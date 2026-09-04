@@ -44,7 +44,16 @@ const check = (cond, label) => {
 await new Promise((r) => server.listen(0, r));
 const base = `http://127.0.0.1:${server.address().port}/`;
 
-const browser = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium' });
+// 環境ごとの Chromium の場所を解決する。
+// - このリポジトリの CI: playwright が ~/.cache/ms-playwright に自前で用意する
+// - 一部のサンドボックス: /opt/pw-browsers/chromium にプリインストールされている
+// 存在するときだけ executablePath を渡し、無ければ playwright の解決に任せる。
+const PREINSTALLED = process.env.PLAYWRIGHT_CHROMIUM_PATH || '/opt/pw-browsers/chromium';
+const launchOptions = fs.existsSync(PREINSTALLED) ? { executablePath: PREINSTALLED } : {};
+console.log(launchOptions.executablePath
+  ? `Chromium: ${PREINSTALLED} (プリインストール)`
+  : 'Chromium: playwright 管理のブラウザを使用');
+const browser = await chromium.launch(launchOptions);
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 
 const consoleErrors = [];
