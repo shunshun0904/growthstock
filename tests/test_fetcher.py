@@ -13,8 +13,8 @@ import unittest
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
 
 from jquants_data_fetcher import (  # noqa: E402
-    build_milestones, credit_metrics, display_code, fundamental_metrics,
-    normalize_code, pct_change, price_metrics, quarterize,
+    build_milestones, credit_metrics, describe_secret, display_code,
+    fundamental_metrics, normalize_code, pct_change, price_metrics, quarterize,
 )
 
 
@@ -185,6 +185,31 @@ class TestCreditMetrics(unittest.TestCase):
             credit_metrics([{"Date": "2025-08-01", "LongMarginTradeVolume": 10,
                              "ShortMarginTradeVolume": 0}])["creditRatio"]
         )
+
+
+class TestDescribeSecret(unittest.TestCase):
+    """認証エラー時の切り分け情報。secret の値そのものは絶対に出力しない。"""
+
+    def test_never_leaks_the_value(self):
+        secret = "SUPERSECRETVALUE1234567890abcdefghijklmno"
+        out = describe_secret(secret)
+        self.assertNotIn(secret, out)
+        self.assertNotIn("SUPERSECRET", out)
+        self.assertIn(str(len(secret)), out)
+
+    def test_flags_non_jwt(self):
+        out = describe_secret("x" * 43)
+        self.assertIn("JWT の形式ではない", out)
+
+    def test_flags_suspiciously_short_jwt(self):
+        out = describe_secret("aaa.bbb.ccc")
+        self.assertIn("異常に短い", out)
+
+    def test_accepts_realistic_jwt_without_warning(self):
+        token = ".".join(["x" * 300] * 3)
+        out = describe_secret(token)
+        self.assertIn("JWT形式", out)
+        self.assertNotIn("→", out)
 
 
 class TestMilestones(unittest.TestCase):

@@ -65,6 +65,22 @@ APIキーはブラウザに置けないため、**取得はGitHub Actions、表�
 > **無人運用したい場合**は `JQUANTS_MAIL` / `JQUANTS_PASSWORD` を追加登録してください。
 > 設定されていれば毎回 `auth_user` からリフレッシュトークンを取り直すため、更新作業が不要になります。
 
+### トークンの見分け方
+
+J-Quants のリフレッシュトークン／IDトークンはいずれも **JWT**（`header.payload.signature` の
+ドット区切り3パート）で、実際の長さは **800文字以上**あります。
+
+`Fetch J-Quants Data` が `HTTP 403 Forbidden` で落ちる場合、ログに secret の
+**形状（長さとJWTか否か）だけ**が出力されます（値そのものは出力されません）。
+
+```
+[auth] JQUANTS_API の形状: 長さ 43 文字 / ドット区切りではない (0個のドット)
+      → J-Quants のリフレッシュトークン/IDトークンは JWT (通常800文字以上) です。
+```
+
+このように表示された場合、`JQUANTS_API` に J-Quants 以外の値が入っています。
+[J-Quants のマイページ](https://jpx-jquants.com/) からリフレッシュトークンを取得し直して登録してください。
+
 ### 2.2 GitHub Pages の有効化
 
 `Settings > Pages > Source` を **GitHub Actions** に設定します。

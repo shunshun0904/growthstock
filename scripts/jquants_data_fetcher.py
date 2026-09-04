@@ -124,6 +124,29 @@ def _looks_like_jwt(value: str) -> bool:
     return bool(re.fullmatch(r"[\w-]+\.[\w-]+\.[\w-]+", value.strip()))
 
 
+def describe_secret(value: str) -> str:
+    """
+    secret の「形」だけを説明する文字列を返す（値そのものは絶対に出力しない）。
+
+    J-Quants のリフレッシュトークン / IDトークンはいずれも Amazon Cognito が発行する
+    JWT であり、`header.payload.signature` の3パート構成で通常 800文字以上ある。
+    それより極端に短い、あるいはドットを含まない値は別物である可能性が高いため、
+    認証エラー時の切り分け情報として長さと形状を示す。
+    """
+    v = value.strip()
+    shape = "JWT形式 (ドット区切り3パート)" if _looks_like_jwt(v) else f"ドット区切りではない ({v.count('.')}個のドット)"
+    verdict = ""
+    if not _looks_like_jwt(v):
+        verdict = (
+            "\n      → J-Quants のリフレッシュトークン/IDトークンは JWT (通常800文字以上) です。"
+            "\n        この値は JWT の形式ではないため、別のサービスのAPIキー等が"
+            "\n        登録されている可能性があります。"
+        )
+    elif len(v) < 200:
+        verdict = "\n      → JWT 形式ですが、J-Quants のトークンとしては異常に短いです。"
+    return f"長さ {len(v)} 文字 / {shape}{verdict}"
+
+
 def _jwt_expiry(token: str) -> Optional[dt.datetime]:
     """JWT の exp クレームを読む (署名検証はしない / 期限切れ判定の情報提供のみ)。"""
     import base64
@@ -206,6 +229,7 @@ def resolve_id_token() -> str:
         return id_token_from_refresh(refresh_token_from_login(mail_part.strip(), pw_part))
 
     # 3) 生のトークン。ID トークン (24h) かリフレッシュトークン (1週間) かを判別する。
+    print(f"[auth] JQUANTS_API の形状: {describe_secret(secret)}")
     exp = _jwt_expiry(secret)
     if exp is not None:
         remaining = exp - dt.datetime.now(tz=dt.timezone.utc)
@@ -231,8 +255,8 @@ def resolve_id_token() -> str:
             print("[auth] JQUANTS_API は idToken として有効でした")
             return secret
         raise AuthError(
-            "JQUANTS_API を認証情報として解決できませんでした。"
-            "リフレッシュトークン (有効期限1週間) が失効している可能性があります。"
+            "JQUANTS_API をリフレッシュトークンとしても IDトークンとしても解決できませんでした。\n"
+            f"      secret の形状: {describe_secret(secret)}"
         ) from exc
 
 
