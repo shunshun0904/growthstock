@@ -1,0 +1,59 @@
+name: Deploy to GitHub Pages
+
+# ダッシュボードを静的サイトとしてビルドし GitHub Pages に公開する。
+# 事前に Settings > Pages > Source を "GitHub Actions" に設定しておくこと。
+on:
+  push:
+    branches: [main, master, 'claude/jquants-browser-app-bwk19a']
+    paths-ignore: ['README.md', 'docs/**']
+  workflow_dispatch:
+  workflow_run:
+    # データ更新が完了したら自動で再デプロイする
+    workflows: ['Fetch J-Quants Data']
+    types: [completed]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # データ取得ワークフローが失敗したときはデプロイしない
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # workflow_run では既定でトリガー元のコミットが取られないため明示する
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,11 @@
+{
+  "generatedAt": null,
+  "placeholder": true,
+  "source": "J-Quants API (https://jpx-jquants.com/)",
+  "stocks": [],
+  "failures": [],
+  "unavailableEndpoints": {},
+  "notes": {
+    "placeholder": "これは初期状態のプレースホルダです。実データはまだ取得されていません。GitHub Actions の 'Fetch J-Quants Data' ワークフローを実行すると、このファイルが J-Quants から取得した実データで上書きされます。ダミーの銘柄データは意図的に含めていません（実データと見分けがつかなくなるため）。"
+  }
+}

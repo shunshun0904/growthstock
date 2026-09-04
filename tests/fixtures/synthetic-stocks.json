@@ -1,0 +1,74 @@
+{
+  "generatedAt": "2026-01-15T06:00:00+00:00",
+  "synthetic": true,
+  "source": "SYNTHETIC TEST FIXTURE — J-Quants のデータではありません",
+  "_warning": "このファイルは UI のスモークテスト専用の合成データです。実在の銘柄・実際の株価とは一切関係ありません。銘柄名はすべて『テスト銘柄◯』としており、実在企業を模していません。",
+  "stocks": [
+    {
+      "code": "0001", "jqCode": "00010", "name": "テスト銘柄A", "sector": "テスト業種",
+      "market": "テスト市場", "note": "全軸が高スコアのケース", "asOf": "2026-01-14", "origin": "jquants",
+      "metrics": {
+        "date": "2026-01-14", "price": 5200, "high52w": 5250, "highRatio": 99.05,
+        "tradingValue": 42.5, "turnoverValue": 43.1, "volume": 817307, "ma20Volume": 420000,
+        "volumeTrend": 194.6, "marketCap": 3120, "epsGrowth": 58.2, "salesGrowth": 33.4,
+        "roe": 22.1, "opMargin": 18.6, "creditRatio": 0.82, "progressRate": 63.5,
+        "quarter": 2, "fiscalPeriod": "2Q", "disclosedDate": "2025-11-07",
+        "opMarginBasis": "TTM (直近4四半期)", "label": "現在", "asOf": "2026-01-14"
+      },
+      "snapshots": {
+        "now": { "label": "現在", "asOf": "2026-01-14", "price": 5200, "high52w": 5250, "highRatio": 99.05, "tradingValue": 42.5, "volumeTrend": 194.6, "marketCap": 3120, "epsGrowth": 58.2, "salesGrowth": 33.4, "roe": 22.1, "opMargin": 18.6, "creditRatio": 0.82, "progressRate": 63.5, "quarter": 2, "fiscalPeriod": "2Q" },
+        "m3":  { "label": "3ヶ月前", "asOf": "2025-10-15", "price": 4100, "high52w": 4400, "highRatio": 93.18, "tradingValue": 18.2, "volumeTrend": 132.0, "marketCap": 2460, "epsGrowth": 41.0, "salesGrowth": 28.1, "roe": 19.4, "opMargin": 16.2, "creditRatio": 1.9, "progressRate": 31.0, "quarter": 1, "fiscalPeriod": "1Q" },
+        "m6":  { "label": "6ヶ月前", "asOf": "2025-07-15", "price": 3050, "high52w": 4400, "highRatio": 69.32, "tradingValue": 6.1, "volumeTrend": 88.0, "marketCap": 1830, "epsGrowth": 12.5, "salesGrowth": 15.0, "roe": 15.2, "opMargin": 13.9, "creditRatio": 4.2, "progressRate": 96.0, "quarter": 4, "fiscalPeriod": "4Q" }
+      },
+      "milestones": [
+        { "date": "2025-11-07", "type": "earnings", "title": "2Q 決算発表", "detail": "（単一四半期換算）売上 310億円 / 営業利益 58億円" },
+        { "date": "2025-11-10", "type": "volume_spike", "title": "出来高急増（大口買い痕跡）", "detail": "出来高 1,240,000株 = 20日平均の 3.1倍・陽線" },
+        { "date": "2025-12-02", "type": "breakout", "title": "52週高値を更新", "detail": "終値 4,610円 が過去52週の最高値 4,400円 を上抜け" }
+      ],
+      "history": [
+        { "date": "2025-07-15", "close": 3050 }, { "date": "2025-08-15", "close": 3400 },
+        { "date": "2025-09-15", "close": 3820 }, { "date": "2025-10-15", "close": 4100 },
+        { "date": "2025-11-17", "close": 4520 }, { "date": "2025-12-15", "close": 4880 },
+        { "date": "2026-01-14", "close": 5200 }
+      ],
+      "sources": { "price": "jquants", "highRatio": "jquants", "tradingValue": "jquants", "volumeTrend": "jquants", "epsGrowth": "jquants", "salesGrowth": "jquants", "roe": "jquants", "opMargin": "jquants", "progressRate": "jquants", "creditRatio": "jquants", "marketCap": "jquants" }
+    },
+    {
+      "code": "0002", "jqCode": "00020", "name": "テスト銘柄B", "sector": "テスト業種",
+      "market": "テスト市場", "note": "信用倍率と進捗率が欠測しているケース", "asOf": "2026-01-14", "origin": "jquants",
+      "metrics": {
+        "date": "2026-01-14", "price": 880, "high52w": 1240, "highRatio": 70.97,
+        "tradingValue": 2.1, "volume": 238636, "ma20Volume": 310000, "volumeTrend": 77.0,
+        "marketCap": 74, "epsGrowth": null, "salesGrowth": 8.2, "roe": 6.1,
+        "opMargin": 4.4, "creditRatio": null, "progressRate": null, "quarter": 3,
+        "fiscalPeriod": "3Q", "disclosedDate": "2025-12-12", "opMarginBasis": "当期累計 (3Q)"
+      },
+      "snapshots": {
+        "now": { "label": "現在", "asOf": "2026-01-14", "price": 880, "highRatio": 70.97, "tradingValue": 2.1, "volumeTrend": 77.0, "marketCap": 74, "epsGrowth": null, "salesGrowth": 8.2, "roe": 6.1, "opMargin": 4.4, "creditRatio": null, "progressRate": null, "quarter": 3, "fiscalPeriod": "3Q" }
+      },
+      "milestones": [],
+      "history": [ { "date": "2025-07-15", "close": 1180 }, { "date": "2025-10-15", "close": 980 }, { "date": "2026-01-14", "close": 880 } ],
+      "sources": { "price": "jquants", "highRatio": "jquants", "tradingValue": "jquants", "volumeTrend": "jquants", "epsGrowth": "unavailable", "salesGrowth": "jquants", "roe": "jquants", "opMargin": "jquants", "progressRate": "unavailable", "creditRatio": "unavailable", "marketCap": "jquants" }
+    },
+    {
+      "code": "0003", "jqCode": "00030", "name": "テスト銘柄C", "sector": "テスト業種",
+      "market": "テスト市場", "note": "", "asOf": "2026-01-14", "origin": "jquants",
+      "metrics": {
+        "date": "2026-01-14", "price": 2340, "high52w": 2600, "highRatio": 90.0,
+        "tradingValue": 8.4, "volume": 358974, "ma20Volume": 300000, "volumeTrend": 119.7,
+        "marketCap": 640, "epsGrowth": 22.0, "salesGrowth": 17.5, "roe": 13.0,
+        "opMargin": 9.8, "creditRatio": 3.4, "progressRate": 78.0, "quarter": 3,
+        "fiscalPeriod": "3Q", "disclosedDate": "2025-12-05", "opMarginBasis": "TTM (直近4四半期)"
+      },
+      "snapshots": {
+        "now": { "label": "現在", "asOf": "2026-01-14", "price": 2340, "highRatio": 90.0, "tradingValue": 8.4, "volumeTrend": 119.7, "marketCap": 640, "epsGrowth": 22.0, "salesGrowth": 17.5, "roe": 13.0, "opMargin": 9.8, "creditRatio": 3.4, "progressRate": 78.0, "quarter": 3, "fiscalPeriod": "3Q" },
+        "m3":  { "label": "3ヶ月前", "asOf": "2025-10-15", "price": 2050, "highRatio": 78.8, "tradingValue": 4.9, "volumeTrend": 101.0, "marketCap": 560, "epsGrowth": 18.0, "salesGrowth": 16.0, "roe": 12.4, "opMargin": 9.1, "creditRatio": 4.1, "progressRate": 49.0, "quarter": 2, "fiscalPeriod": "2Q" }
+      },
+      "milestones": [ { "date": "2025-12-05", "type": "earnings", "title": "3Q 決算発表", "detail": "（単一四半期換算）売上 88億円 / 営業利益 9億円" } ],
+      "history": [ { "date": "2025-07-15", "close": 1900 }, { "date": "2025-10-15", "close": 2050 }, { "date": "2026-01-14", "close": 2340 } ],
+      "sources": { "price": "jquants", "highRatio": "jquants", "tradingValue": "jquants", "volumeTrend": "jquants", "epsGrowth": "jquants", "salesGrowth": "jquants", "roe": "jquants", "opMargin": "jquants", "progressRate": "jquants", "creditRatio": "jquants", "marketCap": "jquants" }
+    }
+  ],
+  "failures": [],
+  "unavailableEndpoints": {}
+}

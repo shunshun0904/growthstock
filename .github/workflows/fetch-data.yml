@@ -1,0 +1,121 @@
+name: Fetch J-Quants Data
+
+# J-Quants API から株価・財務・信用残を取得し public/data/stocks.json を更新する。
+# 認証には Repository secret の JQUANTS_API を使用する。
+on:
+  workflow_dispatch:
+    inputs:
+      codes:
+        description: '銘柄コード (スペース区切り / 空欄なら scripts/watchlist.json 全件)'
+        required: false
+        default: ''
+      check_auth_only:
+        description: '認証疎通の確認のみ行う (データは更新しない)'
+        type: boolean
+        required: false
+        default: false
+  schedule:
+    # 平日 21:00 JST (= 12:00 UTC)。東証の日次データが出そろった後に実行する。
+    # 注意: J-Quants のリフレッシュトークンは有効期限1週間のため、
+    #       JQUANTS_MAIL / JQUANTS_PASSWORD を設定していない場合、
+    #       週に一度 JQUANTS_API の更新が必要になる。
+    - cron: '0 12 * * 1-5'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fetch-jquants-data
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify secret is configured
+        env:
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+        run: |
+          if [ -z "$JQUANTS_API" ]; then
+            echo "::error::Repository secret 'JQUANTS_API' が設定されていません。"
+            echo "::error::Settings > Secrets and variables > Actions で JQUANTS_API を登録してください。"
+            exit 1
+          fi
+          echo "JQUANTS_API is configured (${#JQUANTS_API} characters)"
+
+      - name: Check J-Quants authentication
+        env:
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+          JQUANTS_MAIL: ${{ secrets.JQUANTS_MAIL }}
+          JQUANTS_PASSWORD: ${{ secrets.JQUANTS_PASSWORD }}
+        run: python3 scripts/jquants_data_fetcher.py --check-auth
+
+      - name: Fetch data
+        if: ${{ inputs.check_auth_only != true }}
+        env:
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+          JQUANTS_MAIL: ${{ secrets.JQUANTS_MAIL }}
+          JQUANTS_PASSWORD: ${{ secrets.JQUANTS_PASSWORD }}
+          # 入力はシェルに直接展開せず環境変数経由で渡す
+          INPUT_CODES: ${{ inputs.codes }}
+        run: |
+          if [ -n "$INPUT_CODES" ]; then
+            # shellcheck disable=SC2086
+            python3 scripts/jquants_data_fetcher.py --codes $INPUT_CODES
+          else
+            python3 scripts/jquants_data_fetcher.py
+          fi
+
+      - name: Summarise result
+        if: ${{ inputs.check_auth_only != true }}
+        run: |
+          python3 - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          d = json.load(open('public/data/stocks.json'))
+          print(f"## 取得結果\n")
+          print(f"- 生成日時: `{d.get('generatedAt')}`")
+          print(f"- 銘柄数: **{len(d['stocks'])}**\n")
+          print("| コード | 銘柄名 | 基準日 | 株価 | 52週高値接近率 | 売買代金 | 信用倍率 |")
+          print("| --- | --- | --- | ---: | ---: | ---: | ---: |")
+          for s in d['stocks']:
+              m = s.get('metrics', {})
+              def f(v, suf='', dp=1):
+                  return f"{v:,.{dp}f}{suf}" if isinstance(v, (int, float)) else '—'
+              print(f"| {s['code']} | {s['name']} | {s.get('asOf','—')} | "
+                    f"{f(m.get('price'), '円', 0)} | {f(m.get('highRatio'), '%')} | "
+                    f"{f(m.get('tradingValue'), '億円', 2)} | {f(m.get('creditRatio'), '倍', 2)} |")
+          if d.get('failures'):
+              print(f"\n### 取得に失敗した銘柄\n")
+              for x in d['failures']:
+                  print(f"- `{x['code']}`: {x['reason'][:200]}")
+          if d.get('unavailableEndpoints'):
+              print(f"\n### 利用できなかったエンドポイント (契約プランの制約の可能性)\n")
+              for ep, reason in d['unavailableEndpoints'].items():
+                  print(f"- `{ep}`: {str(reason)[:200]}")
+          PY
+
+      - name: Commit updated data
+        if: ${{ inputs.check_auth_only != true }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- public/data/stocks.json; then
+            echo "データに変更はありません。コミットをスキップします。"
+            exit 0
+          fi
+          git add public/data/stocks.json
+          git commit -m "chore(data): J-Quants データを更新 ($(date -u '+%Y-%m-%d %H:%M UTC'))"
+          for i in 1 2 3 4; do
+            if git push; then exit 0; fi
+            echo "push に失敗しました。$((2 ** i))秒後に再試行します…"
+            sleep $((2 ** i))
+            git pull --rebase
+          done
+          echo "::error::push に失敗しました"
+          exit 1

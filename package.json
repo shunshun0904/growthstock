@@ -1,0 +1,23 @@
+{
+  "name": "growthstock-analyzer-focus",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "成長株分析ダッシュボード Focus — J-Quants API による8軸モメンタム・スコアリング",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "node --test tests/*.test.js",
+    "test:py": "python3 tests/test_fetcher.py"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "recharts": "^2.15.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^6.0.7"
+  }
+}
