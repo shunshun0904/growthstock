@@ -52,7 +52,61 @@ CONFIGS: List[LabelConfig] = [
     LabelConfig(high_window=368, horizon_end=60, sustain_days=60),       # H F + 水準維持
     LabelConfig(high_window=368, horizon_end=60, hold_days=40,
                 sustain_days=60),                                        # I 全部
+    # --- 中間案: 期間を絞りつつ水準維持を課す（高値窓は52週のまま）---
+    LabelConfig(high_window=245, horizon_end=60, sustain_days=60),        # J
 ]
+
+#: ラベルの重なりを調べる組み合わせ（インデックス）。
+#: 「2モデルを作って両方1なら確実」が成り立つかを検証するため。
+#: 独立でない（片方が他方の部分集合など）なら、併用しても情報は増えない。
+OVERLAP_PAIRS = [(4, 9)]   # E(52週/1〜6ヶ月/+維持) と J(52週/1〜3ヶ月/+維持)
+
+
+def label_frame(bars: pd.DataFrame, cfg: LabelConfig) -> pd.DataFrame:
+    """(Code, Date, label) だけを返す。定義間でラベルを突き合わせるため。"""
+    df = price_panel(bars, cfg)
+    df = breakout_flags(df, cfg)
+    df = attach_labels(df, cfg)
+    df["ym"] = df["Date"].dt.to_period("M")
+    is_me = df.groupby(["Code", "ym"], sort=False)["Date"].transform("max") == df["Date"]
+    s = df[is_me]
+    s = s[s["label"].notna() & s["high52w"].notna()]
+    s = s[(s["r_high"] < cfg.max_rhigh_at_t) & (s["tv_ma20"] >= cfg.min_trading_value)]
+    return s[["Code", "Date", "label"]].copy()
+
+
+def overlap(bars: pd.DataFrame, a: LabelConfig, b: LabelConfig) -> Dict:
+    """
+    2つの定義のラベルがどれだけ重なるかを調べる。
+
+    「2つのモデルを作って両方が1なら確実」という考えは、
+    2つのラベルが独立な情報を持っている場合にのみ成り立つ。
+    片方が他方の部分集合なら、併用しても情報は増えず、
+    単に片方のモデルの閾値を上げたのと同じことになる。
+    """
+    fa = label_frame(bars, a).rename(columns={"label": "a"})
+    fb = label_frame(bars, b).rename(columns={"label": "b"})
+    m = fa.merge(fb, on=["Code", "Date"], how="inner")
+    if len(m) == 0:
+        return {"n": 0}
+    a1, b1 = m["a"] == 1, m["b"] == 1
+    both = int((a1 & b1).sum())
+    only_a = int((a1 & ~b1).sum())
+    only_b = int((~a1 & b1).sum())
+    neither = int((~a1 & ~b1).sum())
+    return {
+        "a": a.name, "b": b.name, "n": int(len(m)),
+        "both": both, "only_a": only_a, "only_b": only_b, "neither": neither,
+        "a_rate": round(float(a1.mean()), 4),
+        "b_rate": round(float(b1.mean()), 4),
+        # b が a の部分集合か = b=1 なのに a=0 のケースがゼロか
+        "b_subset_of_a": only_b == 0,
+        "a_subset_of_b": only_a == 0,
+        # 両方1 が b=1 とどれだけ一致するか
+        "both_equals_b": round(both / max(1, int(b1.sum())), 4),
+        # 相関（phi係数）
+        "phi": round(float(m["a"].corr(m["b"])), 4),
+    }
 
 
 def evaluate(bars: pd.DataFrame, cfg: LabelConfig) -> Dict:
@@ -173,8 +227,38 @@ def main(argv=None) -> int:
     print("-" * 118)
     print("分離度 = 正例の最大上昇率p25 − 負例の最大上昇率p75。正なら四分位範囲が重ならない")
 
+    # --- ラベルの重なり分析 ---
+    overlaps = []
+    for ia, ib in OVERLAP_PAIRS:
+        if ia >= len(CONFIGS) or ib >= len(CONFIGS):
+            continue
+        print("\n" + "=" * 78)
+        print(f"ラベルの重なり: {chr(65+ia)} と {chr(65+ib)}")
+        print("-" * 78)
+        ov = overlap(bars, CONFIGS[ia], CONFIGS[ib])
+        overlaps.append(ov)
+        if ov["n"] == 0:
+            print("  共通サンプルがありません")
+            continue
+        print(f"  共通サンプル {ov['n']:,}")
+        print(f"  {chr(65+ia)}=1 の率 {ov['a_rate']*100:.2f}%  /  "
+              f"{chr(65+ib)}=1 の率 {ov['b_rate']*100:.2f}%")
+        print(f"  両方1        {ov['both']:>8,}")
+        print(f"  {chr(65+ia)}のみ1      {ov['only_a']:>8,}")
+        print(f"  {chr(65+ib)}のみ1      {ov['only_b']:>8,}")
+        print(f"  両方0        {ov['neither']:>8,}")
+        print(f"  相関(phi)     {ov['phi']}")
+        if ov["b_subset_of_a"]:
+            print(f"  → {chr(65+ib)}=1 は必ず {chr(65+ia)}=1（部分集合）。"
+                  f"「両方1」は {chr(65+ib)}=1 と完全に同じ")
+        elif ov["a_subset_of_b"]:
+            print(f"  → {chr(65+ia)}=1 は必ず {chr(65+ib)}=1（部分集合）")
+        else:
+            print(f"  → 部分集合ではない。「両方1」は {chr(65+ib)}=1 の "
+                  f"{ov['both_equals_b']*100:.1f}% をカバー")
+
     with open(args.out, "w", encoding="utf-8") as fh:
-        json.dump({"results": results}, fh, ensure_ascii=False, indent=2)
+        json.dump({"results": results, "overlaps": overlaps}, fh, ensure_ascii=False, indent=2)
     print(f"\n[done] {args.out}")
     return 0
 
