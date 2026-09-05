@@ -20,8 +20,8 @@ sys.path.insert(0, os.path.join(ROOT, "research"))
 
 from build_dataset import (  # noqa: E402
     HOLD_DAYS, HORIZON_END, HORIZON_START, HIGH_WINDOW, LabelConfig,
-    add_cross_sectional_ranks, attach_labels, breakout_flags, price_panel,
-    quarterize_panel,
+    _lag_available, add_cross_sectional_ranks, attach_labels, breakout_flags,
+    price_panel, quarterize_panel,
 )
 
 
@@ -374,6 +374,83 @@ class TestFeaturePresets(unittest.TestCase):
         every = F.all_columns()
         self.assertEqual(len([c for c in every if c.endswith("_r")]),
                          len(F.RAW_FOR_RANK))
+
+
+class TestLagOverAvailableValues(unittest.TestCase):
+    """
+    値が疎な列を開示単位で shift すると、ラグがほぼ全部 NaN になる。
+    ROE は通期開示にしか入らないため実際にこれが起きており、
+    ROE_chg の 94.4% 欠測 -> 「決算に予測力なし」という誤った結論につながった。
+    """
+
+    def _annual_in_quarterly(self):
+        """四半期開示が並ぶ中で、年1回だけ値が入る列。ROE と同じ形。"""
+        dates = pd.date_range("2020-05-15", periods=12, freq="91D")
+        val = [np.nan] * 12
+        val[0], val[4], val[8] = 10.0, 12.0, 15.0   # 年1回だけ
+        return pd.DataFrame({"Code": "1234", "DiscDate": dates, "x": val})
+
+    def test_picks_previous_available_not_previous_row(self):
+        df = self._annual_in_quarterly()
+        lag1 = _lag_available(df, "x", 1)
+        # 値がある行(4番目)には、その前の値(10.0)が入る
+        self.assertAlmostEqual(lag1.iloc[4], 10.0)
+        self.assertAlmostEqual(lag1.iloc[8], 12.0)
+        # 値が無い行はラグも NaN のまま
+        self.assertTrue(np.isnan(lag1.iloc[5]))
+
+    def test_naive_shift_cannot_produce_a_single_change(self):
+        """
+        従来実装との差を明示する。
+
+        行単位 shift でもラグ列自体には値が入る（3件）。
+        しかし入る位置が「値のある行の *次* の行」なので、
+        x と x_lag が同じ行に揃わない。
+        chg = q0 - q1 は両方揃った行でしか計算できないため、結果は0件になる。
+        これが ROE_chg 94.4%欠測 の正体。
+        """
+        df = self._annual_in_quarterly()
+        naive = df.groupby("Code", sort=False)["x"].shift(1)
+        self.assertEqual(int(naive.notna().sum()), 3)      # 値自体は入る
+        both_naive = df["x"].notna() & naive.notna()
+        self.assertEqual(int(both_naive.sum()), 0)         # だが同じ行に揃わない
+
+        fixed = _lag_available(df, "x", 1)
+        both_fixed = df["x"].notna() & fixed.notna()
+        self.assertEqual(int(both_fixed.sum()), 2)
+
+    def test_second_lag(self):
+        df = self._annual_in_quarterly()
+        lag2 = _lag_available(df, "x", 2)
+        self.assertAlmostEqual(lag2.iloc[8], 10.0)
+
+    def test_rejects_a_stale_previous_value(self):
+        """間が空きすぎた開示との比較は無意味なので使わない。"""
+        df = pd.DataFrame({
+            "Code": "1234",
+            "DiscDate": pd.to_datetime(["2015-05-15", "2024-05-15"]),
+            "x": [10.0, 20.0]})
+        self.assertTrue(np.isnan(_lag_available(df, "x", 1).iloc[1]))
+
+    def test_never_looks_forward(self):
+        """ラグは過去方向のみ。未来の値が混ざっていないこと。"""
+        df = self._annual_in_quarterly()
+        lag1 = _lag_available(df, "x", 1)
+        for i in range(len(df)):
+            v = lag1.iloc[i]
+            if not np.isnan(v):
+                past = df["x"].iloc[:i]
+                self.assertIn(v, list(past.dropna()))
+
+    def test_does_not_cross_between_codes(self):
+        df = pd.DataFrame({
+            "Code": ["A", "A", "B", "B"],
+            "DiscDate": pd.to_datetime(["2023-05-15", "2023-08-15",
+                                        "2023-05-15", "2023-08-15"]),
+            "x": [1.0, 2.0, 3.0, 4.0]})
+        lag1 = _lag_available(df, "x", 1)
+        self.assertTrue(np.isnan(lag1.iloc[2]))   # B の先頭に A の値が来ない
+        self.assertAlmostEqual(lag1.iloc[3], 3.0)
 
 
 class TestDefaultLabelIsE(unittest.TestCase):

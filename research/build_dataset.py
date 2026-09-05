@@ -240,6 +240,36 @@ def attach_labels(df: pd.DataFrame, cfg: LabelConfig = DEFAULT_LABEL) -> pd.Data
 # 財務系の特徴量（過去3決算）
 # --------------------------------------------------------------------------- #
 
+def _lag_available(df: pd.DataFrame, col: str, n: int,
+                   max_gap_days: int = 800) -> pd.Series:
+    """
+    銘柄ごとに「n個前の "値がある" 開示」の値を返す。
+
+    開示単位の shift(n) だと、間に値の無い開示が1つ挟まった時点で切れる。
+    ROE は通期開示にしか入らないため、shift(1) はほぼ NaN になっていた
+    （実測: q0 がある行のうち q1 もあるのは 6.5%。
+      結果 ROE_chg は 94.4% が欠測し、
+      「決算に予測力が無い」という結論の根拠になってしまっていた）。
+    値のある開示だけを詰めてからずらす。
+
+    古すぎる開示との比較は意味が無いので、開示日の間隔に上限を置く。
+    既定の800日は、年1回しか出ない項目の2期前（≒730日）まで許す値。
+
+    過去方向にしかずらさないので先読みは起きない。
+    """
+    out = pd.Series(np.nan, index=df.index, dtype=float)
+    valid = df[col].notna()
+    if not valid.any():
+        return out
+    sub = df.loc[valid]
+    g = sub.groupby("Code", sort=False)
+    prev_val = g[col].shift(n)
+    prev_date = g["DiscDate"].shift(n)
+    gap = (sub["DiscDate"] - prev_date).dt.days
+    out.loc[valid] = prev_val.where(gap <= max_gap_days)
+    return out
+
+
 def quarterize_panel(fins: pd.DataFrame) -> pd.DataFrame:
     """
     累計ベースの決算を単一四半期に差分展開し、前年同期比を付ける。
@@ -298,13 +328,27 @@ def quarterize_panel(fins: pd.DataFrame) -> pd.DataFrame:
 
     df = df.sort_values(["Code", "DiscDate"]).reset_index(drop=True)
 
+    # --- ROE を TTM で補完 --- #
+    # V2 の ROE は通期開示にしか入っていない
+    # （実測: 1Q/2Q/3Q/4Q すべて 0.0%、FY のみ 61.1%。
+    #   docs/MODEL_FUNDAMENTAL_COVERAGE.md 参照）。
+    # そのままでは四半期サンプルで 23.5% しか埋まらない。
+    # scripts/jquants_data_fetcher.py は既に TTM 補完を持っているのに、
+    # 研究側のパイプラインだけ提供値をそのまま使っていた。
+    g_code = df.groupby("Code", sort=False)
+    ttm_np = g_code["q_np"].transform(lambda s: s.rolling(4, min_periods=4).sum())
+    roe_ttm = np.where(df["Eq"] > 0, ttm_np / df["Eq"] * 100.0, np.nan)
+    df["roe_basis"] = np.where(
+        df["ROE"].notna(), "provided",
+        np.where(np.isfinite(roe_ttm), "ttm", "none"))
+    df["ROE"] = df["ROE"].where(df["ROE"].notna(), pd.Series(roe_ttm, index=df.index))
+
     # --- 直近3決算をラグ列として横に並べる --- #
     axes = ["eps_growth", "sales_growth", "ROE", "op_margin"]
-    g2 = df.groupby("Code", sort=False)
     for a in axes:
         df[f"{a}_q0"] = df[a]
-        df[f"{a}_q1"] = g2[a].shift(1)
-        df[f"{a}_q2"] = g2[a].shift(2)
+        df[f"{a}_q1"] = _lag_available(df, a, 1)
+        df[f"{a}_q2"] = _lag_available(df, a, 2)
         # 変化と傾き（CANSLIM の核心は水準より「加速」）
         df[f"{a}_chg"] = df[f"{a}_q0"] - df[f"{a}_q2"]
         df[f"{a}_chg1"] = df[f"{a}_q0"] - df[f"{a}_q1"]
