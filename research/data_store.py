@@ -22,7 +22,8 @@ from typing import Dict, Iterable, List, Set
 
 MANIFEST_NAME = "manifest.json"
 
-#: manifest で管理するデータ種別
+#: manifest で「取得済みの日」を管理するデータ種別。
+#: master は日付ごとの蓄積ではなく毎回最新に上書きするため、ここには含めない。
 KINDS = ("bars", "fins", "margin", "topix")
 
 
@@ -54,6 +55,7 @@ def save_manifest(data_dir: str, manifest: Dict[str, Dict]) -> None:
         manifest[k] = {"fetched_days": days, "count": len(days),
                        "from": days[0] if days else None,
                        "to": days[-1] if days else None}
+    # master は日付リストを持たない（毎回最新に上書き）ので、そのまま残す
     manifest["updatedAt"] = dt.datetime.now(dt.timezone.utc).isoformat()
     with open(manifest_path(data_dir), "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, ensure_ascii=False, indent=2)

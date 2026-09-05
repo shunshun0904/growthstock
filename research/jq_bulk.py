@@ -42,6 +42,10 @@ FIN_COLS = [
     "FSales", "FOP", "FNP", "FEPS", "ShOutFY", "TrShFY",
 ]
 MARGIN_COLS = ["Date", "Code", "LongVol", "ShrtVol"]
+# 銘柄マスタ。銘柄名・業種・市場区分はダッシュボード表示に必須で、
+# 株価データ側には入っていない（V2 の /equities/master にしかない）
+MASTER_COLS = ["Date", "Code", "CoName", "CoNameEn", "S17", "S17Nm",
+               "S33", "S33Nm", "ScaleCat", "Mkt", "MktNm", "Mrgn", "MrgnNm"]
 
 
 # --------------------------------------------------------------------------- #
@@ -155,6 +159,21 @@ def fetch_margin(client: JQuantsClient, days: List[dt.date]) -> pd.DataFrame:
     return _numify(df, ["LongVol", "ShrtVol"])
 
 
+def fetch_master(client: JQuantsClient, as_of: dt.date) -> pd.DataFrame:
+    """
+    銘柄マスタ（全銘柄の名称・業種・市場区分）。1リクエストで全銘柄が返る。
+
+    株価・財務データには銘柄名が入っていないため、これが無いと
+    画面に「(銘柄名なし)」としか出せない。
+    """
+    rows = client.get_paginated("/equities/master", {"date": as_of.isoformat()})
+    if not rows:
+        raise JQuantsError(f"/equities/master が空を返しました (date={as_of})")
+    df = pd.DataFrame.from_records(rows)
+    keep = [c for c in MASTER_COLS if c in df.columns]
+    return df[keep]
+
+
 def fetch_topix(client: JQuantsClient, start: dt.date, end: dt.date) -> pd.DataFrame:
     """
     TOPIX の日次終値。市場環境の特徴量に使う。
@@ -192,8 +211,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--out-dir", default=DATA_DIR)
     ap.add_argument("--pause", type=float, default=0.05,
                     help="リクエスト間隔(秒)。既定は控えめ（1日1リクエストのため）")
-    ap.add_argument("--what", nargs="*", default=["bars", "fins", "margin", "topix"],
-                    choices=["bars", "fins", "margin", "topix"])
+    ap.add_argument("--what", nargs="*",
+                    default=["bars", "fins", "margin", "topix", "master"],
+                    choices=["bars", "fins", "margin", "topix", "master"])
     ap.add_argument("--incremental", action="store_true",
                     help="manifest を見て、まだ取得していない営業日だけを取得する")
     args = ap.parse_args(argv)
@@ -224,6 +244,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         jobs.append(("margin", lambda: fetch_margin(client, days)))
     if "topix" in args.what:
         jobs.append(("topix", lambda: fetch_topix(client, start, end)))
+    if "master" in args.what:
+        jobs.append(("master", lambda: fetch_master(client, days[-1])))
 
     for name, fn in jobs:
         print(f"\n[{name}] 取得開始")
@@ -301,6 +323,20 @@ def _run_incremental(client: JQuantsClient, days: List[dt.date],
             print(f"[topix] {len(df):,}行を追加 / 更新ファイル {len(written)}件")
         else:
             print("\n[topix] 取得済み。スキップします")
+
+    # 銘柄マスタは1リクエストで全銘柄が返る（実測4.2秒）ので毎回取り直す。
+    # 新規上場・社名変更・市場区分変更を取りこぼさないため、差分にしない。
+    if "master" in args.what:
+        print("\n[master] 銘柄マスタを取得（毎回最新に更新）")
+        try:
+            df = fetch_master(client, days[-1])
+            path = os.path.join(args.out_dir, "master.parquet")
+            df.to_parquet(path, index=False, compression="zstd")
+            print(f"[master] {len(df):,}銘柄 -> {os.path.basename(path)} "
+                  f"({os.path.getsize(path)/1e6:.2f}MB)")
+            manifest["master"] = {"as_of": days[-1].isoformat(), "count": int(len(df))}
+        except JQuantsError as exc:
+            print(f"[master] 取得できませんでした: {exc}", file=sys.stderr)
 
     data_store.save_manifest(args.out_dir, manifest)
     print("\n[manifest] 更新後:")
