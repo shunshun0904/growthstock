@@ -25,6 +25,12 @@ on:
   schedule:
     # 平日 21:30 JST (= 12:30 UTC)。日次データが出そろった後に差分を取り込む
     - cron: '30 12 * * 1-5'
+  # workflow_dispatch はデフォルトブランチにファイルが無いと呼べない。
+  # 調査用ブランチからは、このファイルを更新して起動する。
+  # 1行目に --reset に渡す種別を書く（空なら通常の差分取得）
+  push:
+    branches: ['claude/breakout-model']
+    paths: ['research/refetch_request.txt']
 
 permissions:
   contents: write
@@ -81,7 +87,20 @@ jobs:
           FROM="${{ inputs.from }}"
           [ -z "$FROM" ] && FROM="2016-10-01"
           RESET=""
-          [ -n "${{ inputs.reset }}" ] && RESET="--reset ${{ inputs.reset }}"
+          REQ="${{ inputs.reset }}"
+          # push 起動のときは inputs が空なので、要求ファイルの1行目を読む
+          if [ -z "$REQ" ] && [ -f research/refetch_request.txt ]; then
+            REQ=$(grep -v '^#' research/refetch_request.txt | head -1 | tr -d '\r')
+          fi
+          # 想定外の値を --reset に渡さない
+          for k in $REQ; do
+            case "$k" in
+              bars|fins|margin|topix|master) ;;
+              *) echo "未知の種別: $k"; exit 1 ;;
+            esac
+          done
+          [ -n "$REQ" ] && RESET="--reset $REQ"
+          echo "reset 対象: ${REQ:-なし}"
           python3 research/jq_bulk.py --incremental $RESET \
             --from "$FROM" --to "$TO" 2>&1 | tee fetch.log
 
