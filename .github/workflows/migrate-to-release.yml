@@ -6,6 +6,11 @@ name: Migrate Artifacts To Release
 # 差分取得の仕組みを入れる前に走らせた取得の結果を捨てずに済ませるための一度きりの移行。
 # 移行後は update-data.yml が差分だけを取り込む。
 on:
+  # workflow_dispatch はデフォルトブランチに定義が無いと API から呼べないため、
+  # 設定ファイルの変更でも起動できるようにしておく
+  push:
+    branches: ['claude/breakout-model']
+    paths: ['research/migrate_run_id.txt']
   workflow_dispatch:
     inputs:
       run_id:
@@ -35,13 +40,22 @@ jobs:
           cache: pip
       - run: pip install -r research/requirements.txt
 
+      - name: Resolve run id
+        id: rid
+        run: |
+          if [ -n "${{ inputs.run_id }}" ]; then
+            echo "id=${{ inputs.run_id }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "id=$(tr -d '[:space:]' < research/migrate_run_id.txt)" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           pattern: raw-*
           merge-multiple: true
           path: research/_incoming
-          run-id: ${{ inputs.run_id }}
+          run-id: ${{ steps.rid.outputs.id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - run: ls -lh research/_incoming
 
@@ -49,7 +63,7 @@ jobs:
         run: python3 research/migrate_artifacts.py 2>&1 | tee migrate.log
 
       - name: Fetch company master
-        if: ${{ inputs.fetch_master }}
+        if: ${{ inputs.fetch_master != 'false' }}
         env:
           JQUANTS_API: ${{ secrets.JQUANTS_API }}
         run: |
