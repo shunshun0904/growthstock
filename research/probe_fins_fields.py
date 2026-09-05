@@ -68,15 +68,15 @@ CANDIDATE_ENDPOINTS = [
 
 # 探している概念 -> 項目名に現れそうな断片（実測した名前と突き合わせるだけ）
 WANTED = {
-    "EPS(1株利益)": ["eps"],
-    "BPS(1株純資産)": ["bps", "bookvalue"],
-    "PER": ["per"],
-    "PBR": ["pbr"],
-    "ROE": ["roe"],
-    "ROA": ["roa"],
-    "総資産": ["ta", "totalassets", "assets"],
-    "自己資本": ["eq", "equity", "netassets"],
-    "株数": ["shout", "shares", "issued"],
+    "EPS(1株利益)": {"eps"},
+    "BPS(1株純資産)": {"bps", "bookvalue", "bvps"},
+    "PER": {"per", "pe"},
+    "PBR": {"pbr", "pb"},
+    "ROE": {"roe"},
+    "ROA": {"roa"},
+    "総資産": {"ta", "totalassets", "assets"},
+    "自己資本": {"eq", "sheq", "equity", "netassets"},
+    "株数": {"shout", "shares", "issuedshares"},
 }
 
 
@@ -140,14 +140,37 @@ def probe_fins(client):
             "period_counts": dict(period_total)}
 
 
+# 項目名に付く接頭辞。剥がしてから本体を比較する。
+# 部分一致だと CurPerType が PER に、CashEq が Eq に当たってしまう。
+PREFIXES = ["NxFNC", "NxF", "FNC", "NC", "Nx", "F", "D"]
+# 接尾辞（四半期の別、平均残高など）
+SUFFIXES = ["2Q", "FY", "AR", "Ann"]
+
+
+def _core(name: str) -> str:
+    """接頭辞・接尾辞を剥がして本体を取り出す。"""
+    s = name
+    for p in PREFIXES:
+        if s.startswith(p) and len(s) > len(p):
+            s = s[len(p):]
+            break
+    for q in SUFFIXES:
+        if s.endswith(q) and len(s) > len(q):
+            s = s[: -len(q)]
+            break
+    return s.lower()
+
+
 def match_wanted(field_names):
-    """探している概念が、実測した項目名のどれに当たるかを突き合わせる。"""
-    lowered = {f: re.sub(r"[^a-z]", "", f.lower()) for f in field_names}
+    """
+    探している概念が、実測した項目名のどれに当たるかを突き合わせる。
+
+    完全一致のみ（接頭辞・接尾辞を剥がした後）。
+    部分一致にすると CurPerType が PER に当たるなどの誤検出が出る。
+    """
     out = {}
     for concept, frags in WANTED.items():
-        hits = sorted(f for f, norm in lowered.items()
-                      if any(norm == g or norm.startswith(g) or g in norm
-                             for g in frags))
+        hits = sorted(f for f in field_names if _core(f) in frags)
         out[concept] = hits
     return out
 
@@ -229,6 +252,25 @@ def build_md(fins, endpoints, wanted, current_cols):
     return "\n".join(lines)
 
 
+def read_fin_cols():
+    """
+    research/jq_bulk.py の FIN_COLS を、import せずに読む。
+
+    jq_bulk は pandas に依存するが、probe は標準ライブラリだけで動かしたい
+    （取得系は stdlib のみという方針。probe.yml も pandas を入れていない）。
+    ソースを構文解析して定数だけ取り出す。
+    """
+    import ast
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "jq_bulk.py")
+    tree = ast.parse(open(path, encoding="utf-8").read())
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, ast.Name) and t.id == "FIN_COLS":
+                    return [ast.literal_eval(e) for e in node.value.elts]
+    return []
+
+
 def main() -> int:
     try:
         api_key = resolve_api_key()
@@ -245,14 +287,20 @@ def main() -> int:
         print("決算データを1件も取得できなかった", file=sys.stderr)
         return 1
 
+    # 取得結果はここで先に保存する。
+    # 後段の解析で落ちると、API を叩き直すことになるため。
+    with open(OUT_JSON, "w", encoding="utf-8") as fh:
+        json.dump({"fins": fins, "endpoints": endpoints}, fh,
+                  ensure_ascii=False, indent=2)
+    print(f"  (取得結果を保存: {OUT_JSON})")
+
     names = [f["field"] for f in fins["fields"]]
     wanted = match_wanted(names)
     print("\n[3] 探している指標との突き合わせ")
     for concept, hits in wanted.items():
         print(f"  {concept:<16} {hits if hits else '該当なし'}")
 
-    import jq_bulk
-    current = set(jq_bulk.FIN_COLS)
+    current = set(read_fin_cols())
     dropped = [n for n in names if n not in current]
     print(f"\n[4] FIN_COLS で捨てている項目: {len(dropped)}件")
     for f in fins["fields"]:

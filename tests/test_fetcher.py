@@ -10,7 +10,9 @@ import os
 import sys
 import unittest
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "scripts"))
+sys.path.insert(0, os.path.join(ROOT, "research"))
 
 from jquants_data_fetcher import (  # noqa: E402
     build_milestones, credit_metrics, describe_secret, display_code,
@@ -241,6 +243,63 @@ class TestMilestones(unittest.TestCase):
         base = dt.date.today() - dt.timedelta(days=80)
         q = make_quotes([1000] * 60, [100000] * 60, start=base.isoformat())
         self.assertEqual(build_milestones(q, []), [])
+
+
+class TestFieldMatching(unittest.TestCase):
+    """
+    データ探索で「どの項目が何に当たるか」を判定する部分。
+
+    最初の実装は部分一致だったため、CurPerType が PER に、
+    CashEq が 自己資本 に当たってしまい、
+    存在しない指標を「取得できる」と報告しかけた。
+    誤検出を出さないことを固定する。
+    """
+
+    # 実際に /fins/summary が返した項目名（probe の実測結果より）
+    SEEN = ["EPS", "NCEPS", "DEPS", "FEPS", "FEPS2Q", "NxFEPS", "BPS", "NCBPS",
+            "CurPerEn", "CurPerSt", "CurPerType", "ROE", "NCROE", "TA", "NCTA",
+            "Eq", "EqAR", "NCEq", "CashEq", "ShEq", "NCShEq", "ShOutFY",
+            "DivTotalAnn", "FDivTotalAnn"]
+
+    def _m(self):
+        from probe_fins_fields import match_wanted
+        return match_wanted(self.SEEN)
+
+    def test_per_and_pbr_and_roa_are_not_provided(self):
+        """API が返していない指標を「ある」と言わないこと。"""
+        m = self._m()
+        self.assertEqual(m["PER"], [])
+        self.assertEqual(m["PBR"], [])
+        self.assertEqual(m["ROA"], [])
+
+    def test_curpertype_does_not_match_per(self):
+        m = self._m()
+        self.assertNotIn("CurPerType", m["PER"])
+        self.assertNotIn("CurPerEn", m["PER"])
+
+    def test_casheq_is_not_equity(self):
+        """現金及び現金同等物は自己資本ではない。"""
+        self.assertNotIn("CashEq", self._m()["自己資本"])
+
+    def test_dividend_total_is_not_total_assets(self):
+        self.assertNotIn("DivTotalAnn", self._m()["総資産"])
+
+    def test_finds_what_is_actually_there(self):
+        m = self._m()
+        self.assertIn("BPS", m["BPS(1株純資産)"])
+        self.assertIn("NCBPS", m["BPS(1株純資産)"])
+        self.assertIn("TA", m["総資産"])
+        self.assertIn("ROE", m["ROE"])
+        self.assertIn("EPS", m["EPS(1株利益)"])
+
+    def test_reads_fin_cols_without_pandas(self):
+        """probe は標準ライブラリだけで動く必要がある。
+        jq_bulk を import すると pandas が要り、probe.yml で落ちた。"""
+        from probe_fins_fields import read_fin_cols
+        cols = read_fin_cols()
+        self.assertIn("Sales", cols)
+        self.assertIn("TA", cols)
+        self.assertNotIn("pandas", sys.modules)
 
 
 if __name__ == "__main__":
