@@ -21,6 +21,7 @@ import pandas as pd  # noqa: E402
 
 from train_model import clean_score, evaluate, paired_bootstrap  # noqa: E402
 from walkforward import REFERENCE, make_folds, run, sign_test, summarize  # noqa: E402
+from within_date_signal import conditional, marginal  # noqa: E402
 
 
 def _synthetic(n=8000, rate=0.2, seed=0):
@@ -227,6 +228,55 @@ class TestWalkForwardEndToEnd(unittest.TestCase):
         self.assertAlmostEqual(s["mean_diff"], 0.0)
         self.assertAlmostEqual(s["worst_diff"], -0.1)
         self.assertAlmostEqual(s["best_diff"], +0.1)
+
+
+class TestWithinDateSignal(unittest.TestCase):
+    """日付内 AUC の診断。LTR に見込みがあるかの判断材料になるので、
+    「信号があるとき見つかる / 無いとき見つけない」の両方を固定する。"""
+
+    def _frame(self, n_dates=40, n_codes=200, seed=0, signal=True):
+        rng = np.random.default_rng(seed)
+        rows = []
+        for d in pd.date_range("2020-01-31", periods=n_dates, freq="ME"):
+            r_high = rng.uniform(0, 95, n_codes)
+            useful = rng.normal(0, 1, n_codes)
+            noise = rng.normal(0, 1, n_codes)
+            lin = (r_high - 60) / 15 + (useful * 1.2 if signal else 0.0)
+            # 局面ごとに正例率を大きく動かす（日付内AUCが影響されないことの確認）
+            lin += rng.normal(0, 2)
+            p = 1 / (1 + np.exp(-lin))
+            rows.append(pd.DataFrame({
+                "Date": d, "r_high": r_high, "useful": useful, "noise": noise,
+                "label": (rng.random(n_codes) < p).astype(int)}))
+        return pd.concat(rows, ignore_index=True)
+
+    def test_finds_a_real_within_date_signal(self):
+        df = self._frame(signal=True)
+        res = {r["feature"]: r for r in conditional(df, ["useful", "noise"])}
+        self.assertGreater(res["useful"]["mean_auc"], 0.6)
+        self.assertLess(res["useful"]["p_sign"], 0.05)
+
+    def test_does_not_invent_signal_from_noise(self):
+        df = self._frame(signal=True)
+        res = {r["feature"]: r for r in conditional(df, ["useful", "noise"])}
+        self.assertLess(res["noise"]["abs_edge"], 0.02)
+
+    def test_reports_nothing_when_only_r_high_matters(self):
+        """R_high だけが効く世界では、条件付けると全部 0.5 付近になるはず。
+        ここが誤って『信号あり』と出ると、無駄な LTR 実装に進んでしまう。"""
+        df = self._frame(signal=False)
+        for r in conditional(df, ["useful", "noise"]):
+            self.assertLess(r["abs_edge"], 0.02, r["feature"])
+
+    def test_rank_transform_does_not_change_within_date_auc(self):
+        """順位化は日付内の単調変換なので AUC は変わらない。
+        この前提で順位列を測定対象から外している。"""
+        import build_dataset as B
+        df = self._frame(signal=True)
+        df = B.add_cross_sectional_ranks(df, ["useful"])
+        res = {r["feature"]: r for r in marginal(df, ["useful", "useful_r"])}
+        self.assertAlmostEqual(res["useful"]["mean_auc"],
+                               res["useful_r"]["mean_auc"], places=10)
 
 
 if __name__ == "__main__":

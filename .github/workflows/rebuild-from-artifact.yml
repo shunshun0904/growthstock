@@ -81,6 +81,11 @@ jobs:
       - name: Walk-forward evaluation
         run: python3 research/walkforward.py 2>&1 | tee walkforward.log
 
+      # LTR を作る前に「日付内に取り出せる情報があるか」を測る。
+      # 無ければ LTR を実装しても結果は変わらない。
+      - name: Within-date signal
+        run: python3 research/within_date_signal.py 2>&1 | tee within.log
+
       - name: Build viewer
         run: |
           mkdir -p research/samples
@@ -92,6 +97,7 @@ jobs:
             echo "## データセット構築"; echo '```'; cat build.log; echo '```'
             echo "## ラベル検証データ"; echo '```'; cat labels.log; echo '```'
             echo "## ウォークフォワード"; echo '```'; tail -40 walkforward.log; echo '```'
+            echo "## 日付内の分離力"; echo '```'; tail -30 within.log; echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Commit outputs
@@ -100,7 +106,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           mkdir -p research/samples
           cp research/_data/label_comparison.json research/samples/label_comparison.json
-          git add -A research/samples research/viewer docs/MODEL_RESULTS.md docs/MODEL_WALKFORWARD.md
+          git add -A research/samples research/viewer docs/MODEL_RESULTS.md docs/MODEL_WALKFORWARD.md docs/MODEL_WITHIN_DATE.md
           # git diff は未追跡ファイルを見ないため、staged の差分で判定する
           if git diff --cached --quiet; then
             echo "変更なし"; exit 0
@@ -121,6 +127,8 @@ jobs:
             research/_data/label_comparison.json
             research/_data/results.json
             research/_data/walkforward.json
+            research/_data/within_date.json
             docs/MODEL_RESULTS.md
             docs/MODEL_WALKFORWARD.md
+            docs/MODEL_WITHIN_DATE.md
           retention-days: 30
