@@ -148,12 +148,15 @@ PRESETS: Dict[str, List[str]] = {
     # 決算の順位版のみ
     "rank_fundamental": ["fund_level_rank", "fund_lag_rank", "fund_trend_rank",
                          "fund_streak_rank", "progress_rank"],
-    # 全部の順位版
-    "rank_all": ["fund_level_rank", "fund_lag_rank", "fund_trend_rank",
-                 "fund_streak_rank", "price_rank", "volume_rank",
-                 "liquidity_rank",
-                 "supply_rank", "progress_rank", "valuation_rank",
-                 "turnaround", "market"],
+    # 全部の順位版。`all` から導出する。
+    # 手書きにしていたため `all` にグループを足したときに追随せず、
+    # 列数がずれた（テストが検出）。順位版があるものは差し替え、
+    # 無いもの（業種コード・黒字転換フラグ・市場環境）はそのまま使う。
+    "rank_all": [f"{g}_rank" if f"{g}_rank" in GROUPS else g
+                 for g in ("fund_level", "fund_lag", "fund_trend", "fund_streak",
+                           "price", "volume", "liquidity", "supply", "progress",
+                           "valuation", "dividend", "cashflow", "efficiency",
+                           "guidance", "sector", "turnaround", "market")],
     # 決算 + バリュエーションの順位版
     "rank_fundamental_v2": ["fund_level_rank", "fund_lag_rank", "fund_trend_rank",
                             "fund_streak_rank", "progress_rank",

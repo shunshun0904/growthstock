@@ -363,9 +363,18 @@ class TestFeaturePresets(unittest.TestCase):
             self.assertIn(c, cols)
 
     def test_rank_all_mirrors_all(self):
-        """`rank_all` は `all` と同じ構成の順位版。"""
+        """
+        `rank_all` は `all` と同じ構成の順位版。
+
+        手書きにしていたため `all` にグループを足したときに追随せず、
+        123列 vs 139列 とずれた。グループ単位で対応を確認する。
+        """
         import features as F
         self.assertEqual(len(F.columns("rank_all")), len(F.columns("all")))
+        # グループ単位でも対応していること
+        for g in F.PRESETS["all"]:
+            expected = f"{g}_rank" if f"{g}_rank" in F.GROUPS else g
+            self.assertIn(expected, F.PRESETS["rank_all"], g)
 
     def test_every_preset_resolves(self):
         import features as F
