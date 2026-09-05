@@ -3,7 +3,7 @@
 ウィリアム・オニールの CANSLIM 手法とマーク・ミネルヴィニのトレンドテンプレートを定量化した、
 **8軸モメンタム・スコアリング成長株分析ダッシュボード**です。
 
-データは [J-Quants API](https://jpx-jquants.com/)（日本取引所グループ公式）から取得します。
+データは [J-Quants API **V2**](https://jpx-jquants.com/)（日本取引所グループ公式）から取得します。
 
 ![8軸オクタゴン比較](docs/screenshot-compare.png)
 
@@ -41,45 +41,35 @@ APIキーはブラウザに置けないため、**取得はGitHub Actions、表�
 
 ### 2.1 Repository secret の登録
 
-`Settings > Secrets and variables > Actions` で以下を登録します。
+J-Quants ダッシュボードの **[設定 » API キー]** で APIキーを発行し、
+GitHub の `Settings > Secrets and variables > Actions` に登録します。
 
 | Secret | 必須 | 内容 |
 | --- | :---: | --- |
-| `JQUANTS_API` | ✅ | J-Quants のリフレッシュトークン |
-| `JQUANTS_MAIL` | | J-Quants のログインメールアドレス（任意・下記参照） |
-| `JQUANTS_PASSWORD` | | J-Quants のログインパスワード（任意・下記参照） |
+| `JQUANTS_API` | ✅ | J-Quants API **V2** の APIキー |
 
-`JQUANTS_API` は以下のいずれの形式でも自動判別します。
-
-- リフレッシュトークン（既定の想定）
-- IDトークン
-- `{"mailaddress": "...", "password": "..."}` の JSON
-- `mail@example.com:password` のコロン区切り
-
-> ### ⚠️ リフレッシュトークンの有効期限は 1 週間です
+> ### V1 から V2 への移行について
 >
-> リフレッシュトークンだけを登録した場合、**約1週間ごとに `JQUANTS_API` の更新が必要**です。
-> 期限が切れると `Fetch J-Quants Data` ワークフローが認証エラーで停止し、
-> ログに再発行手順が表示されます。
+> J-Quants API は 2025年12月に **V2** へ移行し、V1 は 2026年6月1日に終了しました。
+> 認証方式が変わっています。
 >
-> **無人運用したい場合**は `JQUANTS_MAIL` / `JQUANTS_PASSWORD` を追加登録してください。
-> 設定されていれば毎回 `auth_user` からリフレッシュトークンを取り直すため、更新作業が不要になります。
-
-### トークンの見分け方
-
-J-Quants のリフレッシュトークン／IDトークンはいずれも **JWT**（`header.payload.signature` の
-ドット区切り3パート）で、実際の長さは **800文字以上**あります。
-
-`Fetch J-Quants Data` が `HTTP 403 Forbidden` で落ちる場合、ログに secret の
-**形状（長さとJWTか否か）だけ**が出力されます（値そのものは出力されません）。
-
-```
-[auth] JQUANTS_API の形状: 長さ 43 文字 / ドット区切りではない (0個のドット)
-      → J-Quants のリフレッシュトークン/IDトークンは JWT (通常800文字以上) です。
-```
-
-このように表示された場合、`JQUANTS_API` に J-Quants 以外の値が入っています。
-[J-Quants のマイページ](https://jpx-jquants.com/) からリフレッシュトークンを取得し直して登録してください。
+> | | V1（終了） | V2（現行） |
+> | --- | --- | --- |
+> | 認証 | メール+パスワード → リフレッシュトークン → IDトークン の3段階 | **APIキー1つ** |
+> | ヘッダー | `Authorization: Bearer <IDトークン>` | **`x-api-key: <APIキー>`** |
+> | 有効期限 | リフレッシュトークン1週間 / IDトークン24時間 | **期限なし**（再発行するまで有効） |
+>
+> V2 には有効期限がないため、**定期実行のためのキー更新作業は不要**です。
+>
+> `JQUANTS_API` に V1 のトークン（`xxx.yyy.zzz` 形式の JWT・800文字超）が残っていると
+> 必ず認証エラーになります。その場合ログに次のように表示されます（値そのものは出力されません）。
+>
+> ```
+> [auth] JQUANTS_API を APIキーとして使用します
+>        (長さ 902 文字 / JWT形式 (ドット区切り3パート)
+>         → これは V1 のリフレッシュトークン/IDトークンの形式です。
+>           V2 は APIキー方式に変更されました。)
+> ```
 
 ### 2.2 GitHub Pages の有効化
 
@@ -116,7 +106,7 @@ node tests/smoke.mjs   # Chromium での実描画テスト (要 playwright)
 ローカルで実データを取得する場合:
 
 ```bash
-export JQUANTS_API='<リフレッシュトークン>'
+export JQUANTS_API='<APIキー>'
 python3 scripts/jquants_data_fetcher.py --check-auth   # 疎通確認
 python3 scripts/jquants_data_fetcher.py --codes 7203   # 単一銘柄
 python3 scripts/jquants_data_fetcher.py                # watchlist 全件
@@ -191,13 +181,36 @@ python3 scripts/jquants_data_fetcher.py                # watchlist 全件
 
 ### 使用エンドポイント
 
-| エンドポイント | 用途 | 必要プラン |
+| V2 エンドポイント | V1（旧） | 用途 |
 | --- | --- | --- |
-| `/token/auth_refresh` | IDトークン取得 | 全プラン |
-| `/listed/info` | 銘柄名・業種・市場区分 | 全プラン |
-| `/prices/daily_quotes` | 株価・出来高・売買代金 | 全プラン |
-| `/fins/statements` | EPS・売上・ROE・進捗率・発行済株式数 | Light 以上 |
-| `/markets/weekly_margin_interest` | 信用倍率（需給軸） | Standard 以上 |
+| `/equities/master` | `/listed/info` | 銘柄名・業種・市場区分 |
+| `/equities/bars/daily` | `/prices/daily_quotes` | 株価・出来高・売買代金 |
+| `/fins/summary` | `/fins/statements` | EPS・売上・ROE・進捗率・発行済株式数 |
+| `/markets/margin-interest` | `/markets/weekly_margin_interest` | 信用倍率（需給軸） |
+
+ベースURL は `https://api.jquants.com/v2`、認証は全エンドポイント共通で `x-api-key` ヘッダーです。
+
+**V2 での主な差分**
+
+- レスポンスのデータ配列キーが一律 **`data`** になりました（V1 は `info` / `daily_quotes` 等）。
+- 列名が短縮されました。対応は `scripts/jquants_data_fetcher.py` 冒頭の **FIELD MAP** 節に全件記載しています。
+
+  | V1 | V2 | | V1 | V2 |
+  | --- | --- | --- | --- | --- |
+  | `Close` | `C` | | `NetSales` | `Sales` |
+  | `Open` / `High` / `Low` | `O` / `H` / `L` | | `OperatingProfit` | `OP` |
+  | `Volume` | `Vo` | | `Profit` | `NP` |
+  | `TurnoverValue` | `Va` | | `Equity` | `Eq` |
+  | `AdjustmentClose` | `AdjC` | | `DisclosedDate` | `DiscDate` |
+  | `CompanyName` | `CoName` | | `TypeOfCurrentPeriod` | `CurPerType` |
+
+- **ROE が API から直接提供される**ようになりました（`/fins/summary` の `ROE` 列）。
+  提供値があればそれを使い、無い場合のみ「TTM純利益 ÷ 自己資本」で算出します。
+  どちらを使ったかは UI の「基本指標」に表示されます。
+- V1 の `TypeOfDocument` による実績決算の判別は、V2 の `DocType` の列挙値が
+  公式クライアントのソースから確認できなかったため採用していません。代わりに
+  **「`CurPerType` が 1Q〜FY のいずれか」かつ「売上・営業利益・純利益・EPS のいずれかに実績値がある」**
+  で判定しています（業績予想の修正のみの開示は実績値を持たないため除外される）。
 
 プラン制約で取得できなかったエンドポイントは `stocks.json` の `unavailableEndpoints` に記録され、
 ダッシュボード上部に警告として表示されます。該当する軸は「—」となり、スコアの平均から除外されます。
@@ -210,7 +223,7 @@ python3 scripts/jquants_data_fetcher.py                # watchlist 全件
 
 ```
 ├── .github/workflows/
-│   ├── fetch-data.yml       # J-Quants データ取得 (secrets.JQUANTS_API を使用)
+│   ├── fetch-data.yml       # J-Quants V2 データ取得 (secrets.JQUANTS_API)
 │   ├── deploy-pages.yml     # GitHub Pages へのビルド & デプロイ
 │   └── ci.yml               # テスト + ビルド + ブラウザ描画テスト
 ├── scripts/

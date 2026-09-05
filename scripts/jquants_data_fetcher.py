@@ -4,22 +4,31 @@ jquants_data_fetcher.py
 =======================
 GrowthStockAnalyzer - Focus のデータ取得・指標算出パイプライン (仕様書 §3)。
 
-J-Quants API から日次株価・財務諸表・信用残を取得し、8軸スコアリングに必要な
+J-Quants API **V2** から日次株価・財務諸表・信用残を取得し、8軸スコアリングに必要な
 指標へ前処理したうえで ``public/data/stocks.json`` を出力する。
 標準ライブラリのみで動作する (CI での依存インストール不要)。
 
-認証
-----
+認証 (V2)
+---------
+V2 は APIキー方式である。V1 の ``auth_user`` → ``auth_refresh`` →
+``Authorization: Bearer`` という3段階のトークン交換は廃止された。
+
+  * ベースURL : ``https://api.jquants.com/v2``
+  * 認証      : リクエストヘッダー ``x-api-key: <APIキー>``
+  * APIキー   : J-Quants ダッシュボードの [設定 » API キー] で発行
+
 環境変数 ``JQUANTS_API`` (GitHub Actions の Repository secret) を使用する。
-中身は以下のいずれの形式でも自動判別する:
+公式クライアントと同じ ``JQUANTS_API_KEY`` も受け付ける。
 
-  * リフレッシュトークン (既定の想定 / 有効期限 1週間)
-  * IDトークン (有効期限 24時間)
-  * ``{"mailaddress": "...", "password": "..."}`` の JSON
-  * ``mail@example.com:password`` のコロン区切り
+V1 → V2 のエンドポイント対応 (本スクリプトで使用するもの)
+--------------------------------------------------------
+  /v1/listed/info                      -> /v2/equities/master
+  /v1/prices/daily_quotes              -> /v2/equities/bars/daily
+  /v1/fins/statements                  -> /v2/fins/summary
+  /v1/markets/weekly_margin_interest   -> /v2/markets/margin-interest
 
-``JQUANTS_MAIL`` / ``JQUANTS_PASSWORD`` が設定されている場合はそちらを優先し、
-リフレッシュトークンを毎回取得し直す (無人運用向け)。
+V2 ではレスポンスの配列キーが一律 ``data`` になり、列名が短縮された
+(``Close`` -> ``C``、``NetSales`` -> ``Sales`` 等)。対応は FIELD MAP 節を参照。
 
 出力方針
 --------
@@ -47,7 +56,7 @@ import urllib.parse
 import urllib.request
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
-API_BASE = "https://api.jquants.com/v1"
+API_BASE = "https://api.jquants.com/v2"
 USER_AGENT = "GrowthStockAnalyzer-Focus/1.0 (+https://github.com/shunshun0904/growthstock)"
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -60,6 +69,37 @@ MARGIN_LOOKBACK_DAYS = 400
 # 取得できなかった理由の分類
 SRC_API = "jquants"
 SRC_NA = "unavailable"
+
+# --------------------------------------------------------------------------- #
+# FIELD MAP : V1 の列名 -> V2 の列名 (公式クライアント jquantsapi/constants.py 準拠)
+# --------------------------------------------------------------------------- #
+#
+#  /equities/master   CompanyName->CoName  CompanyNameEnglish->CoNameEn
+#                     Sector33CodeName->S33Nm  Sector17CodeName->S17Nm
+#                     MarketCodeName->MktNm    ScaleCategory->ScaleCat
+#
+#  /equities/bars/daily
+#                     Open->O  High->H  Low->L  Close->C
+#                     Volume->Vo   TurnoverValue->Va
+#                     AdjustmentOpen->AdjO   AdjustmentHigh->AdjH
+#                     AdjustmentLow->AdjL    AdjustmentClose->AdjC
+#                     AdjustmentVolume->AdjVo
+#
+#  /fins/summary      DisclosedDate->DiscDate  DisclosedTime->DiscTime
+#                     TypeOfDocument->DocType  TypeOfCurrentPeriod->CurPerType
+#                     CurrentPeriodEndDate->CurPerEn
+#                     CurrentFiscalYearStartDate->CurFYSt
+#                     NetSales->Sales  OperatingProfit->OP  Profit->NP
+#                     EarningsPerShare->EPS  Equity->Eq  TotalAssets->TA
+#                     ForecastNetSales->FSales  ForecastOperatingProfit->FOP
+#                     ForecastProfit->FNP       ForecastEarningsPerShare->FEPS
+#                     NumberOfIssuedAndOutstandingShares...->ShOutFY
+#                     NumberOfTreasuryStock...->TrShFY
+#                     (V2 で新設) ROE ... 自己資本利益率が直接提供される
+#
+#  /markets/margin-interest
+#                     LongMarginTradeVolume->LongVol
+#                     ShortMarginTradeVolume->ShrtVol
 
 
 class JQuantsError(RuntimeError):
@@ -117,10 +157,11 @@ def _request(
 
 
 # --------------------------------------------------------------------------- #
-# 認証
+# 認証 (V2: APIキー方式)
 # --------------------------------------------------------------------------- #
 
 def _looks_like_jwt(value: str) -> bool:
+    """ドット区切り3パート = JWT (V1 のトークン形式) かどうか。"""
     return bool(re.fullmatch(r"[\w-]+\.[\w-]+\.[\w-]+", value.strip()))
 
 
@@ -128,145 +169,66 @@ def describe_secret(value: str) -> str:
     """
     secret の「形」だけを説明する文字列を返す（値そのものは絶対に出力しない）。
 
-    J-Quants のリフレッシュトークン / IDトークンはいずれも Amazon Cognito が発行する
-    JWT であり、`header.payload.signature` の3パート構成で通常 800文字以上ある。
-    それより極端に短い、あるいはドットを含まない値は別物である可能性が高いため、
-    認証エラー時の切り分け情報として長さと形状を示す。
+    V1 のトークン (Cognito の JWT / ドット区切り3パート・800文字超) が
+    そのまま残っていると V2 では必ず 401/403 になるため、
+    JWT らしき値を検出したら移行漏れとして警告する。
     """
     v = value.strip()
-    shape = "JWT形式 (ドット区切り3パート)" if _looks_like_jwt(v) else f"ドット区切りではない ({v.count('.')}個のドット)"
-    verdict = ""
-    if not _looks_like_jwt(v):
-        verdict = (
-            "\n      → J-Quants のリフレッシュトークン/IDトークンは JWT (通常800文字以上) です。"
-            "\n        この値は JWT の形式ではないため、別のサービスのAPIキー等が"
-            "\n        登録されている可能性があります。"
+    parts = [f"長さ {len(v)} 文字"]
+    if _looks_like_jwt(v):
+        parts.append(
+            "JWT形式 (ドット区切り3パート)"
+            "\n      → これは V1 のリフレッシュトークン/IDトークンの形式です。"
+            "\n        V2 は APIキー方式に変更されました。J-Quants ダッシュボードの"
+            "\n        [設定 » API キー] で発行した APIキーに差し替えてください。"
         )
-    elif len(v) < 200:
-        verdict = "\n      → JWT 形式ですが、J-Quants のトークンとしては異常に短いです。"
-    return f"長さ {len(v)} 文字 / {shape}{verdict}"
+    else:
+        parts.append("JWTではない (APIキーとして送信します)")
+    return " / ".join(parts)
 
 
-def _jwt_expiry(token: str) -> Optional[dt.datetime]:
-    """JWT の exp クレームを読む (署名検証はしない / 期限切れ判定の情報提供のみ)。"""
-    import base64
+def resolve_api_key() -> str:
+    """
+    環境変数から V2 の APIキーを取得する。
 
-    try:
-        payload = token.split(".")[1]
-        payload += "=" * (-len(payload) % 4)
-        claims = json.loads(base64.urlsafe_b64decode(payload))
-        exp = claims.get("exp")
-        if isinstance(exp, (int, float)):
-            return dt.datetime.fromtimestamp(exp, tz=dt.timezone.utc)
-    except Exception:  # noqa: BLE001 - 解析できなければ情報なしとして扱う
-        return None
-    return None
+    優先順位: JQUANTS_API_KEY (公式クライアントと同じ名前) -> JQUANTS_API
+    """
+    for name in ("JQUANTS_API_KEY", "JQUANTS_API"):
+        raw = os.environ.get(name, "").strip()
+        if not raw:
+            continue
 
+        # JSON で渡された場合はキーらしきフィールドを拾う
+        if raw.startswith("{"):
+            try:
+                obj = json.loads(raw)
+            except json.JSONDecodeError as exc:
+                raise AuthError(f"{name} が JSON らしき文字列ですが解析できません") from exc
+            for key in ("apiKey", "api_key", "apikey", "key"):
+                if obj.get(key):
+                    print(f"[auth] {name} (JSON: {key}) を APIキーとして使用します")
+                    return str(obj[key])
+            raise AuthError(f"{name} の JSON に APIキーらしきフィールドがありません")
 
-def id_token_from_refresh(refresh_token: str) -> str:
-    url = f"{API_BASE}/token/auth_refresh?" + urllib.parse.urlencode(
-        {"refreshtoken": refresh_token}
+        print(f"[auth] {name} を APIキーとして使用します ({describe_secret(raw)})")
+        return raw
+
+    raise AuthError(
+        "環境変数 JQUANTS_API (または JQUANTS_API_KEY) が未設定です。\n"
+        "      J-Quants ダッシュボードの [設定 » API キー] で APIキーを発行し、\n"
+        "      GitHub の Settings > Secrets and variables > Actions に登録してください。"
     )
-    data = _request("POST", url)
-    token = data.get("idToken")
-    if not token:
-        raise AuthError(f"auth_refresh が idToken を返しませんでした: {data}")
-    return token
-
-
-def refresh_token_from_login(mail: str, password: str) -> str:
-    data = _request(
-        "POST",
-        f"{API_BASE}/token/auth_user",
-        body={"mailaddress": mail, "password": password},
-    )
-    token = data.get("refreshToken")
-    if not token:
-        raise AuthError(f"auth_user が refreshToken を返しませんでした: {data}")
-    return token
-
-
-def resolve_id_token() -> str:
-    """環境変数から ID トークンを解決する。secret の形式は自動判別。"""
-    mail = os.environ.get("JQUANTS_MAIL", "").strip()
-    password = os.environ.get("JQUANTS_PASSWORD", "").strip()
-    if mail and password:
-        print("[auth] JQUANTS_MAIL / JQUANTS_PASSWORD からリフレッシュトークンを取得します")
-        return id_token_from_refresh(refresh_token_from_login(mail, password))
-
-    secret = os.environ.get("JQUANTS_API", "").strip()
-    if not secret:
-        raise AuthError(
-            "環境変数 JQUANTS_API が未設定です。"
-            "GitHub の Settings > Secrets and variables > Actions に登録してください。"
-        )
-
-    # 1) JSON 形式 {"mailaddress": ..., "password": ...} / {"refreshToken": ...}
-    if secret.startswith("{"):
-        try:
-            obj = json.loads(secret)
-        except json.JSONDecodeError as exc:
-            raise AuthError("JQUANTS_API が JSON らしき文字列ですが解析できません") from exc
-        if obj.get("mailaddress") and obj.get("password"):
-            print("[auth] JQUANTS_API (JSON: mailaddress/password) でログインします")
-            return id_token_from_refresh(
-                refresh_token_from_login(obj["mailaddress"], obj["password"])
-            )
-        for key in ("idToken", "id_token"):
-            if obj.get(key):
-                print("[auth] JQUANTS_API (JSON: idToken) をそのまま使用します")
-                return obj[key]
-        for key in ("refreshToken", "refresh_token"):
-            if obj.get(key):
-                print("[auth] JQUANTS_API (JSON: refreshToken) から idToken を取得します")
-                return id_token_from_refresh(obj[key])
-        raise AuthError("JQUANTS_API の JSON に利用可能なキーがありません")
-
-    # 2) mail:password 形式
-    if "@" in secret and ":" in secret and not _looks_like_jwt(secret):
-        mail_part, _, pw_part = secret.partition(":")
-        print("[auth] JQUANTS_API (mail:password) でログインします")
-        return id_token_from_refresh(refresh_token_from_login(mail_part.strip(), pw_part))
-
-    # 3) 生のトークン。ID トークン (24h) かリフレッシュトークン (1週間) かを判別する。
-    print(f"[auth] JQUANTS_API の形状: {describe_secret(secret)}")
-    exp = _jwt_expiry(secret)
-    if exp is not None:
-        remaining = exp - dt.datetime.now(tz=dt.timezone.utc)
-        if remaining.total_seconds() <= 0:
-            raise AuthError(
-                f"JQUANTS_API のトークンは {exp:%Y-%m-%d %H:%M UTC} に失効しています。"
-                "J-Quants でリフレッシュトークンを再発行し、secret を更新してください。"
-            )
-        print(f"[auth] トークン残り有効期間: {remaining}")
-
-    try:
-        print("[auth] JQUANTS_API をリフレッシュトークンとして idToken を取得します")
-        return id_token_from_refresh(secret)
-    except AuthError as exc:
-        # リフレッシュトークンとして通らなければ ID トークンの可能性を試す
-        print(f"[auth] auth_refresh に失敗 ({exc}) — idToken として直接検証します")
-        probe = _request(
-            "GET",
-            f"{API_BASE}/listed/info?code=72030",
-            headers={"Authorization": f"Bearer {secret}"},
-        )
-        if "info" in probe:
-            print("[auth] JQUANTS_API は idToken として有効でした")
-            return secret
-        raise AuthError(
-            "JQUANTS_API をリフレッシュトークンとしても IDトークンとしても解決できませんでした。\n"
-            f"      secret の形状: {describe_secret(secret)}"
-        ) from exc
 
 
 # --------------------------------------------------------------------------- #
-# API クライアント
+# API クライアント (V2)
 # --------------------------------------------------------------------------- #
 
 class JQuantsClient:
-    def __init__(self, id_token: str, *, pause: float = 0.25) -> None:
-        self._headers = {"Authorization": f"Bearer {id_token}"}
+    """J-Quants API V2 クライアント (認証は x-api-key ヘッダー)。"""
+
+    def __init__(self, api_key: str, *, pause: float = 0.25) -> None:
+        self._headers = {"x-api-key": api_key}
         self._pause = pause
         #: プラン制約などで利用できなかったエンドポイント -> 理由
         self.unavailable_endpoints: Dict[str, str] = {}
@@ -278,8 +240,11 @@ class JQuantsClient:
         time.sleep(self._pause)
         return _request("GET", url, headers=self._headers)
 
-    def get_paginated(self, path: str, params: dict, key: str) -> List[dict]:
-        """pagination_key を辿って全件取得する。"""
+    def get_paginated(self, path: str, params: dict) -> List[dict]:
+        """
+        pagination_key を辿って全件取得する。
+        V2 はどのエンドポイントもデータ配列を "data" キーで返す。
+        """
         out: List[dict] = []
         cursor: Optional[str] = None
         for _ in range(50):  # 無限ループ防止
@@ -287,52 +252,55 @@ class JQuantsClient:
             if cursor:
                 page_params["pagination_key"] = cursor
             data = self.get(path, page_params)
-            out.extend(data.get(key, []) or [])
+            batch = data.get("data")
+            if isinstance(batch, list):
+                out.extend(batch)
             cursor = data.get("pagination_key")
             if not cursor:
                 break
         return out
 
-    # --- 個別エンドポイント ------------------------------------------------ #
+    # --- 個別エンドポイント (V2) ------------------------------------------ #
 
-    def listed_info(self, code: str) -> Optional[dict]:
+    def equities_master(self, code: str) -> Optional[dict]:
+        """V2 /equities/master (V1: /listed/info)"""
         try:
-            rows = self.get("/listed/info", {"code": code}).get("info") or []
+            rows = self.get_paginated("/equities/master", {"code": code})
             return rows[-1] if rows else None
         except JQuantsError as exc:
-            self.unavailable_endpoints["/listed/info"] = str(exc)
+            self.unavailable_endpoints["/equities/master"] = str(exc)
             return None
 
-    def daily_quotes(self, code: str, date_from: str, date_to: str) -> List[dict]:
+    def daily_bars(self, code: str, date_from: str, date_to: str) -> List[dict]:
+        """V2 /equities/bars/daily (V1: /prices/daily_quotes)"""
         try:
             rows = self.get_paginated(
-                "/prices/daily_quotes",
-                {"code": code, "from": date_from, "to": date_to},
-                "daily_quotes",
+                "/equities/bars/daily", {"code": code, "from": date_from, "to": date_to}
             )
         except JQuantsError as exc:
-            self.unavailable_endpoints["/prices/daily_quotes"] = str(exc)
+            self.unavailable_endpoints["/equities/bars/daily"] = str(exc)
             return []
         return sorted(rows, key=lambda r: r.get("Date", ""))
 
-    def statements(self, code: str) -> List[dict]:
+    def fin_summary(self, code: str) -> List[dict]:
+        """V2 /fins/summary (V1: /fins/statements)"""
         try:
-            rows = self.get_paginated("/fins/statements", {"code": code}, "statements")
+            rows = self.get_paginated("/fins/summary", {"code": code})
         except JQuantsError as exc:
-            self.unavailable_endpoints["/fins/statements"] = str(exc)
+            self.unavailable_endpoints["/fins/summary"] = str(exc)
             return []
-        return sorted(rows, key=lambda r: (r.get("DisclosedDate", ""), r.get("DisclosedTime", "")))
+        return sorted(rows, key=lambda r: (r.get("DiscDate", ""), r.get("DiscTime", "")))
 
-    def weekly_margin_interest(self, code: str, date_from: str, date_to: str) -> List[dict]:
+    def margin_interest(self, code: str, date_from: str, date_to: str) -> List[dict]:
+        """V2 /markets/margin-interest (V1: /markets/weekly_margin_interest)"""
         try:
             rows = self.get_paginated(
-                "/markets/weekly_margin_interest",
+                "/markets/margin-interest",
                 {"code": code, "from": date_from, "to": date_to},
-                "weekly_margin_interest",
             )
         except JQuantsError as exc:
-            # Light / Free プランでは利用不可。需給軸は「データなし」として扱う。
-            self.unavailable_endpoints["/markets/weekly_margin_interest"] = str(exc)
+            # 契約プランによっては利用不可。需給軸は「データなし」として扱う。
+            self.unavailable_endpoints["/markets/margin-interest"] = str(exc)
             return []
         return sorted(rows, key=lambda r: r.get("Date", ""))
 
@@ -408,37 +376,37 @@ def price_metrics(quotes: Sequence[dict], as_of: Optional[str] = None) -> Dict[s
     latest = series[-1]
     out["date"] = latest.get("Date")
 
-    price = pick(latest, "AdjustmentClose", "Close")
+    price = pick(latest, "AdjC", "C")
     out["price"] = price
 
     # 52週高値: 直近営業日から遡って 365日ぶんのバーの最高値
     end = dt.date.fromisoformat(latest["Date"])
     start = end - dt.timedelta(days=365)
     window = [r for r in series if dt.date.fromisoformat(r["Date"]) >= start]
-    highs = [h for h in (pick(r, "AdjustmentHigh", "High") for r in window) if h is not None]
+    highs = [h for h in (pick(r, "AdjH", "H") for r in window) if h is not None]
     if highs:
         out["high52w"] = max(highs)
         if price is not None and out["high52w"] > 0:
             out["highRatio"] = price / out["high52w"] * 100.0
 
     # 売買代金 (億円): 仕様書 §3.2-4 の定義 P_current × Volume / 1e8
-    raw_close = pick(latest, "Close", "AdjustmentClose")
-    raw_volume = pick(latest, "Volume", "AdjustmentVolume")
+    raw_close = pick(latest, "C", "AdjC")
+    raw_volume = pick(latest, "Vo", "AdjVo")
     out["volume"] = raw_volume
     if raw_close is not None and raw_volume is not None:
         out["tradingValue"] = raw_close * raw_volume / 1e8
     # API が返す実際の売買代金 (参考値)
-    turnover = fnum(latest.get("TurnoverValue"))
+    turnover = fnum(latest.get("Va"))
     if turnover is not None:
         out["turnoverValue"] = turnover / 1e8
 
     # 出来高モメンタム (%): 直近出来高 / 直前20日平均出来高
-    prior = [v for v in (pick(r, "AdjustmentVolume", "Volume") for r in series[-21:-1]) if v is not None]
+    prior = [v for v in (pick(r, "AdjVo", "Vo") for r in series[-21:-1]) if v is not None]
     if len(prior) >= 5 and raw_volume is not None:
         ma20 = sum(prior) / len(prior)
         out["ma20Volume"] = ma20
         if ma20 > 0:
-            latest_vol = pick(latest, "AdjustmentVolume", "Volume")
+            latest_vol = pick(latest, "AdjVo", "Vo")
             if latest_vol is not None:
                 out["volumeTrend"] = latest_vol / ma20 * 100.0
 
@@ -451,13 +419,26 @@ def price_metrics(quotes: Sequence[dict], as_of: Optional[str] = None) -> Dict[s
 
 QUARTER_MAP = {"1Q": 1, "2Q": 2, "3Q": 3, "4Q": 4, "FY": 4}
 
-# 実績決算のみを対象とする (業績予想の修正等は除外)
-FINANCIAL_DOC_RE = re.compile(r"FinancialStatements")
+# 実績値を持つ列 (いずれか1つでも埋まっていれば実績開示とみなす)
+ACTUAL_FIELDS = ("Sales", "OP", "NP", "EPS")
 
 
 def _is_financial_statement(row: dict) -> bool:
-    doc = row.get("TypeOfDocument") or ""
-    return bool(FINANCIAL_DOC_RE.search(doc)) and row.get("TypeOfCurrentPeriod") in QUARTER_MAP
+    """
+    実績決算の開示行かどうかを判定する。
+
+    V1 では TypeOfDocument に "FinancialStatements" が含まれるかで判定していたが、
+    V2 の DocType の列挙値は公式クライアントのソースからは確認できなかったため、
+    文字列一致には依存しない判定にしている:
+
+      * CurPerType が 1Q/2Q/3Q/4Q/FY のいずれかであること
+      * かつ 売上・営業利益・純利益・EPS のいずれかに実績値があること
+
+    業績予想の修正のみを開示した行は実績値を持たないため、この条件で除外される。
+    """
+    if row.get("CurPerType") not in QUARTER_MAP:
+        return False
+    return any(fnum(row.get(f)) is not None for f in ACTUAL_FIELDS)
 
 
 def quarterize(statements: Sequence[dict]) -> List[dict]:
@@ -470,21 +451,21 @@ def quarterize(statements: Sequence[dict]) -> List[dict]:
     rows = [r for r in statements if _is_financial_statement(r)]
     by_fy: Dict[str, List[dict]] = {}
     for r in rows:
-        by_fy.setdefault(r.get("CurrentFiscalYearStartDate") or "", []).append(r)
+        by_fy.setdefault(r.get("CurFYSt") or "", []).append(r)
 
     result: List[dict] = []
     for fy_start, group in by_fy.items():
-        group = sorted(group, key=lambda r: QUARTER_MAP[r["TypeOfCurrentPeriod"]])
+        group = sorted(group, key=lambda r: QUARTER_MAP[r["CurPerType"]])
         # 同一四半期の重複開示 (訂正) は最後の開示を採用
         dedup: Dict[int, dict] = {}
         for r in group:
-            dedup[QUARTER_MAP[r["TypeOfCurrentPeriod"]]] = r
+            dedup[QUARTER_MAP[r["CurPerType"]]] = r
         ordered = [dedup[q] for q in sorted(dedup)]
 
         for idx, r in enumerate(ordered):
-            q = QUARTER_MAP[r["TypeOfCurrentPeriod"]]
+            q = QUARTER_MAP[r["CurPerType"]]
             prev = ordered[idx - 1] if idx > 0 else None
-            prev_q = QUARTER_MAP[prev["TypeOfCurrentPeriod"]] if prev else 0
+            prev_q = QUARTER_MAP[prev["CurPerType"]] if prev else 0
 
             def diff(field: str) -> Optional[float]:
                 cur = fnum(r.get(field))
@@ -499,31 +480,31 @@ def quarterize(statements: Sequence[dict]) -> List[dict]:
             result.append({
                 "fiscalYearStart": fy_start,
                 "quarter": q,
-                "period": r.get("TypeOfCurrentPeriod"),
-                "disclosedDate": r.get("DisclosedDate"),
-                "periodEnd": r.get("CurrentPeriodEndDate"),
+                "period": r.get("CurPerType"),
+                "disclosedDate": r.get("DiscDate"),
+                "periodEnd": r.get("CurPerEn"),
                 # 単一四半期値
-                "qNetSales": diff("NetSales"),
-                "qOperatingProfit": diff("OperatingProfit"),
-                "qProfit": diff("Profit"),
-                "qEps": diff("EarningsPerShare"),
+                "qNetSales": diff("Sales"),
+                "qOperatingProfit": diff("OP"),
+                "qProfit": diff("NP"),
+                "qEps": diff("EPS"),
                 # 累計値 (進捗率算出に使用)
-                "cumNetSales": fnum(r.get("NetSales")),
-                "cumOperatingProfit": fnum(r.get("OperatingProfit")),
-                "cumProfit": fnum(r.get("Profit")),
-                "cumEps": fnum(r.get("EarningsPerShare")),
+                "cumNetSales": fnum(r.get("Sales")),
+                "cumOperatingProfit": fnum(r.get("OP")),
+                "cumProfit": fnum(r.get("NP")),
+                "cumEps": fnum(r.get("EPS")),
                 # 会社予想 (通期)
-                "forecastNetSales": fnum(r.get("ForecastNetSales")),
-                "forecastOperatingProfit": fnum(r.get("ForecastOperatingProfit")),
-                "forecastProfit": fnum(r.get("ForecastProfit")),
-                "forecastEps": fnum(r.get("ForecastEarningsPerShare")),
+                "forecastNetSales": fnum(r.get("FSales")),
+                "forecastOperatingProfit": fnum(r.get("FOP")),
+                "forecastProfit": fnum(r.get("FNP")),
+                "forecastEps": fnum(r.get("FEPS")),
                 # 財政状態
-                "equity": fnum(r.get("Equity")),
-                "totalAssets": fnum(r.get("TotalAssets")),
-                "sharesIssued": fnum(
-                    r.get("NumberOfIssuedAndOutstandingSharesAtTheEndOfFiscalYearIncludingTreasuryStock")
-                ),
-                "treasuryShares": fnum(r.get("NumberOfTreasuryStockAtTheEndOfFiscalYear")),
+                "equity": fnum(r.get("Eq")),
+                "totalAssets": fnum(r.get("TA")),
+                "sharesIssued": fnum(r.get("ShOutFY")),
+                "treasuryShares": fnum(r.get("TrShFY")),
+                # V2 で新設: 自己資本利益率が API から直接提供される
+                "reportedRoe": fnum(r.get("ROE")),
             })
 
     return sorted(result, key=lambda r: (r.get("disclosedDate") or "", r["fiscalYearStart"], r["quarter"]))
@@ -536,6 +517,7 @@ def fundamental_metrics(quarters: Sequence[dict], as_of: Optional[str] = None) -
         "epsGrowth": None, "salesGrowth": None, "roe": None, "opMargin": None,
         "progressRate": None, "quarter": None, "sharesOutstanding": None,
         "fiscalPeriod": None, "disclosedDate": None, "opMarginBasis": None,
+        "roeBasis": None,
     }
     if not hist:
         return out
@@ -559,11 +541,18 @@ def fundamental_metrics(quarters: Sequence[dict], as_of: Optional[str] = None) -
         out["epsGrowth"] = pct_change(latest.get("qEps"), prior_year.get("qEps"))
         out["salesGrowth"] = pct_change(latest.get("qNetSales"), prior_year.get("qNetSales"))
 
-    # --- ROE: 直近4四半期の純利益合計 / 自己資本 ---
-    ttm = [r.get("qProfit") for r in hist[-4:]]
-    equity = latest.get("equity")
-    if len(ttm) == 4 and all(v is not None for v in ttm) and equity and equity > 0:
-        out["roe"] = sum(ttm) / equity * 100.0
+    # --- ROE ---
+    # V2 の /fins/summary は ROE を直接提供する。提供値があればそれを使い、
+    # 無い場合のみ「直近4四半期の純利益合計 / 自己資本」で算出する。
+    if latest.get("reportedRoe") is not None:
+        out["roe"] = latest["reportedRoe"]
+        out["roeBasis"] = "J-Quants 提供値 (ROE)"
+    else:
+        ttm = [r.get("qProfit") for r in hist[-4:]]
+        equity = latest.get("equity")
+        if len(ttm) == 4 and all(v is not None for v in ttm) and equity and equity > 0:
+            out["roe"] = sum(ttm) / equity * 100.0
+            out["roeBasis"] = "TTM純利益 / 自己資本 で算出"
 
     # --- 営業利益率: 直近4四半期 (TTM) を優先、不可なら当期累計 ---
     ttm_op = [r.get("qOperatingProfit") for r in hist[-4:]]
@@ -597,8 +586,8 @@ def credit_metrics(margin_rows: Sequence[dict], as_of: Optional[str] = None) -> 
     if not hist:
         return out
     latest = hist[-1]
-    long_v = fnum(latest.get("LongMarginTradeVolume"))
-    short_v = fnum(latest.get("ShortMarginTradeVolume"))
+    long_v = fnum(latest.get("LongVol"))
+    short_v = fnum(latest.get("ShrtVol"))
     out["marginDate"] = latest.get("Date")
     out["marginLong"] = long_v
     out["marginShort"] = short_v
@@ -650,15 +639,15 @@ def build_milestones(
         d = row.get("Date")
         if not d or d < since_s or i < 21:
             continue
-        close = pick(row, "AdjustmentClose", "Close")
-        open_ = pick(row, "AdjustmentOpen", "Open")
-        vol = pick(row, "AdjustmentVolume", "Volume")
+        close = pick(row, "AdjC", "C")
+        open_ = pick(row, "AdjO", "O")
+        vol = pick(row, "AdjVo", "Vo")
         if close is None or vol is None:
             continue
 
         start = dt.date.fromisoformat(d) - dt.timedelta(days=365)
         window = [r for r in quotes[:i] if dt.date.fromisoformat(r["Date"]) >= start]
-        highs = [h for h in (pick(r, "AdjustmentHigh", "High") for r in window) if h is not None]
+        highs = [h for h in (pick(r, "AdjH", "H") for r in window) if h is not None]
         if highs and close > max(highs):
             # 直近30日以内に同種イベントがある場合はまとめる (毎日出さない)
             if prev_breakout is None or (
@@ -672,7 +661,7 @@ def build_milestones(
                 })
                 prev_breakout = d
 
-        prior = [v for v in (pick(r, "AdjustmentVolume", "Volume") for r in quotes[i - 20:i]) if v is not None]
+        prior = [v for v in (pick(r, "AdjVo", "Vo") for r in quotes[i - 20:i]) if v is not None]
         if len(prior) >= 15:
             ma20 = sum(prior) / len(prior)
             if ma20 > 0 and vol >= ma20 * 2.0 and open_ is not None and close > open_:
@@ -704,14 +693,14 @@ def build_stock(client: JQuantsClient, raw_code: str, note: str = "") -> Dict[st
     date_from = (today - dt.timedelta(days=PRICE_LOOKBACK_DAYS)).isoformat()
     date_to = today.isoformat()
 
-    print(f"[fetch] {code} : listed/info")
-    info = client.listed_info(code) or {}
-    print(f"[fetch] {code} : prices/daily_quotes ({date_from} 〜 {date_to})")
-    quotes = client.daily_quotes(code, date_from, date_to)
-    print(f"[fetch] {code} : fins/statements")
-    statements = client.statements(code)
-    print(f"[fetch] {code} : markets/weekly_margin_interest")
-    margins = client.weekly_margin_interest(
+    print(f"[fetch] {code} : /equities/master")
+    info = client.equities_master(code) or {}
+    print(f"[fetch] {code} : /equities/bars/daily ({date_from} 〜 {date_to})")
+    quotes = client.daily_bars(code, date_from, date_to)
+    print(f"[fetch] {code} : /fins/summary")
+    statements = client.fin_summary(code)
+    print(f"[fetch] {code} : /markets/margin-interest")
+    margins = client.margin_interest(
         code, (today - dt.timedelta(days=MARGIN_LOOKBACK_DAYS)).isoformat(), date_to
     )
 
@@ -721,7 +710,7 @@ def build_stock(client: JQuantsClient, raw_code: str, note: str = "") -> Dict[st
         return {
             "code": display_code(code),
             "jqCode": code,
-            "name": info.get("CompanyName") or display_code(code),
+            "name": info.get("CoName") or display_code(code),
             "error": "日次株価データを取得できませんでした",
             "metrics": {}, "snapshots": {}, "milestones": [], "sources": {},
         }
@@ -761,7 +750,7 @@ def build_stock(client: JQuantsClient, raw_code: str, note: str = "") -> Dict[st
     # 直近1年の終値推移 (スパークライン用に週次へ間引き)
     year_start = (base - dt.timedelta(days=365)).isoformat()
     history = [
-        {"date": r["Date"], "close": pick(r, "AdjustmentClose", "Close")}
+        {"date": r["Date"], "close": pick(r, "AdjC", "C")}
         for r in quotes if r["Date"] >= year_start
     ]
     history = [h for h in history[::3] if h["close"] is not None]
@@ -769,11 +758,11 @@ def build_stock(client: JQuantsClient, raw_code: str, note: str = "") -> Dict[st
     return {
         "code": display_code(code),
         "jqCode": code,
-        "name": info.get("CompanyName") or display_code(code),
-        "nameEn": info.get("CompanyNameEnglish"),
-        "sector": info.get("Sector33CodeName") or info.get("Sector17CodeName"),
-        "market": info.get("MarketCodeName"),
-        "scale": info.get("ScaleCategory"),
+        "name": info.get("CoName") or display_code(code),
+        "nameEn": info.get("CoNameEn"),
+        "sector": info.get("S33Nm") or info.get("S17Nm"),
+        "market": info.get("MktNm"),
+        "scale": info.get("ScaleCat"),
         "note": note,
         "asOf": latest_date,
         "metrics": metrics,
@@ -815,24 +804,39 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        token = resolve_id_token()
+        api_key = resolve_api_key()
     except AuthError as exc:
-        print(f"\n[FATAL] 認証に失敗しました: {exc}\n", file=sys.stderr)
-        print(
-            "対処: J-Quants にログインして新しいリフレッシュトークンを発行し、\n"
-            "      GitHub の Settings > Secrets and variables > Actions で\n"
-            "      JQUANTS_API を更新してください。\n"
-            "      （無人運用したい場合は JQUANTS_MAIL / JQUANTS_PASSWORD を登録すると\n"
-            "        毎回自動でトークンを取得します）",
-            file=sys.stderr,
-        )
+        print(f"\n[FATAL] 認証情報を解決できませんでした: {exc}\n", file=sys.stderr)
         return 2
 
-    client = JQuantsClient(token, pause=args.pause)
+    client = JQuantsClient(api_key, pause=args.pause)
 
     if args.check_auth:
-        probe = client.listed_info("72030")
-        print(f"[check-auth] OK : {probe.get('CompanyName') if probe else '(listed/info が空)'}")
+        # 疎通確認は /equities/master を 1 銘柄だけ叩く
+        try:
+            rows = client.get_paginated("/equities/master", {"code": "72030"})
+        except AuthError as exc:
+            print(f"\n[FATAL] APIキーが拒否されました: {exc}\n", file=sys.stderr)
+            print(
+                "対処: J-Quants ダッシュボードの [設定 » API キー] で APIキーを確認し、\n"
+                "      GitHub の Settings > Secrets and variables > Actions で\n"
+                "      JQUANTS_API を更新してください。\n"
+                "      (V2 は APIキー方式です。V1 のリフレッシュトークンは使えません)",
+                file=sys.stderr,
+            )
+            return 2
+        except JQuantsError as exc:
+            print(f"\n[FATAL] J-Quants API に接続できませんでした: {exc}\n", file=sys.stderr)
+            print("      ネットワーク到達性を確認してください "
+                  "(api.jquants.com への HTTPS 接続が必要です)", file=sys.stderr)
+            return 3
+        if not rows:
+            print("[check-auth] 認証は通りましたが /equities/master が空を返しました",
+                  file=sys.stderr)
+            return 1
+        info = rows[-1]
+        print(f"[check-auth] OK : {info.get('Code')} {info.get('CoName')} "
+              f"({info.get('MktNm')} / {info.get('S33Nm')})")
         return 0
 
     targets = (
@@ -858,7 +862,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     payload = {
         "generatedAt": dt.datetime.now(tz=dt.timezone.utc).isoformat(),
-        "source": "J-Quants API (https://jpx-jquants.com/)",
+        "source": "J-Quants API V2 (https://jpx-jquants.com/)",
+        "apiVersion": "v2",
         "stocks": stocks,
         "failures": failures,
         "unavailableEndpoints": client.unavailable_endpoints,
@@ -867,6 +872,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "tradingValue": "売買代金(億円) = 終値 × 出来高 / 1e8 (仕様書 §3.2-4)。API の TurnoverValue も turnoverValue に併記",
             "missingData": "取得できなかった指標は null。0 で埋めることはしない",
             "pointInTime": "snapshots の各時点は、その日までに開示済みのデータのみで算出 (先読みなし)",
+            "apiVersion": "J-Quants API V2 (x-api-key 認証 / エンドポイントと列名は V1 から変更)",
         },
     }
 

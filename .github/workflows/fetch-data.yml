@@ -1,7 +1,7 @@
 name: Fetch J-Quants Data
 
-# J-Quants API から株価・財務・信用残を取得し public/data/stocks.json を更新する。
-# 認証には Repository secret の JQUANTS_API を使用する。
+# J-Quants API V2 から株価・財務・信用残を取得し public/data/stocks.json を更新する。
+# 認証は Repository secret の JQUANTS_API に入れた APIキーを x-api-key ヘッダーで送る。
 on:
   workflow_dispatch:
     inputs:
@@ -16,9 +16,8 @@ on:
         default: false
   schedule:
     # 平日 21:00 JST (= 12:00 UTC)。東証の日次データが出そろった後に実行する。
-    # 注意: J-Quants のリフレッシュトークンは有効期限1週間のため、
-    #       JQUANTS_MAIL / JQUANTS_PASSWORD を設定していない場合、
-    #       週に一度 JQUANTS_API の更新が必要になる。
+    # V2 の APIキーには V1 のような 1週間の有効期限がないため、
+    # ダッシュボードでキーを再発行しない限り定期実行は動き続ける。
     - cron: '0 12 * * 1-5'
 
 permissions:
@@ -44,7 +43,7 @@ jobs:
         run: |
           if [ -z "$JQUANTS_API" ]; then
             echo "::error::Repository secret 'JQUANTS_API' が設定されていません。"
-            echo "::error::Settings > Secrets and variables > Actions で JQUANTS_API を登録してください。"
+            echo "::error::J-Quants ダッシュボードの [設定 » API キー] で発行した APIキーを登録してください。"
             exit 1
           fi
           echo "JQUANTS_API is configured (${#JQUANTS_API} characters)"
@@ -52,16 +51,12 @@ jobs:
       - name: Check J-Quants authentication
         env:
           JQUANTS_API: ${{ secrets.JQUANTS_API }}
-          JQUANTS_MAIL: ${{ secrets.JQUANTS_MAIL }}
-          JQUANTS_PASSWORD: ${{ secrets.JQUANTS_PASSWORD }}
         run: python3 scripts/jquants_data_fetcher.py --check-auth
 
       - name: Fetch data
         if: ${{ inputs.check_auth_only != true }}
         env:
           JQUANTS_API: ${{ secrets.JQUANTS_API }}
-          JQUANTS_MAIL: ${{ secrets.JQUANTS_MAIL }}
-          JQUANTS_PASSWORD: ${{ secrets.JQUANTS_PASSWORD }}
           # 入力はシェルに直接展開せず環境変数経由で渡す
           INPUT_CODES: ${{ inputs.codes }}
         run: |

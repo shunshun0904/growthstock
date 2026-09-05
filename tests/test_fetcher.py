@@ -24,12 +24,11 @@ def make_quotes(closes, volumes=None, start="2025-01-06"):
     rows = []
     for i, c in enumerate(closes):
         v = volumes[i] if volumes else 100000
+        # V2 /equities/bars/daily の列名 (O/H/L/C/Vo/Va, 調整後は Adj*)
         rows.append({
             "Date": (d + dt.timedelta(days=i)).isoformat(),
-            "Open": c - 1, "High": c, "Low": c - 2, "Close": c, "Volume": v,
-            "AdjustmentOpen": c - 1, "AdjustmentHigh": c, "AdjustmentLow": c - 2,
-            "AdjustmentClose": c, "AdjustmentVolume": v,
-            "TurnoverValue": c * v,
+            "O": c - 1, "H": c, "L": c - 2, "C": c, "Vo": v, "Va": c * v,
+            "AdjO": c - 1, "AdjH": c, "AdjL": c - 2, "AdjC": c, "AdjVo": v,
         })
     return rows
 
@@ -95,15 +94,15 @@ class TestPriceMetrics(unittest.TestCase):
 
 
 def statement(fy_start, period, disclosed, sales, op, profit, eps, **extra):
+    """V2 /fins/summary の列名で決算開示行を作る。"""
     row = {
-        "TypeOfDocument": "3QFinancialStatements_Consolidated_JP",
-        "TypeOfCurrentPeriod": period,
-        "CurrentFiscalYearStartDate": fy_start,
-        "CurrentPeriodEndDate": disclosed,
-        "DisclosedDate": disclosed,
-        "DisclosedTime": "15:00",
-        "NetSales": sales, "OperatingProfit": op, "Profit": profit,
-        "EarningsPerShare": eps,
+        "DocType": "3QFinancialStatements_Consolidated_JP",
+        "CurPerType": period,
+        "CurFYSt": fy_start,
+        "CurPerEn": disclosed,
+        "DiscDate": disclosed,
+        "DiscTime": "15:00",
+        "Sales": sales, "OP": op, "NP": profit, "EPS": eps,
     }
     row.update(extra)
     return row
@@ -117,11 +116,9 @@ class TestQuarterize(unittest.TestCase):
             statement("2024-04-01", "2Q", "2024-11-05", 220, 24, 15, 15.0),
             statement("2024-04-01", "3Q", "2025-02-05", 360, 42, 26, 26.0),
             statement("2024-04-01", "4Q", "2025-05-12", 520, 64, 40, 40.0,
-                      Equity=1000, ForecastOperatingProfit=80,
-                      NumberOfIssuedAndOutstandingSharesAtTheEndOfFiscalYearIncludingTreasuryStock=1_000_000,
-                      NumberOfTreasuryStockAtTheEndOfFiscalYear=50_000),
+                      Eq=1000, FOP=80, ShOutFY=1_000_000, TrShFY=50_000),
             statement("2025-04-01", "1Q", "2025-08-05", 140, 16, 10, 10.0,
-                      Equity=1050, ForecastOperatingProfit=90),
+                      Eq=1050, FOP=90),
         ]
 
     def test_cumulative_values_are_differenced(self):
@@ -144,10 +141,21 @@ class TestQuarterize(unittest.TestCase):
         self.assertAlmostEqual(fm["epsGrowth"], (10.0 - 6.0) / 6.0 * 100)
         self.assertEqual(fm["quarter"], 1)
 
-    def test_roe_uses_trailing_four_quarters(self):
+    def test_roe_uses_trailing_four_quarters_when_not_reported(self):
         fm = fundamental_metrics(quarterize(self.rows), as_of="2025-05-31")
         # 直近4四半期純利益 = 6 + 9 + 11 + 14 = 40、自己資本 1000 -> 4.0%
         self.assertAlmostEqual(fm["roe"], 4.0)
+        self.assertIn("TTM", fm["roeBasis"])
+
+    def test_roe_prefers_api_reported_value(self):
+        """V2 の /fins/summary は ROE を直接返すため、提供値があればそれを使う。"""
+        rows = list(self.rows)
+        rows[3] = statement("2024-04-01", "4Q", "2025-05-12", 520, 64, 40, 40.0,
+                            Eq=1000, FOP=80, ShOutFY=1_000_000, TrShFY=50_000,
+                            ROE=12.5)
+        fm = fundamental_metrics(quarterize(rows), as_of="2025-05-31")
+        self.assertAlmostEqual(fm["roe"], 12.5)
+        self.assertIn("提供値", fm["roeBasis"])
 
     def test_progress_rate(self):
         fm = fundamental_metrics(quarterize(self.rows))
@@ -161,20 +169,30 @@ class TestQuarterize(unittest.TestCase):
         self.assertEqual(fm["disclosedDate"], "2025-05-12")
 
     def test_forecast_revision_documents_are_ignored(self):
+        """実績値を持たない開示 (業績予想の修正のみ) は四半期系列に混ぜない。"""
         noise = self.rows + [{
-            "TypeOfDocument": "ForecastRevision", "TypeOfCurrentPeriod": "1Q",
-            "CurrentFiscalYearStartDate": "2025-04-01", "DisclosedDate": "2025-09-01",
-            "NetSales": None, "OperatingProfit": None,
+            "DocType": "ForecastRevision", "CurPerType": "1Q",
+            "CurFYSt": "2025-04-01", "DiscDate": "2025-09-01",
+            "Sales": None, "OP": None, "NP": None, "EPS": None,
+            "FOP": 120,   # 予想だけが入っている
         }]
         qs = quarterize(noise)
         self.assertTrue(all(r["disclosedDate"] != "2025-09-01" for r in qs))
+
+    def test_rows_without_valid_period_are_ignored(self):
+        noise = self.rows + [{
+            "DocType": "Other", "CurPerType": "", "CurFYSt": "2025-04-01",
+            "DiscDate": "2025-09-02", "Sales": 999,
+        }]
+        qs = quarterize(noise)
+        self.assertTrue(all(r["disclosedDate"] != "2025-09-02" for r in qs))
 
 
 class TestCreditMetrics(unittest.TestCase):
     def test_ratio(self):
         rows = [
-            {"Date": "2025-08-01", "LongMarginTradeVolume": 1000, "ShortMarginTradeVolume": 500},
-            {"Date": "2025-08-08", "LongMarginTradeVolume": 900, "ShortMarginTradeVolume": 600},
+            {"Date": "2025-08-01", "LongVol": 1000, "ShrtVol": 500},
+            {"Date": "2025-08-08", "LongVol": 900, "ShrtVol": 600},
         ]
         self.assertAlmostEqual(credit_metrics(rows)["creditRatio"], 1.5)
         self.assertAlmostEqual(credit_metrics(rows, as_of="2025-08-05")["creditRatio"], 2.0)
@@ -182,8 +200,7 @@ class TestCreditMetrics(unittest.TestCase):
     def test_absent_data_is_none_not_zero(self):
         self.assertIsNone(credit_metrics([])["creditRatio"])
         self.assertIsNone(
-            credit_metrics([{"Date": "2025-08-01", "LongMarginTradeVolume": 10,
-                             "ShortMarginTradeVolume": 0}])["creditRatio"]
+            credit_metrics([{"Date": "2025-08-01", "LongVol": 10, "ShrtVol": 0}])["creditRatio"]
         )
 
 
@@ -197,19 +214,16 @@ class TestDescribeSecret(unittest.TestCase):
         self.assertNotIn("SUPERSECRET", out)
         self.assertIn(str(len(secret)), out)
 
-    def test_flags_non_jwt(self):
+    def test_plain_api_key_is_accepted_without_warning(self):
         out = describe_secret("x" * 43)
-        self.assertIn("JWT の形式ではない", out)
-
-    def test_flags_suspiciously_short_jwt(self):
-        out = describe_secret("aaa.bbb.ccc")
-        self.assertIn("異常に短い", out)
-
-    def test_accepts_realistic_jwt_without_warning(self):
-        token = ".".join(["x" * 300] * 3)
-        out = describe_secret(token)
-        self.assertIn("JWT形式", out)
+        self.assertIn("JWTではない", out)
         self.assertNotIn("→", out)
+
+    def test_flags_leftover_v1_token(self):
+        """V1 のトークン (JWT) が残っていたら移行漏れとして警告する。"""
+        out = describe_secret(".".join(["x" * 300] * 3))
+        self.assertIn("V1 のリフレッシュトークン", out)
+        self.assertIn("APIキー", out)
 
 
 class TestMilestones(unittest.TestCase):
