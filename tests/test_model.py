@@ -22,6 +22,7 @@ import pandas as pd  # noqa: E402
 from train_model import clean_score, evaluate, paired_bootstrap  # noqa: E402
 from walkforward import REFERENCE, make_folds, run, sign_test, summarize  # noqa: E402
 from within_date_signal import conditional, marginal  # noqa: E402
+from validate_metrics import check_identities, describe  # noqa: E402
 
 
 def _synthetic(n=8000, rate=0.2, seed=0):
@@ -277,6 +278,64 @@ class TestWithinDateSignal(unittest.TestCase):
         res = {r["feature"]: r for r in marginal(df, ["useful", "useful_r"])}
         self.assertAlmostEqual(res["useful"]["mean_auc"],
                                res["useful_r"]["mean_auc"], places=10)
+
+
+class TestMetricValidation(unittest.TestCase):
+    """
+    PER/PBR/ROE/ROA は割り算で作るので分母が小さいと発散する。
+    「列はあるが値が壊れている」状態を検出できることを固定する。
+    """
+
+    def _clean(self, n=800, seed=0):
+        rng = np.random.default_rng(seed)
+        close = rng.uniform(100, 5000, n)
+        eps = rng.normal(50, 80, n)
+        bps = rng.uniform(50, 3000, n)
+        return pd.DataFrame({
+            "close": close, "eps_ttm": eps, "BPS": bps,
+            "earnings_yield": eps / close * 100,
+            "per": np.where(eps > 0, close / eps, np.nan),
+            "book_yield": bps / close,
+            "pbr": np.where(bps > 0, close / bps, np.nan),
+        })
+
+    def test_identities_hold_on_correct_data(self):
+        checks = {c["name"]: c for c in check_identities(self._clean())}
+        self.assertLess(checks["per × earnings_yield == 100"]["max_rel_err"], 1e-9)
+        self.assertLess(checks["pbr × book_yield == 1"]["max_rel_err"], 1e-9)
+
+    def test_detects_a_broken_ratio(self):
+        """片方の計算式がずれていれば恒等式で分かる。"""
+        df = self._clean()
+        df["per"] = df["close"] / (df["eps_ttm"] * 1.05)
+        c = check_identities(df)[0]
+        self.assertGreater(c["max_rel_err"], 1e-3)
+
+    def test_detects_sign_mismatch(self):
+        """株価は正なので per の符号は EPS の符号と一致するはず。"""
+        df = self._clean()
+        df["per"] = -df["per"]
+        c = [x for x in check_identities(df) if "sign(per)" in x["name"]][0]
+        self.assertGreater(c["mismatches"], 0)
+
+    def test_detects_infinities(self):
+        st = describe(pd.Series([1.0, np.inf, 2.0, -np.inf]), (0, 10))
+        self.assertEqual(st["n_inf"], 2)
+
+    def test_detects_an_all_zero_column(self):
+        st = describe(pd.Series([0.0] * 50), (0, 10))
+        self.assertEqual(st["zero_pct"], 100.0)
+
+    def test_detects_an_all_missing_column(self):
+        st = describe(pd.Series([np.nan] * 50), (0, 10))
+        self.assertEqual(st["present_pct"], 0.0)
+
+    def test_counts_values_outside_the_plausible_range(self):
+        """目安外は「異常」ではなく件数として出す。
+        ROE が100%を超えることは実在するので、切り捨ててはいけない。"""
+        st = describe(pd.Series([10.0, 50.0, 250.0, 900.0]), (-500.0, 500.0))
+        self.assertEqual(st["outside_plausible"], 1)   # 900 のみ
+        self.assertEqual(st["n_negative"], 0)
 
 
 if __name__ == "__main__":

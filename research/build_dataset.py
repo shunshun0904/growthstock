@@ -589,7 +589,14 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     missing = [c for c in feature_cols if c not in samples.columns]
     if missing:
         raise SystemExit(f"features.py が要求する列がありません: {missing}")
-    meta_cols = ["Code", "Date", "close", "high52w", "tv_ma20", "market_cap", "label"]
+    # 特徴量ではないが検証に要る列も残す。
+    # eps_ttm と BPS は per / pbr の分母なので、
+    # 「per × earnings_yield == 100」のような恒等式の検査に必要
+    # （research/validate_metrics.py）。
+    # *_basis は提供値と計算値のどちらを使ったかの記録。
+    meta_cols = ["Code", "Date", "close", "high52w", "tv_ma20", "market_cap", "label",
+                 "eps_ttm", "BPS", "roe_basis", "bps_basis"]
+    meta_cols = [c for c in meta_cols if c in samples.columns]
 
     out = samples[meta_cols + feature_cols].copy()
     out["label"] = out["label"].astype(int)
