@@ -332,6 +332,60 @@
         "endGain_median": -0.54,
         "endGain_positive_rate": 0.481
       }
+    },
+    {
+      "config": "52週 / 1〜3ヶ月 / 定着20日-8% +60日後0%",
+      "high_window": 245,
+      "horizon": [
+        20,
+        60
+      ],
+      "n": 146795,
+      "positive_rate": 0.0521,
+      "n_positive": 7652,
+      "n_stocks": 3905,
+      "date_from": "2017-09-29",
+      "date_to": "2026-02-27",
+      "funnel": {
+        "月末サンプル": 499092,
+        "ラベル確定": 435932,
+        "高値窓あり": 297654,
+        "高値圏を除外": 251799,
+        "流動性フィルタ": 146795
+      },
+      "positive": {
+        "n": 7652,
+        "maxGain_median": 27.92,
+        "maxGain_p25": 18.86,
+        "maxGain_p75": 43.7,
+        "endGain_median": 24.04,
+        "endGain_positive_rate": 0.998
+      },
+      "negative": {
+        "n": 139143,
+        "maxGain_median": 6.53,
+        "maxGain_p25": 0.02,
+        "maxGain_p75": 15.22,
+        "endGain_median": -1.16,
+        "endGain_positive_rate": 0.46
+      }
+    }
+  ],
+  "overlaps": [
+    {
+      "a": "52週 / 1〜6ヶ月 / 定着20日-8% +60日後0%",
+      "b": "52週 / 1〜3ヶ月 / 定着20日-8% +60日後0%",
+      "n": 142000,
+      "both": 7341,
+      "only_a": 8549,
+      "only_b": 0,
+      "neither": 126110,
+      "a_rate": 0.1119,
+      "b_rate": 0.0517,
+      "b_subset_of_a": true,
+      "a_subset_of_b": false,
+      "both_equals_b": 1.0,
+      "phi": 0.6578
     }
   ]
 }
