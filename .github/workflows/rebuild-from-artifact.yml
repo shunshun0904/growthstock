@@ -48,6 +48,8 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
       - run: ls -lh research/_data
 
+      - name: Compare label definitions
+        run: python3 research/compare_label_defs.py 2>&1 | tee compare.log
       - name: Build dataset
         run: python3 research/build_dataset.py 2>&1 | tee build.log
       - name: Export label samples
@@ -68,6 +70,8 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          mkdir -p research/samples
+          cp research/_data/label_comparison.json research/samples/label_comparison.json
           git add -A research/samples research/viewer
           # git diff は未追跡ファイルを見ないため、staged の差分で判定する
           if git diff --cached --quiet; then
@@ -86,4 +90,5 @@ jobs:
           path: |
             research/samples/label_samples.json
             research/viewer/label_review.html
+            research/_data/label_comparison.json
           retention-days: 30

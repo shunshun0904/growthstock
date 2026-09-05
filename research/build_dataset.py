@@ -18,6 +18,7 @@ import argparse
 import glob
 import os
 import sys
+from dataclasses import dataclass
 from typing import List
 
 import numpy as np
@@ -26,12 +27,41 @@ import pandas as pd
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_data")
 
 # --- ラベル定義のパラメータ (docs/MODEL_DESIGN.md §2.1) --- #
+# 既定値。LabelConfig で上書きできる（定義の比較検証のため）。
 HORIZON_START = 20      # 予測ホライズンの開始（営業日）= 約1ヶ月先
 HORIZON_END = 120       # 予測ホライズンの終了（営業日）= 約6ヶ月先
 HOLD_DAYS = 20          # ブレイク後の定着を見る日数
 HOLD_DRAWDOWN = 0.92    # ブレイク時終値の-8%を割らないこと
 VOL_MULTIPLE = 1.5      # ブレイク日の出来高が20日平均の何倍以上か
-HIGH_WINDOW = 245       # 52週 ≒ 245営業日
+HIGH_WINDOW = 245       # 52週 ≒ 245営業日 (78週なら 368)
+
+
+@dataclass(frozen=True)
+class LabelConfig:
+    """ラベル定義。定義を変えて比較できるようにパラメータ化してある。"""
+    high_window: int = HIGH_WINDOW
+    horizon_start: int = HORIZON_START
+    horizon_end: int = HORIZON_END
+    hold_days: int = HOLD_DAYS
+    hold_drawdown: float = HOLD_DRAWDOWN
+    vol_multiple: float = VOL_MULTIPLE
+    max_rhigh_at_t: float = 95.0
+    min_trading_value: float = 0.5
+
+    @property
+    def name(self) -> str:
+        weeks = round(self.high_window / 245 * 52)
+        m0 = round(self.horizon_start / 20)
+        m1 = round(self.horizon_end / 20)
+        return f"{weeks}週高値 / {m0}〜{m1}ヶ月"
+
+    @property
+    def forward_needed(self) -> int:
+        """ラベル確定に必要な将来営業日数。"""
+        return self.horizon_end + self.hold_days
+
+
+DEFAULT_LABEL = LabelConfig()
 
 # --- 除外条件 (docs/MODEL_DESIGN.md §2.2) --- #
 MAX_RHIGH_AT_T = 95.0   # 基準日ですでに高値圏の銘柄は対象外
@@ -55,7 +85,7 @@ def load_parts(prefix: str, data_dir: str) -> pd.DataFrame:
 # 株価系の特徴量とラベル（銘柄ごとに時系列で算出）
 # --------------------------------------------------------------------------- #
 
-def price_panel(bars: pd.DataFrame) -> pd.DataFrame:
+def price_panel(bars: pd.DataFrame, cfg: LabelConfig = DEFAULT_LABEL) -> pd.DataFrame:
     """
     銘柄ごとに時系列指標を算出する。
 
@@ -80,11 +110,12 @@ def price_panel(bars: pd.DataFrame) -> pd.DataFrame:
     # --- 52週高値（当日を含む / 含まない の2種類が要る） --- #
     # 含む  : 基準日時点の高値接近率 R_high の分母
     # 含まない: ブレイク判定（「それまでの高値」を上抜けたか）の基準
+    w = cfg.high_window
     df["high52w"] = g["high"].transform(
-        lambda s: s.rolling(HIGH_WINDOW, min_periods=HIGH_WINDOW).max()
+        lambda s: s.rolling(w, min_periods=w).max()
     )
     df["high52w_prior"] = g["high"].transform(
-        lambda s: s.rolling(HIGH_WINDOW, min_periods=HIGH_WINDOW).max().shift(1)
+        lambda s: s.rolling(w, min_periods=w).max().shift(1)
     )
     df["r_high"] = df["close"] / df["high52w"] * 100.0
 
@@ -106,7 +137,7 @@ def price_panel(bars: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def breakout_flags(df: pd.DataFrame) -> pd.DataFrame:
+def breakout_flags(df: pd.DataFrame, cfg: LabelConfig = DEFAULT_LABEL) -> pd.DataFrame:
     """
     各営業日が「ブレイクアウト日」かどうかを判定する。
 
@@ -118,15 +149,17 @@ def breakout_flags(df: pd.DataFrame) -> pd.DataFrame:
     g = df.groupby("Code", sort=False)
 
     cond_high = df["close"] > df["high52w_prior"]
-    cond_vol = df["vol"] >= df["vol_ma20"] * VOL_MULTIPLE
+    cond_vol = df["vol"] >= df["vol_ma20"] * cfg.vol_multiple
 
     # 3. 定着: 未来 HOLD_DAYS 日の終値の最小値。
     #    逆順 rolling で「t+1 〜 t+HOLD_DAYS」の最小値を得る。
+    hd = cfg.hold_days
+
     def future_min(s: pd.Series) -> pd.Series:
-        return s[::-1].rolling(HOLD_DAYS, min_periods=HOLD_DAYS).min()[::-1].shift(-1)
+        return s[::-1].rolling(hd, min_periods=hd).min()[::-1].shift(-1)
 
     df["future_min_close"] = g["close"].transform(future_min)
-    cond_hold = df["future_min_close"] >= df["close"] * HOLD_DRAWDOWN
+    cond_hold = df["future_min_close"] >= df["close"] * cfg.hold_drawdown
 
     is_bo = cond_high & cond_vol & cond_hold
     # 定着を評価できない（データ末尾）日は判定不能として NaN にする
@@ -136,7 +169,7 @@ def breakout_flags(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def attach_labels(df: pd.DataFrame) -> pd.DataFrame:
+def attach_labels(df: pd.DataFrame, cfg: LabelConfig = DEFAULT_LABEL) -> pd.DataFrame:
     """
     基準日 t のラベル = [t+HORIZON_START, t+HORIZON_END] にブレイク日が1つでもあるか。
 
@@ -144,12 +177,12 @@ def attach_labels(df: pd.DataFrame) -> pd.DataFrame:
     足りない場合は NaN のままにし、後段で確実に除外する。
     """
     g = df.groupby("Code", sort=False)
-    window = HORIZON_END - HORIZON_START + 1
-    need = HORIZON_END + HOLD_DAYS   # ラベル確定に必要な将来営業日数
+    window = cfg.horizon_end - cfg.horizon_start + 1
+    need = cfg.forward_needed   # ラベル確定に必要な将来営業日数
 
     def forward_any(s: pd.Series) -> pd.Series:
         # 逆順 rolling max で [t, t+window-1] の最大値 -> shift で [t+START, t+END] にずらす
-        return s[::-1].rolling(window, min_periods=1).max()[::-1].shift(-HORIZON_START)
+        return s[::-1].rolling(window, min_periods=1).max()[::-1].shift(-cfg.horizon_start)
 
     df["label"] = g["is_breakout"].transform(forward_any)
 
