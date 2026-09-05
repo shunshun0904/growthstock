@@ -40,8 +40,11 @@ from sklearn.metrics import average_precision_score
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# 探索結果はリポジトリに残す。
+# research/_data/ は .gitignore されているので、そこに置くと
+# ワークフローのコンテナが終わった時点で消え、毎回探索し直しになる。
 PARAMS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                           "_data", "lgbm_params.json")
+                           "lgbm_params.json")
 
 # 探索しないもの（固定）。再現性と、木の本数は early stopping で決めるため。
 FIXED = {

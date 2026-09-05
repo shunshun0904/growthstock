@@ -90,11 +90,23 @@ jobs:
         run: python3 research/validate_metrics.py 2>&1 | tee validate.log
       - name: Export label samples
         run: python3 research/export_label_samples.py 2>&1 | tee labels.log
-      # ハイパーパラメータ探索。
-      # 探索期間は最初のテスト窓より前に限る（research/run_tuning.py が
-      # フォールド定義から機械的に導く）。ここを間違えると以降の評価が全部無効になる。
-      - name: Tune LightGBM
-        run: python3 research/run_tuning.py --n-trials 30 2>&1 | tee tune.log
+      # ハイパーパラメータ探索は既定では行わない。
+      # 特徴量を試している段階では毎回6分かかるのが無駄で、
+      # 探索済みのパラメータ（research/lgbm_params.json）を使い回す。
+      # 運用開始前にあらためて探索する。
+      #
+      # 実行したいときは research/tune_request.txt の1行目を "yes" にする。
+      # 探索期間は最初のテスト窓より前に限る（run_tuning.py がフォールド定義から
+      # 機械的に導く）。ここを間違えると以降の評価が全部無効になる。
+      - name: Tune LightGBM (opt-in)
+        run: |
+          REQ=$(grep -v '^#' research/tune_request.txt 2>/dev/null | head -1 | tr -d '[:space:]')
+          if [ "$REQ" = "yes" ]; then
+            python3 research/run_tuning.py --n-trials 30 2>&1 | tee tune.log
+          else
+            echo "探索は行わない（research/lgbm_params.json を使用）" | tee tune.log
+            python3 -c "import json,os;p='research/lgbm_params.json';d=json.load(open(p)) if os.path.exists(p) else {};print(f'保存済み: {len(d)}プリセット')" | tee -a tune.log
+          fi
 
       - name: Train and evaluate
         run: |
@@ -133,7 +145,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           mkdir -p research/samples
           cp research/_data/label_comparison.json research/samples/label_comparison.json
-          git add -A research/samples research/viewer docs/MODEL_RESULTS.md docs/MODEL_WALKFORWARD.md docs/MODEL_WITHIN_DATE.md docs/MODEL_FUNDAMENTAL_COVERAGE.md docs/DATA_VALIDATION.md
+          git add -A research/samples research/viewer research/lgbm_params.json docs/MODEL_RESULTS.md docs/MODEL_WALKFORWARD.md docs/MODEL_WITHIN_DATE.md docs/MODEL_FUNDAMENTAL_COVERAGE.md docs/DATA_VALIDATION.md
           # git diff は未追跡ファイルを見ないため、staged の差分で判定する
           if git diff --cached --quiet; then
             echo "変更なし"; exit 0
@@ -157,7 +169,7 @@ jobs:
             research/_data/within_date.json
             research/_data/fundamental_coverage.json
             research/_data/validation.json
-            research/_data/lgbm_params.json
+            research/lgbm_params.json
             docs/MODEL_RESULTS.md
             docs/MODEL_WALKFORWARD.md
             docs/MODEL_WITHIN_DATE.md

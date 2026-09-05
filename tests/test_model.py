@@ -472,5 +472,31 @@ class TestTuning(unittest.TestCase):
         self.assertAlmostEqual(tuning.scale_pos_weight(y), 9.0)
 
 
+class TestTunedParamsArePersisted(unittest.TestCase):
+    """
+    探索結果は research/lgbm_params.json に残す。
+
+    最初これを research/_data/ に置いていたが、そこは .gitignore されており、
+    ワークフローのコンテナが終わると消えていた。
+    結果、毎回6分かけて探索し直していたのに、値はどこにも残っていなかった。
+    """
+
+    def test_params_path_is_not_in_the_ignored_data_dir(self):
+        import tuning
+        self.assertNotIn(f"_data{os.sep}", tuning.PARAMS_PATH)
+        self.assertTrue(tuning.PARAMS_PATH.endswith("lgbm_params.json"))
+
+    def test_data_dir_is_gitignored(self):
+        """前提の確認。ここが変わったら PARAMS_PATH の判断も変わる。"""
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        ignore = open(os.path.join(root, ".gitignore"), encoding="utf-8").read()
+        self.assertIn("research/_data/", ignore)
+
+    def test_falls_back_to_defaults_when_file_is_absent(self):
+        import tuning
+        p = tuning.params_for("anything", {})
+        self.assertEqual(p["num_leaves"], tuning.DEFAULT_PARAMS["num_leaves"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
