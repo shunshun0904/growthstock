@@ -378,19 +378,35 @@ class TestFeaturePresets(unittest.TestCase):
 
 class TestDefaultLabelIsE(unittest.TestCase):
     """
-    既定のラベル定義が、10定義の比較で採用した E であることを固定する。
-    ここが黙って変わると、過去の結果と比較できなくなる。
+    既定のラベル定義を固定する。ここが黙って変わると過去の結果と比較できなくなる。
+
+    ベースは10定義の比較で採用した E。
+    高値の窓だけ 52週(245) -> 78週(368) に変更した
+    （対象を小型株に絞ったことに伴う再設定）。
     """
 
     def test_default_matches_definition_e(self):
         from build_dataset import DEFAULT_LABEL as L
-        self.assertEqual(L.high_window, 245)         # 52週
+        self.assertEqual(L.high_window, 368)         # 78週
         self.assertEqual(L.horizon_start, 20)        # 1ヶ月先から
         self.assertEqual(L.horizon_end, 120)         # 6ヶ月先まで
         self.assertEqual(L.hold_days, 20)
         self.assertAlmostEqual(L.hold_drawdown, 0.92)
         self.assertEqual(L.sustain_days, 60)         # 60営業日後も
         self.assertAlmostEqual(L.sustain_ratio, 1.0) # 水準維持
+
+    def test_market_cap_band(self):
+        """基準日時点で時価総額50〜300億円に絞る。
+        帯を変えると母集団が変わり、過去の結果と比較できなくなる。"""
+        import build_dataset as B
+        self.assertEqual((B.MIN_MARKET_CAP, B.MAX_MARKET_CAP), (50.0, 300.0))
+
+    def test_high_window_is_78_weeks(self):
+        """368営業日が78週であることを確認する。
+        245(52週) から比率で換算した値。"""
+        from build_dataset import DEFAULT_LABEL as L
+        self.assertEqual(round(L.high_window / 245 * 52), 78)
+        self.assertIn("78週", L.name)
 
     def test_forward_needed_is_180(self):
         """

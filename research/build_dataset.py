@@ -32,16 +32,20 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_data")
 
 # --- ラベル定義のパラメータ (docs/MODEL_DESIGN.md §2.1) --- #
 # 既定値。LabelConfig で上書きできる（定義の比較検証のため）。
-# 10定義を実測比較したうえで採用した定義 E（docs/MODEL_RESULTS 参照）:
-#   52週高値 / ホライズン 1〜6ヶ月 / 定着20日-8% / ブレイク60営業日後も水準維持
+# ベースは定義 E（docs/MODEL_RESULTS 参照）:
+#   ホライズン 1〜6ヶ月 / 定着20日-8% / ブレイク60営業日後も水準維持
 # 「+60日後維持」が分離度に最も効いた（+2.2pt -> +3.8pt、全10定義中で最高）。
-# 定着日数の延長(40日)は分離度がむしろ悪化し、78週高値も効果が薄かった。
+#
+# 高値の窓は 52週 -> 78週 に変更した。
+# 注意: 全銘柄を対象にした最初の10定義比較では 78週高値の効果は薄かった。
+# 今回あらためて採用したのは、対象を小型株（時価総額50〜300億円）に
+# 絞ったためで、母集団が変わっている。効果は再測定して確かめる必要がある。
 HORIZON_START = 20      # 予測ホライズンの開始（営業日）= 約1ヶ月先
 HORIZON_END = 120       # 予測ホライズンの終了（営業日）= 約6ヶ月先
 HOLD_DAYS = 20          # ブレイク後の定着を見る日数
 HOLD_DRAWDOWN = 0.92    # ブレイク時終値の-8%を割らないこと
 VOL_MULTIPLE = 1.5      # ブレイク日の出来高が20日平均の何倍以上か
-HIGH_WINDOW = 245       # 52週 ≒ 245営業日 (78週なら 368)
+HIGH_WINDOW = 368       # 78週 ≒ 368営業日 (52週なら 245)
 SUSTAIN_DAYS = 60       # ブレイク60営業日後の水準を見る
 SUSTAIN_RATIO = 1.0     # ブレイク時終値を下回らないこと
 
@@ -89,6 +93,11 @@ DEFAULT_LABEL = LabelConfig()
 # --- 除外条件 (docs/MODEL_DESIGN.md §2.2) --- #
 MAX_RHIGH_AT_T = 95.0   # 基準日ですでに高値圏の銘柄は対象外
 MIN_TRADING_VALUE = 0.5 # 20日平均売買代金の下限（億円）
+# 時価総額の帯（億円）。基準日時点で判定する。
+# 大型株は決算が織り込まれるのが早く、ブレイクも起きにくい。
+# 小型に絞ることで決算の効きを見やすくする狙い。
+MIN_MARKET_CAP = 50.0
+MAX_MARKET_CAP = 300.0
 
 
 # --------------------------------------------------------------------------- #
@@ -400,6 +409,14 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
 
     # --- 時価総額 --- #
     samples["market_cap"] = samples["close"] * samples["shares_out"] / 1e8
+
+    # --- 時価総額の帯で絞る --- #
+    # 基準日時点で判定する。将来の時価総額は使わない。
+    # 時価総額が出せない（株数が取れない）銘柄もここで落ちる。
+    before = len(samples)
+    samples = samples[samples["market_cap"].between(MIN_MARKET_CAP, MAX_MARKET_CAP)]
+    print(f"[filter] 時価総額 {MIN_MARKET_CAP:.0f}〜{MAX_MARKET_CAP:.0f}億円の外を除外: "
+          f"{before:,} -> {len(samples):,}")
 
     # --- 信用倍率 --- #
     if len(margin):

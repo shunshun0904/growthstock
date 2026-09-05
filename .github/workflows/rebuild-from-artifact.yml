@@ -70,6 +70,11 @@ jobs:
         run: python3 research/compare_label_defs.py 2>&1 | tee compare.log
       - name: Build dataset
         run: python3 research/build_dataset.py 2>&1 | tee build.log
+
+      # 決算特徴量が0勝9敗だったが、ROE_chg は94.4%が欠測だった。
+      # 「予測力が無い」のか「値が入っていない」のかを切り分ける。
+      - name: Fundamental coverage
+        run: python3 research/fundamental_coverage.py 2>&1 | tee coverage.log
       - name: Export label samples
         run: python3 research/export_label_samples.py 2>&1 | tee labels.log
       - name: Train and evaluate
@@ -98,6 +103,7 @@ jobs:
             echo "## ラベル検証データ"; echo '```'; cat labels.log; echo '```'
             echo "## ウォークフォワード"; echo '```'; tail -40 walkforward.log; echo '```'
             echo "## 日付内の分離力"; echo '```'; tail -30 within.log; echo '```'
+            echo "## 決算カバレッジ"; echo '```'; cat coverage.log; echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Commit outputs
@@ -106,7 +112,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           mkdir -p research/samples
           cp research/_data/label_comparison.json research/samples/label_comparison.json
-          git add -A research/samples research/viewer docs/MODEL_RESULTS.md docs/MODEL_WALKFORWARD.md docs/MODEL_WITHIN_DATE.md
+          git add -A research/samples research/viewer docs/MODEL_RESULTS.md docs/MODEL_WALKFORWARD.md docs/MODEL_WITHIN_DATE.md docs/MODEL_FUNDAMENTAL_COVERAGE.md
           # git diff は未追跡ファイルを見ないため、staged の差分で判定する
           if git diff --cached --quiet; then
             echo "変更なし"; exit 0
@@ -128,7 +134,9 @@ jobs:
             research/_data/results.json
             research/_data/walkforward.json
             research/_data/within_date.json
+            research/_data/fundamental_coverage.json
             docs/MODEL_RESULTS.md
             docs/MODEL_WALKFORWARD.md
             docs/MODEL_WITHIN_DATE.md
+            docs/MODEL_FUNDAMENTAL_COVERAGE.md
           retention-days: 30
