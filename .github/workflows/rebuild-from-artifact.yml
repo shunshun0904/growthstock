@@ -72,6 +72,10 @@ jobs:
         run: python3 research/build_dataset.py 2>&1 | tee build.log
       - name: Export label samples
         run: python3 research/export_label_samples.py 2>&1 | tee labels.log
+      - name: Train and evaluate
+        run: |
+          python3 research/train_model.py             --val-start 2023-01-01 --test-start 2024-10-01 2>&1 | tee train.log
+
       - name: Build viewer
         run: |
           mkdir -p research/samples
@@ -90,7 +94,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           mkdir -p research/samples
           cp research/_data/label_comparison.json research/samples/label_comparison.json
-          git add -A research/samples research/viewer
+          git add -A research/samples research/viewer docs/MODEL_RESULTS.md
           # git diff は未追跡ファイルを見ないため、staged の差分で判定する
           if git diff --cached --quiet; then
             echo "変更なし"; exit 0
@@ -109,4 +113,6 @@ jobs:
             research/samples/label_samples.json
             research/viewer/label_review.html
             research/_data/label_comparison.json
+            research/_data/results.json
+            docs/MODEL_RESULTS.md
           retention-days: 30

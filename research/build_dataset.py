@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import glob
+import json
 import os
 import sys
 from dataclasses import dataclass
@@ -24,16 +25,25 @@ from typing import List
 import numpy as np
 import pandas as pd
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import features  # noqa: E402
+
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_data")
 
 # --- ラベル定義のパラメータ (docs/MODEL_DESIGN.md §2.1) --- #
 # 既定値。LabelConfig で上書きできる（定義の比較検証のため）。
+# 10定義を実測比較したうえで採用した定義 E（docs/MODEL_RESULTS 参照）:
+#   52週高値 / ホライズン 1〜6ヶ月 / 定着20日-8% / ブレイク60営業日後も水準維持
+# 「+60日後維持」が分離度に最も効いた（+2.2pt -> +3.8pt、全10定義中で最高）。
+# 定着日数の延長(40日)は分離度がむしろ悪化し、78週高値も効果が薄かった。
 HORIZON_START = 20      # 予測ホライズンの開始（営業日）= 約1ヶ月先
 HORIZON_END = 120       # 予測ホライズンの終了（営業日）= 約6ヶ月先
 HOLD_DAYS = 20          # ブレイク後の定着を見る日数
 HOLD_DRAWDOWN = 0.92    # ブレイク時終値の-8%を割らないこと
 VOL_MULTIPLE = 1.5      # ブレイク日の出来高が20日平均の何倍以上か
 HIGH_WINDOW = 245       # 52週 ≒ 245営業日 (78週なら 368)
+SUSTAIN_DAYS = 60       # ブレイク60営業日後の水準を見る
+SUSTAIN_RATIO = 1.0     # ブレイク時終値を下回らないこと
 
 
 @dataclass(frozen=True)
@@ -52,8 +62,8 @@ class LabelConfig:
     # ブレイク時終値の sustain_ratio 倍以上であることを要求する。
     # hold（期間中の最安値が -x% を割らない）が「急落しないこと」を見るのに対し、
     # sustain は「一定期間後も水準を保っていること」を見る。失速を除外できる。
-    sustain_days: int = 0        # 0 なら条件なし
-    sustain_ratio: float = 1.0
+    sustain_days: int = SUSTAIN_DAYS   # 0 なら条件なし
+    sustain_ratio: float = SUSTAIN_RATIO
 
     @property
     def name(self) -> str:
@@ -394,13 +404,12 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     samples["log_trading_value"] = np.log1p(samples["tv_ma20"])
     samples["log_market_cap"] = np.log1p(samples["market_cap"])
 
-    feature_cols = (
-        [f"{a}_{s}" for a in ["eps_growth", "sales_growth", "ROE", "op_margin"]
-         for s in ["q0", "q1", "q2", "chg", "chg1", "slope"]]
-        + ["r_high", "r_high_3m", "r_high_6m", "volume_trend",
-           "log_trading_value", "log_market_cap", "credit_ratio", "progress_vs_base",
-           "topix_ret_20", "topix_ret_120"]
-    )
+    # 特徴量の一覧は features.py が持つ。データセットには全部作っておき、
+    # どれを使うかは学習時にプリセットで選ぶ（特徴量の実験を回しやすくするため）。
+    feature_cols = features.all_columns()
+    missing = [c for c in feature_cols if c not in samples.columns]
+    if missing:
+        raise SystemExit(f"features.py が要求する列がありません: {missing}")
     meta_cols = ["Code", "Date", "close", "high52w", "tv_ma20", "market_cap", "label"]
 
     out = samples[meta_cols + feature_cols].copy()
@@ -415,6 +424,29 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     print("\n[欠測率の高い特徴量]")
     for name, rate in miss.head(8).items():
         print(f"  {name:<24} {rate*100:5.1f}%")
+
+    # どの定義で作ったデータセットかを残す。あとから追跡できないと混乱するため。
+    meta = {
+        "labelConfig": {
+            "high_window": DEFAULT_LABEL.high_window,
+            "horizon": [DEFAULT_LABEL.horizon_start, DEFAULT_LABEL.horizon_end],
+            "hold_days": DEFAULT_LABEL.hold_days,
+            "hold_drawdown": DEFAULT_LABEL.hold_drawdown,
+            "vol_multiple": DEFAULT_LABEL.vol_multiple,
+            "sustain_days": DEFAULT_LABEL.sustain_days,
+            "sustain_ratio": DEFAULT_LABEL.sustain_ratio,
+            "name": DEFAULT_LABEL.name,
+            "forward_needed": DEFAULT_LABEL.forward_needed,
+        },
+        "n": int(len(out)), "positiveRate": round(float(out["label"].mean()), 4),
+        "features": feature_cols,
+        "from": str(out["Date"].min().date()), "to": str(out["Date"].max().date()),
+    }
+    with open(os.path.join(os.path.dirname(out_path), "dataset_meta.json"),
+              "w", encoding="utf-8") as fh:
+        json.dump(meta, fh, ensure_ascii=False, indent=2)
+    print(f"[label] 定義: {DEFAULT_LABEL.name} "
+          f"(ラベル確定に将来 {DEFAULT_LABEL.forward_needed} 営業日)")
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     out.to_parquet(out_path, index=False, compression="zstd")

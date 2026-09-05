@@ -44,10 +44,16 @@ def flat_then(base_len, base_price, tail_closes, tail_vols=None, base_vol=100000
     return closes, vols
 
 
+#: 基本挙動を確認するための「定着条件なし」設定。
+#: 既定 (DEFAULT_LABEL) は採用定義 E で sustain_days=60 が入っているため、
+#: 高値更新・出来高・hold だけを検証したいテストではこちらを使う。
+BASE = LabelConfig(sustain_days=0)
+
+
 class TestBreakoutDetection(unittest.TestCase):
     def _flags(self, closes, vols):
-        df = price_panel(make_bars(closes, vols))
-        return breakout_flags(df)
+        df = price_panel(make_bars(closes, vols), BASE)
+        return breakout_flags(df, BASE)
 
 
     def test_detects_valid_breakout(self):
@@ -130,7 +136,7 @@ class TestSustainCondition(unittest.TestCase):
         tail = [1200] + [1190] * 30 + [1120] * 40
         tvol = [300000] + [100000] * 70
         closes, vols = flat_then(n, 1000, tail, tvol)
-        base = self._flags(closes, vols, LabelConfig())
+        base = self._flags(closes, vols, LabelConfig(sustain_days=0))
         strict = self._flags(closes, vols, LabelConfig(sustain_days=60, sustain_ratio=1.0))
         self.assertLessEqual(int((strict["is_breakout"] == True).sum()),  # noqa: E712
                              int((base["is_breakout"] == True).sum()))
@@ -144,7 +150,8 @@ class TestSustainCondition(unittest.TestCase):
         self.assertTrue(pd.isna(df.iloc[-1]["is_breakout"]))
 
     def test_forward_needed_accounts_for_sustain(self):
-        self.assertEqual(LabelConfig(horizon_end=60, hold_days=20).forward_needed, 80)
+        self.assertEqual(
+            LabelConfig(horizon_end=60, hold_days=20, sustain_days=0).forward_needed, 80)
         self.assertEqual(
             LabelConfig(horizon_end=60, hold_days=20, sustain_days=60).forward_needed, 120)
 
@@ -152,7 +159,7 @@ class TestSustainCondition(unittest.TestCase):
 class TestHighWindowParameter(unittest.TestCase):
     def test_78week_window_needs_longer_history(self):
         """78週(368日)窓では、368営業日そろうまで高値が未定義になる。"""
-        cfg = LabelConfig(high_window=368)
+        cfg = LabelConfig(high_window=368, sustain_days=0)
         n = 400
         df = price_panel(make_bars(list(range(1000, 1000 + n)), [100000] * n), cfg)
         self.assertTrue(df["high52w"].iloc[:367].isna().all())
@@ -174,7 +181,7 @@ class TestLabelWindow(unittest.TestCase):
         """基準日から breakout_offset 営業日後にブレイクを置き、基準日のラベルを返す。"""
         base = HIGH_WINDOW + 10           # 基準日の位置
         # ラベル確定には基準日から HORIZON_END + HOLD_DAYS 営業日ぶん必要
-        n_tail = max(breakout_offset, HORIZON_END) + HOLD_DAYS + 30
+        n_tail = max(breakout_offset, HORIZON_END) + BASE.forward_needed + 30
         closes = [1000] * base
         vols = [100000] * base
         for i in range(n_tail):
@@ -184,9 +191,9 @@ class TestLabelWindow(unittest.TestCase):
                 closes.append(1200); vols.append(100000)
             else:
                 closes.append(1000); vols.append(100000)
-        df = price_panel(make_bars(closes, vols))
-        df = breakout_flags(df)
-        df = attach_labels(df)
+        df = price_panel(make_bars(closes, vols), BASE)
+        df = breakout_flags(df, BASE)
+        df = attach_labels(df, BASE)
         return df.iloc[base - 1]["label"]
 
     def test_breakout_inside_horizon_is_positive(self):
@@ -211,11 +218,11 @@ class TestLabelWindow(unittest.TestCase):
         「未確定」として NaN。0（起きなかった）に丸めてはいけない。
         """
         n = HIGH_WINDOW + 60
-        df = price_panel(make_bars([1000] * n, [100000] * n))
-        df = attach_labels(breakout_flags(df))
-        need = HORIZON_END + HOLD_DAYS
+        df = price_panel(make_bars([1000] * n, [100000] * n), BASE)
+        df = attach_labels(breakout_flags(df, BASE), BASE)
+        need = BASE.forward_needed
         self.assertTrue(df["label"].iloc[-need:].isna().all(),
-                        "末尾 140営業日はラベル未確定であるべき")
+                        f"末尾 {need}営業日はラベル未確定であるべき")
         self.assertTrue(df["label"].iloc[:-need].notna().all(),
                         "それ以前はラベルが確定しているべき")
 
@@ -252,6 +259,31 @@ class TestNoLookahead(unittest.TestCase):
         last = df.iloc[-1]
         self.assertEqual(last["high52w"], 1500, "当日込みの高値は当日値を含む")
         self.assertEqual(last["high52w_prior"], 1000, "当日を除いた高値は前日までの最大")
+
+
+class TestDefaultLabelIsE(unittest.TestCase):
+    """
+    既定のラベル定義が、10定義の比較で採用した E であることを固定する。
+    ここが黙って変わると、過去の結果と比較できなくなる。
+    """
+
+    def test_default_matches_definition_e(self):
+        from build_dataset import DEFAULT_LABEL as L
+        self.assertEqual(L.high_window, 245)         # 52週
+        self.assertEqual(L.horizon_start, 20)        # 1ヶ月先から
+        self.assertEqual(L.horizon_end, 120)         # 6ヶ月先まで
+        self.assertEqual(L.hold_days, 20)
+        self.assertAlmostEqual(L.hold_drawdown, 0.92)
+        self.assertEqual(L.sustain_days, 60)         # 60営業日後も
+        self.assertAlmostEqual(L.sustain_ratio, 1.0) # 水準維持
+
+    def test_forward_needed_is_180(self):
+        """
+        E はラベル確定に180営業日を要する。
+        エンバーゴをこれより短くするとリークする。
+        """
+        from build_dataset import DEFAULT_LABEL as L
+        self.assertEqual(L.forward_needed, 180)
 
 
 class TestQuarterizePanel(unittest.TestCase):

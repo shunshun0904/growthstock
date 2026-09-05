@@ -8,8 +8,8 @@
   "from": "2016-10-01",
   "to": "2026-09-04",
   "shard_by_year": true,
-  "val_start": "2024-03-01",
-  "test_start": "2024-05-01",
-  "note": "全期間(約10年)の取得。ラベル定義の比較検証のため。学習は実行しない。",
-  "run_train": false
+  "val_start": "2023-01-01",
+  "test_start": "2024-10-01",
+  "note": "採用定義 E で学習。特徴量セット6種を比較。データは Release から読むので取得は発生しない。",
+  "run_train": true
 }
