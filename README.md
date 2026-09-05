@@ -5,6 +5,12 @@
 
 データは [J-Quants API **V2**](https://jpx-jquants.com/)（日本取引所グループ公式）から取得します。
 
+## 🔗 公開ダッシュボード
+
+### **https://shunshun0904.github.io/growthstock/**
+
+GitHub Pages で公開しています。平日 21:00 JST のデータ更新後に自動で再デプロイされます。
+
 ![8軸オクタゴン比較](docs/screenshot-compare.png)
 
 > スクリーンショットは J-Quants API V2 から取得した実データで撮影したものです（2026-09-04 時点）。
@@ -75,6 +81,23 @@ GitHub の `Settings > Secrets and variables > Actions` に登録します。
 ### 2.2 GitHub Pages の有効化
 
 `Settings > Pages > Source` を **GitHub Actions** に設定します。
+
+公開URLは以下で確認できます。
+
+| 場所 | 内容 |
+| --- | --- |
+| `Settings > Pages` | 上部に「Your site is live at ...」として表示 |
+| リポジトリ右サイドバーの **Environments > github-pages** | 最新デプロイと URL |
+| `Deploy to GitHub Pages` ワークフローの実行結果 | `deploy` ジョブに URL が表示される |
+
+> **`deploy` ジョブがログも出さず即座に失敗する場合**
+>
+> `build` は成功しているのに `deploy` だけが1秒ほどで失敗し、ログが取得できない
+> （ランナーが割り当てられていない）ときは、Pages のリソース自体が
+> 未初期化である可能性があります。
+>
+> `Settings > Pages > Source` を一度 **Deploy from a branch** に切り替えて保存し、
+> そのうえで **GitHub Actions** に戻すと初期化され、デプロイが通るようになります。
 
 ### 2.3 初回データ取得
 
