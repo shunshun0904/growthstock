@@ -76,6 +76,11 @@ jobs:
         run: |
           python3 research/train_model.py             --val-start 2023-01-01 --test-start 2024-10-01 2>&1 | tee train.log
 
+      # 単一分割はテスト期間が1つしかなく、局面差と実力差を分離できない。
+      # 訓練窓を伸ばしながらテスト窓を進め、複数局面で同じ比較を繰り返す。
+      - name: Walk-forward evaluation
+        run: python3 research/walkforward.py 2>&1 | tee walkforward.log
+
       - name: Build viewer
         run: |
           mkdir -p research/samples
@@ -86,6 +91,7 @@ jobs:
           {
             echo "## データセット構築"; echo '```'; cat build.log; echo '```'
             echo "## ラベル検証データ"; echo '```'; cat labels.log; echo '```'
+            echo "## ウォークフォワード"; echo '```'; tail -40 walkforward.log; echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Commit outputs
@@ -94,7 +100,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           mkdir -p research/samples
           cp research/_data/label_comparison.json research/samples/label_comparison.json
-          git add -A research/samples research/viewer docs/MODEL_RESULTS.md
+          git add -A research/samples research/viewer docs/MODEL_RESULTS.md docs/MODEL_WALKFORWARD.md
           # git diff は未追跡ファイルを見ないため、staged の差分で判定する
           if git diff --cached --quiet; then
             echo "変更なし"; exit 0
@@ -114,5 +120,7 @@ jobs:
             research/viewer/label_review.html
             research/_data/label_comparison.json
             research/_data/results.json
+            research/_data/walkforward.json
             docs/MODEL_RESULTS.md
+            docs/MODEL_WALKFORWARD.md
           retention-days: 30

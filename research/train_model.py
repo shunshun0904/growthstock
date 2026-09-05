@@ -195,22 +195,33 @@ def baseline_scores(df: pd.DataFrame) -> Dict[str, np.ndarray]:
 # 学習
 # --------------------------------------------------------------------------- #
 
-def fit_models(train: pd.DataFrame, features: List[str]) -> Dict:
+def fit_models(train: pd.DataFrame, features: List[str],
+               verbose: bool = True) -> Dict:
     Xtr = train[features].to_numpy(dtype=float)
     ytr = train["label"].to_numpy(dtype=int)
     # 不均衡対策: 正例に負例/正例 の重みを与える
     pos = max(1, int(ytr.sum()))
     w = np.where(ytr == 1, (len(ytr) - pos) / pos, 1.0)
 
-    print("\n[fit] HistGradientBoosting")
+    if verbose:
+        print("\n[fit] HistGradientBoosting")
+    # early_stopping は使わない。
+    # sklearn の early_stopping=True は訓練データから *ランダムに*
+    # validation_fraction を取る。時系列パネルでは同一銘柄の隣接月が強く相関するため、
+    # そのホールドアウトは訓練行と時間的に混ざった「簡単すぎる」集合になり、
+    # 停止が遅れて過学習する。テストへのリークではないが、
+    # 勾配ブースティングが一貫してロジスティック回帰に負けていた一因と考えられる。
+    # 代わりに正則化を効かせた固定 max_iter にする。
+    # 全プリセット・全フォールドで同じ条件なので比較の公平性は保たれる。
     hgb = HistGradientBoostingClassifier(
-        max_iter=400, learning_rate=0.05, max_leaf_nodes=31,
+        max_iter=200, learning_rate=0.05, max_leaf_nodes=31,
         min_samples_leaf=50, l2_regularization=1.0,
-        early_stopping=True, validation_fraction=0.1, random_state=0,
+        early_stopping=False, random_state=0,
     )
     hgb.fit(Xtr, ytr, sample_weight=w)
 
-    print("[fit] ロジスティック回帰（解釈用）")
+    if verbose:
+        print("[fit] ロジスティック回帰（解釈用）")
     lr = make_pipeline(
         SimpleImputer(strategy="median"),
         StandardScaler(),

@@ -17,7 +17,10 @@ import numpy as np
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "research"))
 
+import pandas as pd  # noqa: E402
+
 from train_model import clean_score, evaluate, paired_bootstrap  # noqa: E402
+from walkforward import REFERENCE, make_folds, run, sign_test, summarize  # noqa: E402
 
 
 def _synthetic(n=8000, rate=0.2, seed=0):
@@ -98,6 +101,132 @@ class TestPairedBootstrap(unittest.TestCase):
                                reference="ref", n_boot=50, seed=5)
         for key in ("diff", "ci_low", "ci_high", "p_better"):
             self.assertFalse(np.isnan(out[0][key]), key)
+
+
+class TestSignTest(unittest.TestCase):
+    """符号検定。フォールド数が少ないので、何勝すれば有意かを把握しておく。"""
+
+    def test_unanimous_is_significant(self):
+        self.assertAlmostEqual(sign_test(8, 0), 2 / 256)
+        self.assertLess(sign_test(9, 0), 0.05)
+
+    def test_even_split_is_not_significant(self):
+        self.assertEqual(sign_test(4, 4), 1.0)
+
+    def test_symmetric(self):
+        self.assertEqual(sign_test(7, 2), sign_test(2, 7))
+
+    def test_nine_folds_needs_eight_wins(self):
+        """9フォールドでは 8勝1敗 でようやく有意。7勝2敗では足りない。
+        レポートの判定を読むときにこの厳しさを踏まえる必要がある。"""
+        self.assertLess(sign_test(8, 1), 0.05)
+        self.assertGreater(sign_test(7, 2), 0.05)
+
+    def test_no_folds_is_nan(self):
+        self.assertTrue(np.isnan(sign_test(0, 0)))
+
+
+class TestMakeFolds(unittest.TestCase):
+    def _folds(self, first="2017-09-29", last="2025-11-28", **kw):
+        kw.setdefault("min_train_months", 36)
+        kw.setdefault("test_months", 6)
+        kw.setdefault("step_months", 6)
+        kw.setdefault("embargo_days", 180)
+        return make_folds(pd.Series(pd.to_datetime([first, last])), **kw)
+
+    def test_test_windows_never_overlap(self):
+        """重なると同じサンプルが2フォールドに入り、独立でなくなる。"""
+        folds = self._folds()
+        self.assertGreater(len(folds), 1)
+        for a, b in zip(folds, folds[1:]):
+            self.assertLess(a.test_end, b.test_start)
+
+    def test_embargo_is_respected(self):
+        """訓練最終日のラベルがテスト期間に食い込まないこと。"""
+        for f in self._folds():
+            gap = (pd.Timestamp(f.test_start) - pd.Timestamp(f.train_end)).days
+            self.assertGreaterEqual(gap, int(180 * 1.45) - 1)
+
+    def test_training_window_expands(self):
+        folds = self._folds()
+        ends = [pd.Timestamp(f.train_end) for f in folds]
+        self.assertEqual(ends, sorted(ends))
+        self.assertEqual(len({f.train_start for f in folds}), 1)
+
+    def test_never_runs_past_the_data(self):
+        for f in self._folds():
+            self.assertLessEqual(pd.Timestamp(f.test_end), pd.Timestamp("2025-11-28"))
+
+    def test_too_short_a_period_yields_no_folds(self):
+        self.assertEqual(self._folds(last="2019-01-01"), [])
+
+
+class TestWalkForwardEndToEnd(unittest.TestCase):
+    """合成データで最後まで通ること。列名や集計の取り違えを検出する。"""
+
+    def _dataset(self, n_dates=60, n_codes=120, seed=0):
+        rng = np.random.default_rng(seed)
+        dates = pd.date_range("2017-09-29", periods=n_dates, freq="ME")
+        rows = []
+        for d in dates:
+            r_high = rng.uniform(0, 95, n_codes)
+            # r_high が高いほど正例になりやすい合成ラベル
+            p = 1 / (1 + np.exp(-(r_high - 70) / 10))
+            frame = {
+                "Date": d,
+                "Code": [f"{i:04d}" for i in range(n_codes)],
+                "r_high": r_high,
+                "r_high_r": rng.uniform(0, 1, n_codes),
+                "volume_trend": rng.normal(0, 1, n_codes),
+                "label": (rng.random(n_codes) < p).astype(int),
+            }
+            # ベースラインの8軸スコアが必要とする列
+            for c in ("ROE_q0", "credit_ratio", "eps_growth_q0", "market_cap",
+                      "op_margin_q0", "progress_vs_base", "sales_growth_q0",
+                      "tv_ma20"):
+                frame[c] = rng.normal(0, 1, n_codes)
+            rows.append(pd.DataFrame(frame))
+        return pd.concat(rows, ignore_index=True)
+
+    def test_runs_and_summarises(self):
+        df = self._dataset()
+        folds = make_folds(pd.to_datetime(df["Date"]), min_train_months=24,
+                           test_months=6, step_months=6, embargo_days=20)
+        self.assertGreaterEqual(len(folds), 2)
+
+        # 実在する列だけを使う最小プリセットを注入する
+        import features as Fx
+        Fx.GROUPS["_t"] = ["r_high", "volume_trend"]
+        Fx.PRESETS["_t"] = ["_t"]
+        try:
+            res = run(df, ["_t"], folds)
+        finally:
+            del Fx.GROUPS["_t"], Fx.PRESETS["_t"]
+
+        self.assertTrue(res["folds"])
+        self.assertTrue(res["summary"])
+        for s in res["summary"]:
+            self.assertEqual(s["wins"] + s["losses"] <= s["n_folds"], True)
+            self.assertGreaterEqual(s["best_diff"], s["worst_diff"])
+        # 基準そのものは要約に出さない（自分との差は常に0で無意味）
+        self.assertNotIn(REFERENCE, [s["name"] for s in res["summary"]])
+
+    def test_summarise_counts_wins_correctly(self):
+        per_fold = [
+            {"results": [{"name": REFERENCE, "pr_auc": 0.3, "diff_vs_ref": 0.0,
+                          "lift@5%": 1.0},
+                         {"name": "m", "pr_auc": 0.4, "diff_vs_ref": +0.1,
+                          "lift@5%": 1.2}]},
+            {"results": [{"name": REFERENCE, "pr_auc": 0.3, "diff_vs_ref": 0.0,
+                          "lift@5%": 1.0},
+                         {"name": "m", "pr_auc": 0.2, "diff_vs_ref": -0.1,
+                          "lift@5%": 0.8}]},
+        ]
+        s = summarize(per_fold)[0]
+        self.assertEqual((s["wins"], s["losses"], s["n_folds"]), (1, 1, 2))
+        self.assertAlmostEqual(s["mean_diff"], 0.0)
+        self.assertAlmostEqual(s["worst_diff"], -0.1)
+        self.assertAlmostEqual(s["best_diff"], +0.1)
 
 
 if __name__ == "__main__":
