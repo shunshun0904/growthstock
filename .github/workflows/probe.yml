@@ -1,0 +1,27 @@
+name: Probe Data Availability
+
+# モデル構築の前提となるデータ量 (銘柄数・遡及範囲・一括取得の可否) を実測する。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Probe
+        env:
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+        run: python3 research/probe_universe.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: probe-result
+          path: research/probe_result.json
+          if-no-files-found: warn
