@@ -3,6 +3,11 @@ name: Probe Data Availability
 # モデル構築の前提となるデータ量 (銘柄数・遡及範囲・一括取得の可否) を実測する。
 on:
   workflow_dispatch:
+  # workflow_dispatch はデフォルトブランチにファイルが無いと呼べないため、
+  # 調査用ブランチでは push でも起動できるようにしておく
+  push:
+    branches: ['claude/breakout-model']
+    paths: ['research/**', '.github/workflows/probe.yml']
 
 permissions:
   contents: read
