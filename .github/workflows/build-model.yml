@@ -125,10 +125,11 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           mkdir -p research/samples
           cp research/_data/label_samples.json research/samples/label_samples.json
-          if git diff --quiet -- research/samples/label_samples.json; then
+          python3 research/viewer/build_viewer.py
+          if git diff --quiet -- research/samples/label_samples.json research/viewer/label_review.html; then
             echo "変更なし"; exit 0
           fi
-          git add research/samples/label_samples.json
+          git add research/samples/label_samples.json research/viewer/label_review.html
           git commit -m "chore(research): ラベル目視検証用のチャートデータを更新"
           for i in 1 2 3 4; do
             if git push; then exit 0; fi
