@@ -56,7 +56,23 @@ GROUPS: Dict[str, List[str]] = {
     # PER/PBR は API に無いので株価と決算から作った（docs/DATA_FIELDS.md）。
     # 逆数（益回り・純資産倍率の逆数）も持つ。赤字や債務超過で
     # PER/PBR が負になると「割安」と誤読されるが、逆数なら符号が意味を保つ。
-    "valuation": ["per", "pbr", "earnings_yield", "book_yield"],
+    "valuation": ["per", "pbr", "earnings_yield", "book_yield",
+                  "psr", "sales_yield", "peg"],
+    # --- 配当 ---
+    # 優待は J-Quants に項目が無いので入れられない
+    # （docs/DATA_FIELDS.md の111項目を機械的に走査して0件）
+    "dividend": ["div_yield", "payout_ratio", "has_dividend"],
+    # --- キャッシュフロー（充足率 約51%）---
+    # 利益の質。利益は出ているが営業CFが伴わない銘柄を分ける
+    "cashflow": ["cfo_yield", "fcf_yield", "cfo_to_op", "accruals"],
+    # --- 収益性・効率 ---
+    "efficiency": ["net_margin", "ordinary_margin", "asset_turnover"],
+    # --- 会社予想 ---
+    # 「プラスアルファの好材料」に最も近い。上方修正はそれ自体が材料
+    "guidance": ["guidance_op_growth", "guidance_revision"],
+    # --- 業種・市場区分（時点別）---
+    # 最新のマスタを過去に当てると先読みになるため月次スナップショットを使う
+    "sector": ["s33_code", "s17_code", "scalecat_code", "mkt_code"],
     # --- 黒字転換 ---
     # 赤字->黒字は小型株で株価が最も動くイベントだが、
     # 従来の成長率定義では欠測として捨てられていた
@@ -71,7 +87,8 @@ GROUPS: Dict[str, List[str]] = {
 #: 絶対値の特徴量では学習が成立していなかった。
 RAW_FOR_RANK: List[str] = [
     c for g in ("fund_level", "fund_lag", "fund_trend", "fund_streak", "price",
-                "volume", "liquidity", "supply", "progress", "valuation")
+                "volume", "liquidity", "supply", "progress", "valuation",
+                "dividend", "cashflow", "efficiency", "guidance")
     for c in GROUPS[g]
 ]
 
@@ -80,7 +97,8 @@ RAW_FOR_RANK: List[str] = [
 # 対象は RAW_FOR_RANK と揃える。ここがずれると
 # 「順位列が存在しないプリセット」が黙って出来てしまう。
 RANKED_GROUPS = ("fund_level", "fund_lag", "fund_trend", "fund_streak", "price",
-                 "volume", "liquidity", "supply", "progress", "valuation")
+                 "volume", "liquidity", "supply", "progress", "valuation",
+                 "dividend", "cashflow", "efficiency", "guidance")
 GROUPS.update({
     f"{g}_rank": [f"{c}_r" for c in GROUPS[g]] for g in RANKED_GROUPS
 })
@@ -101,12 +119,21 @@ PRESETS: Dict[str, List[str]] = {
     # 全部（絶対値のみ。順位版は別プリセットで比較する）
     "all": ["fund_level", "fund_lag", "fund_trend", "fund_streak", "price",
             "volume", "liquidity", "supply", "progress", "valuation",
+            "dividend", "cashflow", "efficiency", "guidance", "sector",
             "turnaround", "market"],
     # バリュエーションのみ
     "valuation_only": ["valuation"],
     # 決算 + バリュエーション + 黒字転換（株価位置を使わない）
-    "fundamental_v2": ["fund_level", "fund_lag", "fund_trend", "fund_streak", "progress",
-                       "valuation", "turnaround"],
+    "fundamental_v2": ["fund_level", "fund_lag", "fund_trend", "fund_streak",
+                       "progress", "valuation", "dividend", "cashflow",
+                       "efficiency", "guidance", "turnaround"],
+    # 決算まわり全部 + 業種。算出できるファンダメンタルズを可能な限り入れる
+    "fundamental_v3": ["fund_level", "fund_lag", "fund_trend", "fund_streak",
+                       "progress", "valuation", "dividend", "cashflow",
+                       "efficiency", "guidance", "sector", "turnaround"],
+    # 今回足したものだけ。既存の決算軸を抜いた効果を見る
+    "extras_only": ["valuation", "dividend", "cashflow", "efficiency",
+                    "guidance", "sector"],
     # 市場環境を抜いた全部。
     # all との差が「相場局面をどれだけ暗記していたか」の目安になる
     "all_no_market": [g for g in GROUPS
@@ -130,7 +157,8 @@ PRESETS: Dict[str, List[str]] = {
     # 決算 + バリュエーションの順位版
     "rank_fundamental_v2": ["fund_level_rank", "fund_lag_rank", "fund_trend_rank",
                             "fund_streak_rank", "progress_rank",
-                            "valuation_rank", "turnaround"],
+                            "valuation_rank", "dividend_rank", "cashflow_rank",
+                            "efficiency_rank", "guidance_rank", "turnaround"],
     # 絶対値と順位の両方（順位が絶対値に上乗せの情報を持つかを見る）
     "raw_and_rank": ["fund_level", "fund_trend", "price", "volume", "liquidity",
                      "supply", "progress", "market",

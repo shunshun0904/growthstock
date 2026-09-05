@@ -57,6 +57,9 @@ DEFAULT_PRESETS = [
     # 決算 + バリュエーション + 黒字転換。
     # PER/PBR/ROA を足した効果を見るのが目的なので、既定に入れておく
     "fundamental_v2", "rank_fundamental_v2",
+    # 算出できるファンダメンタルズを可能な限り入れたセットと、
+    # 今回足したものだけのセット。前者は業種も含む
+    "fundamental_v3", "extras_only",
     "valuation_only",
 ]
 

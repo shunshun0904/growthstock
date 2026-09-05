@@ -109,6 +109,7 @@ MAX_MARKET_CAP = None
 # 逆数（earnings_yield / book_yield）は分母が株価なので発散せず、そちらは残す。
 PER_MAX = 1000.0
 PBR_MAX = 1000.0
+PEG_MAX = 100.0     # PER/成長率。成長率が極小だと発散する
 
 
 # --------------------------------------------------------------------------- #
@@ -313,7 +314,17 @@ def quarterize_panel(fins: pd.DataFrame) -> pd.DataFrame:
     grp = df.groupby(["Code", "CurFYSt"], sort=False)
 
     # 会計年度内で1つ前の四半期との差分を取る（1Q は累計=単期）
-    for src, dst in [("Sales", "q_sales"), ("OP", "q_op"), ("NP", "q_np"), ("EPS", "q_eps")]:
+    #
+    # 経常利益とキャッシュフローも同じ累計ベースなので、ここで一緒に展開する。
+    # これらを後段（DiscDate でソートし直した後）でやると、
+    # 会計年度内の並びが崩れたグループを使うことになり、行がずれる。
+    cumulative = [("Sales", "q_sales"), ("OP", "q_op"), ("NP", "q_np"),
+                  ("EPS", "q_eps"), ("OdP", "q_odp"),
+                  ("CFO", "q_cfo"), ("CFI", "q_cfi"), ("CFF", "q_cff")]
+    for src, dst in cumulative:
+        if src not in df.columns:
+            df[dst] = np.nan
+            continue
         prev_val = grp[src].shift(1)
         prev_q = grp["quarter"].shift(1)
         contiguous = prev_q == df["quarter"] - 1
@@ -412,6 +423,71 @@ def quarterize_panel(fins: pd.DataFrame) -> pd.DataFrame:
     # 提供値を使う利点が無い。
     df["equity_ratio"] = np.where(df["TA"] > 0, df["Eq"] / df["TA"] * 100.0, np.nan)
 
+    # --- 配当・キャッシュフロー・その他の比率 --- #
+    # 使う項目は docs/DATA_FIELDS.md の実測値に基づく。
+    # 存在しない項目は作らない（EV/EBITDA は有利子負債の項目が無いため不可）。
+    def ttm(col: str):
+        """単期の値を4期合計して12ヶ月ぶんにする。"""
+        if col not in df.columns:
+            return pd.Series(np.nan, index=df.index)
+        return g_code[col].transform(lambda s: s.rolling(4, min_periods=4).sum())
+
+    def col(name: str):
+        return df[name] if name in df.columns else pd.Series(np.nan, index=df.index)
+
+    sales_ttm = ttm("q_sales")
+    op_ttm = ttm("q_op")
+    np_ttm = ttm("q_np")
+    df["sales_ttm"] = sales_ttm
+
+    # 経常利益（88.9%）の差分展開も上のループで済ませてある（q_odp）
+    odp_ttm = ttm("q_odp")
+
+    # 利益率（TTM ベース。単期だと季節性で振れる）
+    df["net_margin"] = np.where(sales_ttm > 0, np_ttm / sales_ttm * 100.0, np.nan)
+    df["ordinary_margin"] = np.where(sales_ttm > 0, odp_ttm / sales_ttm * 100.0,
+                                     np.nan)
+
+    # 総資産回転率
+    df["asset_turnover"] = np.where(col("TA") > 0, sales_ttm / col("TA"), np.nan)
+
+    # --- キャッシュフロー（充足率 約51%）--- #
+    # 累計からの差分展開は上のループで済ませてある（q_cfo / q_cfi / q_cff）
+    cfo_ttm = ttm("q_cfo")
+    cfi_ttm = ttm("q_cfi")
+    df["cfo_ttm"] = cfo_ttm
+    # フリーCF = 営業CF + 投資CF（投資CFは通常負なので加算でよい）
+    df["fcf_ttm"] = cfo_ttm + cfi_ttm
+    # 利益の質: 営業CFが営業利益をどれだけ裏付けているか
+    df["cfo_to_op"] = np.where(op_ttm > 0, cfo_ttm / op_ttm * 100.0, np.nan)
+    # アクルーアル: 利益と営業CFの乖離。大きいほど利益の質が低い
+    df["accruals"] = np.where(col("TA") > 0, (np_ttm - cfo_ttm) / col("TA") * 100.0,
+                              np.nan)
+
+    # --- 配当 --- #
+    # 会社予想の年間配当（57.8%）を優先し、無ければ実績（32.4%）
+    div = col("FDivAnn")
+    div = div.where(div.notna(), col("DivAnn"))
+    df["dps"] = div
+    df["has_dividend"] = np.where(div.notna(), (div > 0).astype(float), np.nan)
+    # 配当性向。提供値（22.7%）が無ければ EPS から計算
+    payout_calc = np.where(df["EPS"] > 0, div / df["EPS"] * 100.0, np.nan)
+    df["payout_ratio"] = col("PayoutRatioAnn").where(
+        col("PayoutRatioAnn").notna(), pd.Series(payout_calc, index=df.index))
+
+    # --- 会社予想（今期の伸び見通し）--- #
+    # 予想営業利益 / 前期実績営業利益。1を超えれば増益見通し
+    prev_op_ttm = g_code["q_op"].transform(
+        lambda s: s.shift(4).rolling(4, min_periods=4).sum())
+    df["guidance_op_growth"] = np.where(
+        prev_op_ttm > 0, col("FOP") / prev_op_ttm * 100.0 - 100.0, np.nan)
+    # 予想の修正: 同じ会計年度で前回開示の予想と比べて何%動いたか。
+    # 上方修正は「プラスアルファの好材料」そのもの
+    prev_fop = df.groupby(["Code", "CurFYSt"], sort=False)["FOP"].shift(1) \
+        if "FOP" in df.columns else pd.Series(np.nan, index=df.index)
+    df["guidance_revision"] = np.where(
+        prev_fop > 0, col("FOP") / prev_fop * 100.0 - 100.0, np.nan)
+
     # --- 直近4決算をラグ列として横に並べる --- #
     # 52週高値のブレイクは、3〜4決算続けて好調な銘柄で起きる。
     # レーダーチャートを複数時点で重ねて表示しているのも、
@@ -464,7 +540,12 @@ def quarterize_panel(fins: pd.DataFrame) -> pd.DataFrame:
         df[f"{a}_pos_ratio"] = (pos / avail.where(avail > 0)).where(enough)
 
     keep = (["Code", "DiscDate", "quarter", "progress_vs_base", "shares_out",
-             "eps_growth_turn", "sales_growth_turn", "BPS", "bps_basis", "roe_basis"]
+             "eps_growth_turn", "sales_growth_turn", "BPS", "bps_basis", "roe_basis",
+             # 配当・キャッシュフロー・会社予想・その他の比率
+             "dps", "has_dividend", "payout_ratio",
+             "sales_ttm", "cfo_ttm", "fcf_ttm", "cfo_to_op", "accruals",
+             "net_margin", "ordinary_margin", "asset_turnover",
+             "guidance_op_growth", "guidance_revision"]
             + [c for c in ("EPS", "eps_ttm") if c in df.columns]
             + [c for a in axes for c in (
                 f"{a}_q0", f"{a}_q1", f"{a}_q2", f"{a}_q3",
@@ -589,10 +670,35 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     # 逆数側（益回り・純資産倍率の逆数）は分母が株価なので発散せず、
     # そちらを特徴量として持っている。比率側は解釈用と割り切り、
     # 実在しうる範囲を超えたものは欠測にする。
+    # --- 株価との比で作る指標 --- #
+    mc = samples["market_cap"]          # 億円
+    # PSR = 時価総額 / 売上高(TTM)。売上は円なので億円に直す
+    sales_oku = samples["sales_ttm"] / 1e8
+    samples["psr"] = np.where(sales_oku > 0, mc / sales_oku, np.nan)
+    samples["sales_yield"] = np.where(mc > 0, sales_oku / mc * 100.0, np.nan)
+    # キャッシュフロー利回り
+    samples["cfo_yield"] = np.where(mc > 0, samples["cfo_ttm"] / 1e8 / mc * 100.0,
+                                    np.nan)
+    samples["fcf_yield"] = np.where(mc > 0, samples["fcf_ttm"] / 1e8 / mc * 100.0,
+                                    np.nan)
+    # 配当利回り
+    samples["div_yield"] = np.where(px > 0, samples["dps"] / px * 100.0, np.nan)
+
     per = np.where(samples["eps_ttm"] > 0, px / samples["eps_ttm"], np.nan)
     pbr = np.where(samples["BPS"] > 0, px / samples["BPS"], np.nan)
     samples["per"] = np.where(np.isfinite(per) & (per <= PER_MAX), per, np.nan)
     samples["pbr"] = np.where(np.isfinite(pbr) & (pbr <= PBR_MAX), pbr, np.nan)
+    # PEG = PER / EPS成長率(%)。成長に対して株価が割高か。
+    # 成長率が0以下だと意味を持たない（負のPEGは「割安」ではない）ので欠測にする。
+    # 成長率が極端に小さいと発散するため、PER と同じ考え方で上限を置く。
+    growth = samples["eps_growth_q0"]
+    peg = np.where((samples["per"] > 0) & (growth > 0), samples["per"] / growth,
+                   np.nan)
+    samples["peg"] = np.where(np.isfinite(peg) & (peg <= PEG_MAX), peg, np.nan)
+    n_peg = int((np.isfinite(peg) & (peg > PEG_MAX)).sum())
+    if n_peg:
+        print(f"[filter] peg > {PEG_MAX:g} を欠測に: {n_peg:,}件（成長率が極小）")
+
     for name, arr, cap in (("per", per, PER_MAX), ("pbr", pbr, PBR_MAX)):
         n = int((np.isfinite(arr) & (arr > cap)).sum())
         if n:
@@ -625,6 +731,35 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
         )
     else:
         samples["credit_ratio"] = np.nan
+
+    # --- 業種・市場区分を時点別に結合 --- #
+    # 最新のマスタを過去のサンプルに当てると先読みになる。
+    # とくに市場区分は2022年4月の東証再編で全銘柄が変わっているため、
+    # 2018年のサンプルに現在の区分を付けるのは誤り。
+    # 月次スナップショットを merge_asof で「その時点で有効だった区分」に合わせる。
+    mh_paths = sorted(glob.glob(os.path.join(data_dir, "master_hist_*.parquet")))
+    if mh_paths:
+        mh = pd.concat([pd.read_parquet(x) for x in mh_paths], ignore_index=True)
+        mh["Date"] = pd.to_datetime(mh["Date"])
+        keep_mh = [c for c in ("Date", "Code", "S33", "S17", "ScaleCat", "Mkt")
+                   if c in mh.columns]
+        mh = (mh[keep_mh].dropna(subset=["Date", "Code"])
+              .sort_values("Date").drop_duplicates(["Date", "Code"], keep="last"))
+        print(f"[merge] 業種・市場区分を時点別に結合 ({len(mh):,}行 / "
+              f"{mh['Date'].nunique()}時点)")
+        samples = pd.merge_asof(
+            samples.sort_values("Date"), mh,
+            on="Date", by="Code", direction="backward")
+        for c in ("S33", "S17", "ScaleCat", "Mkt"):
+            if c in samples.columns:
+                # カテゴリは数値コードにする（LightGBM はそのまま分岐できる）
+                samples[f"{c.lower()}_code"] = pd.to_numeric(samples[c],
+                                                             errors="coerce")
+    else:
+        print("[merge] master_hist が無いため業種・市場区分は付与しない")
+    for c in ("s33", "s17", "scalecat", "mkt"):
+        if f"{c}_code" not in samples.columns:
+            samples[f"{c}_code"] = np.nan
 
     # --- 市場環境（TOPIX） --- #
     print("[merge] TOPIX の市場環境特徴量を結合")

@@ -474,6 +474,45 @@ class TestLagOverAvailableValues(unittest.TestCase):
         self.assertAlmostEqual(lag1.iloc[3], 3.0)
 
 
+class TestSectorIsPointInTime(unittest.TestCase):
+    """
+    最新の銘柄マスタを過去のサンプルに当てると先読みになる。
+    とくに市場区分は2022年4月の東証再編で全銘柄が変わっているので、
+    2018年のサンプルに現在の区分を付けるのは誤り。
+    merge_asof の backward で「その時点で有効だった区分」に合わせる。
+    """
+
+    def _master_hist(self):
+        """2022-04 に市場区分が変わった銘柄。"""
+        return pd.DataFrame({
+            "Date": pd.to_datetime(["2021-01-29", "2022-03-31", "2022-04-28"]),
+            "Code": "1234",
+            "S33": ["3050", "3050", "3050"],
+            "Mkt": ["0111", "0111", "0111"],   # 旧区分
+        }).assign(Mkt=["0111", "0111", "0112"])   # 2022-04 で新区分へ
+
+    def test_uses_the_segment_in_force_at_the_time(self):
+        mh = self._master_hist()
+        samples = pd.DataFrame({
+            "Date": pd.to_datetime(["2021-06-30", "2022-06-30"]),
+            "Code": "1234"})
+        merged = pd.merge_asof(samples.sort_values("Date"),
+                               mh.sort_values("Date"),
+                               on="Date", by="Code", direction="backward")
+        # 2021年のサンプルには旧区分、2022年6月には新区分
+        self.assertEqual(merged.iloc[0]["Mkt"], "0111")
+        self.assertEqual(merged.iloc[1]["Mkt"], "0112")
+
+    def test_never_uses_a_future_snapshot(self):
+        """スナップショットより前のサンプルには何も付かない。"""
+        mh = self._master_hist()
+        samples = pd.DataFrame({"Date": pd.to_datetime(["2020-06-30"]),
+                                "Code": "1234"})
+        merged = pd.merge_asof(samples, mh.sort_values("Date"),
+                               on="Date", by="Code", direction="backward")
+        self.assertTrue(pd.isna(merged.iloc[0]["Mkt"]))
+
+
 class TestValuationUsesUnadjustedPrice(unittest.TestCase):
     """
     EPS / BPS / 株数は開示時点のままで分割調整されていない。

@@ -171,6 +171,24 @@ def fetch_margin(client: JQuantsClient, days: List[dt.date]) -> pd.DataFrame:
     return _numify(df, ["LongVol", "ShrtVol"])
 
 
+def fetch_master_history(client: JQuantsClient, days: List[dt.date]) -> pd.DataFrame:
+    """
+    銘柄マスタを時点別に取る（業種・市場区分の point-in-time 用）。
+
+    最新のマスタを過去のサンプルに当てると先読みになる。
+    とくに市場区分は2022年4月の東証再編で全銘柄が変わっているため、
+    2018年のサンプルに現在の区分を付けるのは誤り。
+
+    毎営業日は要らない（業種はめったに変わらない）ので月次で取る。
+    """
+    monthly = sorted({d for d in days if d == max(
+        x for x in days if (x.year, x.month) == (d.year, d.month))})
+    print(f"[master_hist] {len(monthly)}時点（月末）を取得")
+    df = _fetch_by_day(client, "/equities/master", monthly, MASTER_COLS,
+                       "master_hist")
+    return df
+
+
 def fetch_master(client: JQuantsClient, as_of: dt.date) -> pd.DataFrame:
     """
     銘柄マスタ（全銘柄の名称・業種・市場区分）。1リクエストで全銘柄が返る。
@@ -224,12 +242,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--pause", type=float, default=0.05,
                     help="リクエスト間隔(秒)。既定は控えめ（1日1リクエストのため）")
     ap.add_argument("--what", nargs="*",
-                    default=["bars", "fins", "margin", "topix", "master"],
-                    choices=["bars", "fins", "margin", "topix", "master"])
+                    default=["bars", "fins", "margin", "topix", "master", "master_hist"],
+                    choices=["bars", "fins", "margin", "topix", "master",
+                             "master_hist"])
     ap.add_argument("--incremental", action="store_true",
                     help="manifest を見て、まだ取得していない営業日だけを取得する")
     ap.add_argument("--reset", nargs="*", default=[],
-                    choices=["bars", "fins", "margin", "topix", "master"],
+                    choices=["bars", "fins", "margin", "topix", "master", "master_hist"],
                     help="指定した種別の保存済みデータと取得記録を消してから取得する。"
                          "取得する列を増やしたときに使う（既存 parquet には新しい列が"
                          "入っていないが、manifest 上は取得済みなので取り直されない）")
@@ -302,6 +321,22 @@ def _run_incremental(client: JQuantsClient, days: List[dt.date],
     for name in args.what:
         if name == "topix":
             continue  # topix は期間指定で一括取得するので後段でまとめて扱う
+        if name == "master_hist":
+            # 月次スナップショット。日付ループの共通処理には乗せず個別に扱う
+            todo = data_store.missing_days(manifest, "master_hist", days)
+            print(f"\n[master_hist] 候補 {len(days)}日 / 未取得 {len(todo)}日")
+            if todo:
+                t0 = time.time()
+                mh = fetch_master_history(client, todo)
+                written = data_store.merge_into_years(args.out_dir, "master_hist",
+                                                      mh, "Date")
+                data_store.mark_fetched(manifest, "master_hist", todo)
+                total_new += len(mh)
+                print(f"[master_hist] {len(mh):,}行を追加 / 更新ファイル "
+                      f"{len(written)}件 ({time.time()-t0:.0f}秒)")
+            else:
+                print("[master_hist] 取得済み。スキップします")
+            continue
         if name == "master":
             # 銘柄マスタは日付ごとの蓄積ではなく毎回最新に上書きする。
             # 後段で別に取得するので、この日付ループでは扱わない。

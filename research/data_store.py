@@ -25,7 +25,7 @@ MANIFEST_NAME = "manifest.json"
 
 #: manifest で「取得済みの日」を管理するデータ種別。
 #: master は日付ごとの蓄積ではなく毎回最新に上書きするため、ここには含めない。
-KINDS = ("bars", "fins", "margin", "topix")
+KINDS = ("bars", "fins", "margin", "topix", "master_hist")
 
 
 def manifest_path(data_dir: str) -> str:

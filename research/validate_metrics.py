@@ -55,6 +55,22 @@ METRICS = {
     # 自己資本比率は %。中央値が 1 未満なら比率(0〜1)が混ざっている
     "equity_ratio_q0": {"plausible": (-200.0, 100.0),  "unit": "%"},
     "BPS":            {"plausible": (0.0, 1e6),        "unit": "円"},
+    # --- 今回追加した指標 ---
+    "psr":            {"plausible": (0.0, 100.0),      "unit": "倍"},
+    "sales_yield":    {"plausible": (0.0, 5000.0),     "unit": "%"},
+    "peg":            {"plausible": (0.0, 100.0),      "unit": "倍"},
+    "div_yield":      {"plausible": (0.0, 20.0),       "unit": "%"},
+    "payout_ratio":   {"plausible": (0.0, 500.0),      "unit": "%"},
+    "cfo_yield":      {"plausible": (-100.0, 100.0),   "unit": "%"},
+    "fcf_yield":      {"plausible": (-100.0, 100.0),   "unit": "%"},
+    "cfo_to_op":      {"plausible": (-500.0, 1000.0),  "unit": "%"},
+    "accruals":       {"plausible": (-100.0, 100.0),   "unit": "%"},
+    "net_margin":     {"plausible": (-200.0, 100.0),   "unit": "%"},
+    "ordinary_margin": {"plausible": (-200.0, 100.0),  "unit": "%"},
+    "asset_turnover": {"plausible": (0.0, 10.0),       "unit": "回"},
+    "guidance_op_growth": {"plausible": (-200.0, 500.0), "unit": "%"},
+    "guidance_revision":  {"plausible": (-200.0, 500.0), "unit": "%"},
+    "s33_code":       {"plausible": (0.0, 1e5),        "unit": "コード"},
 }
 
 
@@ -104,6 +120,19 @@ def check_identities(df: pd.DataFrame) -> List[Dict]:
         a = (df["pbr"] * df["book_yield"]).to_numpy(dtype=float)
         err, n = rel_err(a, np.ones(len(a)))
         checks.append({"name": "pbr × book_yield == 1",
+                       "max_rel_err": err, "n_checked": n})
+
+    if {"psr", "sales_yield"} <= set(df.columns):
+        a = (df["psr"] * df["sales_yield"]).to_numpy(dtype=float)
+        err, n = rel_err(a, np.full(len(a), 100.0))
+        checks.append({"name": "psr × sales_yield == 100",
+                       "max_rel_err": err, "n_checked": n})
+
+    if {"peg", "per", "eps_growth_q0"} <= set(df.columns):
+        lhs = (df["peg"] * df["eps_growth_q0"]).to_numpy(dtype=float)
+        rhs = df["per"].to_numpy(dtype=float)
+        err, n = rel_err(lhs, rhs)
+        checks.append({"name": "peg × eps成長率 == per",
                        "max_rel_err": err, "n_checked": n})
 
     # 符号の整合。株価は正なので、PER の符号は EPS の符号と一致するはず
