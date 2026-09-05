@@ -14,5 +14,5 @@
   "shard_by_year": false,
   "val_start": "2024-03-01",
   "test_start": "2024-05-01",
-  "note": "パイロット実行: パイプライン全体の疎通と正例率の確認が目的"
+  "note": "パイロット再実行: /markets/calendar の列名を HolDiv に修正"
 }

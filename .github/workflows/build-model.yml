@@ -105,11 +105,36 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
           cat build.log >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
+      - name: Export label samples for visual inspection
+        run: python3 research/export_label_samples.py 2>&1 | tee labels.log
+      - run: |
+          echo "## ラベル目視検証用データ" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat labels.log >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
       - uses: actions/upload-artifact@v4
         with:
           name: dataset
-          path: research/_data/dataset.parquet
+          path: |
+            research/_data/dataset.parquet
+            research/_data/label_samples.json
           retention-days: 30
+      - name: Commit label samples
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          mkdir -p research/samples
+          cp research/_data/label_samples.json research/samples/label_samples.json
+          if git diff --quiet -- research/samples/label_samples.json; then
+            echo "変更なし"; exit 0
+          fi
+          git add research/samples/label_samples.json
+          git commit -m "chore(research): ラベル目視検証用のチャートデータを更新"
+          for i in 1 2 3 4; do
+            if git push; then exit 0; fi
+            sleep $((2 ** i)); git pull --rebase
+          done
+          exit 1
 
   train:
     needs: [config, build]

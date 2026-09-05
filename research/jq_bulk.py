@@ -50,10 +50,12 @@ def trading_days(client: JQuantsClient, start: dt.date, end: dt.date) -> List[dt
     rows = client.get_paginated(
         "/markets/calendar", {"from": start.isoformat(), "to": end.isoformat()}
     )
+    # V2 の列名は HolDiv（V1 は HolidayDivision）。実レスポンスで確認済み。
+    # 値: "0" = 非営業日, "1" = 営業日, "2" = 東証半日立会
+    div_keys = ("HolDiv", "HolidayDivision", "HolidayDiv")
     days = []
     for r in rows:
-        # HolidayDivision: "1" = 営業日（0=非営業日, 2=東証半日, 3=非営業日）
-        div = str(r.get("HolidayDivision") or r.get("HolidayDiv") or "")
+        div = next((str(r[k]) for k in div_keys if k in r and r[k] is not None), "")
         d = r.get("Date")
         if not d:
             continue
