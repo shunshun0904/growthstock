@@ -14,5 +14,5 @@
   "shard_by_year": false,
   "val_start": "2024-03-01",
   "test_start": "2024-05-01",
-  "note": "パイロット再実行: /markets/calendar の列名を HolDiv に修正"
+  "note": "パイロット再実行（前回は正常動作中に誤ってキャンセルしたため）。実測 4.2秒/営業日・491営業日で約35分。"
 }
