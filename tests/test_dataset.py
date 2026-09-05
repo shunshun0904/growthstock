@@ -476,16 +476,17 @@ class TestLagOverAvailableValues(unittest.TestCase):
 
 class TestDefaultLabelIsE(unittest.TestCase):
     """
-    既定のラベル定義を固定する。ここが黙って変わると過去の結果と比較できなくなる。
+    既定のラベル定義が、10定義の比較で採用した E であることを固定する。
+    ここが黙って変わると、過去の結果と比較できなくなる。
 
-    ベースは10定義の比較で採用した E。
-    高値の窓だけ 52週(245) -> 78週(368) に変更した
-    （対象を小型株に絞ったことに伴う再設定）。
+    一時 78週 + 小型株限定に変えたが、E に戻した。
+    あの変更は「決算特徴量に予測力が無い」という結論への対応であり、
+    その結論自体が決算データの欠損によるもので前提が成り立っていなかった。
     """
 
     def test_default_matches_definition_e(self):
         from build_dataset import DEFAULT_LABEL as L
-        self.assertEqual(L.high_window, 368)         # 78週
+        self.assertEqual(L.high_window, 245)         # 52週
         self.assertEqual(L.horizon_start, 20)        # 1ヶ月先から
         self.assertEqual(L.horizon_end, 120)         # 6ヶ月先まで
         self.assertEqual(L.hold_days, 20)
@@ -493,18 +494,23 @@ class TestDefaultLabelIsE(unittest.TestCase):
         self.assertEqual(L.sustain_days, 60)         # 60営業日後も
         self.assertAlmostEqual(L.sustain_ratio, 1.0) # 水準維持
 
-    def test_market_cap_band(self):
-        """基準日時点で時価総額50〜300億円に絞る。
-        帯を変えると母集団が変わり、過去の結果と比較できなくなる。"""
-        import build_dataset as B
-        self.assertEqual((B.MIN_MARKET_CAP, B.MAX_MARKET_CAP), (50.0, 300.0))
+    def test_market_cap_is_not_filtered(self):
+        """
+        時価総額では絞らない（全銘柄が対象）。
 
-    def test_high_window_is_78_weeks(self):
-        """368営業日が78週であることを確認する。
-        245(52週) から比率で換算した値。"""
+        絞ると母集団が変わり過去の結果と比較できなくなる。
+        絞りたい場合は定数に数値を入れれば有効になるが、
+        既定は None であることを固定する。
+        """
+        import build_dataset as B
+        self.assertIsNone(B.MIN_MARKET_CAP)
+        self.assertIsNone(B.MAX_MARKET_CAP)
+
+    def test_high_window_is_52_weeks(self):
+        """245営業日が52週であること。"""
         from build_dataset import DEFAULT_LABEL as L
-        self.assertEqual(round(L.high_window / 245 * 52), 78)
-        self.assertIn("78週", L.name)
+        self.assertEqual(round(L.high_window / 245 * 52), 52)
+        self.assertIn("52週", L.name)
 
     def test_forward_needed_is_180(self):
         """
