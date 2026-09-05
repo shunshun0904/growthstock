@@ -1,0 +1,89 @@
+name: Rebuild From Artifact
+
+# 既存の生データ artifact を再利用してデータセット・ラベル検証データ・
+# ビューアを作り直し、リポジトリにコミットする。
+# 取得（約50分）をやり直さずに後段だけを回せる。
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: '生データ artifact を持つワークフロー実行のID'
+        required: true
+  push:
+    branches: ['claude/breakout-model']
+    paths: ['research/rebuild_run_id.txt']
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r research/requirements.txt
+
+      - name: Resolve run id
+        id: rid
+        run: |
+          if [ -n "${{ inputs.run_id }}" ]; then
+            echo "id=${{ inputs.run_id }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "id=$(tr -d '[:space:]' < research/rebuild_run_id.txt)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download raw data from previous run
+        uses: actions/download-artifact@v4
+        with:
+          pattern: raw-*
+          merge-multiple: true
+          path: research/_data
+          run-id: ${{ steps.rid.outputs.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: ls -lh research/_data
+
+      - name: Build dataset
+        run: python3 research/build_dataset.py 2>&1 | tee build.log
+      - name: Export label samples
+        run: python3 research/export_label_samples.py 2>&1 | tee labels.log
+      - name: Build viewer
+        run: |
+          mkdir -p research/samples
+          cp research/_data/label_samples.json research/samples/label_samples.json
+          python3 research/viewer/build_viewer.py
+
+      - run: |
+          {
+            echo "## データセット構築"; echo '```'; cat build.log; echo '```'
+            echo "## ラベル検証データ"; echo '```'; cat labels.log; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit outputs
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A research/samples research/viewer
+          # git diff は未追跡ファイルを見ないため、staged の差分で判定する
+          if git diff --cached --quiet; then
+            echo "変更なし"; exit 0
+          fi
+          git commit -m "chore(research): ラベル検証データとビューアを更新"
+          for i in 1 2 3 4; do
+            if git push; then exit 0; fi
+            sleep $((2 ** i)); git pull --rebase
+          done
+          exit 1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: label-review
+          path: |
+            research/samples/label_samples.json
+            research/viewer/label_review.html
+          retention-days: 30

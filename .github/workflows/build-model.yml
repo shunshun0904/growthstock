@@ -126,10 +126,11 @@ jobs:
           mkdir -p research/samples
           cp research/_data/label_samples.json research/samples/label_samples.json
           python3 research/viewer/build_viewer.py
-          if git diff --quiet -- research/samples/label_samples.json research/viewer/label_review.html; then
+          git add -A research/samples research/viewer
+          # git diff は未追跡ファイルを見ないため、staged の差分で判定する
+          if git diff --cached --quiet; then
             echo "変更なし"; exit 0
           fi
-          git add research/samples/label_samples.json research/viewer/label_review.html
           git commit -m "chore(research): ラベル目視検証用のチャートデータを更新"
           for i in 1 2 3 4; do
             if git push; then exit 0; fi
