@@ -24,6 +24,7 @@ jobs:
       val_start: ${{ steps.cfg.outputs.val_start }}
       test_start: ${{ steps.cfg.outputs.test_start }}
       shards: ${{ steps.cfg.outputs.shards }}
+      run_train: ${{ steps.cfg.outputs.run_train }}
     steps:
       - uses: actions/checkout@v4
       - id: cfg
@@ -35,6 +36,7 @@ jobs:
           print(f"to={c['to']}")
           print(f"val_start={c['val_start']}")
           print(f"test_start={c['test_start']}")
+          print(f"run_train={str(c.get('run_train', True)).lower()}")
           start = dt.date.fromisoformat(c["from"]); end = dt.date.fromisoformat(c["to"])
           if c.get("shard_by_year"):
               shards = []
@@ -140,6 +142,8 @@ jobs:
 
   train:
     needs: [config, build]
+    # run_config.json の run_train が false のときは学習を実行しない
+    if: needs.config.outputs.run_train != 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
