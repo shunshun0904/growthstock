@@ -1,0 +1,159 @@
+name: Build Breakout Model
+
+# 新高値ブレイクアウト予測モデルのデータ構築・学習・評価。
+# research/run_config.json を編集して push すると起動する。
+on:
+  workflow_dispatch:
+  push:
+    branches: ['claude/breakout-model']
+    paths: ['research/run_config.json']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-breakout-model
+  cancel-in-progress: false
+
+jobs:
+  config:
+    runs-on: ubuntu-latest
+    outputs:
+      from: ${{ steps.cfg.outputs.from }}
+      to: ${{ steps.cfg.outputs.to }}
+      val_start: ${{ steps.cfg.outputs.val_start }}
+      test_start: ${{ steps.cfg.outputs.test_start }}
+      shards: ${{ steps.cfg.outputs.shards }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: cfg
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, datetime as dt
+          c = json.load(open("research/run_config.json"))
+          print(f"from={c['from']}")
+          print(f"to={c['to']}")
+          print(f"val_start={c['val_start']}")
+          print(f"test_start={c['test_start']}")
+          start = dt.date.fromisoformat(c["from"]); end = dt.date.fromisoformat(c["to"])
+          if c.get("shard_by_year"):
+              shards = []
+              for y in range(start.year, end.year + 1):
+                  s = max(start, dt.date(y, 1, 1)).isoformat()
+                  e = min(end, dt.date(y, 12, 31)).isoformat()
+                  shards.append({"from": s, "to": e, "name": str(y)})
+          else:
+              shards = [{"from": c["from"], "to": c["to"], "name": "all"}]
+          print(f"shards={json.dumps(shards)}")
+          PY
+      - run: |
+          echo "## 実行設定" >> $GITHUB_STEP_SUMMARY
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          cat research/run_config.json >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+  fetch:
+    needs: config
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      max-parallel: 4        # API へ同時に叩きすぎない
+      matrix:
+        shard: ${{ fromJson(needs.config.outputs.shards) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r research/requirements.txt
+      - name: Fetch (${{ matrix.shard.name }})
+        env:
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+        run: |
+          python3 research/jq_bulk.py \
+            --from "${{ matrix.shard.from }}" \
+            --to   "${{ matrix.shard.to }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: raw-${{ matrix.shard.name }}
+          path: research/_data/*.parquet
+          retention-days: 7
+
+  build:
+    needs: [config, fetch]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r research/requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: raw-*
+          merge-multiple: true
+          path: research/_data
+      - run: ls -lh research/_data
+      - name: Build dataset
+        run: python3 research/build_dataset.py 2>&1 | tee build.log
+      - run: |
+          echo "## データセット構築" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat build.log >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dataset
+          path: research/_data/dataset.parquet
+          retention-days: 30
+
+  train:
+    needs: [config, build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r research/requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: dataset
+          path: research/_data
+      - name: Train and evaluate
+        run: |
+          python3 research/train_model.py \
+            --val-start "${{ needs.config.outputs.val_start }}" \
+            --test-start "${{ needs.config.outputs.test_start }}" 2>&1 | tee train.log
+      - run: |
+          echo "## 学習・評価" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat train.log >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: results
+          path: |
+            docs/MODEL_RESULTS.md
+            research/_data/results.json
+          retention-days: 30
+      - name: Commit results
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- docs/MODEL_RESULTS.md; then
+            echo "結果に変更なし"; exit 0
+          fi
+          git add docs/MODEL_RESULTS.md
+          git commit -m "chore(model): 学習結果を更新 ($(date -u '+%Y-%m-%d %H:%M UTC'))"
+          for i in 1 2 3 4; do
+            if git push; then exit 0; fi
+            sleep $((2 ** i)); git pull --rebase
+          done
+          exit 1
