@@ -145,9 +145,10 @@ class TestResetKind(unittest.TestCase):
         for n in ("fins_2020.parquet", "fins_2021.parquet",
                   "bars_2020.parquet", "margin_2020.parquet"):
             open(os.path.join(self.dir, n), "w").write("x")
-        self.manifest = {"fins": {"days": ["2020-01-06"]},
-                         "bars": {"days": ["2020-01-06"]},
-                         "margin": {"days": ["2020-01-10"]}}
+        # 実際の manifest の形に合わせる（キーは fetched_days）
+        self.manifest = {"fins": {"fetched_days": ["2020-01-06"]},
+                         "bars": {"fetched_days": ["2020-01-06"]},
+                         "margin": {"fetched_days": ["2020-01-10"]}}
 
     def tearDown(self):
         shutil.rmtree(self.dir, ignore_errors=True)
