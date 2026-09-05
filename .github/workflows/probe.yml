@@ -23,10 +23,12 @@ jobs:
       - name: Probe
         env:
           JQUANTS_API: ${{ secrets.JQUANTS_API }}
-        run: python3 research/probe_universe.py
+        run: |
+          python3 research/probe_universe.py
+          python3 research/probe_boundary.py
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: probe-result
-          path: research/probe_result.json
+          path: research/probe_*.json
           if-no-files-found: warn
