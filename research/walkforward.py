@@ -53,7 +53,24 @@ DEFAULT_PRESETS = [
     "technical", "rank_technical",
     "all", "rank_all",
     "fundamental", "rank_fundamental",
+    # 決算 + バリュエーション + 黒字転換。
+    # PER/PBR/ROA を足した効果を見るのが目的なので、既定に入れておく
+    "fundamental_v2", "rank_fundamental_v2",
+    "valuation_only",
 ]
+
+
+def uncovered_presets(presets: List[str]) -> List[str]:
+    """
+    既定から漏れているプリセットを返す。
+
+    ここは手で維持する一覧なので、プリセットを足しても
+    ウォークフォワードで測られないまま気づかない、ということが実際に起きた
+    （valuation_only / fundamental_v2 を追加したのに既定に入れ忘れ、
+      単一分割でしか評価していなかった）。
+    漏れを黙って通さず、実行時に出す。
+    """
+    return [p for p in F.PRESETS if p not in set(presets)]
 
 REFERENCE = "ベースライン: R_high のみ"
 
@@ -345,6 +362,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     unknown = [p for p in presets if p not in F.PRESETS]
     if unknown:
         raise SystemExit(f"未知の特徴量セット: {unknown}. 利用可能: {sorted(F.PRESETS)}")
+
+    missing = uncovered_presets(presets)
+    if missing and not args.features:
+        print(f"[warn] ウォークフォワードで評価しないプリセット: {missing}")
+        print("       単一分割でしか測られない。意図的でなければ "
+              "DEFAULT_PRESETS に足すこと")
 
     df = pd.read_parquet(args.dataset)
     df = df.sort_values("Date").reset_index(drop=True)

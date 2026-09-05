@@ -28,7 +28,7 @@ permissions:
 jobs:
   rebuild:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90   # プリセットが増えてウォークフォワードが長くなった
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

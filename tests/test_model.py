@@ -20,7 +20,10 @@ sys.path.insert(0, os.path.join(ROOT, "research"))
 import pandas as pd  # noqa: E402
 
 from train_model import clean_score, evaluate, paired_bootstrap  # noqa: E402
-from walkforward import REFERENCE, make_folds, run, sign_test, summarize  # noqa: E402
+from walkforward import (  # noqa: E402
+    DEFAULT_PRESETS, REFERENCE, make_folds, run, sign_test, summarize,
+    uncovered_presets,
+)
 from within_date_signal import conditional, marginal  # noqa: E402
 from validate_metrics import check_identities, describe  # noqa: E402
 
@@ -336,6 +339,36 @@ class TestMetricValidation(unittest.TestCase):
         st = describe(pd.Series([10.0, 50.0, 250.0, 900.0]), (-500.0, 500.0))
         self.assertEqual(st["outside_plausible"], 1)   # 900 のみ
         self.assertEqual(st["n_negative"], 0)
+
+
+class TestWalkForwardCoversNewPresets(unittest.TestCase):
+    """
+    DEFAULT_PRESETS は手で維持する一覧なので、
+    プリセットを足しても評価対象に入れ忘れる事故が実際に起きた。
+    """
+
+    def test_valuation_presets_are_evaluated(self):
+        """PER/PBR/ROA を足した効果を見るのが目的なので、既定に入れる。"""
+        for name in ("fundamental_v2", "rank_fundamental_v2", "valuation_only"):
+            self.assertIn(name, DEFAULT_PRESETS)
+
+    def test_paired_comparisons_are_complete(self):
+        """絶対値版と順位版は対で評価する。片方だけだと比較にならない。"""
+        for base in ("price_only", "technical", "all", "fundamental",
+                     "fundamental_v2"):
+            self.assertIn(base, DEFAULT_PRESETS, base)
+            self.assertIn(f"rank_{base}", DEFAULT_PRESETS, f"rank_{base}")
+
+    def test_uncovered_presets_are_reported(self):
+        """漏れを黙って通さないこと。"""
+        import features as F
+        self.assertEqual(uncovered_presets(list(F.PRESETS)), [])
+        self.assertIn("price_only", uncovered_presets(["technical"]))
+
+    def test_every_default_preset_exists(self):
+        import features as F
+        for name in DEFAULT_PRESETS:
+            self.assertIn(name, F.PRESETS, name)
 
 
 if __name__ == "__main__":
