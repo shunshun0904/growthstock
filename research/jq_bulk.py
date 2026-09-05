@@ -8,6 +8,10 @@ V2 は `date` パラメータで **1リクエスト = その日の全銘柄** �
 
 出力は Parquet（列指向・圧縮）。10年分の日次バーは約1,080万行になるため、
 JSON や素の CSV では扱えない。
+
+--incremental を付けると、manifest（data_store.py）を見て
+**まだ取得していない営業日だけ**を取得し、年別ファイルにマージする。
+全期間の取得は約2.5時間かかるため、日次更新でこれを繰り返すのは現実的でない。
 """
 from __future__ import annotations
 
@@ -21,7 +25,9 @@ from typing import Callable, Iterable, List, Optional
 import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from jquants_data_fetcher import JQuantsClient, JQuantsError, resolve_api_key  # noqa: E402
+import data_store  # noqa: E402
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "research", "_data")
 
@@ -188,6 +194,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="リクエスト間隔(秒)。既定は控えめ（1日1リクエストのため）")
     ap.add_argument("--what", nargs="*", default=["bars", "fins", "margin", "topix"],
                     choices=["bars", "fins", "margin", "topix"])
+    ap.add_argument("--incremental", action="store_true",
+                    help="manifest を見て、まだ取得していない営業日だけを取得する")
     args = ap.parse_args(argv)
 
     start = dt.date.fromisoformat(args.date_from)
@@ -202,6 +210,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     print(f"[calendar] 営業日を取得 ({start} 〜 {end})")
     days = trading_days(client, start, end)
     print(f"[calendar] {len(days)}営業日")
+
+    if args.incremental:
+        return _run_incremental(client, days, start, end, args)
 
     tag = f"{start.isoformat()}_{end.isoformat()}"
     jobs: List[tuple] = []
@@ -223,6 +234,78 @@ def main(argv: Optional[List[str]] = None) -> int:
         size = os.path.getsize(path) / 1e6
         print(f"[{name}] {len(df):,}行 -> {path} ({size:.1f}MB, {time.time()-t0:.0f}秒)")
 
+    return 0
+
+
+def _run_incremental(client: JQuantsClient, days: List[dt.date],
+                     start: dt.date, end: dt.date, args) -> int:
+    """
+    manifest を見て、まだ取得していない営業日だけを取得し、年別ファイルにマージする。
+
+    「その日を取得しに行ったか」で判定する（行数ではない）。
+    財務のようにその日の開示が0件でも取得済みとして扱わないと、毎回叩き直してしまう。
+    """
+    manifest = data_store.load_manifest(args.out_dir)
+    print("\n[manifest] 取得済み:")
+    print(data_store.summarize(manifest))
+
+    total_new = 0
+    for name in args.what:
+        if name == "topix":
+            continue  # topix は期間指定で一括取得するので後段でまとめて扱う
+        if name == "margin":
+            # 信用残は週次公表。週に1日だけ候補にする
+            cand = sorted({d for d in days if d.weekday() == 4})
+            covered = {(d.isocalendar().year, d.isocalendar().week) for d in cand}
+            for d in days:
+                key = (d.isocalendar().year, d.isocalendar().week)
+                if key not in covered:
+                    cand.append(d); covered.add(key)
+            cand = sorted(cand)
+        else:
+            cand = days
+
+        todo = data_store.missing_days(manifest, name, cand)
+        print(f"\n[{name}] 候補 {len(cand)}日 / 未取得 {len(todo)}日")
+        if not todo:
+            print(f"[{name}] 取得済み。スキップします")
+            continue
+
+        t0 = time.time()
+        if name == "bars":
+            df = fetch_bars(client, todo)
+        elif name == "fins":
+            df = fetch_fins(client, todo)
+        else:
+            df = _fetch_by_day(client, "/markets/margin-interest", todo, MARGIN_COLS, "margin")
+            df = _numify(df, ["LongVol", "ShrtVol"])
+
+        date_col = "DiscDate" if name == "fins" else "Date"
+        written = data_store.merge_into_years(args.out_dir, name, df, date_col)
+        data_store.mark_fetched(manifest, name, todo)
+        total_new += len(df)
+        print(f"[{name}] {len(df):,}行を追加 / 更新ファイル {len(written)}件 "
+              f"({time.time()-t0:.0f}秒)")
+        for w in written:
+            print(f"    {os.path.basename(w)} ({os.path.getsize(w)/1e6:.1f}MB)")
+
+    # TOPIX は軽いので取得済み範囲の外側だけ取り直す
+    if "topix" in args.what:
+        have = data_store.fetched_days(manifest, "topix")
+        todo_tp = [d for d in days if d.isoformat() not in have]
+        if todo_tp:
+            print(f"\n[topix] 未取得 {len(todo_tp)}日 -> {todo_tp[0]} 〜 {todo_tp[-1]}")
+            df = fetch_topix(client, todo_tp[0], todo_tp[-1])
+            written = data_store.merge_into_years(args.out_dir, "topix", df, "Date")
+            data_store.mark_fetched(manifest, "topix", todo_tp)
+            print(f"[topix] {len(df):,}行を追加 / 更新ファイル {len(written)}件")
+        else:
+            print("\n[topix] 取得済み。スキップします")
+
+    data_store.save_manifest(args.out_dir, manifest)
+    print("\n[manifest] 更新後:")
+    print(data_store.summarize(manifest))
+    print(f"\n[done] 新規取得 {total_new:,}行")
     return 0
 
 

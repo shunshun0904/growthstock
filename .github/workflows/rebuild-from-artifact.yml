@@ -1,14 +1,22 @@
-name: Rebuild From Artifact
+name: Rebuild From Stored Data
 
-# 既存の生データ artifact を再利用してデータセット・ラベル検証データ・
-# ビューアを作り直し、リポジトリにコミットする。
-# 取得（約50分）をやり直さずに後段だけを回せる。
+# 保存済みの生データからデータセット・ラベル検証データ・ビューアを作り直す。
+# 取得をやり直さずに後段だけを回せるので、ラベル定義を変えての再検証が即座にできる。
+#
+# 生データの取得元は2通り:
+#   source=release  … GitHub Release (タグ data-raw)。既定。update-data.yml が作る
+#   source=artifact … 指定した実行の artifact。Release ができる前の移行用
 on:
   workflow_dispatch:
     inputs:
+      source:
+        description: '生データの取得元'
+        type: choice
+        options: [release, artifact]
+        default: release
       run_id:
-        description: '生データ artifact を持つワークフロー実行のID'
-        required: true
+        description: 'source=artifact のとき、artifact を持つ実行のID'
+        required: false
   push:
     branches: ['claude/breakout-model']
     paths: ['research/rebuild_run_id.txt']
@@ -38,7 +46,16 @@ jobs:
             echo "id=$(tr -d '[:space:]' < research/rebuild_run_id.txt)" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Download raw data from previous run
+      - name: Download raw data (release)
+        if: inputs.source != 'artifact'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p research/_data
+          gh release download data-raw --dir research/_data --clobber
+
+      - name: Download raw data (artifact)
+        if: inputs.source == 'artifact'
         uses: actions/download-artifact@v4
         with:
           pattern: raw-*
@@ -46,6 +63,7 @@ jobs:
           path: research/_data
           run-id: ${{ steps.rid.outputs.id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - run: ls -lh research/_data
 
       - name: Compare label definitions
