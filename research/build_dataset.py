@@ -308,6 +308,36 @@ def quarterize_panel(fins: pd.DataFrame) -> pd.DataFrame:
 
 
 # --------------------------------------------------------------------------- #
+# 横断面正規化
+# --------------------------------------------------------------------------- #
+
+def add_cross_sectional_ranks(df: pd.DataFrame, cols: List[str],
+                              date_col: str = "Date") -> pd.DataFrame:
+    """
+    各列を「同じ日付内でのパーセンタイル順位」(0〜1) に変換した列を追加する。
+
+    元の列は残す。絶対値と順位のどちらが効くかを比較できるようにするため。
+    追加される列名は `<元の列>_r`。
+
+    欠測はそのまま欠測にする。0.5 等で埋めると「中位だった」という
+    観測していない情報を与えることになるため。
+    その日に有効な値が2件未満なら順位が定義できないので欠測にする。
+    """
+    out = df.copy()
+    g = out.groupby(date_col, sort=False)
+    added = 0
+    for c in cols:
+        if c not in out.columns:
+            continue
+        ranked = g[c].rank(pct=True, method="average")   # 0〜1、NaN は NaN のまま
+        valid = g[c].transform("count") >= 2
+        out[f"{c}_r"] = ranked.where(valid)
+        added += 1
+    print(f"[rank] {added}列の順位版を追加")
+    return out
+
+
+# --------------------------------------------------------------------------- #
 # 組み立て
 # --------------------------------------------------------------------------- #
 
@@ -403,6 +433,17 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     # --- 最終的な特徴量セット --- #
     samples["log_trading_value"] = np.log1p(samples["tv_ma20"])
     samples["log_market_cap"] = np.log1p(samples["market_cap"])
+
+    # --- 横断面正規化 ---
+    # 絶対値のままだと相場局面に依存する。上昇局面では全銘柄の R_high が高くなるため、
+    # 「R_high が 87%」の意味が期間によって変わってしまう。
+    # 同じ日付内での順位（パーセンタイル）に直すと、
+    # 「その時点で全銘柄中どのくらいの位置か」という局面に依らない量になる。
+    #
+    # 実測で訓練期間の正例率 6.19% に対しテスト期間 21.66% と3倍以上ずれており、
+    # 絶対値の特徴量では学習が成立していなかった（docs/MODEL_RESULTS.md 参照）。
+    print("\n[rank] 横断面正規化（同一日付内のパーセンタイル順位）")
+    samples = add_cross_sectional_ranks(samples, features.RAW_FOR_RANK)
 
     # 特徴量の一覧は features.py が持つ。データセットには全部作っておき、
     # どれを使うかは学習時にプリセットで選ぶ（特徴量の実験を回しやすくするため）。

@@ -20,7 +20,8 @@ sys.path.insert(0, os.path.join(ROOT, "research"))
 
 from build_dataset import (  # noqa: E402
     HOLD_DAYS, HORIZON_END, HORIZON_START, HIGH_WINDOW, LabelConfig,
-    attach_labels, breakout_flags, price_panel, quarterize_panel,
+    add_cross_sectional_ranks, attach_labels, breakout_flags, price_panel,
+    quarterize_panel,
 )
 
 
@@ -259,6 +260,120 @@ class TestNoLookahead(unittest.TestCase):
         last = df.iloc[-1]
         self.assertEqual(last["high52w"], 1500, "当日込みの高値は当日値を含む")
         self.assertEqual(last["high52w_prior"], 1000, "当日を除いた高値は前日までの最大")
+
+
+class TestCrossSectionalRank(unittest.TestCase):
+    """
+    横断面正規化: 同じ日付内でのパーセンタイル順位に変換する。
+
+    絶対値のままだと相場局面に依存する（訓練期間の正例率 6.19% に対し
+    テスト期間 21.66% と3倍以上ずれていた）。順位に直すと局面依存が消える。
+    """
+
+    def _df(self):
+        return pd.DataFrame({
+            "Date": pd.to_datetime(["2024-01-31"] * 4 + ["2024-02-29"] * 4),
+            "Code": list("ABCD") * 2,
+            "r_high": [70, 80, 90, 95, 50, 60, 70, np.nan],
+        })
+
+    def test_rank_is_within_date(self):
+        """順位は日付ごとに独立して計算される。"""
+        out = add_cross_sectional_ranks(self._df(), ["r_high"])
+        jan = out[out["Date"] == "2024-01-31"].set_index("Code")["r_high_r"]
+        feb = out[out["Date"] == "2024-02-29"].set_index("Code")["r_high_r"]
+        self.assertAlmostEqual(jan["D"], 1.0)      # 1月の最高値
+        self.assertAlmostEqual(feb["C"], 1.0)      # 2月の最高値
+
+    def test_same_absolute_value_gets_different_rank(self):
+        """
+        これが横断面正規化の要点。
+        同じ r_high=70 でも、1月は下位25%、2月は最上位になる。
+        絶対値では区別できない「その時点での相対位置」を表現できる。
+        """
+        out = add_cross_sectional_ranks(self._df(), ["r_high"])
+        jan_a = out[(out["Date"] == "2024-01-31") & (out["Code"] == "A")]["r_high_r"].iloc[0]
+        feb_c = out[(out["Date"] == "2024-02-29") & (out["Code"] == "C")]["r_high_r"].iloc[0]
+        self.assertAlmostEqual(jan_a, 0.25)
+        self.assertAlmostEqual(feb_c, 1.0)
+        self.assertNotAlmostEqual(jan_a, feb_c)
+
+    def test_missing_stays_missing(self):
+        """欠測は 0.5 等で埋めない。観測していない情報を与えることになるため。"""
+        out = add_cross_sectional_ranks(self._df(), ["r_high"])
+        d = out[(out["Date"] == "2024-02-29") & (out["Code"] == "D")]["r_high_r"].iloc[0]
+        self.assertTrue(pd.isna(d))
+
+    def test_single_valid_value_gets_no_rank(self):
+        """その日に有効値が1件だけなら順位に意味がないので欠測にする。"""
+        df = pd.DataFrame({
+            "Date": pd.to_datetime(["2024-03-29"] * 3),
+            "Code": list("ABC"),
+            "r_high": [80, np.nan, np.nan],
+        })
+        out = add_cross_sectional_ranks(df, ["r_high"])
+        self.assertTrue(out["r_high_r"].isna().all())
+
+    def test_original_column_is_kept(self):
+        """絶対値と順位のどちらが効くかを比較するため、元の列は残す。"""
+        out = add_cross_sectional_ranks(self._df(), ["r_high"])
+        self.assertIn("r_high", out.columns)
+        self.assertIn("r_high_r", out.columns)
+
+    def test_rank_is_monotonic_in_value(self):
+        """同一日付内では、値が大きいほど順位も大きい。"""
+        out = add_cross_sectional_ranks(self._df(), ["r_high"])
+        jan = out[out["Date"] == "2024-01-31"].sort_values("r_high")
+        self.assertTrue(jan["r_high_r"].is_monotonic_increasing)
+
+    def test_missing_column_is_skipped(self):
+        out = add_cross_sectional_ranks(self._df(), ["r_high", "存在しない列"])
+        self.assertNotIn("存在しない列_r", out.columns)
+
+
+class TestFeaturePresets(unittest.TestCase):
+    """特徴量セットの定義が壊れていないこと。"""
+
+    def test_all_excludes_rank_columns(self):
+        """`all` は絶対値のみ。順位版は別プリセットで比較する。"""
+        import features as F
+        cols = F.columns("all")
+        self.assertEqual(len(cols), 34)
+        self.assertFalse(any(c.endswith("_r") for c in cols))
+
+    def test_rank_all_mirrors_all(self):
+        """`rank_all` は `all` と同じ構成の順位版。"""
+        import features as F
+        self.assertEqual(len(F.columns("rank_all")), len(F.columns("all")))
+
+    def test_every_preset_resolves(self):
+        import features as F
+        for name in F.PRESETS:
+            self.assertGreater(len(F.columns(name)), 0, f"{name} が空")
+
+    def test_rank_targets_cover_non_market_groups(self):
+        """市場環境(TOPIX)は全銘柄共通なので順位化しない。"""
+        import features as F
+        self.assertNotIn("topix_ret_20", F.RAW_FOR_RANK)
+        self.assertIn("r_high", F.RAW_FOR_RANK)
+
+    def test_all_columns_is_the_union_over_presets(self):
+        """
+        `all_columns()` は build_dataset.py がデータセットに残す列を決める。
+        ここが `columns("all")` だと順位列が丸ごと落ち、
+        rank_* プリセットが「列が無い」ではなく黙って空回りする。
+        """
+        import features as F
+        every = F.all_columns()
+        for name in F.PRESETS:
+            missing = [c for c in F.columns(name) if c not in every]
+            self.assertEqual(missing, [], f"{name} の列が all_columns に無い")
+
+    def test_all_columns_keeps_rank_columns(self):
+        import features as F
+        every = F.all_columns()
+        self.assertEqual(len([c for c in every if c.endswith("_r")]),
+                         len(F.RAW_FOR_RANK))
 
 
 class TestDefaultLabelIsE(unittest.TestCase):

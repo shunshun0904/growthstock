@@ -39,6 +39,23 @@ GROUPS: Dict[str, List[str]] = {
     "market": ["topix_ret_20", "topix_ret_120"],
 }
 
+#: 横断面正規化（同じ日付内でのパーセンタイル順位）を作る対象の列。
+#: 絶対値のままだと相場局面に依存するため、順位に直して局面依存を消す。
+#: 実測で訓練 6.19% / テスト 21.66% と正例率が3倍以上ずれており、
+#: 絶対値の特徴量では学習が成立していなかった。
+RAW_FOR_RANK: List[str] = [
+    c for g in ("fund_level", "fund_lag", "fund_trend", "price", "volume",
+                "liquidity", "supply", "progress")
+    for c in GROUPS[g]
+]
+
+#: 順位版のグループ。列名は元の列に `_r` を付けたもの。
+GROUPS.update({
+    f"{g}_rank": [f"{c}_r" for c in GROUPS[g]]
+    for g in ("fund_level", "fund_lag", "fund_trend", "price", "volume",
+              "liquidity", "supply", "progress")
+})
+
 #: 実験用のプリセット。グループ名の並びで指定する。
 PRESETS: Dict[str, List[str]] = {
     # 素朴なベースライン。株価位置だけ
@@ -50,11 +67,33 @@ PRESETS: Dict[str, List[str]] = {
     # 決算は直近の水準だけ（ラグと傾きを落とす）
     "fund_simple": ["fund_level", "price", "volume", "liquidity", "supply",
                     "progress", "market"],
-    # 全部
-    "all": list(GROUPS.keys()),
+    # 全部（絶対値のみ。順位版は別プリセットで比較する）
+    "all": ["fund_level", "fund_lag", "fund_trend", "price", "volume",
+            "liquidity", "supply", "progress", "market"],
     # 市場環境を抜いた全部。
     # all との差が「相場局面をどれだけ暗記していたか」の目安になる
-    "all_no_market": [g for g in GROUPS if g != "market"],
+    "all_no_market": [g for g in GROUPS
+                      if g != "market" and not g.endswith("_rank")],
+
+    # --- 横断面正規化版（同じ日付内でのパーセンタイル順位）---
+    # 株価位置の順位だけ。price_only と直接比較する
+    "rank_price_only": ["price_rank"],
+    # テクニカル・需給の順位版
+    "rank_technical": ["price_rank", "volume_rank", "liquidity_rank",
+                       "supply_rank", "market"],
+    # 決算の順位版のみ
+    "rank_fundamental": ["fund_level_rank", "fund_lag_rank", "fund_trend_rank",
+                         "progress_rank"],
+    # 全部の順位版
+    "rank_all": ["fund_level_rank", "fund_lag_rank", "fund_trend_rank",
+                 "price_rank", "volume_rank", "liquidity_rank",
+                 "supply_rank", "progress_rank", "market"],
+    # 絶対値と順位の両方（順位が絶対値に上乗せの情報を持つかを見る）
+    "raw_and_rank": ["fund_level", "fund_trend", "price", "volume", "liquidity",
+                     "supply", "progress", "market",
+                     "fund_level_rank", "fund_trend_rank", "price_rank",
+                     "volume_rank", "liquidity_rank", "supply_rank",
+                     "progress_rank"],
 }
 
 DEFAULT_PRESET = "all"
@@ -73,8 +112,20 @@ def columns(preset: str) -> List[str]:
 
 
 def all_columns() -> List[str]:
-    """データセットに作るべき全列。build_dataset.py が使う。"""
-    return columns("all")
+    """データセットに作るべき全列。build_dataset.py が使う。
+
+    どのプリセットからでも参照されうる列の和集合を返す。
+    `columns("all")` ではないことに注意。"all" は絶対値のみのプリセットであり、
+    それを使うと横断面正規化した `*_r` 列がデータセットから落ちてしまう。
+    """
+    out: List[str] = []
+    seen = set()
+    for preset in PRESETS:
+        for c in columns(preset):
+            if c not in seen:
+                seen.add(c)
+                out.append(c)
+    return out
 
 
 def describe(preset: str) -> str:
