@@ -42,7 +42,7 @@
 | ロジスティック回帰 [valuation_only] | 0.2149 | 0.5175 | 26.1% | 24.6% | 1.25x |
 | ベースライン: 既存の8軸総合スコア | 0.2133 | 0.5493 | 22.8% | 20.2% | 1.03x |
 | ベースライン: 出来高モメンタムのみ | 0.2133 | 0.5560 | 15.2% | 17.7% | 0.90x |
-| ロジスティック回帰 [fundamental_v2] | 0.1953 | 0.5075 | 13.6% | 18.3% | 0.93x |
+| ロジスティック回帰 [fundamental_v2] | 0.1953 | 0.5075 | 14.1% | 18.3% | 0.93x |
 | 勾配ブースティング [rank_fundamental_v2] | 0.1927 | 0.4968 | 15.8% | 17.1% | 0.87x |
 | 勾配ブースティング [valuation_only] | 0.1923 | 0.4821 | 29.9% | 20.4% | 1.04x |
 | ロジスティック回帰 [fundamental] | 0.1913 | 0.5078 | 13.0% | 17.2% | 0.88x |
@@ -79,7 +79,7 @@
 | 勾配ブースティング [rank_all] | 0.2943 | 0.6006 | 40.4% | 36.2% | 1.67x |
 | 勾配ブースティング [fundamental_v2] | 0.2440 | 0.5512 | 27.6% | 26.0% | 1.20x |
 | ロジスティック回帰 [valuation_only] | 0.2387 | 0.5407 | 23.7% | 26.1% | 1.21x |
-| 勾配ブースティング [fundamental] | 0.2378 | 0.5452 | 22.8% | 23.9% | 1.10x |
+| 勾配ブースティング [fundamental] | 0.2378 | 0.5452 | 22.8% | 23.7% | 1.09x |
 | ベースライン: 出来高モメンタムのみ | 0.2348 | 0.5474 | 16.2% | 22.3% | 1.03x |
 | 勾配ブースティング [rank_fundamental_v2] | 0.2337 | 0.5323 | 24.6% | 24.1% | 1.11x |
 | ベースライン: 既存の8軸総合スコア | 0.2336 | 0.5386 | 23.7% | 23.8% | 1.10x |
@@ -131,7 +131,7 @@
 | `all` | 64 | fund_level + fund_lag + fund_trend + price + volume + liquidity + supply + progress + valuation + turnaround + market | 0.3097 | 1.40x |
 | `fundamental_v2` | 55 | fund_level + fund_lag + fund_trend + progress + valuation + turnaround | 0.2440 | 1.20x |
 | `valuation_only` | 4 | valuation | 0.2387 | 1.21x |
-| `fundamental` | 49 | fund_level + fund_lag + fund_trend + progress | 0.2378 | 1.10x |
+| `fundamental` | 49 | fund_level + fund_lag + fund_trend + progress | 0.2378 | 1.09x |
 | `rank_fundamental_v2` | 55 | fund_level_rank + fund_lag_rank + fund_trend_rank + progress_rank + valuation_rank + turnaround | 0.2337 | 1.11x |
 | `rank_fundamental` | 49 | fund_level_rank + fund_lag_rank + fund_trend_rank + progress_rank | 0.2302 | 1.06x |
 
