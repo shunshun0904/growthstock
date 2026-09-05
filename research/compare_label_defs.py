@@ -28,11 +28,30 @@ from build_dataset import (  # noqa: E402
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_data")
 
 # 比較する定義。名前は LabelConfig.name が自動生成する。
+#
+# 変更軸は3つ:
+#   (a) 高値窓     52週(245日) → 78週(368日)   … 超えるべき水準を上げる
+#   (b) ホライズン 1〜6ヶ月 → 1〜3ヶ月          … 予測する期間を絞る
+#   (c) 定着条件   期間延長 / 水準維持の追加     … 失速したケースを正例から外す
+#
+# (c) は2案:
+#   c1. hold_days を 20→40 に延長 … ブレイク後40営業日、-8%を割らない
+#   c2. sustain を追加            … ブレイク60営業日後もブレイク時終値以上
 CONFIGS: List[LabelConfig] = [
-    LabelConfig(high_window=245, horizon_start=20, horizon_end=120),  # 現行
-    LabelConfig(high_window=245, horizon_start=20, horizon_end=60),   # 期間だけ短縮
-    LabelConfig(high_window=368, horizon_start=20, horizon_end=120),  # 高値窓だけ拡大
-    LabelConfig(high_window=368, horizon_start=20, horizon_end=60),   # 両方（ご提案）
+    # --- 基準 ---
+    LabelConfig(high_window=245, horizon_end=120),                       # A 現行
+    # --- 単一軸の変更 ---
+    LabelConfig(high_window=245, horizon_end=60),                        # B 期間のみ短縮
+    LabelConfig(high_window=368, horizon_end=120),                       # C 高値窓のみ拡大
+    LabelConfig(high_window=245, horizon_end=120, hold_days=40),         # D 定着期間のみ延長
+    LabelConfig(high_window=245, horizon_end=120, sustain_days=60),      # E 水準維持のみ追加
+    # --- ご提案（高値窓 + 期間）---
+    LabelConfig(high_window=368, horizon_end=60),                        # F
+    # --- ご提案 + 定着条件 ---
+    LabelConfig(high_window=368, horizon_end=60, hold_days=40),          # G F + 定着40日
+    LabelConfig(high_window=368, horizon_end=60, sustain_days=60),       # H F + 水準維持
+    LabelConfig(high_window=368, horizon_end=60, hold_days=40,
+                sustain_days=60),                                        # I 全部
 ]
 
 
@@ -129,16 +148,30 @@ def main(argv=None) -> int:
                   f"終端 中央値 {d['endGain_median']}% "
                   f"/ 終端プラス率 {d['endGain_positive_rate']}")
 
-    print("\n" + "=" * 78)
-    print(f"{'定義':<24}{'サンプル':>10}{'正例率':>9}{'正例の最大上昇':>16}{'負例の最大上昇':>16}")
-    print("-" * 78)
-    for r in results:
+    print("\n" + "=" * 118)
+    print("定義ごとの比較（正例率と、ホライズン内の値動き中央値）")
+    print("-" * 118)
+    hdr = (f"{'#':<3}{'定義':<44}{'サンプル':>10}{'正例率':>9}"
+           f"{'正例:最大上昇':>14}{'正例:終端':>12}{'負例:終端':>12}{'分離度':>9}")
+    print(hdr)
+    print("-" * 118)
+    for i, r in enumerate(results):
+        tag = chr(ord("A") + i)
         if r["n"] == 0:
-            print(f"{r['config']:<24}{'—':>10}")
+            print(f"{tag:<3}{r['config']:<44}{'サンプルなし':>10}")
             continue
         p = r.get("positive", {}); n = r.get("negative", {})
-        print(f"{r['config']:<24}{r['n']:>10,}{r['positive_rate']*100:>8.2f}%"
-              f"{str(p.get('maxGain_median'))+'%':>16}{str(n.get('maxGain_median'))+'%':>16}")
+        # 分離度 = 正例の最大上昇 p25 − 負例の最大上昇 p75。正なら分布が重ならない
+        sep = None
+        if p.get("maxGain_p25") is not None and n.get("maxGain_p75") is not None:
+            sep = p["maxGain_p25"] - n["maxGain_p75"]
+        print(f"{tag:<3}{r['config']:<44}{r['n']:>10,}{r['positive_rate']*100:>8.2f}%"
+              f"{str(p.get('maxGain_median'))+'%':>14}"
+              f"{str(p.get('endGain_median'))+'%':>12}"
+              f"{str(n.get('endGain_median'))+'%':>12}"
+              f"{('+' if sep and sep > 0 else '') + str(round(sep,1)) + 'pt' if sep is not None else '—':>9}")
+    print("-" * 118)
+    print("分離度 = 正例の最大上昇率p25 − 負例の最大上昇率p75。正なら四分位範囲が重ならない")
 
     with open(args.out, "w", encoding="utf-8") as fh:
         json.dump({"results": results}, fh, ensure_ascii=False, indent=2)

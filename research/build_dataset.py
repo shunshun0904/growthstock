@@ -47,18 +47,31 @@ class LabelConfig:
     vol_multiple: float = VOL_MULTIPLE
     max_rhigh_at_t: float = 95.0
     min_trading_value: float = 0.5
+    # --- 定着条件（任意）---
+    # ブレイクから sustain_days 営業日後の終値が、
+    # ブレイク時終値の sustain_ratio 倍以上であることを要求する。
+    # hold（期間中の最安値が -x% を割らない）が「急落しないこと」を見るのに対し、
+    # sustain は「一定期間後も水準を保っていること」を見る。失速を除外できる。
+    sustain_days: int = 0        # 0 なら条件なし
+    sustain_ratio: float = 1.0
 
     @property
     def name(self) -> str:
         weeks = round(self.high_window / 245 * 52)
         m0 = round(self.horizon_start / 20)
         m1 = round(self.horizon_end / 20)
-        return f"{weeks}週高値 / {m0}〜{m1}ヶ月"
+        dd = round((1 - self.hold_drawdown) * 100)
+        base = f"{weeks}週 / {m0}〜{m1}ヶ月 / 定着{self.hold_days}日-{dd}%"
+        if self.sustain_days:
+            pct = round((self.sustain_ratio - 1) * 100)
+            sign = "+" if pct > 0 else ""
+            base += f" +{self.sustain_days}日後{sign}{pct}%"
+        return base
 
     @property
     def forward_needed(self) -> int:
         """ラベル確定に必要な将来営業日数。"""
-        return self.horizon_end + self.hold_days
+        return self.horizon_end + max(self.hold_days, self.sustain_days)
 
 
 DEFAULT_LABEL = LabelConfig()
@@ -144,7 +157,8 @@ def breakout_flags(df: pd.DataFrame, cfg: LabelConfig = DEFAULT_LABEL) -> pd.Dat
     3条件すべてを満たす日のみ True:
       1. 終値が それまでの52週高値 を上抜け
       2. 出来高が20日平均の VOL_MULTIPLE 倍以上
-      3. 以降 HOLD_DAYS 営業日、ブレイク時終値から HOLD_DRAWDOWN を割らない
+      3. 以降 hold_days 営業日、ブレイク時終値から hold_drawdown を割らない
+      4. (任意) sustain_days 営業日後も、ブレイク時終値の sustain_ratio 倍以上
     """
     g = df.groupby("Code", sort=False)
 
@@ -162,9 +176,18 @@ def breakout_flags(df: pd.DataFrame, cfg: LabelConfig = DEFAULT_LABEL) -> pd.Dat
     cond_hold = df["future_min_close"] >= df["close"] * cfg.hold_drawdown
 
     is_bo = cond_high & cond_vol & cond_hold
-    # 定着を評価できない（データ末尾）日は判定不能として NaN にする
-    is_bo = is_bo.where(df["future_min_close"].notna())
-    df["is_breakout"] = is_bo
+    undetermined = df["future_min_close"].isna()
+
+    # 4. 水準維持（任意）: sustain_days 営業日後もブレイク時終値の水準を保っているか
+    if cfg.sustain_days:
+        sd = cfg.sustain_days
+        df["sustain_close"] = g["close"].transform(lambda s: s.shift(-sd))
+        cond_sustain = df["sustain_close"] >= df["close"] * cfg.sustain_ratio
+        is_bo = is_bo & cond_sustain
+        undetermined = undetermined | df["sustain_close"].isna()
+
+    # 判定に必要な将来データが無い（データ末尾）日は判定不能として NaN にする
+    df["is_breakout"] = is_bo.where(~undetermined)
 
     return df
 

@@ -19,7 +19,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "research"))
 
 from build_dataset import (  # noqa: E402
-    HOLD_DAYS, HORIZON_END, HORIZON_START, HIGH_WINDOW,
+    HOLD_DAYS, HORIZON_END, HORIZON_START, HIGH_WINDOW, LabelConfig,
     attach_labels, breakout_flags, price_panel, quarterize_panel,
 )
 
@@ -48,6 +48,7 @@ class TestBreakoutDetection(unittest.TestCase):
     def _flags(self, closes, vols):
         df = price_panel(make_bars(closes, vols))
         return breakout_flags(df)
+
 
     def test_detects_valid_breakout(self):
         """高値更新 + 出来高1.5倍以上 + 20日定着 の3条件が揃えば True。"""
@@ -94,6 +95,78 @@ class TestBreakoutDetection(unittest.TestCase):
         df = self._flags(closes, vols)
         self.assertTrue(pd.isna(df.iloc[-1]["is_breakout"]),
                         "将来データが無い日は判定不能(NaN)であるべき")
+
+
+class TestSustainCondition(unittest.TestCase):
+    """定着条件 (sustain): 一定期間後も水準を保っているか。"""
+
+    def _flags(self, closes, vols, cfg):
+        return breakout_flags(price_panel(make_bars(closes, vols), cfg), cfg)
+
+    def test_sustain_rejects_fade(self):
+        """ブレイク後にじりじり戻して水準を割ったら正例にしない。"""
+        cfg = LabelConfig(sustain_days=60, sustain_ratio=1.0)
+        n = HIGH_WINDOW + 5
+        # ブレイク直後は下げないので hold は通るが、60日後には水準を割る
+        tail = [1200] + [1180] * 30 + [1100] * 40
+        tvol = [300000] + [100000] * 70
+        closes, vols = flat_then(n, 1000, tail, tvol)
+        df = self._flags(closes, vols, cfg)
+        self.assertEqual(int((df["is_breakout"] == True).sum()), 0)  # noqa: E712
+
+    def test_sustain_accepts_holding_level(self):
+        """60日後も水準を保っていれば正例。"""
+        cfg = LabelConfig(sustain_days=60, sustain_ratio=1.0)
+        n = HIGH_WINDOW + 5
+        tail = [1200] + [1250] * 70
+        tvol = [300000] + [100000] * 70
+        closes, vols = flat_then(n, 1000, tail, tvol)
+        df = self._flags(closes, vols, cfg)
+        self.assertEqual(int((df["is_breakout"] == True).sum()), 1)  # noqa: E712
+
+    def test_sustain_is_stricter_than_hold_alone(self):
+        """同じ系列で、定着条件ありのほうが正例が減る(増えることはない)。"""
+        n = HIGH_WINDOW + 5
+        tail = [1200] + [1190] * 30 + [1120] * 40
+        tvol = [300000] + [100000] * 70
+        closes, vols = flat_then(n, 1000, tail, tvol)
+        base = self._flags(closes, vols, LabelConfig())
+        strict = self._flags(closes, vols, LabelConfig(sustain_days=60, sustain_ratio=1.0))
+        self.assertLessEqual(int((strict["is_breakout"] == True).sum()),  # noqa: E712
+                             int((base["is_breakout"] == True).sum()))
+
+    def test_undetermined_when_sustain_horizon_missing(self):
+        """sustain を評価できない末尾は False ではなく NaN。"""
+        cfg = LabelConfig(sustain_days=60, sustain_ratio=1.0)
+        n = HIGH_WINDOW + 5
+        closes, vols = flat_then(n, 1000, [1200] + [1250] * 10, [300000] + [100000] * 10)
+        df = self._flags(closes, vols, cfg)
+        self.assertTrue(pd.isna(df.iloc[-1]["is_breakout"]))
+
+    def test_forward_needed_accounts_for_sustain(self):
+        self.assertEqual(LabelConfig(horizon_end=60, hold_days=20).forward_needed, 80)
+        self.assertEqual(
+            LabelConfig(horizon_end=60, hold_days=20, sustain_days=60).forward_needed, 120)
+
+
+class TestHighWindowParameter(unittest.TestCase):
+    def test_78week_window_needs_longer_history(self):
+        """78週(368日)窓では、368営業日そろうまで高値が未定義になる。"""
+        cfg = LabelConfig(high_window=368)
+        n = 400
+        df = price_panel(make_bars(list(range(1000, 1000 + n)), [100000] * n), cfg)
+        self.assertTrue(df["high52w"].iloc[:367].isna().all())
+        self.assertTrue(df["high52w"].iloc[367:].notna().all())
+
+    def test_wider_window_is_harder_to_break(self):
+        """同じ系列なら、78週高値のほうが52週高値以上になる(超えにくい)。"""
+        n = 400
+        # 前半に高値、後半は低い水準から回復する形
+        closes = list(range(1500, 1500 + 100)) + list(range(1400, 1400 + 300))
+        a = price_panel(make_bars(closes, [100000] * n), LabelConfig(high_window=245))
+        b = price_panel(make_bars(closes, [100000] * n), LabelConfig(high_window=368))
+        both = a["high52w"].notna() & b["high52w"].notna()
+        self.assertTrue((b.loc[both, "high52w"] >= a.loc[both, "high52w"]).all())
 
 
 class TestLabelWindow(unittest.TestCase):
