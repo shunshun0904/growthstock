@@ -302,6 +302,15 @@ def _run_incremental(client: JQuantsClient, days: List[dt.date],
     for name in args.what:
         if name == "topix":
             continue  # topix は期間指定で一括取得するので後段でまとめて扱う
+        if name == "master":
+            # 銘柄マスタは日付ごとの蓄積ではなく毎回最新に上書きする。
+            # 後段で別に取得するので、この日付ループでは扱わない。
+            #
+            # ここを通していたため、下の else（catch-all）に落ちて
+            # /markets/margin-interest を叩き、信用残のデータを
+            # master_YYYY.parquet に書き込んでいた。
+            # 2,425日ぶん・約38分を毎回無駄にしていた。
+            continue
         if name == "margin":
             # 信用残は週次公表。週に1日だけ候補にする
             cand = sorted({d for d in days if d.weekday() == 4})
@@ -321,13 +330,21 @@ def _run_incremental(client: JQuantsClient, days: List[dt.date],
             continue
 
         t0 = time.time()
+        # catch-all の else にしない。
+        # 種別を1つ増やしたときに、黙って別のエンドポイントを叩いてしまう。
         if name == "bars":
             df = fetch_bars(client, todo)
         elif name == "fins":
             df = fetch_fins(client, todo)
-        else:
-            df = _fetch_by_day(client, "/markets/margin-interest", todo, MARGIN_COLS, "margin")
+        elif name == "margin":
+            # todo は上で既に週次に間引いてある。
+            # fetch_margin() は同じ間引きを内部でも行うので、ここでは使わない
+            # （二重に掛けても結果は同じだが、それに依存したくない）
+            df = _fetch_by_day(client, "/markets/margin-interest", todo,
+                               MARGIN_COLS, "margin")
             df = _numify(df, ["LongVol", "ShrtVol"])
+        else:
+            raise SystemExit(f"日付ループで扱えない種別です: {name}")
 
         date_col = "DiscDate" if name == "fins" else "Date"
         written = data_store.merge_into_years(args.out_dir, name, df, date_col)

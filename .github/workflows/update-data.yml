@@ -78,6 +78,27 @@ jobs:
             echo "保存済みデータなし（初回実行）"
           ls -lh research/_data || true
 
+      # master は master.parquet として1ファイルで持つ。
+      # master_YYYY.parquet は、日付ループの catch-all バグで
+      # 信用残のデータが master の名前で書かれてしまったもの。
+      # 保存側にも残っているので消す。
+      - name: Remove stray master_YYYY files
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          stray=(research/_data/master_[0-9]*.parquet)
+          if [ ${#stray[@]} -eq 0 ]; then
+            echo "不要な master_* はありません"; exit 0
+          fi
+          for f in "${stray[@]}"; do
+            n=$(basename "$f")
+            echo "削除: $n"
+            rm -f "$f"
+            gh release delete-asset "$RELEASE_TAG" "$n" --yes || \
+              echo "  (Release 側には無し)"
+          done
+
       - name: Fetch missing days
         env:
           JQUANTS_API: ${{ secrets.JQUANTS_API }}

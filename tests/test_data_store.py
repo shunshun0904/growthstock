@@ -179,5 +179,36 @@ class TestResetKind(unittest.TestCase):
         self.assertEqual(len(os.listdir(self.dir)), 4)
 
 
+class TestKindDispatch(unittest.TestCase):
+    """
+    jq_bulk の日付ループが種別をどう振り分けるか。
+
+    以前は catch-all の else で /markets/margin-interest を叩いており、
+    master がそこに落ちて信用残のデータを master_YYYY.parquet に
+    書き込んでいた（2,425日ぶん・約38分を毎回浪費）。
+    種別を増やしたときに同じ事故が起きないようにする。
+    """
+
+    def _source(self):
+        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "research", "jq_bulk.py")
+        return open(path, encoding="utf-8").read()
+
+    def test_no_catch_all_else_for_endpoints(self):
+        """未知の種別は黙って別のエンドポイントを叩かず、落ちること。"""
+        src = self._source()
+        self.assertIn("日付ループで扱えない種別です", src)
+
+    def test_master_is_excluded_from_the_day_loop(self):
+        """master は日付ごとの蓄積ではないので、日付ループに入れない。"""
+        src = self._source()
+        self.assertIn('if name == "master":', src)
+
+    def test_master_is_not_a_tracked_kind(self):
+        """master は manifest の追跡対象ではない。
+        追跡対象にすると missing_days が毎回「全日未取得」を返す。"""
+        self.assertNotIn("master", data_store.KINDS)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
