@@ -28,10 +28,10 @@
 
 | 軸 | q0 | q1 | q2 | chg1 | chg | slope |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `eps_growth` | 32.4% | 28.8% | 25.5% | 14.4% | 13.3% | 13.3% |
-| `sales_growth` | 41.1% | 36.7% | 32.5% | 21.1% | 19.4% | 19.4% |
-| `ROE` | 23.5% | 22.8% | 19.9% | 1.5% | 3.5% | 3.5% |
-| `op_margin` | 68.2% | 63.6% | 59.1% | 49.2% | 46.6% | 46.6% |
+| `eps_growth` | 32.4% | 25.2% | 17.5% | 25.2% | 17.5% | 17.5% |
+| `sales_growth` | 41.1% | 34.1% | 25.3% | 34.1% | 25.3% | 25.3% |
+| `ROE` | 43.9% | 36.2% | 24.8% | 36.2% | 24.8% | 24.8% |
+| `op_margin` | 68.2% | 61.0% | 50.6% | 61.0% | 50.6% | 50.6% |
 
 ## 3. ラグで失われる割合
 
@@ -40,10 +40,10 @@
 
 | 軸 | q0がある行 | うちq1もある | うちq2もある |
 | --- | ---: | ---: | ---: |
-| `eps_growth` | 29,124 | 44.5% | 41.0% |
-| `sales_growth` | 37,027 | 51.2% | 47.2% |
-| `ROE` | 21,122 | 6.5% | 14.9% |
-| `op_margin` | 61,397 | 72.2% | 68.3% |
+| `eps_growth` | 29,124 | 77.8% | 54.0% |
+| `sales_growth` | 37,027 | 82.8% | 61.4% |
+| `ROE` | 39,525 | 82.4% | 56.5% |
+| `op_margin` | 61,397 | 89.4% | 74.1% |
 
 ## 4. 最終サンプルでの充足率
 
@@ -52,29 +52,29 @@
 | 特徴量 | 充足率 |
 | --- | ---: |
 | `eps_growth_q0` | 25.6% |
-| `eps_growth_q1` | 23.1% |
-| `eps_growth_q2` | 20.4% |
-| `eps_growth_chg1` | 7.3% |
-| `eps_growth_chg` | 7.9% |
-| `eps_growth_slope` | 7.9% |
+| `eps_growth_q1` | 16.7% |
+| `eps_growth_q2` | 9.3% |
+| `eps_growth_chg1` | 16.7% |
+| `eps_growth_chg` | 9.3% |
+| `eps_growth_slope` | 9.3% |
 | `sales_growth_q0` | 34.5% |
-| `sales_growth_q1` | 31.4% |
-| `sales_growth_q2` | 28.1% |
-| `sales_growth_chg1` | 12.0% |
-| `sales_growth_chg` | 13.0% |
-| `sales_growth_slope` | 13.0% |
-| `ROE_q0` | 23.4% |
-| `ROE_q1` | 24.2% |
-| `ROE_q2` | 23.1% |
-| `ROE_chg1` | 2.0% |
-| `ROE_chg` | 5.4% |
-| `ROE_slope` | 5.4% |
+| `sales_growth_q1` | 25.3% |
+| `sales_growth_q2` | 15.8% |
+| `sales_growth_chg1` | 25.3% |
+| `sales_growth_chg` | 15.8% |
+| `sales_growth_slope` | 15.8% |
+| `ROE_q0` | 33.8% |
+| `ROE_q1` | 25.8% |
+| `ROE_q2` | 14.3% |
+| `ROE_chg1` | 25.8% |
+| `ROE_chg` | 14.3% |
+| `ROE_slope` | 14.3% |
 | `op_margin_q0` | 60.3% |
-| `op_margin_q1` | 56.2% |
-| `op_margin_q2` | 56.1% |
-| `op_margin_chg1` | 34.5% |
-| `op_margin_chg` | 36.2% |
-| `op_margin_slope` | 36.2% |
+| `op_margin_q1` | 53.5% |
+| `op_margin_q2` | 41.1% |
+| `op_margin_chg1` | 53.5% |
+| `op_margin_chg` | 41.1% |
+| `op_margin_slope` | 41.1% |
 
 ## 読み方
 
