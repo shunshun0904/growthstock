@@ -38,6 +38,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import features as F  # noqa: E402
+import tuning  # noqa: E402
 from train_model import (  # noqa: E402
     DATA_DIR, EMBARGO_DAYS, baseline_scores, clean_score, evaluate, fit_models,
 )
@@ -141,6 +142,13 @@ def sign_test(wins: int, losses: int) -> float:
 
 
 def run(df: pd.DataFrame, presets: List[str], folds: List[Fold]) -> Dict:
+    # Optuna の探索結果は全フォールドで共有する。
+    # フォールドごとに探索すると計算量が現実的でないうえ、
+    # 条件が揃わなくなる。探索は最初のテスト窓より前のデータだけで行っている
+    # （research/tuning.py）。
+    params_store = tuning.load_params()
+    print(f"[tune] 探索済みパラメータ {len(params_store)}件"
+          if params_store else "[tune] 探索結果が無いため既定値を使用")
     dates = pd.to_datetime(df["Date"])
     per_fold: List[Dict] = []
 
@@ -166,7 +174,8 @@ def run(df: pd.DataFrame, presets: List[str], folds: List[Fold]) -> Dict:
             if missing:
                 print(f"  [skip] {preset}: 列がありません {missing}")
                 continue
-            models = fit_models(tr, cols, verbose=False)
+            models = fit_models(tr, cols, verbose=False, preset=preset,
+                                params_store=params_store)
             Xte = te[cols].to_numpy(dtype=float)
             for mname, model in models.items():
                 scores[f"{mname} [{preset}]"] = model.predict_proba(Xte)[:, 1]

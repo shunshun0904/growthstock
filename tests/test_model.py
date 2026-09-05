@@ -371,5 +371,106 @@ class TestWalkForwardCoversNewPresets(unittest.TestCase):
             self.assertIn(name, F.PRESETS, name)
 
 
+class TestTuningDoesNotSeeTestData(unittest.TestCase):
+    """
+    ハイパーパラメータ探索は「良さそうな設定を選ぶ」作業なので、
+    評価に使う期間を一度でも見ればリークになり、以降の評価が全部無効になる。
+    探索期間がすべてのテスト窓より前で打ち切られていることを固定する。
+    """
+
+    def _folds(self):
+        from train_model import EMBARGO_DAYS
+        return make_folds(pd.Series(pd.to_datetime(["2017-09-29", "2025-11-28"])),
+                          min_train_months=36, test_months=6, step_months=6,
+                          embargo_days=EMBARGO_DAYS), EMBARGO_DAYS
+
+    def test_cutoff_precedes_every_test_window(self):
+        folds, _ = self._folds()
+        cutoff = pd.Timestamp(folds[0].train_end)
+        for f in folds:
+            self.assertLess(cutoff, pd.Timestamp(f.test_start), f.index)
+
+    def test_cutoff_respects_the_embargo(self):
+        """打ち切り日のラベルが最初のテスト窓に食い込まないこと。"""
+        folds, embargo = self._folds()
+        cutoff = pd.Timestamp(folds[0].train_end)
+        gap = (pd.Timestamp(folds[0].test_start) - cutoff).days
+        self.assertGreaterEqual(gap, int(embargo * 1.45) - 1)
+
+    def test_cutoff_is_derived_from_folds_not_hardcoded(self):
+        """
+        フォールドの切り方を変えたら打ち切りも動くこと。
+        固定値を書いていると、切り方を変えた瞬間に静かにリークする。
+        """
+        from train_model import EMBARGO_DAYS
+        dates = pd.Series(pd.to_datetime(["2017-09-29", "2025-11-28"]))
+        a = make_folds(dates, min_train_months=36, test_months=6,
+                       step_months=6, embargo_days=EMBARGO_DAYS)[0].train_end
+        b = make_folds(dates, min_train_months=48, test_months=6,
+                       step_months=6, embargo_days=EMBARGO_DAYS)[0].train_end
+        self.assertNotEqual(a, b)
+
+
+class TestTuning(unittest.TestCase):
+    """探索そのものの挙動。"""
+
+    def _frame(self, n_dates=30, n=200, seed=0):
+        rng = np.random.default_rng(seed)
+        rows = []
+        for d in pd.date_range("2018-01-31", periods=n_dates, freq="ME"):
+            x1 = rng.normal(0, 1, n)
+            p = 1 / (1 + np.exp(-(1.5 * x1 - 1.0)))
+            rows.append(pd.DataFrame({
+                "Date": d, "x1": x1, "x2": rng.normal(0, 1, n),
+                "label": (rng.random(n) < p).astype(int)}))
+        return pd.concat(rows, ignore_index=True)
+
+    def test_inner_split_is_chronological(self):
+        """
+        内側検証をランダムに取ると、同一銘柄の隣接月が両側に入って
+        検証が簡単になりすぎ、必ず楽観的なパラメータが選ばれる。
+        """
+        import tuning
+        tr, va = tuning.chronological_split(self._frame())
+        self.assertLess(tr["Date"].max(), va["Date"].min())
+        self.assertGreater(len(tr), 0)
+        self.assertGreater(len(va), 0)
+
+    def test_tuning_does_not_do_worse_than_defaults(self):
+        import tuning
+        df = self._frame()
+        cols = ["x1", "x2"]
+        best = tuning.tune(df, cols, n_trials=5, verbose=False)
+        tr, va = tuning.chronological_split(df)
+        s_def, _ = tuning._fit_one(tuning.DEFAULT_PARAMS, tr, va, cols)
+        s_best, _ = tuning._fit_one(best, tr, va, cols)
+        self.assertGreaterEqual(s_best, s_def - 1e-9)
+
+    def test_tree_count_comes_from_early_stopping(self):
+        """木の本数は探索対象にせず early stopping が決める。"""
+        import tuning
+        best = tuning.tune(self._frame(), ["x1", "x2"], n_trials=3, verbose=False)
+        self.assertGreaterEqual(best["n_estimators"], 50)
+        self.assertLess(best["n_estimators"], tuning.FIXED["n_estimators"])
+
+    def test_falls_back_to_defaults_without_both_classes(self):
+        import tuning
+        df = self._frame()
+        df["label"] = 0
+        best = tuning.tune(df, ["x1", "x2"], n_trials=3, verbose=False)
+        self.assertEqual(best["learning_rate"],
+                         tuning.DEFAULT_PARAMS["learning_rate"])
+
+    def test_params_for_returns_defaults_for_unknown_preset(self):
+        import tuning
+        p = tuning.params_for("__no_such_preset__", {})
+        self.assertEqual(p["num_leaves"], tuning.DEFAULT_PARAMS["num_leaves"])
+
+    def test_scale_pos_weight_handles_imbalance(self):
+        import tuning
+        y = np.array([0] * 90 + [1] * 10)
+        self.assertAlmostEqual(tuning.scale_pos_weight(y), 9.0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

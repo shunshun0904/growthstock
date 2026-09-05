@@ -82,6 +82,12 @@ jobs:
         run: python3 research/validate_metrics.py 2>&1 | tee validate.log
       - name: Export label samples
         run: python3 research/export_label_samples.py 2>&1 | tee labels.log
+      # ハイパーパラメータ探索。
+      # 探索期間は最初のテスト窓より前に限る（research/run_tuning.py が
+      # フォールド定義から機械的に導く）。ここを間違えると以降の評価が全部無効になる。
+      - name: Tune LightGBM
+        run: python3 research/run_tuning.py --n-trials 30 2>&1 | tee tune.log
+
       - name: Train and evaluate
         run: |
           python3 research/train_model.py             --val-start 2023-01-01 --test-start 2024-10-01 2>&1 | tee train.log
@@ -110,6 +116,7 @@ jobs:
             echo "## 日付内の分離力"; echo '```'; tail -30 within.log; echo '```'
             echo "## 決算カバレッジ"; echo '```'; cat coverage.log; echo '```'
             echo "## 指標の検証"; echo '```'; cat validate.log; echo '```'
+            echo "## パラメータ探索"; echo '```'; tail -40 tune.log; echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Commit outputs
@@ -142,6 +149,7 @@ jobs:
             research/_data/within_date.json
             research/_data/fundamental_coverage.json
             research/_data/validation.json
+            research/_data/lgbm_params.json
             docs/MODEL_RESULTS.md
             docs/MODEL_WALKFORWARD.md
             docs/MODEL_WITHIN_DATE.md

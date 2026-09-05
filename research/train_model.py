@@ -25,7 +25,6 @@ from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.impute import SimpleImputer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import average_precision_score, roc_auc_score
@@ -34,6 +33,7 @@ from sklearn.preprocessing import StandardScaler
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import features as F  # noqa: E402
+import tuning  # noqa: E402
 from build_dataset import DEFAULT_LABEL  # noqa: E402
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_data")
@@ -196,29 +196,32 @@ def baseline_scores(df: pd.DataFrame) -> Dict[str, np.ndarray]:
 # --------------------------------------------------------------------------- #
 
 def fit_models(train: pd.DataFrame, features: List[str],
-               verbose: bool = True) -> Dict:
+               verbose: bool = True, preset: str = "",
+               params_store: Dict | None = None) -> Dict:
+    """
+    LightGBM と ロジスティック回帰 を学習する。
+
+    LightGBM のハイパーパラメータは research/tuning.py が Optuna で
+    探索した結果を使う（research/_data/lgbm_params.json）。
+    探索結果が無ければ既定値。
+
+    木の本数は探索時に early stopping で決めた本数を固定して使う。
+    ここで再び early stopping を掛けると検証用の切り出しが必要になり、
+    フォールドごとに訓練量が変わって比較の条件が揃わない。
+    """
+    import lightgbm as lgb
+
     Xtr = train[features].to_numpy(dtype=float)
     ytr = train["label"].to_numpy(dtype=int)
-    # 不均衡対策: 正例に負例/正例 の重みを与える
-    pos = max(1, int(ytr.sum()))
-    w = np.where(ytr == 1, (len(ytr) - pos) / pos, 1.0)
 
+    params = tuning.params_for(preset, params_store)
     if verbose:
-        print("\n[fit] HistGradientBoosting")
-    # early_stopping は使わない。
-    # sklearn の early_stopping=True は訓練データから *ランダムに*
-    # validation_fraction を取る。時系列パネルでは同一銘柄の隣接月が強く相関するため、
-    # そのホールドアウトは訓練行と時間的に混ざった「簡単すぎる」集合になり、
-    # 停止が遅れて過学習する。テストへのリークではないが、
-    # 勾配ブースティングが一貫してロジスティック回帰に負けていた一因と考えられる。
-    # 代わりに正則化を効かせた固定 max_iter にする。
-    # 全プリセット・全フォールドで同じ条件なので比較の公平性は保たれる。
-    hgb = HistGradientBoostingClassifier(
-        max_iter=200, learning_rate=0.05, max_leaf_nodes=31,
-        min_samples_leaf=50, l2_regularization=1.0,
-        early_stopping=False, random_state=0,
-    )
-    hgb.fit(Xtr, ytr, sample_weight=w)
+        print(f"\n[fit] LightGBM (木{params['n_estimators']}本 "
+              f"/ lr {params['learning_rate']:.3f} "
+              f"/ 葉 {params['num_leaves']})")
+    gbm = lgb.LGBMClassifier(**params,
+                             scale_pos_weight=tuning.scale_pos_weight(ytr))
+    gbm.fit(Xtr, ytr)
 
     if verbose:
         print("[fit] ロジスティック回帰（解釈用）")
@@ -229,7 +232,7 @@ def fit_models(train: pd.DataFrame, features: List[str],
     )
     lr.fit(Xtr, ytr)
 
-    return {"勾配ブースティング": hgb, "ロジスティック回帰": lr}
+    return {"LightGBM": gbm, "ロジスティック回帰": lr}
 
 
 def main(argv: List[str] | None = None) -> int:
@@ -273,6 +276,11 @@ def main(argv: List[str] | None = None) -> int:
             test_scores.update(bs)
 
     # --- 特徴量セットごとに学習・評価 ---
+    params_store = tuning.load_params()
+    if params_store:
+        print(f"[tune] 探索済みパラメータ {len(params_store)}件を使用")
+    else:
+        print("[tune] 探索結果が無いため既定値を使用")
     experiments: List[Dict] = []
     for preset in presets:
         cols = F.columns(preset)
@@ -281,7 +289,8 @@ def main(argv: List[str] | None = None) -> int:
             print(f"[skip] {preset}: 列がありません {missing}")
             continue
         print(f"\n{'='*70}\n[experiment] {F.describe(preset)}\n{'='*70}")
-        models = fit_models(parts["train"], cols)
+        models = fit_models(parts["train"], cols, preset=preset,
+                            params_store=params_store)
         rec = {"preset": preset, "groups": F.PRESETS[preset], "n_features": len(cols),
                "results": {}}
         for split in ("val", "test"):
@@ -314,7 +323,7 @@ def main(argv: List[str] | None = None) -> int:
     pairs = [f"{m} [{p_}]"
              for base in ("price_only", "technical", "all", "fundamental")
              for p_ in (base, f"rank_{base}")
-             for m in ("ロジスティック回帰", "勾配ブースティング")]
+             for m in ("ロジスティック回帰", "LightGBM")]
     keep = list(dict.fromkeys(ranked[:6] + [k for k in pairs if k in test_scores]))
     print(f"\n[bootstrap] {len(keep)}モデル × {args.n_boot}回 の対応のあるブートストラップ")
     boot = paired_bootstrap(y_test, {REF: test_scores[REF],
