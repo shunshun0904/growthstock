@@ -7,10 +7,12 @@ on:
   # 調査用ブランチでは push でも起動できるようにしておく
   push:
     branches: ['claude/breakout-model']
-    paths: ['research/**', '.github/workflows/probe.yml']
+    # research/** にすると rebuild_run_id.txt を触るたびに発火し、
+    # API 呼び出しを無駄に使う。probe 関連のファイルだけに絞る。
+    paths: ['research/probe_*.py', '.github/workflows/probe.yml']
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   probe:
@@ -24,11 +26,27 @@ jobs:
         env:
           JQUANTS_API: ${{ secrets.JQUANTS_API }}
         run: |
+          python3 research/probe_fins_fields.py
           python3 research/probe_universe.py
           python3 research/probe_boundary.py
+      - name: Commit field report
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A docs/DATA_FIELDS.md
+          if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
+          git commit -m "chore(research): /fins/summary の項目一覧を実測して更新"
+          for i in 1 2 3 4; do
+            if git push; then exit 0; fi
+            sleep $((2 ** i)); git pull --rebase
+          done
+          exit 1
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: probe-result
-          path: research/probe_*.json
+          path: |
+            research/probe_*.json
+            docs/DATA_FIELDS.md
           if-no-files-found: warn
