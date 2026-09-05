@@ -82,22 +82,77 @@ def precision_at_k(y_true: np.ndarray, score: np.ndarray, k_pct: float) -> float
     return float(y_true[idx].mean())
 
 
-def evaluate(name: str, y: np.ndarray, score: np.ndarray) -> Dict:
+def clean_score(score: np.ndarray) -> np.ndarray:
     """欠測スコアは最下位として扱う（予測できないものを高評価にしない）。"""
-    score = np.where(np.isfinite(score), score, -np.inf)
+    score = np.asarray(score, dtype=float)
+    ok = np.isfinite(score)
+    if not ok.any():
+        return np.zeros_like(score)
+    return np.where(ok, score, score[ok].min() - 1.0)
+
+
+def evaluate(name: str, y: np.ndarray, score: np.ndarray) -> Dict:
+    score = clean_score(score)
     base_rate = float(y.mean())
     res = {
         "name": name,
         "n": int(len(y)),
         "base_rate": base_rate,
-        "pr_auc": float(average_precision_score(y, np.where(np.isfinite(score), score, np.nanmin(score[np.isfinite(score)]) - 1))),
-        "roc_auc": float(roc_auc_score(y, np.where(np.isfinite(score), score, np.nanmin(score[np.isfinite(score)]) - 1))),
+        "pr_auc": float(average_precision_score(y, score)),
+        "roc_auc": float(roc_auc_score(y, score)),
     }
     for k in (1, 5, 10):
         p = precision_at_k(y, score, k)
         res[f"precision@{k}%"] = p
         res[f"lift@{k}%"] = p / base_rate if base_rate > 0 else float("nan")
     return res
+
+
+def paired_bootstrap(y: np.ndarray, scores: Dict[str, np.ndarray], reference: str,
+                     n_boot: int = 1000, seed: int = 0) -> List[Dict]:
+    """
+    PR-AUC の差が誤差の範囲かを、対応のあるブートストラップで測る。
+
+    テスト期間は1年ほどしかなく、n が同じでも PR-AUC の差 0.004 が
+    意味のある差なのかは目視では判断できない。特徴量を足すたびに
+    「わずかに上回った」が出るので、毎回ここで判定する。
+
+    同一のリサンプルで全モデルを評価する（対応のある比較）。
+    そうしないとモデル間の差にリサンプル自体のばらつきが混ざる。
+    """
+    y = np.asarray(y, dtype=int)
+    clean = {k: clean_score(v) for k, v in scores.items()}
+    names = [k for k in clean if k != reference]
+    diffs = {k: np.empty(n_boot, dtype=float) for k in names}
+    rng = np.random.default_rng(seed)
+    n = len(y)
+
+    done = 0
+    while done < n_boot:
+        idx = rng.integers(0, n, size=n)
+        yb = y[idx]
+        # 正例が無いリサンプルでは PR-AUC が定義できない。引き直す
+        if yb.sum() == 0 or yb.sum() == len(yb):
+            continue
+        ref_ap = average_precision_score(yb, clean[reference][idx])
+        for k in names:
+            diffs[k][done] = average_precision_score(yb, clean[k][idx]) - ref_ap
+        done += 1
+
+    out = []
+    for k in names:
+        d = diffs[k]
+        out.append({
+            "name": k,
+            "pr_auc": float(average_precision_score(y, clean[k])),
+            "diff": float(average_precision_score(y, clean[k])
+                          - average_precision_score(y, clean[reference])),
+            "ci_low": float(np.percentile(d, 2.5)),
+            "ci_high": float(np.percentile(d, 97.5)),
+            "p_better": float((d > 0).mean()),
+        })
+    out.sort(key=lambda r: -r["diff"])
+    return out
 
 
 def report(rows: List[Dict], title: str) -> str:
@@ -167,6 +222,8 @@ def main(argv: List[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="ブレイクアウト予測モデルの学習と評価")
     ap.add_argument("--dataset", default=os.path.join(DATA_DIR, "dataset.parquet"))
     ap.add_argument("--val-start", default="2023-01-01")
+    ap.add_argument("--n-boot", type=int, default=1000,
+                    help="ブートストラップ反復回数。0で無効")
     ap.add_argument("--test-start", default="2025-01-01")
     ap.add_argument("--features", nargs="*", default=None,
                     help=f"評価する特徴量セット。既定は全プリセット。"
@@ -192,10 +249,14 @@ def main(argv: List[str] | None = None) -> int:
 
     # --- ベースラインは特徴量セットに依らないので先に1度だけ算出する ---
     baselines: Dict[str, List[Dict]] = {}
+    test_scores: Dict[str, np.ndarray] = {}
     for split in ("val", "test"):
         part = parts[split]
         y = part["label"].to_numpy(dtype=int)
-        baselines[split] = [evaluate(n, y, sc) for n, sc in baseline_scores(part).items()]
+        bs = baseline_scores(part)
+        baselines[split] = [evaluate(n, y, sc) for n, sc in bs.items()]
+        if split == "test":
+            test_scores.update(bs)
 
     # --- 特徴量セットごとに学習・評価 ---
     experiments: List[Dict] = []
@@ -215,7 +276,10 @@ def main(argv: List[str] | None = None) -> int:
             X = part[cols].to_numpy(dtype=float)
             rows = []
             for mname, model in models.items():
-                rows.append(evaluate(f"{mname}", y, model.predict_proba(X)[:, 1]))
+                sc = model.predict_proba(X)[:, 1]
+                rows.append(evaluate(f"{mname}", y, sc))
+                if split == "test":
+                    test_scores[f"{mname} [{preset}]"] = sc
             rec["results"][split] = rows
             best = max(rows, key=lambda r: r["pr_auc"])
             print(f"  {split:<5} 最良 {best['name']}: "
@@ -227,8 +291,27 @@ def main(argv: List[str] | None = None) -> int:
     if not experiments:
         raise SystemExit("実行できた実験がありません")
 
+    # --- ベースラインとの差が誤差かを判定 ---
+    # 全モデルを対象にすると遅いので、上位と「順位版 vs 絶対値版」の対に絞る。
+    REF = "ベースライン: R_high のみ"
+    y_test = parts["test"]["label"].to_numpy(dtype=int)
+    ranked = sorted((k for k in test_scores if k != REF),
+                    key=lambda k: -average_precision_score(y_test, clean_score(test_scores[k])))
+    pairs = [f"{m} [{p_}]"
+             for base in ("price_only", "technical", "all", "fundamental")
+             for p_ in (base, f"rank_{base}")
+             for m in ("ロジスティック回帰", "勾配ブースティング")]
+    keep = list(dict.fromkeys(ranked[:6] + [k for k in pairs if k in test_scores]))
+    print(f"\n[bootstrap] {len(keep)}モデル × {args.n_boot}回 の対応のあるブートストラップ")
+    boot = paired_bootstrap(y_test, {REF: test_scores[REF],
+                                     **{k: test_scores[k] for k in keep}},
+                            reference=REF, n_boot=args.n_boot)
+    for r in boot[:5]:
+        print(f"  {r['name']:<40} 差 {r['diff']:+.4f} "
+              f"[{r['ci_low']:+.4f}, {r['ci_high']:+.4f}] P(差>0)={r['p_better']:.3f}")
+
     # --- レポート ---
-    body = _report(df, parts, baselines, experiments, args)
+    body = _report(df, parts, baselines, experiments, args, boot, REF)
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as fh:
         fh.write(body + "\n")
@@ -239,6 +322,7 @@ def main(argv: List[str] | None = None) -> int:
         "embargoDays": EMBARGO_DAYS,
         "split": {"val_start": args.val_start, "test_start": args.test_start},
         "baselines": baselines,
+        "bootstrap": {"reference": REF, "n_boot": args.n_boot, "test": boot},
         "experiments": [{k: v for k, v in e.items() if not k.startswith("_")}
                         for e in experiments],
     }
@@ -247,7 +331,7 @@ def main(argv: List[str] | None = None) -> int:
     return 0
 
 
-def _report(df, parts, baselines, experiments, args) -> str:
+def _report(df, parts, baselines, experiments, args, boot=None, ref="") -> str:
     """実測値だけを並べたレポートを組み立てる。"""
     lines = [
         "# 新高値ブレイクアウト予測モデル 結果",
@@ -286,8 +370,22 @@ def _report(df, parts, baselines, experiments, args) -> str:
                          f"{r['lift@5%']:.2f}x |")
         lines.append(f"\n（正例率 = {rows[0]['base_rate']*100:.2f}% / n = {rows[0]['n']:,}）")
 
+    # --- ベースラインとの差の有意性 ---
+    if boot:
+        lines += ["", f"## 差は誤差か（対応のあるブートストラップ B={args.n_boot}）", "",
+                  f"基準は **{ref}**（テスト PR-AUC "
+                  f"{[b for b in baselines['test'] if b['name'] == ref][0]['pr_auc']:.4f}）。",
+                  "95%CI が 0 をまたぐ場合、その差は誤差と区別できない。", "",
+                  "| モデル | PR-AUC | 差 | 95%CI | P(差>0) | 判定 |",
+                  "| --- | ---: | ---: | :---: | ---: | --- |"]
+        for r in boot:
+            sig = "有意" if r["ci_low"] > 0 else ("有意に劣る" if r["ci_high"] < 0 else "誤差")
+            lines.append(f"| {r['name']} | {r['pr_auc']:.4f} | {r['diff']:+.4f} | "
+                         f"[{r['ci_low']:+.4f}, {r['ci_high']:+.4f}] | "
+                         f"{r['p_better']:.3f} | {sig} |")
+
     # --- 特徴量セット別の要約 ---
-    lines += ["", "## 特徴量セット別の比較（テストデータ・勾配ブースティング）", "",
+    lines += ["", "## 特徴量セット別の比較（テストデータ・2モデルのうち良いほう）", "",
               "| セット | 列数 | 構成 | PR-AUC | Lift@5% |",
               "| --- | ---: | --- | ---: | ---: |"]
     for e in sorted(experiments,
