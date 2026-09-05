@@ -52,7 +52,8 @@ METRICS = {
     "book_yield":     {"plausible": (-10.0, 100.0),    "unit": "倍"},
     "ROE_q0":         {"plausible": (-500.0, 500.0),   "unit": "%"},
     "ROA_q0":         {"plausible": (-200.0, 200.0),   "unit": "%"},
-    "equity_ratio_q0": {"plausible": (-100.0, 100.0),  "unit": "%"},
+    # 自己資本比率は %。中央値が 1 未満なら比率(0〜1)が混ざっている
+    "equity_ratio_q0": {"plausible": (-200.0, 100.0),  "unit": "%"},
     "BPS":            {"plausible": (0.0, 1e6),        "unit": "円"},
 }
 
@@ -91,6 +92,8 @@ def check_identities(df: pd.DataFrame) -> List[Dict]:
             return None, 0
         return float(np.nanmax(np.abs(a[m] - b[m]) / np.abs(b[m]))), int(m.sum())
 
+    # 恒等式は per と earnings_yield が同じ株価を使っている前提で成り立つ。
+    # 片方が調整後・片方が未調整だと、ここでずれて検出できる。
     if {"per", "earnings_yield"} <= set(df.columns):
         a = (df["per"] * df["earnings_yield"]).to_numpy(dtype=float)
         err, n = rel_err(a, np.full(len(a), 100.0))

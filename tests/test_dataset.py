@@ -474,6 +474,132 @@ class TestLagOverAvailableValues(unittest.TestCase):
         self.assertAlmostEqual(lag1.iloc[3], 3.0)
 
 
+class TestValuationUsesUnadjustedPrice(unittest.TestCase):
+    """
+    EPS / BPS / 株数は開示時点のままで分割調整されていない。
+    調整後株価と組み合わせると、分割をまたいだ時点で比率がずれる。
+    実測で earnings_yield が最大 +1276%（EPSが株価の12.7倍）まで出ていた。
+    """
+
+    def _bars(self, n=300):
+        """途中で 1:10 分割した銘柄。AdjC は過去が1/10になる。"""
+        d = pd.date_range("2021-01-04", periods=n, freq="B")
+        raw = np.full(n, 1000.0)
+        raw[n // 2:] = 100.0                  # 分割で株価が1/10に
+        adj = np.full(n, 100.0)               # 調整後は一貫して100
+        return pd.DataFrame({
+            "Code": "1234", "Date": d,
+            "O": raw, "H": raw, "L": raw, "C": raw, "Vo": 10000.0,
+            "AdjO": adj, "AdjH": adj, "AdjL": adj, "AdjC": adj, "AdjVo": 100000.0,
+        })
+
+    def test_panel_keeps_both_prices(self):
+        panel = price_panel(self._bars())
+        # 分割前: 調整後は100、未調整は1000
+        first = panel.iloc[0]
+        self.assertAlmostEqual(first["close"], 100.0)
+        self.assertAlmostEqual(first["close_raw"], 1000.0)
+
+    def test_adjusted_price_is_still_used_for_breakout_logic(self):
+        """ブレイク判定は調整後を使う。未調整だと分割日に偽のブレイクが出る。"""
+        panel = price_panel(self._bars())
+        self.assertTrue((panel["close"] == 100.0).all())
+
+    def test_using_adjusted_price_would_distort_the_ratio(self):
+        """
+        この不整合がどれだけ効くかを固定する。
+        分割前の時点で、調整後株価を使うと益回りが10倍に化ける。
+        """
+        panel = price_panel(self._bars())
+        first = panel.iloc[0]
+        eps = 50.0                                    # 開示時点の1株利益
+        correct = eps / first["close_raw"] * 100.0    # 5%
+        wrong = eps / first["close"] * 100.0          # 50%
+        self.assertAlmostEqual(correct, 5.0)
+        self.assertAlmostEqual(wrong, 50.0)
+        self.assertAlmostEqual(wrong / correct, 10.0)
+
+
+class TestQuarterSequenceFeatures(unittest.TestCase):
+    """
+    52週高値のブレイクは3〜4決算続けて好調な銘柄で起きる。
+    「直近1回だけ伸びた」と「3期続けて伸びている」を区別できる必要がある。
+
+    q0=最新 / q1=前回 / q2=2回前 / q3=3回前。
+    """
+
+    def _panel(self, values):
+        """1銘柄・四半期ごとの開示。values は古い順。"""
+        n = len(values)
+        return pd.DataFrame({
+            "Code": "1234",
+            "CurPerType": (["1Q", "2Q", "3Q", "FY"] * (n // 4 + 1))[:n],
+            "DiscDate": pd.date_range("2020-05-15", periods=n, freq="91D"),
+            "CurFYSt": pd.to_datetime("2020-04-01"),
+            "DiscTime": "15:00",
+            "Sales": values, "OP": values, "NP": values, "EPS": values,
+            "Eq": [1000.0] * n, "TA": [2000.0] * n, "ROE": values,
+            "FOP": [100.0] * n, "ShOutFY": [100.0] * n, "TrShFY": [0.0] * n,
+        })
+
+    def _axis(self, values, axis="ROE"):
+        q = quarterize_panel(self._panel(values))
+        return q.iloc[-1]     # 最新の開示行
+
+    def test_each_step_difference_is_present(self):
+        """chg1/chg2/chg3 が各段の差になっていること。"""
+        r = self._axis([10.0, 20.0, 45.0, 50.0])   # 古い順
+        # q0=50, q1=45, q2=20, q3=10
+        self.assertAlmostEqual(r["ROE_q0"], 50.0)
+        self.assertAlmostEqual(r["ROE_q1"], 45.0)
+        self.assertAlmostEqual(r["ROE_q2"], 20.0)
+        self.assertAlmostEqual(r["ROE_q3"], 10.0)
+        self.assertAlmostEqual(r["ROE_chg1"], 5.0)    # 50-45
+        self.assertAlmostEqual(r["ROE_chg2"], 25.0)   # 45-20
+        self.assertAlmostEqual(r["ROE_chg3"], 10.0)   # 20-10
+
+    def test_q1_minus_q2_was_the_missing_piece(self):
+        """
+        以前は chg1 (q0-q1) と chg (q0-q2) しか無く、
+        q1-q2 が抜けていた。決定木は q1 と q2 から差を作れないため、
+        「前回も伸びていたか」を表現できていなかった。
+        """
+        r = self._axis([10.0, 20.0, 45.0, 50.0])
+        self.assertAlmostEqual(r["ROE_chg2"], r["ROE_q1"] - r["ROE_q2"])
+
+    def test_acceleration(self):
+        """加速 = 直近の変化 - その前の変化。"""
+        r = self._axis([10.0, 20.0, 45.0, 50.0])
+        self.assertAlmostEqual(r["ROE_accel"], 5.0 - 25.0)   # 減速している
+
+    def test_up_streak_counts_consecutive_increases(self):
+        r = self._axis([10.0, 20.0, 30.0, 40.0])    # 毎回増加
+        self.assertAlmostEqual(r["ROE_up_streak"], 3.0)
+
+    def test_up_streak_stops_at_the_first_decline(self):
+        """直近から数える。途中で落ちたらそこで止まる。"""
+        r = self._axis([10.0, 40.0, 30.0, 35.0])    # q3=10,q2=40,q1=30,q0=35
+        # q0>q1 は真、q1>q2 は偽 -> 1 で止まる
+        self.assertAlmostEqual(r["ROE_up_streak"], 1.0)
+
+    def test_up_streak_is_zero_when_latest_declines(self):
+        r = self._axis([10.0, 20.0, 30.0, 25.0])
+        self.assertAlmostEqual(r["ROE_up_streak"], 0.0)
+
+    def test_pos_ratio_counts_positive_quarters(self):
+        r = self._axis([-10.0, -5.0, 30.0, 40.0])
+        self.assertAlmostEqual(r["ROE_pos_ratio"], 0.5)   # 4期中2期がプラス
+
+    def test_streak_is_missing_when_too_few_quarters(self):
+        """有効な期が2つ未満なら判定しない。"""
+        q = quarterize_panel(self._panel([10.0]))
+        self.assertTrue(np.isnan(q.iloc[-1]["ROE_up_streak"]))
+
+    def test_three_quarter_change(self):
+        r = self._axis([10.0, 20.0, 45.0, 50.0])
+        self.assertAlmostEqual(r["ROE_chg_3q"], 40.0)   # 50-10
+
+
 class TestDefaultLabelIsE(unittest.TestCase):
     """
     既定のラベル定義が、10定義の比較で採用した E であることを固定する。

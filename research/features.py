@@ -28,10 +28,20 @@ FUND_AXES = ["eps_growth", "sales_growth", "eps_growth_sym", "sales_growth_sym",
 GROUPS: Dict[str, List[str]] = {
     # --- 決算: 直近の水準 ---
     "fund_level": [f"{a}_q0" for a in FUND_AXES],
-    # --- 決算: 1期前・2期前の水準 ---
-    "fund_lag": [f"{a}_{q}" for a in FUND_AXES for q in ("q1", "q2")],
+    # --- 決算: 1〜3期前の水準 ---
+    "fund_lag": [f"{a}_{q}" for a in FUND_AXES for q in ("q1", "q2", "q3")],
     # --- 決算: 変化と傾き（CANSLIM の核心は水準より加速）---
-    "fund_trend": [f"{a}_{s}" for a in FUND_AXES for s in ("chg", "chg1", "slope")],
+    # chg1/chg2/chg3 は決算をまたぐ各段の差。
+    # 「直近1回だけ伸びた」と「3期続けて伸びている」を区別するために各段を持つ。
+    # 決定木は q1 と q2 から差を作れないため、明示的に列にする必要がある。
+    "fund_trend": [f"{a}_{s}" for a in FUND_AXES
+                   for s in ("chg1", "chg2", "chg3", "chg", "chg_3q",
+                             "slope", "accel")],
+    # --- 決算: 連続性 ---
+    # 何期続けて伸びているか / 何期プラスを保っているか。
+    # 連言条件（3期とも増加）は水準の線形結合では表現できない。
+    "fund_streak": [f"{a}_{s}" for a in FUND_AXES
+                    for s in ("up_streak", "pos_ratio")],
     # --- 株価位置 ---
     "price": ["r_high", "r_high_3m", "r_high_6m"],
     # --- 出来高 ---
@@ -60,8 +70,8 @@ GROUPS: Dict[str, List[str]] = {
 #: 実測で訓練 6.19% / テスト 21.66% と正例率が3倍以上ずれており、
 #: 絶対値の特徴量では学習が成立していなかった。
 RAW_FOR_RANK: List[str] = [
-    c for g in ("fund_level", "fund_lag", "fund_trend", "price", "volume",
-                "liquidity", "supply", "progress", "valuation")
+    c for g in ("fund_level", "fund_lag", "fund_trend", "fund_streak", "price",
+                "volume", "liquidity", "supply", "progress", "valuation")
     for c in GROUPS[g]
 ]
 
@@ -69,8 +79,8 @@ RAW_FOR_RANK: List[str] = [
 # 順位版のグループは自動生成する。
 # 対象は RAW_FOR_RANK と揃える。ここがずれると
 # 「順位列が存在しないプリセット」が黙って出来てしまう。
-RANKED_GROUPS = ("fund_level", "fund_lag", "fund_trend", "price", "volume",
-                 "liquidity", "supply", "progress", "valuation")
+RANKED_GROUPS = ("fund_level", "fund_lag", "fund_trend", "fund_streak", "price",
+                 "volume", "liquidity", "supply", "progress", "valuation")
 GROUPS.update({
     f"{g}_rank": [f"{c}_r" for c in GROUPS[g]] for g in RANKED_GROUPS
 })
@@ -84,18 +94,18 @@ PRESETS: Dict[str, List[str]] = {
     # テクニカル・需給のみ（決算を使わない）
     "technical": ["price", "volume", "liquidity", "supply", "market"],
     # 決算のみ（株価を使わない）。従来比較用
-    "fundamental": ["fund_level", "fund_lag", "fund_trend", "progress"],
+    "fundamental": ["fund_level", "fund_lag", "fund_trend", "fund_streak", "progress"],
     # 決算は直近の水準だけ（ラグと傾きを落とす）
     "fund_simple": ["fund_level", "price", "volume", "liquidity", "supply",
                     "progress", "market"],
     # 全部（絶対値のみ。順位版は別プリセットで比較する）
-    "all": ["fund_level", "fund_lag", "fund_trend", "price", "volume",
-            "liquidity", "supply", "progress", "valuation", "turnaround",
-            "market"],
+    "all": ["fund_level", "fund_lag", "fund_trend", "fund_streak", "price",
+            "volume", "liquidity", "supply", "progress", "valuation",
+            "turnaround", "market"],
     # バリュエーションのみ
     "valuation_only": ["valuation"],
     # 決算 + バリュエーション + 黒字転換（株価位置を使わない）
-    "fundamental_v2": ["fund_level", "fund_lag", "fund_trend", "progress",
+    "fundamental_v2": ["fund_level", "fund_lag", "fund_trend", "fund_streak", "progress",
                        "valuation", "turnaround"],
     # 市場環境を抜いた全部。
     # all との差が「相場局面をどれだけ暗記していたか」の目安になる
@@ -110,15 +120,17 @@ PRESETS: Dict[str, List[str]] = {
                        "supply_rank", "market"],
     # 決算の順位版のみ
     "rank_fundamental": ["fund_level_rank", "fund_lag_rank", "fund_trend_rank",
-                         "progress_rank"],
+                         "fund_streak_rank", "progress_rank"],
     # 全部の順位版
     "rank_all": ["fund_level_rank", "fund_lag_rank", "fund_trend_rank",
-                 "price_rank", "volume_rank", "liquidity_rank",
+                 "fund_streak_rank", "price_rank", "volume_rank",
+                 "liquidity_rank",
                  "supply_rank", "progress_rank", "valuation_rank",
                  "turnaround", "market"],
     # 決算 + バリュエーションの順位版
     "rank_fundamental_v2": ["fund_level_rank", "fund_lag_rank", "fund_trend_rank",
-                            "progress_rank", "valuation_rank", "turnaround"],
+                            "fund_streak_rank", "progress_rank",
+                            "valuation_rank", "turnaround"],
     # 絶対値と順位の両方（順位が絶対値に上乗せの情報を持つかを見る）
     "raw_and_rank": ["fund_level", "fund_trend", "price", "volume", "liquidity",
                      "supply", "progress", "market",

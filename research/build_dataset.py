@@ -105,6 +105,11 @@ MIN_TRADING_VALUE = 0.5 # 20日平均売買代金の下限（億円）
 MIN_MARKET_CAP = None
 MAX_MARKET_CAP = None
 
+# PER / PBR の上限。これを超えたら分母が丸め誤差レベルとみなし欠測にする。
+# 逆数（earnings_yield / book_yield）は分母が株価なので発散せず、そちらは残す。
+PER_MAX = 1000.0
+PBR_MAX = 1000.0
+
 
 # --------------------------------------------------------------------------- #
 # 読み込み
@@ -140,6 +145,14 @@ def price_panel(bars: pd.DataFrame, cfg: LabelConfig = DEFAULT_LABEL) -> pd.Data
     df["close"] = close
     df["high"] = high
     df["vol"] = vol
+    # 未調整の終値。バリュエーションと時価総額に使う。
+    #
+    # close は分割調整後（AdjC）で、株価位置とブレイク判定にはこちらが要る
+    # （調整しないと分割日に偽のブレイクが大量に出る）。
+    # 一方 EPS / BPS / 株数は「開示時点のまま」で分割調整されていないため、
+    # 調整後株価と組み合わせると分割をまたいだ時点で比率がずれる。
+    # 実測では earnings_yield が最大 +1276%（EPSが株価の12.7倍）まで出ていた。
+    df["close_raw"] = df["C"]
     # 売買代金は実際の円建て金額なので素の終値×出来高を使う（仕様書 §3.2-4）
     df["trading_value"] = df["C"] * df["Vo"] / 1e8
 
@@ -389,31 +402,75 @@ def quarterize_panel(fins: pd.DataFrame) -> pd.DataFrame:
                                np.where(bps_calc.notna(), "calc", "none"))
     df["BPS"] = df["BPS"].where(df["BPS"].notna(), bps_calc)
 
-    # 自己資本比率。API の EqAR（94.8%）をそのまま使い、無ければ計算する
-    eqar_calc = np.where(df["TA"] > 0, df["Eq"] / df["TA"] * 100.0, np.nan)
-    if "EqAR" in df.columns:
-        df["equity_ratio"] = df["EqAR"].where(df["EqAR"].notna(),
-                                              pd.Series(eqar_calc, index=df.index))
-    else:
-        df["equity_ratio"] = eqar_calc
+    # 自己資本比率。常に Eq / TA から計算する（単位を揃えるため）。
+    #
+    # API の EqAR を優先していたが、EqAR は比率（0〜1）で返り、
+    # 計算側は % だったため単位が混在していた。
+    # 実測で中央値 0.53（比率）と最大 79.3（%）が同居しており、
+    # 同じ列に2つの尺度が混ざっていた。
+    # Eq(94.9%) と TA(94.9%) は EqAR(94.8%) と充足率が変わらないので、
+    # 提供値を使う利点が無い。
+    df["equity_ratio"] = np.where(df["TA"] > 0, df["Eq"] / df["TA"] * 100.0, np.nan)
 
-    # --- 直近3決算をラグ列として横に並べる --- #
+    # --- 直近4決算をラグ列として横に並べる --- #
+    # 52週高値のブレイクは、3〜4決算続けて好調な銘柄で起きる。
+    # レーダーチャートを複数時点で重ねて表示しているのも、
+    # 1時点の形ではなく「推移」を見るため。特徴量も推移を持つ必要がある。
     axes = ["eps_growth", "sales_growth", "eps_growth_sym", "sales_growth_sym",
             "ROE", "ROA", "op_margin", "equity_ratio"]
     for a in axes:
         df[f"{a}_q0"] = df[a]
-        df[f"{a}_q1"] = _lag_available(df, a, 1)
-        df[f"{a}_q2"] = _lag_available(df, a, 2)
-        # 変化と傾き（CANSLIM の核心は水準より「加速」）
-        df[f"{a}_chg"] = df[f"{a}_q0"] - df[f"{a}_q2"]
-        df[f"{a}_chg1"] = df[f"{a}_q0"] - df[f"{a}_q1"]
-        df[f"{a}_slope"] = (df[f"{a}_q0"] - df[f"{a}_q2"]) / 2.0
+        for k in (1, 2, 3):
+            df[f"{a}_q{k}"] = _lag_available(df, a, k)
+
+        q0, q1, q2, q3 = (df[f"{a}_q{k}"] for k in range(4))
+
+        # --- 決算をまたぐ各段の差分 --- #
+        # chg1 だけでは「直近1回の変化」しか見えない。
+        # 各段の差を持つことで「毎回伸びているか」を表現できる。
+        #
+        # 線形モデルは q1 と q2 から差を作れるが、決定木は個別の列で分岐するので
+        # 差を作れない。連言条件（3期とも増加）はそもそも水準の線形結合では
+        # 表現できないため、明示的に列として持たせる。
+        df[f"{a}_chg1"] = q0 - q1     # 前回 -> 今回
+        df[f"{a}_chg2"] = q1 - q2     # 2回前 -> 前回
+        df[f"{a}_chg3"] = q2 - q3     # 3回前 -> 2回前
+        # 2期ぶん・3期ぶんの変化
+        df[f"{a}_chg"] = q0 - q2
+        df[f"{a}_chg_3q"] = q0 - q3
+        df[f"{a}_slope"] = (q0 - q2) / 2.0
+        # 加速: 変化そのものが増えているか（CANSLIM の核心）
+        df[f"{a}_accel"] = df[f"{a}_chg1"] - df[f"{a}_chg2"]
+
+        # --- 連続性 --- #
+        # 「何期続けて伸びているか」「何期プラスを保っているか」。
+        # 欠測は数えず、有効な期が2つ未満なら NaN にする
+        levels = [q0, q1, q2, q3]
+        avail = pd.concat([s.notna() for s in levels], axis=1).sum(axis=1)
+        enough = avail >= 2
+
+        # 直近から数えて何段連続で増加しているか（0〜3）
+        steps = [df[f"{a}_chg1"], df[f"{a}_chg2"], df[f"{a}_chg3"]]
+        up = pd.Series(0.0, index=df.index)
+        alive = pd.Series(True, index=df.index)
+        for s in steps:
+            inc = (s > 0).fillna(False) & s.notna()
+            up = up + (alive & inc).astype(float)
+            alive = alive & inc
+        df[f"{a}_up_streak"] = up.where(enough)
+
+        # 有効な期のうち、水準がプラスだった割合（0〜1）
+        pos = pd.concat([(s > 0) & s.notna() for s in levels], axis=1).sum(axis=1)
+        df[f"{a}_pos_ratio"] = (pos / avail.where(avail > 0)).where(enough)
 
     keep = (["Code", "DiscDate", "quarter", "progress_vs_base", "shares_out",
              "eps_growth_turn", "sales_growth_turn", "BPS", "bps_basis", "roe_basis"]
             + [c for c in ("EPS", "eps_ttm") if c in df.columns]
-            + [c for a in axes for c in
-               (f"{a}_q0", f"{a}_q1", f"{a}_q2", f"{a}_chg", f"{a}_chg1", f"{a}_slope")])
+            + [c for a in axes for c in (
+                f"{a}_q0", f"{a}_q1", f"{a}_q2", f"{a}_q3",
+                f"{a}_chg1", f"{a}_chg2", f"{a}_chg3",
+                f"{a}_chg", f"{a}_chg_3q", f"{a}_slope", f"{a}_accel",
+                f"{a}_up_streak", f"{a}_pos_ratio")])
     return df[[c for c in keep if c in df.columns]]
 
 
@@ -509,7 +566,9 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     print(f"[merge] 決算が1年以上古いサンプル: {int(stale.sum()):,}件を欠測扱い")
 
     # --- 時価総額 --- #
-    samples["market_cap"] = samples["close"] * samples["shares_out"] / 1e8
+    # 時価総額は未調整終値 × 開示時点の株数。
+    # 調整後株価を使うと、後年の分割ぶんだけ過小評価される
+    samples["market_cap"] = samples["close_raw"] * samples["shares_out"] / 1e8
 
     # --- バリュエーション --- #
     # PER / PBR は API に項目が無い（docs/DATA_FIELDS.md の実測）ので、
@@ -519,15 +578,26 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     # 赤字のとき PER は負になり「割安」と誤読される。
     # 逆数の益回り（EPS/株価）にすれば符号がそのまま意味を持ち、
     # 赤字企業も連続量として扱える。PER 自体は黒字のときだけ持つ。
-    samples["earnings_yield"] = np.where(
-        samples["close"] > 0, samples["eps_ttm"] / samples["close"] * 100.0, np.nan)
-    samples["per"] = np.where(
-        samples["eps_ttm"] > 0, samples["close"] / samples["eps_ttm"], np.nan)
-    samples["pbr"] = np.where(
-        samples["BPS"] > 0, samples["close"] / samples["BPS"], np.nan)
+    px = samples["close_raw"]
+    samples["earnings_yield"] = np.where(px > 0, samples["eps_ttm"] / px * 100.0,
+                                         np.nan)
     # 純資産倍率の逆数。BPS が負（債務超過）でも意味を保つ
-    samples["book_yield"] = np.where(
-        samples["close"] > 0, samples["BPS"] / samples["close"], np.nan)
+    samples["book_yield"] = np.where(px > 0, samples["BPS"] / px, np.nan)
+
+    # PER / PBR は分母が小さいと発散する。
+    # 実測で per の最大が 4.0e17 まで出ていた（EPS が丸め誤差レベル）。
+    # 逆数側（益回り・純資産倍率の逆数）は分母が株価なので発散せず、
+    # そちらを特徴量として持っている。比率側は解釈用と割り切り、
+    # 実在しうる範囲を超えたものは欠測にする。
+    per = np.where(samples["eps_ttm"] > 0, px / samples["eps_ttm"], np.nan)
+    pbr = np.where(samples["BPS"] > 0, px / samples["BPS"], np.nan)
+    samples["per"] = np.where(np.isfinite(per) & (per <= PER_MAX), per, np.nan)
+    samples["pbr"] = np.where(np.isfinite(pbr) & (pbr <= PBR_MAX), pbr, np.nan)
+    for name, arr, cap in (("per", per, PER_MAX), ("pbr", pbr, PBR_MAX)):
+        n = int((np.isfinite(arr) & (arr > cap)).sum())
+        if n:
+            print(f"[filter] {name} > {cap:g} を欠測に: {n:,}件"
+                  f"（分母が丸め誤差レベル。逆数側は残している）")
 
     # --- 時価総額の帯で絞る（設定されている場合のみ）--- #
     # 基準日時点で判定する。将来の時価総額は使わない。
@@ -594,7 +664,8 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     # 「per × earnings_yield == 100」のような恒等式の検査に必要
     # （research/validate_metrics.py）。
     # *_basis は提供値と計算値のどちらを使ったかの記録。
-    meta_cols = ["Code", "Date", "close", "high52w", "tv_ma20", "market_cap", "label",
+    meta_cols = ["Code", "Date", "close", "close_raw", "high52w", "tv_ma20",
+                 "market_cap", "label",
                  "eps_ttm", "BPS", "roe_basis", "bps_basis"]
     meta_cols = [c for c in meta_cols if c in samples.columns]
 
