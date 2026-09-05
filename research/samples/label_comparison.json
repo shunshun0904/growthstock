@@ -1,0 +1,337 @@
+{
+  "results": [
+    {
+      "config": "52週 / 1〜6ヶ月 / 定着20日-8%",
+      "high_window": 245,
+      "horizon": [
+        20,
+        120
+      ],
+      "n": 145356,
+      "positive_rate": 0.1754,
+      "n_positive": 25497,
+      "n_stocks": 3894,
+      "date_from": "2017-09-29",
+      "date_to": "2026-01-30",
+      "funnel": {
+        "月末サンプル": 499092,
+        "ラベル確定": 437509,
+        "高値窓あり": 293645,
+        "高値圏を除外": 249425,
+        "流動性フィルタ": 145356
+      },
+      "positive": {
+        "n": 25497,
+        "maxGain_median": 34.52,
+        "maxGain_p25": 22.3,
+        "maxGain_p75": 54.83,
+        "endGain_median": 24.3,
+        "endGain_positive_rate": 0.928
+      },
+      "negative": {
+        "n": 119859,
+        "maxGain_median": 9.18,
+        "maxGain_p25": 1.77,
+        "maxGain_p75": 20.06,
+        "endGain_median": -4.19,
+        "endGain_positive_rate": 0.398
+      }
+    },
+    {
+      "config": "52週 / 1〜3ヶ月 / 定着20日-8%",
+      "high_window": 245,
+      "horizon": [
+        20,
+        60
+      ],
+      "n": 151362,
+      "positive_rate": 0.0832,
+      "n_positive": 12594,
+      "n_stocks": 3954,
+      "date_from": "2017-09-29",
+      "date_to": "2026-04-30",
+      "funnel": {
+        "月末サンプル": 499092,
+        "ラベル確定": 445852,
+        "高値窓あり": 305821,
+        "高値圏を除外": 259174,
+        "流動性フィルタ": 151362
+      },
+      "positive": {
+        "n": 12594,
+        "maxGain_median": 26.49,
+        "maxGain_p25": 17.74,
+        "maxGain_p75": 41.46,
+        "endGain_median": 21.48,
+        "endGain_positive_rate": 0.983
+      },
+      "negative": {
+        "n": 138768,
+        "maxGain_median": 6.13,
+        "maxGain_p25": -0.14,
+        "maxGain_p75": 14.48,
+        "endGain_median": -1.58,
+        "endGain_positive_rate": 0.446
+      }
+    },
+    {
+      "config": "78週 / 1〜6ヶ月 / 定着20日-8%",
+      "high_window": 368,
+      "horizon": [
+        20,
+        120
+      ],
+      "n": 125297,
+      "positive_rate": 0.1494,
+      "n_positive": 18716,
+      "n_stocks": 3639,
+      "date_from": "2018-04-27",
+      "date_to": "2026-01-30",
+      "funnel": {
+        "月末サンプル": 499092,
+        "ラベル確定": 437509,
+        "高値窓あり": 242713,
+        "高値圏を除外": 213447,
+        "流動性フィルタ": 125297
+      },
+      "positive": {
+        "n": 18716,
+        "maxGain_median": 35.88,
+        "maxGain_p25": 23.39,
+        "maxGain_p75": 56.36,
+        "endGain_median": 26.07,
+        "endGain_positive_rate": 0.94
+      },
+      "negative": {
+        "n": 106581,
+        "maxGain_median": 10.11,
+        "maxGain_p25": 2.31,
+        "maxGain_p75": 21.8,
+        "endGain_median": -2.88,
+        "endGain_positive_rate": 0.432
+      }
+    },
+    {
+      "config": "52週 / 1〜6ヶ月 / 定着40日-8%",
+      "high_window": 245,
+      "horizon": [
+        20,
+        120
+      ],
+      "n": 143556,
+      "positive_rate": 0.1423,
+      "n_positive": 20425,
+      "n_stocks": 3871,
+      "date_from": "2017-09-29",
+      "date_to": "2025-12-30",
+      "funnel": {
+        "月末サンプル": 499092,
+        "ラベル確定": 422399,
+        "高値窓あり": 289437,
+        "高値圏を除外": 246293,
+        "流動性フィルタ": 143556
+      },
+      "positive": {
+        "n": 20425,
+        "maxGain_median": 35.52,
+        "maxGain_p25": 23.19,
+        "maxGain_p75": 55.84,
+        "endGain_median": 26.61,
+        "endGain_positive_rate": 0.96
+      },
+      "negative": {
+        "n": 123131,
+        "maxGain_median": 9.77,
+        "maxGain_p25": 2.09,
+        "maxGain_p75": 21.21,
+        "endGain_median": -3.65,
+        "endGain_positive_rate": 0.413
+      }
+    },
+    {
+      "config": "52週 / 1〜6ヶ月 / 定着20日-8% +60日後0%",
+      "high_window": 245,
+      "horizon": [
+        20,
+        120
+      ],
+      "n": 142000,
+      "positive_rate": 0.1119,
+      "n_positive": 15890,
+      "n_stocks": 3855,
+      "date_from": "2017-09-29",
+      "date_to": "2025-11-28",
+      "funnel": {
+        "月末サンプル": 499092,
+        "ラベル確定": 427565,
+        "高値窓あり": 285609,
+        "高値圏を除外": 243708,
+        "流動性フィルタ": 142000
+      },
+      "positive": {
+        "n": 15890,
+        "maxGain_median": 38.91,
+        "maxGain_p25": 25.71,
+        "maxGain_p75": 61.09,
+        "endGain_median": 30.87,
+        "endGain_positive_rate": 0.988
+      },
+      "negative": {
+        "n": 126110,
+        "maxGain_median": 10.27,
+        "maxGain_p25": 2.35,
+        "maxGain_p75": 21.96,
+        "endGain_median": -3.02,
+        "endGain_positive_rate": 0.428
+      }
+    },
+    {
+      "config": "78週 / 1〜3ヶ月 / 定着20日-8%",
+      "high_window": 368,
+      "horizon": [
+        20,
+        60
+      ],
+      "n": 131233,
+      "positive_rate": 0.0696,
+      "n_positive": 9131,
+      "n_stocks": 3711,
+      "date_from": "2018-04-27",
+      "date_to": "2026-04-30",
+      "funnel": {
+        "月末サンプル": 499092,
+        "ラベル確定": 445852,
+        "高値窓あり": 254197,
+        "高値圏を除外": 222826,
+        "流動性フィルタ": 131233
+      },
+      "positive": {
+        "n": 9131,
+        "maxGain_median": 27.01,
+        "maxGain_p25": 18.19,
+        "maxGain_p75": 41.77,
+        "endGain_median": 21.98,
+        "endGain_positive_rate": 0.986
+      },
+      "negative": {
+        "n": 122102,
+        "maxGain_median": 6.49,
+        "maxGain_p25": 0.11,
+        "maxGain_p75": 15.08,
+        "endGain_median": -0.9,
+        "endGain_positive_rate": 0.469
+      }
+    },
+    {
+      "config": "78週 / 1〜3ヶ月 / 定着40日-8%",
+      "high_window": 368,
+      "horizon": [
+        20,
+        60
+      ],
+      "n": 129166,
+      "positive_rate": 0.0562,
+      "n_positive": 7264,
+      "n_stocks": 3687,
+      "date_from": "2018-04-27",
+      "date_to": "2026-03-31",
+      "funnel": {
+        "月末サンプル": 499092,
+        "ラベル確定": 428553,
+        "高値窓あり": 250025,
+        "高値圏を除外": 219098,
+        "流動性フィルタ": 129166
+      },
+      "positive": {
+        "n": 7264,
+        "maxGain_median": 27.02,
+        "maxGain_p25": 18.32,
+        "maxGain_p75": 41.55,
+        "endGain_median": 22.95,
+        "endGain_positive_rate": 0.999
+      },
+      "negative": {
+        "n": 121902,
+        "maxGain_median": 6.67,
+        "maxGain_p25": 0.22,
+        "maxGain_p75": 15.47,
+        "endGain_median": -0.77,
+        "endGain_positive_rate": 0.473
+      }
+    },
+    {
+      "config": "78週 / 1〜3ヶ月 / 定着20日-8% +60日後0%",
+      "high_window": 368,
+      "horizon": [
+        20,
+        60
+      ],
+      "n": 126744,
+      "positive_rate": 0.0445,
+      "n_positive": 5639,
+      "n_stocks": 3648,
+      "date_from": "2018-04-27",
+      "date_to": "2026-02-27",
+      "funnel": {
+        "月末サンプル": 499092,
+        "ラベル確定": 435932,
+        "高値窓あり": 246496,
+        "高値圏を除外": 215782,
+        "流動性フィルタ": 126744
+      },
+      "positive": {
+        "n": 5639,
+        "maxGain_median": 28.3,
+        "maxGain_p25": 19.14,
+        "maxGain_p75": 43.71,
+        "endGain_median": 24.32,
+        "endGain_positive_rate": 0.999
+      },
+      "negative": {
+        "n": 121105,
+        "maxGain_median": 6.8,
+        "maxGain_p25": 0.3,
+        "maxGain_p75": 15.68,
+        "endGain_median": -0.59,
+        "endGain_positive_rate": 0.479
+      }
+    },
+    {
+      "config": "78週 / 1〜3ヶ月 / 定着40日-8% +60日後0%",
+      "high_window": 368,
+      "horizon": [
+        20,
+        60
+      ],
+      "n": 126742,
+      "positive_rate": 0.041,
+      "n_positive": 5199,
+      "n_stocks": 3648,
+      "date_from": "2018-04-27",
+      "date_to": "2026-02-27",
+      "funnel": {
+        "月末サンプル": 499092,
+        "ラベル確定": 423808,
+        "高値窓あり": 246193,
+        "高値圏を除外": 215491,
+        "流動性フィルタ": 126742
+      },
+      "positive": {
+        "n": 5199,
+        "maxGain_median": 28.07,
+        "maxGain_p25": 19.14,
+        "maxGain_p75": 42.88,
+        "endGain_median": 24.42,
+        "endGain_positive_rate": 1.0
+      },
+      "negative": {
+        "n": 121543,
+        "maxGain_median": 6.85,
+        "maxGain_p25": 0.33,
+        "maxGain_p75": 15.79,
+        "endGain_median": -0.54,
+        "endGain_positive_rate": 0.481
+      }
+    }
+  ]
+}
