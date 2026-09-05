@@ -16,6 +16,7 @@ J-Quants からの全期間取得は約2.5時間かかる。毎回取り直す�
 from __future__ import annotations
 
 import datetime as dt
+import glob
 import json
 import os
 from typing import Dict, Iterable, List, Set
@@ -93,6 +94,24 @@ def summarize(manifest: Dict[str, Dict]) -> str:
 # --------------------------------------------------------------------------- #
 # 年別ファイルへの分割保存
 # --------------------------------------------------------------------------- #
+
+def reset_kind(data_dir: str, manifest: Dict[str, Dict], kind: str) -> List[str]:
+    """
+    ある種別の保存済みデータと取得記録を消す。
+
+    列を増やしたときに使う。取得済みの parquet には新しい列が入っていないが、
+    manifest 上は「取得済み」なので incremental では永久に取り直されない。
+    その状態を解消するために、その種別だけを取得前の状態に戻す。
+
+    他の種別（株価など）には触らない。株価は取り直すと数時間かかる。
+    """
+    removed = []
+    for path in sorted(glob.glob(os.path.join(data_dir, f"{kind}_*.parquet"))):
+        os.remove(path)
+        removed.append(os.path.basename(path))
+    manifest.pop(kind, None)
+    return removed
+
 
 def year_path(data_dir: str, kind: str, year: int) -> str:
     return os.path.join(data_dir, f"{kind}_{year}.parquet")

@@ -297,9 +297,19 @@ class TestFieldMatching(unittest.TestCase):
         jq_bulk を import すると pandas が要り、probe.yml で落ちた。"""
         from probe_fins_fields import read_fin_cols
         cols = read_fin_cols()
-        self.assertIn("Sales", cols)
-        self.assertIn("TA", cols)
+        # None = 絞らず全項目を保持。list ならその内容
+        self.assertTrue(cols is None or isinstance(cols, list))
         self.assertNotIn("pandas", sys.modules)
+
+    def test_fins_keeps_every_field(self):
+        """
+        決算をホワイトリストで絞ると、書き漏らした項目が黙って捨てられる。
+        実際 BPS がそれで失われ、PBR を作れなかった。
+        絞らない設定であることを固定する。
+        """
+        from probe_fins_fields import read_fin_cols
+        self.assertIsNone(read_fin_cols(),
+                          "FIN_COLS は None（全項目保持）であるべき")
 
 
 if __name__ == "__main__":

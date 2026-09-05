@@ -18,6 +18,10 @@ on:
         description: '取得終了日 (省略時は今日)'
         required: false
         default: ''
+      reset:
+        description: '取り直す種別（スペース区切り。例: fins）。取得する列を増やしたとき用'
+        required: false
+        default: ''
   schedule:
     # 平日 21:30 JST (= 12:30 UTC)。日次データが出そろった後に差分を取り込む
     - cron: '30 12 * * 1-5'
@@ -76,7 +80,10 @@ jobs:
           [ -z "$TO" ] && TO=$(date -u +%Y-%m-%d)
           FROM="${{ inputs.from }}"
           [ -z "$FROM" ] && FROM="2016-10-01"
-          python3 research/jq_bulk.py --incremental --from "$FROM" --to "$TO" 2>&1 | tee fetch.log
+          RESET=""
+          [ -n "${{ inputs.reset }}" ] && RESET="--reset ${{ inputs.reset }}"
+          python3 research/jq_bulk.py --incremental $RESET \
+            --from "$FROM" --to "$TO" 2>&1 | tee fetch.log
 
       - name: Upload to release
         env:

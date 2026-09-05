@@ -335,11 +335,32 @@ class TestFeaturePresets(unittest.TestCase):
     """特徴量セットの定義が壊れていないこと。"""
 
     def test_all_excludes_rank_columns(self):
-        """`all` は絶対値のみ。順位版は別プリセットで比較する。"""
+        """
+        `all` は絶対値のみ。順位版は別プリセットで比較する。
+
+        列数を固定値で縛ると特徴量を足すたびに落ちるので、
+        「順位列が混ざっていないこと」と「空でないこと」だけを見る。
+        """
         import features as F
         cols = F.columns("all")
-        self.assertEqual(len(cols), 34)
         self.assertFalse(any(c.endswith("_r") for c in cols))
+        self.assertGreater(len(cols), 10)
+
+    def test_rank_groups_match_rank_targets(self):
+        """
+        順位グループの対象と RAW_FOR_RANK がずれると、
+        存在しない列を含むプリセットが黙って出来る。
+        """
+        import features as F
+        from_groups = {c for g in F.RANKED_GROUPS for c in F.GROUPS[g]}
+        self.assertEqual(set(F.RAW_FOR_RANK), from_groups)
+
+    def test_valuation_columns_exist_in_a_preset(self):
+        """PER/PBR は API に無く自前で作った列。プリセットから参照できること。"""
+        import features as F
+        cols = F.columns("valuation_only")
+        for c in ("per", "pbr", "earnings_yield", "book_yield"):
+            self.assertIn(c, cols)
 
     def test_rank_all_mirrors_all(self):
         """`rank_all` は `all` と同じ構成の順位版。"""

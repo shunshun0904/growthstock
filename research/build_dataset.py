@@ -319,8 +319,23 @@ def quarterize_panel(fins: pd.DataFrame) -> pd.DataFrame:
     by_cq = df.groupby(["Code", "quarter"], sort=False)
     for src, dst in [("q_sales", "sales_growth"), ("q_eps", "eps_growth")]:
         prev = by_cq[src].shift(1)
-        # 前年が0以下なら成長率は定義できない（赤字→黒字を+1000%等と表現しない）
+        # 従来の成長率。前年が0以下だと定義できない
+        # （赤字 -> 黒字を +1000% のように表現しないため）
         df[dst] = np.where(prev > 0, (df[src] - prev) / prev * 100.0, np.nan)
+        # 対称変化率。分母を |今期|+|前期| にすることで
+        # 前年が赤字でも定義でき、値は -100〜+100 に収まる。
+        #
+        # 前年が0以下のときに欠測にする扱いは、赤字企業を丸ごと捨てていた。
+        # 小型株は赤字企業の比率が高く、しかも赤字->黒字転換は
+        # 株価が最も動くイベントなので、そこを落とすのは損失が大きい
+        # （実測で eps_growth の充足率は32.4%しかなかった）。
+        denom = df[src].abs() + prev.abs()
+        df[f"{dst}_sym"] = np.where(denom > 0,
+                                    (df[src] - prev) / denom * 100.0, np.nan)
+        # 赤字 -> 黒字の転換そのものをフラグとして持つ
+        df[f"{dst}_turn"] = np.where(prev.notna() & df[src].notna(),
+                                     ((prev <= 0) & (df[src] > 0)).astype(float),
+                                     np.nan)
 
     # 自己資本・株数から時価総額を出すための情報も残す
     df["shares_out"] = df["ShOutFY"] - df["TrShFY"].fillna(0)
@@ -343,8 +358,42 @@ def quarterize_panel(fins: pd.DataFrame) -> pd.DataFrame:
         np.where(np.isfinite(roe_ttm), "ttm", "none"))
     df["ROE"] = df["ROE"].where(df["ROE"].notna(), pd.Series(roe_ttm, index=df.index))
 
+    # --- ROA / BPS / 自己資本比率 --- #
+    # 方針: API が返す比率をそのまま使わず、充足率の高い素の項目から計算する。
+    # 実測（docs/DATA_FIELDS.md）:
+    #   Eq 94.9% / TA 94.9% / ShEq 94.7% / EPS 94.8% / ShOutFY 94.9%
+    #   一方 ROE 32.4%（通期のみ） / BPS 46.7%（ほぼ通期のみ） / NCROE 0.0%
+    #   ROA と PER と PBR は項目として存在しない。
+    ttm_np_roa = g_code["q_np"].transform(lambda s: s.rolling(4, min_periods=4).sum())
+    df["ROA"] = np.where(df["TA"] > 0, ttm_np_roa / df["TA"] * 100.0, np.nan)
+
+    # PER 用の12ヶ月EPS。単期EPSの4期和。
+    # 赤字（0以下）でも値は残す。PER は後段で符号を見て扱う
+    df["eps_ttm"] = g_code["q_eps"].transform(lambda s: s.rolling(4, min_periods=4).sum())
+
+    # BPS は提供値が46.7%しか無いので、株主資本と株数から作る（約94%）。
+    # 提供値があるときはそれを優先し、無いところだけ埋める。
+    sh = df["ShOutFY"] - df["TrShFY"].fillna(0) if "TrShFY" in df.columns else df["ShOutFY"]
+    sh = sh.where(sh > 0)
+    eq_for_bps = df["ShEq"] if "ShEq" in df.columns else df["Eq"]
+    bps_calc = eq_for_bps / sh
+    df["BPS"] = (df["BPS"] if "BPS" in df.columns
+                 else pd.Series(np.nan, index=df.index))
+    df["bps_basis"] = np.where(df["BPS"].notna(), "provided",
+                               np.where(bps_calc.notna(), "calc", "none"))
+    df["BPS"] = df["BPS"].where(df["BPS"].notna(), bps_calc)
+
+    # 自己資本比率。API の EqAR（94.8%）をそのまま使い、無ければ計算する
+    eqar_calc = np.where(df["TA"] > 0, df["Eq"] / df["TA"] * 100.0, np.nan)
+    if "EqAR" in df.columns:
+        df["equity_ratio"] = df["EqAR"].where(df["EqAR"].notna(),
+                                              pd.Series(eqar_calc, index=df.index))
+    else:
+        df["equity_ratio"] = eqar_calc
+
     # --- 直近3決算をラグ列として横に並べる --- #
-    axes = ["eps_growth", "sales_growth", "ROE", "op_margin"]
+    axes = ["eps_growth", "sales_growth", "eps_growth_sym", "sales_growth_sym",
+            "ROE", "ROA", "op_margin", "equity_ratio"]
     for a in axes:
         df[f"{a}_q0"] = df[a]
         df[f"{a}_q1"] = _lag_available(df, a, 1)
@@ -354,10 +403,12 @@ def quarterize_panel(fins: pd.DataFrame) -> pd.DataFrame:
         df[f"{a}_chg1"] = df[f"{a}_q0"] - df[f"{a}_q1"]
         df[f"{a}_slope"] = (df[f"{a}_q0"] - df[f"{a}_q2"]) / 2.0
 
-    keep = (["Code", "DiscDate", "quarter", "progress_vs_base", "shares_out"]
+    keep = (["Code", "DiscDate", "quarter", "progress_vs_base", "shares_out",
+             "eps_growth_turn", "sales_growth_turn", "BPS", "bps_basis", "roe_basis"]
+            + [c for c in ("EPS", "eps_ttm") if c in df.columns]
             + [c for a in axes for c in
                (f"{a}_q0", f"{a}_q1", f"{a}_q2", f"{a}_chg", f"{a}_chg1", f"{a}_slope")])
-    return df[keep]
+    return df[[c for c in keep if c in df.columns]]
 
 
 # --------------------------------------------------------------------------- #
@@ -453,6 +504,24 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
 
     # --- 時価総額 --- #
     samples["market_cap"] = samples["close"] * samples["shares_out"] / 1e8
+
+    # --- バリュエーション --- #
+    # PER / PBR は API に項目が無い（docs/DATA_FIELDS.md の実測）ので、
+    # 基準日の株価と決算値から作る。株価は基準日 t のもの、
+    # 決算は t 以前に開示されたものだけを使っている（merge_asof）ので先読みは無い。
+    #
+    # 赤字のとき PER は負になり「割安」と誤読される。
+    # 逆数の益回り（EPS/株価）にすれば符号がそのまま意味を持ち、
+    # 赤字企業も連続量として扱える。PER 自体は黒字のときだけ持つ。
+    samples["earnings_yield"] = np.where(
+        samples["close"] > 0, samples["eps_ttm"] / samples["close"] * 100.0, np.nan)
+    samples["per"] = np.where(
+        samples["eps_ttm"] > 0, samples["close"] / samples["eps_ttm"], np.nan)
+    samples["pbr"] = np.where(
+        samples["BPS"] > 0, samples["close"] / samples["BPS"], np.nan)
+    # 純資産倍率の逆数。BPS が負（債務超過）でも意味を保つ
+    samples["book_yield"] = np.where(
+        samples["close"] > 0, samples["BPS"] / samples["close"], np.nan)
 
     # --- 時価総額の帯で絞る --- #
     # 基準日時点で判定する。将来の時価総額は使わない。

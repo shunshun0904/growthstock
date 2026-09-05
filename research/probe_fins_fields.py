@@ -177,7 +177,8 @@ def match_wanted(field_names):
 
 def build_md(fins, endpoints, wanted, current_cols):
     got = [f["field"] for f in fins["fields"]]
-    dropped = [f for f in got if f not in current_cols]
+    dropped = ([] if current_cols is None
+               else [f for f in got if f not in set(current_cols)])
     lines = [
         "# J-Quants /fins/summary の項目一覧（実測）",
         "",
@@ -214,7 +215,10 @@ def build_md(fins, endpoints, wanted, current_cols):
         "ここに無い項目は取得時点で捨てている。",
         "",
     ]
-    if dropped:
+    if current_cols is None:
+        lines.append("現在 `FIN_COLS = None`（絞らず全項目を保持）なので、"
+                     "捨てている項目は無い。")
+    elif dropped:
         lines += ["| 項目 | 充足率 |", "| --- | ---: |"]
         for f in fins["fields"]:
             if f["field"] in dropped:
@@ -267,7 +271,9 @@ def read_fin_cols():
         if isinstance(node, ast.Assign):
             for t in node.targets:
                 if isinstance(t, ast.Name) and t.id == "FIN_COLS":
-                    return [ast.literal_eval(e) for e in node.value.elts]
+                    val = ast.literal_eval(node.value)
+                    # None = 絞らずに全項目を保持している
+                    return None if val is None else list(val)
     return []
 
 
@@ -300,15 +306,19 @@ def main() -> int:
     for concept, hits in wanted.items():
         print(f"  {concept:<16} {hits if hits else '該当なし'}")
 
-    current = set(read_fin_cols())
-    dropped = [n for n in names if n not in current]
-    print(f"\n[4] FIN_COLS で捨てている項目: {len(dropped)}件")
-    for f in fins["fields"]:
-        if f["field"] in dropped and f["present_pct"] >= 10:
-            print(f"  {f['field']:<28} {f['present_pct']:5.1f}%")
+    current = read_fin_cols()
+    dropped = [] if current is None else [n for n in names if n not in set(current)]
+    if current is None:
+        print("\n[4] FIN_COLS は None（全項目を保持）。捨てている項目は無い")
+    else:
+        print(f"\n[4] FIN_COLS で捨てている項目: {len(dropped)}件")
+        for f in fins["fields"]:
+            if f["field"] in dropped and f["present_pct"] >= 10:
+                print(f"  {f['field']:<28} {f['present_pct']:5.1f}%")
 
     with open(OUT_JSON, "w", encoding="utf-8") as fh:
         json.dump({"fins": fins, "endpoints": endpoints, "wanted": wanted,
+                   "keeps_all_fields": current is None,
                    "dropped_by_fin_cols": dropped}, fh, ensure_ascii=False, indent=2)
     os.makedirs(os.path.dirname(OUT_MD), exist_ok=True)
     with open(OUT_MD, "w", encoding="utf-8") as fh:

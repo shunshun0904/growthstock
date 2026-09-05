@@ -132,5 +132,51 @@ class TestMergeIntoYears(unittest.TestCase):
         self.assertIn("fins_2024", written[0])
 
 
+class TestResetKind(unittest.TestCase):
+    """
+    取得する列を増やしたとき、既存 parquet には新しい列が入っていないのに
+    manifest 上は「取得済み」なので incremental では永久に取り直されない。
+    reset_kind はその状態を解消する。
+    株価を巻き込むと数時間かかるので、指定した種別だけを消すこと。
+    """
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        for n in ("fins_2020.parquet", "fins_2021.parquet",
+                  "bars_2020.parquet", "margin_2020.parquet"):
+            open(os.path.join(self.dir, n), "w").write("x")
+        self.manifest = {"fins": {"days": ["2020-01-06"]},
+                         "bars": {"days": ["2020-01-06"]},
+                         "margin": {"days": ["2020-01-10"]}}
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def test_removes_only_the_named_kind(self):
+        removed = data_store.reset_kind(self.dir, self.manifest, "fins")
+        self.assertEqual(removed, ["fins_2020.parquet", "fins_2021.parquet"])
+        left = sorted(os.listdir(self.dir))
+        self.assertEqual(left, ["bars_2020.parquet", "margin_2020.parquet"])
+
+    def test_clears_only_that_kind_from_the_manifest(self):
+        data_store.reset_kind(self.dir, self.manifest, "fins")
+        self.assertNotIn("fins", self.manifest)
+        self.assertIn("bars", self.manifest)
+        self.assertIn("margin", self.manifest)
+
+    def test_reset_makes_every_day_missing_again(self):
+        """取り直しの目的はここ。消した後は全営業日が未取得になる。"""
+        days = [dt.date(2020, 1, 6), dt.date(2020, 1, 7)]
+        data_store.mark_fetched(self.manifest, "fins", days)
+        self.assertEqual(data_store.missing_days(self.manifest, "fins", days), [])
+        data_store.reset_kind(self.dir, self.manifest, "fins")
+        self.assertEqual(data_store.missing_days(self.manifest, "fins", days), days)
+
+    def test_unknown_kind_is_harmless(self):
+        removed = data_store.reset_kind(self.dir, self.manifest, "nosuch")
+        self.assertEqual(removed, [])
+        self.assertEqual(len(os.listdir(self.dir)), 4)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

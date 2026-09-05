@@ -36,11 +36,22 @@ EARLIEST_DATE = dt.date(2016, 10, 1)
 
 # 保持する列（全列を持つとサイズが数倍になるため、必要なものだけ）
 BAR_COLS = ["Date", "Code", "O", "H", "L", "C", "Vo", "Va", "AdjO", "AdjH", "AdjL", "AdjC", "AdjVo"]
-FIN_COLS = [
-    "DiscDate", "DiscTime", "Code", "DocType", "CurPerType", "CurPerEn", "CurFYSt",
-    "Sales", "OP", "NP", "EPS", "Eq", "TA", "ROE",
-    "FSales", "FOP", "FNP", "FEPS", "ShOutFY", "TrShFY",
-]
+# 決算は全項目を保持する（None = 絞らない）。
+#
+# 以前はホワイトリストで絞っており、書き漏らした項目が取得時点で捨てられていた。
+# 実際 BPS は API が返しているのに列挙しておらず、PBR を作れなかった。
+# しかも「捨てた」という記録が残らないので、後から気づけない。
+#
+# 決算は全期間でも十数万行しかなく、株価（数千万行）と違って
+# 全項目を持ってもサイズが問題にならない。列を選ぶ理由が無い。
+# 何が返ってくるかは docs/DATA_FIELDS.md（probe_fins_fields.py の実測）を参照。
+FIN_COLS = None
+# 決算のうち数値化しない列。これ以外はすべて数値として扱う
+FIN_TEXT_COLS = {
+    "DiscDate", "DiscTime", "Code", "DocType", "CurPerType", "CurPerEn",
+    "CurPerSt", "CurFYSt", "CurFYEnd", "NxFYSt", "NxFYEnd", "NxPerType",
+    "ChgFYEnd", "RetroRestate", "Sig",
+}
 MARGIN_COLS = ["Date", "Code", "LongVol", "ShrtVol"]
 # 銘柄マスタ。銘柄名・業種・市場区分はダッシュボード表示に必須で、
 # 株価データ側には入っていない（V2 の /equities/master にしかない）
@@ -107,8 +118,9 @@ def _fetch_by_day(
         if not rows:
             continue
         df = pd.DataFrame.from_records(rows)
-        keep = [c for c in columns if c in df.columns]
-        frames.append(df[keep])
+        if columns is not None:
+            df = df[[c for c in columns if c in df.columns]]
+        frames.append(df)
 
         if i % progress_every == 0 or i == total:
             el = time.time() - t0
@@ -124,7 +136,7 @@ def _fetch_by_day(
             print(f"    {f}", file=sys.stderr)
 
     if not frames:
-        return pd.DataFrame(columns=columns)
+        return pd.DataFrame(columns=columns or [])
     return pd.concat(frames, ignore_index=True)
 
 
@@ -137,8 +149,8 @@ def fetch_bars(client: JQuantsClient, days: List[dt.date]) -> pd.DataFrame:
 def fetch_fins(client: JQuantsClient, days: List[dt.date]) -> pd.DataFrame:
     """財務情報（その日に開示されたもの）。"""
     df = _fetch_by_day(client, "/fins/summary", days, FIN_COLS, "fins")
-    num = ["Sales", "OP", "NP", "EPS", "Eq", "TA", "ROE",
-           "FSales", "FOP", "FNP", "FEPS", "ShOutFY", "TrShFY"]
+    # 全項目を保持しているので、数値化はテキスト列以外すべてに掛ける
+    num = [c for c in df.columns if c not in FIN_TEXT_COLS]
     return _numify(df, num)
 
 
@@ -216,6 +228,11 @@ def main(argv: Optional[List[str]] = None) -> int:
                     choices=["bars", "fins", "margin", "topix", "master"])
     ap.add_argument("--incremental", action="store_true",
                     help="manifest を見て、まだ取得していない営業日だけを取得する")
+    ap.add_argument("--reset", nargs="*", default=[],
+                    choices=["bars", "fins", "margin", "topix", "master"],
+                    help="指定した種別の保存済みデータと取得記録を消してから取得する。"
+                         "取得する列を増やしたときに使う（既存 parquet には新しい列が"
+                         "入っていないが、manifest 上は取得済みなので取り直されない）")
     args = ap.parse_args(argv)
 
     start = dt.date.fromisoformat(args.date_from)
@@ -268,6 +285,16 @@ def _run_incremental(client: JQuantsClient, days: List[dt.date],
     財務のようにその日の開示が0件でも取得済みとして扱わないと、毎回叩き直してしまう。
     """
     manifest = data_store.load_manifest(args.out_dir)
+
+    for kind in args.reset:
+        removed = data_store.reset_kind(args.out_dir, manifest, kind)
+        print(f"[reset] {kind}: parquet {len(removed)}件と取得記録を削除 "
+              f"-> 全期間を取り直す")
+        for r in removed:
+            print(f"         {r}")
+    if args.reset:
+        data_store.save_manifest(args.out_dir, manifest)
+
     print("\n[manifest] 取得済み:")
     print(data_store.summarize(manifest))
 
