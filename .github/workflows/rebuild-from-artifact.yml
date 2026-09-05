@@ -25,6 +25,14 @@ permissions:
   contents: write
   actions: read
 
+# 同時に走らせない。
+# 実際に2つのランが並行し、古いほうが後に終わって
+# 新しい結果を上書きしかけた（両方が docs/*.md を同じブランチにコミットするため）。
+# 新しいほうを優先し、古いほうは打ち切る。
+concurrency:
+  group: rebuild-from-stored-data
+  cancel-in-progress: true
+
 jobs:
   rebuild:
     runs-on: ubuntu-latest
