@@ -7,8 +7,9 @@
 
 ![8軸オクタゴン比較](docs/screenshot-compare.png)
 
-> スクリーンショットは UI 検証用の**合成テストデータ**（`tests/fixtures/synthetic-stocks.json`）で撮影したものです。
-> 実在の銘柄・株価ではありません。
+> スクリーンショットは J-Quants API V2 から取得した実データで撮影したものです（2026-09-04 時点）。
+> なお CI のスモークテストは日々値が変わる実データではなく、決定的な合成データ
+> （`tests/fixtures/synthetic-stocks.json` / 銘柄名は「テスト銘柄◯」）を使用しています。
 
 ---
 

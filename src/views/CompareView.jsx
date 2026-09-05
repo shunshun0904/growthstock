@@ -138,6 +138,7 @@ function DetailPanel({ row }) {
             <Row label="20日平均出来高" value={m.ma20Volume == null ? DASH : `${fmtInt(m.ma20Volume)}株`} />
             <Row label="信用倍率" value={m.creditRatio == null ? DASH : `${fmt(m.creditRatio, 2)}倍`} />
             <Row label="直近決算" value={m.fiscalPeriod ? `${m.fiscalPeriod} (${fmtDate(m.disclosedDate)} 開示)` : DASH} />
+            <Row label="ROEの算出基準" value={m.roeBasis || DASH} />
             <Row label="営業利益率の算出基準" value={m.opMarginBasis || DASH} />
           </dl>
         </div>
