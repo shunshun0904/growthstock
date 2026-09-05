@@ -119,6 +119,12 @@ jobs:
 
       # LTR を作る前に「日付内に取り出せる情報があるか」を測る。
       # 無ければ LTR を実装しても結果は変わらない。
+      # R_high の分位で層別した評価。
+      # 従来の基準「R_high のみ」はゴールまでの距離を測っているだけで、
+      # 決算やバリュエーションと競わせても比較にならなかった。
+      - name: Stratified evaluation
+        run: python3 research/stratified_eval.py 2>&1 | tee strat.log
+
       - name: Within-date signal
         run: python3 research/within_date_signal.py 2>&1 | tee within.log
 
@@ -134,6 +140,7 @@ jobs:
             echo "## ラベル検証データ"; echo '```'; cat labels.log; echo '```'
             echo "## ウォークフォワード"; echo '```'; tail -40 walkforward.log; echo '```'
             echo "## 日付内の分離力"; echo '```'; tail -30 within.log; echo '```'
+            echo "## R_high 層別"; echo '```'; tail -30 strat.log; echo '```'
             echo "## 決算カバレッジ"; echo '```'; cat coverage.log; echo '```'
             echo "## 指標の検証"; echo '```'; cat validate.log; echo '```'
             echo "## パラメータ探索"; echo '```'; tail -40 tune.log; echo '```'
@@ -145,7 +152,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           mkdir -p research/samples
           cp research/_data/label_comparison.json research/samples/label_comparison.json
-          git add -A research/samples research/viewer research/lgbm_params.json docs/MODEL_RESULTS.md docs/MODEL_WALKFORWARD.md docs/MODEL_WITHIN_DATE.md docs/MODEL_FUNDAMENTAL_COVERAGE.md docs/DATA_VALIDATION.md
+          git add -A research/samples research/viewer research/lgbm_params.json docs/MODEL_RESULTS.md docs/MODEL_WALKFORWARD.md docs/MODEL_WITHIN_DATE.md docs/MODEL_FUNDAMENTAL_COVERAGE.md docs/DATA_VALIDATION.md docs/MODEL_STRATIFIED.md
           # git diff は未追跡ファイルを見ないため、staged の差分で判定する
           if git diff --cached --quiet; then
             echo "変更なし"; exit 0
@@ -167,6 +174,7 @@ jobs:
             research/_data/results.json
             research/_data/walkforward.json
             research/_data/within_date.json
+            research/_data/stratified.json
             research/_data/fundamental_coverage.json
             research/_data/validation.json
             research/lgbm_params.json
@@ -175,4 +183,5 @@ jobs:
             docs/MODEL_WITHIN_DATE.md
             docs/MODEL_FUNDAMENTAL_COVERAGE.md
             docs/DATA_VALIDATION.md
+            docs/MODEL_STRATIFIED.md
           retention-days: 30

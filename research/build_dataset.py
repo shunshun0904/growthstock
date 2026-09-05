@@ -260,6 +260,29 @@ def attach_labels(df: pd.DataFrame, cfg: LabelConfig = DEFAULT_LABEL) -> pd.Data
 # 財務系の特徴量（過去3決算）
 # --------------------------------------------------------------------------- #
 
+def clip_divergent(s, lo: float, hi: float, name: str = ""):
+    """
+    比率の発散を止める。範囲外は欠測にし、件数を出す。
+
+    分母が丸め誤差レベルだと比率は桁外れの値になる（実測で
+    payout_ratio が 460,000%、guidance_op_growth が 96,285% まで出た）。
+    そういう値は情報ではなく雑音なので落とす。
+
+    上限で切り捨てるのではなく欠測にするのは、
+    切り捨てると「上限にへばりついた実在の値」に見えてしまうため。
+
+    範囲は「実在しうるか」で決める。ROE のように 100% を超えることが
+    実際にある指標を、比率だからと機械的に切ってはいけない。
+    """
+    v = pd.to_numeric(s, errors="coerce")
+    bad = v.notna() & ((v < lo) | (v > hi) | ~np.isfinite(v))
+    n = int(bad.sum())
+    if n and name:
+        print(f"[clip] {name}: 範囲外 {n:,}件を欠測に "
+              f"（{lo:g} 〜 {hi:g} の外）")
+    return v.mask(bad)
+
+
 def _lag_available(df: pd.DataFrame, col: str, n: int,
                    max_gap_days: int = 800) -> pd.Series:
     """
@@ -386,7 +409,11 @@ def quarterize_panel(fins: pd.DataFrame) -> pd.DataFrame:
     df["roe_basis"] = np.where(
         df["ROE"].notna(), "provided",
         np.where(np.isfinite(roe_ttm), "ttm", "none"))
-    df["ROE"] = df["ROE"].where(df["ROE"].notna(), pd.Series(roe_ttm, index=df.index))
+    # ROE/ROA は 100% 超が実在するので上限は広く取る。
+    # ただし自己資本が極小だと桁外れになる（実測で ROE -178,300%）
+    df["ROE"] = clip_divergent(
+        df["ROE"].where(df["ROE"].notna(), pd.Series(roe_ttm, index=df.index)),
+        -500.0, 500.0, "ROE")
 
     # --- ROA / BPS / 自己資本比率 --- #
     # 方針: API が返す比率をそのまま使わず、充足率の高い素の項目から計算する。
@@ -395,7 +422,9 @@ def quarterize_panel(fins: pd.DataFrame) -> pd.DataFrame:
     #   一方 ROE 32.4%（通期のみ） / BPS 46.7%（ほぼ通期のみ） / NCROE 0.0%
     #   ROA と PER と PBR は項目として存在しない。
     ttm_np_roa = g_code["q_np"].transform(lambda s: s.rolling(4, min_periods=4).sum())
-    df["ROA"] = np.where(df["TA"] > 0, ttm_np_roa / df["TA"] * 100.0, np.nan)
+    df["ROA"] = clip_divergent(
+        pd.Series(np.where(df["TA"] > 0, ttm_np_roa / df["TA"] * 100.0, np.nan),
+                  index=df.index), -500.0, 500.0, "ROA")
 
     # PER 用の12ヶ月EPS。単期EPSの4期和。
     # 赤字（0以下）でも値は残す。PER は後段で符号を見て扱う
@@ -444,25 +473,41 @@ def quarterize_panel(fins: pd.DataFrame) -> pd.DataFrame:
     odp_ttm = ttm("q_odp")
 
     # 利益率（TTM ベース。単期だと季節性で振れる）
-    df["net_margin"] = np.where(sales_ttm > 0, np_ttm / sales_ttm * 100.0, np.nan)
-    df["ordinary_margin"] = np.where(sales_ttm > 0, odp_ttm / sales_ttm * 100.0,
-                                     np.nan)
+    # 利益率は売上が極小の会社で発散する（実測で -166,800% まで出た）
+    df["net_margin"] = clip_divergent(
+        pd.Series(np.where(sales_ttm > 0, np_ttm / sales_ttm * 100.0, np.nan),
+                  index=df.index), -500.0, 100.0, "net_margin")
+    df["ordinary_margin"] = clip_divergent(
+        pd.Series(np.where(sales_ttm > 0, odp_ttm / sales_ttm * 100.0, np.nan),
+                  index=df.index), -500.0, 100.0, "ordinary_margin")
 
     # 総資産回転率
     df["asset_turnover"] = np.where(col("TA") > 0, sales_ttm / col("TA"), np.nan)
 
-    # --- キャッシュフロー（充足率 約51%）--- #
-    # 累計からの差分展開は上のループで済ませてある（q_cfo / q_cfi / q_cff）
-    cfo_ttm = ttm("q_cfo")
-    cfi_ttm = ttm("q_cfi")
-    df["cfo_ttm"] = cfo_ttm
+    # --- キャッシュフロー --- #
+    # 累計からの差分展開は上のループで済ませてある（q_cfo / q_cfi / q_cff）。
+    #
+    # TTM（4期合計）にすると充足率が 50.8% -> 11.5% まで落ちる。
+    # キャッシュフロー計算書を四半期ごとに出す会社が少なく、
+    # 半期・通期しか出さない会社では4期が揃わないため。
+    # 代わりに「開示時点の累計値」をそのまま使う。
+    # 累計は期首からの積み上げなので、利益側も同じ累計と比べれば整合する。
+    cfo_cum = col("CFO")
+    cfi_cum = col("CFI")
+    df["cfo_cum"] = cfo_cum
     # フリーCF = 営業CF + 投資CF（投資CFは通常負なので加算でよい）
-    df["fcf_ttm"] = cfo_ttm + cfi_ttm
-    # 利益の質: 営業CFが営業利益をどれだけ裏付けているか
-    df["cfo_to_op"] = np.where(op_ttm > 0, cfo_ttm / op_ttm * 100.0, np.nan)
-    # アクルーアル: 利益と営業CFの乖離。大きいほど利益の質が低い
-    df["accruals"] = np.where(col("TA") > 0, (np_ttm - cfo_ttm) / col("TA") * 100.0,
-                              np.nan)
+    df["fcf_cum"] = cfo_cum + cfi_cum
+    # 利益の質: 営業CFが営業利益をどれだけ裏付けているか。
+    # 分母も同じ期間の累計（OP）にそろえる
+    df["cfo_to_op"] = clip_divergent(
+        pd.Series(np.where(col("OP") > 0, cfo_cum / col("OP") * 100.0, np.nan),
+                  index=df.index), -1000.0, 2000.0, "cfo_to_op")
+    # アクルーアル: 利益と営業CFの乖離。大きいほど利益の質が低い。
+    # 分子は同じ累計期間の純利益にそろえる
+    df["accruals"] = clip_divergent(
+        pd.Series(np.where(col("TA") > 0,
+                           (col("NP") - cfo_cum) / col("TA") * 100.0, np.nan),
+                  index=df.index), -200.0, 200.0, "accruals")
 
     # --- 配当 --- #
     # 会社予想の年間配当（57.8%）を優先し、無ければ実績（32.4%）
@@ -472,21 +517,27 @@ def quarterize_panel(fins: pd.DataFrame) -> pd.DataFrame:
     df["has_dividend"] = np.where(div.notna(), (div > 0).astype(float), np.nan)
     # 配当性向。提供値（22.7%）が無ければ EPS から計算
     payout_calc = np.where(df["EPS"] > 0, div / df["EPS"] * 100.0, np.nan)
-    df["payout_ratio"] = col("PayoutRatioAnn").where(
-        col("PayoutRatioAnn").notna(), pd.Series(payout_calc, index=df.index))
+    df["payout_ratio"] = clip_divergent(
+        col("PayoutRatioAnn").where(col("PayoutRatioAnn").notna(),
+                                    pd.Series(payout_calc, index=df.index)),
+        -100.0, 1000.0, "payout_ratio")
 
     # --- 会社予想（今期の伸び見通し）--- #
     # 予想営業利益 / 前期実績営業利益。1を超えれば増益見通し
     prev_op_ttm = g_code["q_op"].transform(
         lambda s: s.shift(4).rolling(4, min_periods=4).sum())
-    df["guidance_op_growth"] = np.where(
-        prev_op_ttm > 0, col("FOP") / prev_op_ttm * 100.0 - 100.0, np.nan)
+    df["guidance_op_growth"] = clip_divergent(
+        pd.Series(np.where(prev_op_ttm > 0,
+                           col("FOP") / prev_op_ttm * 100.0 - 100.0, np.nan),
+                  index=df.index), -100.0, 1000.0, "guidance_op_growth")
     # 予想の修正: 同じ会計年度で前回開示の予想と比べて何%動いたか。
     # 上方修正は「プラスアルファの好材料」そのもの
     prev_fop = df.groupby(["Code", "CurFYSt"], sort=False)["FOP"].shift(1) \
         if "FOP" in df.columns else pd.Series(np.nan, index=df.index)
-    df["guidance_revision"] = np.where(
-        prev_fop > 0, col("FOP") / prev_fop * 100.0 - 100.0, np.nan)
+    df["guidance_revision"] = clip_divergent(
+        pd.Series(np.where(prev_fop > 0,
+                           col("FOP") / prev_fop * 100.0 - 100.0, np.nan),
+                  index=df.index), -100.0, 1000.0, "guidance_revision")
 
     # --- 直近4決算をラグ列として横に並べる --- #
     # 52週高値のブレイクは、3〜4決算続けて好調な銘柄で起きる。
@@ -543,7 +594,7 @@ def quarterize_panel(fins: pd.DataFrame) -> pd.DataFrame:
              "eps_growth_turn", "sales_growth_turn", "BPS", "bps_basis", "roe_basis",
              # 配当・キャッシュフロー・会社予想・その他の比率
              "dps", "has_dividend", "payout_ratio",
-             "sales_ttm", "cfo_ttm", "fcf_ttm", "cfo_to_op", "accruals",
+             "sales_ttm", "cfo_cum", "fcf_cum", "cfo_to_op", "accruals",
              "net_margin", "ordinary_margin", "asset_turnover",
              "guidance_op_growth", "guidance_revision"]
             + [c for c in ("EPS", "eps_ttm") if c in df.columns]
@@ -674,13 +725,17 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     mc = samples["market_cap"]          # 億円
     # PSR = 時価総額 / 売上高(TTM)。売上は円なので億円に直す
     sales_oku = samples["sales_ttm"] / 1e8
-    samples["psr"] = np.where(sales_oku > 0, mc / sales_oku, np.nan)
+    samples["psr"] = clip_divergent(
+        pd.Series(np.where(sales_oku > 0, mc / sales_oku, np.nan),
+                  index=samples.index), 0.0, 1000.0, "psr")
     samples["sales_yield"] = np.where(mc > 0, sales_oku / mc * 100.0, np.nan)
     # キャッシュフロー利回り
-    samples["cfo_yield"] = np.where(mc > 0, samples["cfo_ttm"] / 1e8 / mc * 100.0,
-                                    np.nan)
-    samples["fcf_yield"] = np.where(mc > 0, samples["fcf_ttm"] / 1e8 / mc * 100.0,
-                                    np.nan)
+    samples["cfo_yield"] = clip_divergent(
+        pd.Series(np.where(mc > 0, samples["cfo_cum"] / 1e8 / mc * 100.0, np.nan),
+                  index=samples.index), -500.0, 500.0, "cfo_yield")
+    samples["fcf_yield"] = clip_divergent(
+        pd.Series(np.where(mc > 0, samples["fcf_cum"] / 1e8 / mc * 100.0, np.nan),
+                  index=samples.index), -500.0, 500.0, "fcf_yield")
     # 配当利回り
     samples["div_yield"] = np.where(px > 0, samples["dps"] / px * 100.0, np.nan)
 

@@ -19,6 +19,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "research"))
 
 from build_dataset import (  # noqa: E402
+    clip_divergent,
     HOLD_DAYS, HORIZON_END, HORIZON_START, HIGH_WINDOW, LabelConfig,
     _lag_available, add_cross_sectional_ranks, attach_labels, breakout_flags,
     price_panel, quarterize_panel,
@@ -481,6 +482,45 @@ class TestLagOverAvailableValues(unittest.TestCase):
         lag1 = _lag_available(df, "x", 1)
         self.assertTrue(np.isnan(lag1.iloc[2]))   # B の先頭に A の値が来ない
         self.assertAlmostEqual(lag1.iloc[3], 3.0)
+
+
+class TestDivergenceGuard(unittest.TestCase):
+    """
+    比率は分母が小さいと発散する。
+    実測で payout_ratio 460,000% / guidance_op_growth 96,285% /
+    net_margin -166,800% が出ていた。
+    PER/PBR にはガードを入れたのに、後から足した指標には入れ忘れていた。
+    """
+
+    def test_out_of_range_becomes_missing(self):
+        s = pd.Series([10.0, 500.0, 460000.0, -1e6])
+        out = clip_divergent(s, -100.0, 1000.0)
+        self.assertAlmostEqual(out.iloc[0], 10.0)
+        self.assertAlmostEqual(out.iloc[1], 500.0)
+        self.assertTrue(np.isnan(out.iloc[2]))
+        self.assertTrue(np.isnan(out.iloc[3]))
+
+    def test_does_not_clamp_to_the_bound(self):
+        """
+        上限で切り捨てると「上限にへばりついた実在の値」に見えてしまう。
+        欠測にするのが正しい。
+        """
+        out = clip_divergent(pd.Series([5000.0]), 0.0, 1000.0)
+        self.assertTrue(np.isnan(out.iloc[0]))
+        self.assertNotEqual(out.iloc[0], 1000.0)
+
+    def test_infinities_are_removed(self):
+        out = clip_divergent(pd.Series([np.inf, -np.inf, 1.0]), -10.0, 10.0)
+        self.assertEqual(int(out.notna().sum()), 1)
+
+    def test_missing_stays_missing(self):
+        out = clip_divergent(pd.Series([np.nan, 5.0]), 0.0, 10.0)
+        self.assertTrue(np.isnan(out.iloc[0]))
+
+    def test_keeps_legitimately_large_values(self):
+        """ROE が100%を超えるのは実在する。範囲内なら残す。"""
+        out = clip_divergent(pd.Series([250.0, -180.0]), -500.0, 500.0)
+        self.assertEqual(int(out.notna().sum()), 2)
 
 
 class TestSectorIsPointInTime(unittest.TestCase):

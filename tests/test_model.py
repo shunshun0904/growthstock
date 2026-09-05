@@ -498,5 +498,54 @@ class TestTunedParamsArePersisted(unittest.TestCase):
         self.assertEqual(p["num_leaves"], tuning.DEFAULT_PARAMS["num_leaves"])
 
 
+class TestStratifiedEvaluation(unittest.TestCase):
+    """
+    r_high はゴールまでの距離を測っているだけなので、
+    それと競わせても比較にならない。層内で比べる枠組みを固定する。
+    """
+
+    def _frame(self, n_dates=12, n=400, seed=0):
+        rng = np.random.default_rng(seed)
+        rows = []
+        for d in pd.date_range("2020-01-31", periods=n_dates, freq="ME"):
+            rh = rng.uniform(10, 95, n)
+            rows.append(pd.DataFrame({"Date": d, "r_high": rh,
+                                      "label": (rng.random(n) < rh / 200).astype(int)}))
+        return pd.concat(rows, ignore_index=True)
+
+    def test_strata_are_assigned_within_each_date(self):
+        """局面で r_high の分布が動くので、日付をまたいで切ってはいけない。"""
+        from stratified_eval import assign_strata, N_STRATA
+        df = self._frame()
+        st = assign_strata(df)
+        for _, g in df.assign(_s=st).groupby("Date"):
+            self.assertEqual(g["_s"].nunique(), N_STRATA)
+
+    def test_r_high_range_is_narrow_inside_a_stratum(self):
+        """層内では距離の差がほとんど無いことを確認する。これが枠組みの前提。"""
+        from stratified_eval import assign_strata
+        df = self._frame().assign(_s=lambda d: assign_strata(d))
+        overall = df["r_high"].max() - df["r_high"].min()
+        for (_, _), g in df.groupby(["Date", "_s"]):
+            self.assertLess(g["r_high"].max() - g["r_high"].min(), overall / 2)
+
+    def test_evaluate_within_rejects_tiny_or_degenerate_groups(self):
+        from stratified_eval import evaluate_within
+        self.assertIsNone(evaluate_within(np.array([1, 0]), np.array([1.0, 0.0])))
+        y = np.zeros(200, dtype=int)
+        self.assertIsNone(evaluate_within(y, np.random.rand(200)))
+        y[:20] = 1
+        self.assertIsNotNone(evaluate_within(y, np.random.rand(200)))
+
+    def test_lift_is_relative_to_the_stratum_base_rate(self):
+        """層ごとに正例率が違うので、PR-AUC の生値では比べられない。"""
+        from stratified_eval import evaluate_within
+        rng = np.random.default_rng(0)
+        y = (rng.random(500) < 0.3).astype(int)
+        res = evaluate_within(y, rng.random(500))
+        self.assertAlmostEqual(res["base_rate"], y.mean())
+        self.assertAlmostEqual(res["lift"], res["pr_auc"] / res["base_rate"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
