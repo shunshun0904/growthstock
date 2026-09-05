@@ -44,6 +44,10 @@ from walkforward import sign_test  # noqa: E402
 MIN_ROWS = 30       # この数を下回る日付・セルは推定が不安定なので捨てる
 MIN_POS = 3         # 正例がこれ未満だと AUC がほぼ無意味
 N_BUCKETS = 5       # R_high の分位数
+# 有効セルがこれ未満の特徴量は順位付けの対象にしない。
+# 1セルしか残らなかった列が |AUC-0.5| で首位に来て、
+# 実質ノイズが最上位に表示される事故が起きたため。
+MIN_CELLS = 50
 
 
 def _auc(y: np.ndarray, x: np.ndarray) -> Optional[float]:
@@ -119,17 +123,25 @@ def conditional(df: pd.DataFrame, cols: List[str], on: str = "r_high") -> List[D
 
 
 def _table(rows: List[Dict], limit: int) -> List[str]:
-    lines = ["| 特徴量 | 平均AUC | 標準偏差 | 0.5からの差 | 上回った回数 | p |",
-             "| --- | ---: | ---: | ---: | :---: | ---: |"]
+    lines = ["| 特徴量 | 有効セル | 平均AUC | 標準偏差 | 0.5からの差 | 上回った回数 | p |",
+             "| --- | ---: | ---: | ---: | ---: | :---: | ---: |"]
     for r in rows[:limit]:
         lines.append(
-            f"| `{r['feature']}` | {r['mean_auc']:.4f} | {r['std_auc']:.4f} | "
-            f"{r['abs_edge']:.4f} | {r['wins']}/{r['wins']+r['losses']} | "
-            f"{r['p_sign']:.4f} |")
+            f"| `{r['feature']}` | {r['n_cells']} | {r['mean_auc']:.4f} | "
+            f"{r['std_auc']:.4f} | {r['abs_edge']:.4f} | "
+            f"{r['wins']}/{r['wins']+r['losses']} | {r['p_sign']:.4f} |")
     return lines
 
 
-def build_report(marg: List[Dict], cond: List[Dict], n_dates: int, n_cells: int) -> str:
+def _split_by_reliability(rows: List[Dict]):
+    """有効セルが足りない特徴量を分ける。推定が不安定なので同列に並べない。"""
+    ok = [r for r in rows if r["n_cells"] >= MIN_CELLS]
+    thin = [r for r in rows if r["n_cells"] < MIN_CELLS]
+    return ok, thin
+
+
+def build_report(marg: List[Dict], cond: List[Dict], n_dates: int, n_cells: int,
+                 n_feats: int) -> str:
     ref_m = next((r for r in marg if r["feature"] == "r_high"), None)
     lines = [
         "# 日付内での分離力",
@@ -143,8 +155,11 @@ def build_report(marg: List[Dict], cond: List[Dict], n_dates: int, n_cells: int)
         "",
         "- AUC 0.5 = 分離力ゼロ。日付内で完結するため正例率の局面差に影響されない",
         f"- 対象日付: {n_dates}",
-        f"- 条件付きのセル数: {n_cells}（日付 × R_high の{N_BUCKETS}分位）",
+        f"- 条件付きのセル: 日付 × R_high の{N_BUCKETS}分位（最大 {n_cells}）",
         f"- 1セルあたり最低 {MIN_ROWS}行・正例{MIN_POS}件を要求。満たさないセルは除外",
+        f"- 有効セルが {MIN_CELLS} 未満の特徴量は別掲（推定が不安定なため）",
+        f"- 特徴量を{n_feats}個試しているので、多重比較の補正後の閾値は "
+        f"p < {0.05 / max(1, n_feats):.4f}（Bonferroni）",
         "",
         "## 1. 単独の分離力（日付内）",
         "",
@@ -163,7 +178,13 @@ def build_report(marg: List[Dict], cond: List[Dict], n_dates: int, n_cells: int)
         "1 で高くても `r_high` と相関しているだけの特徴量は、ここで 0.5 に落ちる。",
         "",
     ]
-    lines += _table(cond, 25)
+    cond_ok, cond_thin = _split_by_reliability(cond)
+    lines += _table(cond_ok, 25)
+    if cond_thin:
+        lines += ["", f"### 有効セルが{MIN_CELLS}未満（参考）", "",
+                  "セル数が少なく推定が不安定なので、上の表とは分けて示す。",
+                  "決算の変化量は開示が揃う銘柄が限られるため、ここに落ちやすい。", ""]
+        lines += _table(cond_thin, 10)
     lines += [
         "",
         "## 読み方",
@@ -204,8 +225,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"  {r['feature']:<24} AUC {r['mean_auc']:.4f} "
               f"(差 {r['abs_edge']:.4f} / p={r['p_sign']:.4f})")
 
-    n_cells = cond[0]["n_cells"] if cond else 0
-    body = build_report(marg, cond, n_dates, n_cells)
+    n_cells = max((r["n_cells"] for r in cond), default=0)
+    body = build_report(marg, cond, n_dates, n_cells, len(cols))
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
     with open(args.out, "w", encoding="utf-8") as fh:
         fh.write(body + "\n")
@@ -215,8 +236,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         json.dump({"marginal": marg, "conditional": cond,
                    "n_dates": int(n_dates)}, fh, ensure_ascii=False, indent=2)
 
-    strong = [r for r in cond if r["abs_edge"] >= 0.02 and r["p_sign"] < 0.05]
-    print("\n[判定] R_high を与えた上でも分離力が残る特徴量:")
+    alpha = 0.05 / max(1, len(cols))
+    strong = [r for r in cond if r["n_cells"] >= MIN_CELLS
+              and r["abs_edge"] >= 0.02 and r["p_sign"] < alpha]
+    print(f"\n[判定] R_high を与えた上でも分離力が残る特徴量 "
+          f"(有効セル>={MIN_CELLS} / |AUC-0.5|>=0.02 / p<{alpha:.4f}):")
     if strong:
         for r in strong:
             print(f"  {r['feature']:<24} AUC {r['mean_auc']:.4f} "
