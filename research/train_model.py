@@ -391,6 +391,18 @@ def main(argv: List[str] | None = None) -> int:
     return 0
 
 
+def reference_pr_auc(experiments, baselines, ref: str):
+    """基準モデルのテスト PR-AUC を引く。見つからなければ None。"""
+    for e in experiments:
+        for r in e.get("results", {}).get("test", []):
+            if f"{r['name']} [{e['preset']}]" == ref or r["name"] == ref:
+                return r["pr_auc"]
+    for b in (baselines or {}).get("test", []):
+        if b["name"] == ref:
+            return b["pr_auc"]
+    return None
+
+
 def _report(df, parts, baselines, experiments, args, boot=None, ref="") -> str:
     """実測値だけを並べたレポートを組み立てる。"""
     lines = [
@@ -430,11 +442,17 @@ def _report(df, parts, baselines, experiments, args, boot=None, ref="") -> str:
                          f"{r['lift@5%']:.2f}x |")
         lines.append(f"\n（正例率 = {rows[0]['base_rate']*100:.2f}% / n = {rows[0]['n']:,}）")
 
-    # --- ベースラインとの差の有意性 ---
+    # --- 基準との差の有意性 ---
     if boot:
+        # 基準はモデルなので experiments から引く。
+        # ベースラインを廃止したあとも baselines を見ていて落ちていた。
+        ref_ap = reference_pr_auc(experiments, baselines, ref)
+        ref_ap_txt = f"{ref_ap:.4f}" if ref_ap is not None else "—"
         lines += ["", f"## 差は誤差か（対応のあるブートストラップ B={args.n_boot}）", "",
-                  f"基準は **{ref}**（テスト PR-AUC "
-                  f"{[b for b in baselines['test'] if b['name'] == ref][0]['pr_auc']:.4f}）。",
+                  f"基準は **{ref}**（テスト PR-AUC {ref_ap_txt}）。",
+                  "単変量のベースラインは廃止した。母集団を高値更新日にした時点で",
+                  "`r_high` は全件ほぼ100の定数になり、勝っても何も言えないため。",
+                  "決算を使わないモデルを基準にして、決算を足す価値を直接測る。",
                   "95%CI が 0 をまたぐ場合、その差は誤差と区別できない。", "",
                   "| モデル | PR-AUC | 差 | 95%CI | P(差>0) | 判定 |",
                   "| --- | ---: | ---: | :---: | ---: | --- |"]
@@ -456,7 +474,8 @@ def _report(df, parts, baselines, experiments, args, boot=None, ref="") -> str:
 
     # --- 特徴量の寄与 ---
     best_exp = max(experiments, key=lambda e: max(r["pr_auc"] for r in e["results"]["test"]))
-    lr = best_exp["_models"].get("ロジスティック回帰")
+    # _models は学習経路でしか付かない（結果だけから組み直すときは無い）
+    lr = best_exp.get("_models", {}).get("ロジスティック回帰")
     if lr is not None:
         coefs = lr.named_steps["logisticregression"].coef_[0]
         imp = sorted(zip(best_exp["_cols"], coefs), key=lambda x: -abs(x[1]))[:15]

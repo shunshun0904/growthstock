@@ -521,6 +521,51 @@ class TestTunedParamsArePersisted(unittest.TestCase):
         self.assertEqual(p["num_leaves"], tuning.DEFAULT_PARAMS["num_leaves"])
 
 
+class TestReportWithoutBaselines(unittest.TestCase):
+    """
+    単変量ベースラインを廃止したあと、レポートが基準の PR-AUC を
+    baselines から引き続けていて IndexError で落ちていた。
+    基準はモデルなので experiments から引く。
+    """
+
+    def test_reference_pr_auc_comes_from_experiments(self):
+        from train_model import reference_pr_auc
+        exps = [{"preset": "technical",
+                 "results": {"test": [{"name": "LightGBM", "pr_auc": 0.13}]}}]
+        self.assertAlmostEqual(
+            reference_pr_auc(exps, {"test": []}, "LightGBM [technical]"), 0.13)
+        self.assertIsNone(
+            reference_pr_auc(exps, {"test": []}, "LightGBM [none]"))
+
+    def test_report_survives_empty_baselines(self):
+        import argparse
+        from train_model import _report
+        n = 40
+        df = pd.DataFrame({
+            "Date": pd.date_range("2020-01-01", periods=n, freq="D"),
+            "Code": ["1"] * n,
+            "label": ([0] * 35) + ([1] * 5)})
+        parts = {"train": df.iloc[:20], "val": df.iloc[20:30], "test": df.iloc[30:]}
+        exps = [{"preset": "technical", "n_features": 3,
+                 "groups": ["price"],
+                 "results": {"val": [{"name": "LightGBM", "pr_auc": 0.1,
+                                      "roc_auc": 0.5, "precision@1%": 0.1,
+                                      "precision@5%": 0.1, "lift@5%": 1.0,
+                                      "base_rate": 0.1, "n": 10}],
+                             "test": [{"name": "LightGBM", "pr_auc": 0.13,
+                                       "roc_auc": 0.6, "precision@1%": 0.2,
+                                       "precision@5%": 0.2, "lift@5%": 1.5,
+                                       "base_rate": 0.1, "n": 10}]}}]
+        boot = [{"name": "LightGBM [all]", "pr_auc": 0.12, "diff": -0.01,
+                 "ci_low": -0.05, "ci_high": 0.03, "p_better": 0.3}]
+        args = argparse.Namespace(val_start="2020-01-21", test_start="2020-01-31",
+                                  n_boot=100)
+        body = _report(df, parts, {"val": [], "test": []}, exps, args, boot,
+                       "LightGBM [technical]")
+        self.assertIn("0.1300", body)
+        self.assertIn("LightGBM [technical]", body)
+
+
 class TestStratifiedEvaluation(unittest.TestCase):
     """
     層内で比べる枠組みを固定する。
