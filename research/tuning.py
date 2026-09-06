@@ -46,11 +46,18 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 PARAMS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                            "lgbm_params.json")
 
-# 探索しないもの（固定）。再現性と、木の本数は early stopping で決めるため。
+#: 探索中の木の本数。固定する。
+#:
+#: early stopping で本数を決めると、検証窓のばらつきがそのまま本数に乗り、
+#: 試行ごとに「別の大きさのモデル」を比べることになる。
+#: 本数を固定すれば、比べているのは残りのパラメータの違いだけになる。
+SEARCH_N_ESTIMATORS = 100
+
+# 探索しないもの（固定）。再現性のため。
 FIXED = {
     "objective": "binary",
     "boosting_type": "gbdt",
-    "n_estimators": 2000,      # 上限。実際の本数は early stopping が決める
+    "n_estimators": SEARCH_N_ESTIMATORS,
     "random_state": 0,
     "n_jobs": -1,
     "verbose": -1,
@@ -83,6 +90,66 @@ def chronological_split(df: pd.DataFrame, valid_frac: float = 0.25
     inner_train = df[d <= cut]
     inner_valid = df[d > cut]
     return inner_train, inner_valid
+
+
+def _year_groups(years: pd.Series, labels: pd.Series, n_splits: int) -> pd.Series:
+    """
+    年を、正例・負例とも n_splits 件以上になるように束ねる。
+
+    StratifiedKFold は、どの層も分割数以上の件数を要求する。
+    サンプルの少ない年（初期は決算4期分の履歴が要るぶん少ない）を
+    そのまま層にすると落ちるので、隣の年に寄せる。
+    """
+    order = sorted(years.unique())
+    label = labels.astype(int)
+    groups: Dict[int, str] = {}
+    cur: List[int] = []
+    for y in order:
+        cur.append(y)
+        m = years.isin(cur)
+        if int(label[m].sum()) >= n_splits and int((1 - label[m]).sum()) >= n_splits:
+            name = f"{cur[0]}" if len(cur) == 1 else f"{cur[0]}-{cur[-1]}"
+            for yy in cur:
+                groups[yy] = name
+            cur = []
+    if cur:
+        # 末尾が足りなければ直前の束に混ぜる
+        last = groups[order[len(groups) - 1]] if groups else f"{cur[0]}-{cur[-1]}"
+        for yy in cur:
+            groups[yy] = last
+    return years.map(groups)
+
+
+def year_folds(df: pd.DataFrame, n_splits: int = 5, seed: int = 0
+               ) -> List[Tuple[pd.DataFrame, pd.DataFrame]]:
+    """
+    年で層別した k 分割。各フォールドが全期間を同じ比率で含む。
+
+    時系列分割は、この規模のデータでは推定が安定しなかった
+    （実測で分割ごとの PR-AUC が 0.036〜0.230 と6倍以上ばらついた）。
+    どの分割も同じ年構成にすれば、その年の局面の当たり外れが
+    フォールド間で相殺され、パラメータの比較ができるようになる。
+
+    層は「年の束 × ラベル」。年だけで層別すると、正例率7%台では
+    フォールドごとの正例数が偏り、PR-AUC が比較にならない。
+
+    引き換えに、訓練と検証が同じ期間を含むので、この CV スコア自体は
+    将来性能の推定にはならない（楽観側に出る）。
+    パラメータを選ぶためだけに使い、実力の判定はウォークフォワードで行う。
+    """
+    from sklearn.model_selection import StratifiedKFold
+
+    years = pd.to_datetime(df["Date"]).dt.year
+    label = df["label"].astype(int)
+    strata = _year_groups(years, label, n_splits).astype(str) + "_" + label.astype(str)
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
+    out: List[Tuple[pd.DataFrame, pd.DataFrame]] = []
+    for tr_idx, va_idx in skf.split(df, strata):
+        tr, va = df.iloc[tr_idx], df.iloc[va_idx]
+        if tr["label"].nunique() < 2 or va["label"].nunique() < 2:
+            continue
+        out.append((tr, va))
+    return out
 
 
 def time_series_folds(df: pd.DataFrame, n_splits: int = 5,
@@ -124,7 +191,8 @@ def scale_pos_weight(y: np.ndarray) -> float:
 
 
 def _fit_one(params: Dict, tr: pd.DataFrame, va: pd.DataFrame,
-             cols: List[str]) -> Tuple[float, float, int]:
+             cols: List[str], early_stopping: bool = True
+             ) -> Tuple[float, float, int]:
     """
     内側検証の PR-AUC・ROC-AUC と、early stopping が決めた木の本数を返す。
 
@@ -138,14 +206,18 @@ def _fit_one(params: Dict, tr: pd.DataFrame, va: pd.DataFrame,
     Xva, yva = va[cols].to_numpy(dtype=float), va["label"].to_numpy(dtype=int)
     model = lgb.LGBMClassifier(**params,
                                scale_pos_weight=scale_pos_weight(ytr))
-    # eval_set は 4.7 で非推奨。eval_X / eval_y を使う
-    model.fit(
-        Xtr, ytr,
-        eval_X=Xva, eval_y=yva,
-        eval_metric="average_precision",
-        callbacks=[lgb.early_stopping(100, verbose=False),
-                   lgb.log_evaluation(0)],
-    )
+    if early_stopping:
+        # eval_set は 4.7 で非推奨。eval_X / eval_y を使う
+        model.fit(
+            Xtr, ytr,
+            eval_X=Xva, eval_y=yva,
+            eval_metric="average_precision",
+            callbacks=[lgb.early_stopping(100, verbose=False),
+                       lgb.log_evaluation(0)],
+        )
+    else:
+        # 本数を固定して学習する。検証データは評価にだけ使う
+        model.fit(Xtr, ytr)
     best_iter = int(getattr(model, "best_iteration_", 0) or params["n_estimators"])
     prob = model.predict_proba(Xva)[:, 1]
     pr = float(average_precision_score(yva, prob))
@@ -155,7 +227,7 @@ def _fit_one(params: Dict, tr: pd.DataFrame, va: pd.DataFrame,
 
 def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
          seed: int = 0, verbose: bool = True, n_splits: int = 5,
-         embargo_days: int = 60) -> Dict:
+         embargo_days: int = 60, scheme: str = "year") -> Dict:
     """
     Optuna で探索する。df は「テスト窓より前」のデータだけを渡すこと。
 
@@ -170,15 +242,23 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
     import optuna
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
-    folds = time_series_folds(df, n_splits=n_splits, embargo_days=embargo_days)
+    if scheme == "year":
+        folds = year_folds(df, n_splits=n_splits, seed=seed)
+    elif scheme == "timeseries":
+        folds = time_series_folds(df, n_splits=n_splits,
+                                  embargo_days=embargo_days)
+    else:
+        raise SystemExit(f"未知の分割方式: {scheme}（year / timeseries）")
     if not folds:
         if verbose:
             print("  [tune] 分割を作れないため既定値を使う")
         return dict(DEFAULT_PARAMS)
     if verbose:
-        print(f"  [tune] 時系列{len(folds)}分割 "
-              + " / ".join(f"訓練{len(t):,}→検証{len(v):,}(正例{int(v['label'].sum())})"
-                           for t, v in folds))
+        ja = {"year": "年で層別", "timeseries": "時系列"}[scheme]
+        print(f"  [tune] {ja}{len(folds)}分割 / 木{SEARCH_N_ESTIMATORS}本固定")
+        print("  [tune] " + " / ".join(
+            f"訓練{len(t):,}→検証{len(v):,}(正例{int(v['label'].sum())})"
+            for t, v in folds))
 
     def objective(trial):
         params = {
@@ -196,7 +276,7 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
         }
         prs, rocs, iters = [], [], []
         for tr, va in folds:
-            pr, roc, it = _fit_one(params, tr, va, cols)
+            pr, roc, it = _fit_one(params, tr, va, cols, early_stopping=False)
             prs.append(pr)
             rocs.append(roc)
             iters.append(it)
@@ -217,12 +297,12 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
     study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
 
     best = {**FIXED, **study.best_params, "subsample_freq": 1}
-    # 木の本数は探索対象にせず、early stopping が決めた本数を使う
-    best["n_estimators"] = max(
-        50, int(study.best_trial.user_attrs.get("best_iteration", 200)))
+    # 木の本数は探索中ずっと固定なので、そのまま採用する
+    best["n_estimators"] = SEARCH_N_ESTIMATORS
     at = study.best_trial.user_attrs
     global LAST_CV
-    LAST_CV = {"n_splits": len(folds), "mean_pr_auc": round(study.best_value, 4),
+    LAST_CV = {"scheme": scheme, "n_estimators": SEARCH_N_ESTIMATORS,
+               "n_splits": len(folds), "mean_pr_auc": round(study.best_value, 4),
                "std": round(float(at.get("score_std", 0.0)), 4),
                "fold_scores": at.get("fold_scores", []),
                "mean_roc_auc": round(float(at.get("roc_auc", float("nan"))), 4),

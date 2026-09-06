@@ -459,22 +459,34 @@ class TestTuning(unittest.TestCase):
         self.assertGreater(len(tr), 0)
         self.assertGreater(len(va), 0)
 
-    def test_tuning_does_not_do_worse_than_defaults(self):
+    def test_reported_score_matches_the_returned_params(self):
+        """
+        報告した CV スコアが、返したパラメータで再現できること。
+
+        「良いスコアを報告しながら別のパラメータを返す」が起きると、
+        結果を信じてよいかが分からなくなる。
+        （既定値より必ず良くなることは保証しない。試行数が少なければ
+        TPE が既定値より良い設定を見つけないことは普通にある）
+        """
         import tuning
         df = self._frame()
         cols = ["x1", "x2"]
-        best = tuning.tune(df, cols, n_trials=5, verbose=False)
-        tr, va = tuning.chronological_split(df)
-        s_def, _, _ = tuning._fit_one(tuning.DEFAULT_PARAMS, tr, va, cols)
-        s_best, _, _ = tuning._fit_one(best, tr, va, cols)
-        self.assertGreaterEqual(s_best, s_def - 1e-9)
+        best = tuning.tune(df, cols, n_trials=5, verbose=False, n_splits=3)
+        folds = tuning.year_folds(df, n_splits=3)
+        got = float(np.mean([
+            tuning._fit_one(best, tr, va, cols, early_stopping=False)[0]
+            for tr, va in folds]))
+        self.assertAlmostEqual(got, tuning.LAST_CV["mean_pr_auc"], places=3)
 
-    def test_tree_count_comes_from_early_stopping(self):
-        """木の本数は探索対象にせず early stopping が決める。"""
+    def test_tree_count_is_fixed_during_the_search(self):
+        """
+        本数を early stopping に決めさせると、試行ごとに別の大きさの
+        モデルを比べることになる。固定して他のパラメータだけを比べる。
+        """
         import tuning
-        best = tuning.tune(self._frame(), ["x1", "x2"], n_trials=3, verbose=False)
-        self.assertGreaterEqual(best["n_estimators"], 50)
-        self.assertLess(best["n_estimators"], tuning.FIXED["n_estimators"])
+        best = tuning.tune(self._frame(), ["x1", "x2"], n_trials=3, verbose=False,
+                           n_splits=3)
+        self.assertEqual(best["n_estimators"], tuning.SEARCH_N_ESTIMATORS)
 
     def test_falls_back_to_defaults_without_both_classes(self):
         import tuning
@@ -521,10 +533,75 @@ class TestTunedParamsArePersisted(unittest.TestCase):
         self.assertEqual(p["num_leaves"], tuning.DEFAULT_PARAMS["num_leaves"])
 
 
+class TestYearStratifiedFolds(unittest.TestCase):
+    """
+    探索の評価は年で層別した k 分割。
+
+    時系列分割はこの規模では推定が安定しなかった
+    （実測で分割ごとの PR-AUC が 0.036〜0.230 と6倍以上ばらついた）。
+    各フォールドを同じ年構成にすれば、局面の当たり外れが相殺される。
+    """
+
+    def _df(self, spec=((2018, 60), (2019, 300), (2020, 900), (2021, 1200))):
+        rng = np.random.default_rng(0)
+        rows = []
+        for year, n in spec:
+            a = rng.normal(0, 1, n)
+            rows.append(pd.DataFrame({
+                "Date": pd.date_range(f"{year}-01-05", f"{year}-12-25", periods=n),
+                "a": a,
+                "label": (rng.random(n) < 1 / (1 + np.exp(-(a * 0.7 - 2.6)))).astype(int)}))
+        return pd.concat(rows, ignore_index=True)
+
+    def test_every_fold_has_the_same_year_mix(self):
+        from tuning import year_folds
+        df = self._df()
+        folds = year_folds(df, n_splits=5, seed=0)
+        self.assertEqual(len(folds), 5)
+        mixes = []
+        for _, va in folds:
+            y = pd.to_datetime(va["Date"]).dt.year.value_counts(normalize=True)
+            mixes.append(y.sort_index().round(2).to_dict())
+        self.assertEqual(len(set(map(str, mixes))), 1, mixes)
+
+    def test_positive_rate_is_balanced_across_folds(self):
+        """年だけで層別すると正例数が偏る。層は 年の束 × ラベル にする。"""
+        from tuning import year_folds
+        rates = [v["label"].mean() for _, v in year_folds(self._df(), n_splits=5)]
+        self.assertLess(float(np.std(rates)), 0.005)
+
+    def test_small_years_are_merged(self):
+        """
+        StratifiedKFold は分割数未満の層で落ちる。
+        正例の少ない年（初期は決算4期分の履歴が要るぶん少ない）は隣に寄せる。
+        """
+        from tuning import year_folds
+        df = self._df(spec=((2017, 20), (2018, 60), (2019, 300), (2020, 900)))
+        folds = year_folds(df, n_splits=5, seed=0)   # 落ちなければよい
+        self.assertEqual(len(folds), 5)
+
+    def test_search_fixes_the_number_of_trees(self):
+        """
+        本数を early stopping に決めさせると、試行ごとに別の大きさの
+        モデルを比べることになる。固定して他のパラメータだけを比べる。
+        """
+        from tuning import tune, SEARCH_N_ESTIMATORS
+        best = tune(self._df(), ["a"], n_trials=2, n_splits=5, scheme="year",
+                    verbose=False)
+        self.assertEqual(best["n_estimators"], SEARCH_N_ESTIMATORS)
+        self.assertEqual(SEARCH_N_ESTIMATORS, 100)
+
+    def test_unknown_scheme_stops(self):
+        from tuning import tune
+        with self.assertRaises(SystemExit):
+            tune(self._df(), ["a"], n_trials=1, scheme="random", verbose=False)
+
+
 class TestTuningFolds(unittest.TestCase):
     """
-    探索の評価は時系列 k 分割。ランダム分割にすると同じ銘柄の隣接期間が
-    訓練と検証の両方に入り、必ず楽観的なパラメータが選ばれる。
+    時系列分割（既定ではないが残してある）。
+    ランダム分割にすると同じ銘柄の隣接期間が訓練と検証の両方に入り、
+    必ず楽観的なパラメータが選ばれる。
     """
 
     def _df(self, days=1000, per_day=3):

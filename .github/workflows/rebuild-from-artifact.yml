@@ -131,7 +131,7 @@ jobs:
           # ここは「読めなければ no」でよいので失敗を無害化する
           REQ=$(grep -v '^#' research/tune_request.txt 2>/dev/null | head -1 | tr -d '[:space:]' || true)
           if [ "$REQ" = "yes" ]; then
-            python3 research/run_tuning.py --n-trials 30 \
+            python3 research/run_tuning.py --n-trials 50 \
               --features $(grep -v '^#' research/tune_presets.txt | tr '\n' ' ') \
               --n-splits 5 2>&1 | tee tune.log
           else

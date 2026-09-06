@@ -48,14 +48,16 @@ def tuning_cutoff(dates: pd.Series, args) -> pd.Timestamp:
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="LightGBM のパラメータ探索")
     ap.add_argument("--dataset", default=os.path.join(DATA_DIR, "dataset.parquet"))
-    ap.add_argument("--n-trials", type=int, default=30)
+    ap.add_argument("--n-trials", type=int, default=50)
     ap.add_argument("--features", nargs="*", default=None,
                     help=f"探索するプリセット。既定: {' '.join(DEFAULT_PRESETS)}")
     ap.add_argument("--min-train-months", type=int, default=36)
     ap.add_argument("--test-months", type=int, default=6)
     ap.add_argument("--step-months", type=int, default=6)
     ap.add_argument("--n-splits", type=int, default=5,
-                    help="探索の評価に使う時系列分割の数")
+                    help="探索の評価に使う分割の数")
+    ap.add_argument("--cv", choices=["year", "timeseries"], default="year",
+                    help="分割方式。year=年で層別（既定） / timeseries=時系列")
     args = ap.parse_args(argv)
 
     df = pd.read_parquet(args.dataset).sort_values("Date").reset_index(drop=True)
@@ -83,7 +85,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"\n[{i}/{len(presets)}] {preset} ({len(cols)}列) "
               f"— 経過 {el/60:.1f}分")
         params = tuning.tune(tune_df, cols, n_trials=args.n_trials,
-                             n_splits=args.n_splits, embargo_days=EMBARGO_DAYS)
+                             n_splits=args.n_splits, embargo_days=EMBARGO_DAYS,
+                             scheme=args.cv)
         # 探索の記録を一緒に保存する。params_for が読むときに落とすので
         # LightGBM には渡らない
         store[preset] = {**params, "_cv": dict(tuning.LAST_CV),
