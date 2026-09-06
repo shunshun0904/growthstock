@@ -155,7 +155,10 @@ def redundant_pairs(df: pd.DataFrame, cols: List[str],
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="特徴量の EDA サマリ")
     ap.add_argument("--dataset", default=os.path.join(DATA_DIR, "dataset.parquet"))
-    ap.add_argument("--out", default=os.path.join(DATA_DIR, "eda.json"))
+    # research/_data/ は .gitignore されており、コミットできない。
+    # 可視化は手元で行うので、リポジトリに残る場所へ出す
+    ap.add_argument("--out", default=os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "eda.json"))
     args = ap.parse_args(argv)
 
     df = pd.read_parquet(args.dataset)
@@ -166,7 +169,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     stats = {c: describe_column(df[c]) for c in cols}
 
     print("[eda] ヒストグラム")
-    hists = {c: histogram(df[c]) for c in cols}
+    # 順位列(_r)は構成上ほぼ一様分布になり、見ても情報が無い。
+    # ファイルサイズだけ増えるので省く
+    hists = {c: histogram(df[c]) for c in cols if not c.endswith("_r")}
 
     print("[eda] 年別の欠損率")
     miss_year = missing_by_year(df, cols)
@@ -206,8 +211,17 @@ def main(argv: Optional[List[str]] = None) -> int:
         "label": labels, "redundant": dup, "problems": problems,
     }
     os.makedirs(os.path.dirname(args.out), exist_ok=True)
+    def round_floats(o, nd=6):
+        if isinstance(o, float):
+            return None if not np.isfinite(o) else round(o, nd)
+        if isinstance(o, dict):
+            return {k: round_floats(v, nd) for k, v in o.items()}
+        if isinstance(o, list):
+            return [round_floats(v, nd) for v in o]
+        return o
+
     with open(args.out, "w", encoding="utf-8") as fh:
-        json.dump(payload, fh, ensure_ascii=False)
+        json.dump(round_floats(payload), fh, ensure_ascii=False)
     print(f"[done] {args.out} ({os.path.getsize(args.out)/1e6:.1f}MB)")
 
     print(f"\n[問題のある列] {len(problems)}件")

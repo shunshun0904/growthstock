@@ -570,5 +570,41 @@ class TestEmbargoFollowsTheLabel(unittest.TestCase):
         self.assertIn("EMBARGO_DAYS = (B.RISE_HORIZON", src)
 
 
+class TestSmallFoldsAreSkipped(unittest.TestCase):
+    """
+    母集団を高値更新日に変えてサンプルが減り、
+    実際に「テスト0件」のフォールドが出た。
+    少数サンプルの PR-AUC は勝敗の符号がほぼ運で決まるので、評価に入れない。
+    """
+
+    def test_thresholds_are_set(self):
+        import walkforward as W
+        self.assertGreaterEqual(W.MIN_TEST_ROWS, 100)
+        self.assertGreaterEqual(W.MIN_TEST_POSITIVES, 10)
+
+    def test_empty_fold_produces_no_rows(self):
+        import walkforward as W
+        import features as Fx
+        df = pd.DataFrame({
+            "Date": pd.to_datetime(["2020-01-31"] * 10),
+            "Code": [f"{i}" for i in range(10)],
+            "r_high": np.linspace(10, 90, 10),
+            "volume_trend": np.ones(10),
+            "label": [0] * 9 + [1],
+        })
+        for c in ("ROE_q0", "credit_ratio", "eps_growth_q0", "market_cap",
+                  "op_margin_q0", "progress_vs_base", "sales_growth_q0",
+                  "tv_ma20"):
+            df[c] = 1.0
+        fold = W.Fold(1, "2020-01-01", "2020-01-31", "2020-02-01", "2020-02-28")
+        Fx.GROUPS["_t"] = ["r_high"]
+        Fx.PRESETS["_t"] = ["_t"]
+        try:
+            res = W.run(df, ["_t"], [fold])
+        finally:
+            del Fx.GROUPS["_t"], Fx.PRESETS["_t"]
+        self.assertEqual(res["folds"], [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

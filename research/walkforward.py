@@ -80,6 +80,11 @@ def uncovered_presets(presets: List[str]) -> List[str]:
 
 REFERENCE = "ベースライン: R_high のみ"
 
+# これを下回るテスト窓は評価しない。
+# 少数のサンプルで出した PR-AUC は、勝敗の符号がほぼ運で決まる
+MIN_TEST_ROWS = 200
+MIN_TEST_POSITIVES = 20
+
 
 @dataclass(frozen=True)
 class Fold:
@@ -168,8 +173,16 @@ def run(df: pd.DataFrame, presets: List[str], folds: List[Fold]) -> Dict:
               f"({len(te):,}件 正例率 {yte.mean()*100:.2f}%)")
         print('='*70)
 
-        if len(te) == 0 or yte.sum() == 0 or len(tr) == 0 or ytr.sum() == 0:
-            print("  [skip] 正例が無いためこのフォールドは評価できない")
+        # 件数が少なすぎるフォールドは評価に値しない。
+        # 母集団を高値更新日に変えてサンプルが減り、
+        # 実際に「テスト0件」のフォールドが出た。
+        if len(te) < MIN_TEST_ROWS or yte.sum() < MIN_TEST_POSITIVES:
+            print(f"  [skip] テストが小さすぎる（{len(te)}件 / 正例 "
+                  f"{int(yte.sum())}件。最低 {MIN_TEST_ROWS}件・"
+                  f"正例{MIN_TEST_POSITIVES}件）")
+            continue
+        if len(tr) == 0 or ytr.sum() == 0:
+            print("  [skip] 訓練に正例が無い")
             continue
 
         scores: Dict[str, np.ndarray] = dict(baseline_scores(te))
