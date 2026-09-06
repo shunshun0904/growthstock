@@ -180,10 +180,17 @@ PRESETS: Dict[str, List[str]] = {
     # 「良くなっているか」とは別のことを測っている。
     "fund_delta": ["fund_growth", "fund_trend", "fund_streak", "turnaround",
                    "guidance"],
+    # 会社予想を抜いた版。決算の完全性で絞ったあとも guidance だけは
+    # 42〜57%欠測が残る（会社予想の開示率が低いため）。
+    # 「欠測を学習させない」という主旨を徹底するとこちらになる
+    "fund_delta_core": ["fund_growth", "fund_trend", "fund_streak", "turnaround"],
     # 変化だけの決算 + テクニカル。実運用に近い形
     "delta_technical": ["fund_growth", "fund_trend", "fund_streak", "turnaround",
                         "guidance", "price", "breakout", "volume", "liquidity",
                         "supply", "market"],
+    "delta_core_technical": ["fund_growth", "fund_trend", "fund_streak",
+                             "turnaround", "price", "breakout", "volume",
+                             "liquidity", "supply", "market"],
     # その順位版
     "rank_delta_technical": ["fund_growth_rank", "fund_trend_rank",
                              "fund_streak_rank", "turnaround", "guidance_rank",

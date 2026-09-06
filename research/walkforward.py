@@ -65,7 +65,8 @@ DEFAULT_PRESETS = [
     "valuation_only",
     # 決算を「変化」だけで組んだセット。絶対水準を外し、
     # 差分・成長率・連続性だけで判断させる
-    "fund_delta", "delta_technical", "rank_delta_technical",
+    "fund_delta", "fund_delta_core",
+    "delta_technical", "delta_core_technical", "rank_delta_technical",
 ]
 
 
