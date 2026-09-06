@@ -43,12 +43,13 @@ from build_dataset import (  # noqa: E402
     breakout_flags, mark_new_highs, price_panel,
 )
 
-#: 比較する2案。既定(F)と、継続をより厳しくした案(G)。
-#: G は F の条件をすべて含み、しきい値だけを上げているので
-#: G の正例は必ず F の正例に含まれる（真部分集合）。
-#: したがって食い違うのは「F では正例だが G では負例」の1バケットだけ。
-CFG_F = DEFAULT_RISE
-CFG_G = RiseConfig(keep_days=20, end_ratio=0.15, require_uptrend=True)
+#: 採用した定義（G）と、比較のために残す緩い案（F）。
+#: 採用案は緩い案の条件をすべて含み、しきい値だけを上げているので、
+#: 採用案の正例は必ず緩い案の正例に含まれる（真部分集合）。
+#: したがって食い違うのは「緩い案なら正例だが採用案では負例」の1組だけ。
+#: 何を切り捨てる定義にしたのかを、あとから見て分かるように残す。
+CFG_ADOPTED = DEFAULT_RISE
+CFG_LOOSE = RiseConfig(keep_days=10, end_ratio=0.10, require_uptrend=True)
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_data")
 
@@ -67,7 +68,7 @@ def verdict(df: pd.DataFrame, cfg: RiseConfig) -> pd.Series:
     """
     データセットに入っている材料からラベルを引き直す。
 
-    F と G は同じ材料（future_rise / keep_days_cnt / end_level / uptrend_end）に
+    2案は同じ材料（future_rise / keep_days_cnt / end_level / uptrend_end）に
     しきい値を変えて当てるだけなので、パネルを作り直す必要はない。
     """
     ok = pd.to_numeric(df["future_rise"], errors="coerce") >= cfg.threshold
@@ -145,16 +146,16 @@ def build_case(panel: pd.DataFrame, code: str, t_date: pd.Timestamp,
         "target": r(close_t * (1 + RISE_THRESHOLD), 1),
         "thresholdPct": round(RISE_THRESHOLD * 100, 1),
         "hitPos": hit_pos,
-        # 継続の材料。F と G のどちらで落ちたかを1件ずつ確認できるようにする
+        # 継続の材料。採用案と緩い案のどちらで落ちたかを1件ずつ確認できるようにする
         "bucket": bucket,
         "keepDays": keep_days,
-        "keepDaysF": CFG_F.keep_days,
-        "keepDaysG": CFG_G.keep_days,
+        "keepDaysF": CFG_LOOSE.keep_days,
+        "keepDaysG": CFG_ADOPTED.keep_days,
         "endLevel": r(end_level),
-        "endLineF": r(close_t * (1 + CFG_F.end_ratio), 1),
-        "endLineG": r(close_t * (1 + CFG_G.end_ratio), 1),
-        "endRatioF": round(CFG_F.end_ratio * 100, 1),
-        "endRatioG": round(CFG_G.end_ratio * 100, 1),
+        "endLineF": r(close_t * (1 + CFG_LOOSE.end_ratio), 1),
+        "endLineG": r(close_t * (1 + CFG_ADOPTED.end_ratio), 1),
+        "endRatioF": round(CFG_LOOSE.end_ratio * 100, 1),
+        "endRatioG": round(CFG_ADOPTED.end_ratio * 100, 1),
         "uptrendEnd": uptrend,
         "maxGain": r((fwd_max / close_t - 1) * 100),
         "maxDraw": r((fwd_min / close_t - 1) * 100),
@@ -209,27 +210,32 @@ def main(argv: List[str] | None = None) -> int:
         except Exception:
             pass
 
-    # F と G のラベルを引き直して4つに分ける。
-    # G は F の真部分集合なので、食い違うのは f_only の1バケットだけ。
-    # そこが「F にするか G にするか」の判断がぶら下がっている唯一の集合。
-    f = verdict(ds, CFG_F)
-    g = verdict(ds, CFG_G)
+    # 採用案と緩い案のラベルを引き直して4つに分ける。
+    # 採用案は緩い案の真部分集合なので、食い違うのは f_only の1組だけ。
+    loose = verdict(ds, CFG_LOOSE)
+    adopted = verdict(ds, CFG_ADOPTED)
     reached = pd.to_numeric(ds["future_rise"], errors="coerce") >= RISE_THRESHOLD
     reached = reached.fillna(False)
 
-    assert int((g & ~f).sum()) == 0, "G が F の部分集合になっていない（前提が崩れている）"
+    assert int((adopted & ~loose).sum()) == 0, \
+        "採用案が緩い案の部分集合になっていない（比較の前提が崩れている）"
+    # 採用案の判定は dataset の label と一致していなければならない。
+    # ずれていれば、ここで引き直した条件か build 側のどちらかが古い。
+    mismatch = int((adopted != (ds["label"] == 1)).sum())
+    assert mismatch == 0, f"引き直したラベルが dataset と {mismatch}件食い違う"
 
     buckets = [
-        ("both_pos", "F・G とも正例", 1, f & g),
-        ("f_only", "F では正例 / G では負例", 1, f & ~g),
-        ("reached_only", "到達したが継続せず（F・G とも負例）", 0, ~f & reached),
-        ("not_reached", "未到達（+20%に届かず）", 0, ~f & ~reached),
+        ("both_pos", "正例（採用）", 1, adopted),
+        ("f_only", "緩い案なら正例 / 採用案では負例", 0, loose & ~adopted),
+        ("reached_only", "到達したが継続せず", 0, ~loose & reached),
+        ("not_reached", "未到達（+20%に届かず）", 0, ~loose & ~reached),
     ]
     print("[bucket] " + " / ".join(f"{ja} {int(m.sum()):,}件" for _, ja, _, m in buckets))
 
-    # 判断がかかっているのは f_only なので、そこを厚めに採る
-    quota = {"both_pos": args.n_pos // 2, "f_only": args.n_pos - args.n_pos // 2,
-             "reached_only": args.n_neg // 2, "not_reached": args.n_neg - args.n_neg // 2}
+    # 正例と、採用案が切り捨てた側（f_only）を厚めに採る。
+    # 定義が妥当かは「何を正例にしたか」と「何を外したか」の両方を見ないと分からない。
+    quota = {"both_pos": args.n_pos, "f_only": args.n_neg,
+             "reached_only": args.n_neg // 2, "not_reached": args.n_neg // 2}
 
     rng = np.random.default_rng(args.seed)
     cases = []
@@ -329,10 +335,10 @@ def main(argv: List[str] | None = None) -> int:
         "summary": summary,
         "buckets": bucket_stats,
         "compare": {
-            "F": {"name": CFG_F.name, "keepDays": CFG_F.keep_days,
-                  "endRatio": round(CFG_F.end_ratio * 100, 1)},
-            "G": {"name": CFG_G.name, "keepDays": CFG_G.keep_days,
-                  "endRatio": round(CFG_G.end_ratio * 100, 1)},
+            "F": {"name": CFG_LOOSE.name, "keepDays": CFG_LOOSE.keep_days,
+                  "endRatio": round(CFG_LOOSE.end_ratio * 100, 1)},
+            "G": {"name": CFG_ADOPTED.name, "keepDays": CFG_ADOPTED.keep_days,
+                  "endRatio": round(CFG_ADOPTED.end_ratio * 100, 1)},
         },
         "cases": cases,
     }

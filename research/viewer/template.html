@@ -146,17 +146,16 @@ footer { margin-top: 44px; padding-top: 20px; border-top: 1px solid var(--border
   <header>
     <h1>ブレイクアウト・ラベル検証</h1>
     <p class="sub">
-      継続条件を <b>F（維持10日 / 終盤+10%）</b>にするか
-      <b>G（維持20日 / 終盤+15%）</b>にするかを、実データのチャートで決める。
-      G の条件は F をすべて含んでしかも厳しいので、<b>G の正例は必ず F の正例に含まれる</b>。
-      つまり両者が食い違うのは「<b>F では正例 / G では負例</b>」の1組だけで、
-      判断はそこに全部かかっている。既定の表示をそこにしてある。
+      採用した定義（<b>維持20日 / 終盤+15%</b>）で、何を正例とし、何を外したのかを
+      実データのチャートで確認する。比較のため、採用前に候補だった緩い案
+      （維持10日 / 終盤+10%）も残してある。採用案は緩い案の条件をすべて含むので、
+      緩い案の正例のうち一部が採用案では負例になる。その組も見られる。
     </p>
     <div class="meta" id="meta"></div>
   </header>
 
   <section class="def">
-    <h2>2案の違い</h2>
+    <h2>採用した定義</h2>
     <p style="margin:0 0 9px;font-size:13px;color:var(--ink-2)">
       母集団は<strong id="pop">高値を更新した日</strong>（高値ベース、連続更新は初回のみ）。
       基準日 <code>t</code> の終値を分母に、判定期間 <code id="hz"></code> で
@@ -168,8 +167,8 @@ footer { margin-top: 44px; padding-top: 20px; border-top: 1px solid var(--border
     <p style="margin:9px 0 0;font-size:12px;color:var(--ink-3)">
       1.が「到達」、2.〜4.が「継続」。到達だけを条件にすると、
       一瞬だけ吹き上げてすぐ下落トレンドに入ったものまで正例になる。
-      チャートの点線は終盤の水準（F と G の2本）で、
-      終値がこの2本の間で終わっていれば「F では正例 / G では負例」に当たる。
+      チャートの点線は終盤の水準（採用案と緩い案の2本）で、
+      終値がこの2本の間で終わっていれば「緩い案なら正例／採用では負例」に当たる。
     </p>
   </section>
 
@@ -195,8 +194,8 @@ footer { margin-top: 44px; padding-top: 20px; border-top: 1px solid var(--border
 
   <div class="controls">
     <div class="seg" role="group" aria-label="表示するケース">
-      <button type="button" data-f="b-f_only" aria-pressed="true">F では正例 / G では負例</button>
-      <button type="button" data-f="b-both_pos" aria-pressed="false">F・G とも正例</button>
+      <button type="button" data-f="b-both_pos" aria-pressed="true">正例</button>
+      <button type="button" data-f="b-f_only" aria-pressed="false">緩い案なら正例／採用では負例</button>
       <button type="button" data-f="b-reached_only" aria-pressed="false">到達したが継続せず</button>
       <button type="button" data-f="b-not_reached" aria-pressed="false">未到達</button>
       <button type="button" data-f="all" aria-pressed="false">すべて</button>
@@ -217,7 +216,7 @@ footer { margin-top: 44px; padding-top: 20px; border-top: 1px solid var(--border
     <span><i style="border-color:var(--ma-s)"></i>MA短期</span>
     <span><i style="border-color:var(--ma-l)"></i>MA長期</span>
     <span><i style="border-color:var(--ref);border-top-style:dashed"></i>目標 +20%</span>
-    <span><i style="border-color:var(--warn);border-top-style:dotted"></i>終盤の水準（F・G）</span>
+    <span><i style="border-color:var(--warn);border-top-style:dotted"></i>終盤の水準（採用・緩い案）</span>
     <span><i class="band"></i>判定期間</span>
     <span><i class="dot"></i>目標に最初に到達した日</span>
     <span><i style="border-color:var(--ink-3);border-top-style:dotted"></i>基準日 t</span>
@@ -345,8 +344,8 @@ function chart(c, { w = 300, h = 108, volH = 0, pad = { t: 8, r: 6, b: 12, l: 40
 
   // 終盤の水準ライン。F と G の2本を引く。
   // 終値がこの間で終わっていれば「F では正例、G では負例」に当たる
-  for (const [v, lab] of [[c.endLineG, "G 終盤 +" + c.endRatioG + "%"],
-                          [c.endLineF, "F 終盤 +" + c.endRatioF + "%"]]) {
+  for (const [v, lab] of [[c.endLineG, "採用 終盤 +" + c.endRatioG + "%"],
+                          [c.endLineF, "緩い案 +" + c.endRatioF + "%"]]) {
     if (v == null) continue;
     svg.appendChild(el("line", { x1: pad.l, y1: Y(v), x2: w - pad.r, y2: Y(v),
       stroke: "var(--warn)", "stroke-width": 1, "stroke-dasharray": "1 4", opacity: 0.8 }));
@@ -406,10 +405,10 @@ function chart(c, { w = 300, h = 108, volH = 0, pad = { t: 8, r: 6, b: 12, l: 40
 /* ---------------- 画面 ---------------- */
 const fmtPct = v => v == null ? "—" : (v > 0 ? "+" : "") + v.toFixed(1) + "%";
 const BUCKET = {
-  both_pos:     { ja: "F・G とも正例",   cls: "pos" },
-  f_only:       { ja: "F のみ正例",       cls: "mid" },
-  reached_only: { ja: "到達したが継続せず", cls: "neg" },
-  not_reached:  { ja: "未到達",           cls: "neg" },
+  both_pos:     { ja: "正例",                 cls: "pos" },
+  f_only:       { ja: "緩い案なら正例／採用では負例", cls: "mid" },
+  reached_only: { ja: "到達したが継続せず",       cls: "neg" },
+  not_reached:  { ja: "未到達",                cls: "neg" },
 };
 const bk = c => BUCKET[c.bucket] || { ja: c.label ? "正例" : "負例", cls: c.label ? "pos" : "neg" };
 const cls = v => v == null ? "" : (v > 0 ? " up" : v < 0 ? " down" : "");
@@ -419,7 +418,7 @@ const C = DATA.compare || { F: {}, G: {} };
 document.getElementById("hz").textContent = `[t+1, t+${D.riseHorizon}]`;
 document.getElementById("pop").textContent = `${D.highWeeks ?? 52}週高値を更新した日`;
 document.getElementById("defcmp").innerHTML =
-  `<thead><tr><th>条件</th><th>F（既定）</th><th>G（厳しく）</th></tr></thead><tbody>` +
+  `<thead><tr><th>条件</th><th>緩い案（不採用）</th><th>採用</th></tr></thead><tbody>` +
   `<tr><td>1. 到達</td><td class="v">+${D.riseThreshold}%</td><td class="v">+${D.riseThreshold}%</td></tr>` +
   `<tr><td>2. 維持（+${D.riseThreshold}%以上で引けた日）</td>` +
     `<td class="v">${C.F.keepDays}日以上</td><td class="v">${C.G.keepDays}日以上</td></tr>` +
@@ -470,7 +469,7 @@ document.getElementById("summary").innerHTML =
   `<th>終端リターン<br>中央値</th><th>終端が<br>プラスの割合</th>` +
   `<th>維持日数<br>中央値</th><th>終了時に<br>上昇トレンド</th></tr></thead><tbody>${rows}</tbody>`;
 
-let filter = "b-f_only", sortKey = "gain-desc";
+let filter = "b-both_pos", sortKey = "gain-desc";
 const grid = document.getElementById("grid");
 const empty = document.getElementById("empty");
 const countEl = document.getElementById("count");
@@ -539,10 +538,10 @@ function show(c) {
     `<div>判定期間内 最大下落率<b class="${cls(c.maxDraw).trim()}">${fmtPct(c.maxDraw)}</b></div>` +
     `<div>更新日の終値<b>${c.closeAtT == null ? "—" : c.closeAtT.toLocaleString("ja-JP")}円</b></div>` +
     `<div>目標<b>${c.target == null ? "—" : c.target.toLocaleString("ja-JP")}円</b></div>` +
-    `<div>維持日数（F:${c.keepDaysF}日 / G:${c.keepDaysG}日）` +
+    `<div>維持日数（採用:${c.keepDaysG}日 / 緩い案:${c.keepDaysF}日）` +
       `<b class="${(c.keepDays ?? 0) >= (c.keepDaysG ?? 0) ? "up" : (c.keepDays ?? 0) >= (c.keepDaysF ?? 0) ? "" : "down"}">` +
       `${c.keepDays == null ? "—" : c.keepDays + "日"}</b></div>` +
-    `<div>終盤の水準（F:+${c.endRatioF}% / G:+${c.endRatioG}%）` +
+    `<div>終盤の水準（採用:+${c.endRatioG}% / 緩い案:+${c.endRatioF}%）` +
       `<b class="${(c.endLevel ?? -1e9) >= (c.endRatioG ?? 0) ? "up" : (c.endLevel ?? -1e9) >= (c.endRatioF ?? 0) ? "" : "down"}">` +
       `${fmtPct(c.endLevel)}</b></div>` +
     `<div>終了時のトレンド<b class="${c.uptrendEnd ? "up" : "down"}">${c.uptrendEnd == null ? "—" : (c.uptrendEnd ? "上昇" : "下落")}</b></div>` +

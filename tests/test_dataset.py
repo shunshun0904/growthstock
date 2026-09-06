@@ -938,9 +938,10 @@ class TestDefaultLabelIsE(unittest.TestCase):
         from build_dataset import DEFAULT_RISE as R
         self.assertEqual(R.horizon, 60)              # 3ヶ月
         self.assertAlmostEqual(R.threshold, 0.20)    # +20%
-        # 継続の軸
-        self.assertEqual(R.keep_days, 10)
-        self.assertAlmostEqual(R.end_ratio, 0.10)
+        # 継続の軸。8定義の比較とチャートの目視で定義G を採用した。
+        # 緩い案（維持10日 / 終盤+10%）との差は573件で、そこだけが分かれ目だった。
+        self.assertEqual(R.keep_days, 20)
+        self.assertAlmostEqual(R.end_ratio, 0.15)
         self.assertEqual(R.end_window, 5)
         self.assertTrue(R.require_uptrend)
         self.assertEqual((R.trend_short, R.trend_long), (20, 60))

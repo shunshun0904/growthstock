@@ -51,9 +51,9 @@ CONFIGS: List[Tuple[int, RiseConfig, str]] = [
     (W78, RiseConfig(**{**_REACH, "end_ratio": 0.10}),           "78週・+終盤10%"),
     (W78, RiseConfig(**{**_REACH, "require_uptrend": True}),     "78週・+トレンド"),
     (W78, RiseConfig(keep_days=10, end_ratio=0.10,
-                     require_uptrend=True),                      "78週・継続すべて（既定）"),
+                     require_uptrend=True),                      "78週・継続すべて（緩い案）"),
     (W78, RiseConfig(keep_days=20, end_ratio=0.15,
-                     require_uptrend=True),                      "78週・継続を厳しく"),
+                     require_uptrend=True),                      "78週・継続すべて（採用）"),
     (W52, RiseConfig(keep_days=10, end_ratio=0.10,
                      require_uptrend=True),                      "52週・継続すべて"),
 ]
