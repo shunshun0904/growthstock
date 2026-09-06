@@ -294,12 +294,24 @@ class TestFieldMatching(unittest.TestCase):
 
     def test_reads_fin_cols_without_pandas(self):
         """probe は標準ライブラリだけで動く必要がある。
-        jq_bulk を import すると pandas が要り、probe.yml で落ちた。"""
-        from probe_fins_fields import read_fin_cols
-        cols = read_fin_cols()
-        # None = 絞らず全項目を保持。list ならその内容
-        self.assertTrue(cols is None or isinstance(cols, list))
-        self.assertNotIn("pandas", sys.modules)
+        jq_bulk を import すると pandas が要り、probe.yml で落ちた。
+
+        sys.modules は差し替えの効かないプロセス共有の状態なので、
+        同じプロセス内で判定すると他のテストが入れた pandas を拾う
+        （単体では通るのに一括実行だけ落ちていた）。別プロセスで確かめる。
+        """
+        import subprocess
+        code = (
+            "import sys; sys.path.insert(0, %r);"
+            "import probe_fins_fields as m;"
+            "c = m.read_fin_cols();"
+            "assert c is None or isinstance(c, list), type(c);"
+            "assert 'pandas' not in sys.modules, 'pandas を import している';"
+            "print('ok')" % os.path.join(ROOT, "research")
+        )
+        r = subprocess.run([sys.executable, "-c", code],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
 
     def test_fins_keeps_every_field(self):
         """

@@ -128,6 +128,36 @@ def label_stats(df: pd.DataFrame) -> Dict:
             k: round(float(fr.quantile(q)), 2)
             for k, q in (("p10", .1), ("p25", .25), ("median", .5),
                          ("p75", .75), ("p90", .9))}
+
+    # 継続の軸。到達したのに正例にならなかった分がどれだけあるかを見る。
+    # 「一瞬の上昇」を外せているかは、ここの内訳で確かめる。
+    import build_dataset as B
+    cfg = B.DEFAULT_RISE
+    if "future_rise" in df.columns:
+        reached = pd.to_numeric(df["future_rise"], errors="coerce") >= cfg.threshold
+        out["continuation"] = {
+            "definition": cfg.name,
+            "reached": int(reached.sum()),
+            "reached_rate": round(float(reached.mean() * 100), 2),
+            "positive": int(y.sum()),
+            # 到達したのに継続条件で落ちた件数
+            "reached_but_dropped": int((reached & (y == 0)).sum()),
+        }
+        for col, key in (("keep_days_cnt", "keep_days"),
+                         ("end_level", "end_level"),
+                         ("uptrend_end", "uptrend")):
+            if col not in df.columns:
+                continue
+            v = pd.to_numeric(df[col], errors="coerce")
+            if col == "end_level":
+                v = v * 100
+            among = v[reached.fillna(False)]
+            out["continuation"][key] = {
+                "median_all": round(float(v.median()), 2) if v.notna().any() else None,
+                "median_reached": (round(float(among.median()), 2)
+                                   if among.notna().any() else None),
+                "hist": histogram(v),
+            }
     return out
 
 

@@ -34,9 +34,11 @@ GROUPS: Dict[str, List[str]] = {
     # chg1/chg2/chg3 は決算をまたぐ各段の差。
     # 「直近1回だけ伸びた」と「3期続けて伸びている」を区別するために各段を持つ。
     # 決定木は q1 と q2 から差を作れないため、明示的に列にする必要がある。
+    # slope は持たない。(q0-q2)/2 は chg の定数倍で、EDA では8軸すべて
+    # chg と r=1.000 だった。木は単調変換に不変なので分岐も変わらない。
     "fund_trend": [f"{a}_{s}" for a in FUND_AXES
                    for s in ("chg1", "chg2", "chg3", "chg", "chg_3q",
-                             "slope", "accel")],
+                             "accel")],
     # --- 決算: 連続性 ---
     # 何期続けて伸びているか / 何期プラスを保っているか。
     # 連言条件（3期とも増加）は水準の線形結合では表現できない。
@@ -79,7 +81,12 @@ GROUPS: Dict[str, List[str]] = {
     "guidance": ["guidance_op_growth", "guidance_revision"],
     # --- 業種・市場区分（時点別）---
     # 最新のマスタを過去に当てると先読みになるため月次スナップショットを使う
-    "sector": ["s33_code", "s17_code", "scalecat_code", "mkt_code"],
+    #
+    # 規模区分（scalecat_code）は外した。/equities/master の項目名を
+    # 実測せずに "ScaleCat" と書いていたため、100%欠測の空列だった。
+    # 規模は log_market_cap（liquidity 群）が連続値で持っているので情報の損失も無い。
+    # 本当の項目名が分かったら、実測してから戻す。
+    "sector": ["s33_code", "s17_code", "mkt_code"],
     # --- 黒字転換 ---
     # 赤字->黒字は小型株で株価が最も動くイベントだが、
     # 従来の成長率定義では欠測として捨てられていた

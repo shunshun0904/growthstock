@@ -19,7 +19,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "research"))
 
 from build_dataset import (  # noqa: E402
-    clip_divergent, mark_new_highs, attach_rise_label,
+    clip_divergent, mark_new_highs, attach_rise_label, RiseConfig,
     HOLD_DAYS, HORIZON_END, HORIZON_START, HIGH_WINDOW, LabelConfig,
     _lag_available, add_cross_sectional_ranks, attach_labels, breakout_flags,
     price_panel, quarterize_panel,
@@ -347,6 +347,34 @@ class TestFeaturePresets(unittest.TestCase):
         self.assertFalse(any(c.endswith("_r") for c in cols))
         self.assertGreater(len(cols), 10)
 
+    def test_future_columns_are_never_features(self):
+        """
+        未来から作った列が特徴量に混ざればリークで結果が無意味になる。
+
+        meta として持ち出しているので、名前の付け替えひとつで
+        features 側に流れ込みうる。機械的に止める。
+        """
+        import features as F
+        from build_dataset import FUTURE_COLS
+        overlap = set(FUTURE_COLS) & set(F.all_columns())
+        self.assertEqual(overlap, set())
+
+    def test_no_redundant_slope_columns(self):
+        """
+        (q0-q2)/2 は chg の定数倍。EDA で8軸すべて相関 1.000 だった。
+        情報が無い列を戻さない。
+        """
+        import features as F
+        self.assertEqual([c for c in F.all_columns() if c.endswith("_slope")], [])
+
+    def test_no_unmeasured_master_field(self):
+        """
+        規模区分は /equities/master の項目名を実測せずに書いたため
+        100%欠測の空列だった。実測せずに戻さない。
+        """
+        import features as F
+        self.assertNotIn("scalecat_code", F.all_columns())
+
     def test_rank_groups_match_rank_targets(self):
         """
         順位グループの対象と RAW_FOR_RANK がずれると、
@@ -547,7 +575,7 @@ class TestBreakoutPopulation(unittest.TestCase):
 
 
 class TestRiseLabel(unittest.TestCase):
-    """更新日の終値から、先 horizon 営業日以内に threshold 以上上昇したか。"""
+    """到達の軸: 先 horizon 営業日以内に threshold 以上上昇したか。"""
 
     def _df(self, closes):
         return pd.DataFrame({
@@ -555,34 +583,122 @@ class TestRiseLabel(unittest.TestCase):
             "Date": pd.date_range("2021-01-04", periods=len(closes), freq="B"),
             "close": closes})
 
+    @staticmethod
+    def _reach_only(horizon=3, threshold=0.20):
+        """継続の条件を全部切って、到達の軸だけを見る設定。"""
+        return RiseConfig(horizon=horizon, threshold=threshold,
+                          keep_days=0, end_ratio=None, require_uptrend=False)
+
     def test_positive_when_it_rises_enough(self):
         out = attach_rise_label(self._df([100, 105, 125, 110, 108]),
-                                horizon=3, threshold=0.20)
+                                self._reach_only())
         self.assertTrue(bool(out["label"].iloc[0]))    # 125/100-1 = 25%
 
     def test_negative_when_it_does_not(self):
         out = attach_rise_label(self._df([100, 105, 110, 108, 107]),
-                                horizon=3, threshold=0.20)
+                                self._reach_only())
         self.assertFalse(bool(out["label"].iloc[0]))
 
     def test_measured_on_close_not_high(self):
         """高値ベースだと「一瞬触れただけ」を正例にしてしまう。"""
         out = attach_rise_label(self._df([100, 119, 119, 119]),
-                                horizon=3, threshold=0.20)
+                                self._reach_only())
         self.assertFalse(bool(out["label"].iloc[0]))
 
     def test_undetermined_at_the_tail_is_nan_not_false(self):
         """先の営業日が足りない末尾を False にすると負例が水増しされる。"""
-        out = attach_rise_label(self._df([100, 105, 110]),
-                                horizon=3, threshold=0.20)
+        out = attach_rise_label(self._df([100, 105, 110]), self._reach_only())
         self.assertTrue(pd.isna(out["label"].iloc[1]))
         self.assertTrue(pd.isna(out["label"].iloc[2]))
 
     def test_never_uses_the_current_day(self):
         """当日の終値は分母。将来の窓は t+1 から始まる。"""
         out = attach_rise_label(self._df([100, 100, 100, 100, 100]),
-                                horizon=3, threshold=0.0)
+                                self._reach_only(threshold=0.0))
         self.assertAlmostEqual(out["future_rise"].iloc[0], 0.0)
+
+
+class TestRiseContinuation(unittest.TestCase):
+    """
+    継続の軸。到達だけを条件にすると、一瞬吹き上げてすぐ崩れた銘柄も正例になる。
+    それはモメンタムではないので、続いたことを条件に加える。
+    """
+
+    def _df(self, closes):
+        return pd.DataFrame({
+            "Code": "1234",
+            "Date": pd.date_range("2021-01-04", periods=len(closes), freq="B"),
+            "close": [float(c) for c in closes]})
+
+    # 100 から +25% まで飛んで、すぐ元へ戻る（吹き上げ）
+    SPIKE = [100] + [125] + [100] * 10
+    # 100 から +25% まで上がってそのまま張り付く（継続）
+    HOLD = [100] + [125] * 11
+
+    def test_spike_and_hold_both_reach_the_threshold(self):
+        """前提の確認。到達だけならどちらも正例になってしまう。"""
+        cfg = RiseConfig(horizon=10, threshold=0.20, keep_days=0,
+                         end_ratio=None, require_uptrend=False)
+        for closes in (self.SPIKE, self.HOLD):
+            out = attach_rise_label(self._df(closes), cfg)
+            self.assertTrue(bool(out["label"].iloc[0]))
+
+    def test_keep_days_rejects_the_spike(self):
+        cfg = RiseConfig(horizon=10, threshold=0.20, keep_days=5,
+                         end_ratio=None, require_uptrend=False)
+        spike = attach_rise_label(self._df(self.SPIKE), cfg)
+        hold = attach_rise_label(self._df(self.HOLD), cfg)
+        self.assertEqual(spike["keep_days_cnt"].iloc[0], 1)    # 1日だけ
+        self.assertEqual(hold["keep_days_cnt"].iloc[0], 10)
+        self.assertFalse(bool(spike["label"].iloc[0]))
+        self.assertTrue(bool(hold["label"].iloc[0]))
+
+    def test_end_level_rejects_the_spike(self):
+        cfg = RiseConfig(horizon=10, threshold=0.20, keep_days=0,
+                         end_ratio=0.10, end_window=1, require_uptrend=False)
+        spike = attach_rise_label(self._df(self.SPIKE), cfg)
+        hold = attach_rise_label(self._df(self.HOLD), cfg)
+        self.assertAlmostEqual(spike["end_level"].iloc[0], 0.0)
+        self.assertAlmostEqual(hold["end_level"].iloc[0], 0.25)
+        self.assertFalse(bool(spike["label"].iloc[0]))
+        self.assertTrue(bool(hold["label"].iloc[0]))
+
+    def test_uptrend_rejects_a_rollover(self):
+        """到達したあと下落トレンドに入ったものを外す。"""
+        # 上げてから、長期平均を割り込むまでじりじり下げる
+        closes = ([100] * 12 + [125] * 3
+                  + list(range(124, 104, -1)) + [80] * 12)
+        cfg = RiseConfig(horizon=20, threshold=0.20, keep_days=0,
+                         end_ratio=None, require_uptrend=True,
+                         trend_short=3, trend_long=10)
+        out = attach_rise_label(self._df(closes), cfg)
+        self.assertTrue(out["future_rise"].iloc[11] >= 0.20)  # 到達はしている
+        self.assertEqual(out["uptrend_end"].iloc[11], 0.0)    # だが下落トレンド
+        self.assertFalse(bool(out["label"].iloc[11]))
+
+    def test_disabled_conditions_do_not_make_labels_undetermined(self):
+        """
+        条件を切ったなら、その入力が無くてもラベルは決まる。
+
+        終盤条件を切っているのに「終盤の値が無いから未確定」とすると、
+        短い系列のラベルが理由なく消える。
+        """
+        cfg = RiseConfig(horizon=2, threshold=0.20, keep_days=0,
+                         end_ratio=None, require_uptrend=False)
+        out = attach_rise_label(self._df([100, 130, 130, 130]), cfg)
+        self.assertTrue(bool(out["label"].iloc[0]))
+
+    def test_counts_are_per_code(self):
+        """銘柄をまたいで窓が漏れると、別の銘柄の値でラベルが決まる。"""
+        a = self._df([100] + [125] * 11).assign(Code="1111")
+        b = self._df([100] * 12).assign(Code="2222")
+        cfg = RiseConfig(horizon=10, threshold=0.20, keep_days=5,
+                         end_ratio=None, require_uptrend=False)
+        out = attach_rise_label(pd.concat([a, b], ignore_index=True), cfg)
+        self.assertEqual(out["keep_days_cnt"].iloc[0], 10)     # 1111
+        self.assertEqual(out["keep_days_cnt"].iloc[12], 0)     # 2222
+        self.assertTrue(bool(out["label"].iloc[0]))
+        self.assertFalse(bool(out["label"].iloc[12]))
 
 
 class TestDivergenceGuard(unittest.TestCase):
@@ -791,23 +907,28 @@ class TestQuarterSequenceFeatures(unittest.TestCase):
 
 class TestDefaultLabelIsE(unittest.TestCase):
     """
-    既定のラベル定義が、10定義の比較で採用した E であることを固定する。
-    ここが黙って変わると、過去の結果と比較できなくなる。
+    既定の定義を固定する。ここが黙って変わると過去の結果と比較できなくなる。
 
-    一時 78週 + 小型株限定に変えたが、E に戻した。
-    あの変更は「決算特徴量に予測力が無い」という結論への対応であり、
-    その結論自体が決算データの欠損によるもので前提が成り立っていなかった。
+    母集団は breakout（高値更新日）で、目的変数は RiseConfig が決める。
+    LabelConfig は month_end 母集団だけで使う旧定義。
     """
 
-    def test_default_matches_definition_e(self):
-        from build_dataset import DEFAULT_LABEL as L
-        self.assertEqual(L.high_window, 245)         # 52週
-        self.assertEqual(L.horizon_start, 20)        # 1ヶ月先から
-        self.assertEqual(L.horizon_end, 120)         # 6ヶ月先まで
-        self.assertEqual(L.hold_days, 20)
-        self.assertAlmostEqual(L.hold_drawdown, 0.92)
-        self.assertEqual(L.sustain_days, 60)         # 60営業日後も
-        self.assertAlmostEqual(L.sustain_ratio, 1.0) # 水準維持
+    def test_population_is_breakout(self):
+        import build_dataset as B
+        self.assertEqual(B.POPULATION, "breakout")
+        self.assertTrue(B.BREAKOUT_ON_HIGH)          # 高値ベースで判定
+        self.assertEqual(B.BREAKOUT_COOLDOWN, 20)
+
+    def test_default_rise_definition(self):
+        from build_dataset import DEFAULT_RISE as R
+        self.assertEqual(R.horizon, 60)              # 3ヶ月
+        self.assertAlmostEqual(R.threshold, 0.20)    # +20%
+        # 継続の軸
+        self.assertEqual(R.keep_days, 10)
+        self.assertAlmostEqual(R.end_ratio, 0.10)
+        self.assertEqual(R.end_window, 5)
+        self.assertTrue(R.require_uptrend)
+        self.assertEqual((R.trend_short, R.trend_long), (20, 60))
 
     def test_market_cap_is_not_filtered(self):
         """
@@ -821,11 +942,16 @@ class TestDefaultLabelIsE(unittest.TestCase):
         self.assertIsNone(B.MIN_MARKET_CAP)
         self.assertIsNone(B.MAX_MARKET_CAP)
 
-    def test_high_window_is_52_weeks(self):
-        """245営業日が52週であること。"""
-        from build_dataset import DEFAULT_LABEL as L
-        self.assertEqual(round(L.high_window / 245 * 52), 52)
-        self.assertIn("52週", L.name)
+    def test_high_window_is_78_weeks(self):
+        """
+        368営業日が78週であること。
+
+        52週(245日)から広げた。1年前の高値を1円抜いただけの更新を
+        母集団から外し、抜けた水準の意味を重くする。
+        """
+        import build_dataset as B
+        self.assertEqual(B.HIGH_WINDOW, 368)
+        self.assertEqual(round(B.HIGH_WINDOW / 245 * 52), 78)
 
     def test_forward_needed_is_180(self):
         """

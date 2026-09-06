@@ -20,7 +20,7 @@ import json
 import os
 import sys
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 import pandas as pd
@@ -46,7 +46,10 @@ HORIZON_END = 120       # 予測ホライズンの終了（営業日）= 約6ヶ
 HOLD_DAYS = 20          # ブレイク後の定着を見る日数
 HOLD_DRAWDOWN = 0.92    # ブレイク時終値の-8%を割らないこと
 VOL_MULTIPLE = 1.5      # ブレイク日の出来高が20日平均の何倍以上か
-HIGH_WINDOW = 245       # 52週 ≒ 245営業日 (78週なら 368)
+# 78週 ≒ 368営業日。52週(245日)から広げた。
+# 52週だと「1年前の高値を1円抜いただけ」も母集団に入り、
+# 抜けた水準の重みが軽い。1年半ぶりの高値なら上値の戻り売りが薄い。
+HIGH_WINDOW = 368
 SUSTAIN_DAYS = 60       # ブレイク60営業日後の水準を見る
 SUSTAIN_RATIO = 1.0     # ブレイク時終値を下回らないこと
 
@@ -122,6 +125,55 @@ BREAKOUT_COOLDOWN = 20
 # 終値ベースで測る（高値ベースだと「一瞬触れただけ」を正例にしてしまう）。
 RISE_HORIZON = 60        # 営業日。約3ヶ月
 RISE_THRESHOLD = 0.20    # +20%
+
+# --- 継続の軸 --- #
+# 「到達したか」だけだと、一瞬吹き上げてすぐ下落トレンドに入った銘柄も
+# 正例になる。それはモメンタムではないので、続いたことを条件に加える。
+# 3つとも独立に効かせられる（0 / None で無効）。
+#
+#   keep_days  … +threshold の水準を通算何営業日保ったか。瞬間的なヒゲを外す
+#   end_ratio  … ホライズン終盤の水準（基準日終値比）。失速・往って来いを外す
+#   uptrend    … ホライズン終了時点で短期移動平均 >= 長期移動平均。
+#                下落トレンドに転換したものを外す
+KEEP_DAYS = 10           # +20%以上で引けた日が通算10営業日以上
+END_RATIO = 0.10         # 60営業日後もまだ +10%以上
+END_WINDOW = 5           # 終盤の水準は5営業日平均で見る（1日の綾を拾わない）
+TREND_SHORT = 20         # 短期移動平均（営業日）
+TREND_LONG = 60          # 長期移動平均（営業日）
+REQUIRE_UPTREND = True
+
+
+@dataclass(frozen=True)
+class RiseConfig:
+    """母集団が breakout のときの目的変数。定義を変えて比較できる形にしてある。"""
+    horizon: int = RISE_HORIZON
+    threshold: float = RISE_THRESHOLD
+    keep_days: int = KEEP_DAYS              # 0 なら条件なし
+    end_ratio: Optional[float] = END_RATIO  # None なら条件なし
+    end_window: int = END_WINDOW
+    trend_short: int = TREND_SHORT
+    trend_long: int = TREND_LONG
+    require_uptrend: bool = REQUIRE_UPTREND
+
+    @property
+    def name(self) -> str:
+        m = round(self.horizon / 20)
+        base = f"{m}ヶ月内+{self.threshold*100:.0f}%"
+        if self.keep_days:
+            base += f" / 維持{self.keep_days}日"
+        if self.end_ratio is not None:
+            base += f" / 終盤+{self.end_ratio*100:.0f}%"
+        if self.require_uptrend:
+            base += f" / MA{self.trend_short}>=MA{self.trend_long}"
+        return base
+
+
+DEFAULT_RISE = RiseConfig()
+
+#: 未来の値から作った列。特徴量に混ぜたらリークになる。
+#: meta として持ち出すが、features に紛れ込んでいないか build() で必ず確認する。
+FUTURE_COLS = ["label", "future_max_close", "future_rise",
+               "keep_days_cnt", "end_level", "uptrend_end"]
 
 # --- 除外条件 (docs/MODEL_DESIGN.md §2.2) --- #
 MAX_RHIGH_AT_T = 95.0   # 基準日ですでに高値圏の銘柄は対象外
@@ -290,25 +342,143 @@ def mark_new_highs(df: pd.DataFrame, cooldown: int = BREAKOUT_COOLDOWN,
     return df
 
 
-def attach_rise_label(df: pd.DataFrame, horizon: int = RISE_HORIZON,
-                      threshold: float = RISE_THRESHOLD) -> pd.DataFrame:
+def _days_above(close: np.ndarray, horizon: int, level: float) -> np.ndarray:
     """
-    更新日の終値から、先 horizon 営業日以内に threshold 以上上昇したか。
+    各 t について、t+1 〜 t+horizon の終値が close[t]*level 以上だった日数。
 
-    終値ベースで測る。高値ベースだと「一瞬触れただけ」も正例になってしまう。
+    しきい値が行ごと（close[t] 倍）に動くので、固定値の rolling では書けない。
+    銘柄1本ぶんの窓行列を作って一気に数える。
+    """
+    n = len(close)
+    out = np.full(n, np.nan)
+    if n <= horizon:
+        return out
+    win = np.lib.stride_tricks.sliding_window_view(close, horizon)  # win[k] = close[k:k+horizon]
+    fwd = win[1:]              # t 行目 = close[t+1 : t+1+horizon]
+    m = fwd.shape[0]           # = n - horizon
+    out[:m] = (fwd >= (close[:m] * level)[:, None]).sum(axis=1)
+    return out
+
+
+def _by_code(df: pd.DataFrame, values: np.ndarray, fn) -> np.ndarray:
+    """銘柄ごとの連続区間に fn を適用する。df は Code,Date でソート済みが前提。"""
+    out = np.full(len(df), np.nan)
+    codes = df["Code"].to_numpy()
+    starts = np.flatnonzero(np.r_[True, codes[1:] != codes[:-1]])
+    ends = np.r_[starts[1:], len(codes)]
+    for a, b in zip(starts, ends):
+        out[a:b] = fn(values[a:b])
+    return out
+
+
+def attach_rise_label(df: pd.DataFrame, cfg: RiseConfig = DEFAULT_RISE) -> pd.DataFrame:
+    """
+    「上がったか」だけでなく「続いたか」も条件にする。
+
+    到達（従来）:
+        更新日の終値から、先 horizon 営業日以内に threshold 以上上昇したか。
+        終値ベースで測る。高値ベースだと「一瞬触れただけ」も正例になる。
+
+    継続（追加）:
+        到達しても、その後すぐ下落トレンドに入るならモメンタムとは言えない。
+        次の3つで「続いたこと」を要求する。どれも0/Noneで無効化できる。
+          keep_days … +threshold 以上で引けた日が通算 keep_days 日以上
+          end_ratio … 終盤 end_window 日平均が基準日終値の +end_ratio 以上
+          uptrend   … t+horizon 時点で MA(trend_short) >= MA(trend_long)
+
     先の営業日が足りない末尾は NaN（判定不能）にする。False にはしない。
+    ここを False にすると「起きなかった」と「まだ分からない」が混ざる。
     """
     g = df.groupby("Code", sort=False)
+    h = cfg.horizon
 
     def future_max(s: pd.Series) -> pd.Series:
         # t+1 〜 t+horizon の終値の最大
-        return s[::-1].rolling(horizon, min_periods=horizon).max()[::-1].shift(-1)
+        return s[::-1].rolling(h, min_periods=h).max()[::-1].shift(-1)
 
     df["future_max_close"] = g["close"].transform(future_max)
     ratio = df["future_max_close"] / df["close"] - 1.0
     df["future_rise"] = ratio
-    df["label"] = (ratio >= threshold).where(df["future_max_close"].notna())
+    hit = ratio >= cfg.threshold
+
+    close = df["close"].to_numpy(dtype=float)
+
+    # --- 維持日数 --- #
+    if cfg.keep_days:
+        df["keep_days_cnt"] = _by_code(
+            df, close, lambda a: _days_above(a, h, 1.0 + cfg.threshold))
+    else:
+        df["keep_days_cnt"] = np.nan
+
+    # --- 終盤の水準 --- #
+    # t+horizon 時点での「直近 end_window 日平均終値」。
+    # 1日だけの値だと、たまたまその日が押し目でも失格になってしまう。
+    ma_end = g["close"].transform(
+        lambda s: s.rolling(cfg.end_window, min_periods=cfg.end_window).mean())
+    end_close = ma_end.groupby(df["Code"], sort=False).shift(-h)
+    df["end_level"] = end_close / df["close"] - 1.0
+
+    # --- トレンド --- #
+    ma_s = g["close"].transform(
+        lambda s: s.rolling(cfg.trend_short, min_periods=cfg.trend_short).mean())
+    ma_l = g["close"].transform(
+        lambda s: s.rolling(cfg.trend_long, min_periods=cfg.trend_long).mean())
+    up = (ma_s >= ma_l).where(ma_s.notna() & ma_l.notna())
+    df["uptrend_end"] = up.groupby(df["Code"], sort=False).shift(-h)
+
+    # --- 合成 --- #
+    ok = hit.copy()
+    if cfg.keep_days:
+        ok &= df["keep_days_cnt"] >= cfg.keep_days
+    if cfg.end_ratio is not None:
+        ok &= df["end_level"] >= cfg.end_ratio
+    if cfg.require_uptrend:
+        ok &= df["uptrend_end"] == 1.0
+
+    # 判定に使う将来値が1つでも欠けていれば未確定。
+    # 課していない条件の入力までは要求しない
+    # （終盤条件を切っているのに終盤の値が無いから未確定、では筋が通らない）。
+    determined = df["future_max_close"].notna()
+    if cfg.end_ratio is not None:
+        determined &= end_close.notna()
+    if cfg.require_uptrend:
+        determined &= df["uptrend_end"].notna()
+    df["label"] = ok.where(determined)
     return df
+
+
+def report_rise_funnel(samples: pd.DataFrame,
+                       cfg: RiseConfig = DEFAULT_RISE) -> None:
+    """継続条件をどれだけ課したか、条件ごとに何件落ちたかを出す。
+
+    「正例が減った」で終わらせず、どの条件がどれだけ効いたかを見えるようにする。
+    条件は順に重ねるので、各行の残数は「そこまでの全条件を満たした件数」。
+    """
+    d = samples[samples["label"].notna()]
+    if d.empty:
+        return
+    n = len(d)
+    steps = [(f"到達（{cfg.horizon}営業日以内に +{cfg.threshold*100:.0f}%）",
+              d["future_rise"] >= cfg.threshold)]
+    if cfg.keep_days:
+        steps.append((f"維持（+{cfg.threshold*100:.0f}%以上で引けた日 >= {cfg.keep_days}日）",
+                      d["keep_days_cnt"] >= cfg.keep_days))
+    if cfg.end_ratio is not None:
+        steps.append((f"終盤（{cfg.horizon}営業日後の{cfg.end_window}日平均 >= "
+                      f"+{cfg.end_ratio*100:.0f}%）",
+                      d["end_level"] >= cfg.end_ratio))
+    if cfg.require_uptrend:
+        steps.append((f"トレンド（MA{cfg.trend_short} >= MA{cfg.trend_long}）",
+                      d["uptrend_end"] == 1.0))
+
+    print(f"[label] ラベル確定 {n:,}件について、条件を重ねたときの正例数")
+    mask = pd.Series(True, index=d.index)
+    prev = n
+    for name, cond in steps:
+        mask = mask & cond.fillna(False)
+        k = int(mask.sum())
+        print(f"  {name:<46} {k:>7,}件 ({k/n*100:5.2f}%)  -{prev-k:,}")
+        prev = k
 
 
 def add_breakout_context(df: pd.DataFrame) -> pd.DataFrame:
@@ -680,7 +850,8 @@ def quarterize_panel(fins: pd.DataFrame) -> pd.DataFrame:
         # 2期ぶん・3期ぶんの変化
         df[f"{a}_chg"] = q0 - q2
         df[f"{a}_chg_3q"] = q0 - q3
-        df[f"{a}_slope"] = (q0 - q2) / 2.0
+        # かつて {a}_slope = (q0-q2)/2 を持っていたが、chg の定数倍でしかなく
+        # EDA で8軸すべて chg と r=1.000 だった。情報が無いので作らない。
         # 加速: 変化そのものが増えているか（CANSLIM の核心）
         df[f"{a}_accel"] = df[f"{a}_chg1"] - df[f"{a}_chg2"]
 
@@ -716,7 +887,7 @@ def quarterize_panel(fins: pd.DataFrame) -> pd.DataFrame:
             + [c for a in axes for c in (
                 f"{a}_q0", f"{a}_q1", f"{a}_q2", f"{a}_q3",
                 f"{a}_chg1", f"{a}_chg2", f"{a}_chg3",
-                f"{a}_chg", f"{a}_chg_3q", f"{a}_slope", f"{a}_accel",
+                f"{a}_chg", f"{a}_chg_3q", f"{a}_accel",
                 f"{a}_up_streak", f"{a}_pos_ratio")])
     return df[[c for c in keep if c in df.columns]]
 
@@ -776,9 +947,12 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
 
         n_all = int(df["is_new_high"].sum())
         samples = df[df["is_fresh_break"] == True].copy()   # noqa: E712
-        print(f"[sample] 52週高値の更新日: {n_all:,}行")
+        weeks = round(HIGH_WINDOW / 245 * 52)
+        print(f"[sample] {weeks}週高値の更新日: {n_all:,}行")
         print(f"[sample] うち新規のブレイク（直前{BREAKOUT_COOLDOWN}営業日に更新なし）: "
               f"{len(samples):,}行")
+        print(f"[label] 定義: {DEFAULT_RISE.name}")
+        report_rise_funnel(samples)
     else:
         print("[panel] ブレイクアウト日を判定")
         df = breakout_flags(df)
@@ -926,23 +1100,28 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     if mh_paths:
         mh = pd.concat([pd.read_parquet(x) for x in mh_paths], ignore_index=True)
         mh["Date"] = pd.to_datetime(mh["Date"])
-        keep_mh = [c for c in ("Date", "Code", "S33", "S17", "ScaleCat", "Mkt")
-                   if c in mh.columns]
-        mh = (mh[keep_mh].dropna(subset=["Date", "Code"])
+        # 実際に来ている項目名を必ず出す。
+        # "ScaleCat" を実測せずに書いたせいで100%欠測の空列を作っていた。
+        # 名前を決め打ちすると、外したときに静かに空列になって気づけない。
+        print(f"[merge] master_hist の項目: {sorted(mh.columns)}")
+        want = ("S33", "S17", "Mkt")
+        found = [c for c in want if c in mh.columns]
+        for c in want:
+            if c not in found:
+                print(f"[warn] master_hist に {c} が無い。{c.lower()}_code は欠測になる")
+        mh = (mh[["Date", "Code"] + found].dropna(subset=["Date", "Code"])
               .sort_values("Date").drop_duplicates(["Date", "Code"], keep="last"))
         print(f"[merge] 業種・市場区分を時点別に結合 ({len(mh):,}行 / "
               f"{mh['Date'].nunique()}時点)")
         samples = pd.merge_asof(
             samples.sort_values("Date"), mh,
             on="Date", by="Code", direction="backward")
-        for c in ("S33", "S17", "ScaleCat", "Mkt"):
-            if c in samples.columns:
-                # カテゴリは数値コードにする（LightGBM はそのまま分岐できる）
-                samples[f"{c.lower()}_code"] = pd.to_numeric(samples[c],
-                                                             errors="coerce")
+        for c in found:
+            # カテゴリは数値コードにする（LightGBM はそのまま分岐できる）
+            samples[f"{c.lower()}_code"] = pd.to_numeric(samples[c], errors="coerce")
     else:
         print("[merge] master_hist が無いため業種・市場区分は付与しない")
-    for c in ("s33", "s17", "scalecat", "mkt"):
+    for c in ("s33", "s17", "mkt"):
         if f"{c}_code" not in samples.columns:
             samples[f"{c}_code"] = np.nan
 
@@ -984,10 +1163,20 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     # 「per × earnings_yield == 100」のような恒等式の検査に必要
     # （research/validate_metrics.py）。
     # *_basis は提供値と計算値のどちらを使ったかの記録。
+    # ラベルの材料も持ち出す。EDA で将来リターンの分布を見たり、
+    # 「どの条件で正例から外れたか」を数えたりするのに要る。
+    # 未来の情報なので特徴量には絶対に入れない（下でチェックする）。
     meta_cols = ["Code", "Date", "close", "close_raw", "high52w", "tv_ma20",
                  "market_cap", "label",
+                 "future_rise", "keep_days_cnt", "end_level", "uptrend_end",
                  "eps_ttm", "BPS", "roe_basis", "bps_basis"]
     meta_cols = [c for c in meta_cols if c in samples.columns]
+
+    # 未来から作った列が特徴量に混ざるとリークで結果が無意味になる。
+    # 名前の付け替えで事故が起きうるので、機械的に止める。
+    leak = sorted(set(FUTURE_COLS) & set(feature_cols))
+    if leak:
+        raise SystemExit(f"[fatal] 未来の列が特徴量に含まれています: {leak}")
 
     out = samples[meta_cols + feature_cols].copy()
     out["label"] = out["label"].astype(int)

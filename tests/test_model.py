@@ -500,34 +500,40 @@ class TestTunedParamsArePersisted(unittest.TestCase):
 
 class TestStratifiedEvaluation(unittest.TestCase):
     """
-    r_high はゴールまでの距離を測っているだけなので、
-    それと競わせても比較にならない。層内で比べる枠組みを固定する。
+    層内で比べる枠組みを固定する。
+
+    母集団が高値更新日なので r_high は全件ほぼ100になり、層別の軸には使えない。
+    軸は時価総額（+20%上昇の起きやすさが規模で大きく違う。実測で
+    〜100億 43.9% に対し 3000億〜 18.7%）。
+    ここは stratified_eval.STRATIFY_BY を直接使い、軸を変えたら
+    テストも一緒に動くようにする。
     """
 
     def _frame(self, n_dates=12, n=400, seed=0):
+        from stratified_eval import STRATIFY_BY
         rng = np.random.default_rng(seed)
         rows = []
         for d in pd.date_range("2020-01-31", periods=n_dates, freq="ME"):
-            rh = rng.uniform(10, 95, n)
-            rows.append(pd.DataFrame({"Date": d, "r_high": rh,
-                                      "label": (rng.random(n) < rh / 200).astype(int)}))
+            x = rng.uniform(10, 95, n)
+            rows.append(pd.DataFrame({"Date": d, STRATIFY_BY: x,
+                                      "label": (rng.random(n) < x / 200).astype(int)}))
         return pd.concat(rows, ignore_index=True)
 
     def test_strata_are_assigned_within_each_date(self):
-        """局面で r_high の分布が動くので、日付をまたいで切ってはいけない。"""
+        """局面で分布が動くので、日付をまたいで切ってはいけない。"""
         from stratified_eval import assign_strata, N_STRATA
         df = self._frame()
         st = assign_strata(df)
         for _, g in df.assign(_s=st).groupby("Date"):
             self.assertEqual(g["_s"].nunique(), N_STRATA)
 
-    def test_r_high_range_is_narrow_inside_a_stratum(self):
-        """層内では距離の差がほとんど無いことを確認する。これが枠組みの前提。"""
-        from stratified_eval import assign_strata
+    def test_axis_range_is_narrow_inside_a_stratum(self):
+        """層内では軸の差がほとんど無いことを確認する。これが枠組みの前提。"""
+        from stratified_eval import assign_strata, STRATIFY_BY
         df = self._frame().assign(_s=lambda d: assign_strata(d))
-        overall = df["r_high"].max() - df["r_high"].min()
+        overall = df[STRATIFY_BY].max() - df[STRATIFY_BY].min()
         for (_, _), g in df.groupby(["Date", "_s"]):
-            self.assertLess(g["r_high"].max() - g["r_high"].min(), overall / 2)
+            self.assertLess(g[STRATIFY_BY].max() - g[STRATIFY_BY].min(), overall / 2)
 
     def test_evaluate_within_rejects_tiny_or_degenerate_groups(self):
         from stratified_eval import evaluate_within

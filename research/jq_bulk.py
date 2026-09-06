@@ -55,8 +55,14 @@ FIN_TEXT_COLS = {
 MARGIN_COLS = ["Date", "Code", "LongVol", "ShrtVol"]
 # 銘柄マスタ。銘柄名・業種・市場区分はダッシュボード表示に必須で、
 # 株価データ側には入っていない（V2 の /equities/master にしかない）
-MASTER_COLS = ["Date", "Code", "CoName", "CoNameEn", "S17", "S17Nm",
-               "S33", "S33Nm", "ScaleCat", "Mkt", "MktNm", "Mrgn", "MrgnNm"]
+# 列は選ばない。
+# 銘柄マスタは1日4,400行ほどで、月次スナップショットを全期間集めても
+# 数十万行にしかならない。サイズを理由に列を絞る必要が無い。
+#
+# 以前は上の FIN_COLS と同じく手書きの白リストにしていて、
+# 実在しない "ScaleCat" を書いたために規模区分が100%欠測の空列になり、
+# しかも白リストが黙って落とすので気づけなかった。同じ事故を繰り返さない。
+MASTER_COLS = None
 
 
 # --------------------------------------------------------------------------- #
@@ -200,8 +206,9 @@ def fetch_master(client: JQuantsClient, as_of: dt.date) -> pd.DataFrame:
     if not rows:
         raise JQuantsError(f"/equities/master が空を返しました (date={as_of})")
     df = pd.DataFrame.from_records(rows)
-    keep = [c for c in MASTER_COLS if c in df.columns]
-    return df[keep]
+    if MASTER_COLS is None:
+        return df
+    return df[[c for c in MASTER_COLS if c in df.columns]]
 
 
 def fetch_topix(client: JQuantsClient, start: dt.date, end: dt.date) -> pd.DataFrame:
