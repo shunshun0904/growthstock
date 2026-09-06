@@ -20,6 +20,7 @@
 
   --series:    #3987e5;   /* 終値。dataviz バリデータで dark surface 通過済み */
   --ref:       #6b7a94;   /* 高値ライン（注釈であって系列ではない） */
+  --warn:      #c8862e;   /* F と G で判定が分かれる側 */
   --ma-s:      #c8862e;   /* 短期移動平均。終値と競わない暖色の細線 */
   --ma-l:      #7a5ba8;   /* 長期移動平均 */
   --good:      #0ca30c;   /* ブレイク判定日 */
@@ -72,6 +73,9 @@ table.summary td.v { font-family: var(--mono); font-variant-numeric: tabular-num
 .pill::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 .pill.pos { color: var(--good); background: rgba(12,163,12,.12); }
 .pill.neg { color: var(--ink-3); background: rgba(92,105,128,.12); }
+/* F では正例だが G では負例。判断がぶら下がっているのはここだけなので、
+   正例側とも負例側とも別の色にする */
+.pill.mid { color: var(--warn); background: rgba(200,134,46,.14); }
 
 /* ---------- 操作 ---------- */
 .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 20px; }
@@ -142,24 +146,40 @@ footer { margin-top: 44px; padding-top: 20px; border-top: 1px solid var(--border
   <header>
     <h1>ブレイクアウト・ラベル検証</h1>
     <p class="sub">
-      「正例としたサンプルは、本当にモメンタムを形成しているか」を実データのチャートで確認する。
-      一瞬吹き上げてすぐ崩れたものが正例に混じっていないか、
-      逆に外した側（到達したが継続しなかった）が本当に外して良いものかを目で見る。
+      継続条件を <b>F（維持10日 / 終盤+10%）</b>にするか
+      <b>G（維持20日 / 終盤+15%）</b>にするかを、実データのチャートで決める。
+      G の条件は F をすべて含んでしかも厳しいので、<b>G の正例は必ず F の正例に含まれる</b>。
+      つまり両者が食い違うのは「<b>F では正例 / G では負例</b>」の1組だけで、
+      判断はそこに全部かかっている。既定の表示をそこにしてある。
     </p>
     <div class="meta" id="meta"></div>
   </header>
 
   <section class="def">
-    <h2>正例の定義</h2>
+    <h2>2案の違い</h2>
     <p style="margin:0 0 9px;font-size:13px;color:var(--ink-2)">
       母集団は<strong id="pop">高値を更新した日</strong>（高値ベース、連続更新は初回のみ）。
       基準日 <code>t</code> の終値を分母に、判定期間 <code id="hz"></code> で
       以下を<strong>すべて</strong>満たせば正例。
     </p>
-    <ol id="def-list"></ol>
+    <div style="overflow-x:auto">
+      <table class="summary" id="defcmp"></table>
+    </div>
     <p style="margin:9px 0 0;font-size:12px;color:var(--ink-3)">
       1.が「到達」、2.〜4.が「継続」。到達だけを条件にすると、
       一瞬だけ吹き上げてすぐ下落トレンドに入ったものまで正例になる。
+      チャートの点線は終盤の水準（F と G の2本）で、
+      終値がこの2本の間で終わっていれば「F では正例 / G では負例」に当たる。
+    </p>
+  </section>
+
+  <section class="verdict">
+    <h2>4つの組 — 母集団全体での件数</h2>
+    <div style="overflow-x:auto">
+      <table class="summary" id="buckets"></table>
+    </div>
+    <p style="font-size:12px;color:var(--ink-3);margin:10px 0 0">
+      抽出したケースではなく母集団全体の数字。抽出分だけを見ると偶然の偏りを定義の性質と読み違える。
     </p>
   </section>
 
@@ -174,11 +194,11 @@ footer { margin-top: 44px; padding-top: 20px; border-top: 1px solid var(--border
   </section>
 
   <div class="controls">
-    <div class="seg" role="group" aria-label="表示するラベル">
-      <button type="button" data-f="1" aria-pressed="true">正例</button>
-      <button type="button" data-f="neg-継続せず" aria-pressed="false">負例（到達したが継続せず）</button>
-      <button type="button" data-f="neg-未到達" aria-pressed="false">負例（未到達）</button>
-      <button type="button" data-f="0" aria-pressed="false">負例すべて</button>
+    <div class="seg" role="group" aria-label="表示するケース">
+      <button type="button" data-f="b-f_only" aria-pressed="true">F では正例 / G では負例</button>
+      <button type="button" data-f="b-both_pos" aria-pressed="false">F・G とも正例</button>
+      <button type="button" data-f="b-reached_only" aria-pressed="false">到達したが継続せず</button>
+      <button type="button" data-f="b-not_reached" aria-pressed="false">未到達</button>
       <button type="button" data-f="all" aria-pressed="false">すべて</button>
     </div>
     <select id="sort" aria-label="並び順">
@@ -196,6 +216,8 @@ footer { margin-top: 44px; padding-top: 20px; border-top: 1px solid var(--border
     <span><i style="border-color:var(--ref);border-top-style:dashed"></i>高値ライン</span>
     <span><i style="border-color:var(--ma-s)"></i>MA短期</span>
     <span><i style="border-color:var(--ma-l)"></i>MA長期</span>
+    <span><i style="border-color:var(--ref);border-top-style:dashed"></i>目標 +20%</span>
+    <span><i style="border-color:var(--warn);border-top-style:dotted"></i>終盤の水準（F・G）</span>
     <span><i class="band"></i>判定期間</span>
     <span><i class="dot"></i>目標に最初に到達した日</span>
     <span><i style="border-color:var(--ink-3);border-top-style:dotted"></i>基準日 t</span>
@@ -251,7 +273,8 @@ function chart(c, { w = 300, h = 108, volH = 0, pad = { t: 8, r: 6, b: 12, l: 40
   }
   // 参照線も範囲に含める。含めないと枠外に出て描かれない
   if (c.target != null) vals.push(c.target);
-  if (c.endLine != null) vals.push(c.endLine);
+  if (c.endLineF != null) vals.push(c.endLineF);
+  if (c.endLineG != null) vals.push(c.endLineG);
   if (!vals.length) return svg;
   let lo = Math.min(...vals), hi = Math.max(...vals);
   const span = (hi - lo) || 1;
@@ -305,24 +328,35 @@ function chart(c, { w = 300, h = 108, volH = 0, pad = { t: 8, r: 6, b: 12, l: 40
 
   // 目標ライン（更新日終値の +threshold%）。
   // 系列ではなく参照線なので、破線の弱い色にして本線と競わせない
+  // 参照線は3本（目標 / 終盤F / 終盤G）あり、水準が近いとラベルが重なって読めない。
+  // 一覧のカードでは線だけを引き、値は詳細チャートでだけ出す。
+  const wide = w >= 700;
   if (c.target != null) {
     svg.appendChild(el("line", { x1: pad.l, y1: Y(c.target), x2: w - pad.r, y2: Y(c.target),
       stroke: "var(--ref)", "stroke-width": 1.25, "stroke-dasharray": "2 4",
       opacity: 0.85 }));
-    const tl = el("text", { x: w - pad.r - 2, y: Y(c.target) - 4, "text-anchor": "end",
-      fill: "var(--ink-3)", "font-size": 9, "font-family": "var(--mono)" });
-    tl.textContent = "+" + (c.thresholdPct ?? 20) + "%";
-    svg.appendChild(tl);
+    if (wide) {
+      const tl = el("text", { x: w - pad.r - 2, y: Y(c.target) - 4, "text-anchor": "end",
+        fill: "var(--ink-3)", "font-size": 10, "font-family": "var(--mono)" });
+      tl.textContent = "目標 +" + (c.thresholdPct ?? 20) + "%";
+      svg.appendChild(tl);
+    }
   }
 
-  // 終盤の水準ライン（継続条件）。ここを割っていれば失速
-  if (c.endLine != null) {
-    svg.appendChild(el("line", { x1: pad.l, y1: Y(c.endLine), x2: w - pad.r, y2: Y(c.endLine),
-      stroke: "var(--ink-3)", "stroke-width": 1, "stroke-dasharray": "1 4", opacity: 0.8 }));
-    const el2 = el("text", { x: w - pad.r - 2, y: Y(c.endLine) - 4, "text-anchor": "end",
-      fill: "var(--ink-3)", "font-size": 9, "font-family": "var(--mono)" });
-    el2.textContent = "+" + (c.endRatioPct ?? 10) + "%";
-    svg.appendChild(el2);
+  // 終盤の水準ライン。F と G の2本を引く。
+  // 終値がこの間で終わっていれば「F では正例、G では負例」に当たる
+  for (const [v, lab] of [[c.endLineG, "G 終盤 +" + c.endRatioG + "%"],
+                          [c.endLineF, "F 終盤 +" + c.endRatioF + "%"]]) {
+    if (v == null) continue;
+    svg.appendChild(el("line", { x1: pad.l, y1: Y(v), x2: w - pad.r, y2: Y(v),
+      stroke: "var(--warn)", "stroke-width": 1, "stroke-dasharray": "1 4", opacity: 0.8 }));
+    if (wide) {
+      // 目標ラインのラベルは右端にあるので、こちらは左端に置いて重ならないようにする
+      const t2 = el("text", { x: pad.l + 3, y: Y(v) - 4, "text-anchor": "start",
+        fill: "var(--warn)", "font-size": 10, "font-family": "var(--mono)" });
+      t2.textContent = lab;
+      svg.appendChild(t2);
+    }
   }
 
   // 目標に最初に到達した日（周囲に地の色のリングを入れて線と重ならないようにする）
@@ -371,17 +405,42 @@ function chart(c, { w = 300, h = 108, volH = 0, pad = { t: 8, r: 6, b: 12, l: 40
 
 /* ---------------- 画面 ---------------- */
 const fmtPct = v => v == null ? "—" : (v > 0 ? "+" : "") + v.toFixed(1) + "%";
+const BUCKET = {
+  both_pos:     { ja: "F・G とも正例",   cls: "pos" },
+  f_only:       { ja: "F のみ正例",       cls: "mid" },
+  reached_only: { ja: "到達したが継続せず", cls: "neg" },
+  not_reached:  { ja: "未到達",           cls: "neg" },
+};
+const bk = c => BUCKET[c.bucket] || { ja: c.label ? "正例" : "負例", cls: c.label ? "pos" : "neg" };
 const cls = v => v == null ? "" : (v > 0 ? " up" : v < 0 ? " down" : "");
 
 const D = DATA.definition;
+const C = DATA.compare || { F: {}, G: {} };
 document.getElementById("hz").textContent = `[t+1, t+${D.riseHorizon}]`;
 document.getElementById("pop").textContent = `${D.highWeeks ?? 52}週高値を更新した日`;
-document.getElementById("def-list").innerHTML = [
-  `<li>到達: 終値が <code>+${D.riseThreshold}%</code> 以上に達する</li>`,
-  D.keepDays ? `<li>維持: <code>+${D.riseThreshold}%</code> 以上で引けた日が通算 <code>${D.keepDays}営業日</code> 以上</li>` : "",
-  D.endRatio != null ? `<li>終盤: <code>t+${D.riseHorizon}</code> 時点の <code>${D.endWindow}日平均</code> が <code>+${D.endRatio}%</code> 以上</li>` : "",
-  D.trend ? `<li>トレンド: <code>t+${D.riseHorizon}</code> 時点で <code>${D.trend}</code></li>` : "",
-].join("");
+document.getElementById("defcmp").innerHTML =
+  `<thead><tr><th>条件</th><th>F（既定）</th><th>G（厳しく）</th></tr></thead><tbody>` +
+  `<tr><td>1. 到達</td><td class="v">+${D.riseThreshold}%</td><td class="v">+${D.riseThreshold}%</td></tr>` +
+  `<tr><td>2. 維持（+${D.riseThreshold}%以上で引けた日）</td>` +
+    `<td class="v">${C.F.keepDays}日以上</td><td class="v">${C.G.keepDays}日以上</td></tr>` +
+  `<tr><td>3. 終盤（t+${D.riseHorizon} の${D.endWindow}日平均）</td>` +
+    `<td class="v">+${C.F.endRatio}%以上</td><td class="v">+${C.G.endRatio}%以上</td></tr>` +
+  `<tr><td>4. トレンド</td><td class="v">${D.trend}</td><td class="v">${D.trend}</td></tr>` +
+  `</tbody>`;
+
+const bs = DATA.buckets || {};
+document.getElementById("buckets").innerHTML =
+  `<thead><tr><th>組</th><th>件数</th><th>母集団比</th><th>最大上昇<br>中央値</th>` +
+  `<th>終盤<br>中央値</th><th>維持日数<br>中央値</th></tr></thead><tbody>` +
+  ["both_pos", "f_only", "reached_only", "not_reached"].filter(k => bs[k]).map(k => {
+    const d = bs[k], m = BUCKET[k];
+    return `<tr><td><span class="pill ${m.cls}">${m.ja}</span></td>` +
+      `<td class="v">${d.n.toLocaleString("ja-JP")}</td>` +
+      `<td class="v">${d.share.toFixed(2)}%</td>` +
+      `<td class="v">${fmtPct(d.maxGain_median)}</td>` +
+      `<td class="v">${fmtPct(d.endGain_median)}</td>` +
+      `<td class="v">${d.keepDays_median}日</td></tr>`;
+  }).join("") + `</tbody>`;
 
 const s = DATA.datasetStats;
 document.getElementById("meta").innerHTML =
@@ -411,7 +470,7 @@ document.getElementById("summary").innerHTML =
   `<th>終端リターン<br>中央値</th><th>終端が<br>プラスの割合</th>` +
   `<th>維持日数<br>中央値</th><th>終了時に<br>上昇トレンド</th></tr></thead><tbody>${rows}</tbody>`;
 
-let filter = "1", sortKey = "gain-desc";
+let filter = "b-f_only", sortKey = "gain-desc";
 const grid = document.getElementById("grid");
 const empty = document.getElementById("empty");
 const countEl = document.getElementById("count");
@@ -419,7 +478,7 @@ const countEl = document.getElementById("count");
 function visible() {
   let list = DATA.cases.filter(c => {
     if (filter === "all") return true;
-    if (filter.startsWith("neg-")) return c.label === 0 && c.negKind === filter.slice(4);
+    if (filter.startsWith("b-")) return c.bucket === filter.slice(2);
     return String(c.label) === filter;
   });
   const by = {
@@ -446,8 +505,7 @@ function render() {
     head.className = "card-top";
     head.innerHTML =
       `<div class="card-id">${c.name || "(銘柄名なし)"}<span class="code">${c.code} · t=${c.t}</span></div>` +
-      `<span class="pill ${c.label ? "pos" : "neg"}">${c.label ? "正例" :
-         (c.negKind ? "負例・" + c.negKind : "負例")}</span>`;
+      `<span class="pill ${bk(c).cls}">${bk(c).ja}</span>`;
     card.appendChild(head);
     card.appendChild(chart(c));
     const st = document.createElement("div");
@@ -456,7 +514,8 @@ function render() {
       `<div>最大上昇<b class="${cls(c.maxGain).trim()}">${fmtPct(c.maxGain)}</b></div>` +
       `<div>終端<b class="${cls(c.endGain).trim()}">${fmtPct(c.endGain)}</b></div>` +
       `<div>最大下落<b class="${cls(c.maxDraw).trim()}">${fmtPct(c.maxDraw)}</b></div>` +
-      `<div>維持日数<b class="${(c.keepDays ?? 0) >= (c.keepDaysNeeded ?? 0) ? "up" : "down"}">` +
+      `<div>維持日数<b class="${(c.keepDays ?? 0) >= (c.keepDaysG ?? 0) ? "up"
+          : (c.keepDays ?? 0) >= (c.keepDaysF ?? 0) ? "" : "down"}">` +
         `${c.keepDays == null ? "—" : c.keepDays + "日"}</b></div>`;
     card.appendChild(st);
     const open = () => show(c);
@@ -473,17 +532,19 @@ function show(c) {
   document.getElementById("m-name").textContent = c.name || "(銘柄名なし)";
   document.getElementById("m-code").textContent =
     `${c.code} · 高値更新日 ${c.t} · ${c.label ? "正例" : "負例"}` +
-    (c.hitPos == null ? "" : " · 目標到達あり") +
-    (c.negKind ? " · " + c.negKind : "");
+    ` · ${bk(c).ja}` + (c.hitPos == null ? "" : " · 目標到達あり");
   document.getElementById("m-stats").innerHTML =
     `<div>判定期間内 最大上昇率<b class="${cls(c.maxGain).trim()}">${fmtPct(c.maxGain)}</b></div>` +
     `<div>終端リターン<b class="${cls(c.endGain).trim()}">${fmtPct(c.endGain)}</b></div>` +
     `<div>判定期間内 最大下落率<b class="${cls(c.maxDraw).trim()}">${fmtPct(c.maxDraw)}</b></div>` +
     `<div>更新日の終値<b>${c.closeAtT == null ? "—" : c.closeAtT.toLocaleString("ja-JP")}円</b></div>` +
     `<div>目標<b>${c.target == null ? "—" : c.target.toLocaleString("ja-JP")}円</b></div>` +
-    `<div>維持日数（要${c.keepDaysNeeded ?? 0}日）<b class="${(c.keepDays ?? 0) >= (c.keepDaysNeeded ?? 0) ? "up" : "down"}">` +
+    `<div>維持日数（F:${c.keepDaysF}日 / G:${c.keepDaysG}日）` +
+      `<b class="${(c.keepDays ?? 0) >= (c.keepDaysG ?? 0) ? "up" : (c.keepDays ?? 0) >= (c.keepDaysF ?? 0) ? "" : "down"}">` +
       `${c.keepDays == null ? "—" : c.keepDays + "日"}</b></div>` +
-    `<div>終盤の水準（要+${c.endRatioPct ?? 0}%）<b class="${cls(c.endLevel).trim()}">${fmtPct(c.endLevel)}</b></div>` +
+    `<div>終盤の水準（F:+${c.endRatioF}% / G:+${c.endRatioG}%）` +
+      `<b class="${(c.endLevel ?? -1e9) >= (c.endRatioG ?? 0) ? "up" : (c.endLevel ?? -1e9) >= (c.endRatioF ?? 0) ? "" : "down"}">` +
+      `${fmtPct(c.endLevel)}</b></div>` +
     `<div>終了時のトレンド<b class="${c.uptrendEnd ? "up" : "down"}">${c.uptrendEnd == null ? "—" : (c.uptrendEnd ? "上昇" : "下落")}</b></div>` +
     `<div>ベース長<b>${c.baseLength == null ? "—" : c.baseLength + "営業日"}</b></div>` +
     `<div>抜けの大きさ<b>${c.breakMargin == null ? "—" : fmtPct(c.breakMargin)}</b></div>` +
