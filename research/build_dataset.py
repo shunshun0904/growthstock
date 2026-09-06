@@ -966,6 +966,13 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
         print("[warn] margin データなし。需給軸は欠測として扱います")
         margin = pd.DataFrame(columns=["Date", "Code", "LongVol", "ShrtVol"])
 
+    # 年別の行数。年ごとの parquet を1つ落とすと、その年が丸ごと消えるだけでなく
+    # 前後の年の rolling も壊れる。集計結果の年別内訳を読む前に、
+    # 入力そのものが揃っているかを確かめられるようにしておく。
+    _by = pd.to_datetime(bars["Date"]).dt.year.value_counts().sort_index()
+    print("[input] 日次バーの年別行数: "
+          + " ".join(f"{y}:{n:,}" for y, n in _by.items()))
+
     print("\n[panel] 株価系の指標を算出")
     df = price_panel(bars)
     if POPULATION == "breakout":
@@ -982,6 +989,11 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
         print(f"[sample] うち新規のブレイク（直前{BREAKOUT_COOLDOWN}営業日に更新なし）: "
               f"{len(samples):,}行")
         print(f"[label] 定義: {DEFAULT_RISE.name}")
+        for tag, sub in (("高値更新日", df[df["is_new_high"] == True]),   # noqa: E712
+                         ("新規ブレイク", samples)):
+            c = sub.groupby(sub["Date"].dt.year).size()
+            print(f"[sample] {tag}の年別: "
+                  + " ".join(f"{y}:{n:,}" for y, n in c.items()))
         report_rise_funnel(samples)
     else:
         print("[panel] ブレイクアウト日を判定")
