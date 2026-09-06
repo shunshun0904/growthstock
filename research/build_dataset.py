@@ -203,11 +203,29 @@ PEG_MAX = 100.0     # PER/成長率。成長率が極小だと発散する
 # --------------------------------------------------------------------------- #
 
 def load_parts(prefix: str, data_dir: str) -> pd.DataFrame:
+    """
+    年ごとの parquet を1つに繋ぐ。
+
+    列の集合がファイル間でずれていると、concat は足りない列を黙って
+    NaN で埋める。行数は揃っているのに値だけが無い、という形になり、
+    行数を数えるだけでは気づけない。ずれていたら必ず出す。
+    """
     paths = sorted(glob.glob(os.path.join(data_dir, f"{prefix}_*.parquet")))
     if not paths:
         raise SystemExit(f"{prefix} の parquet が {data_dir} にありません。先に jq_bulk.py を実行してください")
-    df = pd.concat([pd.read_parquet(p) for p in paths], ignore_index=True)
+    frames, cols = [], {}
+    for path in paths:
+        f = pd.read_parquet(path)
+        frames.append(f)
+        cols[os.path.basename(path)] = set(f.columns)
+    df = pd.concat(frames, ignore_index=True)
     print(f"[load] {prefix}: {len(df):,}行 ({len(paths)}ファイル)")
+
+    for name, cs in cols.items():
+        missing = sorted(set(df.columns) - cs)
+        if missing:
+            print(f"[warn] {name}: 他のファイルにあって、このファイルに無い列 "
+                  f"{missing}（concat で NaN 埋めになる）")
     return df
 
 
@@ -991,6 +1009,16 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     _gap = [str(k) for k, v in _m.items() if v < _m.median() * 0.5]
     print(f"[input] 月別行数の中央値 {int(_m.median()):,} / "
           f"半分未満の月: {', '.join(_gap) if _gap else 'なし'}")
+    # 行があっても値が無ければ同じこと。列が欠けたファイルが1つ混ざると、
+    # concat がその列を NaN で埋めるので、行数の確認だけでは見つからない。
+    for c in ("H", "AdjH", "C", "AdjC", "Vo", "AdjVo"):
+        if c not in bars.columns:
+            print(f"[warn] 日次バーに {c} 列が無い")
+            continue
+        miss = bars[c].isna().groupby(_d.dt.year).mean() * 100
+        bad = [f"{y}:{v:.0f}%" for y, v in miss.items() if v > 5]
+        if bad:
+            print(f"[warn] {c} の欠測が多い年: " + " ".join(bad))
 
     print("\n[panel] 株価系の指標を算出")
     df = price_panel(bars)
