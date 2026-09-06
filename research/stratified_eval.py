@@ -52,6 +52,9 @@ N_STRATA = 5
 import build_dataset as _B  # noqa: E402
 STRATIFY_BY = "log_market_cap" if _B.POPULATION == "breakout" else "r_high"
 REFERENCE = STRATIFY_BY
+#: レポートの見出しに使う日本語名。軸を変えたらここも一緒に動く。
+AXIS_JA = {"log_market_cap": "時価総額（対数）", "r_high": "R_high"}.get(
+    STRATIFY_BY, STRATIFY_BY)
 
 # 層別で比べる特徴量セット。層内では株価位置がほぼ効かないので、
 # 決算・バリュエーション側を中心に見る
@@ -60,7 +63,7 @@ DEFAULT_PRESETS = ["breakout_only", "technical", "fundamental", "fundamental_v3"
 
 
 def assign_strata(df: pd.DataFrame, n: int = N_STRATA) -> pd.Series:
-    """日付ごとに r_high の分位で層を振る。局面で分布が動くため日付内で切る。"""
+    """日付ごとに STRATIFY_BY の分位で層を振る。局面で分布が動くため日付内で切る。"""
     return df.groupby("Date", sort=False)[STRATIFY_BY].transform(
         lambda s: pd.qcut(s, n, labels=False, duplicates="drop"))
 
@@ -114,8 +117,8 @@ def run(df: pd.DataFrame, presets: List[str], folds) -> Dict:
                 if res is None:
                     continue
                 out.append({"fold": fold.index, "stratum": int(st), "model": name,
-                            "r_high_lo": float(rh.min()),
-                            "r_high_hi": float(rh.max()), **res})
+                            "axis_lo": float(rh.min()),
+                            "axis_hi": float(rh.max()), **res})
     return {"rows": out, "summary": summarize(out)}
 
 
@@ -149,39 +152,41 @@ def build_report(res: Dict, args) -> str:
     rows, summary = res["rows"], res["summary"]
     d = pd.DataFrame(rows) if rows else pd.DataFrame()
     lines = [
-        "# R_high 層別の評価",
+        f"# {AXIS_JA}で層別した評価",
         "",
         "`research/stratified_eval.py` の出力。**実測値のみ**を記載する。",
         "",
         "## なぜ層別にするか",
         "",
-        "従来の基準「R_high のみ」はほとんど同語反復だった。",
-        "ラベルが「52週高値を上抜けるか」で、`r_high` が「52週高値の何%の位置か」",
-        "なので、`r_high` は**ゴールまでの距離**を測っているにすぎない。",
-        "全9局面で 1.69倍±0.15 と異常に安定していたのはそのため。",
-        "決算やバリュエーションをこれと competing させても比較にならない。",
+        "母集団を高値更新日に変える前は `r_high`（52週高値への近さ）で層別していた。",
+        "ラベルが「52週高値を上抜けるか」で `r_high` が「その何%の位置か」なので、",
+        "`r_high` は**ゴールまでの距離**を測っているにすぎず、比較にならなかった。",
         "",
-        "ここでは `r_high` の分位（日付内）で層に分け、**層の中だけで**評価する。",
-        "「同じくらい高値に近い銘柄どうしで、どれが抜けるか」を測る。",
+        "いまの母集団は高値更新日なので `r_high` は全件ほぼ100で、層別の軸に使えない。",
+        f"代わりに **{AXIS_JA}** で層に分け、**層の中だけで**評価する。",
+        "値動きの大きさが規模に強く依存し、"
+        "「+20%上昇」の起きやすさが規模で2倍違うため"
+        "（実測: 〜100億 10.98% / 3000億〜 5.57%）。",
+        "「同じくらいの規模の銘柄どうしで、どれが伸びるか」を測る。",
         "",
-        f"- 層数: {N_STRATA}（日付ごとに `r_high` の分位で切る）",
+        f"- 層数: {N_STRATA}（日付ごとに `{STRATIFY_BY}` の分位で切る）",
         f"- フォールド: ウォークフォワードと同じ切り方",
         "- `Lift` = PR-AUC ÷ その層の正例率。1.0 なら無意味",
         "",
     ]
     if not d.empty:
         lines += ["## 層の中身", "",
-                  "| 層 | r_high の範囲 | 平均サンプル数 | 平均正例率 |",
+                  f"| 層 | `{STRATIFY_BY}` の範囲 | 平均サンプル数 | 平均正例率 |",
                   "| ---: | --- | ---: | ---: |"]
         for st, g in d[d["model"] == REFERENCE].groupby("stratum"):
-            lines.append(f"| {int(st)} | {g['r_high_lo'].min():.1f} 〜 "
-                         f"{g['r_high_hi'].max():.1f} | {g['n'].mean():,.0f} | "
+            lines.append(f"| {int(st)} | {g['axis_lo'].min():.1f} 〜 "
+                         f"{g['axis_hi'].max():.1f} | {g['n'].mean():,.0f} | "
                          f"{g['base_rate'].mean()*100:.1f}% |")
         lines += ["", "正例率が層によって大きく違えば、"
                   "「距離が近いほど抜けやすい」という当たり前の関係が確認できる。", ""]
 
-        lines += ["## 層内での `r_high` 自体の効き", "",
-                  "層内では `r_high` の差がほとんど無いので、ほぼ無力になるはず。",
+        lines += [f"## 層内での `{STRATIFY_BY}` 自体の効き", "",
+                  f"層内では `{STRATIFY_BY}` の差がほとんど無いので、ほぼ無力になるはず。",
                   "そうなっていれば、この枠組みが機能している証拠になる。", "",
                   "| 層 | 平均PR-AUC | 平均正例率 | Lift |",
                   "| ---: | ---: | ---: | ---: |"]
@@ -191,8 +196,8 @@ def build_report(res: Dict, args) -> str:
                          f"{g['lift'].mean():.2f}x |")
 
     lines += ["", "## 層別のモデル成績", "",
-              "`勝敗` は層内で `r_high` を上回ったフォールド数。", "",
-              "| 層 | モデル | 平均Lift | Lift@10% | 対r_high | 勝敗 |",
+              f"`勝敗` は層内で `{STRATIFY_BY}` を上回ったフォールド数。", "",
+              f"| 層 | モデル | 平均Lift | Lift@10% | 対`{STRATIFY_BY}` | 勝敗 |",
               "| ---: | --- | ---: | ---: | ---: | :---: |"]
     for s in summary:
         lines.append(f"| {s['stratum']} | {s['model']} | {s['mean_lift']:.2f}x | "
@@ -206,7 +211,7 @@ def build_report(res: Dict, args) -> str:
         "- **Lift が 1.0 付近なら、その層では何も予測できていない**",
         "- 高値に近い層（層4）で Lift が出れば、実運用に近い形で使える",
         "  （もともと候補として見るのはその層のため）",
-        "- 層内で `r_high` の Lift が 1.0 付近まで落ちていれば、",
+        f"- 層内で `{STRATIFY_BY}` の Lift が 1.0 付近まで落ちていれば、",
         "  「距離」の影響を取り除けている",
         "",
     ]
@@ -214,7 +219,7 @@ def build_report(res: Dict, args) -> str:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
-    ap = argparse.ArgumentParser(description="R_high 層別の評価")
+    ap = argparse.ArgumentParser(description=f"{STRATIFY_BY} で層別した評価")
     ap.add_argument("--dataset", default=os.path.join(DATA_DIR, "dataset.parquet"))
     ap.add_argument("--features", nargs="*", default=None)
     ap.add_argument("--min-train-months", type=int, default=36)
@@ -243,7 +248,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     with open(os.path.join(DATA_DIR, "stratified.json"), "w", encoding="utf-8") as fh:
         json.dump(res, fh, ensure_ascii=False, indent=2)
 
-    print("\n[層内で r_high を上回ったモデル]")
+    print(f"\n[層内で {STRATIFY_BY} を上回ったモデル]")
     hit = [s for s in res["summary"] if s["wins"] > s["losses"]]
     for s in sorted(hit, key=lambda r: -r["mean_diff"])[:10]:
         print(f"  層{s['stratum']} {s['model']:<34} "

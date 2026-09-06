@@ -52,6 +52,71 @@ MACRO = [
 
 TOP_N = 30
 
+#: 画面側。セットを選び直したら、グループ別と上位N列を描き直す。
+#: 棒は横向き（ランキングなので。縦棒だと長い列名が読めない）。
+VIEW_JS = r"""
+const $ = id => document.getElementById(id);
+const W = 300;
+const esc = s => String(s).replace(/[&<>"]/g, c =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function bars(rows) {
+  if (!rows.length) return '<p class="note">この セットには列がありません。</p>';
+  const top = Math.max(...rows.map(r => r.value)) || 1;
+  return '<div class="bars">' + rows.map(r => {
+    const w = Math.max(r.value / top * W, 1.5);
+    return `<div class="bar-label"><code>${esc(r.label)}</code></div>` +
+      `<div><svg width="${W}" height="13" role="img" ` +
+      `aria-label="${esc(r.label)} ${r.pct.toFixed(2)}%">` +
+      `<rect x="0" y="1.5" width="${w.toFixed(1)}" height="10" rx="4" ` +
+      `fill="var(--s-${r.macro})"></rect></svg></div>` +
+      `<div class="bar-value">${r.pct.toFixed(2)}%</div>` +
+      `<div class="n">${esc(r.note)}</div>`;
+  }).join("") + "</div>";
+}
+
+function render(name) {
+  const s = D.sets[name];
+  const total = s.rows.reduce((a, r) => a + r[1], 0) || 1;
+  const used = s.rows.filter(r => r[2] > 0).length;
+  const headShare = s.rows.slice(0, D.topN).reduce((a, r) => a + r[1], 0) / total * 100;
+
+  $("facts").innerHTML = [
+    ["特徴量セット", esc(name), `${s.n}列`],
+    ["テスト PR-AUC", s.ap.toFixed(4), `正例率 ${(s.rate * 100).toFixed(2)}%`],
+    ["Lift@5%", s.lift.toFixed(2) + "x", ""],
+    ["実際に使われた列", String(used), `${s.rows.length}列中`],
+    [`上位${D.topN}列の寄与`, headShare.toFixed(1) + "%", "gain 合計に占める割合"],
+  ].map(([k, v, sub]) =>
+    `<div class="fact"><div class="eyebrow">${esc(k)}</div>` +
+    `<div class="n">${v}</div><div class="sub">${esc(sub)}</div></div>`).join("");
+
+  const agg = {}, cnt = {};
+  for (const k of Object.keys(D.labels)) { agg[k] = 0; cnt[k] = 0; }
+  for (const [col, gain] of s.rows) {
+    const m = D.macro[col] || "price";
+    agg[m] += gain; cnt[m] += 1;
+  }
+  $("grp").innerHTML = bars(Object.keys(D.labels).map(k => ({
+    label: D.labels[k], value: agg[k], pct: agg[k] / total * 100,
+    macro: k, note: `${cnt[k]}列`,
+  })).sort((a, b) => b.value - a.value));
+
+  $("top").innerHTML = bars(s.rows.slice(0, D.topN).map(([col, gain, sp]) => ({
+    label: col, value: gain, pct: gain / total * 100,
+    macro: D.macro[col] || "price", note: `${sp.toLocaleString("ja-JP")}回`,
+  })));
+  $("pickmeta").textContent = name === D.best ? "テスト PR-AUC 最良" : "";
+}
+
+const pick = $("pick");
+pick.innerHTML = D.order.map(n =>
+  `<option value="${esc(n)}"${n === D.best ? " selected" : ""}>${esc(n)}` +
+  ` — PR-AUC ${D.sets[n].ap.toFixed(4)} / ${D.sets[n].n}列</option>`).join("");
+pick.addEventListener("change", e => render(e.target.value));
+render(D.best);
+"""
+
 e = html.escape
 
 
@@ -110,39 +175,26 @@ def build(res: Dict) -> str:
     scored.sort(key=lambda t: -t[0])
     best_ap, best_metrics, best = scored[0]
 
-    imp = best["importance"]
-    total = sum(r["gain"] for r in imp) or 1.0
+    # 最良モデルは列数の少ないセットになることがある（実測では technical の14列）。
+    # それだけを出すと「決算 0%」のように、そのセットに入っていないだけの軸が
+    # 効かないように見えてしまう。切り替えられるようにして、
+    # 全部入りのセットも同じ画面で見られるようにする。
+    sets = {}
+    for ap, m, x in scored:
+        rows = [[r["col"], round(r["gain"], 3), r["split"]] for r in x["importance"]]
+        sets[x["preset"]] = {"ap": round(ap, 4), "lift": round(m["lift@5%"], 2),
+                             "n": x["n_features"], "rate": round(m["base_rate"], 4),
+                             "rows": rows}
+    order = [x["preset"] for _, _, x in scored]
+    # 既定は最良。全部入りが別にあれば選択肢の先頭近くに置く
+    macro_map = {c: macro_of(c) for pre in sets for c, _, _ in sets[pre]["rows"]}
 
-    # --- 上位N列 --- #
-    top = [{"label": r["col"], "value": r["gain"],
-            "pct": r["gain"] / total * 100, "macro": macro_of(r["col"]),
-            "note": f'{r["split"]:,}回'} for r in imp[:TOP_N]]
-    used = sum(1 for r in imp if r["split"] > 0)
-    head_share = sum(r["gain"] for r in imp[:TOP_N]) / total * 100
-
-    # --- グループ別 --- #
-    agg: Dict[str, float] = {k: 0.0 for k, _, _ in MACRO}
-    cnt: Dict[str, int] = {k: 0 for k, _, _ in MACRO}
-    for r in imp:
-        m = macro_of(r["col"])
-        agg[m] += r["gain"]
-        cnt[m] += 1
-    grp = [{"label": ja, "value": agg[k], "pct": agg[k] / total * 100,
-            "macro": k, "note": f"{cnt[k]}列"}
-           for k, ja, _ in MACRO]
-    grp.sort(key=lambda r: -r["value"])
-
-    facts = [
-        ("特徴量セット", e(best["preset"]), f'{best["n_features"]}列'),
-        ("テスト PR-AUC", f'{best_ap:.4f}', f'正例率 {best_metrics["base_rate"]*100:.2f}%'),
-        ("Lift@5%", f'{best_metrics["lift@5%"]:.2f}x', ""),
-        ("実際に使われた列", f'{used}', f'{len(imp)}列中'),
-        ("上位30列の寄与", f'{head_share:.1f}%', "gain 合計に占める割合"),
-    ]
-    head = ('<div class="facts">' + "".join(
-        f'<div class="fact"><div class="eyebrow">{e(k)}</div>'
-        f'<div class="n">{v}</div><div class="sub">{e(s)}</div></div>'
-        for k, v, s in facts) + "</div>")
+    payload = json.dumps({"sets": sets, "order": order, "best": best["preset"],
+                          "macro": macro_map,
+                          "labels": {k: ja for k, ja, _ in MACRO},
+                          "topN": TOP_N}, ensure_ascii=False,
+                         separators=(",", ":"))
+    head = '<div class="facts" id="facts"></div>'
 
     others = "".join(
         f'<tr><td>{e(x["preset"])}</td><td class="v">{ap:.4f}</td>'
@@ -162,15 +214,25 @@ def build(res: Dict) -> str:
             "font-size:11.5px;color:var(--ink-2)}"
             ".legend i{display:inline-block;width:11px;height:11px;border-radius:3px;"
             "margin-right:6px;vertical-align:-1px}"
+            ".controls{display:flex;align-items:center;gap:10px;margin:14px 0 4px}"
+            ".controls label{font-size:11.5px;color:var(--ink-3)}"
+            "select{font:inherit;font-size:12.5px;padding:5px 9px;border-radius:4px;"
+            "border:1px solid var(--line);background:var(--surface);color:var(--ink)}"
             "</style>"
             '<div class="wrap"><header>'
             "<h1>ブレイク予測モデル 重要度</h1>"
             '<p class="lede">モデルが実際に何を使って判断しているかを見る。'
             "gain（その分割で減った損失の合計）の大きい順。</p>"
             f"{head}</header>"
-            + section("01", "グループ別の寄与", legend() + bars(grp),
-                      "3つに束ねた寄与。どの軸で判断しているかの全体像。")
-            + section("02", f"上位{TOP_N}列", legend() + bars(top),
+            + section("01", "グループ別の寄与",
+                      '<div class="controls"><label for="pick">特徴量セット</label>'
+                      '<select id="pick"></select>'
+                      '<span class="n" id="pickmeta"></span></div>'
+                      + legend() + '<div id="grp"></div>',
+                      "3つに束ねた寄与。どの軸で判断しているかの全体像。"
+                      "セットに入っていない軸は 0% になるので、"
+                      "全部入りのセットと見比べる。")
+            + section("02", f"上位{TOP_N}列", legend() + '<div id="top"></div>',
                       "棒の右は gain 全体に占める割合、その右は分割に使われた回数。"
                       "回数だけ多くて割合が小さい列は、値の種類が多いだけの可能性がある。")
             + section("03", "特徴量セット別のテスト成績",
@@ -184,7 +246,8 @@ def build(res: Dict) -> str:
               "列を落とす判断は、落として測り直してから行う。</p>"
             '<footer class="note">データ: J-Quants API V2（日本取引所グループ）／'
             "重要度は research/train_model.py、組版は research/importance_report.py。"
-            "</footer></div>")
+            "</footer></div>"
+            f"<script>const D={payload};{VIEW_JS}</script>")
 
 
 def section(no: str, title: str, body: str, lede: str = "") -> str:
