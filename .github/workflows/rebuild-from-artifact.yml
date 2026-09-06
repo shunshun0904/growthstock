@@ -164,7 +164,13 @@ jobs:
       - name: Train and evaluate
         if: steps.gate.outputs.train == 'yes'
         run: |
-          python3 research/train_model.py             --val-start 2023-01-01 --test-start 2024-10-01 2>&1 | tee train.log
+          # 評価する特徴量セットは research/eval_presets.txt で指定する。
+          # 探索の条件が揃っていないセットを混ぜると、特徴量の差ではなく
+          # パラメータの差を見ることになる
+          PRESETS=$(grep -v '^#' research/eval_presets.txt | tr '\n' ' ')
+          echo "評価するセット: $PRESETS"
+          python3 research/train_model.py --features $PRESETS \
+            --val-start 2023-01-01 --test-start 2024-10-01 2>&1 | tee train.log
 
       # モデルが実際に何を使っているか。学習した場合だけ意味がある
       - name: Feature importance
@@ -175,7 +181,9 @@ jobs:
       # 訓練窓を伸ばしながらテスト窓を進め、複数局面で同じ比較を繰り返す。
       - name: Walk-forward evaluation
         if: steps.gate.outputs.train == 'yes'
-        run: python3 research/walkforward.py 2>&1 | tee walkforward.log
+        run: |
+          PRESETS=$(grep -v '^#' research/eval_presets.txt | tr '\n' ' ')
+          python3 research/walkforward.py --features $PRESETS 2>&1 | tee walkforward.log
 
       # LTR を作る前に「日付内に取り出せる情報があるか」を測る。
       # 無ければ LTR を実装しても結果は変わらない。
@@ -184,7 +192,9 @@ jobs:
       # 決算やバリュエーションと競わせても比較にならなかった。
       - name: Stratified evaluation
         if: steps.gate.outputs.train == 'yes'
-        run: python3 research/stratified_eval.py 2>&1 | tee strat.log
+        run: |
+          PRESETS=$(grep -v '^#' research/eval_presets.txt | tr '\n' ' ')
+          python3 research/stratified_eval.py --features $PRESETS 2>&1 | tee strat.log
 
       - name: Within-date signal
         if: steps.gate.outputs.train == 'yes'

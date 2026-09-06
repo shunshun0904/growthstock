@@ -82,10 +82,14 @@ def uncovered_presets(presets: List[str]) -> List[str]:
     """
     return [p for p in F.PRESETS if p not in set(presets)]
 
-# 基準はモデル。決算を使わないテクニカルのモデルを基準にして、
-# 「決算を足すと良くなるか」を直接問う。
-# 単変量のベースライン（R_high など）は、母集団を高値更新日にした時点で
-# 全件ほぼ100の定数になり、勝っても何も言えないので廃止した。
+# 基準は「無情報」（全件同じスコア）。
+# 全件同点の PR-AUC はその窓の正例率に一致するので、
+# 差は「正例率をどれだけ上回ったか」になる。
+#
+# 別のモデルを基準にするのはやめた。探索の条件が揃っていないモデル同士を
+# 比べると、特徴量の差ではなくパラメータの差を見てしまう。
+# 単変量のベースライン（R_high など）も、母集団を高値更新日にした時点で
+# 定数化したので廃止した。
 from train_model import REFERENCE_MODEL  # noqa: E402
 REFERENCE = REFERENCE_MODEL
 
