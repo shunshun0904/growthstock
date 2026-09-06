@@ -63,6 +63,9 @@ DEFAULT_PRESETS = [
     # 今回足したものだけのセット。前者は業種も含む
     "fundamental_v3", "extras_only",
     "valuation_only",
+    # 決算を「変化」だけで組んだセット。絶対水準を外し、
+    # 差分・成長率・連続性だけで判断させる
+    "fund_delta", "delta_technical", "rank_delta_technical",
 ]
 
 
@@ -78,7 +81,12 @@ def uncovered_presets(presets: List[str]) -> List[str]:
     """
     return [p for p in F.PRESETS if p not in set(presets)]
 
-REFERENCE = "ベースライン: R_high のみ"
+# 基準はモデル。決算を使わないテクニカルのモデルを基準にして、
+# 「決算を足すと良くなるか」を直接問う。
+# 単変量のベースライン（R_high など）は、母集団を高値更新日にした時点で
+# 全件ほぼ100の定数になり、勝っても何も言えないので廃止した。
+from train_model import REFERENCE_MODEL  # noqa: E402
+REFERENCE = REFERENCE_MODEL
 
 # これを下回るテスト窓は評価しない。
 # 少数のサンプルで出した PR-AUC は、勝敗の符号がほぼ運で決まる
@@ -199,7 +207,11 @@ def run(df: pd.DataFrame, presets: List[str], folds: List[Fold]) -> Dict:
                 scores[f"{mname} [{preset}]"] = model.predict_proba(Xte)[:, 1]
 
         rows = [evaluate(name, yte, sc) for name, sc in scores.items()]
-        ref = next(r for r in rows if r["name"] == REFERENCE)
+        ref = next((r for r in rows if r["name"] == REFERENCE), None)
+        if ref is None:
+            raise SystemExit(
+                f"[fatal] 基準 {REFERENCE} が結果にありません。"
+                f"基準はモデルなので、その特徴量セットを必ず評価対象に含めること")
         for r in rows:
             r["diff_vs_ref"] = r["pr_auc"] - ref["pr_auc"]
         rows.sort(key=lambda r: -r["pr_auc"])

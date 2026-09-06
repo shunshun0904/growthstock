@@ -199,14 +199,20 @@ class TestWalkForwardEndToEnd(unittest.TestCase):
                            test_months=6, step_months=6, embargo_days=20)
         self.assertGreaterEqual(len(folds), 2)
 
-        # 実在する列だけを使う最小プリセットを注入する
+        # 基準はモデル（REFERENCE）なので、その特徴量セットを必ず評価する。
+        # 実在する列だけを使う最小プリセットを、基準の名前に合わせて注入する。
         import features as Fx
+        ref_preset = REFERENCE.split("[")[1].rstrip("]")
         Fx.GROUPS["_t"] = ["r_high", "volume_trend"]
         Fx.PRESETS["_t"] = ["_t"]
+        saved = Fx.PRESETS.get(ref_preset)
+        Fx.PRESETS[ref_preset] = ["_t"]
         try:
-            res = run(df, ["_t"], folds)
+            res = run(df, [ref_preset, "_t"], folds)
         finally:
             del Fx.GROUPS["_t"], Fx.PRESETS["_t"]
+            if saved is not None:
+                Fx.PRESETS[ref_preset] = saved
 
         self.assertTrue(res["folds"])
         self.assertTrue(res["summary"])
@@ -215,6 +221,23 @@ class TestWalkForwardEndToEnd(unittest.TestCase):
             self.assertGreaterEqual(s["best_diff"], s["worst_diff"])
         # 基準そのものは要約に出さない（自分との差は常に0で無意味）
         self.assertNotIn(REFERENCE, [s["name"] for s in res["summary"]])
+
+    def test_missing_reference_is_a_hard_error(self):
+        """
+        基準はモデルなので、その特徴量セットを評価し忘れると比較が成立しない。
+        黙って別のモデルを基準にせず、止める。
+        """
+        df = self._dataset()
+        folds = make_folds(pd.to_datetime(df["Date"]), min_train_months=24,
+                           test_months=6, step_months=6, embargo_days=20)
+        import features as Fx
+        Fx.GROUPS["_t"] = ["r_high", "volume_trend"]
+        Fx.PRESETS["_t"] = ["_t"]
+        try:
+            with self.assertRaises(SystemExit):
+                run(df, ["_t"], folds)
+        finally:
+            del Fx.GROUPS["_t"], Fx.PRESETS["_t"]
 
     def test_summarise_counts_wins_correctly(self):
         per_fold = [

@@ -24,10 +24,18 @@ from typing import Dict, List
 FUND_AXES = ["eps_growth", "sales_growth", "eps_growth_sym", "sales_growth_sym",
              "ROE", "ROA", "op_margin", "equity_ratio"]
 
+#: 軸を「それ自体が成長率か」で分ける。
+#: eps_growth_q0 は今期の成長率なので、水準ではあっても中身は変化量。
+#: ROE_q0 は絶対水準。差分だけで組むセットを作るとき、この区別が要る。
+GROWTH_AXES = ["eps_growth", "sales_growth", "eps_growth_sym", "sales_growth_sym"]
+LEVEL_AXES = ["ROE", "ROA", "op_margin", "equity_ratio"]
+
 #: 特徴量のグループ。キーがグループ名、値が列名。
 GROUPS: Dict[str, List[str]] = {
     # --- 決算: 直近の水準 ---
     "fund_level": [f"{a}_q0" for a in FUND_AXES],
+    # --- 決算: 成長率そのもの（水準だが中身は変化量）---
+    "fund_growth": [f"{a}_q0" for a in GROWTH_AXES],
     # --- 決算: 1〜3期前の水準 ---
     "fund_lag": [f"{a}_{q}" for a in FUND_AXES for q in ("q1", "q2", "q3")],
     # --- 決算: 変化と傾き（CANSLIM の核心は水準より加速）---
@@ -110,9 +118,12 @@ RAW_FOR_RANK: List[str] = [
 # 順位版のグループは自動生成する。
 # 対象は RAW_FOR_RANK と揃える。ここがずれると
 # 「順位列が存在しないプリセット」が黙って出来てしまう。
-RANKED_GROUPS = ("fund_level", "fund_lag", "fund_trend", "fund_streak", "price",
-                 "breakout", "volume", "liquidity", "supply", "progress",
-                 "valuation", "dividend", "cashflow", "efficiency", "guidance")
+# fund_growth は fund_level の部分集合なので、順位列は既に作られている。
+# 集合としては何も足さないので上の assert は保たれる。
+RANKED_GROUPS = ("fund_level", "fund_growth", "fund_lag", "fund_trend",
+                 "fund_streak", "price", "breakout", "volume", "liquidity",
+                 "supply", "progress", "valuation", "dividend", "efficiency",
+                 "cashflow", "guidance")
 GROUPS.update({
     f"{g}_rank": [f"{c}_r" for c in GROUPS[g]] for g in RANKED_GROUPS
 })
@@ -157,9 +168,27 @@ PRESETS: Dict[str, List[str]] = {
     "extras_only": ["valuation", "dividend", "cashflow", "efficiency",
                     "guidance", "sector"],
     # 市場環境を抜いた全部。
-    # all との差が「相場局面をどれだけ暗記していたか」の目安になる
-    "all_no_market": [g for g in GROUPS
-                      if g != "market" and not g.endswith("_rank")],
+    # all との差が「相場局面をどれだけ暗記していたか」の目安になる。
+    # GROUPS から作ると fund_growth（fund_level の部分集合）が二重に入るので
+    # ALL_GROUPS から引く
+    "all_no_market": [g for g in ALL_GROUPS if g != "market"],
+
+    # --- 決算を「変化」だけで組むセット --- #
+    # 絶対水準（ROE 何%、営業利益率 何%）ではなく、
+    # 前期との差分・前々期との差分・成長率・連続性で判断させる。
+    # 水準は業種や事業モデルで決まる部分が大きく、
+    # 「良くなっているか」とは別のことを測っている。
+    "fund_delta": ["fund_growth", "fund_trend", "fund_streak", "turnaround",
+                   "guidance"],
+    # 変化だけの決算 + テクニカル。実運用に近い形
+    "delta_technical": ["fund_growth", "fund_trend", "fund_streak", "turnaround",
+                        "guidance", "price", "breakout", "volume", "liquidity",
+                        "supply", "market"],
+    # その順位版
+    "rank_delta_technical": ["fund_growth_rank", "fund_trend_rank",
+                             "fund_streak_rank", "turnaround", "guidance_rank",
+                             "price_rank", "breakout_rank", "volume_rank",
+                             "liquidity_rank", "supply_rank", "market"],
 
     # --- 横断面正規化版（同じ日付内でのパーセンタイル順位）---
     # 株価位置の順位だけ。price_only と直接比較する

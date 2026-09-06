@@ -39,6 +39,11 @@ from build_dataset import DEFAULT_LABEL  # noqa: E402
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_data")
 
+#: 比較の基準。決算を使わないモデルを基準にして、
+#: 「決算を足すと良くなるか」を直接問う。
+#: 単変量のベースライン（R_high など）は母集団の変更で定数化したため廃止した。
+REFERENCE_MODEL = "LightGBM [technical]"
+
 #: レポートに出すラベル定義の名前。母集団で中身が変わる。
 LABEL_NAME = (B.DEFAULT_RISE.name if B.POPULATION == "breakout"
               else DEFAULT_LABEL.name)
@@ -186,17 +191,19 @@ def report(rows: List[Dict], title: str) -> str:
 
 def baseline_scores(df: pd.DataFrame) -> Dict[str, np.ndarray]:
     """
-    これらに勝てなければ34特徴量のモデルを作る意味がない。
+    単変量のベースラインは使わない。
+
+    かつては「R_high のみ」「出来高モメンタムのみ」「既存の8軸スコア」を
+    基準にしていたが、これは月末を母集団にしてラベルが
+    「先1〜6ヶ月で52週高値を抜くか」だった時代の設計。
+    いまの母集団は高値更新日そのもので、R_high は全件ほぼ100の定数になる。
+    定数に勝っても何も言えないので、比較の基準にはできない。
+
+    代わりの基準は REFERENCE_MODEL（決算を使わないテクニカルのモデル）。
+    問うべきは「決算を足すと、テクニカルだけより良くなるか」なので、
+    基準もモデルにする。
     """
-    out = {}
-    # 1. 52週高値接近率のみ（高値に近いほどブレイクしやすい、という素朴な仮説）
-    out["ベースライン: R_high のみ"] = df["r_high"].to_numpy(dtype=float)
-    # 2. 出来高モメンタムのみ
-    out["ベースライン: 出来高モメンタムのみ"] = df["volume_trend"].to_numpy(dtype=float)
-    # 3. 既存ダッシュボードの8軸総合スコア相当（現行スコアに予測力があるかの検証）
-    from eight_axis_score import eight_axis_total  # noqa: E402
-    out["ベースライン: 既存の8軸総合スコア"] = eight_axis_total(df)
-    return out
+    return {}
 
 
 # --------------------------------------------------------------------------- #
@@ -342,10 +349,12 @@ def main(argv: List[str] | None = None) -> int:
     if not experiments:
         raise SystemExit("実行できた実験がありません")
 
-    # --- ベースラインとの差が誤差かを判定 ---
+    # --- 基準との差が誤差かを判定 ---
     # 全モデルを対象にすると遅いので、上位と「順位版 vs 絶対値版」の対に絞る。
-    REF = "ベースライン: R_high のみ"
     y_test = parts["test"]["label"].to_numpy(dtype=int)
+    REF = (REFERENCE_MODEL if REFERENCE_MODEL in test_scores
+           else max(test_scores, key=lambda k: average_precision_score(
+               y_test, clean_score(test_scores[k]))))
     ranked = sorted((k for k in test_scores if k != REF),
                     key=lambda k: -average_precision_score(y_test, clean_score(test_scores[k])))
     pairs = [f"{m} [{p_}]"

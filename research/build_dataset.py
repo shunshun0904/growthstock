@@ -150,6 +150,33 @@ REQUIRE_UPTREND = True
 # 許しすぎると長期休止銘柄の「数点だけの高値」を基準にしてしまう。
 MIN_WINDOW_COVERAGE = 0.5
 
+# --- 決算の完全性で母集団を絞る --- #
+# 決算の「変化」で判断させるなら、変化が作れないレコードを混ぜても
+# 欠測を学習させるだけになる。作れない行は最初から外す。
+#
+# 候補は狭いものから広いものまであり、残る件数と正例率が変わる。
+# どれを採るかは実測を見て決めるので、候補は全部数えて出す。
+FUND_REQUIREMENT_SETS = {
+    "none": [],
+    # 直近1回の変化（売上とEPS）
+    "growth1": ["eps_growth_chg1", "sales_growth_chg1"],
+    # 2段の変化。「毎回伸びているか」を表せる最小構成
+    "growth2": ["eps_growth_chg1", "eps_growth_chg2",
+                "sales_growth_chg1", "sales_growth_chg2"],
+    # 収益性の変化も要求する
+    "profit2": ["eps_growth_chg1", "eps_growth_chg2",
+                "sales_growth_chg1", "sales_growth_chg2",
+                "ROE_chg1", "ROE_chg2", "op_margin_chg1", "op_margin_chg2"],
+    # 4期そろい（3段の変化がすべて作れる）
+    "full4": ["eps_growth_chg1", "eps_growth_chg2", "eps_growth_chg3",
+              "sales_growth_chg1", "sales_growth_chg2", "sales_growth_chg3",
+              "ROE_chg1", "ROE_chg2", "op_margin_chg1", "op_margin_chg2"],
+}
+#: 実際に適用する要求。FUND_REQUIREMENT_SETS のキー。
+#: growth2 = 売上とEPSについて「前期との差分」と「前々期と前期の差分」が
+#: 両方作れること。決算を変化で判断させるなら、これが最小構成になる。
+FUND_REQUIREMENT = "growth2"
+
 
 @dataclass(frozen=True)
 class RiseConfig:
@@ -491,6 +518,46 @@ def attach_rise_label(df: pd.DataFrame, cfg: RiseConfig = DEFAULT_RISE) -> pd.Da
         determined &= df["uptrend_end"].notna()
     df["label"] = ok.where(determined)
     return df
+
+
+def report_fund_completeness(samples: pd.DataFrame) -> None:
+    """
+    決算の変化がどれだけ作れるかを、要求の強さごとに数える。
+
+    絞ってから測るのでは「絞った結果どうなるか」が分からない。
+    絞る前に、候補ごとの残存数と正例率を並べて出す。
+    """
+    n = len(samples)
+    lab = samples["label"]
+    print(f"[fund] 決算の完全性で絞った場合の残存（絞る前 {n:,}件 / "
+          f"正例率 {lab.mean()*100:.2f}%）")
+    for name, cols in FUND_REQUIREMENT_SETS.items():
+        have = [c for c in cols if c in samples.columns]
+        if len(have) != len(cols):
+            print(f"  {name:<9} 列が足りない: {sorted(set(cols) - set(have))}")
+            continue
+        m = samples[have].notna().all(axis=1) if have else pd.Series(True, index=samples.index)
+        k = int(m.sum())
+        rate = lab[m].mean() * 100 if k else float("nan")
+        mark = " ← 採用" if name == FUND_REQUIREMENT else ""
+        print(f"  {name:<9} {k:>7,}件 ({k/n*100:5.1f}%) 正例率 {rate:5.2f}% "
+              f"/ 要求{len(cols)}列{mark}")
+
+
+def apply_fund_requirement(samples: pd.DataFrame) -> pd.DataFrame:
+    """FUND_REQUIREMENT に従って、変化が作れない行を落とす。"""
+    cols = FUND_REQUIREMENT_SETS[FUND_REQUIREMENT]
+    if not cols:
+        return samples
+    have = [c for c in cols if c in samples.columns]
+    missing = sorted(set(cols) - set(have))
+    if missing:
+        raise SystemExit(f"[fatal] 要求列がデータにありません: {missing}")
+    before = len(samples)
+    out = samples[samples[have].notna().all(axis=1)].copy()
+    print(f"[filter] 決算の変化が作れない行を除外（{FUND_REQUIREMENT}）: "
+          f"{before:,} -> {len(out):,}")
+    return out
 
 
 def report_rise_funnel(samples: pd.DataFrame,
@@ -1290,6 +1357,12 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     #
     # 実測で訓練期間の正例率 6.19% に対しテスト期間 21.66% と3倍以上ずれており、
     # 絶対値の特徴量では学習が成立していなかった（docs/MODEL_RESULTS.md 参照）。
+    # --- 決算の完全性で絞る --- #
+    # 順位を付ける前に絞る。順位は「その日の中で何位か」なので、
+    # 絞ったあとの母集団の中で付け直さないと意味がずれる。
+    report_fund_completeness(samples)
+    samples = apply_fund_requirement(samples)
+
     print("\n[rank] 横断面正規化（同一日付内のパーセンタイル順位）")
     samples = add_cross_sectional_ranks(samples, features.RAW_FOR_RANK)
 
