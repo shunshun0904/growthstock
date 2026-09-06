@@ -160,6 +160,11 @@ jobs:
         run: |
           python3 research/train_model.py             --val-start 2023-01-01 --test-start 2024-10-01 2>&1 | tee train.log
 
+      # モデルが実際に何を使っているか。学習した場合だけ意味がある
+      - name: Feature importance
+        if: steps.gate.outputs.train == 'yes'
+        run: python3 research/importance_report.py 2>&1 | tee importance.log
+
       # 単一分割はテスト期間が1つしかなく、局面差と実力差を分離できない。
       # 訓練窓を伸ばしながらテスト窓を進め、複数局面で同じ比較を繰り返す。
       - name: Walk-forward evaluation
@@ -204,6 +209,7 @@ jobs:
             sec "指標の検証" validate.log
             sec "EDA" eda.log
             sec "EDA ページ" eda_report.log
+            sec "重要度ページ" importance.log
             sec "パラメータ探索" tune.log 40
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -213,7 +219,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           mkdir -p research/samples
           cp research/_data/label_comparison.json research/samples/label_comparison.json
-          git add -A research/samples research/viewer research/lgbm_params.json research/eda.json research/eda_report.html docs/MODEL_RESULTS.md docs/MODEL_WALKFORWARD.md docs/MODEL_WITHIN_DATE.md docs/MODEL_FUNDAMENTAL_COVERAGE.md docs/DATA_VALIDATION.md docs/MODEL_STRATIFIED.md
+          git add -A research/samples research/viewer research/lgbm_params.json research/eda.json research/eda_report.html research/importance_report.html docs/MODEL_RESULTS.md docs/MODEL_WALKFORWARD.md docs/MODEL_WITHIN_DATE.md docs/MODEL_FUNDAMENTAL_COVERAGE.md docs/DATA_VALIDATION.md docs/MODEL_STRATIFIED.md
           # git diff は未追跡ファイルを見ないため、staged の差分で判定する
           if git diff --cached --quiet; then
             echo "変更なし"; exit 0
@@ -240,6 +246,7 @@ jobs:
             research/_data/validation.json
             research/eda.json
             research/eda_report.html
+            research/importance_report.html
             research/lgbm_params.json
             docs/MODEL_RESULTS.md
             docs/MODEL_WALKFORWARD.md

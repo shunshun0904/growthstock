@@ -203,6 +203,25 @@ def baseline_scores(df: pd.DataFrame) -> Dict[str, np.ndarray]:
 # 学習
 # --------------------------------------------------------------------------- #
 
+def lgbm_importance(gbm, cols: List[str]) -> List[Dict]:
+    """
+    LightGBM の特徴量重要度。gain（分割で減った損失の合計）を主に見る。
+
+    split（使われた回数）だけだと、値の種類が多い列がただ多く選ばれる。
+    gain は「その分割がどれだけ効いたか」なので、寄与の大きさに近い。
+    どちらも出して、片方だけ大きい列は解釈のときに疑えるようにする。
+    """
+    booster = gbm.booster_
+    gain = booster.feature_importance(importance_type="gain")
+    split = booster.feature_importance(importance_type="split")
+    total = float(gain.sum()) or 1.0
+    rows = [{"col": c, "gain": float(g), "share": float(g) / total,
+             "split": int(sp)}
+            for c, g, sp in zip(cols, gain, split)]
+    rows.sort(key=lambda r: -r["gain"])
+    return rows
+
+
 def fit_models(train: pd.DataFrame, features: List[str],
                verbose: bool = True, preset: str = "",
                params_store: Dict | None = None) -> Dict:
@@ -317,6 +336,7 @@ def main(argv: List[str] | None = None) -> int:
                   f"PR-AUC {best['pr_auc']:.4f} / Lift@5% {best['lift@5%']:.2f}x")
         rec["_models"] = models
         rec["_cols"] = cols
+        rec["importance"] = lgbm_importance(models["LightGBM"], cols)
         experiments.append(rec)
 
     if not experiments:
