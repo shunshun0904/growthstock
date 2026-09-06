@@ -367,13 +367,28 @@ class TestFeaturePresets(unittest.TestCase):
         import features as F
         self.assertEqual([c for c in F.all_columns() if c.endswith("_slope")], [])
 
-    def test_no_unmeasured_master_field(self):
+    def test_non_numeric_category_is_encoded_not_nulled(self):
         """
-        規模区分は /equities/master の項目名を実測せずに書いたため
-        100%欠測の空列だった。実測せずに戻さない。
+        規模区分が100%欠測だった原因は項目名ではなく、値が
+        "TOPIX Small 2" のような文字列で to_numeric が全件 NaN にしていたこと。
+        文字列のカテゴリを黙って空列にしない。
         """
-        import features as F
-        self.assertNotIn("scalecat_code", F.all_columns())
+        from build_dataset import encode_category
+        s = pd.Series(["TOPIX Small 2", "TOPIX Core30", "TOPIX Small 2", None])
+        out = encode_category(s, "ScaleCat")
+        self.assertEqual(out.notna().sum(), 3)
+        self.assertEqual(out.iloc[0], out.iloc[2])
+        self.assertNotEqual(out.iloc[0], out.iloc[1])
+        # 並びは辞書順で固定。実行ごとに変わるとモデルが再現しない
+        self.assertEqual(out.iloc[1], 0.0)   # "TOPIX Core30"
+        self.assertEqual(out.iloc[0], 1.0)   # "TOPIX Small 2"
+
+    def test_numeric_category_is_left_alone(self):
+        """S33/S17/Mkt は数字コードで来る。符号化し直してはいけない。"""
+        from build_dataset import encode_category
+        out = encode_category(pd.Series(["3050", "6100", None]), "S33")
+        self.assertEqual(out.iloc[0], 3050)
+        self.assertEqual(out.iloc[1], 6100)
 
     def test_rank_groups_match_rank_targets(self):
         """

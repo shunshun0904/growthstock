@@ -82,11 +82,11 @@ GROUPS: Dict[str, List[str]] = {
     # --- 業種・市場区分（時点別）---
     # 最新のマスタを過去に当てると先読みになるため月次スナップショットを使う
     #
-    # 規模区分（scalecat_code）は外した。/equities/master の項目名を
-    # 実測せずに "ScaleCat" と書いていたため、100%欠測の空列だった。
-    # 規模は log_market_cap（liquidity 群）が連続値で持っているので情報の損失も無い。
-    # 本当の項目名が分かったら、実測してから戻す。
-    "sector": ["s33_code", "s17_code", "mkt_code"],
+    # 規模区分（scalecat_code）は一度外して戻した。100%欠測だった原因は
+    # 項目名ではなく（ScaleCat は実際に届いていた）、値が
+    # "TOPIX Small 2" のような文字列で、pd.to_numeric が全件 NaN に
+    # していたこと。build_dataset.encode_category が符号化する。
+    "sector": ["s33_code", "s17_code", "scalecat_code", "mkt_code"],
     # --- 黒字転換 ---
     # 赤字->黒字は小型株で株価が最も動くイベントだが、
     # 従来の成長率定義では欠測として捨てられていた

@@ -40,7 +40,9 @@ def histogram(v: pd.Series, bins: int = N_BINS) -> Optional[Dict]:
     ビンごとの件数。外れ値で潰れないよう 1%〜99% で範囲を切る。
     範囲外の件数は別に持ち、描画側で「範囲外 N件」と出せるようにする。
     """
-    x = pd.to_numeric(v, errors="coerce")
+    # bool のまま quantile を取ると numpy が「boolean subtract は使えない」で落ちる。
+    # to_numeric は bool を bool のまま返すので、ここで明示的に数値にする。
+    x = pd.to_numeric(v, errors="coerce").astype("float64")
     x = x[np.isfinite(x)]
     if len(x) < 10:
         return None
@@ -61,7 +63,8 @@ def histogram(v: pd.Series, bins: int = N_BINS) -> Optional[Dict]:
 
 
 def describe_column(v: pd.Series) -> Dict:
-    x = pd.to_numeric(v, errors="coerce")
+    # histogram と同じ理由で bool を float に落とす（quantile が bool で落ちる）
+    x = pd.to_numeric(v, errors="coerce").astype("float64")
     finite = x[np.isfinite(x)]
     out = {
         "n": int(len(x)),

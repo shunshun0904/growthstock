@@ -38,7 +38,10 @@ import build_dataset as B  # noqa: E402
 from build_dataset import DEFAULT_LABEL  # noqa: E402
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_data")
-META_COLS = ["Code", "Date", "close", "high52w", "tv_ma20", "market_cap", "label"]
+
+#: レポートに出すラベル定義の名前。母集団で中身が変わる。
+LABEL_NAME = (B.DEFAULT_RISE.name if B.POPULATION == "breakout"
+              else DEFAULT_LABEL.name)
 
 # エンバーゴはラベル定義から導く。ハードコードするとラベルを変えたときにリークする。
 # 採用定義 E は sustain_days=60 を含むため 120+60 = 180営業日必要。
@@ -259,7 +262,7 @@ def main(argv: List[str] | None = None) -> int:
 
     df = pd.read_parquet(args.dataset)
     print(f"[data] {len(df):,}サンプル / 正例率 {df['label'].mean()*100:.2f}%")
-    print(f"[label] 定義: {DEFAULT_LABEL.name}")
+    print(f"[label] 定義: {LABEL_NAME}")
     print(f"[split] エンバーゴ {EMBARGO_DAYS}営業日（ラベル定義から自動導出）\n")
 
     parts = time_split(df, args.val_start, args.test_start)
@@ -346,7 +349,7 @@ def main(argv: List[str] | None = None) -> int:
     print(f"\n[done] {args.out}")
 
     payload = {
-        "labelConfig": DEFAULT_LABEL.name,
+        "labelConfig": LABEL_NAME,
         "embargoDays": EMBARGO_DAYS,
         "split": {"val_start": args.val_start, "test_start": args.test_start},
         "baselines": baselines,
@@ -369,7 +372,7 @@ def _report(df, parts, baselines, experiments, args, boot=None, ref="") -> str:
         "",
         "## 条件",
         "",
-        f"- **ラベル定義**: {DEFAULT_LABEL.name}",
+        f"- **ラベル定義**: {LABEL_NAME}",
         f"- データセット: {len(df):,}サンプル / 全体の正例率 **{df['label'].mean()*100:.2f}%**",
         f"- 期間: {pd.to_datetime(df['Date']).min().date()} 〜 {pd.to_datetime(df['Date']).max().date()}"
         f" / 銘柄数 {df['Code'].nunique():,}",

@@ -30,6 +30,15 @@ permissions:
   contents: write
   actions: read
 
+# 既定の run シェルは `bash -e` で pipefail が入らない。
+# 全ステップが `python3 ... 2>&1 | tee x.log` の形なので、
+# スクリプトが落ちても tee の終了コード0が採用され、ステップは成功扱いになる。
+# 実際 EDA が例外で落ちたまま「成功」で通り、結果が更新されないことに気づけなかった。
+# `shell: bash` を指定すると GitHub は `bash --noprofile --norc -eo pipefail` を使う。
+defaults:
+  run:
+    shell: bash
+
 # 同時に走らせない。
 # 実際に2つのランが並行し、古いほうが後に終わって
 # 新しい結果を上書きしかけた（両方が docs/*.md を同じブランチにコミットするため）。
@@ -110,7 +119,9 @@ jobs:
       # 機械的に導く）。ここを間違えると以降の評価が全部無効になる。
       - name: Tune LightGBM (opt-in)
         run: |
-          REQ=$(grep -v '^#' research/tune_request.txt 2>/dev/null | head -1 | tr -d '[:space:]')
+          # pipefail 下では head が先に閉じて grep が SIGPIPE で落ちうる。
+          # ここは「読めなければ no」でよいので失敗を無害化する
+          REQ=$(grep -v '^#' research/tune_request.txt 2>/dev/null | head -1 | tr -d '[:space:]' || true)
           if [ "$REQ" = "yes" ]; then
             python3 research/run_tuning.py --n-trials 30 2>&1 | tee tune.log
           else
@@ -130,7 +141,7 @@ jobs:
         run: |
           REQ="${{ inputs.train }}"
           if [ -z "$REQ" ]; then
-            REQ=$(grep -v '^#' research/train_request.txt 2>/dev/null | head -1 | tr -d '[:space:]')
+            REQ=$(grep -v '^#' research/train_request.txt 2>/dev/null | head -1 | tr -d '[:space:]' || true)
           fi
           if [ "$REQ" = "yes" ]; then
             echo "train=yes" >> "$GITHUB_OUTPUT"

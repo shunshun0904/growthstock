@@ -568,6 +568,34 @@ def clip_divergent(s, lo: float, hi: float, name: str = ""):
     return v.mask(bad)
 
 
+def encode_category(s: pd.Series, name: str = "") -> pd.Series:
+    """
+    マスタのカテゴリ列を数値コードにする。
+
+    数値で来る列（S33/S17/Mkt は数字コード）はそのまま数値化する。
+    数値でない列（ScaleCat は "TOPIX Small 2" のような文字列）を
+    pd.to_numeric に通すと**全件 NaN の空列**になる。
+    実際それで scalecat_code が100%欠測だった。列は届いていたのに、
+    数値化に失敗していることを誰も見ていなかった。
+
+    文字列だった場合は、値を並べて安定した整数に割り当てる。
+    並びは辞書順で固定する（実行ごとに変わるとモデルが再現しなくなる）。
+    どの値が来ているかは必ず出す。順序に意味を持たせたければ、
+    実際の値を見てから明示的に対応表を書く。
+    """
+    v = pd.to_numeric(s, errors="coerce")
+    if v.notna().any():
+        return v
+    vals = sorted(x for x in s.dropna().unique())
+    if not vals:
+        print(f"[warn] {name}: 値が1つも無い。欠測のままにする")
+        return pd.Series(np.nan, index=s.index)
+    print(f"[merge] {name} は数値でないため符号化する: "
+          + ", ".join(f"{i}={x}" for i, x in enumerate(vals)))
+    code = {x: i for i, x in enumerate(vals)}
+    return s.map(code).astype("float64")
+
+
 def _lag_available(df: pd.DataFrame, col: str, n: int,
                    max_gap_days: int = 800) -> pd.Series:
     """
@@ -1103,8 +1131,10 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
         # 実際に来ている項目名を必ず出す。
         # "ScaleCat" を実測せずに書いたせいで100%欠測の空列を作っていた。
         # 名前を決め打ちすると、外したときに静かに空列になって気づけない。
+        # 実際に来ている項目名を必ず出す。
+        # 名前を決め打ちすると、外したときに静かに空列になって気づけない。
         print(f"[merge] master_hist の項目: {sorted(mh.columns)}")
-        want = ("S33", "S17", "Mkt")
+        want = ("S33", "S17", "Mkt", "ScaleCat")
         found = [c for c in want if c in mh.columns]
         for c in want:
             if c not in found:
@@ -1118,10 +1148,10 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
             on="Date", by="Code", direction="backward")
         for c in found:
             # カテゴリは数値コードにする（LightGBM はそのまま分岐できる）
-            samples[f"{c.lower()}_code"] = pd.to_numeric(samples[c], errors="coerce")
+            samples[f"{c.lower()}_code"] = encode_category(samples[c], c)
     else:
         print("[merge] master_hist が無いため業種・市場区分は付与しない")
-    for c in ("s33", "s17", "mkt"):
+    for c in ("s33", "s17", "mkt", "scalecat"):
         if f"{c}_code" not in samples.columns:
             samples[f"{c}_code"] = np.nan
 
