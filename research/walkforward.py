@@ -244,13 +244,14 @@ def summarize(per_fold: List[Dict]) -> List[Dict]:
     for name in names:
         if name == REFERENCE:
             continue
-        diffs, aucs, lifts = [], [], []
+        diffs, aucs, rocs, lifts = [], [], [], []
         for f in per_fold:
             r = next((x for x in f["results"] if x["name"] == name), None)
             if r is None:
                 continue
             diffs.append(r["diff_vs_ref"])
             aucs.append(r["pr_auc"])
+            rocs.append(r.get("roc_auc", float("nan")))
             lifts.append(r["lift@5%"])
         if not diffs:
             continue
@@ -260,6 +261,9 @@ def summarize(per_fold: List[Dict]) -> List[Dict]:
             "name": name,
             "n_folds": len(diffs),
             "mean_pr_auc": float(np.mean(aucs)),
+            # ROC-AUC は判断の主軸にしない（正例率7%台では負例側の並びが
+            # 支配的になる）が、水準を掴むために併記する
+            "mean_roc_auc": float(np.nanmean(rocs)) if rocs else float("nan"),
             "mean_diff": float(np.mean(diffs)),
             "median_diff": float(np.median(diffs)),
             "worst_diff": float(np.min(diffs)),
@@ -341,8 +345,8 @@ def build_report(df: pd.DataFrame, res: Dict, args) -> str:
         "",
         _significance_note(len(per_fold)),
         "",
-        "| モデル | 平均PR-AUC | 平均差 | 中央値差 | 最悪差 | 勝敗 | p | 判定 |",
-        "| --- | ---: | ---: | ---: | ---: | :---: | ---: | --- |",
+        "| モデル | 平均PR-AUC | 平均ROC-AUC | 平均差 | 中央値差 | 最悪差 | 勝敗 | p | 判定 |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | :---: | ---: | --- |",
     ]
     for s in summary:
         if s["p_sign"] < 0.05 and s["wins"] > s["losses"]:
@@ -352,7 +356,8 @@ def build_report(df: pd.DataFrame, res: Dict, args) -> str:
         else:
             verdict = "一貫しない"
         lines.append(
-            f"| {s['name']} | {s['mean_pr_auc']:.4f} | {s['mean_diff']:+.4f} | "
+            f"| {s['name']} | {s['mean_pr_auc']:.4f} | "
+            f"{s.get('mean_roc_auc', float('nan')):.4f} | {s['mean_diff']:+.4f} | "
             f"{s['median_diff']:+.4f} | {s['worst_diff']:+.4f} | "
             f"{s['wins']}勝{s['losses']}敗 | {s['p_sign']:.3f} | {verdict} |"
         )

@@ -36,7 +36,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import average_precision_score
+from sklearn.metrics import average_precision_score, roc_auc_score
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -124,8 +124,14 @@ def scale_pos_weight(y: np.ndarray) -> float:
 
 
 def _fit_one(params: Dict, tr: pd.DataFrame, va: pd.DataFrame,
-             cols: List[str]) -> Tuple[float, int]:
-    """内側検証の PR-AUC と、early stopping が決めた木の本数を返す。"""
+             cols: List[str]) -> Tuple[float, float, int]:
+    """
+    内側検証の PR-AUC・ROC-AUC と、early stopping が決めた木の本数を返す。
+
+    探索の目的関数は PR-AUC。正例率が7%台なので、ROC-AUC だと
+    負例側の並びの差が支配的になり、上位の精度が上がらなくても数字が動く。
+    ROC-AUC は「見るため」に併記する（目的関数にはしない）。
+    """
     import lightgbm as lgb
 
     Xtr, ytr = tr[cols].to_numpy(dtype=float), tr["label"].to_numpy(dtype=int)
@@ -141,8 +147,10 @@ def _fit_one(params: Dict, tr: pd.DataFrame, va: pd.DataFrame,
                    lgb.log_evaluation(0)],
     )
     best_iter = int(getattr(model, "best_iteration_", 0) or params["n_estimators"])
-    score = float(average_precision_score(yva, model.predict_proba(Xva)[:, 1]))
-    return score, best_iter
+    prob = model.predict_proba(Xva)[:, 1]
+    pr = float(average_precision_score(yva, prob))
+    roc = float(roc_auc_score(yva, prob))
+    return pr, roc, best_iter
 
 
 def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
@@ -186,17 +194,21 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
             "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 10.0, log=True),
             "reg_lambda": trial.suggest_float("reg_lambda", 1e-8, 10.0, log=True),
         }
-        scores, iters = [], []
+        prs, rocs, iters = [], [], []
         for tr, va in folds:
-            sc, it = _fit_one(params, tr, va, cols)
-            scores.append(sc)
+            pr, roc, it = _fit_one(params, tr, va, cols)
+            prs.append(pr)
+            rocs.append(roc)
             iters.append(it)
         trial.set_user_attr("best_iteration", int(np.median(iters)))
-        trial.set_user_attr("fold_scores", [round(s, 4) for s in scores])
+        trial.set_user_attr("fold_scores", [round(x, 4) for x in prs])
+        trial.set_user_attr("fold_roc", [round(x, 4) for x in rocs])
+        trial.set_user_attr("roc_auc", float(np.mean(rocs)))
+        trial.set_user_attr("roc_std", float(np.std(rocs)))
         # 分割ごとのばらつきが大きい設定は、たまたま当たっただけの可能性がある。
         # 平均で選ぶが、ばらつきも残して後から見られるようにする
-        trial.set_user_attr("score_std", float(np.std(scores)))
-        return float(np.mean(scores))
+        trial.set_user_attr("score_std", float(np.std(prs)))
+        return float(np.mean(prs))
 
     study = optuna.create_study(
         direction="maximize",
@@ -213,13 +225,23 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
     LAST_CV = {"n_splits": len(folds), "mean_pr_auc": round(study.best_value, 4),
                "std": round(float(at.get("score_std", 0.0)), 4),
                "fold_scores": at.get("fold_scores", []),
+               "mean_roc_auc": round(float(at.get("roc_auc", float("nan"))), 4),
+               "roc_std": round(float(at.get("roc_std", 0.0)), 4),
+               "fold_roc": at.get("fold_roc", []),
+               "base_rate": round(float(np.mean(
+                   [v["label"].mean() for _, v in folds])), 4),
                "n_trials": n_trials}
     if verbose:
-        folds_txt = " ".join(f"{x:.4f}" for x in at.get("fold_scores", []))
-        print(f"  [tune] {n_trials}試行 / {len(folds)}分割平均PR-AUC "
-              f"{study.best_value:.4f} (±{at.get('score_std', 0):.4f}) "
-              f"/ 木 {best['n_estimators']}本")
-        print(f"  [tune] 分割ごと: {folds_txt}")
+        pr_txt = " ".join(f"{x:.4f}" for x in at.get("fold_scores", []))
+        roc_txt = " ".join(f"{x:.4f}" for x in at.get("fold_roc", []))
+        print(f"  [tune] {n_trials}試行 / {len(folds)}分割 "
+              f"PR-AUC {study.best_value:.4f} (±{at.get('score_std', 0):.4f}) "
+              f"/ ROC-AUC {at.get('roc_auc', float('nan')):.4f} "
+              f"(±{at.get('roc_std', 0):.4f}) / 木 {best['n_estimators']}本")
+        print(f"  [tune] 分割ごと PR-AUC : {pr_txt}")
+        print(f"  [tune] 分割ごと ROC-AUC: {roc_txt}")
+        print(f"  [tune] 検証窓の正例率 : "
+              + " ".join(f"{v['label'].mean()*100:.2f}%" for _, v in folds))
     return best
 
 

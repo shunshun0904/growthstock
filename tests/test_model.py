@@ -465,8 +465,8 @@ class TestTuning(unittest.TestCase):
         cols = ["x1", "x2"]
         best = tuning.tune(df, cols, n_trials=5, verbose=False)
         tr, va = tuning.chronological_split(df)
-        s_def, _ = tuning._fit_one(tuning.DEFAULT_PARAMS, tr, va, cols)
-        s_best, _ = tuning._fit_one(best, tr, va, cols)
+        s_def, _, _ = tuning._fit_one(tuning.DEFAULT_PARAMS, tr, va, cols)
+        s_best, _, _ = tuning._fit_one(best, tr, va, cols)
         self.assertGreaterEqual(s_best, s_def - 1e-9)
 
     def test_tree_count_comes_from_early_stopping(self):
