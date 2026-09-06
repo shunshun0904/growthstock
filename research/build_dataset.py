@@ -1041,18 +1041,30 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
             c = sub.groupby(sub["Date"].dt.year).size()
             print(f"[sample] {tag}の年別: "
                   + " ".join(f"{y}:{n:,}" for y, n in c.items()))
-        # 更新日が0の年があったとき、「相場として届かなかった」のか
-        # 「そもそも判定できていない」のかを分ける。
-        # prior が全欠測なら後者（履歴が分断されている）。
+        # 更新日が0の年があったとき、どこで止まっているのかを分ける。
+        # 「値が無い(high)」「基準が作れない(prior)」「届かなかった(比率)」は別物。
         _y = df["Date"].dt.year
+        print(f"[diag] dtype high={df['high'].dtype} "
+              f"prior={df['high52w_prior'].dtype} date={df['Date'].dtype}")
         rows = []
         for y, gy in df.groupby(_y):
             ratio = (gy["high"] / gy["high52w_prior"]).replace(
                 [np.inf, -np.inf], np.nan)
-            rows.append(f"{y}:判定可{gy['high52w_prior'].notna().mean()*100:.0f}%"
-                        f"/最大比{ratio.max():.3f}" if ratio.notna().any()
-                        else f"{y}:判定可0%")
-        print("[diag] 高値比（high / それまでの78週高値）: " + " ".join(rows))
+            mx = f"{ratio.max():.3f}" if ratio.notna().any() else "—"
+            rows.append(f"{y}:行{len(gy):,}/high有{gy['high'].notna().sum():,}"
+                        f"/prior有{gy['high52w_prior'].notna().sum():,}/最大比{mx}")
+        print("[diag] 年別: " + "  ".join(rows))
+        # 全期間そろっている1銘柄を1本追う。全体の集計では
+        # 「新規上場が多いだけ」と区別がつかない。
+        code = df["Code"].value_counts().idxmax()
+        one = df[df["Code"] == code]
+        per = one.groupby(one["Date"].dt.year).agg(
+            n=("high", "size"), high=("high", "count"),
+            prior=("high52w_prior", "count"))
+        print(f"[diag] 最長銘柄 {code}（{len(one):,}行）: "
+              + " ".join(f"{y}:{r.n}/{r.high}/{r.prior}"
+                         for y, r in per.iterrows())
+              + "  （行/high有/prior有）")
         report_rise_funnel(samples)
     else:
         print("[panel] ブレイクアウト日を判定")
