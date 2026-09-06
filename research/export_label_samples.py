@@ -2,14 +2,17 @@
 """
 ラベル定義を目視検証するためのチャートデータを書き出す。
 
-「正例としたサンプルが、本当に先1〜6ヶ月で明確なモメンタムを形成しているか」を
-実データのチャートで確認するのが目的。定義の良し悪しは数字だけでは判断できない。
+数字だけでは定義の良し悪しは判断できないので、実データのチャートで確認する。
 
-各ケースについて、基準日 t の前後を含む値動きと、
-  * 予測ホライズン [t+20, t+120]
-  * ブレイク判定日 b
-  * 52週高値のライン
-  * ブレイク後の最大上昇率 / 最大下落率
+現在の定義:
+  母集団 = 52週高値を更新した日（高値ベース、連続更新は初回のみ）
+  正例   = 更新日の終値から、先60営業日以内に +20% 以上（終値ベース）
+
+各ケースについて、更新日 t の前後を含む値動きと、
+  * 判定期間 [t+1, t+60]
+  * +20% のライン（到達したかが一目で分かる）
+  * 52週高値のライン（t で更新しているはず）
+  * 最大上昇率 / 最大下落率
 を出力する。
 
 出力: research/_data/label_samples.json
@@ -28,13 +31,15 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from build_dataset import (  # noqa: E402
-    HORIZON_END, HORIZON_START, attach_labels, breakout_flags, price_panel,
+    POPULATION, RISE_HORIZON, RISE_THRESHOLD, add_breakout_context,
+    attach_labels, attach_rise_label, breakout_flags, mark_new_highs,
+    price_panel,
 )
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_data")
 
-BEFORE = 120   # 基準日より前に何営業日ぶん見せるか
-AFTER = 150    # 基準日より後に何営業日ぶん見せるか
+BEFORE = 120              # 基準日より前に何営業日ぶん見せるか
+AFTER = RISE_HORIZON + 20  # 判定期間より少し先まで見せる
 
 
 def load_bars(data_dir: str) -> pd.DataFrame:
@@ -56,25 +61,28 @@ def build_case(panel: pd.DataFrame, code: str, t_date: pd.Timestamp,
     lo = max(0, i - BEFORE)
     hi = min(len(g), i + AFTER + 1)
     win = g.iloc[lo:hi]
-    t_pos = i - lo   # ウィンドウ内での基準日の位置
-
-    # ホライズン内のブレイク日
-    h_lo, h_hi = i + HORIZON_START, min(len(g) - 1, i + HORIZON_END)
-    bo_positions = []
-    if h_lo <= h_hi:
-        seg = g.iloc[h_lo:h_hi + 1]
-        bo_positions = [int(p - lo) for p in seg.index[seg["is_breakout"] == True]]  # noqa: E712
+    t_pos = i - lo   # ウィンドウ内での基準日（＝52週高値の更新日）の位置
 
     close_t = float(g.iloc[i]["close"])
-    fwd = g.iloc[i + HORIZON_START: h_hi + 1]["close"] if h_lo <= h_hi else pd.Series(dtype=float)
+    # 判定期間は t+1 〜 t+RISE_HORIZON。当日は含まない
+    h_lo, h_hi = i + 1, min(len(g) - 1, i + RISE_HORIZON)
+    fwd = g.iloc[h_lo:h_hi + 1]["close"] if h_lo <= h_hi else pd.Series(dtype=float)
     fwd_max = float(fwd.max()) if len(fwd) else float("nan")
     fwd_min = float(fwd.min()) if len(fwd) else float("nan")
-
-    # 最終的な到達点（ホライズン終端の終値）
     end_close = float(g.iloc[h_hi]["close"]) if h_lo <= h_hi else float("nan")
+
+    # +20% に最初に到達した日（正例ならあるはず）
+    hit_pos = None
+    if len(fwd):
+        hits = np.where(fwd.to_numpy() >= close_t * (1 + RISE_THRESHOLD))[0]
+        if len(hits):
+            hit_pos = int(h_lo + hits[0] - lo)
 
     def r(v, d=2):
         return None if (v is None or not np.isfinite(v)) else round(float(v), d)
+
+    def col(name_, d=1):
+        return [r(v, d) for v in win[name_]] if name_ in win.columns else None
 
     return {
         "code": code,
@@ -82,16 +90,26 @@ def build_case(panel: pd.DataFrame, code: str, t_date: pd.Timestamp,
         "label": int(label),
         "t": t_date.date().isoformat(),
         "tPos": t_pos,
-        "horizon": [t_pos + HORIZON_START, t_pos + HORIZON_END],
-        "breakouts": bo_positions,
+        # 判定期間（ウィンドウ内の位置）
+        "horizon": [t_pos + 1, t_pos + RISE_HORIZON],
         "closeAtT": r(close_t, 1),
+        # 目標ライン。チャートに水平線として引く
+        "target": r(close_t * (1 + RISE_THRESHOLD), 1),
+        "thresholdPct": round(RISE_THRESHOLD * 100, 1),
+        "hitPos": hit_pos,
         "maxGain": r((fwd_max / close_t - 1) * 100),
         "maxDraw": r((fwd_min / close_t - 1) * 100),
         "endGain": r((end_close / close_t - 1) * 100),
-        "rHighAtT": r(float(g.iloc[i]["r_high"])),
+        # ブレイクの文脈（新しい特徴量が妥当かの目視確認にも使う）
+        "baseLength": r(float(g.iloc[i].get("base_length", np.nan)), 0),
+        "breakMargin": r(float(g.iloc[i].get("break_margin", np.nan))),
+        "closePosition": r(float(g.iloc[i].get("close_position", np.nan))),
+        "volRatio": r(float(g.iloc[i]["vol"] / g.iloc[i]["vol_ma20"]) * 100
+                      if np.isfinite(g.iloc[i].get("vol_ma20", np.nan))
+                      and g.iloc[i].get("vol_ma20", 0) > 0 else np.nan),
         "dates": [d.date().isoformat() for d in win["Date"]],
-        "close": [r(v, 1) for v in win["close"]],
-        "high52w": [r(v, 1) for v in win["high52w"]],
+        "close": col("close"),
+        "high52w": col("high52w"),
         "volume": [None if not np.isfinite(v) else int(v) for v in win["vol"]],
         "volMa20": [None if not np.isfinite(v) else int(v) for v in win["vol_ma20"]],
     }
@@ -112,8 +130,12 @@ def main(argv: List[str] | None = None) -> int:
     print(f"[data] {len(ds):,}サンプル / 正例率 {ds['label'].mean()*100:.2f}%")
 
     bars = load_bars(args.data_dir)
-    print("[panel] 指標とブレイク判定を再計算")
-    panel = attach_labels(breakout_flags(price_panel(bars)))
+    print("[panel] 指標とラベルを再計算")
+    panel = price_panel(bars)
+    if POPULATION == "breakout":
+        panel = add_breakout_context(attach_rise_label(mark_new_highs(panel)))
+    else:
+        panel = attach_labels(breakout_flags(panel))
 
     # 銘柄名（あれば）
     names: Dict[str, str] = {}
@@ -170,8 +192,12 @@ def main(argv: List[str] | None = None) -> int:
     out = {
         "generatedAt": pd.Timestamp.utcnow().isoformat(),
         "definition": {
-            "horizonStart": HORIZON_START, "horizonEnd": HORIZON_END,
-            "note": "正例 = [t+20, t+120]営業日に「52週高値更新 + 出来高1.5倍 + 20営業日-8%以内で定着」が起きた",
+            "riseHorizon": RISE_HORIZON,
+            "riseThreshold": round(RISE_THRESHOLD * 100, 1),
+            "population": POPULATION,
+            "note": ("母集団 = 52週高値を更新した日（高値ベース、連続更新は初回のみ）。"
+                     f"正例 = 更新日の終値から先{RISE_HORIZON}営業日以内に "
+                     f"+{RISE_THRESHOLD*100:.0f}%以上（終値ベース）"),
         },
         "datasetStats": {
             "n": int(len(ds)),
