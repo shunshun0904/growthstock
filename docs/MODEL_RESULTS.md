@@ -21,40 +21,40 @@
 | モデル | PR-AUC | ROC-AUC | P@1% | P@5% | Lift@5% |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | ベースライン: R_high のみ | 0.3481 | 0.7353 | 37.5% | 38.6% | 1.96x |
-| LightGBM [price_only] | 0.3435 | 0.7150 | 40.8% | 42.6% | 2.17x |
-| LightGBM [rank_price_only] | 0.3273 | 0.6990 | 37.0% | 38.8% | 1.98x |
+| LightGBM [price_only] | 0.3435 | 0.7150 | 45.7% | 43.4% | 2.21x |
+| LightGBM [rank_price_only] | 0.3273 | 0.6990 | 42.4% | 38.8% | 1.98x |
 | ロジスティック回帰 [rank_price_only] | 0.3194 | 0.7100 | 31.5% | 33.9% | 1.73x |
 | ロジスティック回帰 [rank_technical] | 0.3124 | 0.7008 | 29.9% | 32.6% | 1.66x |
 | LightGBM [technical] | 0.3071 | 0.6631 | 33.7% | 38.5% | 1.96x |
 | ロジスティック回帰 [technical] | 0.2826 | 0.6868 | 15.8% | 23.1% | 1.18x |
 | ロジスティック回帰 [price_only] | 0.2785 | 0.6825 | 15.8% | 21.7% | 1.10x |
-| ロジスティック回帰 [fund_simple] | 0.2735 | 0.6755 | 15.8% | 21.3% | 1.09x |
-| ロジスティック回帰 [raw_and_rank] | 0.2654 | 0.6544 | 20.1% | 22.3% | 1.14x |
+| ロジスティック回帰 [fund_simple] | 0.2718 | 0.6743 | 14.7% | 21.6% | 1.10x |
+| ロジスティック回帰 [raw_and_rank] | 0.2652 | 0.6534 | 18.5% | 23.4% | 1.19x |
 | LightGBM [rank_technical] | 0.2642 | 0.6099 | 29.3% | 31.3% | 1.60x |
-| LightGBM [rank_all] | 0.2580 | 0.6032 | 31.0% | 31.9% | 1.62x |
-| LightGBM [raw_and_rank] | 0.2569 | 0.5955 | 34.2% | 30.0% | 1.53x |
-| LightGBM [all_no_market] | 0.2548 | 0.6157 | 29.9% | 25.6% | 1.30x |
-| LightGBM [fund_simple] | 0.2520 | 0.5938 | 29.3% | 30.1% | 1.53x |
-| ロジスティック回帰 [rank_all] | 0.2517 | 0.6159 | 20.1% | 23.0% | 1.17x |
-| LightGBM [all] | 0.2425 | 0.5925 | 27.2% | 25.7% | 1.31x |
-| ロジスティック回帰 [all] | 0.2370 | 0.6183 | 14.1% | 16.7% | 0.85x |
-| ロジスティック回帰 [all_no_market] | 0.2299 | 0.6071 | 12.0% | 15.3% | 0.78x |
+| LightGBM [rank_all] | 0.2552 | 0.6004 | 29.3% | 29.8% | 1.52x |
+| LightGBM [all_no_market] | 0.2536 | 0.6166 | 25.5% | 26.1% | 1.33x |
+| LightGBM [fund_simple] | 0.2531 | 0.5929 | 29.3% | 30.1% | 1.53x |
+| LightGBM [all] | 0.2522 | 0.6028 | 28.8% | 30.2% | 1.54x |
+| LightGBM [raw_and_rank] | 0.2518 | 0.5911 | 32.6% | 29.6% | 1.51x |
+| ロジスティック回帰 [rank_all] | 0.2515 | 0.6162 | 20.1% | 22.8% | 1.16x |
+| ロジスティック回帰 [all] | 0.2358 | 0.6171 | 12.0% | 16.1% | 0.82x |
+| ロジスティック回帰 [all_no_market] | 0.2282 | 0.6047 | 10.3% | 15.9% | 0.81x |
 | ベースライン: 出来高モメンタムのみ | 0.2133 | 0.5560 | 15.2% | 17.7% | 0.90x |
-| ベースライン: 既存の8軸総合スコア | 0.2130 | 0.5486 | 22.8% | 19.8% | 1.01x |
-| ロジスティック回帰 [fundamental] | 0.1930 | 0.5031 | 14.7% | 15.5% | 0.79x |
-| LightGBM [rank_fundamental_v2] | 0.1817 | 0.4548 | 16.8% | 17.1% | 0.87x |
-| LightGBM [fundamental] | 0.1797 | 0.4680 | 6.0% | 12.0% | 0.61x |
-| LightGBM [rank_fundamental] | 0.1790 | 0.4577 | 13.6% | 15.2% | 0.77x |
-| ロジスティック回帰 [rank_fundamental] | 0.1777 | 0.4686 | 10.9% | 13.5% | 0.69x |
-| LightGBM [fundamental_v3] | 0.1759 | 0.4601 | 15.2% | 11.5% | 0.59x |
-| ロジスティック回帰 [fundamental_v3] | 0.1712 | 0.4340 | 3.8% | 22.0% | 1.12x |
-| LightGBM [fundamental_v2] | 0.1697 | 0.4416 | 12.5% | 13.3% | 0.68x |
-| ロジスティック回帰 [fundamental_v2] | 0.1675 | 0.4411 | 7.6% | 9.4% | 0.48x |
-| ロジスティック回帰 [rank_fundamental_v2] | 0.1627 | 0.4234 | 4.3% | 10.8% | 0.55x |
-| LightGBM [extras_only] | 0.1603 | 0.4110 | 9.8% | 8.8% | 0.45x |
-| ロジスティック回帰 [extras_only] | 0.1592 | 0.3762 | 2.2% | 20.7% | 1.05x |
-| LightGBM [valuation_only] | 0.1410 | 0.3366 | 10.3% | 7.3% | 0.37x |
-| ロジスティック回帰 [valuation_only] | 0.1385 | 0.3299 | 4.3% | 4.3% | 0.22x |
+| ベースライン: 既存の8軸総合スコア | 0.2130 | 0.5485 | 22.8% | 19.8% | 1.01x |
+| ロジスティック回帰 [fundamental] | 0.1914 | 0.5024 | 12.5% | 14.5% | 0.74x |
+| LightGBM [rank_fundamental] | 0.1819 | 0.4605 | 13.6% | 17.3% | 0.88x |
+| LightGBM [rank_fundamental_v2] | 0.1804 | 0.4529 | 17.4% | 16.7% | 0.85x |
+| LightGBM [fundamental] | 0.1795 | 0.4670 | 8.2% | 13.8% | 0.70x |
+| ロジスティック回帰 [rank_fundamental] | 0.1774 | 0.4684 | 11.4% | 13.7% | 0.70x |
+| LightGBM [fundamental_v3] | 0.1719 | 0.4471 | 19.0% | 11.5% | 0.59x |
+| ロジスティック回帰 [fundamental_v3] | 0.1710 | 0.4350 | 5.4% | 20.3% | 1.03x |
+| ロジスティック回帰 [fundamental_v2] | 0.1685 | 0.4436 | 5.4% | 9.8% | 0.50x |
+| LightGBM [fundamental_v2] | 0.1666 | 0.4353 | 7.6% | 11.4% | 0.58x |
+| ロジスティック回帰 [rank_fundamental_v2] | 0.1620 | 0.4220 | 4.3% | 10.3% | 0.52x |
+| LightGBM [extras_only] | 0.1604 | 0.4123 | 8.2% | 8.3% | 0.42x |
+| ロジスティック回帰 [extras_only] | 0.1601 | 0.3833 | 3.8% | 21.3% | 1.09x |
+| LightGBM [valuation_only] | 0.1409 | 0.3352 | 8.7% | 7.6% | 0.39x |
+| ロジスティック回帰 [valuation_only] | 0.1384 | 0.3293 | 4.3% | 4.3% | 0.22x |
 
 （正例率 = 19.63% / n = 18,462）
 
@@ -63,40 +63,40 @@
 | モデル | PR-AUC | ROC-AUC | P@1% | P@5% | Lift@5% |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | ロジスティック回帰 [rank_technical] | 0.3442 | 0.6911 | 36.4% | 39.6% | 1.83x |
-| LightGBM [price_only] | 0.3432 | 0.6896 | 40.8% | 38.8% | 1.79x |
+| LightGBM [price_only] | 0.3432 | 0.6896 | 40.8% | 39.0% | 1.80x |
 | ロジスティック回帰 [rank_price_only] | 0.3413 | 0.6962 | 36.4% | 39.3% | 1.82x |
 | ベースライン: R_high のみ | 0.3379 | 0.6839 | 44.7% | 39.0% | 1.80x |
-| LightGBM [rank_price_only] | 0.3356 | 0.6791 | 40.4% | 39.5% | 1.82x |
+| LightGBM [rank_price_only] | 0.3356 | 0.6791 | 39.5% | 40.2% | 1.86x |
 | ロジスティック回帰 [price_only] | 0.3258 | 0.6851 | 26.8% | 36.5% | 1.69x |
 | ロジスティック回帰 [technical] | 0.3226 | 0.6879 | 23.2% | 33.1% | 1.53x |
 | LightGBM [technical] | 0.3208 | 0.6477 | 47.8% | 39.7% | 1.83x |
-| ロジスティック回帰 [fund_simple] | 0.3159 | 0.6812 | 19.7% | 31.9% | 1.47x |
-| ロジスティック回帰 [raw_and_rank] | 0.3088 | 0.6708 | 23.2% | 29.5% | 1.36x |
-| LightGBM [all_no_market] | 0.3051 | 0.6346 | 38.2% | 37.9% | 1.75x |
-| LightGBM [raw_and_rank] | 0.3008 | 0.6135 | 46.9% | 39.9% | 1.84x |
+| ロジスティック回帰 [fund_simple] | 0.3159 | 0.6817 | 19.3% | 31.8% | 1.47x |
+| ロジスティック回帰 [raw_and_rank] | 0.3074 | 0.6696 | 22.4% | 28.2% | 1.30x |
+| LightGBM [all_no_market] | 0.3032 | 0.6391 | 39.0% | 34.9% | 1.61x |
+| LightGBM [raw_and_rank] | 0.2995 | 0.6135 | 44.3% | 36.7% | 1.70x |
 | LightGBM [rank_technical] | 0.2984 | 0.6148 | 36.0% | 35.4% | 1.63x |
-| LightGBM [all] | 0.2953 | 0.6112 | 46.9% | 36.9% | 1.70x |
-| LightGBM [fund_simple] | 0.2935 | 0.6096 | 40.8% | 35.7% | 1.65x |
-| ロジスティック回帰 [rank_all] | 0.2918 | 0.6308 | 25.9% | 32.5% | 1.50x |
-| ロジスティック回帰 [all] | 0.2839 | 0.6402 | 19.3% | 27.3% | 1.26x |
-| LightGBM [rank_all] | 0.2835 | 0.5939 | 39.9% | 34.6% | 1.60x |
-| ロジスティック回帰 [all_no_market] | 0.2802 | 0.6324 | 21.9% | 27.7% | 1.28x |
+| ロジスティック回帰 [rank_all] | 0.2910 | 0.6305 | 26.8% | 31.2% | 1.44x |
+| LightGBM [fund_simple] | 0.2891 | 0.6060 | 39.5% | 35.3% | 1.63x |
+| LightGBM [all] | 0.2886 | 0.6077 | 37.7% | 34.4% | 1.59x |
+| ロジスティック回帰 [all] | 0.2831 | 0.6406 | 19.3% | 26.3% | 1.21x |
+| LightGBM [rank_all] | 0.2830 | 0.5955 | 32.9% | 35.8% | 1.65x |
+| ロジスティック回帰 [all_no_market] | 0.2793 | 0.6333 | 18.9% | 27.6% | 1.28x |
 | ベースライン: 出来高モメンタムのみ | 0.2348 | 0.5474 | 16.2% | 22.3% | 1.03x |
-| ベースライン: 既存の8軸総合スコア | 0.2334 | 0.5382 | 23.2% | 23.5% | 1.09x |
-| LightGBM [fundamental_v3] | 0.2292 | 0.5225 | 23.7% | 22.2% | 1.03x |
-| LightGBM [fundamental] | 0.2207 | 0.5102 | 22.4% | 21.9% | 1.01x |
-| ロジスティック回帰 [fundamental_v3] | 0.2190 | 0.4844 | 13.6% | 29.6% | 1.37x |
-| ロジスティック回帰 [fundamental] | 0.2118 | 0.5087 | 18.0% | 17.0% | 0.78x |
-| LightGBM [fundamental_v2] | 0.2117 | 0.5025 | 18.0% | 16.3% | 0.75x |
-| LightGBM [extras_only] | 0.2108 | 0.4776 | 21.1% | 21.9% | 1.01x |
-| ロジスティック回帰 [extras_only] | 0.2093 | 0.4421 | 22.4% | 31.7% | 1.47x |
-| ロジスティック回帰 [rank_fundamental] | 0.2070 | 0.4991 | 17.1% | 15.6% | 0.72x |
-| LightGBM [rank_fundamental] | 0.2063 | 0.4763 | 17.5% | 18.4% | 0.85x |
-| LightGBM [rank_fundamental_v2] | 0.1995 | 0.4526 | 18.9% | 19.3% | 0.89x |
-| ロジスティック回帰 [rank_fundamental_v2] | 0.1990 | 0.4741 | 17.5% | 16.5% | 0.76x |
-| ロジスティック回帰 [fundamental_v2] | 0.1973 | 0.4722 | 14.9% | 15.5% | 0.71x |
-| LightGBM [valuation_only] | 0.1795 | 0.4080 | 22.4% | 14.1% | 0.65x |
-| ロジスティック回帰 [valuation_only] | 0.1694 | 0.3886 | 7.0% | 9.5% | 0.44x |
+| ベースライン: 既存の8軸総合スコア | 0.2333 | 0.5380 | 23.2% | 23.5% | 1.09x |
+| LightGBM [fundamental_v3] | 0.2252 | 0.5167 | 23.2% | 21.2% | 0.98x |
+| LightGBM [fundamental] | 0.2209 | 0.5110 | 23.7% | 20.7% | 0.96x |
+| ロジスティック回帰 [fundamental_v3] | 0.2190 | 0.4882 | 10.5% | 28.8% | 1.33x |
+| LightGBM [fundamental_v2] | 0.2131 | 0.5061 | 18.4% | 18.1% | 0.84x |
+| ロジスティック回帰 [fundamental] | 0.2122 | 0.5107 | 21.5% | 15.8% | 0.73x |
+| ロジスティック回帰 [extras_only] | 0.2110 | 0.4512 | 13.2% | 30.9% | 1.42x |
+| LightGBM [rank_fundamental] | 0.2071 | 0.4768 | 19.3% | 18.4% | 0.85x |
+| ロジスティック回帰 [rank_fundamental] | 0.2069 | 0.4992 | 16.7% | 15.4% | 0.71x |
+| LightGBM [extras_only] | 0.2054 | 0.4693 | 19.3% | 17.8% | 0.82x |
+| LightGBM [rank_fundamental_v2] | 0.2009 | 0.4522 | 20.6% | 20.3% | 0.94x |
+| ロジスティック回帰 [fundamental_v2] | 0.1987 | 0.4778 | 11.0% | 15.5% | 0.71x |
+| ロジスティック回帰 [rank_fundamental_v2] | 0.1980 | 0.4732 | 12.7% | 15.7% | 0.73x |
+| LightGBM [valuation_only] | 0.1795 | 0.4077 | 21.5% | 14.4% | 0.67x |
+| ロジスティック回帰 [valuation_only] | 0.1692 | 0.3879 | 7.0% | 9.5% | 0.44x |
 
 （正例率 = 21.66% / n = 22,893）
 
@@ -115,35 +115,35 @@
 | ロジスティック回帰 [technical] | 0.3226 | -0.0153 | [-0.0244, -0.0060] | 0.000 | 有意に劣る |
 | LightGBM [technical] | 0.3208 | -0.0171 | [-0.0281, -0.0065] | 0.001 | 有意に劣る |
 | LightGBM [rank_technical] | 0.2984 | -0.0395 | [-0.0497, -0.0296] | 0.000 | 有意に劣る |
-| LightGBM [all] | 0.2953 | -0.0426 | [-0.0537, -0.0314] | 0.000 | 有意に劣る |
-| ロジスティック回帰 [rank_all] | 0.2918 | -0.0461 | [-0.0539, -0.0382] | 0.000 | 有意に劣る |
-| ロジスティック回帰 [all] | 0.2839 | -0.0540 | [-0.0628, -0.0443] | 0.000 | 有意に劣る |
-| LightGBM [rank_all] | 0.2835 | -0.0544 | [-0.0651, -0.0440] | 0.000 | 有意に劣る |
-| LightGBM [fundamental] | 0.2207 | -0.1171 | [-0.1284, -0.1066] | 0.000 | 有意に劣る |
-| ロジスティック回帰 [fundamental] | 0.2118 | -0.1261 | [-0.1370, -0.1161] | 0.000 | 有意に劣る |
-| ロジスティック回帰 [rank_fundamental] | 0.2070 | -0.1308 | [-0.1413, -0.1204] | 0.000 | 有意に劣る |
-| LightGBM [rank_fundamental] | 0.2063 | -0.1316 | [-0.1429, -0.1206] | 0.000 | 有意に劣る |
+| ロジスティック回帰 [rank_all] | 0.2910 | -0.0468 | [-0.0546, -0.0388] | 0.000 | 有意に劣る |
+| LightGBM [all] | 0.2886 | -0.0493 | [-0.0597, -0.0386] | 0.000 | 有意に劣る |
+| ロジスティック回帰 [all] | 0.2831 | -0.0548 | [-0.0640, -0.0455] | 0.000 | 有意に劣る |
+| LightGBM [rank_all] | 0.2830 | -0.0549 | [-0.0660, -0.0444] | 0.000 | 有意に劣る |
+| LightGBM [fundamental] | 0.2209 | -0.1170 | [-0.1281, -0.1060] | 0.000 | 有意に劣る |
+| ロジスティック回帰 [fundamental] | 0.2122 | -0.1257 | [-0.1366, -0.1156] | 0.000 | 有意に劣る |
+| LightGBM [rank_fundamental] | 0.2071 | -0.1308 | [-0.1419, -0.1197] | 0.000 | 有意に劣る |
+| ロジスティック回帰 [rank_fundamental] | 0.2069 | -0.1309 | [-0.1413, -0.1205] | 0.000 | 有意に劣る |
 
 ## 特徴量セット別の比較（テストデータ・2モデルのうち良いほう）
 
 | セット | 列数 | 構成 | PR-AUC | Lift@5% |
 | --- | ---: | --- | ---: | ---: |
 | `rank_technical` | 9 | price_rank + volume_rank + liquidity_rank + supply_rank + market | 0.3442 | 1.83x |
-| `price_only` | 3 | price | 0.3432 | 1.79x |
+| `price_only` | 3 | price | 0.3432 | 1.80x |
 | `rank_price_only` | 3 | price_rank | 0.3413 | 1.82x |
 | `technical` | 9 | price + volume + liquidity + supply + market | 0.3226 | 1.53x |
 | `fund_simple` | 18 | fund_level + price + volume + liquidity + supply + progress + market | 0.3159 | 1.47x |
-| `raw_and_rank` | 146 | fund_level + fund_trend + price + volume + liquidity + supply + progress + market + fund_level_rank + fund_trend_rank + price_rank + volume_rank + liquidity_rank + supply_rank + progress_rank | 0.3088 | 1.36x |
-| `all_no_market` | 137 | fund_level + fund_lag + fund_trend + fund_streak + price + volume + liquidity + supply + progress + valuation + dividend + cashflow + efficiency + guidance + sector + turnaround | 0.3051 | 1.75x |
-| `all` | 139 | fund_level + fund_lag + fund_trend + fund_streak + price + volume + liquidity + supply + progress + valuation + dividend + cashflow + efficiency + guidance + sector + turnaround + market | 0.2953 | 1.70x |
-| `rank_all` | 139 | fund_level_rank + fund_lag_rank + fund_trend_rank + fund_streak_rank + price_rank + volume_rank + liquidity_rank + supply_rank + progress_rank + valuation_rank + dividend_rank + cashflow_rank + efficiency_rank + guidance_rank + sector + turnaround + market | 0.2918 | 1.50x |
-| `fundamental_v3` | 130 | fund_level + fund_lag + fund_trend + fund_streak + progress + valuation + dividend + cashflow + efficiency + guidance + sector + turnaround | 0.2292 | 1.03x |
-| `fundamental` | 105 | fund_level + fund_lag + fund_trend + fund_streak + progress | 0.2207 | 1.01x |
-| `fundamental_v2` | 126 | fund_level + fund_lag + fund_trend + fund_streak + progress + valuation + dividend + cashflow + efficiency + guidance + turnaround | 0.2117 | 0.75x |
-| `extras_only` | 23 | valuation + dividend + cashflow + efficiency + guidance + sector | 0.2108 | 1.01x |
-| `rank_fundamental` | 105 | fund_level_rank + fund_lag_rank + fund_trend_rank + fund_streak_rank + progress_rank | 0.2070 | 0.72x |
-| `rank_fundamental_v2` | 126 | fund_level_rank + fund_lag_rank + fund_trend_rank + fund_streak_rank + progress_rank + valuation_rank + dividend_rank + cashflow_rank + efficiency_rank + guidance_rank + turnaround | 0.1995 | 0.89x |
-| `valuation_only` | 7 | valuation | 0.1795 | 0.65x |
+| `raw_and_rank` | 146 | fund_level + fund_trend + price + volume + liquidity + supply + progress + market + fund_level_rank + fund_trend_rank + price_rank + volume_rank + liquidity_rank + supply_rank + progress_rank | 0.3074 | 1.30x |
+| `all_no_market` | 137 | fund_level + fund_lag + fund_trend + fund_streak + price + volume + liquidity + supply + progress + valuation + dividend + cashflow + efficiency + guidance + sector + turnaround | 0.3032 | 1.61x |
+| `rank_all` | 139 | fund_level_rank + fund_lag_rank + fund_trend_rank + fund_streak_rank + price_rank + volume_rank + liquidity_rank + supply_rank + progress_rank + valuation_rank + dividend_rank + cashflow_rank + efficiency_rank + guidance_rank + sector + turnaround + market | 0.2910 | 1.44x |
+| `all` | 139 | fund_level + fund_lag + fund_trend + fund_streak + price + volume + liquidity + supply + progress + valuation + dividend + cashflow + efficiency + guidance + sector + turnaround + market | 0.2886 | 1.59x |
+| `fundamental_v3` | 130 | fund_level + fund_lag + fund_trend + fund_streak + progress + valuation + dividend + cashflow + efficiency + guidance + sector + turnaround | 0.2252 | 0.98x |
+| `fundamental` | 105 | fund_level + fund_lag + fund_trend + fund_streak + progress | 0.2209 | 0.96x |
+| `fundamental_v2` | 126 | fund_level + fund_lag + fund_trend + fund_streak + progress + valuation + dividend + cashflow + efficiency + guidance + turnaround | 0.2131 | 0.84x |
+| `extras_only` | 23 | valuation + dividend + cashflow + efficiency + guidance + sector | 0.2110 | 1.42x |
+| `rank_fundamental` | 105 | fund_level_rank + fund_lag_rank + fund_trend_rank + fund_streak_rank + progress_rank | 0.2071 | 0.85x |
+| `rank_fundamental_v2` | 126 | fund_level_rank + fund_lag_rank + fund_trend_rank + fund_streak_rank + progress_rank + valuation_rank + dividend_rank + cashflow_rank + efficiency_rank + guidance_rank + turnaround | 0.2009 | 0.94x |
+| `valuation_only` | 7 | valuation | 0.1795 | 0.67x |
 
 ## 特徴量の寄与（`rank_technical` のロジスティック回帰・標準化係数 上位15）
 
