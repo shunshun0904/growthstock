@@ -51,26 +51,26 @@
 
 | 特徴量 | 充足率 |
 | --- | ---: |
-| `eps_growth_q0` | 75.5% |
-| `eps_growth_q1` | 72.8% |
-| `eps_growth_q2` | 69.0% |
-| `eps_growth_chg1` | 72.8% |
-| `eps_growth_chg` | 69.0% |
-| `sales_growth_q0` | 87.5% |
-| `sales_growth_q1` | 85.1% |
-| `sales_growth_q2` | 81.7% |
-| `sales_growth_chg1` | 85.1% |
-| `sales_growth_chg` | 81.7% |
-| `ROE_q0` | 89.0% |
-| `ROE_q1` | 88.8% |
-| `ROE_q2` | 87.9% |
-| `ROE_chg1` | 88.8% |
-| `ROE_chg` | 87.9% |
-| `op_margin_q0` | 84.3% |
-| `op_margin_q1` | 84.3% |
-| `op_margin_q2` | 84.2% |
-| `op_margin_chg1` | 84.3% |
-| `op_margin_chg` | 84.2% |
+| `eps_growth_q0` | 74.3% |
+| `eps_growth_q1` | 72.1% |
+| `eps_growth_q2` | 68.8% |
+| `eps_growth_chg1` | 72.1% |
+| `eps_growth_chg` | 68.8% |
+| `sales_growth_q0` | 87.7% |
+| `sales_growth_q1` | 85.7% |
+| `sales_growth_q2` | 82.8% |
+| `sales_growth_chg1` | 85.7% |
+| `sales_growth_chg` | 82.8% |
+| `ROE_q0` | 88.5% |
+| `ROE_q1` | 88.4% |
+| `ROE_q2` | 87.7% |
+| `ROE_chg1` | 88.4% |
+| `ROE_chg` | 87.7% |
+| `op_margin_q0` | 85.1% |
+| `op_margin_q1` | 85.0% |
+| `op_margin_q2` | 84.9% |
+| `op_margin_chg1` | 85.0% |
+| `op_margin_chg` | 84.9% |
 
 ## 読み方
 
