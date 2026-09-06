@@ -173,9 +173,12 @@ FUND_REQUIREMENT_SETS = {
               "ROE_chg1", "ROE_chg2", "op_margin_chg1", "op_margin_chg2"],
 }
 #: 実際に適用する要求。FUND_REQUIREMENT_SETS のキー。
-#: growth2 = 売上とEPSについて「前期との差分」と「前々期と前期の差分」が
-#: 両方作れること。決算を変化で判断させるなら、これが最小構成になる。
-FUND_REQUIREMENT = "growth2"
+#: full4 = 売上・EPS の3段の差分と、ROE・営業利益率の2段の差分が
+#: すべて作れること。4決算そろっている行だけが残る。
+#: 実測では 17,580 -> 10,116（57.5%）に減るが、正例率は 7.49% -> 7.48% と動かない。
+#: 「決算が揃っている銘柄」と「揃っていない銘柄」でブレイクの起きやすさに
+#: 差が無いので、絞っても正例側に偏りは入らない。
+FUND_REQUIREMENT = "full4"
 
 
 @dataclass(frozen=True)
