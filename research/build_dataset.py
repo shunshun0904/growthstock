@@ -180,6 +180,39 @@ FUND_REQUIREMENT_SETS = {
 #: 差が無いので、絞っても正例側に偏りは入らない。
 FUND_REQUIREMENT = "full4"
 
+# --- 決算の中身で母集団を絞る --- #
+# 決算を特徴量として薄く効かせるより、対象を選ぶ側に使う。
+# 「増収増益が続いている銘柄の高値更新だけを見る」という形。
+#
+# 効いたかどうかは正例率で分かる。絞って正例率が上がるなら、
+# モデルを作る前の段階で優位が取れている。上がらないなら、
+# 高値更新という事実に決算の良さがすでに織り込まれているということ。
+def _up(d, col, n):
+    """col の直近 n 期がすべてプラスか。"""
+    import functools
+    import operator
+    return functools.reduce(operator.and_,
+                            (d[f"{col}_q{k}"] > 0 for k in range(n)))
+
+
+FUND_QUALITY_SETS = {
+    "none": None,
+    # 直近1期が増収増益
+    "up1": lambda d: _up(d, "sales_growth", 1) & _up(d, "eps_growth", 1),
+    # 2期連続で増収増益
+    "up2": lambda d: _up(d, "sales_growth", 2) & _up(d, "eps_growth", 2),
+    # 3期連続で増収増益
+    "up3": lambda d: _up(d, "sales_growth", 3) & _up(d, "eps_growth", 3),
+    # 2期連続の増収増益 かつ EPS成長が加速している
+    "up2_accel": lambda d: (_up(d, "sales_growth", 2) & _up(d, "eps_growth", 2)
+                            & (d["eps_growth_chg1"] > 0)),
+    # 増益かつ営業利益率も改善
+    "up2_margin": lambda d: (_up(d, "sales_growth", 2) & _up(d, "eps_growth", 2)
+                             & (d["op_margin_chg1"] > 0)),
+}
+#: 実際に適用する条件。FUND_QUALITY_SETS のキー。
+FUND_QUALITY = "none"
+
 
 @dataclass(frozen=True)
 class RiseConfig:
@@ -545,6 +578,47 @@ def report_fund_completeness(samples: pd.DataFrame) -> None:
         mark = " ← 採用" if name == FUND_REQUIREMENT else ""
         print(f"  {name:<9} {k:>7,}件 ({k/n*100:5.1f}%) 正例率 {rate:5.2f}% "
               f"/ 要求{len(cols)}列{mark}")
+
+
+def report_fund_quality(samples: pd.DataFrame) -> None:
+    """
+    決算の中身で絞ったときに、正例率がどう動くかを候補ごとに出す。
+
+    ここで正例率が上がるなら、モデル以前の段階で優位が取れている。
+    上がらないなら、高値更新という事実に決算の良さが織り込まれている。
+    絞る前に全候補を数える。
+    """
+    n = len(samples)
+    base = samples["label"].mean() * 100
+    print(f"[quality] 決算の中身で絞った場合（絞る前 {n:,}件 / 正例率 {base:.2f}%）")
+    for name, fn in FUND_QUALITY_SETS.items():
+        if fn is None:
+            continue
+        try:
+            m = fn(samples).fillna(False)
+        except KeyError as exc:
+            print(f"  {name:<11} 列が無い: {exc}")
+            continue
+        k = int(m.sum())
+        if k == 0:
+            print(f"  {name:<11} 該当なし")
+            continue
+        rate = samples.loc[m, "label"].mean() * 100
+        mark = " ← 採用" if name == FUND_QUALITY else ""
+        print(f"  {name:<11} {k:>7,}件 ({k/n*100:5.1f}%) 正例率 {rate:5.2f}% "
+              f"（{rate - base:+.2f}pt / {rate/base:.2f}倍）{mark}")
+
+
+def apply_fund_quality(samples: pd.DataFrame) -> pd.DataFrame:
+    """FUND_QUALITY に従って、決算の中身で母集団を絞る。"""
+    fn = FUND_QUALITY_SETS[FUND_QUALITY]
+    if fn is None:
+        return samples
+    before = len(samples)
+    out = samples[fn(samples).fillna(False)].copy()
+    print(f"[filter] 決算の中身で絞る（{FUND_QUALITY}）: {before:,} -> {len(out):,} "
+          f"/ 正例率 {out['label'].mean()*100:.2f}%")
+    return out
 
 
 def apply_fund_requirement(samples: pd.DataFrame) -> pd.DataFrame:
@@ -1365,6 +1439,8 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     # 絞ったあとの母集団の中で付け直さないと意味がずれる。
     report_fund_completeness(samples)
     samples = apply_fund_requirement(samples)
+    report_fund_quality(samples)
+    samples = apply_fund_quality(samples)
 
     print("\n[rank] 横断面正規化（同一日付内のパーセンタイル順位）")
     samples = add_cross_sectional_ranks(samples, features.RAW_FOR_RANK)

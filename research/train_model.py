@@ -315,6 +315,15 @@ def main(argv: List[str] | None = None) -> int:
         print(f"[tune] 探索済みパラメータ {len(params_store)}件を使用")
     else:
         print("[tune] 探索結果が無いため既定値を使用")
+    # 探索済みのセットと既定値のセットを混ぜて比べると、比較が不公平になる。
+    # 既定値は木2000本・early stopping 無しなので、列の多いセットほど過学習する。
+    # 実際これで「決算を足すと悪くなる」という誤った結論を出しかけた。
+    untuned = [p_ for p_ in presets if p_ not in params_store]
+    if untuned and params_store:
+        print(f"[warn] 探索結果が無いセット（既定値 木{tuning.DEFAULT_PARAMS['n_estimators']}本）: "
+              + " ".join(untuned))
+        print("[warn] 探索済みのセットと同じ土俵ではない。"
+              "比較するなら research/tune_request.txt を yes にして探索し直すこと")
     experiments: List[Dict] = []
     for preset in presets:
         cols = F.columns(preset)
