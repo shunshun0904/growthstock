@@ -84,6 +84,11 @@ jobs:
       - name: Fundamental coverage
         run: python3 research/fundamental_coverage.py 2>&1 | tee coverage.log
 
+      # 学習の前に特徴量の EDA。欠損・異常値・分布・冗長性を集計する。
+      # 描画はしない（データセットは CI 側にしかないので、集計だけ出して手元で描く）
+      - name: EDA stats
+        run: python3 research/eda_stats.py 2>&1 | tee eda.log
+
       # PER/PBR/ROE/ROA は割り算で作るので分母が小さいと発散する。
       # 値が壊れたまま学習しないよう、モデルに入れる前に検査する。
       - name: Validate metrics
@@ -143,6 +148,7 @@ jobs:
             echo "## R_high 層別"; echo '```'; tail -30 strat.log; echo '```'
             echo "## 決算カバレッジ"; echo '```'; cat coverage.log; echo '```'
             echo "## 指標の検証"; echo '```'; cat validate.log; echo '```'
+            echo "## EDA"; echo '```'; cat eda.log; echo '```'
             echo "## パラメータ探索"; echo '```'; tail -40 tune.log; echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -177,6 +183,7 @@ jobs:
             research/_data/stratified.json
             research/_data/fundamental_coverage.json
             research/_data/validation.json
+            research/_data/eda.json
             research/lgbm_params.json
             docs/MODEL_RESULTS.md
             docs/MODEL_WALKFORWARD.md
