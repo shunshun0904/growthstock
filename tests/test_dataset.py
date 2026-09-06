@@ -633,6 +633,67 @@ class TestRiseLabel(unittest.TestCase):
         self.assertAlmostEqual(out["future_rise"].iloc[0], 0.0)
 
 
+class TestMissingBarsDoNotEraseHistory(unittest.TestCase):
+    """
+    売買が成立しない日は高値が欠測になる（実測で全行の約3%）。
+
+    rolling の min_periods は「窓の中の非欠測の数」で判定されるため、
+    min_periods=w にすると欠測1つで後続 w 行の判定が丸ごと消える。
+    78週窓では1つの欠測が約1年半を潰し、実際 2021年の高値更新日が
+    0件になっていた（銘柄13290 は2021年の prior が 245行中0行）。
+    """
+
+    def _bars(self, n=900, nan_at=None):
+        dates = pd.bdate_range("2016-10-03", periods=n)
+        px = pd.Series(1000.0 + pd.Series(range(n)) * 0.5)
+        h = px * 1.01
+        if nan_at is not None:
+            h = h.copy()
+            h.iloc[nan_at] = np.nan
+        return pd.DataFrame({
+            "Code": "13290", "Date": dates, "C": px, "H": h, "L": px * 0.99,
+            "Vo": 100000, "Va": px * 100000,
+            "AdjC": px, "AdjH": h, "AdjL": px * 0.99, "AdjVo": 100000})
+
+    def test_one_missing_high_does_not_blank_the_window(self):
+        from build_dataset import price_panel, LabelConfig
+        w = 368
+        cfg = LabelConfig(high_window=w)
+        clean = price_panel(self._bars(), cfg)
+        holed = price_panel(self._bars(nan_at=500), cfg)
+        # 欠測が無いときに基準が作れている行数
+        base = int(clean["high52w_prior"].notna().sum())
+        self.assertGreater(base, 0)
+        got = int(holed["high52w_prior"].notna().sum())
+        # 1つの欠測で失われるのはその行の周辺だけで、窓ぶんではない
+        self.assertGreaterEqual(got, base - 2,
+                                f"欠測1つで {base - got} 行の判定が消えた")
+
+    def test_history_is_still_required(self):
+        """欠測を許すようにしても、履歴が足りない先頭では基準を作らない。"""
+        from build_dataset import price_panel, LabelConfig
+        w = 368
+        out = price_panel(self._bars(), LabelConfig(high_window=w))
+        self.assertTrue(out["high52w_prior"].iloc[:w].isna().all())
+        self.assertTrue(out["high52w_prior"].iloc[w:].notna().all())
+
+    def test_label_survives_a_missing_close(self):
+        """ラベル側も同じ。先の窓に売買不成立の日が1つあるだけで未確定にしない。"""
+        from build_dataset import attach_rise_label, RiseConfig
+        n = 40
+        close = pd.Series([100.0] * 5 + [130.0] * (n - 5))
+        holed = close.copy()
+        holed.iloc[10] = np.nan
+        cfg = RiseConfig(horizon=10, threshold=0.20, keep_days=0,
+                         end_ratio=None, require_uptrend=False)
+        df = pd.DataFrame({"Code": "1", "Date": pd.bdate_range("2021-01-04", periods=n),
+                           "close": holed})
+        out = attach_rise_label(df, cfg)
+        self.assertTrue(bool(out["label"].iloc[0]))
+        # 先の行が足りない末尾は従来どおり未確定
+        self.assertTrue(pd.isna(out["label"].iloc[n - 1]))
+
+
 class TestRiseContinuation(unittest.TestCase):
     """
     継続の軸。到達だけを条件にすると、一瞬吹き上げてすぐ崩れた銘柄も正例になる。

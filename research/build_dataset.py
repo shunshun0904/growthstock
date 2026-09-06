@@ -144,6 +144,12 @@ TREND_SHORT = 20         # 短期移動平均（営業日）
 TREND_LONG = 60          # 長期移動平均（営業日）
 REQUIRE_UPTREND = True
 
+# 窓の中で実際に値がある割合の下限。
+# 売買が成立しない日は高値が欠測になる（実測で全行の約3%）。
+# 欠測を許さないと1つの欠測が窓ぶんの判定を潰すが、
+# 許しすぎると長期休止銘柄の「数点だけの高値」を基準にしてしまう。
+MIN_WINDOW_COVERAGE = 0.5
+
 
 @dataclass(frozen=True)
 class RiseConfig:
@@ -268,13 +274,25 @@ def price_panel(bars: pd.DataFrame, cfg: LabelConfig = DEFAULT_LABEL) -> pd.Data
     # --- 52週高値（当日を含む / 含まない の2種類が要る） --- #
     # 含む  : 基準日時点の高値接近率 R_high の分母
     # 含まない: ブレイク判定（「それまでの高値」を上抜けたか）の基準
+    # min_periods は「窓の中の非欠測の数」で判定される。
+    # w を指定すると、窓の中に欠測が1つでもあれば結果が欠測になる。
+    # 高値が欠測の日（売買が成立していない日）は実測で全行の約3%あり、
+    # 1つの欠測が後続 w 行（78週窓なら約1年半）の判定を丸ごと潰していた。
+    # 実際 2021年は高値更新日が0件になり、原因はこれだった。
+    #
+    # 意図は「w 営業日ぶんの履歴があること」であって
+    # 「窓の中に欠測が1つも無いこと」ではない。2つに分けて表す。
+    #   min_periods=1  … 手元にある高値の最大を取る
+    #   age >= w       … w 行ぶんの履歴がたまっているか
+    #   coverage       … 窓の中で実際に値がある割合（休止銘柄を弾く）
     w = cfg.high_window
-    df["high52w"] = g["high"].transform(
-        lambda s: s.rolling(w, min_periods=w).max()
-    )
-    df["high52w_prior"] = g["high"].transform(
-        lambda s: s.rolling(w, min_periods=w).max().shift(1)
-    )
+    age = g.cumcount()
+    hi = g["high"].transform(lambda s: s.rolling(w, min_periods=1).max())
+    cov = g["high"].transform(lambda s: s.rolling(w, min_periods=1).count())
+    enough = (age >= w - 1) & (cov >= w * MIN_WINDOW_COVERAGE)
+    df["high52w"] = hi.where(enough)
+    df["high52w_prior"] = hi.shift(1).where(enough.shift(1, fill_value=False)
+                                            & (age >= w))
     df["r_high"] = df["close"] / df["high52w"] * 100.0
 
     # --- 出来高モメンタム（当日を除く直前20日平均との比） --- #
@@ -412,11 +430,15 @@ def attach_rise_label(df: pd.DataFrame, cfg: RiseConfig = DEFAULT_RISE) -> pd.Da
     g = df.groupby("Code", sort=False)
     h = cfg.horizon
 
+    # 高値窓と同じ理由で min_periods は 1 にする。
+    # 先の窓に売買不成立の日が1つあるだけでラベルが未確定になっていた。
+    # 「先 h 営業日ぶんの行があるか」は末尾からの位置で別に判定する。
     def future_max(s: pd.Series) -> pd.Series:
         # t+1 〜 t+horizon の終値の最大
-        return s[::-1].rolling(h, min_periods=h).max()[::-1].shift(-1)
+        return s[::-1].rolling(h, min_periods=1).max()[::-1].shift(-1)
 
-    df["future_max_close"] = g["close"].transform(future_max)
+    have_forward = g.cumcount(ascending=False) >= h
+    df["future_max_close"] = g["close"].transform(future_max).where(have_forward)
     ratio = df["future_max_close"] / df["close"] - 1.0
     df["future_rise"] = ratio
     hit = ratio >= cfg.threshold
@@ -434,15 +456,19 @@ def attach_rise_label(df: pd.DataFrame, cfg: RiseConfig = DEFAULT_RISE) -> pd.Da
     # t+horizon 時点での「直近 end_window 日平均終値」。
     # 1日だけの値だと、たまたまその日が押し目でも失格になってしまう。
     ma_end = g["close"].transform(
-        lambda s: s.rolling(cfg.end_window, min_periods=cfg.end_window).mean())
+        lambda s: s.rolling(cfg.end_window, min_periods=1).mean())
     end_close = ma_end.groupby(df["Code"], sort=False).shift(-h)
     df["end_level"] = end_close / df["close"] - 1.0
 
     # --- トレンド --- #
     ma_s = g["close"].transform(
-        lambda s: s.rolling(cfg.trend_short, min_periods=cfg.trend_short).mean())
+        lambda s: s.rolling(cfg.trend_short, min_periods=1).mean())
     ma_l = g["close"].transform(
-        lambda s: s.rolling(cfg.trend_long, min_periods=cfg.trend_long).mean())
+        lambda s: s.rolling(cfg.trend_long, min_periods=1).mean())
+    # 移動平均は履歴がたまってから使う（min_periods を外したぶんここで担保する）
+    _age = g.cumcount()
+    ma_s = ma_s.where(_age >= cfg.trend_short - 1)
+    ma_l = ma_l.where(_age >= cfg.trend_long - 1)
     up = (ma_s >= ma_l).where(ma_s.notna() & ma_l.notna())
     df["uptrend_end"] = up.groupby(df["Code"], sort=False).shift(-h)
 
