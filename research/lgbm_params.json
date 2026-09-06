@@ -66,18 +66,32 @@
   "all": {
     "objective": "binary",
     "boosting_type": "gbdt",
-    "n_estimators": 131,
+    "n_estimators": 50,
     "random_state": 0,
     "n_jobs": -1,
     "verbose": -1,
-    "learning_rate": 0.17358601002721927,
-    "num_leaves": 126,
-    "min_child_samples": 275,
-    "subsample": 0.7169175643315073,
-    "colsample_bytree": 0.9468975763513916,
-    "reg_alpha": 0.01701631906232093,
-    "reg_lambda": 0.06852831757017862,
-    "subsample_freq": 1
+    "learning_rate": 0.01243477891166077,
+    "num_leaves": 85,
+    "min_child_samples": 49,
+    "subsample": 0.5132494697717319,
+    "colsample_bytree": 0.37691367702310763,
+    "reg_alpha": 0.13461706198480558,
+    "reg_lambda": 6.494122338622921e-08,
+    "subsample_freq": 1,
+    "_cv": {
+      "n_splits": 5,
+      "mean_pr_auc": 0.1537,
+      "std": 0.0851,
+      "fold_scores": [
+        0.0365,
+        0.2303,
+        0.2138,
+        0.064,
+        0.2239
+      ],
+      "n_trials": 30
+    },
+    "_n_features": 136
   },
   "rank_all": {
     "objective": "binary",
