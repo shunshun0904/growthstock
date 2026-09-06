@@ -969,9 +969,28 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     # 年別の行数。年ごとの parquet を1つ落とすと、その年が丸ごと消えるだけでなく
     # 前後の年の rolling も壊れる。集計結果の年別内訳を読む前に、
     # 入力そのものが揃っているかを確かめられるようにしておく。
-    _by = pd.to_datetime(bars["Date"]).dt.year.value_counts().sort_index()
+    _d = pd.to_datetime(bars["Date"])
+    _by = _d.dt.year.value_counts().sort_index()
     print("[input] 日次バーの年別行数: "
           + " ".join(f"{y}:{n:,}" for y, n in _by.items()))
+    # 行数が揃っていても、年をまたいで銘柄コードが噛み合っていなければ
+    # 各コードの履歴が分断され、rolling が成立しなくなる。
+    # 年ごとの銘柄数と、前年と共通のコード数を見る。
+    _codes = {int(y): set(g) for y, g in bars.assign(_y=_d.dt.year)
+              .groupby("_y")["Code"]}
+    _prev = None
+    _row = []
+    for y in sorted(_codes):
+        cur = _codes[y]
+        ov = f"/前年と共通 {len(cur & _prev):,}" if _prev else ""
+        _row.append(f"{y}:{len(cur):,}{ov}")
+        _prev = cur
+    print("[input] 年別の銘柄数: " + " ".join(_row))
+    # 月別の行数。年内の穴（特定の月だけ無い）は年別集計では見えない
+    _m = _d.dt.to_period("M").value_counts().sort_index()
+    _gap = [str(k) for k, v in _m.items() if v < _m.median() * 0.5]
+    print(f"[input] 月別行数の中央値 {int(_m.median()):,} / "
+          f"半分未満の月: {', '.join(_gap) if _gap else 'なし'}")
 
     print("\n[panel] 株価系の指標を算出")
     df = price_panel(bars)
@@ -994,6 +1013,18 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
             c = sub.groupby(sub["Date"].dt.year).size()
             print(f"[sample] {tag}の年別: "
                   + " ".join(f"{y}:{n:,}" for y, n in c.items()))
+        # 更新日が0の年があったとき、「相場として届かなかった」のか
+        # 「そもそも判定できていない」のかを分ける。
+        # prior が全欠測なら後者（履歴が分断されている）。
+        _y = df["Date"].dt.year
+        rows = []
+        for y, gy in df.groupby(_y):
+            ratio = (gy["high"] / gy["high52w_prior"]).replace(
+                [np.inf, -np.inf], np.nan)
+            rows.append(f"{y}:判定可{gy['high52w_prior'].notna().mean()*100:.0f}%"
+                        f"/最大比{ratio.max():.3f}" if ratio.notna().any()
+                        else f"{y}:判定可0%")
+        print("[diag] 高値比（high / それまでの78週高値）: " + " ".join(rows))
         report_rise_funnel(samples)
     else:
         print("[panel] ブレイクアウト日を判定")
