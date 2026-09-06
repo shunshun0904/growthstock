@@ -107,6 +107,10 @@ jobs:
       - name: EDA report
         run: python3 research/eda_report.py 2>&1 | tee eda_report.log
 
+      # 特徴量の意味の一覧。features.py から作るので、列を足せば一緒に増える
+      - name: Feature dictionary
+        run: python3 research/feature_dict.py 2>&1 | tee dict.log
+
       # PER/PBR/ROE/ROA は割り算で作るので分母が小さいと発散する。
       # 値が壊れたまま学習しないよう、モデルに入れる前に検査する。
       - name: Validate metrics
@@ -209,6 +213,7 @@ jobs:
             sec "指標の検証" validate.log
             sec "EDA" eda.log
             sec "EDA ページ" eda_report.log
+            sec "特徴量辞書" dict.log
             sec "重要度ページ" importance.log
             sec "パラメータ探索" tune.log 40
           } >> "$GITHUB_STEP_SUMMARY"
@@ -219,7 +224,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           mkdir -p research/samples
           cp research/_data/label_comparison.json research/samples/label_comparison.json
-          git add -A research/samples research/viewer research/lgbm_params.json research/eda.json research/eda_report.html research/importance_report.html docs/MODEL_RESULTS.md docs/MODEL_WALKFORWARD.md docs/MODEL_WITHIN_DATE.md docs/MODEL_FUNDAMENTAL_COVERAGE.md docs/DATA_VALIDATION.md docs/MODEL_STRATIFIED.md
+          git add -A research/samples research/viewer research/lgbm_params.json research/eda.json research/eda_report.html research/importance_report.html research/feature_dict.html docs/MODEL_RESULTS.md docs/MODEL_WALKFORWARD.md docs/MODEL_WITHIN_DATE.md docs/MODEL_FUNDAMENTAL_COVERAGE.md docs/DATA_VALIDATION.md docs/MODEL_STRATIFIED.md
           # git diff は未追跡ファイルを見ないため、staged の差分で判定する
           if git diff --cached --quiet; then
             echo "変更なし"; exit 0
@@ -247,6 +252,7 @@ jobs:
             research/eda.json
             research/eda_report.html
             research/importance_report.html
+            research/feature_dict.html
             research/lgbm_params.json
             docs/MODEL_RESULTS.md
             docs/MODEL_WALKFORWARD.md
