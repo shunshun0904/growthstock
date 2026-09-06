@@ -61,16 +61,16 @@
 | `sales_growth_q2` | 100.0% |
 | `sales_growth_chg1` | 100.0% |
 | `sales_growth_chg` | 100.0% |
-| `ROE_q0` | 94.5% |
-| `ROE_q1` | 94.5% |
-| `ROE_q2` | 94.4% |
-| `ROE_chg1` | 94.5% |
-| `ROE_chg` | 94.4% |
-| `op_margin_q0` | 93.4% |
-| `op_margin_q1` | 93.4% |
-| `op_margin_q2` | 93.4% |
-| `op_margin_chg1` | 93.4% |
-| `op_margin_chg` | 93.4% |
+| `ROE_q0` | 100.0% |
+| `ROE_q1` | 100.0% |
+| `ROE_q2` | 100.0% |
+| `ROE_chg1` | 100.0% |
+| `ROE_chg` | 100.0% |
+| `op_margin_q0` | 100.0% |
+| `op_margin_q1` | 100.0% |
+| `op_margin_q2` | 100.0% |
+| `op_margin_chg1` | 100.0% |
+| `op_margin_chg` | 100.0% |
 
 ## 読み方
 
