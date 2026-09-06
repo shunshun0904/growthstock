@@ -547,5 +547,28 @@ class TestStratifiedEvaluation(unittest.TestCase):
         self.assertAlmostEqual(res["lift"], res["pr_auc"] / res["base_rate"])
 
 
+class TestEmbargoFollowsTheLabel(unittest.TestCase):
+    """
+    母集団を高値更新日にしたことでラベルが変わり、
+    確定に必要な将来日数が 180 -> 60 営業日になった。
+    エンバーゴをラベルに追随させないとリークする。
+    """
+
+    def test_embargo_matches_the_rise_horizon(self):
+        import build_dataset as B
+        from train_model import EMBARGO_DAYS
+        if B.POPULATION == "breakout":
+            self.assertEqual(EMBARGO_DAYS, B.RISE_HORIZON)
+        else:
+            self.assertEqual(EMBARGO_DAYS, B.DEFAULT_LABEL.forward_needed)
+
+    def test_embargo_is_not_hardcoded(self):
+        """固定値だと、ラベルを変えた瞬間に静かにリークする。"""
+        import inspect
+        import train_model
+        src = inspect.getsource(train_model)
+        self.assertIn("EMBARGO_DAYS = (B.RISE_HORIZON", src)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

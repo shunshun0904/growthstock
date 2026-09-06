@@ -19,7 +19,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "research"))
 
 from build_dataset import (  # noqa: E402
-    clip_divergent,
+    clip_divergent, mark_new_highs, attach_rise_label,
     HOLD_DAYS, HORIZON_END, HORIZON_START, HIGH_WINDOW, LabelConfig,
     _lag_available, add_cross_sectional_ranks, attach_labels, breakout_flags,
     price_panel, quarterize_panel,
@@ -372,6 +372,8 @@ class TestFeaturePresets(unittest.TestCase):
         """
         import features as F
         self.assertEqual(len(F.columns("rank_all")), len(F.columns("all")))
+        # グループ名の一覧は1箇所（ALL_GROUPS）だけに書く
+        self.assertEqual(F.PRESETS["all"], F.ALL_GROUPS)
         # グループ単位でも対応していること
         for g in F.PRESETS["all"]:
             expected = f"{g}_rank" if f"{g}_rank" in F.GROUPS else g
@@ -482,6 +484,105 @@ class TestLagOverAvailableValues(unittest.TestCase):
         lag1 = _lag_available(df, "x", 1)
         self.assertTrue(np.isnan(lag1.iloc[2]))   # B の先頭に A の値が来ない
         self.assertAlmostEqual(lag1.iloc[3], 3.0)
+
+
+class TestBreakoutPopulation(unittest.TestCase):
+    """
+    母集団を「52週高値の更新日 × 銘柄」にする。
+    運用では場中に52週高値を超えた銘柄を、その日の夜に判定する。
+    """
+
+    def _panel(self, closes, highs=None, w=5):
+        """52週高値の窓を w 日にした小さなパネル。"""
+        n = len(closes)
+        df = pd.DataFrame({
+            "Code": "1234",
+            "Date": pd.date_range("2021-01-04", periods=n, freq="B"),
+            "close": closes,
+            "high": highs if highs is not None else closes,
+        })
+        df["high52w_prior"] = (df["high"].rolling(w, min_periods=w).max().shift(1))
+        return df
+
+    def test_detects_a_new_high(self):
+        # 5日窓。6日目に過去最高を超える
+        df = self._panel([100, 101, 102, 103, 104, 110, 105])
+        out = mark_new_highs(df, cooldown=3)
+        self.assertTrue(bool(out["is_new_high"].iloc[5]))
+        self.assertFalse(bool(out["is_new_high"].iloc[6]))
+
+    def test_uses_the_prior_high_not_todays(self):
+        """当日を含む高値と比べると、自分自身と比べることになり常に成立する。"""
+        df = self._panel([100, 101, 102, 103, 104, 110])
+        out = mark_new_highs(df, cooldown=3)
+        # high52w_prior は当日を含まないので、110 > 104 で成立
+        self.assertAlmostEqual(out["high52w_prior"].iloc[5], 104.0)
+
+    def test_consecutive_updates_collapse_to_one(self):
+        """
+        高値更新が続くと、ほぼ同じ特徴量・重なるラベルのサンプルが量産され、
+        件数が水増しされるうえ独立でなくなる。初回だけを残す。
+        """
+        df = self._panel([100, 101, 102, 103, 104, 110, 111, 112, 113])
+        out = mark_new_highs(df, cooldown=3)
+        self.assertEqual(int(out["is_new_high"].sum()), 4)      # 110,111,112,113
+        self.assertEqual(int(out["is_fresh_break"].sum()), 1)   # 110 のみ
+        self.assertTrue(bool(out["is_fresh_break"].iloc[5]))
+
+    def test_a_later_break_after_a_quiet_gap_counts_again(self):
+        closes = [100, 101, 102, 103, 104, 110] + [105] * 5 + [120]
+        df = self._panel(closes)
+        out = mark_new_highs(df, cooldown=3)
+        self.assertEqual(int(out["is_fresh_break"].sum()), 2)
+
+    def test_high_based_detection(self):
+        """場中に超えれば候補。終値が押し戻されても更新日とみなす。"""
+        closes = [100, 101, 102, 103, 104, 103]
+        highs = [100, 101, 102, 103, 104, 115]
+        df = self._panel(closes, highs)
+        on_high = mark_new_highs(df.copy(), cooldown=3, on_high=True)
+        on_close = mark_new_highs(df.copy(), cooldown=3, on_high=False)
+        self.assertTrue(bool(on_high["is_new_high"].iloc[5]))
+        self.assertFalse(bool(on_close["is_new_high"].iloc[5]))
+
+
+class TestRiseLabel(unittest.TestCase):
+    """更新日の終値から、先 horizon 営業日以内に threshold 以上上昇したか。"""
+
+    def _df(self, closes):
+        return pd.DataFrame({
+            "Code": "1234",
+            "Date": pd.date_range("2021-01-04", periods=len(closes), freq="B"),
+            "close": closes})
+
+    def test_positive_when_it_rises_enough(self):
+        out = attach_rise_label(self._df([100, 105, 125, 110, 108]),
+                                horizon=3, threshold=0.20)
+        self.assertTrue(bool(out["label"].iloc[0]))    # 125/100-1 = 25%
+
+    def test_negative_when_it_does_not(self):
+        out = attach_rise_label(self._df([100, 105, 110, 108, 107]),
+                                horizon=3, threshold=0.20)
+        self.assertFalse(bool(out["label"].iloc[0]))
+
+    def test_measured_on_close_not_high(self):
+        """高値ベースだと「一瞬触れただけ」を正例にしてしまう。"""
+        out = attach_rise_label(self._df([100, 119, 119, 119]),
+                                horizon=3, threshold=0.20)
+        self.assertFalse(bool(out["label"].iloc[0]))
+
+    def test_undetermined_at_the_tail_is_nan_not_false(self):
+        """先の営業日が足りない末尾を False にすると負例が水増しされる。"""
+        out = attach_rise_label(self._df([100, 105, 110]),
+                                horizon=3, threshold=0.20)
+        self.assertTrue(pd.isna(out["label"].iloc[1]))
+        self.assertTrue(pd.isna(out["label"].iloc[2]))
+
+    def test_never_uses_the_current_day(self):
+        """当日の終値は分母。将来の窓は t+1 から始まる。"""
+        out = attach_rise_label(self._df([100, 100, 100, 100, 100]),
+                                horizon=3, threshold=0.0)
+        self.assertAlmostEqual(out["future_rise"].iloc[0], 0.0)
 
 
 class TestDivergenceGuard(unittest.TestCase):

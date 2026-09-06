@@ -43,7 +43,14 @@ GROUPS: Dict[str, List[str]] = {
     "fund_streak": [f"{a}_{s}" for a in FUND_AXES
                     for s in ("up_streak", "pos_ratio")],
     # --- 株価位置 ---
+    # 母集団を52週高値の更新日にすると r_high は全件ほぼ100になり使えなくなる。
+    # ラグ版（3ヶ月前・6ヶ月前の位置）は「どこから上がってきたか」を表すので残る。
     "price": ["r_high", "r_high_3m", "r_high_6m"],
+    # --- ブレイクの性質 ---
+    # 高値更新日を母集団にしたので「どう抜けたか」が主役になる。
+    # 効くかどうかは日付内診断と層別評価で測る（現時点では仮説）。
+    "breakout": ["base_length", "break_margin", "close_position",
+                 "ret_20d", "vol_20d"],
     # --- 出来高 ---
     "volume": ["volume_trend"],
     # --- 流動性・サイズ ---
@@ -87,8 +94,8 @@ GROUPS: Dict[str, List[str]] = {
 #: 絶対値の特徴量では学習が成立していなかった。
 RAW_FOR_RANK: List[str] = [
     c for g in ("fund_level", "fund_lag", "fund_trend", "fund_streak", "price",
-                "volume", "liquidity", "supply", "progress", "valuation",
-                "dividend", "cashflow", "efficiency", "guidance")
+                "breakout", "volume", "liquidity", "supply", "progress",
+                "valuation", "dividend", "cashflow", "efficiency", "guidance")
     for c in GROUPS[g]
 ]
 
@@ -97,30 +104,38 @@ RAW_FOR_RANK: List[str] = [
 # 対象は RAW_FOR_RANK と揃える。ここがずれると
 # 「順位列が存在しないプリセット」が黙って出来てしまう。
 RANKED_GROUPS = ("fund_level", "fund_lag", "fund_trend", "fund_streak", "price",
-                 "volume", "liquidity", "supply", "progress", "valuation",
-                 "dividend", "cashflow", "efficiency", "guidance")
+                 "breakout", "volume", "liquidity", "supply", "progress",
+                 "valuation", "dividend", "cashflow", "efficiency", "guidance")
 GROUPS.update({
     f"{g}_rank": [f"{c}_r" for c in GROUPS[g]] for g in RANKED_GROUPS
 })
 assert set(RAW_FOR_RANK) == {c for g in RANKED_GROUPS for c in GROUPS[g]}, \
     "RAW_FOR_RANK と RANKED_GROUPS がずれている"
 
+#: 「全部入り」に含めるグループ。
+#: `all` と `rank_all` はここから作る。片方に足し忘れる事故を防ぐため、
+#: グループ名を書く場所を1箇所に絞る。
+ALL_GROUPS: List[str] = [
+    "fund_level", "fund_lag", "fund_trend", "fund_streak", "price", "breakout",
+    "volume", "liquidity", "supply", "progress", "valuation", "dividend",
+    "cashflow", "efficiency", "guidance", "sector", "turnaround", "market",
+]
+
 #: 実験用のプリセット。グループ名の並びで指定する。
 PRESETS: Dict[str, List[str]] = {
     # 素朴なベースライン。株価位置だけ
     "price_only": ["price"],
     # テクニカル・需給のみ（決算を使わない）
-    "technical": ["price", "volume", "liquidity", "supply", "market"],
+    "technical": ["price", "breakout", "volume", "liquidity", "supply", "market"],
+    # ブレイクの性質だけ。高値更新日を母集団にしたときの素朴なベースライン
+    "breakout_only": ["breakout"],
     # 決算のみ（株価を使わない）。従来比較用
     "fundamental": ["fund_level", "fund_lag", "fund_trend", "fund_streak", "progress"],
     # 決算は直近の水準だけ（ラグと傾きを落とす）
     "fund_simple": ["fund_level", "price", "volume", "liquidity", "supply",
                     "progress", "market"],
     # 全部（絶対値のみ。順位版は別プリセットで比較する）
-    "all": ["fund_level", "fund_lag", "fund_trend", "fund_streak", "price",
-            "volume", "liquidity", "supply", "progress", "valuation",
-            "dividend", "cashflow", "efficiency", "guidance", "sector",
-            "turnaround", "market"],
+    "all": ALL_GROUPS,
     # バリュエーションのみ
     "valuation_only": ["valuation"],
     # 決算 + バリュエーション + 黒字転換（株価位置を使わない）
@@ -148,15 +163,10 @@ PRESETS: Dict[str, List[str]] = {
     # 決算の順位版のみ
     "rank_fundamental": ["fund_level_rank", "fund_lag_rank", "fund_trend_rank",
                          "fund_streak_rank", "progress_rank"],
-    # 全部の順位版。`all` から導出する。
-    # 手書きにしていたため `all` にグループを足したときに追随せず、
-    # 列数がずれた（テストが検出）。順位版があるものは差し替え、
-    # 無いもの（業種コード・黒字転換フラグ・市場環境）はそのまま使う。
-    "rank_all": [f"{g}_rank" if f"{g}_rank" in GROUPS else g
-                 for g in ("fund_level", "fund_lag", "fund_trend", "fund_streak",
-                           "price", "volume", "liquidity", "supply", "progress",
-                           "valuation", "dividend", "cashflow", "efficiency",
-                           "guidance", "sector", "turnaround", "market")],
+    # 全部の順位版。ALL_GROUPS から機械的に導出する。
+    # グループ名を2箇所に手書きしていたため、`all` に足したときに追随せず
+    # 列数がずれた。今度は同じ一覧から作る。
+    "rank_all": [f"{g}_rank" if f"{g}_rank" in GROUPS else g for g in ALL_GROUPS],
     # 決算 + バリュエーションの順位版
     "rank_fundamental_v2": ["fund_level_rank", "fund_lag_rank", "fund_trend_rank",
                             "fund_streak_rank", "progress_rank",

@@ -34,6 +34,7 @@ from sklearn.preprocessing import StandardScaler
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import features as F  # noqa: E402
 import tuning  # noqa: E402
+import build_dataset as B  # noqa: E402
 from build_dataset import DEFAULT_LABEL  # noqa: E402
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_data")
@@ -41,7 +42,11 @@ META_COLS = ["Code", "Date", "close", "high52w", "tv_ma20", "market_cap", "label
 
 # エンバーゴはラベル定義から導く。ハードコードするとラベルを変えたときにリークする。
 # 採用定義 E は sustain_days=60 を含むため 120+60 = 180営業日必要。
-EMBARGO_DAYS = DEFAULT_LABEL.forward_needed
+# 母集団が breakout のときのラベルは「先 RISE_HORIZON 営業日以内の上昇」なので、
+# 確定に必要な将来日数は RISE_HORIZON。従来の定義E（180営業日）より大幅に短い。
+# ここをラベルに追随させないとリークする。
+EMBARGO_DAYS = (B.RISE_HORIZON if B.POPULATION == "breakout"
+                else DEFAULT_LABEL.forward_needed)
 
 
 # --------------------------------------------------------------------------- #

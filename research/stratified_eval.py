@@ -43,17 +43,25 @@ from train_model import DATA_DIR, EMBARGO_DAYS, clean_score, fit_models  # noqa:
 from walkforward import TRADING_TO_CALENDAR, make_folds  # noqa: E402
 
 N_STRATA = 5
-REFERENCE = "r_high"
+
+# 層別の軸。母集団によって意味のある軸が変わる。
+#   month_end … r_high（ゴールまでの距離）を揃える
+#   breakout  … r_high は全件ほぼ100なので使えない。
+#               代わりに時価総額で揃える。値動きの大きさが規模に強く依存し、
+#               「+20%上昇」の起きやすさが規模で違うため
+import build_dataset as _B  # noqa: E402
+STRATIFY_BY = "log_market_cap" if _B.POPULATION == "breakout" else "r_high"
+REFERENCE = STRATIFY_BY
 
 # 層別で比べる特徴量セット。層内では株価位置がほぼ効かないので、
 # 決算・バリュエーション側を中心に見る
-DEFAULT_PRESETS = ["price_only", "fundamental", "fundamental_v3",
+DEFAULT_PRESETS = ["breakout_only", "technical", "fundamental", "fundamental_v3",
                    "extras_only", "valuation_only", "all"]
 
 
 def assign_strata(df: pd.DataFrame, n: int = N_STRATA) -> pd.Series:
     """日付ごとに r_high の分位で層を振る。局面で分布が動くため日付内で切る。"""
-    return df.groupby("Date", sort=False)["r_high"].transform(
+    return df.groupby("Date", sort=False)[STRATIFY_BY].transform(
         lambda s: pd.qcut(s, n, labels=False, duplicates="drop"))
 
 
@@ -85,7 +93,8 @@ def run(df: pd.DataFrame, presets: List[str], folds) -> Dict:
             continue
         print(f"\n[fold {fold.index}] テスト {fold.test_start}〜{fold.test_end}")
 
-        scores: Dict[str, np.ndarray] = {REFERENCE: te["r_high"].to_numpy(float)}
+        scores: Dict[str, np.ndarray] = {
+            REFERENCE: te[STRATIFY_BY].to_numpy(float)}
         for preset in presets:
             cols = [c for c in F.columns(preset) if c in df.columns]
             if len(cols) < len(F.columns(preset)):
@@ -99,7 +108,7 @@ def run(df: pd.DataFrame, presets: List[str], folds) -> Dict:
         for st in sorted(te["_stratum"].dropna().unique()):
             m = (te["_stratum"] == st).to_numpy()
             y = te.loc[m, "label"].to_numpy(dtype=int)
-            rh = te.loc[m, "r_high"]
+            rh = te.loc[m, STRATIFY_BY]
             for name, sc in scores.items():
                 res = evaluate_within(y, sc[m])
                 if res is None:

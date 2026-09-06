@@ -91,6 +91,38 @@ class LabelConfig:
 
 DEFAULT_LABEL = LabelConfig()
 
+# --------------------------------------------------------------------------- #
+# 母集団の定義
+# --------------------------------------------------------------------------- #
+# "breakout" … 52週高値を更新した日 × 銘柄。運用の形に合わせた設定。
+#              その日の夜にモデルを回して「この更新は伸びるか」を判定する。
+# "month_end" … 月末営業日 × 銘柄（従来）。
+#              「まだ抜けていない銘柄が先1〜6ヶ月で抜けるか」を予測していた。
+#
+# breakout に変えた理由:
+#   従来の基準 r_high（52週高値への近さ）はゴールまでの距離を測っているだけで、
+#   ラベル（52週高値を抜けるか）とほぼ同語反復だった。
+#   実測でも r_high の Lift は層0で2.29倍、層4（高値至近）で1.05倍と、
+#   距離を揃えると何も予測できていなかった（docs/MODEL_STRATIFIED.md）。
+#   高値更新日に母集団を固定すれば距離は全銘柄で同じになり、この問題が消える。
+POPULATION = "breakout"
+
+# 高値更新の判定は高値ベース（終値ベースではなく）。
+# 場中に52週高値を超えた時点で候補になる、という運用の形に合わせる。
+BREAKOUT_ON_HIGH = True
+
+# 同じ上昇局面の連続した更新日を1件にまとめる。
+# 高値更新が10日続くと、ほぼ同じ特徴量・重なるラベルのサンプルが10件でき、
+# 件数が水増しされるうえサンプル間が独立でなくなる。
+# 直前 BREAKOUT_COOLDOWN 営業日に更新が無い日だけを「新規のブレイク」とみなす。
+BREAKOUT_COOLDOWN = 20
+
+# --- 目的変数（母集団が breakout のとき）--- #
+# 更新日の終値から、先 RISE_HORIZON 営業日以内に RISE_THRESHOLD 以上上昇したか。
+# 終値ベースで測る（高値ベースだと「一瞬触れただけ」を正例にしてしまう）。
+RISE_HORIZON = 60        # 営業日。約3ヶ月
+RISE_THRESHOLD = 0.20    # +20%
+
 # --- 除外条件 (docs/MODEL_DESIGN.md §2.2) --- #
 MAX_RHIGH_AT_T = 95.0   # 基準日ですでに高値圏の銘柄は対象外
 MIN_TRADING_VALUE = 0.5 # 20日平均売買代金の下限（億円）
@@ -142,9 +174,11 @@ def price_panel(bars: pd.DataFrame, cfg: LabelConfig = DEFAULT_LABEL) -> pd.Data
 
     close = df["AdjC"].fillna(df["C"])
     high = df["AdjH"].fillna(df["H"])
+    low = df["AdjL"].fillna(df["L"]) if "AdjL" in df.columns else df["L"]
     vol = df["AdjVo"].fillna(df["Vo"])
     df["close"] = close
     df["high"] = high
+    df["low"] = low
     df["vol"] = vol
     # 未調整の終値。バリュエーションと時価総額に使う。
     #
@@ -228,6 +262,87 @@ def breakout_flags(df: pd.DataFrame, cfg: LabelConfig = DEFAULT_LABEL) -> pd.Dat
     # 判定に必要な将来データが無い（データ末尾）日は判定不能として NaN にする
     df["is_breakout"] = is_bo.where(~undetermined)
 
+    return df
+
+
+def mark_new_highs(df: pd.DataFrame, cooldown: int = BREAKOUT_COOLDOWN,
+                   on_high: bool = BREAKOUT_ON_HIGH) -> pd.DataFrame:
+    """
+    52週高値を更新した日に印を付ける。
+
+    判定は「それまでの52週高値」との比較（high52w_prior は当日を含まない）。
+    当日を含む high52w と比べると、自分自身と比べることになって常に成立する。
+
+    連続した更新日は1件にまとめる。
+    高値更新が10日続くと、ほぼ同じ特徴量・重なるラベルのサンプルが10件でき、
+    件数が水増しされるうえサンプル間が独立でなくなるため。
+    直前 cooldown 営業日に更新が無い日だけを「新規のブレイク」とみなす。
+    """
+    px = df["high"] if on_high else df["close"]
+    is_new_high = (px > df["high52w_prior"]) & df["high52w_prior"].notna()
+    df["is_new_high"] = is_new_high
+
+    g = df.groupby("Code", sort=False)
+    # 直前 cooldown 営業日（当日を除く）に更新があったか
+    recent = g["is_new_high"].transform(
+        lambda s: s.shift(1).rolling(cooldown, min_periods=1).max())
+    df["is_fresh_break"] = is_new_high & (recent.fillna(0) == 0)
+    return df
+
+
+def attach_rise_label(df: pd.DataFrame, horizon: int = RISE_HORIZON,
+                      threshold: float = RISE_THRESHOLD) -> pd.DataFrame:
+    """
+    更新日の終値から、先 horizon 営業日以内に threshold 以上上昇したか。
+
+    終値ベースで測る。高値ベースだと「一瞬触れただけ」も正例になってしまう。
+    先の営業日が足りない末尾は NaN（判定不能）にする。False にはしない。
+    """
+    g = df.groupby("Code", sort=False)
+
+    def future_max(s: pd.Series) -> pd.Series:
+        # t+1 〜 t+horizon の終値の最大
+        return s[::-1].rolling(horizon, min_periods=horizon).max()[::-1].shift(-1)
+
+    df["future_max_close"] = g["close"].transform(future_max)
+    ratio = df["future_max_close"] / df["close"] - 1.0
+    df["future_rise"] = ratio
+    df["label"] = (ratio >= threshold).where(df["future_max_close"].notna())
+    return df
+
+
+def add_breakout_context(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    ブレイクそのものの性質を表す特徴量。
+
+    母集団を高値更新日にすると r_high は全件ほぼ100になって使えなくなる。
+    代わりに「どういう抜け方をしたか」が効くはずなので、それを列にする。
+    ここは推測なので、効くかどうかは日付内診断と層別評価で測る。
+    """
+    g = df.groupby("Code", sort=False)
+
+    # ベースの長さ: 前回の52週高値更新から何営業日空いたか。
+    # 長く保ち合ってからの初回ブレイクほど強い、という仮説を測れるようにする
+    idx = pd.Series(np.arange(len(df)), index=df.index)
+    last_nh = idx.where(df["is_new_high"].fillna(False)).groupby(
+        df["Code"], sort=False).ffill().shift(1)
+    df["base_length"] = (idx - last_nh).where(df["is_new_high"].fillna(False))
+
+    # 抜けの大きさ: それまでの高値をどれだけ上回ったか（%）
+    df["break_margin"] = (df["close"] / df["high52w_prior"] - 1.0) * 100.0
+
+    # 当日の値幅の中で終値がどこにあるか。
+    # 高値引けなら強い、上ヒゲなら弱い
+    rng = df["high"] - df["low"]
+    df["close_position"] = np.where(rng > 0, (df["close"] - df["low"]) / rng * 100.0,
+                                    np.nan)
+
+    # 直近20営業日の上昇率。すでに走った後か、静かなところからの初動か
+    df["ret_20d"] = (df["close"] / g["close"].shift(20) - 1.0) * 100.0
+    # ボラティリティ（20営業日の日次リターン標準偏差）
+    ret1 = df["close"] / g["close"].shift(1) - 1.0
+    df["vol_20d"] = ret1.groupby(df["Code"], sort=False).transform(
+        lambda s: s.rolling(20, min_periods=15).std()) * 100.0
     return df
 
 
@@ -652,16 +767,28 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
 
     print("\n[panel] 株価系の指標を算出")
     df = price_panel(bars)
-    print("[panel] ブレイクアウト日を判定")
-    df = breakout_flags(df)
-    print("[panel] ラベルを付与")
-    df = attach_labels(df)
+    if POPULATION == "breakout":
+        print("[panel] 52週高値の更新日を判定")
+        df = mark_new_highs(df)
+        print("[panel] ブレイク後の上昇ラベルを付与")
+        df = attach_rise_label(df)
+        df = add_breakout_context(df)
 
-    # --- 月末営業日だけをサンプルとして抜き出す --- #
-    df["ym"] = df["Date"].dt.to_period("M")
-    is_month_end = df.groupby(["Code", "ym"], sort=False)["Date"].transform("max") == df["Date"]
-    samples = df[is_month_end].copy()
-    print(f"[sample] 月末サンプル: {len(samples):,}行")
+        n_all = int(df["is_new_high"].sum())
+        samples = df[df["is_fresh_break"] == True].copy()   # noqa: E712
+        print(f"[sample] 52週高値の更新日: {n_all:,}行")
+        print(f"[sample] うち新規のブレイク（直前{BREAKOUT_COOLDOWN}営業日に更新なし）: "
+              f"{len(samples):,}行")
+    else:
+        print("[panel] ブレイクアウト日を判定")
+        df = breakout_flags(df)
+        print("[panel] ラベルを付与")
+        df = attach_labels(df)
+        df["ym"] = df["Date"].dt.to_period("M")
+        is_month_end = (df.groupby(["Code", "ym"], sort=False)["Date"]
+                        .transform("max") == df["Date"])
+        samples = df[is_month_end].copy()
+        print(f"[sample] 月末サンプル: {len(samples):,}行")
 
     # --- 除外条件 --- #
     before = len(samples)
@@ -672,9 +799,12 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     samples = samples[samples["high52w"].notna()]
     print(f"[filter] 52週高値が未定義(上場直後)を除外: {before:,} -> {len(samples):,}")
 
-    before = len(samples)
-    samples = samples[samples["r_high"] < MAX_RHIGH_AT_T]
-    print(f"[filter] 基準日ですでに高値圏(R_high>={MAX_RHIGH_AT_T})を除外: {before:,} -> {len(samples):,}")
+    if POPULATION != "breakout":
+        # 高値更新日を母集団にする場合、r_high は全件ほぼ100なのでこの除外は掛けない
+        before = len(samples)
+        samples = samples[samples["r_high"] < MAX_RHIGH_AT_T]
+        print(f"[filter] 基準日ですでに高値圏(R_high>={MAX_RHIGH_AT_T})を除外: "
+              f"{before:,} -> {len(samples):,}")
 
     before = len(samples)
     samples = samples[samples["tv_ma20"] >= MIN_TRADING_VALUE]

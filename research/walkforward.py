@@ -51,6 +51,8 @@ TRADING_TO_CALENDAR = 1.45
 # 全部見たいときは --features で明示する。
 DEFAULT_PRESETS = [
     "price_only", "rank_price_only",
+    # 高値更新日を母集団にしたので「どう抜けたか」が素朴なベースラインになる
+    "breakout_only",
     "technical", "rank_technical",
     "all", "rank_all",
     "fundamental", "rank_fundamental",
