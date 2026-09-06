@@ -103,6 +103,10 @@ jobs:
       - name: EDA stats
         run: python3 research/eda_stats.py 2>&1 | tee eda.log
 
+      # 集計をそのまま読むページに組む。手で書くと作り直しのたびに書き直しになる
+      - name: EDA report
+        run: python3 research/eda_report.py 2>&1 | tee eda_report.log
+
       # PER/PBR/ROE/ROA は割り算で作るので分母が小さいと発散する。
       # 値が壊れたまま学習しないよう、モデルに入れる前に検査する。
       - name: Validate metrics
@@ -199,6 +203,7 @@ jobs:
             sec "決算カバレッジ" coverage.log
             sec "指標の検証" validate.log
             sec "EDA" eda.log
+            sec "EDA ページ" eda_report.log
             sec "パラメータ探索" tune.log 40
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -208,7 +213,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           mkdir -p research/samples
           cp research/_data/label_comparison.json research/samples/label_comparison.json
-          git add -A research/samples research/viewer research/lgbm_params.json research/eda.json docs/MODEL_RESULTS.md docs/MODEL_WALKFORWARD.md docs/MODEL_WITHIN_DATE.md docs/MODEL_FUNDAMENTAL_COVERAGE.md docs/DATA_VALIDATION.md docs/MODEL_STRATIFIED.md
+          git add -A research/samples research/viewer research/lgbm_params.json research/eda.json research/eda_report.html docs/MODEL_RESULTS.md docs/MODEL_WALKFORWARD.md docs/MODEL_WITHIN_DATE.md docs/MODEL_FUNDAMENTAL_COVERAGE.md docs/DATA_VALIDATION.md docs/MODEL_STRATIFIED.md
           # git diff は未追跡ファイルを見ないため、staged の差分で判定する
           if git diff --cached --quiet; then
             echo "変更なし"; exit 0
@@ -234,6 +239,7 @@ jobs:
             research/_data/fundamental_coverage.json
             research/_data/validation.json
             research/eda.json
+            research/eda_report.html
             research/lgbm_params.json
             docs/MODEL_RESULTS.md
             docs/MODEL_WALKFORWARD.md
