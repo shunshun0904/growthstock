@@ -85,6 +85,39 @@ def chronological_split(df: pd.DataFrame, valid_frac: float = 0.25
     return inner_train, inner_valid
 
 
+def time_series_folds(df: pd.DataFrame, n_splits: int = 5,
+                      embargo_days: int = 60
+                      ) -> List[Tuple[pd.DataFrame, pd.DataFrame]]:
+    """
+    時系列の k 分割。訓練窓を伸ばしながら検証窓を前に進める。
+
+    通常の KFold は使えない。行をシャッフルすると同じ銘柄の隣接期間が
+    訓練と検証の両方に入り、検証が簡単になりすぎて必ず楽観的な
+    パラメータが選ばれる。
+
+    1つの分割で決めるとその期間の癖を拾うので、複数の期間で平均する。
+    分割は「件数で等分」する（期間で等分すると、サンプルの少ない
+    初期の窓が極端に小さくなる）。
+
+    訓練と検証の間にはエンバーゴを置く。ラベルが先 embargo_days 営業日の
+    情報を含むため、隣接させると訓練側のラベルが検証期間に食い込む。
+    """
+    d = pd.to_datetime(df["Date"])
+    edges = [d.quantile(k / (n_splits + 1)) for k in range(1, n_splits + 2)]
+    embargo = pd.Timedelta(days=int(round(embargo_days * 1.45)))
+    out: List[Tuple[pd.DataFrame, pd.DataFrame]] = []
+    for i in range(n_splits):
+        va_lo, va_hi = edges[i], edges[i + 1]
+        tr = df[d <= va_lo - embargo]
+        va = df[(d > va_lo) & (d <= va_hi)]
+        if len(tr) == 0 or len(va) == 0:
+            continue
+        if tr["label"].nunique() < 2 or va["label"].nunique() < 2:
+            continue
+        out.append((tr, va))
+    return out
+
+
 def scale_pos_weight(y: np.ndarray) -> float:
     pos = max(1, int(np.sum(y)))
     return float((len(y) - pos) / pos)
@@ -113,21 +146,31 @@ def _fit_one(params: Dict, tr: pd.DataFrame, va: pd.DataFrame,
 
 
 def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
-         seed: int = 0, verbose: bool = True) -> Dict:
+         seed: int = 0, verbose: bool = True, n_splits: int = 5,
+         embargo_days: int = 60) -> Dict:
     """
     Optuna で探索する。df は「テスト窓より前」のデータだけを渡すこと。
 
+    評価は時系列 k 分割の平均 PR-AUC。
+    1つの分割で決めていたときは、その期間の癖を拾う恐れがあった。
+
     返すのは LGBMClassifier にそのまま渡せる辞書。
-    n_estimators は early stopping が決めた本数に置き換えてある。
+    探索の記録は tune_cv() で別に取る（返り値に混ぜると、
+    そのまま LGBMClassifier に渡したときに未知の引数で落ちる）。
+    n_estimators は各分割の early stopping が決めた本数の中央値。
     """
     import optuna
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
-    tr, va = chronological_split(df)
-    if len(va) == 0 or va["label"].nunique() < 2 or tr["label"].nunique() < 2:
+    folds = time_series_folds(df, n_splits=n_splits, embargo_days=embargo_days)
+    if not folds:
         if verbose:
-            print("  [tune] 内側検証に両クラスが揃わないため既定値を使う")
+            print("  [tune] 分割を作れないため既定値を使う")
         return dict(DEFAULT_PARAMS)
+    if verbose:
+        print(f"  [tune] 時系列{len(folds)}分割 "
+              + " / ".join(f"訓練{len(t):,}→検証{len(v):,}(正例{int(v['label'].sum())})"
+                           for t, v in folds))
 
     def objective(trial):
         params = {
@@ -143,9 +186,17 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
             "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 10.0, log=True),
             "reg_lambda": trial.suggest_float("reg_lambda", 1e-8, 10.0, log=True),
         }
-        score, best_iter = _fit_one(params, tr, va, cols)
-        trial.set_user_attr("best_iteration", best_iter)
-        return score
+        scores, iters = [], []
+        for tr, va in folds:
+            sc, it = _fit_one(params, tr, va, cols)
+            scores.append(sc)
+            iters.append(it)
+        trial.set_user_attr("best_iteration", int(np.median(iters)))
+        trial.set_user_attr("fold_scores", [round(s, 4) for s in scores])
+        # 分割ごとのばらつきが大きい設定は、たまたま当たっただけの可能性がある。
+        # 平均で選ぶが、ばらつきも残して後から見られるようにする
+        trial.set_user_attr("score_std", float(np.std(scores)))
+        return float(np.mean(scores))
 
     study = optuna.create_study(
         direction="maximize",
@@ -157,9 +208,18 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
     # 木の本数は探索対象にせず、early stopping が決めた本数を使う
     best["n_estimators"] = max(
         50, int(study.best_trial.user_attrs.get("best_iteration", 200)))
+    at = study.best_trial.user_attrs
+    global LAST_CV
+    LAST_CV = {"n_splits": len(folds), "mean_pr_auc": round(study.best_value, 4),
+               "std": round(float(at.get("score_std", 0.0)), 4),
+               "fold_scores": at.get("fold_scores", []),
+               "n_trials": n_trials}
     if verbose:
-        print(f"  [tune] {n_trials}試行 / 内側検証PR-AUC {study.best_value:.4f} "
+        folds_txt = " ".join(f"{x:.4f}" for x in at.get("fold_scores", []))
+        print(f"  [tune] {n_trials}試行 / {len(folds)}分割平均PR-AUC "
+              f"{study.best_value:.4f} (±{at.get('score_std', 0):.4f}) "
               f"/ 木 {best['n_estimators']}本")
+        print(f"  [tune] 分割ごと: {folds_txt}")
     return best
 
 
@@ -176,8 +236,19 @@ def save_params(params: Dict[str, Dict], path: str = PARAMS_PATH) -> None:
         json.dump(params, fh, ensure_ascii=False, indent=2)
 
 
+#: 直近の tune() が使った分割の記録。tune() の返り値には混ぜない。
+LAST_CV: Dict = {}
+
+
 def params_for(preset: str, store: Optional[Dict[str, Dict]] = None) -> Dict:
-    """プリセット名から学習用パラメータを返す。無ければ既定値。"""
+    """
+    プリセット名から学習用パラメータを返す。無ければ既定値。
+
+    `_` で始まるキーは探索の記録（CV スコアなど）で、LightGBM には渡さない。
+    """
     store = load_params() if store is None else store
     got = store.get(preset)
-    return {**dict(DEFAULT_PARAMS), **got} if got else dict(DEFAULT_PARAMS)
+    if not got:
+        return dict(DEFAULT_PARAMS)
+    clean = {k: v for k, v in got.items() if not k.startswith("_")}
+    return {**dict(DEFAULT_PARAMS), **clean}

@@ -54,6 +54,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--min-train-months", type=int, default=36)
     ap.add_argument("--test-months", type=int, default=6)
     ap.add_argument("--step-months", type=int, default=6)
+    ap.add_argument("--n-splits", type=int, default=5,
+                    help="探索の評価に使う時系列分割の数")
     args = ap.parse_args(argv)
 
     df = pd.read_parquet(args.dataset).sort_values("Date").reset_index(drop=True)
@@ -80,7 +82,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         el = time.time() - t0
         print(f"\n[{i}/{len(presets)}] {preset} ({len(cols)}列) "
               f"— 経過 {el/60:.1f}分")
-        store[preset] = tuning.tune(tune_df, cols, n_trials=args.n_trials)
+        params = tuning.tune(tune_df, cols, n_trials=args.n_trials,
+                             n_splits=args.n_splits, embargo_days=EMBARGO_DAYS)
+        # 探索の記録を一緒に保存する。params_for が読むときに落とすので
+        # LightGBM には渡らない
+        store[preset] = {**params, "_cv": dict(tuning.LAST_CV),
+                         "_n_features": len(cols)}
         tuning.save_params(store)      # 途中で落ちても結果を失わない
 
     print(f"\n[done] {len(store)}件を {tuning.PARAMS_PATH} に保存 "

@@ -521,6 +521,55 @@ class TestTunedParamsArePersisted(unittest.TestCase):
         self.assertEqual(p["num_leaves"], tuning.DEFAULT_PARAMS["num_leaves"])
 
 
+class TestTuningFolds(unittest.TestCase):
+    """
+    探索の評価は時系列 k 分割。ランダム分割にすると同じ銘柄の隣接期間が
+    訓練と検証の両方に入り、必ず楽観的なパラメータが選ばれる。
+    """
+
+    def _df(self, days=1000, per_day=3):
+        rng = np.random.default_rng(0)
+        dates = pd.date_range("2018-07-01", periods=days, freq="D")
+        n = days * per_day
+        d = pd.DataFrame({"Date": np.repeat(dates, per_day),
+                          "a": rng.normal(0, 1, n)})
+        d["label"] = (rng.random(n) < 0.1).astype(int)
+        return d
+
+    def test_validation_always_follows_training(self):
+        from tuning import time_series_folds
+        folds = time_series_folds(self._df(), n_splits=5, embargo_days=60)
+        self.assertEqual(len(folds), 5)
+        for tr, va in folds:
+            t, v = pd.to_datetime(tr["Date"]), pd.to_datetime(va["Date"])
+            self.assertGreater(v.min(), t.max())
+
+    def test_embargo_is_respected(self):
+        """ラベルは先60営業日の情報を含む。隣接させると訓練が検証に食い込む。"""
+        from tuning import time_series_folds
+        folds = time_series_folds(self._df(), n_splits=5, embargo_days=60)
+        for tr, va in folds:
+            gap = (pd.to_datetime(va["Date"]).min()
+                   - pd.to_datetime(tr["Date"]).max()).days
+            self.assertGreaterEqual(gap, int(60 * 1.45) - 1)
+
+    def test_training_window_expands(self):
+        from tuning import time_series_folds
+        folds = time_series_folds(self._df(), n_splits=5, embargo_days=60)
+        sizes = [len(tr) for tr, _ in folds]
+        self.assertEqual(sizes, sorted(sizes))
+        starts = {pd.to_datetime(tr["Date"]).min() for tr, _ in folds}
+        self.assertEqual(len(starts), 1)
+
+    def test_record_of_the_search_is_not_passed_to_lightgbm(self):
+        """_cv は探索の記録。LGBMClassifier に渡すと未知の引数で落ちる。"""
+        from tuning import params_for
+        store = {"x": {"learning_rate": 0.1, "_cv": {"mean_pr_auc": 0.2}}}
+        got = params_for("x", store)
+        self.assertAlmostEqual(got["learning_rate"], 0.1)
+        self.assertFalse([k for k in got if k.startswith("_")])
+
+
 class TestReportWithoutBaselines(unittest.TestCase):
     """
     単変量ベースラインを廃止したあと、レポートが基準の PR-AUC を

@@ -131,7 +131,9 @@ jobs:
           # ここは「読めなければ no」でよいので失敗を無害化する
           REQ=$(grep -v '^#' research/tune_request.txt 2>/dev/null | head -1 | tr -d '[:space:]' || true)
           if [ "$REQ" = "yes" ]; then
-            python3 research/run_tuning.py --n-trials 30 2>&1 | tee tune.log
+            python3 research/run_tuning.py --n-trials 30 \
+              --features $(grep -v '^#' research/tune_presets.txt | tr '\n' ' ') \
+              --n-splits 5 2>&1 | tee tune.log
           else
             echo "探索は行わない（research/lgbm_params.json を使用）" | tee tune.log
             python3 -c "import json,os;p='research/lgbm_params.json';d=json.load(open(p)) if os.path.exists(p) else {};print(f'保存済み: {len(d)}プリセット')" | tee -a tune.log

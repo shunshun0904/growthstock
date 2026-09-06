@@ -1,4 +1,4 @@
-no
+yes
 # 1行目が "yes" のときだけ Optuna 探索を実行する。
 # それ以外なら research/lgbm_params.json の探索済みパラメータを使う。
 #
