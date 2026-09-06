@@ -1,0 +1,111 @@
+<title>ブレイク予測モデル 重要度</title><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Shippori+Mincho:wght@600;700&family=Noto+Sans+JP:wght@400;500;700&family=JetBrains+Mono:wght@400;600&display=swap"><style>
+:root{
+  --ground:#F5F7F9; --surface:#FFFFFF; --surface-2:#EDF0F4;
+  --ink:#12171E; --ink-2:#54606F; --ink-3:#8B96A5;
+  --line:#DCE2E9; --line-soft:#E9EDF2;
+  --accent:#2F5D8C; --accent-soft:#DCE7F2;
+  --good:#1B6B50; --warn:#A56E14; --bad:#A33636;
+  --good-bg:#DFF0E8; --warn-bg:#F7EBD5; --bad-bg:#F6E0E0;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --body:"Noto Sans JP",system-ui,-apple-system,"Hiragino Kaku Gothic ProN",sans-serif;
+  --display:"Shippori Mincho","Hiragino Mincho ProN",serif;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+  --ground:#0E1217; --surface:#161B22; --surface-2:#1D242D;
+  --ink:#E3E8EF; --ink-2:#9AA6B4; --ink-3:#6C7887;
+  --line:#28313B; --line-soft:#1F272F;
+  --accent:#7FA9D8; --accent-soft:#1C2C3E;
+  --good:#5FBF98; --warn:#D6A64E; --bad:#DC7C7C;
+  --good-bg:#16302A; --warn-bg:#322814; --bad-bg:#331E1E;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#0E1217; --surface:#161B22; --surface-2:#1D242D;
+  --ink:#E3E8EF; --ink-2:#9AA6B4; --ink-3:#6C7887;
+  --line:#28313B; --line-soft:#1F272F;
+  --accent:#7FA9D8; --accent-soft:#1C2C3E;
+  --good:#5FBF98; --warn:#D6A64E; --bad:#DC7C7C;
+  --good-bg:#16302A; --warn-bg:#322814; --bad-bg:#331E1E;
+}
+*{box-sizing:border-box}
+body{background:var(--ground);color:var(--ink);font-family:var(--body);
+     line-height:1.7;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1080px;margin:0 auto;padding:48px 24px 96px}
+header{border-bottom:2px solid var(--ink);padding-bottom:20px;margin-bottom:8px}
+.eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.14em;
+         text-transform:uppercase;color:var(--ink-3);margin:0 0 6px}
+h1{font-family:var(--display);font-size:clamp(28px,4.4vw,42px);line-height:1.25;
+   margin:0;font-weight:700;text-wrap:balance;letter-spacing:.01em}
+.sub{color:var(--ink-2);font-size:14.5px;margin:10px 0 0;max-width:62ch}
+.facts{display:flex;flex-wrap:wrap;gap:0;margin:22px 0 0;
+       border:1px solid var(--line);border-radius:3px;background:var(--surface);
+       overflow:hidden}
+.fact{flex:1 1 150px;padding:13px 16px;border-right:1px solid var(--line-soft)}
+.fact:last-child{border-right:0}
+.fact dt{font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;
+         color:var(--ink-3);text-transform:uppercase;margin:0}
+.fact dd{margin:3px 0 0;font-family:var(--mono);font-size:19px;font-weight:600;
+         font-variant-numeric:tabular-nums}
+section{margin-top:56px}
+h2{font-family:var(--display);font-size:23px;font-weight:700;margin:0 0 4px;
+   letter-spacing:.01em}
+h2 .num{font-family:var(--mono);font-size:12px;font-weight:600;color:var(--accent);
+        letter-spacing:.1em;margin-right:10px;vertical-align:3px}
+.lede{color:var(--ink-2);font-size:14px;margin:0 0 22px;max-width:66ch}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:3px;
+       padding:22px 24px}
+figure{margin:0}
+figcaption{font-size:12.5px;color:var(--ink-3);margin-top:12px;
+           padding-top:10px;border-top:1px solid var(--line-soft)}
+svg{display:block;width:100%;height:auto;overflow:visible}
+.bar-label{font-family:var(--body);font-size:12px;fill:var(--ink-2)}
+.bar-value{font-family:var(--mono);font-size:12px;font-weight:600;fill:var(--ink);
+           font-variant-numeric:tabular-nums}
+.axis{font-family:var(--mono);font-size:10px;fill:var(--ink-3)}
+table{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}
+th:first-child,td:first-child{width:auto}
+th:not(:first-child),td:not(:first-child){width:110px}
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+th{text-align:left;font-family:var(--mono);font-size:10.5px;letter-spacing:.07em;
+   text-transform:uppercase;color:var(--ink-3);font-weight:600;
+   padding:0 12px 8px 0;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:8px 12px 8px 0;border-bottom:1px solid var(--line-soft);
+   vertical-align:top}
+td.n{font-family:var(--mono);font-variant-numeric:tabular-nums;text-align:right;
+     white-space:nowrap}
+code{font-family:var(--mono);font-size:12.5px;background:var(--surface-2);
+     padding:1.5px 5px;border-radius:2px}
+.tag{display:inline-block;font-family:var(--mono);font-size:10.5px;font-weight:600;
+     padding:2px 7px;border-radius:2px;letter-spacing:.03em;white-space:nowrap}
+.t-bad{background:var(--bad-bg);color:var(--bad)}
+.t-warn{background:var(--warn-bg);color:var(--warn)}
+.t-good{background:var(--good-bg);color:var(--good)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(238px,1fr));gap:18px}
+/* 横棒の行: ラベル / バー / 値 / 補足。値の桁を揃えたいので固定幅を与える */
+.bars{display:grid;grid-template-columns:minmax(104px,max-content) max-content 78px 1fr;
+  gap:5px 14px;align-items:center;margin:14px 0 0}
+.bars .bar-value{text-align:right}
+h3{font-family:var(--body);font-size:12px;font-weight:700;letter-spacing:.06em;
+  color:var(--ink-3);margin:26px 0 0;text-transform:uppercase}
+h3:first-child{margin-top:0}
+.v{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.hcard{background:var(--surface);border:1px solid var(--line);border-radius:3px;
+       padding:14px 15px 12px}
+.hcard h3{margin:0;font-family:var(--mono);font-size:12.5px;font-weight:600;
+          color:var(--ink);letter-spacing:.01em;word-break:break-all}
+.hmeta{font-family:var(--mono);font-size:10.5px;color:var(--ink-3);margin:2px 0 9px;
+       font-variant-numeric:tabular-nums}
+.note{border-left:2px solid var(--accent);padding:2px 0 2px 16px;margin:20px 0 0;
+      color:var(--ink-2);font-size:13.5px;max-width:64ch}
+.note b{color:var(--ink)}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--ink-2);
+        margin-bottom:14px;font-family:var(--mono)}
+.sw{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;
+    vertical-align:-1px}
+footer{margin-top:64px;padding-top:18px;border-top:1px solid var(--line);
+       font-size:12px;color:var(--ink-3);font-family:var(--mono)}
+@media (prefers-reduced-motion:no-preference){
+  .panel,.hcard{transition:border-color .15s}
+}
+:root{--s-fund:#2a78d6;--s-val:#eb6834;--s-price:#1baf7a}@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--s-fund:#3987e5;--s-val:#d95926;--s-price:#199e70}}:root[data-theme="dark"]{--s-fund:#3987e5;--s-val:#d95926;--s-price:#199e70}.legend{display:flex;flex-wrap:wrap;gap:16px;margin:14px 0 0;font-size:11.5px;color:var(--ink-2)}.legend i{display:inline-block;width:11px;height:11px;border-radius:3px;margin-right:6px;vertical-align:-1px}</style><div class="wrap"><header><h1>ブレイク予測モデル 重要度</h1><p class="lede">モデルが実際に何を使って判断しているかを見る。gain（その分割で減った損失の合計）の大きい順。</p><div class="facts"><div class="fact"><div class="eyebrow">特徴量セット</div><div class="n">technical</div><div class="sub">14列</div></div><div class="fact"><div class="eyebrow">テスト PR-AUC</div><div class="n">0.1342</div><div class="sub">正例率 9.63%</div></div><div class="fact"><div class="eyebrow">Lift@5%</div><div class="n">1.63x</div><div class="sub"></div></div><div class="fact"><div class="eyebrow">実際に使われた列</div><div class="n">14</div><div class="sub">14列中</div></div><div class="fact"><div class="eyebrow">上位30列の寄与</div><div class="n">100.0%</div><div class="sub">gain 合計に占める割合</div></div></div></header><section><h2><span class="num">01</span>グループ別の寄与</h2><p class="lede">3つに束ねた寄与。どの軸で判断しているかの全体像。</p><div class="legend"><span><i style="background:var(--s-fund);border:0"></i>決算</span><span><i style="background:var(--s-val);border:0"></i>バリュエーション・配当</span><span><i style="background:var(--s-price);border:0"></i>株価・需給・市場</span></div><div class="bars"><div class="bar-label"><code>株価・需給・市場</code></div><div><svg width="300" height="13" role="img" aria-label="株価・需給・市場 109063.8"><rect x="0" y="1.5" width="300.0" height="10" rx="4" fill="var(--s-price)"></rect></svg></div><div class="bar-value">100.00%</div><div class="n">14列</div><div class="bar-label"><code>決算</code></div><div><svg width="300" height="13" role="img" aria-label="決算 0.0"><rect x="0" y="1.5" width="1.5" height="10" rx="4" fill="var(--s-fund)"></rect></svg></div><div class="bar-value">0.00%</div><div class="n">0列</div><div class="bar-label"><code>バリュエーション・配当</code></div><div><svg width="300" height="13" role="img" aria-label="バリュエーション・配当 0.0"><rect x="0" y="1.5" width="1.5" height="10" rx="4" fill="var(--s-val)"></rect></svg></div><div class="bar-value">0.00%</div><div class="n">0列</div></div></section><section><h2><span class="num">02</span>上位30列</h2><p class="lede">棒の右は gain 全体に占める割合、その右は分割に使われた回数。回数だけ多くて割合が小さい列は、値の種類が多いだけの可能性がある。</p><div class="legend"><span><i style="background:var(--s-fund);border:0"></i>決算</span><span><i style="background:var(--s-val);border:0"></i>バリュエーション・配当</span><span><i style="background:var(--s-price);border:0"></i>株価・需給・市場</span></div><div class="bars"><div class="bar-label"><code>vol_20d</code></div><div><svg width="300" height="13" role="img" aria-label="vol_20d 23650.1"><rect x="0" y="1.5" width="300.0" height="10" rx="4" fill="var(--s-price)"></rect></svg></div><div class="bar-value">21.68%</div><div class="n">108回</div><div class="bar-label"><code>log_market_cap</code></div><div><svg width="300" height="13" role="img" aria-label="log_market_cap 11327.6"><rect x="0" y="1.5" width="143.7" height="10" rx="4" fill="var(--s-price)"></rect></svg></div><div class="bar-value">10.39%</div><div class="n">115回</div><div class="bar-label"><code>topix_ret_120</code></div><div><svg width="300" height="13" role="img" aria-label="topix_ret_120 10182.4"><rect x="0" y="1.5" width="129.2" height="10" rx="4" fill="var(--s-price)"></rect></svg></div><div class="bar-value">9.34%</div><div class="n">118回</div><div class="bar-label"><code>ret_20d</code></div><div><svg width="300" height="13" role="img" aria-label="ret_20d 8078.4"><rect x="0" y="1.5" width="102.5" height="10" rx="4" fill="var(--s-price)"></rect></svg></div><div class="bar-value">7.41%</div><div class="n">93回</div><div class="bar-label"><code>base_length</code></div><div><svg width="300" height="13" role="img" aria-label="base_length 8036.6"><rect x="0" y="1.5" width="101.9" height="10" rx="4" fill="var(--s-price)"></rect></svg></div><div class="bar-value">7.37%</div><div class="n">95回</div><div class="bar-label"><code>credit_ratio</code></div><div><svg width="300" height="13" role="img" aria-label="credit_ratio 7301.1"><rect x="0" y="1.5" width="92.6" height="10" rx="4" fill="var(--s-price)"></rect></svg></div><div class="bar-value">6.69%</div><div class="n">91回</div><div class="bar-label"><code>r_high_6m</code></div><div><svg width="300" height="13" role="img" aria-label="r_high_6m 7284.4"><rect x="0" y="1.5" width="92.4" height="10" rx="4" fill="var(--s-price)"></rect></svg></div><div class="bar-value">6.68%</div><div class="n">103回</div><div class="bar-label"><code>r_high</code></div><div><svg width="300" height="13" role="img" aria-label="r_high 6795.8"><rect x="0" y="1.5" width="86.2" height="10" rx="4" fill="var(--s-price)"></rect></svg></div><div class="bar-value">6.23%</div><div class="n">67回</div><div class="bar-label"><code>r_high_3m</code></div><div><svg width="300" height="13" role="img" aria-label="r_high_3m 6169.6"><rect x="0" y="1.5" width="78.3" height="10" rx="4" fill="var(--s-price)"></rect></svg></div><div class="bar-value">5.66%</div><div class="n">101回</div><div class="bar-label"><code>volume_trend</code></div><div><svg width="300" height="13" role="img" aria-label="volume_trend 5877.8"><rect x="0" y="1.5" width="74.6" height="10" rx="4" fill="var(--s-price)"></rect></svg></div><div class="bar-value">5.39%</div><div class="n">69回</div><div class="bar-label"><code>topix_ret_20</code></div><div><svg width="300" height="13" role="img" aria-label="topix_ret_20 4145.5"><rect x="0" y="1.5" width="52.6" height="10" rx="4" fill="var(--s-price)"></rect></svg></div><div class="bar-value">3.80%</div><div class="n">74回</div><div class="bar-label"><code>log_trading_value</code></div><div><svg width="300" height="13" role="img" aria-label="log_trading_value 4077.2"><rect x="0" y="1.5" width="51.7" height="10" rx="4" fill="var(--s-price)"></rect></svg></div><div class="bar-value">3.74%</div><div class="n">71回</div><div class="bar-label"><code>close_position</code></div><div><svg width="300" height="13" role="img" aria-label="close_position 3614.1"><rect x="0" y="1.5" width="45.8" height="10" rx="4" fill="var(--s-price)"></rect></svg></div><div class="bar-value">3.31%</div><div class="n">47回</div><div class="bar-label"><code>break_margin</code></div><div><svg width="300" height="13" role="img" aria-label="break_margin 2523.2"><rect x="0" y="1.5" width="32.0" height="10" rx="4" fill="var(--s-price)"></rect></svg></div><div class="bar-value">2.31%</div><div class="n">40回</div></div></section><section><h2><span class="num">03</span>特徴量セット別のテスト成績</h2><p class="lede">上の重要度は、この表の最上段（PR-AUC 最良）のモデルのもの。</p><div class="scroll"><table><thead><tr><th>セット</th><th>PR-AUC</th><th>Lift@5%</th><th>列数</th></tr></thead><tbody><tr><td>technical</td><td class="v">0.1342</td><td class="v">1.63x</td><td class="v">14</td></tr><tr><td>rank_all</td><td class="v">0.1288</td><td class="v">1.55x</td><td class="v">136</td></tr><tr><td>all</td><td class="v">0.1249</td><td class="v">1.34x</td><td class="v">136</td></tr><tr><td>all_no_market</td><td class="v">0.1235</td><td class="v">1.63x</td><td class="v">134</td></tr><tr><td>price_only</td><td class="v">0.1186</td><td class="v">1.21x</td><td class="v">3</td></tr><tr><td>rank_price_only</td><td class="v">0.1184</td><td class="v">1.34x</td><td class="v">3</td></tr><tr><td>raw_and_rank</td><td class="v">0.1170</td><td class="v">1.30x</td><td class="v">130</td></tr><tr><td>fund_simple</td><td class="v">0.1122</td><td class="v">1.17x</td><td class="v">18</td></tr><tr><td>extras_only</td><td class="v">0.1095</td><td class="v">0.92x</td><td class="v">23</td></tr><tr><td>rank_technical</td><td class="v">0.1082</td><td class="v">1.26x</td><td class="v">9</td></tr></tbody></table></div></section><p class="note"><b>読むときの注意。</b>重要度は「モデルが何を使ったか」であって、因果でも「効く順」でもない。相関の強い列どうしでは重要度が分け合われるため、低いことは効かないことの証拠にならない。列を落とす判断は、落として測り直してから行う。</p><footer class="note">データ: J-Quants API V2（日本取引所グループ）／重要度は research/train_model.py、組版は research/importance_report.py。</footer></div>
