@@ -17,6 +17,11 @@ on:
       run_id:
         description: 'source=artifact のとき、artifact を持つ実行のID'
         required: false
+      train:
+        description: '学習・評価まで実行する（既定は EDA まで）'
+        type: choice
+        options: ['no', 'yes']
+        default: 'no'
   push:
     branches: ['claude/breakout-model']
     paths: ['research/rebuild_run_id.txt']
@@ -113,13 +118,37 @@ jobs:
             python3 -c "import json,os;p='research/lgbm_params.json';d=json.load(open(p)) if os.path.exists(p) else {};print(f'保存済み: {len(d)}プリセット')" | tee -a tune.log
           fi
 
+      # 学習は既定では行わない。
+      # EDA で特徴量の欠損・異常値を確認し、利用者が明示的に許可してから走らせる。
+      # 特徴量がおかしいまま学習しても結果が無駄になり、EDA を先に出す意味が消える。
+      #
+      # 許可の与え方は2通り:
+      #   ・workflow_dispatch の train を yes にする（その1回だけ）
+      #   ・research/train_request.txt の1行目を "yes" にする（push 起動でも効く）
+      - name: Resolve train gate
+        id: gate
+        run: |
+          REQ="${{ inputs.train }}"
+          if [ -z "$REQ" ]; then
+            REQ=$(grep -v '^#' research/train_request.txt 2>/dev/null | head -1 | tr -d '[:space:]')
+          fi
+          if [ "$REQ" = "yes" ]; then
+            echo "train=yes" >> "$GITHUB_OUTPUT"
+            echo "学習・評価まで実行する"
+          else
+            echo "train=no" >> "$GITHUB_OUTPUT"
+            echo "学習は行わない（EDA まで）。許可するには train=yes か research/train_request.txt の1行目を yes にする"
+          fi
+
       - name: Train and evaluate
+        if: steps.gate.outputs.train == 'yes'
         run: |
           python3 research/train_model.py             --val-start 2023-01-01 --test-start 2024-10-01 2>&1 | tee train.log
 
       # 単一分割はテスト期間が1つしかなく、局面差と実力差を分離できない。
       # 訓練窓を伸ばしながらテスト窓を進め、複数局面で同じ比較を繰り返す。
       - name: Walk-forward evaluation
+        if: steps.gate.outputs.train == 'yes'
         run: python3 research/walkforward.py 2>&1 | tee walkforward.log
 
       # LTR を作る前に「日付内に取り出せる情報があるか」を測る。
@@ -128,9 +157,11 @@ jobs:
       # 従来の基準「R_high のみ」はゴールまでの距離を測っているだけで、
       # 決算やバリュエーションと競わせても比較にならなかった。
       - name: Stratified evaluation
+        if: steps.gate.outputs.train == 'yes'
         run: python3 research/stratified_eval.py 2>&1 | tee strat.log
 
       - name: Within-date signal
+        if: steps.gate.outputs.train == 'yes'
         run: python3 research/within_date_signal.py 2>&1 | tee within.log
 
       - name: Build viewer
@@ -139,17 +170,25 @@ jobs:
           cp research/_data/label_samples.json research/samples/label_samples.json
           python3 research/viewer/build_viewer.py
 
-      - run: |
+      # 学習をスキップすると walkforward.log などは存在しない。
+      # bash -e なので tail が失敗するとこのステップごと落ちる。無い分は「実行せず」と書く。
+      - name: Step summary
+        run: |
+          sec() {
+            echo "## $1"; echo '```'
+            if [ -f "$2" ]; then tail -"${3:-500}" "$2"; else echo "(実行せず)"; fi
+            echo '```'
+          }
           {
-            echo "## データセット構築"; echo '```'; cat build.log; echo '```'
-            echo "## ラベル検証データ"; echo '```'; cat labels.log; echo '```'
-            echo "## ウォークフォワード"; echo '```'; tail -40 walkforward.log; echo '```'
-            echo "## 日付内の分離力"; echo '```'; tail -30 within.log; echo '```'
-            echo "## R_high 層別"; echo '```'; tail -30 strat.log; echo '```'
-            echo "## 決算カバレッジ"; echo '```'; cat coverage.log; echo '```'
-            echo "## 指標の検証"; echo '```'; cat validate.log; echo '```'
-            echo "## EDA"; echo '```'; cat eda.log; echo '```'
-            echo "## パラメータ探索"; echo '```'; tail -40 tune.log; echo '```'
+            sec "データセット構築" build.log
+            sec "ラベル検証データ" labels.log
+            sec "ウォークフォワード" walkforward.log 40
+            sec "日付内の分離力" within.log 30
+            sec "R_high 層別" strat.log 30
+            sec "決算カバレッジ" coverage.log
+            sec "指標の検証" validate.log
+            sec "EDA" eda.log
+            sec "パラメータ探索" tune.log 40
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Commit outputs
