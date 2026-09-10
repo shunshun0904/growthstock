@@ -216,7 +216,15 @@ FUND_REQUIREMENT_SETS = {
 #:
 #: 赤字銘柄を候補から外したいなら、この列の欠測に頼るのではなく
 #: FUND_QUALITY（増収増益フィルタ）で明示的に指定すること。
-FUND_REQUIREMENT = "full4_sym"
+#:
+#: いまは "none"（絞らない）にしてある。
+#:   full4_sym は 17,580 -> 12,484 と母集団の29.0%を落としていた。
+#:   落ちた5,096行は「決算の変化が作れない」だけで、
+#:   株価・需給・地合いの特徴量は揃っている。捨てるには惜しい。
+#:   欠測を学習させる懸念は fund_complete フラグで明示することに置き換えた
+#:   （列ごとにばらばらに欠測を学ぶより、1本のフラグのほうが素直）。
+#: 効果は all（fund_complete 込み）で測る。戻すなら "full4_sym" に書き換える。
+FUND_REQUIREMENT = "none"
 
 # --- 決算の中身で母集団を絞る --- #
 # 決算を特徴量として薄く効かせるより、対象を選ぶ側に使う。
@@ -286,7 +294,31 @@ FUTURE_COLS = ["label", "future_max_close", "future_rise",
 
 # --- 除外条件 (docs/MODEL_DESIGN.md §2.2) --- #
 MAX_RHIGH_AT_T = 95.0   # 基準日ですでに高値圏の銘柄は対象外
-MIN_TRADING_VALUE = 0.5 # 20日平均売買代金の下限（億円）
+
+# 20日平均売買代金の下限（億円）。None なら絞らない。
+#
+# 0.5億円のとき 27,237 -> 17,580 と母集団の35.5%を落としていた。
+# 単一のフィルタとしては最も大きく、決算完全性（-29.0%）より効いていた。
+# しかも落ちるのは小型側なので、母集団は「小型に偏っている」のではなく
+# 逆に「小型を削ってある」状態だった。
+#
+# 撤廃したうえで、閾値ごとの残存件数と正例率を毎回出す
+# （report_liquidity_threshold）。どこで切るかは実測を見て決める。
+#
+# 注意: 統計的に有利でも、売買代金が小さい銘柄は実際には買えない
+# （スプレッド・約定不能・スリッページ）。
+# 数字が良くなっても運用の利益に直結しない。戻すならここに値を入れる。
+MIN_TRADING_VALUE = None
+#: 残存件数と正例率を出す閾値の候補（億円）。None は「絞らない」
+LIQUIDITY_LADDER = (None, 0.05, 0.1, 0.3, 0.5, 1.0, 3.0)
+
+# 時価総額の帯（億円）。フラグ列 cap_band の境界。
+#
+# 端は固定値にする。分位点で切ると全期間の分布を見ることになり、
+# 基準日から見て未来の情報が混ざる。
+# 区切りは EDA のラベル内訳（〜100 / 100〜300 / 300〜1000 / 1000〜3000 / 3000〜）
+# と同じにして、集計とモデルで別の帯を使わないようにする。
+CAP_BAND_EDGES = (100.0, 300.0, 1000.0, 3000.0)
 # 時価総額の帯（億円）。基準日時点で判定する。None なら絞らない。
 #
 # 一時 50〜300億円に絞ったが、解除した。
@@ -663,6 +695,68 @@ def apply_fund_quality(samples: pd.DataFrame) -> pd.DataFrame:
     print(f"[filter] 決算の中身で絞る（{FUND_QUALITY}）: {before:,} -> {len(out):,} "
           f"/ 正例率 {out['label'].mean()*100:.2f}%")
     return out
+
+
+def report_liquidity_threshold(samples: pd.DataFrame) -> None:
+    """
+    流動性の下限を変えたときの残存件数と正例率を出す。
+
+    絞ってから測るのでは「絞った結果どうなるか」しか分からない。
+    絞る前に、候補ごとの残存数と正例率を並べて出す
+    （決算フィルタの report_fund_completeness と同じやり方）。
+    """
+    n = len(samples)
+    if n == 0 or "tv_ma20" not in samples.columns:
+        return
+    base = float(samples["label"].mean() * 100)
+    print(f"[liq] 流動性の下限ごとの残存（絞る前 {n:,}件 / 正例率 {base:.2f}%）")
+    for thr in LIQUIDITY_LADDER:
+        keep = samples if thr is None else samples[samples["tv_ma20"] >= thr]
+        name = "なし" if thr is None else f"{thr}億円"
+        rate = float(keep["label"].mean() * 100) if len(keep) else float("nan")
+        print(f"  {name:>8}  {len(keep):>7,}件 ({len(keep) / n * 100:5.1f}%) "
+              f"正例率 {rate:5.2f}%")
+
+
+def fund_complete_flag(samples: pd.DataFrame) -> pd.Series:
+    """
+    決算の変化（full4_sym の10列）がすべて作れる行かどうか。
+
+    FUND_REQUIREMENT で絞らない場合、決算が欠測の行が混ざる。
+    LightGBM は欠測をそのまま扱えるが、「欠測かどうか」は
+    列ごとにばらばらに学習される。1本のフラグにしておけば、
+    どちらの母集団の行なのかをモデルが直接見られる。
+
+    絞る／絞らないに関わらず作る。絞った場合は全行 1 になる。
+    """
+    cols = FUND_REQUIREMENT_SETS["full4_sym"]
+    missing = sorted(set(cols) - set(samples.columns))
+    if missing:
+        raise SystemExit(f"[fatal] fund_complete の材料がありません: {missing}")
+    return samples[cols].notna().all(axis=1).astype(float)
+
+
+def cap_band(market_cap: pd.Series) -> pd.Series:
+    """
+    時価総額の帯（0=最小 … 4=最大）。欠測は欠測のまま返す。
+
+    log_market_cap（連続値）が既にあるので、木にとって情報は増えない。
+    帯は log_market_cap の単調な階段関数であり、帯での分割は
+    log_market_cap での分割で必ず再現できる。
+
+    それでも持たせるのは2点のため:
+      ・CV の層別（tuning._cap_bands）と EDA の内訳（eda_stats）が
+        同じ帯を使うようになる。3か所で違う切り方をしていると、
+        同じ「規模」という言葉が別のものを指す
+      ・浅い木でも他の特徴量との交互作用を作りやすい
+
+    層別評価（stratified_eval）は日付ごとの分位で切る。あちらは
+    「同じ日の中で規模を揃えて比べる」ための層で、目的が違う。
+    """
+    filled = pd.to_numeric(market_cap, errors="coerce")
+    band = pd.Series(np.digitize(filled.fillna(-1.0), CAP_BAND_EDGES),
+                     index=filled.index, dtype=float)
+    return band.where(filled.notna())
 
 
 def apply_fund_requirement(samples: pd.DataFrame) -> pd.DataFrame:
@@ -1417,9 +1511,14 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
         print(f"[filter] 基準日ですでに高値圏(R_high>={MAX_RHIGH_AT_T})を除外: "
               f"{before:,} -> {len(samples):,}")
 
-    before = len(samples)
-    samples = samples[samples["tv_ma20"] >= MIN_TRADING_VALUE]
-    print(f"[filter] 低流動性(20日平均売買代金<{MIN_TRADING_VALUE}億円)を除外: {before:,} -> {len(samples):,}")
+    report_liquidity_threshold(samples)
+    if MIN_TRADING_VALUE is None:
+        print("[filter] 流動性の下限は設定していない（MIN_TRADING_VALUE=None）")
+    else:
+        before = len(samples)
+        samples = samples[samples["tv_ma20"] >= MIN_TRADING_VALUE]
+        print(f"[filter] 低流動性(20日平均売買代金<{MIN_TRADING_VALUE}億円)を除外: "
+              f"{before:,} -> {len(samples):,}")
 
     # --- 財務をマージ（開示日ベースの point-in-time） --- #
     print("\n[merge] 財務情報を開示日ベースで結合")
@@ -1578,6 +1677,16 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     # --- 最終的な特徴量セット --- #
     samples["log_trading_value"] = np.log1p(samples["tv_ma20"])
     samples["log_market_cap"] = np.log1p(samples["market_cap"])
+    # 母集団を広げると規模と決算の揃い方の分布が変わる。
+    # どちらの群の行なのかをモデルが直接見られるようにフラグで持たせる
+    samples["cap_band"] = cap_band(samples["market_cap"])
+    samples["fund_complete"] = fund_complete_flag(samples)
+    _cb = samples["cap_band"].value_counts(dropna=False).sort_index()
+    print("[flag] 時価総額の帯: " + " ".join(
+        f"{'欠測' if pd.isna(k) else int(k)}:{v:,}" for k, v in _cb.items()))
+    print(f"[flag] 決算の変化が全て作れる行: "
+          f"{samples['fund_complete'].sum():,.0f} / {len(samples):,} "
+          f"({samples['fund_complete'].mean() * 100:.1f}%)")
 
     # --- 横断面正規化 ---
     # 絶対値のままだと相場局面に依存する。上昇局面では全銘柄の R_high が高くなるため、

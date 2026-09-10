@@ -103,6 +103,16 @@ GROUPS: Dict[str, List[str]] = {
     # 赤字->黒字は小型株で株価が最も動くイベントだが、
     # 従来の成長率定義では欠測として捨てられていた
     "turnaround": ["eps_growth_turn", "sales_growth_turn"],
+    # --- 規模・母集団のフラグ ---
+    #
+    # 母集団の制約（流動性の下限・決算の完全性）を外すと、
+    # 規模と決算の揃い方の分布が変わる。どちらの群の行なのかを
+    # モデルが直接見られるようにフラグで持たせる。
+    #
+    # cap_band は log_market_cap の単調な階段関数なので、木にとって
+    # 情報は増えない。層別（CV・評価）と特徴量で同じ帯を使うために置く。
+    # 順位化はしない（帯の日付内順位は時価総額の順位と同じものになる）。
+    "scale": ["cap_band", "fund_complete"],
     # --- 市場環境（これを外すとモデルは相場局面を暗記しやすくなる）---
     #
     # ここの列はすべて「その日は全銘柄同じ値」である。
@@ -155,7 +165,8 @@ assert set(RAW_FOR_RANK) == {c for g in RANKED_GROUPS for c in GROUPS[g]}, \
 ALL_GROUPS: List[str] = [
     "fund_level", "fund_lag", "fund_trend", "fund_streak", "price", "breakout",
     "volume", "liquidity", "supply", "progress", "valuation", "dividend",
-    "cashflow", "efficiency", "guidance", "sector", "turnaround", "market",
+    "cashflow", "efficiency", "guidance", "sector", "turnaround", "scale",
+    "market",
 ]
 
 #: 実験用のプリセット。グループ名の並びで指定する。
@@ -260,7 +271,9 @@ DEFAULT_PRESET = "all"
 #: （このリポジトリで実際に何度も起きた種類の事故）。
 #: 「1列だけ抜いたセット」のためにその risk は負わない。
 PRESET_DROP: Dict[str, frozenset] = {
-    "all_no_cap": frozenset({"log_market_cap"}),
+    # cap_band も落とす。log_market_cap だけ抜いても帯が残っていては
+    # 規模の情報が別の入口から戻ってきて、この対照実験が成立しない
+    "all_no_cap": frozenset({"log_market_cap", "cap_band"}),
 }
 assert set(PRESET_DROP) <= set(PRESETS), \
     f"PRESET_DROP に未知のプリセット: {sorted(set(PRESET_DROP) - set(PRESETS))}"

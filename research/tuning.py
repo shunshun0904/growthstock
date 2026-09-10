@@ -140,15 +140,38 @@ def _year_groups(years: pd.Series, labels: pd.Series, n_splits: int) -> pd.Serie
 #: 層別しているつもりで何も揃えていないことになる。
 CAP_BANDS = 5
 CAP_COL = "log_market_cap"
+#: build_dataset が作る固定境界の帯。あればこちらを優先する
+BAND_COL = "cap_band"
 
 
 def _cap_bands(df: pd.DataFrame, n_bands: int = CAP_BANDS) -> pd.Series:
-    """時価総額（対数）を全期間の分位で帯に分ける。欠測は独立した帯にする。"""
+    """
+    時価総額を帯に分ける。欠測は独立した帯にする。
+
+    データセットに cap_band（build_dataset の固定境界。億円で
+    100/300/1000/3000）があればそれを使う。層別評価・特徴量・CV で
+    別々の帯を使うと、同じ「規模」という言葉が3か所で違うものを指す。
+
+    無い場合だけ全期間の分位に落とす。分位は分布そのものを見ているので、
+    厳密には期間全体の情報を使っていることになる。
+    """
+    if BAND_COL in df.columns:
+        return _band_label(pd.to_numeric(df[BAND_COL], errors="coerce"))
     if CAP_COL not in df.columns:
         return pd.Series("na", index=df.index)
     v = pd.to_numeric(df[CAP_COL], errors="coerce")
-    band = pd.qcut(v, n_bands, labels=False, duplicates="drop")
-    return band.astype("Int64").astype(str).fillna("na")
+    return _band_label(pd.qcut(v, n_bands, labels=False, duplicates="drop"))
+
+
+def _band_label(v: pd.Series) -> pd.Series:
+    """
+    帯の番号を層の名前にする。欠測は "na"。
+
+    `.astype("Int64").astype(str).fillna("na")` は効かない。
+    astype(str) の時点で pd.NA が文字列 "<NA>" になるので、
+    fillna には何も残っていない。欠測は astype の前に取り分ける。
+    """
+    return v.astype("Int64").astype(str).where(v.notna(), "na")
 
 
 def _composition_spread(frames: List[pd.DataFrame], key: pd.Series) -> float:

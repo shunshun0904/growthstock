@@ -794,6 +794,33 @@ class TestTunedParamsArePersisted(unittest.TestCase):
         self.assertEqual(p["num_leaves"], tuning.DEFAULT_PARAMS["num_leaves"])
 
 
+class TestCapBandSource(unittest.TestCase):
+    """
+    規模の帯は、層別評価・特徴量・CV で同じ定義でなければならない。
+    別々に切ると、同じ「規模」という言葉が3か所で違うものを指す。
+    """
+
+    def test_prefers_the_dataset_band_over_quantiles(self):
+        import tuning as T
+        df = pd.DataFrame({
+            "log_market_cap": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "cap_band": [0.0, 0.0, 0.0, 4.0, 4.0],
+        })
+        self.assertEqual(list(T._cap_bands(df)), ["0", "0", "0", "4", "4"])
+
+    def test_falls_back_to_quantiles_without_the_column(self):
+        import tuning as T
+        df = pd.DataFrame({"log_market_cap": [float(i) for i in range(100)]})
+        band = T._cap_bands(df)
+        self.assertEqual(band.nunique(), T.CAP_BANDS)
+
+    def test_missing_band_becomes_its_own_stratum(self):
+        """欠測を既存の帯に混ぜると、揃えたつもりの構成がずれる。"""
+        import tuning as T
+        df = pd.DataFrame({"cap_band": [0.0, np.nan, 4.0]})
+        self.assertEqual(list(T._cap_bands(df)), ["0", "na", "4"])
+
+
 class TestYearStratifiedFolds(unittest.TestCase):
     """
     探索の評価は年で層別した k 分割。

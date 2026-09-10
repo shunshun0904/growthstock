@@ -23,6 +23,7 @@ from build_dataset import (  # noqa: E402
     HOLD_DAYS, HORIZON_END, HORIZON_START, HIGH_WINDOW, LabelConfig,
     _lag_available, add_cross_sectional_ranks, attach_labels, breakout_flags,
     price_panel, quarterize_panel, market_environment, MACRO_ETFS,
+    cap_band, fund_complete_flag, CAP_BAND_EDGES, FUND_REQUIREMENT_SETS,
 )
 
 
@@ -1046,12 +1047,19 @@ class TestFundRequirementKeepsTurnarounds(unittest.TestCase):
             self.assertTrue(all(pd.notna(r[c]) for c in cols),
                             f"{key} が黒字継続の会社を落としている")
 
-    def test_the_applied_requirement_is_the_symmetric_one(self):
-        """既定を固定する。黙って戻ると転換がまた全部消える。"""
+    def test_the_applied_requirement_is_never_the_asymmetric_one(self):
+        """
+        full4 に黙って戻ると赤字->黒字転換がまた全部消える。
+        絞らない（none）か対称版（full4_sym）のどちらかであること。
+
+        いまは none（絞らずに fund_complete フラグで持つ）。
+        絞る側に戻すなら full4_sym を使う。
+        """
         import build_dataset as B
-        self.assertEqual(B.FUND_REQUIREMENT, "full4_sym")
         self.assertIn(B.FUND_REQUIREMENT, B.FUND_REQUIREMENT_SETS)
-        # 要求の強さは full4 と同じでなければならない（緩めたわけではない）
+        self.assertNotEqual(B.FUND_REQUIREMENT, "full4",
+                            "full4 は前年4期すべて黒字の会社しか残さない")
+        # 対称版の要求の強さは full4 と同じでなければならない（緩めたわけではない）
         self.assertEqual(len(B.FUND_REQUIREMENT_SETS["full4_sym"]),
                          len(B.FUND_REQUIREMENT_SETS["full4"]))
 
@@ -1254,6 +1262,67 @@ class TestMarketEnvironment(unittest.TestCase):
         """全銘柄共通の値を日付内で順位化しても情報にならない。"""
         import features as F
         for c in F.GROUPS["market"]:
+            self.assertNotIn(c, F.RAW_FOR_RANK, c)
+
+
+class TestPopulationFlags(unittest.TestCase):
+    """
+    母集団の制約（流動性の下限・決算の完全性）を外したぶん、
+    どちらの群の行なのかをフラグで持たせる。
+    """
+
+    def test_cap_band_boundaries(self):
+        """境界は「以上」で上の帯に入る。EDA の内訳と同じ切り方にする。"""
+        s = pd.Series([1.0, 99.9, 100.0, 299.9, 300.0, 999.9, 1000.0,
+                       2999.9, 3000.0, 500000.0])
+        self.assertEqual(list(cap_band(s)), [0, 0, 1, 1, 2, 2, 3, 3, 4, 4])
+
+    def test_cap_band_keeps_missing_missing(self):
+        """時価総額が無い行を最小の帯に落とすと、規模の分布が歪む。"""
+        s = pd.Series([np.nan, 50.0, np.nan])
+        out = cap_band(s)
+        self.assertTrue(pd.isna(out.iloc[0]))
+        self.assertEqual(out.iloc[1], 0)
+        self.assertTrue(pd.isna(out.iloc[2]))
+
+    def test_cap_band_has_one_more_band_than_edges(self):
+        self.assertEqual(int(cap_band(pd.Series([1e9])).iloc[0]),
+                         len(CAP_BAND_EDGES))
+
+    def test_fund_complete_marks_exactly_the_rows_the_filter_would_keep(self):
+        """
+        fund_complete は「full4_sym で絞ったら残る行」と一致していないと、
+        絞る／絞らないの比較ができなくなる。
+        """
+        cols = FUND_REQUIREMENT_SETS["full4_sym"]
+        df = pd.DataFrame({c: [1.0, 1.0, 1.0] for c in cols})
+        df.loc[1, cols[0]] = np.nan          # 1列でも欠けたら不成立
+        df.loc[2, cols[-1]] = np.nan
+        flag = fund_complete_flag(df)
+        self.assertEqual(list(flag), [1.0, 0.0, 0.0])
+        kept = df[df[cols].notna().all(axis=1)]
+        self.assertEqual(len(kept), int(flag.sum()))
+
+    def test_fund_complete_fails_loudly_when_material_is_missing(self):
+        """材料が無いのに黙って全0を返すと、母集団の比較が壊れる。"""
+        with self.assertRaises(SystemExit):
+            fund_complete_flag(pd.DataFrame({"x": [1.0]}))
+
+    def test_no_cap_preset_also_drops_the_band(self):
+        """
+        all_no_cap は「規模を抜いたら何が残るか」の対照実験。
+        log_market_cap だけ抜いても帯が残っていては規模が別口から戻る。
+        """
+        import features as F
+        cols = F.columns("all_no_cap")
+        self.assertNotIn("log_market_cap", cols)
+        self.assertNotIn("cap_band", cols)
+        self.assertIn("cap_band", F.columns("all"))
+
+    def test_scale_flags_are_not_ranked(self):
+        """帯の日付内順位は時価総額の順位と同じものになる。二重に持たない。"""
+        import features as F
+        for c in F.GROUPS["scale"]:
             self.assertNotIn(c, F.RAW_FOR_RANK, c)
 
 
