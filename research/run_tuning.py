@@ -58,10 +58,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--n-splits", type=int, default=5,
                     help="探索の評価に使う分割の数")
     ap.add_argument("--cv",
-                    choices=["year", "year_cap", "cap", "timeseries"],
+                    choices=["year", "year_cap", "year_cap_date", "cap",
+                             "timeseries"],
                     default="year",
                     help="分割方式。year=年で層別（既定） / "
-                         "year_cap=年×時価総額帯 / cap=時価総額帯のみ / "
+                         "year_cap=年×時価総額帯 / "
+                         "year_cap_date=それに加えて日付単位で分割 / "
+                         "cap=時価総額帯のみ / "
                          "timeseries=時系列")
     args = ap.parse_args(argv)
 

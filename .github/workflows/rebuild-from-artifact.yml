@@ -141,11 +141,13 @@ jobs:
           # ここは「読めなければ no」でよいので失敗を無害化する
           REQ=$(grep -v '^#' research/tune_request.txt 2>/dev/null | head -1 | tr -d '[:space:]' || true)
           if [ "$REQ" = "yes" ]; then
-            # 層は「年の束 × 時価総額帯 × ラベル」。
-            # 年だけだと規模の構成がフォールド間で最大4.9ptずれる（実測）。
-            # 正例率が規模で1.8倍違うので、構成がずれると難易度もずれる。
-            # 年を規模で置き換えてはいけない（年構成が2.7ptずれる）
-            python3 research/run_tuning.py --n-trials 50 --cv year_cap \
+            # 層は「年の束 × 時価総額帯 × ラベル」、分割は日付単位。
+            # 行単位で切ると、ある日の7銘柄が訓練側と検証側に分かれる。
+            # 同じ日の銘柄は地合いを共有するので、分けると検証が楽になり
+            # CV が楽観側に出る（LTR では答えの一部を訓練で見ることになる）。
+            # 引き換えに層の揃いは緩くなる（年構成 0.06pt -> 1.7pt）。
+            # 日付をまたげない以上これが下限で、リークを残すよりよい
+            python3 research/run_tuning.py --n-trials 50 --cv year_cap_date \
               --features $(grep -v '^#' research/tune_presets.txt | tr '\n' ' ') \
               --n-splits 5 2>&1 | tee tune.log
           else

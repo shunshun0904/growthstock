@@ -182,11 +182,73 @@ def _coarsen(levels: List[pd.Series], n_splits: int) -> pd.Series:
         cand = lv.astype(str)
         big = cand.groupby(cand).transform("size") >= n_splits
         out = cand.where(big, out)
+
+    # 細かい層に抜けていった結果、残った粗い層のほうが分割数を割ることがある。
+    # 例: 粗い層に100件あり、96件が細かい層へ移ると粗い層は4件になる。
+    # StratifiedKFold はそこで落ちる（警告を出して分割が偏る）。
+    # 割ってしまった層は最大の層に寄せる。
+    for _ in range(len(levels) + 2):
+        size = out.groupby(out).transform("size")
+        if bool((size >= n_splits).all()):
+            break
+        biggest = out.value_counts().index[0]
+        out = out.where(size >= n_splits, biggest)
     return out
 
 
+#: 日付単位で分けるときの、1日あたり正例数のバケット境界。
+#: 平均7.2銘柄/日なので正例は0〜3件が大半。細かく割ると層が薄くなる。
+POS_BUCKETS = (0, 1, 2, 3)
+
+
+def _date_strata(df: pd.DataFrame, n_splits: int, by_year: bool,
+                 by_cap: bool) -> pd.Series:
+    """
+    日付ごとの層を作る（索引は日付）。
+
+    日付単位で分けるなら、層も日付単位で持たなければならない。
+    ラベルや時価総額は日付の中で変わるので、行単位の層をそのまま
+    StratifiedGroupKFold に渡しても満たせず、結果として何も揃わない
+    （実測で年構成のずれが 0.062pt -> 8.820pt に悪化した）。
+
+    日付レベルで意味を持つのは
+      ・その日の正例数（正例率を揃えるため）
+      ・その日が属する年（局面を揃えるため）
+      ・その日の規模の中心（規模構成を揃えるため）
+
+    粗いほうから順に積んで _coarsen に渡す。一気に細かくすると、
+    薄い層が「正例数だけ」まで落ちて年の情報ごと失われる
+    （実測で年構成のずれが 2.725pt に留まっていた原因）。
+    """
+    g = df.groupby("Date", sort=True)
+    npos = g["label"].sum().astype(int)
+
+    # 積む順が結果を決める。薄い層は1段粗いほうへ落ちるので、
+    # 最後まで残したい軸を先に置く。年は局面の当たり外れを相殺する
+    # いちばん効く軸なので先頭に置く（正例数を先頭にすると、
+    # 薄い層が年の情報ごと落ちて年構成のずれが3倍になった）。
+    levels: List[pd.Series] = []
+    if by_year:
+        row_years = pd.to_datetime(df["Date"]).dt.year
+        mapping = dict(zip(row_years,
+                           _year_groups(row_years, df["label"].astype(int),
+                                        n_splits)))
+        years = pd.to_datetime(pd.Series(g["Date"].first())).dt.year
+        levels.append("y" + years.map(mapping).astype(str))
+    # 1日あたりの正例数。多すぎる日はまとめる
+    pos = "p" + np.minimum(npos, POS_BUCKETS[-1]).astype(str)
+    levels.append((levels[-1] + "_" + pos) if levels else pos)
+    if by_cap:
+        band = _cap_bands(df)
+        mode = band.groupby(df["Date"], sort=True).agg(
+            lambda t: t.value_counts().index[0]).astype(str)
+        levels.append(levels[-1] + "_c" + mode)
+    return _coarsen(levels, n_splits)
+
+
 def year_folds(df: pd.DataFrame, n_splits: int = 5, seed: int = 0,
-               by_cap: bool = False, by_year: bool = True
+               by_cap: bool = False, by_year: bool = True,
+               group_by_date: bool = False
                ) -> List[Tuple[pd.DataFrame, pd.DataFrame]]:
     """
     層別した k 分割。各フォールドが同じ構成になるようにする。
@@ -204,6 +266,13 @@ def year_folds(df: pd.DataFrame, n_splits: int = 5, seed: int = 0,
 
     年を時価総額帯で「置き換え」ないこと。置き換えると局面の当たり外れが
     相殺されなくなり、時系列分割で起きたばらつきが戻る。足すのが正しい。
+
+    group_by_date=True にすると、同じ日のサンプルを必ず同じフォールドに入れる。
+    行単位で切ると、ある日の7銘柄が訓練側と検証側に分かれる。
+    「同じ日の銘柄を並べ替える」ことを学習する LTR ではその日の答えの一部を
+    訓練で見ることになり、成立しない。pointwise でも同じ日の銘柄は
+    地合いを共有するので、分けると検証が楽になり CV が楽観側に出る。
+    引き換えに、日付をまたげないぶん層の揃い方は緩くなる（近似になる）。
 
     層を細かくするほど構成は揃うが、StratifiedKFold は件数が分割数未満の
     層で落ちる。足りない層だけ1段粗い層に落とす（_coarsen）。
@@ -227,9 +296,25 @@ def year_folds(df: pd.DataFrame, n_splits: int = 5, seed: int = 0,
         levels.append(prev + "_cap" + cap)
     strata = _coarsen(levels, n_splits)
 
-    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
+    if group_by_date:
+        # 日付を1件とみなして層別し、日付ごとまとめてフォールドに入れる。
+        # 層も日付単位で作る（行単位の層を渡しても満たせない）
+        ds = _date_strata(df, n_splits, by_year=by_year, by_cap=by_cap)
+        skf = StratifiedKFold(n_splits=n_splits, shuffle=True,
+                              random_state=seed)
+        dates = ds.index.to_numpy()
+        by_date = {d: i for i, d in enumerate(dates)}
+        pos = df["Date"].map(by_date).to_numpy()
+        parts = ((np.flatnonzero(np.isin(pos, tr)),
+                  np.flatnonzero(np.isin(pos, va)))
+                 for tr, va in skf.split(dates, ds.to_numpy()))
+    else:
+        splitter = StratifiedKFold(n_splits=n_splits, shuffle=True,
+                                   random_state=seed)
+        parts = splitter.split(df, strata)
+
     out: List[Tuple[pd.DataFrame, pd.DataFrame]] = []
-    for tr_idx, va_idx in skf.split(df, strata):
+    for tr_idx, va_idx in parts:
         tr, va = df.iloc[tr_idx], df.iloc[va_idx]
         if tr["label"].nunique() < 2 or va["label"].nunique() < 2:
             continue
@@ -327,22 +412,27 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
     import optuna
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
-    if scheme in ("year", "year_cap", "cap"):
+    if scheme in ("year", "year_cap", "cap", "year_cap_date"):
         folds = year_folds(df, n_splits=n_splits, seed=seed,
-                           by_year=scheme in ("year", "year_cap"),
-                           by_cap=scheme in ("year_cap", "cap"))
+                           by_year=scheme in ("year", "year_cap",
+                                              "year_cap_date"),
+                           by_cap=scheme in ("year_cap", "cap",
+                                             "year_cap_date"),
+                           group_by_date=scheme == "year_cap_date")
     elif scheme == "timeseries":
         folds = time_series_folds(df, n_splits=n_splits,
                                   embargo_days=embargo_days)
     else:
         raise SystemExit(
-            f"未知の分割方式: {scheme}（year / year_cap / cap / timeseries）")
+            f"未知の分割方式: {scheme}"
+            "（year / year_cap / year_cap_date / cap / timeseries）")
     if not folds:
         if verbose:
             print("  [tune] 分割を作れないため既定値を使う")
         return dict(DEFAULT_PARAMS)
     if verbose:
         ja = {"year": "年で層別", "year_cap": "年×時価総額帯で層別",
+              "year_cap_date": "年×時価総額帯で層別・日付単位で分割",
               "cap": "時価総額帯で層別", "timeseries": "時系列"}[scheme]
         print(f"  [tune] {ja}{len(folds)}分割 / 木{SEARCH_N_ESTIMATORS}本固定")
         print("  [tune] " + " / ".join(

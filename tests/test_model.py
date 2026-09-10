@@ -880,6 +880,91 @@ class TestYearStratifiedFolds(unittest.TestCase):
         with self.assertRaises(SystemExit):
             tune(self._df(), ["a"], n_trials=1, scheme="cap_only")
 
+    def _dated_df(self, per_date=7):
+        """1日あたり数銘柄しかない、実データと同じ形。"""
+        rng = np.random.default_rng(0)
+        spec = ((2018, 88), (2019, 755), (2020, 1335), (2021, 1627),
+                (2022, 877), (2023, 2270), (2024, 2101))
+        rows = []
+        for year, n in spec:
+            nd = max(1, int(n / per_date))
+            dates = pd.date_range(f"{year}-01-05", f"{year}-12-25", periods=nd)
+            cap = rng.normal(9.5, 1.6, n)
+            tilt = np.clip(0.11 * (1.8 - 0.16 * (cap - 7.0)), 0.01, 0.4)
+            rows.append(pd.DataFrame({
+                "Date": np.repeat(dates, per_date + 1)[:n],
+                "log_market_cap": cap,
+                "label": (rng.random(n) < tilt).astype(int)}))
+        return pd.concat(rows, ignore_index=True).reset_index(drop=True)
+
+    def test_date_grouping_keeps_a_day_in_one_fold(self):
+        """
+        同じ日の銘柄が訓練と検証に分かれてはいけない。
+        「その日の銘柄を並べ替える」ことを学習するのに、その日の答えの
+        一部を訓練で見ていることになる。
+        """
+        from tuning import year_folds
+        df = self._dated_df()
+        folds = year_folds(df, n_splits=5, by_cap=True, group_by_date=True)
+        self.assertEqual(len(folds), 5)
+        for tr, va in folds:
+            shared = set(tr["Date"]) & set(va["Date"])
+            self.assertEqual(shared, set(), f"日付が両側にある: {len(shared)}件")
+
+    def test_row_level_split_does_share_dates(self):
+        """
+        対照。行単位で切れば日付は必ず両側に現れる。
+        ここが空なら上のテストは何も検出していない。
+        """
+        from tuning import year_folds
+        df = self._dated_df()
+        folds = year_folds(df, n_splits=5, by_cap=True, group_by_date=False)
+        shared = sum(len(set(tr["Date"]) & set(va["Date"])) for tr, va in folds)
+        self.assertGreater(shared, 100, "行単位でも日付が分かれていない")
+
+    def test_date_grouping_still_balances_years(self):
+        """
+        日付単位にすると層の揃いは緩くなるが、年構成が崩れてはいけない。
+        日付レベルの層を作らず行単位の層を渡していたときは
+        年構成のずれが 8.8pt まで悪化した。
+        """
+        from tuning import year_folds
+        df = self._dated_df().assign(
+            _y=lambda d: pd.to_datetime(d["Date"]).dt.year)
+        vas = [v for _, v in year_folds(df, n_splits=5, by_cap=True,
+                                        group_by_date=True)]
+        m = pd.DataFrame([v["_y"].value_counts(normalize=True)
+                          for v in vas]).fillna(0)
+        self.assertLess(float((m.max() - m.min()).max()) * 100, 4.0)
+
+    def test_coarsen_never_leaves_a_stratum_below_n_splits(self):
+        """
+        細かい層に抜けた結果、残った粗い層のほうが分割数を割ることがある。
+        粗い層に100件あり96件が細かい層へ移れば、粗い層は4件になる。
+        StratifiedKFold はそこで警告を出して分割が偏る。
+        """
+        from tuning import _coarsen
+        rng = np.random.default_rng(0)
+        n, k = 400, 5
+        coarse = pd.Series(["a"] * n)
+        # a のうち大半を、それぞれ十分大きい細かい層へ移す。
+        # 端数だけが a に残るように作る
+        fine = pd.Series([f"f{i // 8}" for i in range(n)])
+        fine.iloc[-3:] = "tiny"            # 3件しかない層
+        out = _coarsen([coarse, fine], k)
+        sizes = out.value_counts()
+        self.assertTrue((sizes >= k).all(), f"分割数を割る層が残った: "
+                                            f"{sizes[sizes < k].to_dict()}")
+
+    def test_split_emits_no_sklearn_warning(self):
+        """分割が偏っていれば sklearn が警告を出す。出ないことを固定する。"""
+        import warnings
+        from tuning import year_folds
+        df = self._dated_df()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UserWarning)
+            year_folds(df, n_splits=5, by_cap=True, group_by_date=True)
+
     def test_fold_positive_rates_are_recorded(self):
         """
         揃っていることを実行のたびに記録する。記録が無いと、
