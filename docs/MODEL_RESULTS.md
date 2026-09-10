@@ -6,33 +6,36 @@
 ## 条件
 
 - **ラベル定義**: 3ヶ月内+20% / 維持10日 / 終盤+10% / MA20>=MA60
-- データセット: 22,909サンプル / 全体の正例率 **11.51%**
-- 期間: 2018-04-03 〜 2026-06-10 / 銘柄数 4,015
-- 分割: **直近12ヶ月をホールドアウト**（2025-06-10 〜 2026-06-10）。それ以前を探索と学習に使う
-- **エンバーゴ 60営業日**（ラベル確定に必要な将来日数から自動導出）。2025-03-15 〜 2025-06-10 は捨てる
+- データセット: 22,936サンプル / 全体の正例率 **11.50%**
+- 期間: 2018-04-03 〜 2026-06-16 / 銘柄数 4,017
+- 分割: **直近12ヶ月をホールドアウト**（2025-06-16 〜 2026-06-16）。それ以前を探索と学習に使う
+- **エンバーゴ 60営業日**（ラベル確定に必要な将来日数から自動導出）。2025-03-21 〜 2025-06-16 は捨てる
 - ハイパーパラメータの探索もホールドアウトより前だけで行う（`research/run_tuning.py` が同じ境界から打ち切り日を取る）
 
-  - train: 17,400件 / 2018-04-03 〜 2025-03-14 / 正例率 10.25%
-  - test: 4,770件 / 2025-06-10 〜 2026-06-10 / 正例率 15.05%
+  - train: 17,485件 / 2018-04-03 〜 2025-03-21 / 正例率 10.23%
+  - test: 4,746件 / 2025-06-16 〜 2026-06-16 / 正例率 14.94%
 
 
 ## ホールドアウト（直近12ヶ月）— 唯一の成績
 
 | モデル | PR-AUC | ROC-AUC | 日付内AUC | P@1% | P@5% | Lift@5% |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| LTR [all] | 0.1921 | 0.5996 | 0.6119 | 14.9% | 20.6% | 1.37x |
-| LightGBM [all_no_market] | 0.1903 | 0.5958 | 0.6065 | 17.0% | 20.2% | 1.34x |
-| LTR [all_no_market] | 0.1883 | 0.5978 | 0.6065 | 25.5% | 19.3% | 1.28x |
-| ロジスティック回帰 [all_no_market] | 0.1767 | 0.5700 | 0.5855 | 19.1% | 16.8% | 1.12x |
-| LightGBM [all] | 0.1739 | 0.5661 | 0.6054 | 14.9% | 18.5% | 1.23x |
-| ロジスティック回帰 [all] | 0.1698 | 0.5399 | 0.5854 | 17.0% | 20.2% | 1.34x |
-| 無情報（一定スコア） | 0.1505 | 0.5000 | 0.5000 | 15.1% | 15.1% | 1.00x |
+| LTR [all_no_sector_index] | 0.1916 | 0.6004 | 0.6186 | 21.3% | 19.4% | 1.30x |
+| LTR [all_no_market] | 0.1915 | 0.5962 | 0.6066 | 14.9% | 24.5% | 1.64x |
+| LightGBM [all_no_market] | 0.1904 | 0.5944 | 0.6064 | 23.4% | 21.1% | 1.41x |
+| LTR [all] | 0.1863 | 0.5909 | 0.6172 | 23.4% | 19.8% | 1.33x |
+| LightGBM [all] | 0.1795 | 0.5807 | 0.6288 | 19.1% | 18.1% | 1.21x |
+| LightGBM [all_no_sector_index] | 0.1771 | 0.5610 | 0.5923 | 19.1% | 22.4% | 1.50x |
+| ロジスティック回帰 [all_no_market] | 0.1728 | 0.5614 | 0.5815 | 21.3% | 15.2% | 1.02x |
+| ロジスティック回帰 [all] | 0.1673 | 0.5403 | 0.5874 | 17.0% | 17.3% | 1.16x |
+| ロジスティック回帰 [all_no_sector_index] | 0.1666 | 0.5359 | 0.5838 | 17.0% | 17.7% | 1.19x |
+| 無情報（一定スコア） | 0.1494 | 0.5000 | 0.5000 | 14.9% | 14.9% | 1.00x |
 
-（正例率 = 15.05% / n = 4,770）
+（正例率 = 14.94% / n = 4,746）
 
 ## 差は誤差か（対応のあるブートストラップ B=1000）
 
-基準は **無情報（一定スコア）**（テスト PR-AUC 0.1505）。
+基準は **無情報（一定スコア）**（テスト PR-AUC 0.1494）。
 単変量のベースラインは廃止した。母集団を高値更新日にした時点で
 「高値からの距離」は全銘柄で同じになり、それを基準にしても
 何も言えないため。全件同じスコアを与える無情報モデルなら、
@@ -42,39 +45,41 @@ PR-AUC はその窓の正例率に一致し、差は「正例率をどれだけ
 
 | モデル | PR-AUC | 差 | 95%CI | P(差>0) | 判定 |
 | --- | ---: | ---: | :---: | ---: | --- |
-| LTR [all] | 0.1921 | +0.0416 | [+0.0287, +0.0578] | 1.000 | 有意 |
-| LightGBM [all_no_market] | 0.1903 | +0.0397 | [+0.0271, +0.0560] | 1.000 | 有意 |
-| LTR [all_no_market] | 0.1883 | +0.0378 | [+0.0263, +0.0539] | 1.000 | 有意 |
-| ロジスティック回帰 [all_no_market] | 0.1767 | +0.0262 | [+0.0154, +0.0415] | 1.000 | 有意 |
-| LightGBM [all] | 0.1739 | +0.0234 | [+0.0130, +0.0373] | 1.000 | 有意 |
-| ロジスティック回帰 [all] | 0.1698 | +0.0193 | [+0.0070, +0.0340] | 1.000 | 有意 |
+| LTR [all_no_sector_index] | 0.1916 | +0.0423 | [+0.0280, +0.0594] | 1.000 | 有意 |
+| LTR [all_no_market] | 0.1915 | +0.0421 | [+0.0293, +0.0597] | 1.000 | 有意 |
+| LightGBM [all_no_market] | 0.1904 | +0.0410 | [+0.0282, +0.0597] | 1.000 | 有意 |
+| LTR [all] | 0.1863 | +0.0369 | [+0.0239, +0.0538] | 1.000 | 有意 |
+| LightGBM [all] | 0.1795 | +0.0301 | [+0.0191, +0.0448] | 1.000 | 有意 |
+| LightGBM [all_no_sector_index] | 0.1771 | +0.0277 | [+0.0152, +0.0435] | 1.000 | 有意 |
+| ロジスティック回帰 [all] | 0.1673 | +0.0179 | [+0.0065, +0.0324] | 0.998 | 有意 |
 
 ## 特徴量セット別の比較（テストデータ・2モデルのうち良いほう）
 
 | セット | 列数 | 構成 | PR-AUC | Lift@5% |
 | --- | ---: | --- | ---: | ---: |
-| `all` | 147 | fund_level + fund_lag + fund_trend + fund_streak + price + breakout + volume + liquidity + supply + progress + valuation + dividend + cashflow + efficiency + guidance + sector + turnaround + scale + market | 0.1921 | 1.37x |
-| `all_no_market` | 136 | fund_level + fund_lag + fund_trend + fund_streak + price + breakout + volume + liquidity + supply + progress + valuation + dividend + cashflow + efficiency + guidance + sector + turnaround + scale | 0.1903 | 1.34x |
+| `all_no_sector_index` | 147 | fund_level + fund_lag + fund_trend + fund_streak + price + breakout + volume + liquidity + supply + progress + valuation + dividend + cashflow + efficiency + guidance + sector + turnaround + scale + market | 0.1916 | 1.30x |
+| `all_no_market` | 140 | fund_level + fund_lag + fund_trend + fund_streak + price + breakout + volume + liquidity + supply + progress + valuation + dividend + cashflow + efficiency + guidance + sector + turnaround + scale + sector_index | 0.1915 | 1.64x |
+| `all` | 151 | fund_level + fund_lag + fund_trend + fund_streak + price + breakout + volume + liquidity + supply + progress + valuation + dividend + cashflow + efficiency + guidance + sector + turnaround + scale + sector_index + market | 0.1863 | 1.33x |
 
-## 特徴量の寄与（`all` のロジスティック回帰・標準化係数 上位15）
+## 特徴量の寄与（`all_no_sector_index` のロジスティック回帰・標準化係数 上位15）
 
 | 特徴量 | 係数 | 向き |
 | --- | ---: | --- |
-| `ROA_q1` | +0.681 | ブレイクしやすい |
-| `ROA_q0` | -0.621 | しにくい |
-| `ROE_accel` | -0.517 | しにくい |
-| `sales_growth_up_streak` | +0.489 | ブレイクしやすい |
-| `sales_growth_sym_chg_3q` | -0.477 | しにくい |
-| `ROE_chg1` | +0.470 | ブレイクしやすい |
-| `sales_growth_sym_up_streak` | -0.456 | しにくい |
-| `log_market_cap` | -0.455 | しにくい |
-| `equity_ratio_chg` | +0.424 | ブレイクしやすい |
-| `equity_ratio_q2` | -0.417 | しにくい |
-| `sales_growth_chg_3q` | +0.408 | ブレイクしやすい |
-| `sales_growth_chg3` | -0.382 | しにくい |
-| `ROA_chg_3q` | -0.380 | しにくい |
-| `log_trading_value` | +0.369 | ブレイクしやすい |
-| `ROA_chg1` | +0.368 | ブレイクしやすい |
+| `ROA_q1` | +0.704 | ブレイクしやすい |
+| `ROA_q0` | -0.645 | しにくい |
+| `ROE_accel` | -0.540 | しにくい |
+| `sales_growth_up_streak` | +0.503 | ブレイクしやすい |
+| `ROE_chg1` | +0.491 | ブレイクしやすい |
+| `sales_growth_sym_chg_3q` | -0.483 | しにくい |
+| `sales_growth_sym_up_streak` | -0.471 | しにくい |
+| `log_market_cap` | -0.458 | しにくい |
+| `equity_ratio_chg` | +0.441 | ブレイクしやすい |
+| `equity_ratio_q2` | -0.434 | しにくい |
+| `sales_growth_chg_3q` | +0.430 | ブレイクしやすい |
+| `sales_growth_chg3` | -0.404 | しにくい |
+| `ROA_chg_3q` | -0.387 | しにくい |
+| `ROA_chg1` | +0.382 | ブレイクしやすい |
+| `ROE_q2` | +0.372 | ブレイクしやすい |
 
 ## 読み方
 
