@@ -1,4 +1,4 @@
-no
+yes
 # 1行目が "yes" のときだけ LTR（LGBMRanker / lambdarank）を探索する。
 #
 # 目的関数は pointwise と同じ PR-AUC。lambdarank が最適化するのは
