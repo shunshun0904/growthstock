@@ -1302,6 +1302,51 @@ class TestIndexIdentification(unittest.TestCase):
         self.assertAlmostEqual(r["gap"], 0.0, places=6)
         self.assertFalse(r["confident"])
 
+    def test_hex_runs_splits_on_gaps(self):
+        """
+        指数コードは16進の連番。10進で数えると 0039 の次が 0040 になり、
+        003A〜003F を飛ばしたことに気づけない。
+        """
+        import identify_indices as I
+        runs = I._hex_runs(["0040", "0041", "0042", "0048", "0049", "zzzz"])
+        self.assertEqual(runs, [["0040", "0041", "0042"], ["0048", "0049"]])
+
+    def test_offset_only_uses_runs_of_the_right_length(self):
+        """
+        業種の数と長さが違う並びに当てはめると、起点をずらせば
+        どこかは当たってしまう。長さが一致する並びだけを対象にする。
+        """
+        import numpy as np
+        import identify_indices as I
+        days = pd.bdate_range("2020-01-01", periods=400)
+        rng = np.random.default_rng(0)
+        a = pd.Series(rng.normal(0, 0.01, len(days)), index=days)
+        b = pd.Series(rng.normal(0, 0.01, len(days)), index=days)
+        sec = pd.DataFrame({"1050": a, "2050": b, "ALL": (a + b) / 2})
+        # 業種は2つ。長さ2の連番だけが対象になり、長さ3の並びは無視される
+        idx = pd.DataFrame({"0040": a, "0041": b, "0042": a}, index=days)
+        out = I.test_offset(idx, sec, "S33")
+        self.assertEqual(out["nSectors"], 2)
+        self.assertEqual(out["runs"], [])
+
+    def test_offset_reports_rank_not_just_correlation(self):
+        """
+        相関が低い業種でも、仮説が指す業種が1位なら当たっている。
+        相関だけ見ると「弱い業種は同定できない」と誤って切り捨てる。
+        """
+        import numpy as np
+        import identify_indices as I
+        days = pd.bdate_range("2020-01-01", periods=400)
+        rng = np.random.default_rng(1)
+        a = pd.Series(rng.normal(0, 0.01, len(days)), index=days)
+        b = pd.Series(rng.normal(0, 0.01, len(days)), index=days)
+        sec = pd.DataFrame({"1050": a, "2050": b, "ALL": (a + b) / 2})
+        idx = pd.DataFrame({"0040": a, "0041": b}, index=days)
+        out = I.test_offset(idx, sec, "S33")
+        (run,) = out["runs"]
+        self.assertEqual(run["rank1"], 2)
+        self.assertEqual([p["rank"] for p in run["pairs"]], [1, 1])
+
     def test_market_code_is_not_treated_as_a_name(self):
         """
         master_hist の Mkt は数値コード（実測 101〜113）であって名称ではない。

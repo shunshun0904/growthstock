@@ -74,6 +74,18 @@ DOMESTIC_MARKETS = ("プライム", "スタンダード", "グロース", "市�
 #: 市場区分の名称が入っている可能性のある列。実測で見つかったものを使う
 MARKET_NAME_COLS = ("MktNm", "MarketCodeName")
 
+#: 業種コード -> 名称 / 銘柄数。master_hist が S33Nm / S17Nm を持っていたので、
+#: コードだけで報告せずに済む（実測: master_hist の項目一覧）。
+SECTOR_NAMES: Dict[str, Dict[str, str]] = {}
+SECTOR_COUNTS: Dict[str, Dict[str, Optional[int]]] = {}
+
+
+def label(axis: str, code: str) -> str:
+    """業種コードに名称を添える。名称が無ければコードだけ返す。"""
+    if code == "ALL":
+        return "全銘柄"
+    return SECTOR_NAMES.get(axis, {}).get(code, code)
+
 
 # --------------------------------------------------------------------------- #
 # 指数
@@ -183,7 +195,9 @@ def sector_returns(axis: str) -> pd.DataFrame:
     mh["Code"] = mh["Code"].astype(str)
     print(f"[sector] master_hist の項目: {sorted(mh.columns)}")
     name_col = next((c for c in MARKET_NAME_COLS if c in mh.columns), None)
-    keep = [c for c in (axis, name_col) if c and c in mh.columns]
+    # 業種の名称。master_hist が持っているので、コードだけで報告せずに済む
+    sector_name_col = f"{axis}Nm" if f"{axis}Nm" in mh.columns else None
+    keep = [c for c in (axis, name_col, sector_name_col) if c and c in mh.columns]
     if axis not in keep:
         raise SystemExit(f"[fatal] master_hist に {axis} がありません。列: {sorted(mh.columns)}")
     mh = (mh[["Date", "Code"] + keep].dropna(subset=["Date", "Code"])
@@ -210,7 +224,10 @@ def sector_returns(axis: str) -> pd.DataFrame:
     bars = bars.dropna(subset=[axis])
     bars = bars.sort_values(["Code", "Date"])
     g = bars.groupby("Code", sort=False)
-    bars["ret"] = g["AdjC"].pct_change()
+    # fill_method=None が要る。既定の ffill は欠測日を前日値で埋めてから
+    # 変化率を取るので、値が無い日をまたいだところで 0% のリターンが
+    # 作られ、系列がなまる
+    bars["ret"] = g["AdjC"].pct_change(fill_method=None)
     # 前日の時価総額を重みにする
     bars["w"] = (g["C"].shift(1) * g["shares"].shift(1))
     bars = bars.dropna(subset=["ret", "w"])
@@ -230,16 +247,25 @@ def sector_returns(axis: str) -> pd.DataFrame:
     allg = bars.groupby("Date", sort=True)[["wr", "w"]].sum()
     wide["ALL"] = (allg["wr"] / allg["w"])
 
+    if sector_name_col:
+        names = (bars.dropna(subset=[sector_name_col])
+                 .groupby(axis)[sector_name_col].agg(
+                     lambda t: t.value_counts().index[0]))
+        SECTOR_NAMES[axis] = {str(k): str(v) for k, v in names.items()}
+
     n = bars.groupby(["Date", axis], sort=True).size().unstack(axis)
     med = n.stack().median()
     print(f"[sector] {axis}: {wide.shape[1] - 1}業種 / {wide.shape[0]}日 "
           f"（1業種あたりの銘柄数 中央値 "
           f"{'—' if pd.isna(med) else int(med)}）")
     # 銘柄数が極端に少ない業種は、指数と対応させても偶然の相関になりやすい。
-    # 相関を見る前に気づけるよう出す
-    thin = n.median().sort_values().head(5)
+    # 相関を見る前に気づけるよう、全業種ぶん出す
+    SECTOR_COUNTS[axis] = {str(k): (None if pd.isna(v) else int(v))
+                           for k, v in n.median().items()}
+    thin = n.median().sort_values().head(8)
     print("[sector] 銘柄数が少ない業種: " + " / ".join(
-        f"{k}:{'—' if pd.isna(v) else int(v)}" for k, v in thin.items()))
+        f"{k}({label(axis, str(k))}):{'—' if pd.isna(v) else int(v)}"
+        for k, v in thin.items()))
     return wide
 
 
@@ -279,6 +305,83 @@ def match(idx: pd.DataFrame, sec: pd.DataFrame, min_days: int = 500) -> List[dic
     return out
 
 
+#: 業種として扱わないコード。実測で「その他」に相当し、銘柄数が1しかない
+NON_SECTOR_CODES = {"9999", "99"}
+
+
+def _hex_runs(codes: List[str]) -> List[List[str]]:
+    """4桁16進として連続しているコードの並びを取り出す。"""
+    vals = []
+    for c in codes:
+        try:
+            vals.append((int(c, 16), c))
+        except ValueError:
+            continue
+    vals.sort()
+    runs: List[List[str]] = []
+    for v, c in vals:
+        if runs and int(runs[-1][-1], 16) + 1 == v:
+            runs[-1].append(c)
+        else:
+            runs.append([c])
+    return runs
+
+
+def test_offset(idx: pd.DataFrame, sec: pd.DataFrame, axis: str) -> dict:
+    """
+    「指数コードの並び順が業種コードの並び順と一致する」という仮説を検証する。
+
+    最初の実測で、相関がはっきり出た4件がすべて
+    「指数コードの16進オフセット = 業種コードの昇順の位置」に乗っていた。
+    偶然そうなる確率は低いが、乗っている4件だけを見て決めるのは
+    後知恵の当てはめになる。
+
+    そこで仮説を先に固定し、**全対**について
+      ・仮説が指す業種との相関
+      ・その業種が何位か（1位なら仮説どおり）
+    を出す。何位かまで出せば、相関が低い業種でも仮説が当たっているのか
+    外れているのかを分けて読める。
+
+    対象は「業種の数とちょうど同じ長さの連番」。長さが違う並びに
+    当てはめると、どこを起点にしても何かしら当たってしまう。
+    """
+    sectors = [c for c in sec.columns
+               if c != "ALL" and c not in NON_SECTOR_CODES]
+    sectors.sort()
+    n = len(sectors)
+    runs = [r for r in _hex_runs(list(idx.columns)) if len(r) == n]
+    print(f"[offset] {axis}: 業種 {n}個 / 長さの一致する連番 {len(runs)}本")
+    out = {"axis": axis, "nSectors": n, "runs": []}
+    common = idx.index.intersection(sec.index)
+    a, b = idx.loc[common], sec.loc[common]
+    for run in runs:
+        pairs, rank1 = [], 0
+        for k, code in enumerate(run):
+            x = a[code]
+            ok = x.notna()
+            corr = b.loc[ok].corrwith(x[ok]).dropna().sort_values(ascending=False)
+            want = sectors[k]
+            if want not in corr.index:
+                pairs.append({"index": code, "sector": want, "corr": None,
+                              "rank": None})
+                continue
+            rank = int(list(corr.index).index(want)) + 1
+            rank1 += rank == 1
+            pairs.append({
+                "index": code, "sector": want, "sectorName": label(axis, want),
+                "corr": round(float(corr[want]), 4), "rank": rank,
+                "nStocks": SECTOR_COUNTS.get(axis, {}).get(want),
+            })
+        got = [p["corr"] for p in pairs if p["corr"] is not None]
+        med = float(np.median(got)) if got else float("nan")
+        print(f"[offset] {run[0]}〜{run[-1]}: 1位一致 {rank1}/{len(run)} "
+              f"/ 相関の中央値 {med:.4f}")
+        out["runs"].append({"from": run[0], "to": run[-1],
+                            "rank1": rank1, "n": len(run),
+                            "medianCorr": round(med, 4), "pairs": pairs})
+    return out
+
+
 def write_md(res: dict) -> None:
     L: List[str] = []
     L.append("# 指数コードの同定（実測）")
@@ -306,23 +409,54 @@ def write_md(res: dict) -> None:
         L.append("`0000` を測れなかった。")
     L.append("")
 
-    for axis, label in (("S33", "33業種"), ("S17", "17業種")):
+    for axis, label_axis in (("S33", "33業種"), ("S17", "17業種")):
         rows = res["axes"].get(axis, [])
         ok = [r for r in rows if r.get("confident")]
-        L.append(f"## {label}（`{axis}`）との突き合わせ")
+        L.append(f"## {label_axis}（`{axis}`）との突き合わせ")
         L.append("")
         L.append(f"指数 {len(rows)}件のうち、条件を満たしたのは **{len(ok)}件**。")
         L.append("")
+        cnts = (res.get("sectors") or {}).get(axis, {})
+        thin = sorted(((v.get("stocks") or 0), k, v.get("name", k))
+                      for k, v in cnts.items() if k != "ALL")[:6]
+        if thin:
+            L.append("銘柄数が少ない業種は、指数と対応させても偶然の相関になりやすい: "
+                     + " / ".join(f"{nm}(`{k}`) {n}銘柄" for n, k, nm in thin))
+            L.append("")
         L.append("| 指数 | 最良一致 | 相関 | 2位 | 相関 | 差 | 判定 |")
         L.append("| --- | --- | ---: | --- | ---: | ---: | :---: |")
         for r in sorted(rows, key=lambda x: -(x.get("corr") or -1)):
             if "best" not in r:
                 L.append(f"| `{r['index']}` | — | — | — | — | — | {r.get('note','')} |")
                 continue
-            L.append(f"| `{r['index']}` | `{r['best']}` | {r['corr']} | "
-                     f"`{r['second']}` | {r['secondCorr']} | {r['gap']} | "
+            bn = r.get("bestName") or r["best"]
+            sn = r.get("secondName") or r.get("second")
+            L.append(f"| `{r['index']}` | {bn} (`{r['best']}`) | {r['corr']} | "
+                     f"{sn} (`{r['second']}`) | {r['secondCorr']} | {r['gap']} | "
                      f"{'○' if r['confident'] else '×'} |")
         L.append("")
+
+        off = (res.get("offset") or {}).get(axis)
+        if off and off.get("runs"):
+            L.append(f"### 並び順の仮説（{label_axis})")
+            L.append("")
+            L.append("「指数コードの16進の並び = 業種コードの昇順の並び」を先に固定し、")
+            L.append("**全対**について仮説が指す業種との相関と、その業種が何位かを出す。")
+            L.append("相関が低い業種でも、1位なら仮説どおりに当たっている。")
+            L.append("")
+            for run in off["runs"]:
+                L.append(f"`{run['from']}`〜`{run['to']}`: "
+                         f"**1位一致 {run['rank1']}/{run['n']}** "
+                         f"/ 相関の中央値 {run['medianCorr']}")
+                L.append("")
+                L.append("| 指数 | 仮説が指す業種 | 相関 | 順位 | 銘柄数 |")
+                L.append("| --- | --- | ---: | ---: | ---: |")
+                for pr in run["pairs"]:
+                    nm = pr.get("sectorName") or pr["sector"]
+                    L.append(f"| `{pr['index']}` | {nm} (`{pr['sector']}`) | "
+                             f"{pr.get('corr', '—')} | {pr.get('rank', '—')} | "
+                             f"{pr.get('nStocks', '—')} |")
+                L.append("")
 
     L.append("## 読み方")
     L.append("")
@@ -359,6 +493,15 @@ def main(argv: Optional[List[str]] = None) -> int:
         print(f"[3] {axis} と突き合わせ")
         rows = match(idx, sec)
         res["axes"][axis] = rows
+        for r in rows:
+            if r.get("best"):
+                r["bestName"] = label(axis, r["best"])
+                r["secondName"] = label(axis, r["second"]) if r.get("second") else None
+        print(f"[4] {axis}: 並び順の仮説を検証")
+        res.setdefault("offset", {})[axis] = test_offset(idx, sec, axis)
+        res.setdefault("sectors", {})[axis] = {
+            c: {"name": label(axis, c), "stocks": SECTOR_COUNTS.get(axis, {}).get(c)}
+            for c in sorted(sec.columns)}
         hit = [r for r in rows if r.get("confident")]
         print(f"  条件を満たした指数: {len(hit)}/{len(rows)}件")
         for r in sorted(hit, key=lambda x: -x["corr"])[:10]:
