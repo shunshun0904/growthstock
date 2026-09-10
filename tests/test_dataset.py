@@ -1302,6 +1302,20 @@ class TestIndexIdentification(unittest.TestCase):
         self.assertAlmostEqual(r["gap"], 0.0, places=6)
         self.assertFalse(r["confident"])
 
+    def test_sector_codes_sort_numerically(self):
+        """
+        文字列のまま並べると 1, 10, 11, ... 17, 2, 3 になる。
+        S33 は全部4桁なので影響しないが、S17 は 1〜17 の1〜2桁で崩れる。
+        実際これで S17 の検証が 1/17 しか当たらず、
+        「仮説が外れた」と読み違えるところだった。
+        """
+        import identify_indices as I
+        got = sorted(["1", "10", "17", "2", "9"], key=I._sort_key)
+        self.assertEqual(got, ["1", "2", "9", "10", "17"])
+        # 4桁ゼロ詰めは文字列順でも数値順と一致する（S33 が無事だった理由）
+        s33 = ["0050", "1050", "3300", "9050"]
+        self.assertEqual(sorted(s33, key=I._sort_key), sorted(s33))
+
     def test_hex_runs_splits_on_gaps(self):
         """
         指数コードは16進の連番。10進で数えると 0039 の次が 0040 になり、

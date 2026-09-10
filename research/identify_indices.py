@@ -217,6 +217,11 @@ def sector_returns(axis: str) -> pd.DataFrame:
         else:
             bars = kept
             print(f"[sector] 内国株に限定: {before:,} -> {len(bars):,}行")
+        # 何が残って何が落ちたかを出す。業種の銘柄数が想定より薄いとき、
+        # 絞り方のせいなのか元々少ないのかをここで切り分ける
+        vc = mk.value_counts()
+        print("[sector] 市場区分の内訳: " + " / ".join(
+            f"{k}:{v:,}" for k, v in vc.head(10).items()))
     else:
         print("[sector] 市場区分の名称が無いので絞らない"
               "（ETF/ETN は決算が無く株数が付かないので、重みの段階で落ちる）")
@@ -309,6 +314,22 @@ def match(idx: pd.DataFrame, sec: pd.DataFrame, min_days: int = 500) -> List[dic
 NON_SECTOR_CODES = {"9999", "99"}
 
 
+def _sort_key(code: str):
+    """
+    業種コードを数として並べる。
+
+    文字列のまま並べると 1, 10, 11, ... 17, 2, 3 の順になる。
+    S33 は全部4桁（0050, 1050, ...）なので文字列順でも数値順と同じだが、
+    S17 は 1〜17 の1〜2桁なので順序が崩れる。
+    実際これで S17 の並び順の検証が 1/17 しか当たらず、
+    「仮説が外れた」と読み違えるところだった。
+    """
+    try:
+        return (0, int(code), "")
+    except ValueError:
+        return (1, 0, code)
+
+
 def _hex_runs(codes: List[str]) -> List[List[str]]:
     """4桁16進として連続しているコードの並びを取り出す。"""
     vals = []
@@ -347,7 +368,7 @@ def test_offset(idx: pd.DataFrame, sec: pd.DataFrame, axis: str) -> dict:
     """
     sectors = [c for c in sec.columns
                if c != "ALL" and c not in NON_SECTOR_CODES]
-    sectors.sort()
+    sectors.sort(key=_sort_key)
     n = len(sectors)
     runs = [r for r in _hex_runs(list(idx.columns)) if len(r) == n]
     print(f"[offset] {axis}: 業種 {n}個 / 長さの一致する連番 {len(runs)}本")
