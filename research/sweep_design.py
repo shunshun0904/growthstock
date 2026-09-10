@@ -553,6 +553,418 @@ def load_dataset(high_window: int) -> Optional[pd.DataFrame]:
     return df.reset_index(drop=True)
 
 
+# --------------------------------------------------------------------------- #
+# ウォークフォワード
+# --------------------------------------------------------------------------- #
+#: 掃引の単一分割と揃える既定。walkforward.py の既定と同じ。
+WF_MIN_TRAIN_MONTHS = 36
+WF_TEST_MONTHS = 6
+WF_STEP_MONTHS = 6
+
+
+def wf_folds(dates, embargo_days: int):
+    """
+    訓練窓を伸ばしながらテスト窓を進める。窓の作り方は walkforward.py と同じ。
+
+    エンバーゴは**比べる設計のうち最長のホライズン**に合わせて全設計で共通にする。
+    設計ごとに変えると窓の境界そのものがずれ、評価期間が違う設計を
+    比べることになる。共通にすると短いホライズンの設計は訓練が少し減るが、
+    減るだけでリークはしない（エンバーゴは広いほうが安全側）。
+    """
+    import walkforward as WF
+    return WF.make_folds(pd.to_datetime(pd.Series(dates)),
+                         min_train_months=WF_MIN_TRAIN_MONTHS,
+                         test_months=WF_TEST_MONTHS,
+                         step_months=WF_STEP_MONTHS,
+                         embargo_days=embargo_days)
+
+
+#: 窓が小さすぎると勝敗の符号がほぼ運で決まる。walkforward.py と同じ下限。
+WF_MIN_TEST_ROWS = 200
+WF_MIN_TEST_POSITIVES = 20
+
+
+def wf_one(design: Design, frame: pd.DataFrame, cols: List[str], params: Dict,
+           fold) -> Optional[Dict]:
+    """1設計 × 1フォールド。分離力と実収益の物差しを両方返す。"""
+    import lightgbm as lgb
+
+    d = pd.to_datetime(frame["Date"])
+    tr = frame[(d <= pd.Timestamp(fold.train_end)) & frame["label"].notna()]
+    te = frame[(d >= pd.Timestamp(fold.test_start))
+               & (d <= pd.Timestamp(fold.test_end)) & frame["label"].notna()]
+    if len(te) < WF_MIN_TEST_ROWS or te["label"].sum() < WF_MIN_TEST_POSITIVES:
+        return None
+    if len(tr) < 1000 or tr["label"].sum() < 50:
+        return None
+
+    ytr = tr["label"].to_numpy(dtype=int)
+    yte = te["label"].to_numpy(dtype=int)
+    gbm = lgb.LGBMClassifier(**params, scale_pos_weight=tuning.scale_pos_weight(ytr))
+    gbm.fit(tr[cols].to_numpy(dtype=float), ytr)
+    score = gbm.predict_proba(te[cols].to_numpy(dtype=float))[:, 1]
+
+    ev = T.evaluate(design.key, yte, score, dates=te["Date"])
+    t = te.copy()
+    t["score"] = score
+    k = max(1, int(len(t) * 0.05))
+    top = t.nlargest(k, "score")
+    a, b = outcome_stats(t), outcome_stats(top)
+    row = {
+        "fold": fold.index,
+        "test_start": fold.test_start, "test_end": fold.test_end,
+        "n_train": int(len(tr)), "n_test": int(len(te)),
+        "base_rate": round(ev["base_rate"], 4),
+        "pr_auc": round(ev["pr_auc"], 4),
+        "pr_gain": round(ev["pr_auc"] - ev["base_rate"], 4),
+        "roc_auc": round(ev["roc_auc"], 4),
+        "within_date_auc": round(ev["within_date_auc"], 4),
+        "lift@5%": round(ev["lift@5%"], 3),
+        "outcome_top5": b, "outcome_all": a,
+    }
+    if a and b:
+        row["edge_end_median"] = round(b["end_median"] - a["end_median"], 2)
+        row["edge_win_rate"] = round(b["win_rate"] - a["win_rate"], 4)
+    if "vol_20d" in t.columns:
+        row["top5_vol"] = round(float(top["vol_20d"].median()), 3)
+        row["all_vol"] = round(float(t["vol_20d"].median()), 3)
+    # 各窓のスコアを持ち帰る。全窓をまとめた区間はプールしてから出す
+    row["_idx"] = t.index.to_numpy()
+    row["_score"] = score
+    return row
+
+
+def paired_vs_rule(pooled: pd.DataFrame, col: str, desc: bool,
+                   k_pct: float = 5.0, n_boot: int = 1000, seed: int = 0):
+    """
+    モデルの上位5%と、1列で並べただけの上位5%を、**同じ行集合の上で対で**比べる。
+
+    それぞれに別々の95%区間を付けて重なりを見るのでは判定にならない。
+    2つの区間が重なっていても差は有意でありうるし、その逆もある。
+    同じリサンプルの中で両方を選び直して差を取る。
+
+    リサンプルは日付単位（同じ日の銘柄は地合いを共有していて独立ではない）。
+    戻り値は (差の中央値, 下限, 上限, 差が正だった割合)。
+    """
+    rng = np.random.default_rng(seed)
+    end = pooled["ref_end"].to_numpy(dtype=float)
+    ms = pooled["score"].to_numpy(dtype=float)
+    rs = pooled[col].to_numpy(dtype=float)
+    if not desc:
+        rs = -rs
+    groups = [np.flatnonzero(pooled["Date"].to_numpy() == d)
+              for d in pd.unique(pooled["Date"])]
+    diffs = []
+    for _ in range(n_boot):
+        pick = rng.integers(0, len(groups), len(groups))
+        idx = np.concatenate([groups[i] for i in pick])
+        e, a, b = end[idx], ms[idx], rs[idx]
+        ok = np.isfinite(e) & np.isfinite(a) & np.isfinite(b)
+        e, a, b = e[ok], a[ok], b[ok]
+        if len(e) < 40:
+            continue
+        n = max(1, int(len(e) * k_pct / 100))
+        top_m = e[np.argsort(a, kind="stable")[-n:]]
+        top_r = e[np.argsort(b, kind="stable")[-n:]]
+        diffs.append(float(np.median(top_m) - np.median(top_r)) * 100)
+    if not diffs:
+        return (float("nan"),) * 3 + (float("nan"),)
+    lo, hi = np.percentile(diffs, [2.5, 97.5])
+    return (round(float(np.median(diffs)), 2), round(float(lo), 2),
+            round(float(hi), 2), round(float(np.mean(np.array(diffs) > 0)), 3))
+
+
+def wf_naive(frame: pd.DataFrame, folds) -> List[Dict]:
+    """モデルを使わない対照を同じフォールドで測る。"""
+    d = pd.to_datetime(frame["Date"])
+    out = []
+    for name, col, desc in NAIVE_RULES:
+        if col not in frame.columns:
+            continue
+        per, pooled = [], []
+        for f in folds:
+            te = frame[(d >= pd.Timestamp(f.test_start))
+                       & (d <= pd.Timestamp(f.test_end)) & frame[col].notna()]
+            if len(te) < WF_MIN_TEST_ROWS:
+                continue
+            u = te.copy()
+            u["score"] = u[col] if desc else -u[col]
+            k = max(1, int(len(u) * 0.05))
+            a, b = outcome_stats(u), outcome_stats(u.nlargest(k, "score"))
+            if not a or not b:
+                continue
+            per.append(round(b["end_median"] - a["end_median"], 2))
+            pooled.append(u)
+        if not per:
+            continue
+        allrows = pd.concat(pooled, ignore_index=True)
+        lo, hi = edge_ci(allrows)
+        k = max(1, int(len(allrows) * 0.05))
+        a, b = outcome_stats(allrows), outcome_stats(allrows.nlargest(k, "score"))
+        out.append({
+            "name": name, "folds": len(per),
+            "wins": int(sum(1 for v in per if v > 0)),
+            "per_fold": per,
+            "pooled_edge": round(b["end_median"] - a["end_median"], 2),
+            "pooled_ci": [lo, hi],
+            "pooled_win_rate": b["win_rate"],
+            "pooled_all_win_rate": a["win_rate"],
+        })
+    return out
+
+
+def wf_summary(design: Design, rows: List[Dict], frame: pd.DataFrame) -> Dict:
+    """
+    フォールドをまとめる。
+
+    平均だけでは足りない。PR-AUC の水準は局面で違うので、
+    「無情報に勝った窓の数」（符号）と、全窓をプールした実収益の差を並べる。
+    """
+    import walkforward as WF
+
+    keep = [r for r in rows if "edge_end_median" in r]
+    if not keep:
+        return {"key": design.key, "axis": design.axis, "label": design.label,
+                "skipped": "評価できたフォールドが無い"}
+
+    def m(k):
+        v = [r[k] for r in keep if r.get(k) is not None]
+        return round(float(np.mean(v)), 4) if v else None
+
+    wins = sum(1 for r in keep if r["pr_gain"] > 0)
+    edge_wins = sum(1 for r in keep if r["edge_end_median"] > 0)
+
+    # 全窓のテスト行をまとめて1本の区間を出す。窓ごとの区間は
+    # 1窓あたり200件前後で広すぎ、10本並べても読めない
+    idx = np.concatenate([r["_idx"] for r in keep])
+    score = np.concatenate([r["_score"] for r in keep])
+    pooled = frame.loc[idx].copy()
+    pooled["score"] = score
+    k = max(1, int(len(pooled) * 0.05))
+    top = pooled.nlargest(k, "score")
+    a, b = outcome_stats(pooled), outcome_stats(top)
+    lo, hi = edge_ci(pooled)
+
+    out = {
+        "key": design.key, "axis": design.axis, "label": design.label,
+        "n_folds": len(keep),
+        "wins_vs_reference": wins, "losses_vs_reference": len(keep) - wins,
+        "sign_test_p": round(WF.sign_test(wins, len(keep) - wins), 4),
+        "edge_positive_folds": edge_wins,
+        "mean_pr_auc": m("pr_auc"), "mean_pr_gain": m("pr_gain"),
+        "mean_roc_auc": m("roc_auc"), "mean_within_date_auc": m("within_date_auc"),
+        "mean_lift5": m("lift@5%"), "mean_base_rate": m("base_rate"),
+        "mean_edge": m("edge_end_median"),
+        "median_edge": round(float(np.median([r["edge_end_median"] for r in keep])), 2),
+        "mean_top5_vol": m("top5_vol"), "mean_all_vol": m("all_vol"),
+        "pooled_n": int(len(pooled)),
+        "pooled_top5_end": b["end_median"], "pooled_all_end": a["end_median"],
+        "pooled_top5_win": b["win_rate"], "pooled_all_win": a["win_rate"],
+        "pooled_edge": round(b["end_median"] - a["end_median"], 2),
+        "pooled_ci": [lo, hi],
+        "pooled_significant": bool(lo > 0),
+        "folds": [{k: v for k, v in r.items() if not k.startswith("_")}
+                  for r in keep],
+    }
+    # モデルが「1列で並べただけ」を超えているか。区間の重なりでは判定できない
+    out["vs_rules"] = {}
+    for name, col, desc in NAIVE_RULES:
+        if col not in pooled.columns:
+            continue
+        med, lo2, hi2, ppos = paired_vs_rule(pooled, col, desc)
+        out["vs_rules"][name] = {"diff": med, "ci": [lo2, hi2],
+                                 "p_positive": ppos,
+                                 "significant": bool(lo2 > 0)}
+    return out
+
+
+def run_walkforward(args, designs: List[Design], cols: List[str],
+                    params: Dict) -> int:
+    """3設計を同じ10窓で回して比べる。"""
+    paths = sorted(glob.glob(os.path.join(args.data_dir, "bars_*.parquet")))
+    if not paths:
+        raise SystemExit("bars_*.parquet がありません")
+    bars = pd.concat([pd.read_parquet(p) for p in paths], ignore_index=True)
+    print(f"[load] 日次バー {len(bars):,}行 / {bars['Code'].nunique():,}銘柄")
+    panels = Panels(bars)
+
+    embargo = max(d.forward_needed for d in designs)
+    print(f"[wf] エンバーゴは全設計共通で {embargo}営業日"
+          f"（比べる設計の最長ホライズン）。"
+          "設計ごとに変えると窓の境界がずれて比較にならない")
+
+    datasets: Dict[int, pd.DataFrame] = {}
+    refs: Dict[int, pd.DataFrame] = {}
+    folds = None
+    results, naive = [], []
+    for design in designs:
+        hw = design.high_window
+        if hw not in datasets:
+            ds = load_dataset(hw)
+            if ds is None:
+                print(f"[skip] 高値窓 {hw} のデータセットが無い")
+                datasets[hw] = None
+            else:
+                datasets[hw] = ds
+        ds = datasets[hw]
+        if ds is None:
+            results.append({"key": design.key, "axis": design.axis,
+                            "label": design.label,
+                            "skipped": f"高値窓 {hw} のデータセットが無い"})
+            continue
+        if hw not in refs:
+            refs[hw] = reference_outcome(panels.get(hw))
+        frame = build_frame(design, ds, panels.get(hw), refs[hw], cols)
+        if folds is None:
+            folds = wf_folds(frame["Date"], embargo)
+            print(f"[wf] {len(folds)}フォールド: " + " / ".join(
+                f"{f.test_start}〜{f.test_end}" for f in folds))
+            naive = wf_naive(frame, folds)
+            print("\n[対照] モデルを使わず1列で並べたとき（全窓をまとめた値）")
+            for r in naive:
+                lo, hi = r["pooled_ci"]
+                print(f"    {r['name']:<26} {r['pooled_edge']:+6.2f}pt "
+                      f"[{lo:+.2f},{hi:+.2f}] / 正の窓 {r['wins']}/{r['folds']} "
+                      f"/ 勝率 {r['pooled_win_rate']*100:.1f}%")
+
+        print(f"\n=== [{design.axis}] {design.label} ===")
+        rows = []
+        for f in folds:
+            r = wf_one(design, frame, cols, params, f)
+            if r is None:
+                print(f"    窓{f.index} {f.test_start}〜{f.test_end}: 件数不足で飛ばす")
+                continue
+            rows.append(r)
+            print(f"    窓{r['fold']} {r['test_start']}〜{r['test_end']} "
+                  f"n={r['n_test']:>5,} 正例率{r['base_rate']*100:5.2f}% "
+                  f"PR-AUC {r['pr_auc']:.4f}({r['pr_gain']:+.4f}) "
+                  f"ROC {r['roc_auc']:.4f} 実収益の差 "
+                  f"{r.get('edge_end_median', float('nan')):+6.2f}pt")
+        summ = wf_summary(design, rows, frame)
+        results.append(summ)
+        if "skipped" in summ:
+            print(f"    {summ['skipped']}")
+            continue
+        lo, hi = summ["pooled_ci"]
+        print(f"  → 無情報に勝った窓 {summ['wins_vs_reference']}/{summ['n_folds']}"
+              f"（符号検定 p={summ['sign_test_p']}） / "
+              f"実収益が正の窓 {summ['edge_positive_folds']}/{summ['n_folds']}")
+        print(f"  → 平均 PR-AUC {summ['mean_pr_auc']:.4f}"
+              f"（対無情報 {summ['mean_pr_gain']:+.4f}） / "
+              f"ROC-AUC {summ['mean_roc_auc']:.4f} / "
+              f"日付内 {summ['mean_within_date_auc']:.4f} / "
+              f"Lift@5% {summ['mean_lift5']:.2f}x")
+        print(f"  → 全窓まとめ: 上位5% {summ['pooled_top5_end']:+.2f}% "
+              f"勝率 {summ['pooled_top5_win']*100:.1f}% / "
+              f"全件 {summ['pooled_all_end']:+.2f}% "
+              f"勝率 {summ['pooled_all_win']*100:.1f}% / "
+              f"差 {summ['pooled_edge']:+.2f}pt [{lo:+.2f},{hi:+.2f}]"
+              f"{' 有意' if summ['pooled_significant'] else ''}")
+        if summ.get("mean_top5_vol"):
+            print(f"  → 上位5%の日次ボラ {summ['mean_top5_vol']:.2f}%"
+                  f"（母集団 {summ['mean_all_vol']:.2f}%）")
+        for nm, v in (summ.get("vs_rules") or {}).items():
+            print(f"  → 対 {nm}: {v['diff']:+.2f}pt "
+                  f"[{v['ci'][0]:+.2f},{v['ci'][1]:+.2f}]"
+                  f"{' 有意に上' if v['significant'] else ''}")
+
+    payload = {"embargo_days": embargo, "preset": args.preset,
+               "params_key": args.params,
+               "min_train_months": WF_MIN_TRAIN_MONTHS,
+               "test_months": WF_TEST_MONTHS, "step_months": WF_STEP_MONTHS,
+               "folds": [f.__dict__ for f in (folds or [])],
+               "naive_baselines": naive, "results": results}
+    with open(args.wf_out, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False, indent=2)
+    print(f"\n[done] {args.wf_out}")
+    _write_wf_doc(args.wf_doc, payload)
+    print(f"[done] {args.wf_doc}")
+    return 0
+
+
+def _write_wf_doc(path: str, payload: Dict) -> None:
+    ok = [r for r in payload["results"] if "pooled_edge" in r]
+    L = [
+        "# 設計のウォークフォワード検証",
+        "",
+        "`research/sweep_design.py --walkforward` が生成する。手で書き換えない。",
+        "",
+        "単一のホールドアウト1年では、局面差と設計の差を分離できない。",
+        "訓練窓を伸ばしながらテスト窓を進め、同じ比較を複数の局面で繰り返す。",
+        "",
+        "## 条件",
+        "",
+        f"- 特徴量セット: `{payload['preset']}` / パラメータ: `{payload['params_key']}`（全設計で共通）",
+        f"- 訓練の最小 {payload['min_train_months']}ヶ月 / テスト窓 {payload['test_months']}ヶ月 / 前進 {payload['step_months']}ヶ月",
+        f"- エンバーゴ {payload['embargo_days']}営業日（比べる設計の最長ホライズンに合わせて共通化）",
+        f"- フォールド {len(payload['folds'])}本: "
+        + " / ".join(f"{f['test_start']}〜{f['test_end']}" for f in payload["folds"]),
+        "",
+        "## 結果",
+        "",
+        "| 設計 | 窓 | 無情報に勝った窓 | 符号検定p | 平均PR-AUC | 対無情報 | 平均ROC-AUC | 平均日付内 | 平均Lift@5% | 実収益が正の窓 | 全窓まとめの差 | 95%区間 |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|:---:|",
+    ]
+    for r in ok:
+        lo, hi = r["pooled_ci"]
+        L.append(
+            f"| {r['label']} | {r['n_folds']} "
+            f"| {r['wins_vs_reference']}/{r['n_folds']} | {r['sign_test_p']} "
+            f"| {r['mean_pr_auc']:.4f} | {r['mean_pr_gain']:+.4f} "
+            f"| {r['mean_roc_auc']:.4f} | {r['mean_within_date_auc']:.4f} "
+            f"| {r['mean_lift5']:.2f}x "
+            f"| {r['edge_positive_folds']}/{r['n_folds']} "
+            f"| {r['pooled_edge']:+.2f}pt | [{lo:+.2f},{hi:+.2f}] |")
+    naive = payload.get("naive_baselines") or []
+    if naive:
+        L += ["", "## モデルを使わない対照（同じ窓）", "",
+              "| 並べ方 | 正の窓 | 全窓まとめの差 | 95%区間 | 上位5%勝率 |",
+              "|---|---:|---:|:---:|---:|"]
+        for r in naive:
+            lo, hi = r["pooled_ci"]
+            L.append(f"| {r['name']} | {r['wins']}/{r['folds']} "
+                     f"| {r['pooled_edge']:+.2f}pt | [{lo:+.2f},{hi:+.2f}] "
+                     f"| {r['pooled_win_rate']*100:.1f}% |")
+    L += ["", "## 上位5%は何を選んでいるか", "",
+          "| 設計 | 上位5%の日次ボラ（窓平均） | 母集団 | 上位5%の実収益 | 全件 | 勝率 | 全件勝率 |",
+          "|---|---:|---:|---:|---:|---:|---:|"]
+    for r in ok:
+        L.append(f"| {r['label']} | {r.get('mean_top5_vol', float('nan')):.2f}% "
+                 f"| {r.get('mean_all_vol', float('nan')):.2f}% "
+                 f"| {r['pooled_top5_end']:+.2f}% | {r['pooled_all_end']:+.2f}% "
+                 f"| {r['pooled_top5_win']*100:.1f}% "
+                 f"| {r['pooled_all_win']*100:.1f}% |")
+    if any(r.get("vs_rules") for r in ok):
+        rules = list(next(r["vs_rules"] for r in ok if r.get("vs_rules")))
+        L += ["", "## 1列で並べただけの規則を超えているか", "",
+              "同じ行集合の上で対で比べた「上位5%の実収益の差」。",
+              "別々の区間の重なりでは判定できないのでこちらで測る。", "",
+              "| 設計 | " + " | ".join(f"対 {n}" for n in rules) + " |",
+              "|---|" + "---:|" * len(rules)]
+        for r in ok:
+            cells = []
+            for n in rules:
+                v = (r.get("vs_rules") or {}).get(n)
+                cells.append("—" if not v else
+                             f"{v['diff']:+.2f}pt [{v['ci'][0]:+.2f},{v['ci'][1]:+.2f}]")
+            L.append(f"| {r['label']} | " + " | ".join(cells) + " |")
+
+    L += ["", "## 窓ごとの内訳", ""]
+    for r in ok:
+        L += [f"### {r['label']}", "",
+              "| 窓 | テスト期間 | n | 正例率 | PR-AUC | 対無情報 | ROC-AUC | 日付内 | Lift@5% | 実収益の差 |",
+              "|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|"]
+        for f in r["folds"]:
+            L.append(f"| {f['fold']} | {f['test_start']}〜{f['test_end']} "
+                     f"| {f['n_test']:,} | {f['base_rate']*100:.2f}% "
+                     f"| {f['pr_auc']:.4f} | {f['pr_gain']:+.4f} "
+                     f"| {f['roc_auc']:.4f} | {f['within_date_auc']:.4f} "
+                     f"| {f['lift@5%']:.2f}x "
+                     f"| {f.get('edge_end_median', float('nan')):+.2f}pt |")
+        L.append("")
+    open(path, "w", encoding="utf-8").write("\n".join(L) + "\n")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="母集団・ラベル設計を掃引する")
     ap.add_argument("--data-dir", default=DATA_DIR)
@@ -563,6 +975,12 @@ def main(argv=None) -> int:
     ap.add_argument("--doc", default=os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "docs", "MODEL_DESIGN_SWEEP.md"))
+    ap.add_argument("--walkforward", action="store_true",
+                    help="単一分割ではなく複数窓で検証する")
+    ap.add_argument("--wf-out", default=os.path.join(DATA_DIR, "sweep_walkforward.json"))
+    ap.add_argument("--wf-doc", default=os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "docs", "MODEL_DESIGN_WALKFORWARD.md"))
     args = ap.parse_args(argv)
 
     designs = DESIGNS
@@ -579,6 +997,9 @@ def main(argv=None) -> int:
           f"/ lr {params['learning_rate']:.4f} / 葉 {params['num_leaves']}）")
     print("[setup] ハイパーパラメータは全設計で共通。"
           "設計ごとに探索し直すと設計の差と探索の差が混ざる")
+
+    if args.walkforward:
+        return run_walkforward(args, designs, cols, params)
 
     paths = sorted(glob.glob(os.path.join(args.data_dir, "bars_*.parquet")))
     if not paths:
