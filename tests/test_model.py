@@ -87,6 +87,81 @@ class TestPrecisionAtK(unittest.TestCase):
         self.assertEqual(precision_at_k(y, y.astype(float), 5), 1.0)
 
 
+class TestHoldoutSplit(unittest.TestCase):
+    """
+    直近1年をホールドアウトにする分割。ここが崩れると評価が全部無効になる。
+
+    以前は --val-start / --test-start に日付をベタ書きしていた。
+    データが伸びても評価期間が古いまま固定され、しかも探索の打ち切り日は
+    ウォークフォワードの min_train_months（根拠のない36という数字）から
+    導かれていて、探索に使えるデータが全体の2割に制限されていた。
+    """
+
+    def _dates(self, first="2018-07-12", last="2026-06-10", n=2000):
+        return pd.Series(pd.to_datetime(
+            np.linspace(pd.Timestamp(first).value, pd.Timestamp(last).value, n)
+        ))
+
+    def _frame(self, **kw):
+        d = self._dates(**kw)
+        rng = np.random.default_rng(0)
+        return pd.DataFrame({"Date": d, "Code": "1",
+                             "label": (rng.random(len(d)) < 0.11).astype(int)})
+
+    def test_holdout_is_the_last_n_months(self):
+        from train_model import holdout_bounds
+        d = self._dates()
+        _, test_start, dmax = holdout_bounds(d, holdout_months=12)
+        self.assertEqual(dmax, pd.Timestamp(d.max()))
+        self.assertEqual(test_start, dmax - pd.DateOffset(months=12))
+
+    def test_embargo_gap_matches_the_label_horizon(self):
+        """訓練最終日のラベルはこの先60営業日で決まる。詰めるとリークする。"""
+        from train_model import EMBARGO_DAYS, TRADING_TO_CALENDAR, holdout_bounds
+        train_end, test_start, _ = holdout_bounds(self._dates())
+        gap = (test_start - train_end).days
+        self.assertEqual(gap, int(round(EMBARGO_DAYS * TRADING_TO_CALENDAR)))
+
+    def test_train_is_entirely_before_test(self):
+        from train_model import holdout_split
+        parts = holdout_split(self._frame())
+        tr = pd.to_datetime(parts["train"]["Date"])
+        te = pd.to_datetime(parts["test"]["Date"])
+        self.assertGreater(len(tr), 0)
+        self.assertGreater(len(te), 0)
+        self.assertLess(tr.max(), te.min())
+
+    def test_no_row_is_in_both_sides(self):
+        from train_model import holdout_split
+        df = self._frame().reset_index(drop=True)
+        parts = holdout_split(df)
+        self.assertEqual(set(parts["train"].index) & set(parts["test"].index), set())
+
+    def test_longer_holdout_leaves_less_training_data(self):
+        from train_model import holdout_split
+        df = self._frame()
+        short = holdout_split(df, holdout_months=6)
+        long_ = holdout_split(df, holdout_months=18)
+        self.assertGreater(len(short["train"]), len(long_["train"]))
+        self.assertLess(len(short["test"]), len(long_["test"]))
+
+    def test_tuning_never_sees_the_holdout(self):
+        """
+        探索の打ち切り日が学習側の train_end と一致すること。
+        別々に決めると片方だけずれ、探索がホールドアウトを覗く。
+        """
+        import argparse
+        from run_tuning import tuning_cutoff
+        from train_model import holdout_bounds
+        d = self._dates()
+        for months in (6, 12, 18):
+            args = argparse.Namespace(holdout_months=months)
+            train_end, test_start, _ = holdout_bounds(d, months)
+            self.assertEqual(tuning_cutoff(d, args), train_end,
+                             f"holdout_months={months} でずれた")
+            self.assertLess(tuning_cutoff(d, args), test_start)
+
+
 class TestPairedBootstrap(unittest.TestCase):
     """既知の答えがあるケースで、判定が正しく出ることを固定する。"""
 
@@ -704,22 +779,17 @@ class TestReportWithoutBaselines(unittest.TestCase):
             "Date": pd.date_range("2020-01-01", periods=n, freq="D"),
             "Code": ["1"] * n,
             "label": ([0] * 35) + ([1] * 5)})
-        parts = {"train": df.iloc[:20], "val": df.iloc[20:30], "test": df.iloc[30:]}
+        parts = {"train": df.iloc[:30], "test": df.iloc[30:]}
         exps = [{"preset": "technical", "n_features": 3,
                  "groups": ["price"],
-                 "results": {"val": [{"name": "LightGBM", "pr_auc": 0.1,
-                                      "roc_auc": 0.5, "precision@1%": 0.1,
-                                      "precision@5%": 0.1, "lift@5%": 1.0,
-                                      "base_rate": 0.1, "n": 10}],
-                             "test": [{"name": "LightGBM", "pr_auc": 0.13,
+                 "results": {"test": [{"name": "LightGBM", "pr_auc": 0.13,
                                        "roc_auc": 0.6, "precision@1%": 0.2,
                                        "precision@5%": 0.2, "lift@5%": 1.5,
                                        "base_rate": 0.1, "n": 10}]}}]
         boot = [{"name": "LightGBM [all]", "pr_auc": 0.12, "diff": -0.01,
                  "ci_low": -0.05, "ci_high": 0.03, "p_better": 0.3}]
-        args = argparse.Namespace(val_start="2020-01-21", test_start="2020-01-31",
-                                  n_boot=100)
-        body = _report(df, parts, {"val": [], "test": []}, exps, args, boot,
+        args = argparse.Namespace(holdout_months=12, n_boot=100)
+        body = _report(df, parts, {"test": []}, exps, args, boot,
                        "LightGBM [technical]")
         self.assertIn("0.1300", body)
         self.assertIn("LightGBM [technical]", body)

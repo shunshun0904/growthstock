@@ -123,8 +123,9 @@ jobs:
       # 運用開始前にあらためて探索する。
       #
       # 実行したいときは research/tune_request.txt の1行目を "yes" にする。
-      # 探索期間は最初のテスト窓より前に限る（run_tuning.py がフォールド定義から
-      # 機械的に導く）。ここを間違えると以降の評価が全部無効になる。
+      # 探索期間はホールドアウト（直近1年）より前に限る。run_tuning.py が
+      # train_model.holdout_bounds から機械的に導くので、学習側と必ず揃う。
+      # ここを間違えると以降の評価が全部無効になる。
       - name: Tune LightGBM (opt-in)
         run: |
           # pipefail 下では head が先に閉じて grep が SIGPIPE で落ちうる。
@@ -169,8 +170,9 @@ jobs:
           # パラメータの差を見ることになる
           PRESETS=$(grep -v '^#' research/eval_presets.txt | tr '\n' ' ')
           echo "評価するセット: $PRESETS"
-          python3 research/train_model.py --features $PRESETS \
-            --val-start 2023-01-01 --test-start 2024-10-01 2>&1 | tee train.log
+          # 分割はデータ末尾から機械的に決まる（直近1年をホールドアウト）。
+          # 日付を手で書くと、データが伸びたときに評価期間が古いまま固定される
+          python3 research/train_model.py --features $PRESETS 2>&1 | tee train.log
 
       # モデルが実際に何を使っているか。学習した場合だけ意味がある
       - name: Feature importance

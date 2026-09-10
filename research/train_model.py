@@ -7,13 +7,18 @@
   * 分割は時系列。ランダム分割は使わない
     （同一日の銘柄間が強く相関し、ラベル窓が重なるため、
       ランダム分割は必ず楽観的な数字を出す）
-  * 訓練と検証の間にエンバーゴを置く。日数はラベル定義から導出する
+  * **直近1年をホールドアウトにし、それ以前を探索と学習に使う**。
+    成績はこの1本だけから出す。境界はデータ末尾から機械的に決めるので
+    （holdout_bounds）、データが伸びれば評価期間も自動で前に進む
+  * 訓練とホールドアウトの間にエンバーゴを置く。日数はラベル定義から導出する
     （訓練最終日のラベルは forward_needed 営業日先の情報を含むため。
       ここをハードコードするとラベル変更時に静かにリークする）
+  * ハイパーパラメータの探索も同じ境界で打ち切る（run_tuning.py）。
+    学習側と別々に決めると片方だけずれてリークする
   * Accuracy は使わない。正例が少数なので「全部起きない」でも高く出る
-  * ベースラインに勝てなければ「特徴量に追加の予測力なし」と結論する
-  * ベースラインとの差は対応のあるブートストラップで有意性を確認する
-    （テスト期間が約1年しかなく、PR-AUC の 0.004 差は目視で判断できない）
+  * 無情報（一定スコア）に勝てなければ「特徴量に予測力なし」と結論する
+  * その差は対応のあるブートストラップで有意性を確認する
+    （PR-AUC の 0.004 差が誤差かどうかは目視では判断できない）
 """
 from __future__ import annotations
 
@@ -62,26 +67,66 @@ EMBARGO_DAYS = (B.RISE_HORIZON if B.POPULATION == "breakout"
 # 分割
 # --------------------------------------------------------------------------- #
 
-def time_split(df: pd.DataFrame, val_start: str, test_start: str) -> Dict[str, pd.DataFrame]:
-    """
-    時系列で 訓練 / 検証 / テスト に分ける。境界にエンバーゴを入れる。
+# 営業日→暦日の換算。年間約250営業日 / 365日 なので 1営業日 ≒ 1.45暦日。
+# walkforward / stratified_eval / run_tuning もここから読む（定義を1か所にする）。
+TRADING_TO_CALENDAR = 1.45
 
-        |--- 訓練 ---|--エンバーゴ--|--- 検証 ---|--エンバーゴ--|--- テスト ---|
+#: 評価用に取り分ける直近の月数。
+#:
+#: 1年にしてある。半年だと決算期が一巡せず、評価窓に季節性の偏りが乗る
+#: （3月期末企業が大半なので、4〜9月と10〜3月では出てくる決算が違う）。
+#: 長くすると評価は安定するが、学習に使える期間が削れて直近の相場を
+#: 学習できなくなる。1年が両方の妥協点。
+HOLDOUT_MONTHS = 12
+
+#: 学習後に成績を出す分割。ホールドアウト1本だけにしてある。
+#: 以前は val / test の2本を出していたが、val は早期打ち切りにも
+#: 使っておらず、数字が2つ並ぶぶん都合のよいほうを読む余地を作るだけだった。
+EVAL_SPLITS = ("test",)
+
+
+def holdout_bounds(dates, holdout_months: int = HOLDOUT_MONTHS,
+                   embargo_days: int = EMBARGO_DAYS):
+    """
+    直近 holdout_months ヶ月を評価用に取り分ける境界を返す。
+
+        |------ 探索 + 学習 ------|--エンバーゴ--|--- ホールドアウト ---|
+                            train_end        test_start          dmax
+
+    ここが探索・学習・評価すべての基準になる。run_tuning.py も
+    この関数から探索の打ち切り日を取る（別々に決めるとリークする）。
+    戻り値は (train_end, test_start, dmax)。
+    """
+    d = pd.to_datetime(pd.Series(dates))
+    dmax = pd.Timestamp(d.max())
+    test_start = dmax - pd.DateOffset(months=holdout_months)
+    embargo = pd.Timedelta(days=int(round(embargo_days * TRADING_TO_CALENDAR)))
+    return test_start - embargo, test_start, dmax
+
+
+def holdout_split(df: pd.DataFrame, holdout_months: int = HOLDOUT_MONTHS
+                  ) -> Dict[str, pd.DataFrame]:
+    """
+    学習用とホールドアウトに分ける。境界にエンバーゴを入れる。
+
+    エンバーゴぶん（ラベル確定に必要な将来日数）は捨てる。
+    訓練最終日のサンプルのラベルはその先60営業日の値動きで決まるので、
+    詰めるとホールドアウト期間の情報が訓練側に入る。
     """
     d = pd.to_datetime(df["Date"])
-    val_start_ts = pd.Timestamp(val_start)
-    test_start_ts = pd.Timestamp(test_start)
-    # 営業日ベースのエンバーゴを暦日に換算（1営業日 ≒ 1.45暦日）
-    embargo = pd.Timedelta(days=int(EMBARGO_DAYS * 1.45))
+    train_end, test_start, dmax = holdout_bounds(d, holdout_months)
 
     parts = {
-        "train": df[d < val_start_ts - embargo],
-        "val": df[(d >= val_start_ts) & (d < test_start_ts - embargo)],
-        "test": df[d >= test_start_ts],
+        "train": df[d <= train_end],
+        "test": df[d >= test_start],
     }
+    dropped = int(((d > train_end) & (d < test_start)).sum())
+    print(f"  ホールドアウト: 直近{holdout_months}ヶ月（{test_start.date()} 〜 {dmax.date()}）")
+    print(f"  エンバーゴで捨てる: {dropped:,}件 "
+          f"（{train_end.date()} 〜 {test_start.date()}）")
     for name, p in parts.items():
         if len(p) == 0:
-            raise SystemExit(f"{name} が空です。val_start/test_start を見直してください")
+            raise SystemExit(f"{name} が空です。--holdout-months を見直してください")
         dd = pd.to_datetime(p["Date"])
         print(f"  {name:<6} {len(p):>8,}件  {dd.min().date()} 〜 {dd.max().date()}  "
               f"正例率 {p['label'].mean()*100:5.2f}%")
@@ -301,10 +346,10 @@ def fit_models(train: pd.DataFrame, features: List[str],
 def main(argv: List[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="ブレイクアウト予測モデルの学習と評価")
     ap.add_argument("--dataset", default=os.path.join(DATA_DIR, "dataset.parquet"))
-    ap.add_argument("--val-start", default="2023-01-01")
     ap.add_argument("--n-boot", type=int, default=1000,
                     help="ブートストラップ反復回数。0で無効")
-    ap.add_argument("--test-start", default="2025-01-01")
+    ap.add_argument("--holdout-months", type=int, default=HOLDOUT_MONTHS,
+                    help="評価用に取り分ける直近の月数")
     ap.add_argument("--features", nargs="*", default=None,
                     help=f"評価する特徴量セット。既定は全プリセット。"
                          f"利用可能: {sorted(F.PRESETS)}")
@@ -320,7 +365,7 @@ def main(argv: List[str] | None = None) -> int:
     print(f"[label] 定義: {LABEL_NAME}")
     print(f"[split] エンバーゴ {EMBARGO_DAYS}営業日（ラベル定義から自動導出）\n")
 
-    parts = time_split(df, args.val_start, args.test_start)
+    parts = holdout_split(df, args.holdout_months)
 
     presets = args.features or list(F.PRESETS.keys())
     unknown = [p for p in presets if p not in F.PRESETS]
@@ -330,7 +375,7 @@ def main(argv: List[str] | None = None) -> int:
     # --- ベースラインは特徴量セットに依らないので先に1度だけ算出する ---
     baselines: Dict[str, List[Dict]] = {}
     test_scores: Dict[str, np.ndarray] = {}
-    for split in ("val", "test"):
+    for split in EVAL_SPLITS:
         part = parts[split]
         y = part["label"].to_numpy(dtype=int)
         bs = baseline_scores(part)
@@ -365,7 +410,7 @@ def main(argv: List[str] | None = None) -> int:
                             params_store=params_store)
         rec = {"preset": preset, "groups": F.PRESETS[preset], "n_features": len(cols),
                "results": {}}
-        for split in ("val", "test"):
+        for split in EVAL_SPLITS:
             part = parts[split]
             y = part["label"].to_numpy(dtype=int)
             X = part[cols].to_numpy(dtype=float)
@@ -418,7 +463,7 @@ def main(argv: List[str] | None = None) -> int:
     payload = {
         "labelConfig": LABEL_NAME,
         "embargoDays": EMBARGO_DAYS,
-        "split": {"val_start": args.val_start, "test_start": args.test_start},
+        "split": {"holdout_months": args.holdout_months},
         "baselines": baselines,
         "bootstrap": {"reference": REF, "n_boot": args.n_boot, "test": boot},
         "experiments": [{k: v for k, v in e.items() if not k.startswith("_")}
@@ -443,6 +488,8 @@ def reference_pr_auc(experiments, baselines, ref: str):
 
 def _report(df, parts, baselines, experiments, args, boot=None, ref="") -> str:
     """実測値だけを並べたレポートを組み立てる。"""
+    _tend, _tstart, _dmax = holdout_bounds(pd.to_datetime(df["Date"]),
+                                           args.holdout_months)
     lines = [
         "# 新高値ブレイクアウト予測モデル 結果",
         "",
@@ -455,8 +502,12 @@ def _report(df, parts, baselines, experiments, args, boot=None, ref="") -> str:
         f"- データセット: {len(df):,}サンプル / 全体の正例率 **{df['label'].mean()*100:.2f}%**",
         f"- 期間: {pd.to_datetime(df['Date']).min().date()} 〜 {pd.to_datetime(df['Date']).max().date()}"
         f" / 銘柄数 {df['Code'].nunique():,}",
-        f"- 分割: 訓練 〜{args.val_start} / 検証 {args.val_start}〜{args.test_start} / テスト {args.test_start}〜",
-        f"- **エンバーゴ {EMBARGO_DAYS}営業日**（ラベル確定に必要な将来日数から自動導出）",
+        f"- 分割: **直近{args.holdout_months}ヶ月をホールドアウト**（{_tstart.date()} 〜 {_dmax.date()}）。"
+        f"それ以前を探索と学習に使う",
+        f"- **エンバーゴ {EMBARGO_DAYS}営業日**（ラベル確定に必要な将来日数から自動導出）。"
+        f"{_tend.date()} 〜 {_tstart.date()} は捨てる",
+        "- ハイパーパラメータの探索もホールドアウトより前だけで行う"
+        "（`research/run_tuning.py` が同じ境界から打ち切り日を取る）",
         "",
     ]
     for name, part in parts.items():
@@ -465,7 +516,7 @@ def _report(df, parts, baselines, experiments, args, boot=None, ref="") -> str:
                      f" / 正例率 {part['label'].mean()*100:.2f}%")
     lines.append("")
 
-    for split, title in (("val", "検証データ (val)"), ("test", "テストデータ (test) — 最終評価")):
+    for split, title in ((("test"), f"ホールドアウト（直近{args.holdout_months}ヶ月）— 唯一の成績"),):
         rows = list(baselines[split])
         for e in experiments:
             for r in e["results"][split]:

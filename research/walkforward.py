@@ -42,9 +42,10 @@ import tuning  # noqa: E402
 from train_model import (  # noqa: E402
     DATA_DIR, EMBARGO_DAYS, baseline_scores, clean_score, evaluate, fit_models,
 )
+from train_model import TRADING_TO_CALENDAR as train_model_TRADING_TO_CALENDAR  # noqa: E402
 
-# 営業日→暦日の換算。年間約250営業日 / 365日 なので 1営業日 ≒ 1.45暦日
-TRADING_TO_CALENDAR = 1.45
+# 営業日→暦日の換算。定義は train_model にある（学習側と揃える）
+TRADING_TO_CALENDAR = train_model_TRADING_TO_CALENDAR
 
 # ウォークフォワードは学習回数がフォールド数だけ増える。
 # 既定は「絶対値 vs 順位版」の対になっているセットに絞る。
@@ -281,27 +282,6 @@ def summarize(per_fold: List[Dict]) -> List[Dict]:
     return out
 
 
-def _wins_needed(n_folds: int) -> int:
-    """符号検定で p<0.05 に達するのに必要な勝数。レポートの注記に使う。"""
-    for w in range(n_folds, -1, -1):
-        if sign_test(w, n_folds - w) >= 0.05:
-            return w + 1
-    return n_folds
-
-
-def _significance_note(n_folds: int) -> str:
-    need = _wins_needed(n_folds)
-    if need > n_folds:
-        return (f"**注意: フォールドが{n_folds}個しかないため、符号検定では "
-                f"全勝しても p<0.05 に届かない**（{n_folds}戦全勝で "
-                f"p={sign_test(n_folds, 0):.3f}）。テスト窓を短くして"
-                "フォールド数を増やすか、この検定を判断材料にしないこと。")
-    return (f"フォールドが{n_folds}個なので、この検定で p<0.05 に達するには"
-            f"**{need}勝以上**が必要（{n_folds}戦）。厳しい基準だが、"
-            "少数のフォールドで偶然勝ち越すことは珍しくないため、"
-            "この水準を満たさない差は「一貫しない」と扱う。")
-
-
 def build_report(df: pd.DataFrame, res: Dict, args) -> str:
     per_fold, summary = res["folds"], res["summary"]
     lines = [
@@ -309,9 +289,22 @@ def build_report(df: pd.DataFrame, res: Dict, args) -> str:
         "",
         "`research/walkforward.py` の出力。**実測値のみ**を記載する。",
         "",
-        "単一分割（[MODEL_RESULTS.md](MODEL_RESULTS.md)）はテスト期間が1つしかなく、",
-        "「特徴量に予測力が無い」のか「その1年が不利だっただけ」かを区別できない。",
-        "ここでは訓練窓を伸ばしながらテスト窓を前に進め、複数の局面で同じ比較を繰り返す。",
+        "> **これは成績表ではなく、安定性の診断です。**",
+        "> モデルの実力は [MODEL_RESULTS.md](MODEL_RESULTS.md) の"
+        "ホールドアウト1本だけで判断してください。",
+        "",
+        "ここで見たいのは1つだけ、**「優位が特定の時期のまぐれではないか」**。",
+        "訓練窓を伸ばしながらテスト窓を前に進め、差の符号が時期によって",
+        "反転しないかを確かめる。",
+        "",
+        "**この表の数字を実力として読んではいけない理由が2つある。**",
+        "",
+        "1. ハイパーパラメータはホールドアウト直前までのデータで探索している。",
+        "   ここのテスト窓の大半はその期間に含まれるので、フォールドの成績は",
+        "   楽観側に出る。**不安定さの検出には使えるが、強さの確認には使えない。**",
+        "2. expanding window なのでフォールドの訓練データは入れ子になっている",
+        "   （F4の訓練データはF3の訓練データを丸ごと含む）。勝敗は独立ではないので、",
+        "   符号検定の p 値は本来より小さく出る。**この列は目安であって検定ではない。**",
         "",
         "## 条件",
         "",
@@ -344,21 +337,20 @@ def build_report(df: pd.DataFrame, res: Dict, args) -> str:
         "",
         "## 総合（全フォールド）",
         "",
-        f"`勝敗` は各フォールドで基準を上回った回数。`p` は勝率0.5の両側符号検定。",
-        "PR-AUC の水準は局面ごとに違うので、差の平均より**符号の一貫性**を重視する。",
+        "`勝敗` は各フォールドで基準を上回った回数。`p(参考)` は勝率0.5の",
+        "両側符号検定だが、上に書いたとおりフォールドは独立ではないので、",
+        "**有意水準として読まないこと**。見るのは符号がそろっているかどうか。",
         "",
-        _significance_note(len(per_fold)),
-        "",
-        "| モデル | 平均PR-AUC | 平均ROC-AUC | 平均差 | 中央値差 | 最悪差 | 勝敗 | p | 判定 |",
+        "| モデル | 平均PR-AUC | 平均ROC-AUC | 平均差 | 中央値差 | 最悪差 | 勝敗 | p(参考) | 符号 |",
         "| --- | ---: | ---: | ---: | ---: | ---: | :---: | ---: | --- |",
     ]
     for s in summary:
-        if s["p_sign"] < 0.05 and s["wins"] > s["losses"]:
-            verdict = "**一貫して上回る**"
-        elif s["p_sign"] < 0.05:
-            verdict = "一貫して下回る"
+        if s["losses"] == 0 and s["wins"] > 0:
+            verdict = "**全フォールドで正**"
+        elif s["wins"] == 0 and s["losses"] > 0:
+            verdict = "全フォールドで負"
         else:
-            verdict = "一貫しない"
+            verdict = f"混在（{s['wins']}勝{s['losses']}敗）"
         lines.append(
             f"| {s['name']} | {s['mean_pr_auc']:.4f} | "
             f"{s.get('mean_roc_auc', float('nan')):.4f} | {s['mean_diff']:+.4f} | "
@@ -385,8 +377,12 @@ def build_report(df: pd.DataFrame, res: Dict, args) -> str:
         "",
         "## 読み方",
         "",
-        "- 各フォールドの差が**正負に散らばる**なら、その特徴量セットに安定した優位は無い",
-        "- 一貫して正でも差が小さければ、実用上の意味は別途 Lift@5% で見る",
+        "- 各フォールドの差が**正負に散らばる**なら、その優位は時期依存で信用できない。"
+        "この場合はホールドアウトの数字も割り引いて読む",
+        "- 符号がそろっていても、それは「不安定さが見つからなかった」までで、"
+        "**強さの証拠にはならない**（上の理由1）",
+        "- **最悪差**の列を見ること。ここが 0 に近ければ、"
+        "符号がそろっていても実質は引き分けのフォールドがある",
         "- 訓練正例率とテスト正例率の乖離が大きいフォールドほど、",
         "  絶対確率を当てる問題としては難しい（順位付けの問題に変えると緩和する）",
         "",
