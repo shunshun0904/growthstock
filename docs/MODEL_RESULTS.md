@@ -20,10 +20,8 @@
 
 | モデル | PR-AUC | ROC-AUC | P@1% | P@5% | Lift@5% |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| LightGBM [all] | 0.1764 | 0.5739 | 7.4% | 17.8% | 1.19x |
-| LightGBM [all_no_cap] | 0.1748 | 0.5606 | 18.5% | 19.3% | 1.29x |
+| LightGBM [all] | 0.1773 | 0.5674 | 11.1% | 19.3% | 1.29x |
 | ロジスティック回帰 [all] | 0.1733 | 0.5516 | 14.8% | 19.3% | 1.29x |
-| ロジスティック回帰 [all_no_cap] | 0.1627 | 0.5337 | 11.1% | 16.3% | 1.09x |
 | 無情報（一定スコア） | 0.1498 | 0.5000 | 15.0% | 15.0% | 1.00x |
 
 （正例率 = 14.98% / n = 2,710）
@@ -40,17 +38,14 @@ PR-AUC はその窓の正例率に一致し、差は「正例率をどれだけ
 
 | モデル | PR-AUC | 差 | 95%CI | P(差>0) | 判定 |
 | --- | ---: | ---: | :---: | ---: | --- |
-| LightGBM [all] | 0.1764 | +0.0266 | [+0.0134, +0.0463] | 1.000 | 有意 |
-| LightGBM [all_no_cap] | 0.1748 | +0.0250 | [+0.0112, +0.0478] | 1.000 | 有意 |
+| LightGBM [all] | 0.1773 | +0.0274 | [+0.0131, +0.0492] | 1.000 | 有意 |
 | ロジスティック回帰 [all] | 0.1733 | +0.0235 | [+0.0098, +0.0429] | 1.000 | 有意 |
-| ロジスティック回帰 [all_no_cap] | 0.1627 | +0.0129 | [+0.0014, +0.0300] | 0.986 | 有意 |
 
 ## 特徴量セット別の比較（テストデータ・2モデルのうち良いほう）
 
 | セット | 列数 | 構成 | PR-AUC | Lift@5% |
 | --- | ---: | --- | ---: | ---: |
-| `all` | 136 | fund_level + fund_lag + fund_trend + fund_streak + price + breakout + volume + liquidity + supply + progress + valuation + dividend + cashflow + efficiency + guidance + sector + turnaround + market | 0.1764 | 1.19x |
-| `all_no_cap` | 135 | fund_level + fund_lag + fund_trend + fund_streak + price + breakout + volume + liquidity + supply + progress + valuation + dividend + cashflow + efficiency + guidance + sector + turnaround + market | 0.1748 | 1.29x |
+| `all` | 136 | fund_level + fund_lag + fund_trend + fund_streak + price + breakout + volume + liquidity + supply + progress + valuation + dividend + cashflow + efficiency + guidance + sector + turnaround + market | 0.1773 | 1.29x |
 
 ## 特徴量の寄与（`all` のロジスティック回帰・標準化係数 上位15）
 
