@@ -1265,6 +1265,29 @@ class TestMarketEnvironment(unittest.TestCase):
             self.assertNotIn(c, F.RAW_FOR_RANK, c)
 
 
+class TestFeatureDictCoversEveryGroup(unittest.TestCase):
+    """
+    グループを足して feature_dict.MACRO に登録し忘れると、
+    辞書ページの生成が落ちる（実際に落ちた）。
+    CI の後段ではなく、ここで気づけるようにする。
+    """
+
+    def test_every_group_is_assigned_to_a_macro_section(self):
+        import feature_dict as FD
+        import features as F
+        used = {g for _, gs, _ in FD.MACRO for g in gs}
+        known = {g for g in F.GROUPS if not g.endswith("_rank")}
+        self.assertEqual(sorted(known - used), [],
+                         "大区分に割り当てられていない中区分がある")
+
+    def test_every_feature_has_a_description(self):
+        import feature_dict as FD
+        import features as F
+        undocumented = [c for c in F.columns("all")
+                        if FD.describe(c) == "（説明未登録）"]
+        self.assertEqual(undocumented, [])
+
+
 class TestPopulationFlags(unittest.TestCase):
     """
     母集団の制約（流動性の下限・決算の完全性）を外したぶん、
