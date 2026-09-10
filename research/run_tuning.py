@@ -57,8 +57,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="評価用に取り分ける直近の月数。ここより後は探索に使わない")
     ap.add_argument("--n-splits", type=int, default=5,
                     help="探索の評価に使う分割の数")
-    ap.add_argument("--cv", choices=["year", "timeseries"], default="year",
-                    help="分割方式。year=年で層別（既定） / timeseries=時系列")
+    ap.add_argument("--cv",
+                    choices=["year", "year_cap", "cap", "timeseries"],
+                    default="year",
+                    help="分割方式。year=年で層別（既定） / "
+                         "year_cap=年×時価総額帯 / cap=時価総額帯のみ / "
+                         "timeseries=時系列")
     args = ap.parse_args(argv)
 
     df = pd.read_parquet(args.dataset).sort_values("Date").reset_index(drop=True)

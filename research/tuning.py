@@ -134,28 +134,84 @@ def _year_groups(years: pd.Series, labels: pd.Series, n_splits: int) -> pd.Serie
     return years.map(groups)
 
 
-def year_folds(df: pd.DataFrame, n_splits: int = 5, seed: int = 0
+#: 層別に使う時価総額の帯の数。全期間を通した分位で切る。
+#:
+#: 日付ごとの分位にしてはいけない。どの日も各帯が均等になるので、
+#: 層別しているつもりで何も揃えていないことになる。
+CAP_BANDS = 5
+CAP_COL = "log_market_cap"
+
+
+def _cap_bands(df: pd.DataFrame, n_bands: int = CAP_BANDS) -> pd.Series:
+    """時価総額（対数）を全期間の分位で帯に分ける。欠測は独立した帯にする。"""
+    if CAP_COL not in df.columns:
+        return pd.Series("na", index=df.index)
+    v = pd.to_numeric(df[CAP_COL], errors="coerce")
+    band = pd.qcut(v, n_bands, labels=False, duplicates="drop")
+    return band.astype("Int64").astype(str).fillna("na")
+
+
+def _coarsen(levels: List[pd.Series], n_splits: int) -> pd.Series:
+    """
+    細かい層から順に使い、分割数に満たない層だけを1段粗い層に落とす。
+
+    層を細かくするほど各フォールドの構成は揃うが、StratifiedKFold は
+    件数が分割数未満の層で落ちる。全体を粗くすると、細かく取れる部分まで
+    損をする。足りない層だけを落とせば両方を取れる。
+
+    levels は粗い順に渡す（最後が最も細かい）。
+    先頭は必ず全行を賄える粗さにすること（実際にはラベルだけの層）。
+    """
+    out = levels[0].astype(str)
+    for lv in levels[1:]:
+        cand = lv.astype(str)
+        big = cand.groupby(cand).transform("size") >= n_splits
+        out = cand.where(big, out)
+    return out
+
+
+def year_folds(df: pd.DataFrame, n_splits: int = 5, seed: int = 0,
+               by_cap: bool = False, by_year: bool = True
                ) -> List[Tuple[pd.DataFrame, pd.DataFrame]]:
     """
-    年で層別した k 分割。各フォールドが全期間を同じ比率で含む。
+    層別した k 分割。各フォールドが同じ構成になるようにする。
 
-    時系列分割は、この規模のデータでは推定が安定しなかった
-    （実測で分割ごとの PR-AUC が 0.036〜0.230 と6倍以上ばらついた）。
-    どの分割も同じ年構成にすれば、その年の局面の当たり外れが
-    フォールド間で相殺され、パラメータの比較ができるようになる。
+    層に入れる軸:
+      ラベル      必ず入れる。PR-AUC の下限は正例率そのものなので、
+                  分割間で正例率がずれるとスコアの差が実力の差なのか
+                  正例率の差なのか分からなくなる
+      年（束）    by_year=True。時系列分割はこの規模では推定が安定しなかった
+                  （実測で分割ごとの PR-AUC が 0.036〜0.230 と6倍以上ばらついた）。
+                  同じ年構成にすれば局面の当たり外れが相殺される
+      時価総額帯  by_cap=True。正例率が規模で 1.8倍違う（〜100億 10.36% /
+                  3000億〜 5.74%）ので、規模構成がフォールドで違うと
+                  難易度も違ってくる
 
-    層は「年の束 × ラベル」。年だけで層別すると、正例率7%台では
-    フォールドごとの正例数が偏り、PR-AUC が比較にならない。
+    年を時価総額帯で「置き換え」ないこと。置き換えると局面の当たり外れが
+    相殺されなくなり、時系列分割で起きたばらつきが戻る。足すのが正しい。
+
+    層を細かくするほど構成は揃うが、StratifiedKFold は件数が分割数未満の
+    層で落ちる。足りない層だけ1段粗い層に落とす（_coarsen）。
 
     引き換えに、訓練と検証が同じ期間を含むので、この CV スコア自体は
     将来性能の推定にはならない（楽観側に出る）。
-    パラメータを選ぶためだけに使い、実力の判定はウォークフォワードで行う。
+    パラメータを選ぶためだけに使い、実力の判定はホールドアウトで行う。
     """
     from sklearn.model_selection import StratifiedKFold
 
-    years = pd.to_datetime(df["Date"]).dt.year
     label = df["label"].astype(int)
-    strata = _year_groups(years, label, n_splits).astype(str) + "_" + label.astype(str)
+    # 粗い順に積む。先頭は必ず全行を賄えるもの（ラベルだけ）
+    levels: List[pd.Series] = [label.astype(str)]
+    if by_year:
+        years = pd.to_datetime(df["Date"]).dt.year
+        yg = _year_groups(years, label, n_splits).astype(str)
+        levels.append(yg + "_" + label.astype(str))
+    if by_cap:
+        cap = _cap_bands(df).astype(str)
+        prev = levels[-1]
+        levels.append(prev + "_cap" + cap)
+    strata = _coarsen(levels, n_splits)
+
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
     out: List[Tuple[pd.DataFrame, pd.DataFrame]] = []
     for tr_idx, va_idx in skf.split(df, strata):
@@ -256,19 +312,23 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
     import optuna
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
-    if scheme == "year":
-        folds = year_folds(df, n_splits=n_splits, seed=seed)
+    if scheme in ("year", "year_cap", "cap"):
+        folds = year_folds(df, n_splits=n_splits, seed=seed,
+                           by_year=scheme in ("year", "year_cap"),
+                           by_cap=scheme in ("year_cap", "cap"))
     elif scheme == "timeseries":
         folds = time_series_folds(df, n_splits=n_splits,
                                   embargo_days=embargo_days)
     else:
-        raise SystemExit(f"未知の分割方式: {scheme}（year / timeseries）")
+        raise SystemExit(
+            f"未知の分割方式: {scheme}（year / year_cap / cap / timeseries）")
     if not folds:
         if verbose:
             print("  [tune] 分割を作れないため既定値を使う")
         return dict(DEFAULT_PARAMS)
     if verbose:
-        ja = {"year": "年で層別", "timeseries": "時系列"}[scheme]
+        ja = {"year": "年で層別", "year_cap": "年×時価総額帯で層別",
+              "cap": "時価総額帯で層別", "timeseries": "時系列"}[scheme]
         print(f"  [tune] {ja}{len(folds)}分割 / 木{SEARCH_N_ESTIMATORS}本固定")
         print("  [tune] " + " / ".join(
             f"訓練{len(t):,}→検証{len(v):,}(正例{int(v['label'].sum())})"

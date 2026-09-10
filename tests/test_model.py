@@ -723,6 +723,100 @@ class TestYearStratifiedFolds(unittest.TestCase):
         self.assertGreater(max(no_label), 4 * max(with_label),
                            f"年だけでも揃ってしまい比較になっていない: {no_label}")
 
+    def _capped_df(self, n_per_year=None):
+        """時価総額を持ち、規模が小さいほど正例率が高いデータ（実測と同じ向き）。"""
+        spec = n_per_year or ((2018, 88), (2019, 755), (2020, 1335), (2021, 1627),
+                              (2022, 877), (2023, 2270), (2024, 2101))
+        rng = np.random.default_rng(0)
+        rows = []
+        for year, n in spec:
+            cap = rng.normal(9.5, 1.6, n)
+            tilt = np.clip(0.11 * (1.8 - 0.16 * (cap - 7.0)), 0.01, 0.4)
+            rows.append(pd.DataFrame({
+                "Date": pd.date_range(f"{year}-01-05", f"{year}-12-25", periods=n),
+                "log_market_cap": cap,
+                "label": (rng.random(n) < tilt).astype(int)}))
+        return pd.concat(rows, ignore_index=True).reset_index(drop=True)
+
+    @staticmethod
+    def _spread(frames, col):
+        """フォールド間で、その列の構成比が最大どれだけ違うか（pt）。"""
+        m = pd.DataFrame([f[col].value_counts(normalize=True)
+                          for f in frames]).fillna(0)
+        return float((m.max() - m.min()).max()) * 100
+
+    def test_cap_bands_must_be_global_not_per_fold(self):
+        """
+        帯は全期間の分位で切る。フォールド内で切ると定義上どのフォールドも
+        均等になり、層別しているつもりで何も測っていないことになる
+        （実際この誤りで「規模は既に揃っている」と読み違えた）。
+        """
+        from tuning import _cap_bands, CAP_BANDS
+        df = self._capped_df()
+        band = _cap_bands(df)
+        self.assertEqual(len(set(band)), CAP_BANDS)
+        # 全期間で切っているので、年ごとに見ると構成は均等にならない
+        by_year = pd.DataFrame([
+            band[pd.to_datetime(df["Date"]).dt.year == y].value_counts(normalize=True)
+            for y in sorted(pd.to_datetime(df["Date"]).dt.year.unique())]).fillna(0)
+        self.assertGreater(float((by_year.max() - by_year.min()).max()), 0.0)
+
+    def test_adding_cap_to_the_strata_balances_size_across_folds(self):
+        """
+        年とラベルだけで層別すると、規模の構成はフォールド間で放置される。
+        正例率が規模で 1.8倍違うので、規模構成がずれると難易度もずれる。
+        """
+        from tuning import year_folds, _cap_bands
+        df = self._capped_df()
+        df = df.assign(_band=_cap_bands(df))
+        without, with_cap = [], []
+        for seed in range(5):
+            a = [v for _, v in year_folds(df, n_splits=5, seed=seed, by_cap=False)]
+            b = [v for _, v in year_folds(df, n_splits=5, seed=seed, by_cap=True)]
+            without.append(self._spread(a, "_band"))
+            with_cap.append(self._spread(b, "_band"))
+        self.assertGreater(max(without), 1.0,
+                           f"規模が既に揃っていて比較にならない: {without}")
+        self.assertLess(max(with_cap), max(without) / 4,
+                        f"規模帯を層に入れても揃わない: {with_cap} vs {without}")
+
+    def test_cap_must_be_added_to_year_not_substituted_for_it(self):
+        """
+        年を規模で置き換えると、局面の当たり外れが相殺されなくなる。
+        時系列分割で起きたばらつきが戻るので、置き換えてはいけない。
+        """
+        from tuning import year_folds
+        df = self._capped_df().assign(_y=lambda d: pd.to_datetime(d["Date"]).dt.year)
+        both = [v for _, v in year_folds(df, n_splits=5, by_year=True, by_cap=True)]
+        cap_only = [v for _, v in year_folds(df, n_splits=5, by_year=False, by_cap=True)]
+        self.assertLess(self._spread(both, "_y"),
+                        self._spread(cap_only, "_y") / 4)
+
+    def test_label_stays_balanced_with_three_axes(self):
+        """軸を増やしても層が細かくなりすぎてラベルが崩れないこと。"""
+        from tuning import year_folds
+        df = self._capped_df()
+        rates = [v["label"].mean()
+                 for _, v in year_folds(df, n_splits=5, by_cap=True)]
+        self.assertLess(float(np.std(rates)), 0.005, rates)
+
+    def test_thin_strata_fall_back_instead_of_crashing(self):
+        """
+        StratifiedKFold は分割数未満の層で落ちる。細かい層が薄いときは
+        1段粗い層に落として、分割自体は必ず作れるようにする。
+        """
+        from tuning import year_folds
+        # 年ごとに 30件しかない。年×規模帯×ラベルにすると 1層あたり数件になる
+        df = self._capped_df(n_per_year=((2018, 30), (2019, 30), (2020, 30),
+                                         (2021, 30), (2022, 30)))
+        folds = year_folds(df, n_splits=5, by_cap=True)
+        self.assertEqual(len(folds), 5)
+
+    def test_unknown_scheme_still_rejected(self):
+        from tuning import tune
+        with self.assertRaises(SystemExit):
+            tune(self._df(), ["a"], n_trials=1, scheme="cap_only")
+
     def test_fold_positive_rates_are_recorded(self):
         """
         揃っていることを実行のたびに記録する。記録が無いと、

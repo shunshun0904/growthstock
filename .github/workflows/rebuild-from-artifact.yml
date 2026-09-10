@@ -132,7 +132,11 @@ jobs:
           # ここは「読めなければ no」でよいので失敗を無害化する
           REQ=$(grep -v '^#' research/tune_request.txt 2>/dev/null | head -1 | tr -d '[:space:]' || true)
           if [ "$REQ" = "yes" ]; then
-            python3 research/run_tuning.py --n-trials 50 \
+            # 層は「年の束 × 時価総額帯 × ラベル」。
+            # 年だけだと規模の構成がフォールド間で最大4.9ptずれる（実測）。
+            # 正例率が規模で1.8倍違うので、構成がずれると難易度もずれる。
+            # 年を規模で置き換えてはいけない（年構成が2.7ptずれる）
+            python3 research/run_tuning.py --n-trials 50 --cv year_cap \
               --features $(grep -v '^#' research/tune_presets.txt | tr '\n' ' ') \
               --n-splits 5 2>&1 | tee tune.log
           else

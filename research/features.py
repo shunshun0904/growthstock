@@ -158,6 +158,13 @@ PRESETS: Dict[str, List[str]] = {
                     "progress", "market"],
     # 全部（絶対値のみ。順位版は別プリセットで比較する）
     "all": ALL_GROUPS,
+    # all から時価総額だけ抜いたもの。
+    # log_market_cap は gain 4位で、しかも正例率が規模で 1.8倍違う
+    # （〜100億 10.36% / 3000億〜 5.74%）。モデルの優位が
+    # 「小型を上に持ってきただけ」でないかを、列ごと外して直接測る。
+    # 層別評価では全5層で規模単独を上回っているので、規模以外の情報は
+    # あるはず。それがどれだけ残るかがここで分かる。
+    "all_no_cap": ALL_GROUPS,
     # バリュエーションのみ
     "valuation_only": ["valuation"],
     # 決算 + バリュエーション + 黒字転換（株価位置を使わない）
@@ -230,6 +237,20 @@ PRESETS: Dict[str, List[str]] = {
 DEFAULT_PRESET = "all"
 
 
+#: プリセットごとに、グループから抜く列。
+#:
+#: グループを分割して表現することもできるが、liquidity を割ると
+#: RAW_FOR_RANK / RANKED_GROUPS / ALL_GROUPS と既存プリセット全部を
+#: 触ることになり、どれか1つ書き漏らせば黙って壊れる
+#: （このリポジトリで実際に何度も起きた種類の事故）。
+#: 「1列だけ抜いたセット」のためにその risk は負わない。
+PRESET_DROP: Dict[str, frozenset] = {
+    "all_no_cap": frozenset({"log_market_cap"}),
+}
+assert set(PRESET_DROP) <= set(PRESETS), \
+    f"PRESET_DROP に未知のプリセット: {sorted(set(PRESET_DROP) - set(PRESETS))}"
+
+
 def columns(preset: str) -> List[str]:
     """プリセット名から列名の一覧を返す。"""
     if preset not in PRESETS:
@@ -237,9 +258,11 @@ def columns(preset: str) -> List[str]:
     out: List[str] = []
     for g in PRESETS[preset]:
         out.extend(GROUPS[g])
+    drop = PRESET_DROP.get(preset, frozenset())
     # 順序を保ったまま重複を除く
     seen = set()
-    return [c for c in out if not (c in seen or seen.add(c))]
+    return [c for c in out
+            if c not in drop and not (c in seen or seen.add(c))]
 
 
 def all_columns() -> List[str]:
