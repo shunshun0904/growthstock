@@ -101,6 +101,17 @@ class Design:
     keep_days: int = 10
     end_ratio: Optional[float] = 0.10
     require_uptrend: bool = True
+    #: 到達しきい値を銘柄自身のボラティリティで測る。None なら固定%（従来）。
+    #:
+    #: 「先60営業日で +20%」は銘柄のボラティリティで正規化されていない。
+    #: 日次ボラ3%の銘柄の60日σは 3%×√60 ≒ 23% で、+20% は 0.85σ。
+    #: 日次ボラ1%なら 7.7% で、同じ +20% が 2.6σ になる。
+    #: つまり正例になりやすさが定義の時点で銘柄ごとに何倍も違う。
+    #: 実測でも日付内で最も分離するのは vol_20d（AUC 0.6325）で、
+    #: モデルの日付内AUC 0.6288 を単独で上回っている。
+    #: 「上がる銘柄を当てている」のか「荒い銘柄を選んでいるだけ」なのかを
+    #: 切り分けるために、しきい値を k×σ にした定義を並べる。
+    vol_norm_k: Optional[float] = None
 
     @property
     def rise(self) -> B.RiseConfig:
@@ -156,6 +167,18 @@ DESIGNS: List[Design] = [
     _var("tv30", "流動性の下限", "3.0億円", min_trading_value=3.0),
     # --- 高値窓（母集団が増える。別データセットが要る） --- #
     _var("w245", "高値窓", "52週(245日)", high_window=245),
+    # --- 到達しきい値をボラティリティで正規化する --- #
+    # 比較相手は keep0（維持条件なし・固定+20%）。ボラ正規化のほうは
+    # しきい値が行ごとに動くので維持日数を付けられず、形を揃えるため。
+    #
+    # 実測の60日σ: 中央15.0% / p5 6.0% / p95 47.8%（8倍の開き）。
+    # 固定+20%は p5 の銘柄には 3.3σ、p95 の銘柄には 0.42σ にあたる。
+    # 正例になりやすさが定義の時点で銘柄ごとに何倍も違う。
+    # k は正例率が keep0 に近くなるあたりを挟んで振る。
+    _var("volk10", "ボラ正規化", "k=1.0σ", vol_norm_k=1.0, keep_days=0),
+    _var("volk12", "ボラ正規化", "k=1.2σ", vol_norm_k=1.2, keep_days=0),
+    _var("volk14", "ボラ正規化", "k=1.4σ", vol_norm_k=1.4, keep_days=0),
+    _var("volk16", "ボラ正規化", "k=1.6σ", vol_norm_k=1.6, keep_days=0),
 ]
 
 
@@ -240,8 +263,9 @@ def reference_outcome(panel: pd.DataFrame) -> pd.DataFrame:
     運用で手に入るのは ref_end に近い。ref_rise は「うまく降りられたら」の上限。
     """
     df = B.attach_rise_label(panel.copy(), REF_RISE)
-    out = df[["Code", "Date", "future_rise", "end_level"]].copy()
-    return out.rename(columns={"future_rise": "ref_rise", "end_level": "ref_end"})
+    out = df[["Code", "Date", "future_rise", "end_level", "uptrend_end"]].copy()
+    return out.rename(columns={"future_rise": "ref_rise", "end_level": "ref_end",
+                               "uptrend_end": "ref_uptrend"})
 
 
 # --------------------------------------------------------------------------- #
@@ -317,7 +341,28 @@ def run_design(design: Design, frame: pd.DataFrame, cols: List[str],
         lo, hi = edge_ci(t)
         row["edge_end_ci"] = [lo, hi]
         row["edge_significant"] = bool(lo > 0)
+    # 上位5%が「どんな銘柄」なのか。数字が良くなったときに
+    # 何を選ぶようになったのかが分からないと、結果を信じる根拠がない
+    row["top5_profile"] = profile(top, t)
     return row
+
+
+#: 上位5%の素性を見る列。無い列は飛ばす。
+PROFILE_COLS = ("vol_20d", "log_market_cap", "ret_20d", "tv_ma20_log", "r_high")
+
+
+def profile(top: pd.DataFrame, allrows: pd.DataFrame) -> Dict:
+    """上位5%と全件の中央値を並べる。何を選ぶようになったかを見るため。"""
+    out: Dict = {}
+    for c in PROFILE_COLS:
+        if c not in top.columns:
+            continue
+        a, b = allrows[c].dropna(), top[c].dropna()
+        if len(a) == 0 or len(b) == 0:
+            continue
+        out[c] = {"top5": round(float(b.median()), 3),
+                  "all": round(float(a.median()), 3)}
+    return out
 
 
 def edge_ci(t: pd.DataFrame, k_pct: float = 5.0, n_boot: int = 1000,
@@ -360,6 +405,53 @@ def edge_ci(t: pd.DataFrame, k_pct: float = 5.0, n_boot: int = 1000,
 # 組み立て
 # --------------------------------------------------------------------------- #
 
+#: モデルを使わない対照。列名と「大きいほうを上位にするか」の組。
+#:
+#: 掃引でどれだけ数字が良くなっても、この対照に勝てないなら
+#: モデルは要らない（その1列で並べれば済む）。ラベルを見ないので
+#: 全設計に共通の1組として出す。
+NAIVE_RULES = (
+    ("低ボラ順（-vol_20d）", "vol_20d", False),
+    ("モメンタム順（ret_20d）", "ret_20d", True),
+    ("大型順（log_market_cap）", "log_market_cap", True),
+    ("高ボラ順（vol_20d）", "vol_20d", True),
+)
+
+
+def naive_baselines(frame: pd.DataFrame, test_start: pd.Timestamp,
+                    dmax: pd.Timestamp) -> List[Dict]:
+    """
+    1列で並べただけの対照。同じ評価期間・同じ物差しで測る。
+
+    「上位5%の実収益が全件よりどれだけ良いか」はラベルを見ないので、
+    ラベル定義に関係なく計算できる。モデルの数字はこれと比べて読む。
+    """
+    d = pd.to_datetime(frame["Date"])
+    t = frame[(d >= test_start) & (d <= dmax)].copy()
+    out = []
+    for name, col, desc in NAIVE_RULES:
+        if col not in t.columns:
+            continue
+        u = t[t[col].notna()].copy()
+        u["score"] = u[col] if desc else -u[col]
+        k = max(1, int(len(u) * 0.05))
+        top = u.nlargest(k, "score")
+        a, b = outcome_stats(u), outcome_stats(top)
+        if not a or not b:
+            continue
+        lo, hi = edge_ci(u)
+        out.append({"name": name, "n": int(len(u)),
+                    "top5_end_median": b["end_median"],
+                    "all_end_median": a["end_median"],
+                    "top5_win_rate": b["win_rate"],
+                    "all_win_rate": a["win_rate"],
+                    "edge_end_median": round(b["end_median"] - a["end_median"], 2),
+                    "edge_end_ci": [lo, hi],
+                    "edge_significant": bool(lo > 0),
+                    "edge_significant_negative": bool(hi < 0)})
+    return out
+
+
 def build_frame(design: Design, dataset: pd.DataFrame, panel: pd.DataFrame,
                 ref: pd.DataFrame, cols: List[str]) -> Optional[pd.DataFrame]:
     """
@@ -384,7 +476,11 @@ def build_frame(design: Design, dataset: pd.DataFrame, panel: pd.DataFrame,
         # データセット自体が既定のクールダウンで作られている
         sel["fresh"] = True
 
-    lab = labels_for(panel, design.rise)[["Code", "Date", "label"]]
+    if design.vol_norm_k is None:
+        lab = labels_for(panel, design.rise)[["Code", "Date", "label"]]
+    else:
+        # 参照ホライズンの値から作るので、パネルの付け直しは要らない
+        lab = ref[["Code", "Date"]].assign(label=np.nan)
 
     m = keys
     for right in (sel, lab, ref):
@@ -404,11 +500,48 @@ def build_frame(design: Design, dataset: pd.DataFrame, panel: pd.DataFrame,
     out = dataset.iloc[rows][cols].copy()
     out["Date"] = dataset["Date"].to_numpy()[rows]
     out["Code"] = dataset["Code"].to_numpy()[rows]
-    for c in ("label", "ref_rise", "ref_end"):
+    for c in ("label", "ref_rise", "ref_end", "ref_uptrend"):
         out[c] = m[c].to_numpy()
     # True/False/NaN の object 列を数値にそろえる（NaN = 判定不能を残す）
     out["label"] = pd.to_numeric(out["label"], errors="coerce")
+    if design.vol_norm_k is not None:
+        out["label"] = vol_normalised_label(out, design)
     return out.reset_index(drop=True)
+
+
+def vol_normalised_label(frame: pd.DataFrame, design: Design) -> pd.Series:
+    """
+    到達しきい値を銘柄自身の σ で測ったラベル。
+
+        σ      = vol_20d/100 × √horizon      （日次ボラから期間ボラへ）
+        到達   = ref_rise >= k×σ
+        終盤   = ref_end  >= (end_ratio/threshold) × k×σ
+        トレンド = 参照ホライズン終了時点で MA20 >= MA60
+
+    維持日数は付けない。しきい値が行ごとに動くとこの条件だけ別実装になり、
+    「正規化したから変わった」のか「維持条件の実装が変わったから変わった」のか
+    分からなくなる。比較相手は同じ形の keep0（維持条件なし）にする。
+    """
+    if design.keep_days:
+        raise SystemExit(f"[{design.key}] ボラ正規化と維持日数は同時に使えない")
+    if design.horizon != REF_HORIZON:
+        raise SystemExit(f"[{design.key}] ボラ正規化は参照ホライズン"
+                         f"（{REF_HORIZON}営業日）でのみ定義している")
+    if "vol_20d" not in frame.columns:
+        raise SystemExit(f"[{design.key}] vol_20d が特徴量に無い")
+
+    sigma = frame["vol_20d"] / 100.0 * np.sqrt(design.horizon)
+    hit = frame["ref_rise"] >= design.vol_norm_k * sigma
+    ok = hit.copy()
+    determined = frame["ref_rise"].notna() & sigma.notna()
+    if design.end_ratio is not None:
+        frac = design.end_ratio / design.threshold
+        ok &= frame["ref_end"] >= frac * design.vol_norm_k * sigma
+        determined &= frame["ref_end"].notna()
+    if design.require_uptrend:
+        ok &= frame["ref_uptrend"] == 1.0
+        determined &= frame["ref_uptrend"].notna()
+    return ok.where(determined).astype("float64")
 
 
 def load_dataset(high_window: int) -> Optional[pd.DataFrame]:
@@ -457,6 +590,7 @@ def main(argv=None) -> int:
     datasets: Dict[int, pd.DataFrame] = {}
     refs: Dict[int, pd.DataFrame] = {}
     results: List[Dict] = []
+    naive: Optional[List[Dict]] = None
     test_start = dmax = None
 
     for design in designs:
@@ -491,6 +625,21 @@ def main(argv=None) -> int:
                   f"{test_start.date()} 〜 {dmax.date()}")
 
         frame = build_frame(design, ds, panels.get(hw), refs[hw], cols)
+        if naive is None and hw == 368:
+            naive = naive_baselines(frame, test_start, dmax)
+            print("\n[対照] モデルを使わず1列で並べたときの"
+                  "「上位5% - 全件」（同じ評価期間・同じ物差し）")
+            for r in naive:
+                # 負に有意なものを「有意でない」と書くと逆に読める。
+                # 実際「モメンタム順 -17.90pt [-21.61,-13.67]」が
+                # 「有意でない」と出ていた
+                sig = ("有意に正" if r["edge_significant"]
+                       else "有意に負" if r["edge_significant_negative"]
+                       else "有意でない")
+                print(f"    {r['name']:<26} {r['edge_end_median']:+6.2f}pt "
+                      f"[{r['edge_end_ci'][0]:+.2f},{r['edge_end_ci'][1]:+.2f}] "
+                      f"{sig} / 勝率 {r['top5_win_rate']*100:.1f}% "
+                      f"(全件 {r['all_win_rate']*100:.1f}%)")
         print(f"\n=== [{design.axis}] {design.label} ===")
         row = run_design(design, frame, cols, params, test_start, dmax)
         results.append(row)
@@ -511,6 +660,7 @@ def main(argv=None) -> int:
 
     _print_table(results)
     payload = {
+        "naive_baselines": naive or [],
         "reference_horizon": REF_HORIZON,
         "preset": args.preset, "params_key": args.params,
         "test_start": str(test_start.date()) if test_start is not None else None,
@@ -617,6 +767,44 @@ def _write_doc(path: str, payload: Dict) -> None:
             f"| {a.get('end_median', float('nan')):+.2f}% "
             f"| {r.get('edge_end_median', float('nan')):+.2f}pt "
             f"| {_ci_text(r) or '—'} |")
+    naive = payload.get("naive_baselines") or []
+    if naive:
+        L += ["", "## モデルを使わない対照", "",
+              "同じ評価期間・同じ物差しで、1列だけで並べたときの"
+              "「上位5% - 全件」。",
+              "掃引でどれだけ数字が良くなっても、ここに勝てないなら"
+              "モデルは要らない。", "",
+              "| 並べ方 | 上位5%終盤 | 全件終盤 | 差 | 95%区間 | 上位5%勝率 |",
+              "|---|---:|---:|---:|:---:|---:|"]
+        for r in naive:
+            ci = r["edge_end_ci"]
+            L.append(f"| {r['name']} | {r['top5_end_median']:+.2f}% "
+                     f"| {r['all_end_median']:+.2f}% "
+                     f"| {r['edge_end_median']:+.2f}pt "
+                     f"| [{ci[0]:+.2f},{ci[1]:+.2f}] "
+                     f"| {r['top5_win_rate']*100:.1f}% |")
+
+    prof = [r for r in ok if r.get("top5_profile")]
+    if prof:
+        cols = [c for c in PROFILE_COLS
+                if any(c in r["top5_profile"] for r in prof)]
+        ja = {"vol_20d": "日次ボラ(%)", "log_market_cap": "log時価総額",
+              "ret_20d": "20日リターン(%)", "r_high": "高値への近さ",
+              "tv_ma20_log": "log売買代金"}
+        L += ["", "## 上位5%はどんな銘柄か", "",
+              "設計を変えると、モデルが選ぶ銘柄そのものが変わる。",
+              "数字が良くなったときに何を選ぶようになったのかが分からないと、",
+              "結果を信じる根拠がない。各セルは「上位5%の中央値（全件の中央値）」。", "",
+              "| 軸 | 設計 | " + " | ".join(ja.get(c, c) for c in cols) + " |",
+              "|---|---|" + "---:|" * len(cols)]
+        for r in prof:
+            cells = []
+            for c in cols:
+                v = r["top5_profile"].get(c)
+                cells.append(f"{v['top5']:.2f} ({v['all']:.2f})" if v else "—")
+            name = f"**{r['label']}**" if r["key"] == "base" else r["label"]
+            L.append(f"| {r['axis']} | {name} | " + " | ".join(cells) + " |")
+
     skipped = [r for r in payload["results"] if "skipped" in r]
     if skipped:
         L += ["", "## 測れなかった設計", ""]
