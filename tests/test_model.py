@@ -673,10 +673,71 @@ class TestYearStratifiedFolds(unittest.TestCase):
         self.assertEqual(len(set(map(str, mixes))), 1, mixes)
 
     def test_positive_rate_is_balanced_across_folds(self):
-        """年だけで層別すると正例数が偏る。層は 年の束 × ラベル にする。"""
+        """
+        年だけで層別すると正例数が偏る。層は 年の束 × ラベル にする。
+
+        PR-AUC の下限は正例率そのものなので、フォールド間で正例率がずれると
+        スコアの差が実力の差なのか正例率の差なのか分からなくなる。
+        """
         from tuning import year_folds
-        rates = [v["label"].mean() for _, v in year_folds(self._df(), n_splits=5)]
-        self.assertLess(float(np.std(rates)), 0.005)
+        folds = year_folds(self._df(), n_splits=5)
+        va = [v["label"].mean() for _, v in folds]
+        tr = [t["label"].mean() for t, _ in folds]
+        self.assertLess(float(np.std(va)), 0.005, f"検証側が揃っていない: {va}")
+        # 訓練側は検証側の補集合なので、こちらも自動的に揃うはず。
+        # 揃っていなければ層別が効いていない
+        self.assertLess(float(np.std(tr)), 0.005, f"訓練側が揃っていない: {tr}")
+
+    def test_label_in_the_strata_is_what_keeps_it_balanced(self):
+        """
+        ラベルを層に入れると、正例率の幅が丸め誤差ぶんに固定される。
+        年だけの層別はシード次第で大きく暴れる。
+
+        「シードごとの勝ち負け」では検出できない（年だけでも偶然揃う
+        シードがある）。効いているのは平均ではなく最悪値と再現性なので、
+        そちらを固定する。実測（正例219件・5分割）:
+            ラベル入り  どのシードでも 0.610pt
+            年だけ      0.407 〜 5.691pt
+        """
+        from sklearn.model_selection import StratifiedKFold
+        from tuning import _year_groups, year_folds
+        df = self._df()
+        years = pd.to_datetime(df["Date"]).dt.year
+        only_year = _year_groups(years, df["label"], 5)
+
+        with_label, no_label = [], []
+        for seed in range(10):
+            r1 = [v["label"].mean() for _, v in year_folds(df, n_splits=5, seed=seed)]
+            skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=seed)
+            r2 = [df.iloc[va]["label"].mean() for _, va in skf.split(df, only_year)]
+            with_label.append(max(r1) - min(r1))
+            no_label.append(max(r2) - min(r2))
+
+        # 1. ラベルを入れた側はシードに依存しない（層の切り方で決まる）
+        self.assertAlmostEqual(max(with_label), min(with_label), places=6,
+                               msg=f"シードで変わっている: {with_label}")
+        # 2. その幅は丸め誤差の水準にとどまる
+        self.assertLess(max(with_label), 0.01, f"幅が大きすぎる: {with_label}")
+        # 3. 年だけの層別は最悪値がはるかに大きい。ここが縮まっているなら
+        #    このテストは何も検出していない
+        self.assertGreater(max(no_label), 4 * max(with_label),
+                           f"年だけでも揃ってしまい比較になっていない: {no_label}")
+
+    def test_fold_positive_rates_are_recorded(self):
+        """
+        揃っていることを実行のたびに記録する。記録が無いと、
+        実データで崩れても後から確かめられない。
+        """
+        import tuning
+        df = self._df()
+        cols = ["a"]
+        tuning.tune(df, cols, n_trials=2, n_splits=5, verbose=False)
+        cv = tuning.LAST_CV
+        self.assertEqual(len(cv["fold_pos_rate"]), 5)
+        self.assertAlmostEqual(cv["fold_pos_rate_spread"],
+                               max(cv["fold_pos_rate"]) - min(cv["fold_pos_rate"]),
+                               places=4)
+        self.assertLess(cv["fold_pos_rate_spread"], 0.02)
 
     def test_small_years_are_merged(self):
         """

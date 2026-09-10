@@ -2,30 +2,40 @@
 """
 LightGBM のハイパーパラメータを Optuna で探索する。
 
-## 最重要: テスト期間を見ないこと
+## 最重要: ホールドアウトを見ないこと
 
 探索は「良さそうなパラメータを選ぶ」作業なので、
 評価に使う期間のデータを一度でも見ればリークになる。
-ウォークフォワードは9つのテスト窓（2021-06〜2025-11）を持つため、
-探索に使ってよいのは **最初のテスト窓より前** のデータだけになる。
+探索に使ってよいのは **ホールドアウト（直近1年）より前** だけ。
+境界は train_model.holdout_bounds から機械的に取る（run_tuning.py）。
 
-    |--- 探索に使ってよい ---|--エンバーゴ--|-- F1テスト --|-- F2テスト --| ...
+    |--- 探索に使ってよい ---|--エンバーゴ--|--- ホールドアウト ---|
                             ↑
                      ここより後は一切見ない
 
-そのうえで、探索用データをさらに時系列で内側訓練 / 内側検証に割り、
-内側検証の PR-AUC を最大化する。ここもランダム分割は使わない
-（同一銘柄の隣接月が強く相関するため、必ず楽観的な数字が出る）。
+## 分割は「年の束 × ラベル」で層別する
+
+時系列分割はこの規模では推定が安定しなかった（実測で分割ごとの
+PR-AUC が 0.036〜0.230 と6倍以上ばらついた）。年で層別すれば
+局面の当たり外れがフォールド間で相殺される。
+
+層にラベルも入れる理由: PR-AUC の下限は正例率そのものなので、
+フォールド間で正例率がずれると、スコアの差が実力の差なのか
+正例率の差なのか分からなくなる。年だけで層別すると、正例率が
+1割程度の問題ではフォールドごとの正例数が実際に偏る。
+揃っていることは実行のたびに記録する（LAST_CV の fold_pos_rate）。
+
+引き換えに、訓練と検証が同じ期間を含むので、この CV スコア自体は
+将来性能の推定にはならない（楽観側に出る）。パラメータを選ぶためだけに
+使い、実力の判定はホールドアウトで行う。
 
 ## なぜフォールドごとに探索しないか
 
-フォールドごとに探索するのが理想だが、
-9フォールド × 11プリセット × 試行回数 の学習が必要で現実的な時間に収まらない。
-代わりに「プリセットごとに1回、最初のテスト窓より前のデータだけで探索」する。
+フォールドごとに探索するのが理想だが、学習回数が現実的な時間に収まらない。
+代わりに「プリセットごとに1回、ホールドアウトより前のデータだけで探索」する。
 全フォールドで同じパラメータを使うので比較の条件も揃う。
 
-探索結果は research/_data/lgbm_params.json に保存し、
-単一分割とウォークフォワードで共有する。毎回探索し直さない。
+探索結果は research/lgbm_params.json に保存する。毎回探索し直さない。
 """
 from __future__ import annotations
 
@@ -310,6 +320,16 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
                "fold_roc": at.get("fold_roc", []),
                "base_rate": round(float(np.mean(
                    [v["label"].mean() for _, v in folds])), 4),
+               # フォールドごとの正例率も残す。層は「年の束 × ラベル」なので
+               # ここが揃っているはずだが、記録が無いと後から確かめられない。
+               # 揃っていなければ、その探索の PR-AUC は分割間で比較できていない
+               # （PR-AUC の下限は正例率そのものなので、正例率がずれると
+               #   スコアの差が実力の差なのか正例率の差なのか分からなくなる）。
+               "fold_pos_rate": [round(float(v["label"].mean()), 4)
+                                 for _, v in folds],
+               "fold_pos_rate_spread": round(float(
+                   max(v["label"].mean() for _, v in folds)
+                   - min(v["label"].mean() for _, v in folds)), 4),
                "n_trials": n_trials}
     if verbose:
         pr_txt = " ".join(f"{x:.4f}" for x in at.get("fold_scores", []))
@@ -320,8 +340,12 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
               f"(±{at.get('roc_std', 0):.4f}) / 木 {best['n_estimators']}本")
         print(f"  [tune] 分割ごと PR-AUC : {pr_txt}")
         print(f"  [tune] 分割ごと ROC-AUC: {roc_txt}")
+        rates = [v["label"].mean() for _, v in folds]
         print(f"  [tune] 検証窓の正例率 : "
-              + " ".join(f"{v['label'].mean()*100:.2f}%" for _, v in folds))
+              + " ".join(f"{r*100:.2f}%" for r in rates)
+              + f"（幅 {(max(rates)-min(rates))*100:.3f}pt）")
+        print(f"  [tune] 訓練窓の正例率 : "
+              + " ".join(f"{t['label'].mean()*100:.2f}%" for t, _ in folds))
     return best
 
 
