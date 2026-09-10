@@ -53,6 +53,40 @@ class TestCleanScore(unittest.TestCase):
         self.assertEqual(r["precision@1%"], 1.0)   # 上位1件は本物の正例
 
 
+class TestPrecisionAtK(unittest.TestCase):
+    """
+    上位k%は同点の扱いで値が変わる。素朴に argsort すると同点の順序は
+    配列の並び（＝日付順）が決め、「上位k%」ではなく「最初のk%」を測る。
+    """
+
+    def test_constant_score_gives_exactly_the_base_rate(self):
+        from train_model import precision_at_k
+        y = np.zeros(1000, dtype=int)
+        y[:90] = 1                                  # 正例は先頭に固める
+        rate = float(y.mean())
+        for k in (1, 5, 10):
+            self.assertAlmostEqual(precision_at_k(y, np.zeros(1000), k),
+                                   rate, places=9)
+
+    def test_ordering_of_rows_does_not_change_the_answer(self):
+        """並べ替えても値が動かないこと。動くなら日付順を読んでいる。"""
+        from train_model import precision_at_k
+        rng = np.random.default_rng(3)
+        y = (rng.random(600) < 0.15).astype(int)
+        score = np.repeat([2.0, 1.0, 0.0], 200)     # 3値なので同点だらけ
+        base = precision_at_k(y, score, 5)
+        for seed in range(5):
+            p = np.random.default_rng(seed).permutation(len(y))
+            self.assertAlmostEqual(precision_at_k(y[p], score[p], 5),
+                                   base, places=9)
+
+    def test_a_perfect_score_still_reaches_one(self):
+        from train_model import precision_at_k
+        rng = np.random.default_rng(1)
+        y = (rng.random(400) < 0.2).astype(int)
+        self.assertEqual(precision_at_k(y, y.astype(float), 5), 1.0)
+
+
 class TestPairedBootstrap(unittest.TestCase):
     """既知の答えがあるケースで、判定が正しく出ることを固定する。"""
 
@@ -231,6 +265,12 @@ class TestWalkForwardEndToEnd(unittest.TestCase):
         r = evaluate(REFERENCE_MODEL, y, sc[REFERENCE_MODEL])
         self.assertAlmostEqual(r["pr_auc"], float(y.mean()), places=6)
         self.assertAlmostEqual(r["roc_auc"], 0.5, places=6)
+        # 上位k%も同じく「無情報」でなければならない。
+        # 同点を配列順で切っていたときは Lift@5% が 1.87倍 / 0.42倍 と出て、
+        # 実際は「テスト期間の最初の5%の正例率」を測っていた。
+        for k in (1, 5, 10):
+            self.assertAlmostEqual(r[f"lift@{k}%"], 1.0, places=6,
+                                   msg=f"無情報の Lift@{k}% は1.00倍のはず")
 
     def test_summarise_counts_wins_correctly(self):
         per_fold = [

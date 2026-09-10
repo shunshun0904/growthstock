@@ -93,10 +93,35 @@ def time_split(df: pd.DataFrame, val_start: str, test_start: str) -> Dict[str, p
 # --------------------------------------------------------------------------- #
 
 def precision_at_k(y_true: np.ndarray, score: np.ndarray, k_pct: float) -> float:
-    """スコア上位 k% の的中率。実運用（上位n銘柄だけ見る）に最も近い指標。"""
+    """
+    スコア上位 k% の的中率。実運用（上位n銘柄だけ見る）に最も近い指標。
+
+    同点は「その中からランダムに選んだときの期待値」で扱う。
+    素朴に argsort で上位n件を取ると、同点の並びは配列の順序（＝日付順）で
+    決まってしまう。定数スコアではそれが全件同点になり、
+    「テスト期間の最初の5%の正例率」を測っているだけの数字が出る。
+    実際それで無情報モデルに Lift@5% 1.87倍 / 0.42倍 という
+    意味のない値が並んだ。同点を期待値で割れば、定数スコアは
+    必ず全体の正例率（Lift 1.00倍）になる。
+    """
     n = max(1, int(len(score) * k_pct / 100))
-    idx = np.argsort(-score)[:n]
-    return float(y_true[idx].mean())
+    y_true = np.asarray(y_true, dtype=float)
+    score = np.asarray(score, dtype=float)
+    if n >= len(score):
+        return float(y_true.mean())
+
+    # n件目の値を境にして、それより大きいものは確実に入る。
+    # ちょうど同点のものは、残り枠を等確率で分け合う。
+    cut = np.partition(score, -n)[-n]
+    above = score > cut
+    tied = score == cut
+    n_above = int(above.sum())
+    n_tied = int(tied.sum())
+    hits = float(y_true[above].sum())
+    remaining = n - n_above
+    if remaining > 0 and n_tied > 0:
+        hits += remaining * float(y_true[tied].mean())
+    return hits / n
 
 
 def clean_score(score: np.ndarray) -> np.ndarray:
@@ -464,8 +489,10 @@ def _report(df, parts, baselines, experiments, args, boot=None, ref="") -> str:
         lines += ["", f"## 差は誤差か（対応のあるブートストラップ B={args.n_boot}）", "",
                   f"基準は **{ref}**（テスト PR-AUC {ref_ap_txt}）。",
                   "単変量のベースラインは廃止した。母集団を高値更新日にした時点で",
-                  "`r_high` は全件ほぼ100の定数になり、勝っても何も言えないため。",
-                  "決算を使わないモデルを基準にして、決算を足す価値を直接測る。",
+                  "「高値からの距離」は全銘柄で同じになり、それを基準にしても",
+                  "何も言えないため。全件同じスコアを与える無情報モデルなら、",
+                  "PR-AUC はその窓の正例率に一致し、差は「正例率をどれだけ",
+                  "上回ったか」になる。母集団やラベルの定義を変えても意味が変わらない。",
                   "95%CI が 0 をまたぐ場合、その差は誤差と区別できない。", "",
                   "| モデル | PR-AUC | 差 | 95%CI | P(差>0) | 判定 |",
                   "| --- | ---: | ---: | :---: | ---: | --- |"]

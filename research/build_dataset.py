@@ -675,8 +675,8 @@ def add_breakout_context(df: pd.DataFrame) -> pd.DataFrame:
     """
     ブレイクそのものの性質を表す特徴量。
 
-    母集団を高値更新日にすると r_high は全件ほぼ100になって使えなくなる。
-    代わりに「どういう抜け方をしたか」が効くはずなので、それを列にする。
+    母集団を高値更新日にすると、どの銘柄も「高値からの距離」は同じになる。
+    残る違いは「どういう抜け方をしたか」なので、それを列にする。
     ここは推測なので、効くかどうかは日付内診断と層別評価で測る。
     """
     g = df.groupby("Code", sort=False)
@@ -1257,7 +1257,7 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     print(f"[filter] 52週高値が未定義(上場直後)を除外: {before:,} -> {len(samples):,}")
 
     if POPULATION != "breakout":
-        # 高値更新日を母集団にする場合、r_high は全件ほぼ100なのでこの除外は掛けない
+        # 高値更新日を母集団にする場合、全件が定義上ここに引っかかるので掛けない
         before = len(samples)
         samples = samples[samples["r_high"] < MAX_RHIGH_AT_T]
         print(f"[filter] 基準日ですでに高値圏(R_high>={MAX_RHIGH_AT_T})を除外: "
