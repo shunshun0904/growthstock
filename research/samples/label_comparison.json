@@ -4,33 +4,33 @@
       "config": "3ヶ月内+20%",
       "high_window": 245,
       "high_weeks": 52,
-      "n": 31270,
-      "positive_rate": 0.2532,
-      "n_positive": 7917,
-      "n_stocks": 4310,
+      "n": 31296,
+      "positive_rate": 0.2531,
+      "n_positive": 7922,
+      "n_stocks": 4311,
       "date_from": "2017-09-29",
-      "date_to": "2026-06-10",
+      "date_to": "2026-06-16",
       "funnel": {
-        "新規ブレイク": 39212,
-        "ラベル確定": 37896,
-        "高値窓あり": 37896,
-        "流動性フィルタ": 31270
+        "新規ブレイク": 39235,
+        "ラベル確定": 37927,
+        "高値窓あり": 37927,
+        "流動性フィルタ": 31296
       },
       "cascade": {
-        "到達": 7917
+        "到達": 7922
       },
       "positive": {
-        "n": 7917,
+        "n": 7922,
         "maxGain_median": 32.16,
         "maxGain_p25": 24.66,
-        "maxGain_p75": 46.92,
-        "endGain_median": 20.46,
+        "maxGain_p75": 46.91,
+        "endGain_median": 20.47,
         "endGain_positive_rate": 0.869,
         "keepDays_median": null,
         "uptrend_rate": 0.741
       },
       "negative": {
-        "n": 23353,
+        "n": 23374,
         "maxGain_median": 6.15,
         "maxGain_p25": 2.01,
         "maxGain_p75": 11.52,
@@ -45,33 +45,33 @@
       "config": "3ヶ月内+20%",
       "high_window": 368,
       "high_weeks": 78,
-      "n": 22909,
-      "positive_rate": 0.254,
-      "n_positive": 5818,
-      "n_stocks": 4015,
+      "n": 22936,
+      "positive_rate": 0.2539,
+      "n_positive": 5823,
+      "n_stocks": 4017,
       "date_from": "2018-04-03",
-      "date_to": "2026-06-10",
+      "date_to": "2026-06-16",
       "funnel": {
-        "新規ブレイク": 28454,
-        "ラベル確定": 27250,
-        "高値窓あり": 27250,
-        "流動性フィルタ": 22909
+        "新規ブレイク": 28478,
+        "ラベル確定": 27281,
+        "高値窓あり": 27281,
+        "流動性フィルタ": 22936
       },
       "cascade": {
-        "到達": 5818
+        "到達": 5823
       },
       "positive": {
-        "n": 5818,
-        "maxGain_median": 31.82,
+        "n": 5823,
+        "maxGain_median": 31.8,
         "maxGain_p25": 24.56,
-        "maxGain_p75": 46.27,
+        "maxGain_p75": 46.25,
         "endGain_median": 20.33,
         "endGain_positive_rate": 0.861,
         "keepDays_median": null,
         "uptrend_rate": 0.734
       },
       "negative": {
-        "n": 17091,
+        "n": 17113,
         "maxGain_median": 6.16,
         "maxGain_p25": 2.03,
         "maxGain_p75": 11.56,
@@ -86,34 +86,34 @@
       "config": "3ヶ月内+20% / 維持10日",
       "high_window": 368,
       "high_weeks": 78,
-      "n": 22909,
-      "positive_rate": 0.1492,
-      "n_positive": 3418,
-      "n_stocks": 4015,
+      "n": 22936,
+      "positive_rate": 0.1491,
+      "n_positive": 3419,
+      "n_stocks": 4017,
       "date_from": "2018-04-03",
-      "date_to": "2026-06-10",
+      "date_to": "2026-06-16",
       "funnel": {
-        "新規ブレイク": 28454,
-        "ラベル確定": 27250,
-        "高値窓あり": 27250,
-        "流動性フィルタ": 22909
+        "新規ブレイク": 28478,
+        "ラベル確定": 27281,
+        "高値窓あり": 27281,
+        "流動性フィルタ": 22936
       },
       "cascade": {
-        "到達": 5818,
-        "維持10日": 3418
+        "到達": 5823,
+        "維持10日": 3419
       },
       "positive": {
-        "n": 3418,
+        "n": 3419,
         "maxGain_median": 41.0,
-        "maxGain_p25": 31.7,
-        "maxGain_p75": 58.94,
+        "maxGain_p25": 31.69,
+        "maxGain_p75": 58.93,
         "endGain_median": 27.34,
         "endGain_positive_rate": 0.938,
         "keepDays_median": 26.0,
         "uptrend_rate": 0.79
       },
       "negative": {
-        "n": 19491,
+        "n": 19517,
         "maxGain_median": 7.61,
         "maxGain_p25": 2.61,
         "maxGain_p75": 14.48,
@@ -128,36 +128,36 @@
       "config": "3ヶ月内+20% / 終盤+10%",
       "high_window": 368,
       "high_weeks": 78,
-      "n": 22909,
+      "n": 22936,
       "positive_rate": 0.1912,
-      "n_positive": 4381,
-      "n_stocks": 4015,
+      "n_positive": 4385,
+      "n_stocks": 4017,
       "date_from": "2018-04-03",
-      "date_to": "2026-06-10",
+      "date_to": "2026-06-16",
       "funnel": {
-        "新規ブレイク": 28454,
-        "ラベル確定": 27237,
-        "高値窓あり": 27237,
-        "流動性フィルタ": 22909
+        "新規ブレイク": 28478,
+        "ラベル確定": 27268,
+        "高値窓あり": 27268,
+        "流動性フィルタ": 22936
       },
       "cascade": {
-        "到達": 5818,
-        "終盤+10%": 4381
+        "到達": 5823,
+        "終盤+10%": 4385
       },
       "positive": {
-        "n": 4381,
-        "maxGain_median": 33.8,
-        "maxGain_p25": 25.53,
-        "maxGain_p75": 49.69,
-        "endGain_median": 24.41,
+        "n": 4385,
+        "maxGain_median": 33.77,
+        "maxGain_p25": 25.56,
+        "maxGain_p75": 49.66,
+        "endGain_median": 24.37,
         "endGain_positive_rate": 1.0,
         "keepDays_median": null,
         "uptrend_rate": 0.905
       },
       "negative": {
-        "n": 18528,
+        "n": 18551,
         "maxGain_median": 7.0,
-        "maxGain_p25": 2.37,
+        "maxGain_p25": 2.38,
         "maxGain_p75": 13.22,
         "endGain_median": -3.0,
         "endGain_positive_rate": 0.39,
@@ -170,38 +170,38 @@
       "config": "3ヶ月内+20% / MA20>=MA60",
       "high_window": 368,
       "high_weeks": 78,
-      "n": 22909,
+      "n": 22936,
       "positive_rate": 0.1863,
-      "n_positive": 4269,
-      "n_stocks": 4015,
+      "n_positive": 4273,
+      "n_stocks": 4017,
       "date_from": "2018-04-03",
-      "date_to": "2026-06-10",
+      "date_to": "2026-06-16",
       "funnel": {
-        "新規ブレイク": 28454,
-        "ラベル確定": 27250,
-        "高値窓あり": 27250,
-        "流動性フィルタ": 22909
+        "新規ブレイク": 28478,
+        "ラベル確定": 27281,
+        "高値窓あり": 27281,
+        "流動性フィルタ": 22936
       },
       "cascade": {
-        "到達": 5818,
-        "トレンド": 4269
+        "到達": 5823,
+        "トレンド": 4273
       },
       "positive": {
-        "n": 4269,
+        "n": 4273,
         "maxGain_median": 32.25,
-        "maxGain_p25": 24.87,
-        "maxGain_p75": 46.67,
-        "endGain_median": 23.97,
+        "maxGain_p25": 24.88,
+        "maxGain_p75": 46.66,
+        "endGain_median": 23.95,
         "endGain_positive_rate": 0.985,
         "keepDays_median": null,
         "uptrend_rate": 1.0
       },
       "negative": {
-        "n": 18640,
-        "maxGain_median": 7.06,
+        "n": 18663,
+        "maxGain_median": 7.07,
         "maxGain_p25": 2.4,
         "maxGain_p75": 13.36,
-        "endGain_median": -2.86,
+        "endGain_median": -2.87,
         "endGain_positive_rate": 0.397,
         "keepDays_median": null,
         "uptrend_rate": 0.386
@@ -212,37 +212,37 @@
       "config": "3ヶ月内+20% / 維持10日 / 終盤+10% / MA20>=MA60",
       "high_window": 368,
       "high_weeks": 78,
-      "n": 22909,
-      "positive_rate": 0.1151,
-      "n_positive": 2636,
-      "n_stocks": 4015,
+      "n": 22936,
+      "positive_rate": 0.115,
+      "n_positive": 2637,
+      "n_stocks": 4017,
       "date_from": "2018-04-03",
-      "date_to": "2026-06-10",
+      "date_to": "2026-06-16",
       "funnel": {
-        "新規ブレイク": 28454,
-        "ラベル確定": 27237,
-        "高値窓あり": 27237,
-        "流動性フィルタ": 22909
+        "新規ブレイク": 28478,
+        "ラベル確定": 27268,
+        "高値窓あり": 27268,
+        "流動性フィルタ": 22936
       },
       "cascade": {
-        "到達": 5818,
-        "維持10日": 3418,
-        "終盤+10%": 2975,
-        "トレンド": 2636
+        "到達": 5823,
+        "維持10日": 3419,
+        "終盤+10%": 2976,
+        "トレンド": 2637
       },
       "positive": {
-        "n": 2636,
+        "n": 2637,
         "maxGain_median": 40.56,
         "maxGain_p25": 31.58,
-        "maxGain_p75": 57.8,
-        "endGain_median": 31.24,
+        "maxGain_p75": 57.79,
+        "endGain_median": 31.22,
         "endGain_positive_rate": 1.0,
         "keepDays_median": 26.0,
         "uptrend_rate": 1.0
       },
       "negative": {
-        "n": 20273,
-        "maxGain_median": 8.08,
+        "n": 20299,
+        "maxGain_median": 8.09,
         "maxGain_p25": 2.79,
         "maxGain_p75": 15.61,
         "endGain_median": -1.75,
@@ -256,20 +256,20 @@
       "config": "3ヶ月内+20% / 維持20日 / 終盤+15% / MA20>=MA60",
       "high_window": 368,
       "high_weeks": 78,
-      "n": 22909,
-      "positive_rate": 0.0762,
+      "n": 22936,
+      "positive_rate": 0.0761,
       "n_positive": 1746,
-      "n_stocks": 4015,
+      "n_stocks": 4017,
       "date_from": "2018-04-03",
-      "date_to": "2026-06-10",
+      "date_to": "2026-06-16",
       "funnel": {
-        "新規ブレイク": 28454,
-        "ラベル確定": 27237,
-        "高値窓あり": 27237,
-        "流動性フィルタ": 22909
+        "新規ブレイク": 28478,
+        "ラベル確定": 27268,
+        "高値窓あり": 27268,
+        "流動性フィルタ": 22936
       },
       "cascade": {
-        "到達": 5818,
+        "到達": 5823,
         "維持20日": 2210,
         "終盤+15%": 1961,
         "トレンド": 1746
@@ -285,8 +285,8 @@
         "uptrend_rate": 1.0
       },
       "negative": {
-        "n": 21163,
-        "maxGain_median": 8.64,
+        "n": 21190,
+        "maxGain_median": 8.65,
         "maxGain_p25": 2.98,
         "maxGain_p75": 17.06,
         "endGain_median": -1.06,
@@ -300,27 +300,27 @@
       "config": "3ヶ月内+20% / 維持10日 / 終盤+10% / MA20>=MA60",
       "high_window": 245,
       "high_weeks": 52,
-      "n": 31270,
-      "positive_rate": 0.1174,
-      "n_positive": 3671,
-      "n_stocks": 4310,
+      "n": 31296,
+      "positive_rate": 0.1173,
+      "n_positive": 3672,
+      "n_stocks": 4311,
       "date_from": "2017-09-29",
-      "date_to": "2026-06-10",
+      "date_to": "2026-06-16",
       "funnel": {
-        "新規ブレイク": 39212,
-        "ラベル確定": 37878,
-        "高値窓あり": 37878,
-        "流動性フィルタ": 31270
+        "新規ブレイク": 39235,
+        "ラベル確定": 37909,
+        "高値窓あり": 37909,
+        "流動性フィルタ": 31296
       },
       "cascade": {
-        "到達": 7917,
-        "維持10日": 4709,
-        "終盤+10%": 4118,
-        "トレンド": 3671
+        "到達": 7922,
+        "維持10日": 4710,
+        "終盤+10%": 4119,
+        "トレンド": 3672
       },
       "positive": {
-        "n": 3671,
-        "maxGain_median": 40.84,
+        "n": 3672,
+        "maxGain_median": 40.83,
         "maxGain_p25": 31.75,
         "maxGain_p75": 58.46,
         "endGain_median": 31.08,
@@ -329,7 +329,7 @@
         "uptrend_rate": 1.0
       },
       "negative": {
-        "n": 27599,
+        "n": 27624,
         "maxGain_median": 7.99,
         "maxGain_p25": 2.72,
         "maxGain_p75": 15.45,
