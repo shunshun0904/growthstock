@@ -225,6 +225,12 @@ PRESETS: Dict[str, List[str]] = {
     # GROUPS から作ると fund_growth（fund_level の部分集合）が二重に入るので
     # ALL_GROUPS から引く
     "all_no_market": [g for g in ALL_GROUPS if g != "market"],
+    # 業種指数を抜いた全部。
+    # rel_sector_20 は単独では ret_20d に負けており（日付内AUC 0.5686 対 0.5967）、
+    # しかも ret_20d と r=0.9632 と冗長性の検出に引っかかっている。
+    # 単独で効かなくても、他の列と組み合わせて効く可能性は残る。
+    # それを測れるのはこの差だけ。
+    "all_no_sector_index": [g for g in ALL_GROUPS if g != "sector_index"],
 
     # --- 決算を「変化」だけで組むセット --- #
     # 絶対水準（ROE 何%、営業利益率 何%）ではなく、
