@@ -147,9 +147,18 @@ jobs:
             # CV が楽観側に出る（LTR では答えの一部を訓練で見ることになる）。
             # 引き換えに層の揃いは緩くなる（年構成 0.06pt -> 1.7pt）。
             # 日付をまたげない以上これが下限で、リークを残すよりよい
+            PRESETS=$(grep -v '^#' research/tune_presets.txt | tr '\n' ' ')
             python3 research/run_tuning.py --n-trials 50 --cv year_cap_date \
-              --features $(grep -v '^#' research/tune_presets.txt | tr '\n' ' ') \
-              --n-splits 5 2>&1 | tee tune.log
+              --features $PRESETS --n-splits 5 2>&1 | tee tune.log
+            # LTR は目的関数が違うので別に探索する（鍵も __ltr で分ける）。
+            # 探索の指標は pointwise と同じ PR-AUC にしてある。
+            # 指標まで変えると「順位を直接最適化したから良くなった」のか
+            # 「別の指標で選んだから良くなった」のか分からなくなる
+            LTR=$(grep -v '^#' research/ltr_request.txt 2>/dev/null | head -1 | tr -d '[:space:]' || true)
+            if [ "$LTR" = "yes" ]; then
+              python3 research/run_tuning.py --n-trials 50 --cv year_cap_date \
+                --model ranker --features $PRESETS --n-splits 5 2>&1 | tee -a tune.log
+            fi
           else
             echo "探索は行わない（research/lgbm_params.json を使用）" | tee tune.log
             python3 -c "import json,os;p='research/lgbm_params.json';d=json.load(open(p)) if os.path.exists(p) else {};print(f'保存済み: {len(d)}プリセット')" | tee -a tune.log

@@ -66,6 +66,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                          "year_cap_date=それに加えて日付単位で分割 / "
                          "cap=時価総額帯のみ / "
                          "timeseries=時系列")
+    ap.add_argument("--model", choices=["classifier", "ranker"],
+                    default="classifier",
+                    help="classifier=pointwise（既定） / ranker=LTR（lambdarank）。"
+                         "ranker は --cv year_cap_date が必須")
     args = ap.parse_args(argv)
 
     df = pd.read_parquet(args.dataset).sort_values("Date").reset_index(drop=True)
@@ -94,11 +98,13 @@ def main(argv: Optional[List[str]] = None) -> int:
               f"— 経過 {el/60:.1f}分")
         params = tuning.tune(tune_df, cols, n_trials=args.n_trials,
                              n_splits=args.n_splits, embargo_days=EMBARGO_DAYS,
-                             scheme=args.cv)
+                             scheme=args.cv, model=args.model)
         # 探索の記録を一緒に保存する。params_for が読むときに落とすので
         # LightGBM には渡らない
-        store[preset] = {**params, "_cv": dict(tuning.LAST_CV),
-                         "_n_features": len(cols)}
+        # LTR は同じ特徴量セットでも目的関数が違うので鍵を分ける
+        key = preset + ("__ltr" if args.model == "ranker" else "")
+        store[key] = {**params, "_cv": dict(tuning.LAST_CV),
+                      "_n_features": len(cols)}
         tuning.save_params(store)      # 途中で落ちても結果を失わない
 
     print(f"\n[done] {len(store)}件を {tuning.PARAMS_PATH} に保存 "

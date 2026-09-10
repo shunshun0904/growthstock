@@ -178,7 +178,7 @@ def clean_score(score: np.ndarray) -> np.ndarray:
     return np.where(ok, score, score[ok].min() - 1.0)
 
 
-def evaluate(name: str, y: np.ndarray, score: np.ndarray) -> Dict:
+def evaluate(name: str, y: np.ndarray, score: np.ndarray, dates=None) -> Dict:
     score = clean_score(score)
     base_rate = float(y.mean())
     res = {
@@ -188,6 +188,11 @@ def evaluate(name: str, y: np.ndarray, score: np.ndarray) -> Dict:
         "pr_auc": float(average_precision_score(y, score)),
         "roc_auc": float(roc_auc_score(y, score)),
     }
+    # 実運用で問うのは「その日の候補のうちどれを買うか」なので、
+    # 日付をまたいだ順位ではなく日付内の並べ替えを別に測る。
+    # 全体の PR-AUC が同じでも、こちらは差がつくことがある
+    if dates is not None:
+        res["within_date_auc"] = within_date_auc(y, score, dates)
     for k in (1, 5, 10):
         p = precision_at_k(y, score, k)
         res[f"precision@{k}%"] = p
@@ -303,6 +308,71 @@ def lgbm_importance(gbm, cols: List[str]) -> List[Dict]:
     return rows
 
 
+#: LTR のパラメータを保存するときの接尾辞。
+#: 同じ特徴量セットでも目的関数が違うので、pointwise と同じ鍵に入れると
+#: どちらのパラメータか分からなくなる。
+LTR_SUFFIX = "__ltr"
+
+
+class DateRanker:
+    """
+    LGBMRanker を「同じ日の銘柄を並べ替える」形で使うための薄い包み。
+
+    実運用で問うのは「その日に高値更新した数銘柄のうちどれを買うか」なので、
+    日付をグループにして順位を直接最適化する。日付内診断では
+    r_high を揃えても分離力が残る特徴量が39個あり、最適化する情報は存在する
+    （docs/MODEL_WITHIN_DATE.md）。
+
+    出力はスコアであって確率ではない。PR-AUC / ROC-AUC / 上位k% は
+    すべて順位だけで決まるのでそのまま使えるが、確率として読まないこと。
+    predict_proba の形にしているのは、既存の評価経路をそのまま通すため。
+    """
+
+    def __init__(self, params: Dict):
+        import lightgbm as lgb
+        # 目的関数だけ差し替える。scale_pos_weight は ranker に無い
+        p = {k: v for k, v in params.items()
+             if k not in ("objective", "scale_pos_weight")}
+        self.model = lgb.LGBMRanker(objective="lambdarank", **p)
+
+    def fit(self, train: pd.DataFrame, features: List[str]) -> "DateRanker":
+        # LGBMRanker はグループが連続していることを要求する
+        d = train.sort_values("Date", kind="stable")
+        sizes = d.groupby("Date", sort=True).size().to_numpy()
+        self.model.fit(d[features].to_numpy(dtype=float),
+                       d["label"].to_numpy(dtype=int), group=sizes)
+        return self
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        s = self.model.predict(X)
+        return np.column_stack([-s, s])
+
+
+def within_date_auc(y: np.ndarray, score: np.ndarray, dates) -> float:
+    """
+    同一日内の（正例, 負例）ペアで、正例のほうがスコアが高い割合。
+
+    実運用で効くのはこれで、日付をまたいだ順位は使わない。
+    日付ごとに AUC を出して平均すると1日あたり数銘柄しかない母集団では
+    推定が立たないので、ペアを全日から集めてプールする
+    （research/within_date_signal.py と同じ測り方）。
+    """
+    y = np.asarray(y, dtype=int)
+    s = clean_score(score)
+    codes = pd.factorize(pd.Series(dates), sort=True)[0]
+    hit = tot = 0.0
+    for c in np.unique(codes):
+        m = codes == c
+        yp, sp = y[m], s[m]
+        pos, neg = sp[yp == 1], sp[yp == 0]
+        if len(pos) == 0 or len(neg) == 0:
+            continue
+        d = pos[:, None] - neg[None, :]
+        hit += float((d > 0).sum() + 0.5 * (d == 0).sum())
+        tot += d.size
+    return hit / tot if tot else float("nan")
+
+
 def fit_models(train: pd.DataFrame, features: List[str],
                verbose: bool = True, preset: str = "",
                params_store: Dict | None = None) -> Dict:
@@ -340,7 +410,20 @@ def fit_models(train: pd.DataFrame, features: List[str],
     )
     lr.fit(Xtr, ytr)
 
-    return {"LightGBM": gbm, "ロジスティック回帰": lr}
+    out = {"LightGBM": gbm, "ロジスティック回帰": lr}
+
+    # LTR は探索済みパラメータがあるときだけ足す。
+    # 既定値で回すと、探索済みの pointwise と条件が揃わない比較になる
+    store = tuning.load_params() if params_store is None else params_store
+    ltr_key = f"{preset}{LTR_SUFFIX}"
+    if ltr_key in store:
+        rp = tuning.params_for(ltr_key, store)
+        if verbose:
+            print(f"[fit] LTR / LGBMRanker (木{rp['n_estimators']}本 "
+                  f"/ lr {rp['learning_rate']:.3f} / 葉 {rp['num_leaves']})")
+        out["LTR"] = DateRanker(rp).fit(train, features)
+
+    return out
 
 
 def main(argv: List[str] | None = None) -> int:
@@ -379,7 +462,8 @@ def main(argv: List[str] | None = None) -> int:
         part = parts[split]
         y = part["label"].to_numpy(dtype=int)
         bs = baseline_scores(part)
-        baselines[split] = [evaluate(n, y, sc) for n, sc in bs.items()]
+        baselines[split] = [evaluate(n, y, sc, part["Date"])
+                            for n, sc in bs.items()]
         if split == "test":
             test_scores.update(bs)
 
@@ -417,7 +501,7 @@ def main(argv: List[str] | None = None) -> int:
             rows = []
             for mname, model in models.items():
                 sc = model.predict_proba(X)[:, 1]
-                rows.append(evaluate(f"{mname}", y, sc))
+                rows.append(evaluate(f"{mname}", y, sc, part["Date"]))
                 if split == "test":
                     test_scores[f"{mname} [{preset}]"] = sc
             rec["results"][split] = rows
@@ -523,10 +607,13 @@ def _report(df, parts, baselines, experiments, args, boot=None, ref="") -> str:
                 rows.append({**r, "name": f"{r['name']} [{e['preset']}]"})
         rows.sort(key=lambda r: -r["pr_auc"])
         lines += ["", f"## {title}", "",
-                  "| モデル | PR-AUC | ROC-AUC | P@1% | P@5% | Lift@5% |",
-                  "| --- | ---: | ---: | ---: | ---: | ---: |"]
+                  "| モデル | PR-AUC | ROC-AUC | 日付内AUC | P@1% | P@5% | Lift@5% |",
+                  "| --- | ---: | ---: | ---: | ---: | ---: | ---: |"]
         for r in rows:
+            wd = r.get("within_date_auc")
+            wd_txt = f"{wd:.4f}" if wd is not None and wd == wd else "—"
             lines.append(f"| {r['name']} | {r['pr_auc']:.4f} | {r['roc_auc']:.4f} | "
+                         f"{wd_txt} | "
                          f"{r['precision@1%']*100:.1f}% | {r['precision@5%']*100:.1f}% | "
                          f"{r['lift@5%']:.2f}x |")
         lines.append(f"\n（正例率 = {rows[0]['base_rate']*100:.2f}% / n = {rows[0]['n']:,}）")

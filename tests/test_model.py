@@ -162,6 +162,96 @@ class TestHoldoutSplit(unittest.TestCase):
             self.assertLess(tuning_cutoff(d, args), test_start)
 
 
+class TestLearningToRank(unittest.TestCase):
+    """
+    実運用で問うのは「その日の候補のうちどれを買うか」なので、
+    日付をグループにして順位を直接最適化する。
+    「日付内の信号を拾えること」と「無いときに作り出さないこと」を固定する。
+    """
+
+    def _frame(self, n_dates=400, per_date=8, signal=True, seed=0):
+        rng = np.random.default_rng(seed)
+        rows = []
+        for d in pd.date_range("2020-01-01", periods=n_dates, freq="B"):
+            useful = rng.normal(0, 1, per_date)
+            lin = -2.0 + (useful * 1.5 if signal else 0.0)
+            lin += rng.normal(0, 1.5)          # 日ごとの水準差（地合い）
+            rows.append(pd.DataFrame({
+                "Date": d, "useful": useful,
+                "noise": rng.normal(0, 1, per_date),
+                "label": (rng.random(per_date)
+                          < 1 / (1 + np.exp(-lin))).astype(int)}))
+        return pd.concat(rows, ignore_index=True)
+
+    def _split(self, df, cut="2021-05-01"):
+        return df[df["Date"] < cut], df[df["Date"] >= cut]
+
+    def test_within_date_auc_is_half_for_a_constant_score(self):
+        from train_model import within_date_auc
+        df = self._frame(n_dates=60)
+        y = df["label"].to_numpy(dtype=int)
+        self.assertAlmostEqual(
+            within_date_auc(y, np.zeros(len(y)), df["Date"]), 0.5, places=9)
+
+    def test_within_date_auc_is_one_for_a_perfect_score(self):
+        from train_model import within_date_auc
+        df = self._frame(n_dates=60)
+        y = df["label"].to_numpy(dtype=int)
+        self.assertEqual(
+            within_date_auc(y, y.astype(float), df["Date"]), 1.0)
+
+    def test_ranker_learns_a_within_date_signal(self):
+        import tuning
+        from train_model import DateRanker, within_date_auc
+        tr, te = self._split(self._frame(signal=True))
+        cols = ["useful", "noise"]
+        p = dict(tuning.DEFAULT_PARAMS)
+        p["n_estimators"] = 100
+        sc = DateRanker(p).fit(tr, cols).predict_proba(
+            te[cols].to_numpy(dtype=float))[:, 1]
+        auc = within_date_auc(te["label"].to_numpy(dtype=int), sc, te["Date"])
+        self.assertGreater(auc, 0.65, f"日付内の信号を拾えていない: {auc:.4f}")
+
+    def test_ranker_does_not_invent_a_signal(self):
+        import tuning
+        from train_model import DateRanker, within_date_auc
+        tr, te = self._split(self._frame(signal=False))
+        cols = ["useful", "noise"]
+        p = dict(tuning.DEFAULT_PARAMS)
+        p["n_estimators"] = 100
+        sc = DateRanker(p).fit(tr, cols).predict_proba(
+            te[cols].to_numpy(dtype=float))[:, 1]
+        auc = within_date_auc(te["label"].to_numpy(dtype=int), sc, te["Date"])
+        self.assertLess(abs(auc - 0.5), 0.06, f"無い信号を作っている: {auc:.4f}")
+
+    def test_ranker_refuses_a_split_that_shares_dates(self):
+        """
+        行単位で切ると、その日の答えの一部を訓練で見ることになる。
+        黙って通すと成立しない学習をしたまま数字だけ出る。
+        """
+        import tuning
+        df = self._frame(n_dates=120)
+        with self.assertRaises(SystemExit):
+            tuning.tune(df, ["useful"], n_trials=1, scheme="year_cap",
+                        model="ranker")
+
+    def test_ltr_is_added_only_when_tuned(self):
+        """
+        探索結果が無いのに既定値で回すと、探索済みの pointwise と
+        条件が揃わない比較になる。無いときは足さない。
+        """
+        from train_model import fit_models, LTR_SUFFIX
+        import tuning
+        tr, _ = self._split(self._frame(n_dates=120))
+        cols = ["useful", "noise"]
+        p = dict(tuning.DEFAULT_PARAMS)
+        self.assertNotIn("LTR", fit_models(tr, cols, verbose=False,
+                                           preset="x", params_store={}))
+        got = fit_models(tr, cols, verbose=False, preset="x",
+                         params_store={f"x{LTR_SUFFIX}": p})
+        self.assertIn("LTR", got)
+
+
 class TestPairedBootstrap(unittest.TestCase):
     """既知の答えがあるケースで、判定が正しく出ることを固定する。"""
 

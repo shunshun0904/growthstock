@@ -360,6 +360,31 @@ def scale_pos_weight(y: np.ndarray) -> float:
     return float((len(y) - pos) / pos)
 
 
+def _fit_ranker(params: Dict, tr: pd.DataFrame, va: pd.DataFrame,
+                cols: List[str]) -> Tuple[float, float, int]:
+    """
+    LGBMRanker（lambdarank）を日付グループで学習し、検証窓で測る。
+
+    目的関数は pointwise と同じ PR-AUC にする。lambdarank が最適化する
+    のは日付内の順位だが、探索の指標まで変えると
+    「順位を直接最適化したから良くなった」のか
+    「別の指標で選んだから良くなった」のか分からなくなる。
+    日付内での実力は評価側で別に測る（train_model.within_date_auc）。
+    """
+    import lightgbm as lgb
+
+    p = {k: v for k, v in params.items() if k != "objective"}
+    model = lgb.LGBMRanker(objective="lambdarank", **p)
+    d = tr.sort_values("Date", kind="stable")
+    sizes = d.groupby("Date", sort=True).size().to_numpy()
+    model.fit(d[cols].to_numpy(dtype=float),
+              d["label"].to_numpy(dtype=int), group=sizes)
+    yva = va["label"].to_numpy(dtype=int)
+    sc = model.predict(va[cols].to_numpy(dtype=float))
+    return (float(average_precision_score(yva, sc)),
+            float(roc_auc_score(yva, sc)), int(params["n_estimators"]))
+
+
 def _fit_one(params: Dict, tr: pd.DataFrame, va: pd.DataFrame,
              cols: List[str], early_stopping: bool = True
              ) -> Tuple[float, float, int]:
@@ -397,12 +422,17 @@ def _fit_one(params: Dict, tr: pd.DataFrame, va: pd.DataFrame,
 
 def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
          seed: int = 0, verbose: bool = True, n_splits: int = 5,
-         embargo_days: int = 60, scheme: str = "year") -> Dict:
+         embargo_days: int = 60, scheme: str = "year",
+         model: str = "classifier") -> Dict:
     """
     Optuna で探索する。df は「テスト窓より前」のデータだけを渡すこと。
 
     評価は時系列 k 分割の平均 PR-AUC。
     1つの分割で決めていたときは、その期間の癖を拾う恐れがあった。
+
+    model="ranker" にすると LGBMRanker（lambdarank）を日付グループで学習する。
+    そのときは分割も日付単位でなければならない（同じ日が両側にあると、
+    その日の答えの一部を訓練で見ることになる）。
 
     返すのは LGBMClassifier にそのまま渡せる辞書。
     探索の記録は tune_cv() で別に取る（返り値に混ぜると、
@@ -412,6 +442,11 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
     import optuna
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
+    if model == "ranker" and scheme != "year_cap_date":
+        raise SystemExit(
+            "LTR は日付単位の分割が必須です（--cv year_cap_date）。"
+            f"指定: {scheme}。同じ日が訓練と検証に分かれると、"
+            "その日の答えの一部を訓練で見ることになります")
     if scheme in ("year", "year_cap", "cap", "year_cap_date"):
         folds = year_folds(df, n_splits=n_splits, seed=seed,
                            by_year=scheme in ("year", "year_cap",
@@ -455,7 +490,11 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
         }
         prs, rocs, iters = [], [], []
         for tr, va in folds:
-            pr, roc, it = _fit_one(params, tr, va, cols, early_stopping=False)
+            if model == "ranker":
+                pr, roc, it = _fit_ranker(params, tr, va, cols)
+            else:
+                pr, roc, it = _fit_one(params, tr, va, cols,
+                                       early_stopping=False)
             prs.append(pr)
             rocs.append(roc)
             iters.append(it)
@@ -480,7 +519,8 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
     best["n_estimators"] = SEARCH_N_ESTIMATORS
     at = study.best_trial.user_attrs
     global LAST_CV
-    LAST_CV = {"scheme": scheme, "n_estimators": SEARCH_N_ESTIMATORS,
+    LAST_CV = {"scheme": scheme, "model": model,
+               "n_estimators": SEARCH_N_ESTIMATORS,
                "n_splits": len(folds), "mean_pr_auc": round(study.best_value, 4),
                "std": round(float(at.get("score_std", 0.0)), 4),
                "fold_scores": at.get("fold_scores", []),
