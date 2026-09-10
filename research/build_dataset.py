@@ -174,9 +174,24 @@ FUND_REQUIREMENT_SETS = {
                 "sales_growth_chg1", "sales_growth_chg2",
                 "ROE_chg1", "ROE_chg2", "op_margin_chg1", "op_margin_chg2"],
     # 4期そろい（3段の変化がすべて作れる）
+    #
+    # 注意: eps_growth / sales_growth は「前年同期が0以下だと欠測」という
+    # 定義なので、これを要求すると前年4期すべて黒字だった会社しか残らない。
+    # 実測でその副作用が出ている（EDA):
+    #   eps_growth_turn      全10,116行が 0（赤字->黒字が1件も無い）
+    #   eps_growth_sym_q0    max 99.939 で 100 に届かない（同上）
+    #   同 p5 = -100          黒字->赤字転落は5%以上ある（非対称に落ちている）
     "full4": ["eps_growth_chg1", "eps_growth_chg2", "eps_growth_chg3",
               "sales_growth_chg1", "sales_growth_chg2", "sales_growth_chg3",
               "ROE_chg1", "ROE_chg2", "op_margin_chg1", "op_margin_chg2"],
+    # full4 と同じ強さの要求を、対称変化率（_sym）で掛けたもの。
+    # _sym は分母が |今期|+|前期| なので前年が赤字でも定義でき、
+    # 赤字->黒字転換の会社を落とさない。
+    # ROE_chg / op_margin_chg は水準の差分なので符号に依存せず、そのまま。
+    "full4_sym": ["eps_growth_sym_chg1", "eps_growth_sym_chg2", "eps_growth_sym_chg3",
+                  "sales_growth_sym_chg1", "sales_growth_sym_chg2",
+                  "sales_growth_sym_chg3",
+                  "ROE_chg1", "ROE_chg2", "op_margin_chg1", "op_margin_chg2"],
 }
 #: 実際に適用する要求。FUND_REQUIREMENT_SETS のキー。
 #: full4 = 売上・EPS の3段の差分と、ROE・営業利益率の2段の差分が
