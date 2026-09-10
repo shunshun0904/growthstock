@@ -1265,6 +1265,54 @@ class TestMarketEnvironment(unittest.TestCase):
             self.assertNotIn(c, F.RAW_FOR_RANK, c)
 
 
+class TestPopulationOrigin(unittest.TestCase):
+    """
+    母集団の制約を外して増えた行を、チャートで見られるように分類する。
+    どの行が新しく入ったのかがずれると、目視検証の対象が変わってしまう。
+    """
+
+    @staticmethod
+    def _ds(rows):
+        import export_label_samples as E
+        return pd.DataFrame(rows), E
+
+    def test_classifies_each_row(self):
+        df, E = self._ds([
+            {"tv_ma20": 1.0, "fund_complete": 1.0},   # 従来からいた
+            {"tv_ma20": 0.2, "fund_complete": 1.0},   # 流動性を緩めて入った
+            {"tv_ma20": 1.0, "fund_complete": 0.0},   # 決算を緩めて入った
+            {"tv_ma20": 0.2, "fund_complete": 0.0},   # 両方だが流動性を優先
+        ])
+        self.assertEqual(list(E.population_origin(df)),
+                         ["base", "added_liq", "added_fund", "added_liq"])
+
+    def test_boundary_belongs_to_the_old_population(self):
+        """変更前の下限ちょうどは、変更前も残っていた行。"""
+        import export_label_samples as E
+        df = pd.DataFrame({"tv_ma20": [E.PREV_MIN_TRADING_VALUE],
+                           "fund_complete": [1.0]})
+        self.assertEqual(list(E.population_origin(df)), ["base"])
+
+    def test_missing_turnover_is_not_counted_as_added(self):
+        """
+        売買代金が欠測の行を「流動性を緩めて入った」に入れると、
+        増えた行の件数が水増しされる。NaN の比較は False なので base に残る。
+        """
+        import export_label_samples as E
+        df = pd.DataFrame({"tv_ma20": [np.nan], "fund_complete": [1.0]})
+        self.assertEqual(list(E.population_origin(df)), ["base"])
+
+    def test_prev_floor_is_above_the_current_one(self):
+        """
+        比較の基準が現在の下限より下だと、増えた行が0件になって
+        「増えていない」ように見える。
+        """
+        import build_dataset as B
+        import export_label_samples as E
+        if B.MIN_TRADING_VALUE is not None:
+            self.assertGreater(E.PREV_MIN_TRADING_VALUE, B.MIN_TRADING_VALUE)
+
+
 class TestFeatureDictCoversEveryGroup(unittest.TestCase):
     """
     グループを足して feature_dict.MACRO に登録し忘れると、

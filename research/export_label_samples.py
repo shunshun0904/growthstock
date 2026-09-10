@@ -53,6 +53,35 @@ from build_dataset import (  # noqa: E402
 CFG_ADOPTED = DEFAULT_RISE
 CFG_STRICT = RiseConfig(keep_days=20, end_ratio=0.15, require_uptrend=True)
 
+#: 母集団を広げる前の制約。「どの行が新しく入ったか」を出すための基準。
+#:
+#: 変更前は 20日平均売買代金 0.5億円以上、かつ決算の変化10列がすべて作れる行
+#: だけを母集団にしていた（17,580 -> 12,484）。いまは 0.1億円まで下げ、
+#: 決算の要求は外して fund_complete フラグで持っている。
+#:
+#: 増えた行が本当にラベルとして妥当かは数字では分からないので、
+#: 増えた側の正例だけを取り出してチャートで見られるようにする。
+PREV_MIN_TRADING_VALUE = 0.5
+
+
+def population_origin(ds: pd.DataFrame) -> pd.Series:
+    """
+    各行が「もともと母集団にいた」か「制約を外して入った」かを返す。
+
+    base        変更前の母集団にもいた行
+    added_liq   流動性の下限を下げたことで入った行
+    added_fund  決算の要求を外したことで入った行（流動性は元から足りている）
+
+    流動性を先に見る。両方に当たる行を二重に数えないためで、
+    「買えるかどうか」のほうが運用上きつい制約だから先に置く。
+    """
+    tv = pd.to_numeric(ds.get("tv_ma20"), errors="coerce")
+    fc = pd.to_numeric(ds.get("fund_complete"), errors="coerce")
+    out = pd.Series("base", index=ds.index, dtype=object)
+    out[fc != 1.0] = "added_fund"
+    out[tv < PREV_MIN_TRADING_VALUE] = "added_liq"
+    return out
+
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_data")
 
 BEFORE = 120              # 基準日より前に何営業日ぶん見せるか
@@ -226,17 +255,37 @@ def main(argv: List[str] | None = None) -> int:
     mismatch = int((adopted != (ds["label"] == 1)).sum())
     assert mismatch == 0, f"引き直したラベルが dataset と {mismatch}件食い違う"
 
+    # 正例は「ラベル定義の軸」と「母集団の軸」の2つで分ける。
+    #   ラベル定義 … 厳しい案でも正例か、緩めて戻った分か
+    #   母集団     … もともといた行か、制約を外して入った行か
+    # 重なりが出ないよう、母集団の軸を先に切ってから定義の軸で割る。
+    # 重なったままだと要約の件数が二重に数えられる。
+    origin = population_origin(ds)
+    base = origin == "base"
     buckets = [
-        ("both_pos", "正例（厳しい案でも正例）", 1, strict),
-        ("loosened_in", "正例（緩めて戻った分）", 1, adopted & ~strict),
+        ("pos_base_strict", "正例（従来母集団・厳しい案でも正例）", 1, base & strict),
+        ("pos_base_loosened", "正例（従来母集団・緩めて戻った分）", 1,
+         base & adopted & ~strict),
+        ("pos_added_liq", "正例（流動性を緩めて入った）", 1,
+         (origin == "added_liq") & adopted),
+        ("pos_added_fund", "正例（決算を緩めて入った）", 1,
+         (origin == "added_fund") & adopted),
         ("reached_only", "到達したが継続せず", 0, ~adopted & reached),
         ("not_reached", "未到達（+20%に届かず）", 0, ~adopted & ~reached),
     ]
+    covered = np.zeros(len(ds), dtype=int)
+    for _, _, _, m in buckets:
+        covered += m.to_numpy().astype(int)
+    assert covered.max() <= 1, "バケットが重なっている（件数が二重に数えられる）"
+    print("[origin] " + " / ".join(
+        f"{k} {int(v):,}件" for k, v in origin.value_counts().items()))
     print("[bucket] " + " / ".join(f"{ja} {int(m.sum()):,}件" for _, ja, _, m in buckets))
 
-    # 正例の核と、緩めて戻った分を同じだけ採る。
-    # 定義が妥当かは「何を正例にしたか」と「緩めて何が入ったか」の両方を見ないと分からない。
-    quota = {"both_pos": args.n_pos // 2, "loosened_in": args.n_pos // 2,
+    # 正例は4種を同数ずつ採る。増えた行のラベルが妥当かを見るのが今回の主目的なので、
+    # 従来母集団と追加分を同じ枚数だけ並べて比べられるようにする。
+    per_pos = max(1, args.n_pos // 4)
+    quota = {"pos_base_strict": per_pos, "pos_base_loosened": per_pos,
+             "pos_added_liq": per_pos, "pos_added_fund": per_pos,
              "reached_only": args.n_neg // 2, "not_reached": args.n_neg // 2}
 
     rng = np.random.default_rng(args.seed)
@@ -253,6 +302,9 @@ def main(argv: List[str] | None = None) -> int:
             c = build_case(panel, row["Code"], row["Date"],
                            names.get(row["Code"], ""), label, key)
             if c:
+                c["origin"] = origin.loc[row.name]
+                c["tradingValue"] = (None if pd.isna(row.get("tv_ma20"))
+                                     else round(float(row["tv_ma20"]), 3))
                 cases.append(c)
 
     # バケットごとに要約する。母集団全体の数字（抽出前）も併せて出す。
@@ -334,6 +386,20 @@ def main(argv: List[str] | None = None) -> int:
             "from": ds["Date"].min().date().isoformat(),
             "to": ds["Date"].max().date().isoformat(),
         },
+        # 制約を外して増えた行が、どれだけ入っていて正例率がいくつか。
+        # チャートで見る前に、まず件数と率で全体像を掴めるようにする
+        "origin": {
+            k: {
+                "n": int((origin == k).sum()),
+                "positiveRate": round(float(ds.loc[origin == k, "label"].mean()), 4)
+                if int((origin == k).sum()) else None,
+                "label": ja,
+            }
+            for k, ja in (("base", "従来の母集団"),
+                          ("added_liq", "流動性を緩めて入った"),
+                          ("added_fund", "決算を緩めて入った"))
+        },
+        "prevMinTradingValue": PREV_MIN_TRADING_VALUE,
         "summary": summary,
         "buckets": bucket_stats,
         "compare": {

@@ -81,7 +81,10 @@ def evaluate(panel: pd.DataFrame, cfg: RiseConfig, high_window: int) -> Dict:
     steps["ラベル確定"] = len(s)
     s = s[s["high52w"].notna()]
     steps["高値窓あり"] = len(s)
-    s = s[s["tv_ma20"] >= MIN_TRADING_VALUE]
+    # build_dataset と同じ扱いにする。None は「絞らない」であって
+    # 「0以上で絞る」ではない（0以上にすると欠測の行が黙って消える）
+    if MIN_TRADING_VALUE is not None:
+        s = s[s["tv_ma20"] >= MIN_TRADING_VALUE]
     steps["流動性フィルタ"] = len(s)
 
     if len(s) == 0:

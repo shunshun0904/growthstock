@@ -195,8 +195,10 @@ footer { margin-top: 44px; padding-top: 20px; border-top: 1px solid var(--border
 
   <div class="controls">
     <div class="seg" role="group" aria-label="表示するケース">
-      <button type="button" data-f="b-both_pos" aria-pressed="true">正例（厳しい案でも正例）</button>
-      <button type="button" data-f="b-loosened_in" aria-pressed="false">正例（緩めて戻った分）</button>
+      <button type="button" data-f="b-pos_added_liq" aria-pressed="true">正例（流動性を緩めて入った）</button>
+      <button type="button" data-f="b-pos_added_fund" aria-pressed="false">正例（決算を緩めて入った）</button>
+      <button type="button" data-f="b-pos_base_strict" aria-pressed="false">正例（従来・厳しい案でも）</button>
+      <button type="button" data-f="b-pos_base_loosened" aria-pressed="false">正例（従来・緩めて戻った）</button>
       <button type="button" data-f="b-reached_only" aria-pressed="false">到達したが継続せず</button>
       <button type="button" data-f="b-not_reached" aria-pressed="false">未到達</button>
       <button type="button" data-f="all" aria-pressed="false">すべて</button>
@@ -406,10 +408,17 @@ function chart(c, { w = 300, h = 108, volH = 0, pad = { t: 8, r: 6, b: 12, l: 40
 /* ---------------- 画面 ---------------- */
 const fmtPct = v => v == null ? "—" : (v > 0 ? "+" : "") + v.toFixed(1) + "%";
 const BUCKET = {
-  both_pos:     { ja: "正例（厳しい案でも正例）", cls: "pos" },
-  loosened_in:  { ja: "正例（緩めて戻った分）",   cls: "mid" },
-  reached_only: { ja: "到達したが継続せず",       cls: "neg" },
-  not_reached:  { ja: "未到達",                cls: "neg" },
+  pos_added_liq:     { ja: "正例（流動性を緩めて入った）",   cls: "pos" },
+  pos_added_fund:    { ja: "正例（決算を緩めて入った）",     cls: "pos" },
+  pos_base_strict:   { ja: "正例（従来・厳しい案でも正例）", cls: "pos" },
+  pos_base_loosened: { ja: "正例（従来・緩めて戻った分）",   cls: "mid" },
+  reached_only:      { ja: "到達したが継続せず",             cls: "neg" },
+  not_reached:       { ja: "未到達",                         cls: "neg" },
+};
+const ORIGIN = {
+  base:       "従来の母集団",
+  added_liq:  "流動性を緩めて入った",
+  added_fund: "決算を緩めて入った",
 };
 const bk = c => BUCKET[c.bucket] || { ja: c.label ? "正例" : "負例", cls: c.label ? "pos" : "neg" };
 const cls = v => v == null ? "" : (v > 0 ? " up" : v < 0 ? " down" : "");
@@ -432,7 +441,8 @@ const bs = DATA.buckets || {};
 document.getElementById("buckets").innerHTML =
   `<thead><tr><th>組</th><th>件数</th><th>母集団比</th><th>最大上昇<br>中央値</th>` +
   `<th>終盤<br>中央値</th><th>維持日数<br>中央値</th></tr></thead><tbody>` +
-  ["both_pos", "loosened_in", "reached_only", "not_reached"].filter(k => bs[k]).map(k => {
+  ["pos_added_liq", "pos_added_fund", "pos_base_strict", "pos_base_loosened",
+   "reached_only", "not_reached"].filter(k => bs[k]).map(k => {
     const d = bs[k], m = BUCKET[k];
     return `<tr><td><span class="pill ${m.cls}">${m.ja}</span></td>` +
       `<td class="v">${d.n.toLocaleString("ja-JP")}</td>` +
@@ -447,7 +457,12 @@ document.getElementById("meta").innerHTML =
   `<span><b>期間</b> ${s.from} 〜 ${s.to}</span>` +
   `<span><b>サンプル数</b> <span class="num">${s.n.toLocaleString("ja-JP")}</span></span>` +
   `<span><b>正例率</b> <span class="num">${(s.positiveRate * 100).toFixed(2)}%</span></span>` +
-  `<span><b>表示ケース</b> <span class="num">${DATA.cases.length}</span></span>`;
+  `<span><b>表示ケース</b> <span class="num">${DATA.cases.length}</span></span>` +
+  // 母集団の内訳。増えた行が何件で正例率がいくつかを、チャートを見る前に置く
+  Object.entries(DATA.origin || {}).filter(([, d]) => d.n > 0).map(([, d]) =>
+    `<span><b>${d.label}</b> <span class="num">${d.n.toLocaleString("ja-JP")}件` +
+    `${d.positiveRate == null ? "" : " / 正例率 " + (d.positiveRate * 100).toFixed(2) + "%"}` +
+    `</span></span>`).join("");
 
 const sm = DATA.summary || {};
 const rows = [["positive", "正例", "pos"], ["negative", "負例", "neg"]]
@@ -470,7 +485,7 @@ document.getElementById("summary").innerHTML =
   `<th>終端リターン<br>中央値</th><th>終端が<br>プラスの割合</th>` +
   `<th>維持日数<br>中央値</th><th>終了時に<br>上昇トレンド</th></tr></thead><tbody>${rows}</tbody>`;
 
-let filter = "b-both_pos", sortKey = "gain-desc";
+let filter = "b-pos_added_liq", sortKey = "gain-desc";
 const grid = document.getElementById("grid");
 const empty = document.getElementById("empty");
 const countEl = document.getElementById("count");
@@ -503,8 +518,14 @@ function render() {
     card.setAttribute("role", "button");
     const head = document.createElement("div");
     head.className = "card-top";
+    // 売買代金は「その銘柄が実際に買えるか」を示す。
+    // 制約を外して増えた行はここが小さいので、チャートの良し悪しと
+    // 同じ画面で見えないと判断を誤る
+    const tv = c.tradingValue == null ? "" :
+      ` · ${c.tradingValue.toFixed(2)}億円/日`;
     head.innerHTML =
-      `<div class="card-id">${c.name || "(銘柄名なし)"}<span class="code">${c.code} · t=${c.t}</span></div>` +
+      `<div class="card-id">${c.name || "(銘柄名なし)"}<span class="code">${c.code} · t=${c.t}` +
+      `${ORIGIN[c.origin] ? " · " + ORIGIN[c.origin] : ""}${tv}</span></div>` +
       `<span class="pill ${bk(c).cls}">${bk(c).ja}</span>`;
     card.appendChild(head);
     card.appendChild(chart(c));
