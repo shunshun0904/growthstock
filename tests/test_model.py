@@ -403,6 +403,69 @@ class TestWithinDateSignal(unittest.TestCase):
         for r in conditional(df, ["useful", "noise"]):
             self.assertLess(r["abs_edge"], 0.02, r["feature"])
 
+    def _sparse_frame(self, n_dates=1700, per_date=7, seed=0, signal=True):
+        """
+        実データと同じ形。1日あたり数銘柄しかない。
+
+        以前の実装は日付ごとに AUC を出すのに1日30件を要求していたため、
+        この形では 1,739日のうち14日しか使えず、条件付きは0セルだった。
+        """
+        rng = np.random.default_rng(seed)
+        n = n_dates * per_date
+        r_high = rng.uniform(90, 100, n)
+        useful = rng.normal(0, 1, n)
+        noise = rng.normal(0, 1, n)
+        lin = -2.0 + (useful * 1.2 if signal else 0.0)
+        lin += np.repeat(rng.normal(0, 1.5, n_dates), per_date)  # 局面差
+        return pd.DataFrame({
+            "Date": np.repeat(pd.date_range("2018-07-12", periods=n_dates,
+                                            freq="B"), per_date),
+            "r_high": r_high, "useful": useful, "noise": noise,
+            "label": (rng.random(n) < 1 / (1 + np.exp(-lin))).astype(int)})
+
+    def test_sparse_dates_still_produce_a_measurement(self):
+        """
+        1日7銘柄でも測れること。ここが空になると LTR の判断材料が
+        「無い」ではなく「測れていない」になり、区別がつかなくなる。
+        """
+        df = self._sparse_frame()
+        marg = {r["feature"]: r for r in marginal(df, ["useful", "noise"])}
+        cond = {r["feature"]: r for r in conditional(df, ["useful", "noise"])}
+        self.assertTrue(marg and cond, "疎な日付で測定が空になっている")
+        for res in (marg, cond):
+            self.assertGreater(res["useful"]["n_pairs"], 1000)
+            # 使えた日付が全体のごく一部しかない、という状態を許さない
+            self.assertGreater(res["useful"]["n_dates"], 500)
+
+    def test_sparse_dates_find_the_signal_and_reject_noise(self):
+        df = self._sparse_frame(signal=True)
+        res = {r["feature"]: r for r in conditional(df, ["useful", "noise"])}
+        self.assertGreater(res["useful"]["mean_auc"], 0.6)
+        self.assertTrue(res["useful"]["significant"])
+        self.assertLess(res["noise"]["abs_edge"], 0.02)
+        self.assertFalse(res["noise"]["significant"])
+
+    def test_confidence_interval_uses_date_bootstrap(self):
+        """
+        ペアは日付内で相関する。ペア単位でリサンプルすると独立を仮定して
+        CI が狭く出るので、日付ごと引き直していることを確かめる。
+        同じ日のペアを複製して増やしても CI は狭くならないはず。
+        """
+        from within_date_signal import _date_pairs, _concordance, _summarise
+        df = self._sparse_frame(signal=True, per_date=7)
+        d_ids, pi, ni = _date_pairs(df)
+        x = df["useful"].to_numpy(dtype=float)
+        base = _summarise("useful", _concordance(x, pi, ni), d_ids)
+        # 同じペアを3重に持たせる（情報は増えていない）
+        dup = _summarise("useful",
+                         np.tile(_concordance(x, pi, ni), 3),
+                         np.tile(d_ids, 3))
+        w_base = base["ci_high"] - base["ci_low"]
+        w_dup = dup["ci_high"] - dup["ci_low"]
+        self.assertGreater(w_dup, w_base * 0.7,
+                           "ペアを複製しただけで CI が狭くなっている"
+                           f"（{w_base:.4f} -> {w_dup:.4f}）")
+
     def test_rank_transform_does_not_change_within_date_auc(self):
         """順位化は日付内の単調変換なので AUC は変わらない。
         この前提で順位列を測定対象から外している。"""
