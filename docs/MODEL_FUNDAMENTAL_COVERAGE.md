@@ -51,11 +51,11 @@
 
 | 特徴量 | 充足率 |
 | --- | ---: |
-| `eps_growth_q0` | 100.0% |
-| `eps_growth_q1` | 100.0% |
-| `eps_growth_q2` | 100.0% |
-| `eps_growth_chg1` | 100.0% |
-| `eps_growth_chg` | 100.0% |
+| `eps_growth_q0` | 84.2% |
+| `eps_growth_q1` | 84.0% |
+| `eps_growth_q2` | 83.1% |
+| `eps_growth_chg1` | 84.0% |
+| `eps_growth_chg` | 83.1% |
 | `sales_growth_q0` | 100.0% |
 | `sales_growth_q1` | 100.0% |
 | `sales_growth_q2` | 100.0% |
