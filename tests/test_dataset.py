@@ -1678,16 +1678,73 @@ class TestSweepDesign(unittest.TestCase):
         self.S = S
 
     def test_each_variant_moves_exactly_one_factor(self):
-        """基準から2つ以上動いていたら、どちらが効いたか分からなくなる。"""
+        """
+        基準から2つ以上動いていたら、どちらが効いたか分からなくなる。
+
+        ボラ正規化だけは例外で、しきい値が行ごとに動くと維持日数の条件が
+        書けないので keep_days=0 も一緒に動く。だから比較相手は基準ではなく
+        keep0（維持条件なし）。その組でだけ2因子を許し、
+        相手が実在することもここで確かめる。
+        """
         S = self.S
         fields = [f for f in S.BASE.__dataclass_fields__
                   if f not in ("key", "axis", "label")]
+        keys = {d.key for d in S.DESIGNS}
         for d in S.DESIGNS:
             if d.key == "base":
                 continue
-            diff = [f for f in fields if getattr(d, f) != getattr(S.BASE, f)]
+            diff = sorted(f for f in fields
+                          if getattr(d, f) != getattr(S.BASE, f))
+            if d.vol_norm_k is not None:
+                self.assertEqual(diff, ["keep_days", "vol_norm_k"],
+                                 f"{d.key} が動かした因子: {diff}")
+                self.assertIn("keep0", keys, "ボラ正規化の比較相手が無い")
+                self.assertEqual(d.keep_days, 0)
+                continue
             self.assertEqual(len(diff), 1,
                              f"{d.key} が動かした因子: {diff}")
+
+    def test_vol_normalised_label_scales_with_volatility(self):
+        """
+        同じ上昇率でも、荒い銘柄では正例にならず静かな銘柄では正例になること。
+        ここが逆だと正規化になっていない。
+        """
+        S = self.S
+        d = S._var("v", "ボラ正規化", "k=1.0σ", vol_norm_k=1.0, keep_days=0)
+        # 60日σ = vol_20d/100*sqrt(60)。vol_20d=1.0 なら 7.75%、3.0 なら 23.2%
+        frame = pd.DataFrame({
+            "vol_20d": [1.0, 3.0],
+            "ref_rise": [0.15, 0.15],     # どちらも +15% 到達
+            "ref_end": [0.15, 0.15],
+            "ref_uptrend": [1.0, 1.0],
+        })
+        got = S.vol_normalised_label(frame, d).to_numpy()
+        self.assertEqual(list(got), [1.0, 0.0])
+
+    def test_vol_normalised_label_keeps_undetermined_as_nan(self):
+        """将来値が無い行は「起きなかった」ではなく「まだ分からない」。"""
+        S = self.S
+        d = S._var("v", "ボラ正規化", "k=1.0σ", vol_norm_k=1.0, keep_days=0)
+        frame = pd.DataFrame({
+            "vol_20d": [2.0, 2.0, 2.0],
+            "ref_rise": [np.nan, 0.50, 0.50],
+            "ref_end": [0.20, np.nan, 0.20],
+            "ref_uptrend": [1.0, 1.0, np.nan],
+        })
+        got = S.vol_normalised_label(frame, d).to_numpy()
+        self.assertTrue(np.isnan(got).all(), f"NaN のはずが {got}")
+
+    def test_vol_normalised_label_refuses_keep_days(self):
+        """
+        維持日数と同時に指定したら止まること。黙って無視すると
+        「維持条件が効いている」つもりの結果が出てしまう。
+        """
+        S = self.S
+        d = S._var("v", "ボラ正規化", "x", vol_norm_k=1.0, keep_days=10)
+        frame = pd.DataFrame({"vol_20d": [2.0], "ref_rise": [0.5],
+                              "ref_end": [0.2], "ref_uptrend": [1.0]})
+        with self.assertRaises(SystemExit):
+            S.vol_normalised_label(frame, d)
 
     def test_design_keys_are_unique(self):
         keys = [d.key for d in self.S.DESIGNS]
