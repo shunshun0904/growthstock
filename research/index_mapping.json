@@ -1,5 +1,5 @@
 {
-  "measuredAt": "2026-09-10T13:08:15.047489+00:00",
+  "measuredAt": "2026-09-10T13:14:57.617182+00:00",
   "minCorr": 0.8,
   "minGap": 0.05,
   "axes": {
@@ -2191,9 +2191,9 @@
         {
           "from": "0080",
           "to": "0090",
-          "rank1": 1,
+          "rank1": 13,
           "n": 17,
-          "medianCorr": 0.4857,
+          "medianCorr": 0.771,
           "pairs": [
             {
               "index": "0080",
@@ -2205,131 +2205,131 @@
             },
             {
               "index": "0081",
-              "sector": "10",
-              "sectorName": "情報通信・サービスその他",
-              "corr": 0.3346,
-              "rank": 15,
-              "nStocks": 489
-            },
-            {
-              "index": "0082",
-              "sector": "11",
-              "sectorName": "電気・ガス",
-              "corr": 0.2797,
-              "rank": 19,
-              "nStocks": 25
-            },
-            {
-              "index": "0083",
-              "sector": "12",
-              "sectorName": "運輸・物流",
-              "corr": 0.4633,
-              "rank": 16,
-              "nStocks": 12
-            },
-            {
-              "index": "0084",
-              "sector": "13",
-              "sectorName": "商社・卸売",
-              "corr": 0.5347,
-              "rank": 3,
-              "nStocks": 84
-            },
-            {
-              "index": "0085",
-              "sector": "14",
-              "sectorName": "小売",
-              "corr": 0.4857,
-              "rank": 14,
-              "nStocks": 105
-            },
-            {
-              "index": "0086",
-              "sector": "15",
-              "sectorName": "銀行",
-              "corr": 0.5579,
-              "rank": 7,
-              "nStocks": 79
-            },
-            {
-              "index": "0087",
-              "sector": "16",
-              "sectorName": "金融（除く銀行）",
-              "corr": 0.6706,
-              "rank": 7,
-              "nStocks": 26
-            },
-            {
-              "index": "0088",
-              "sector": "17",
-              "sectorName": "不動産",
-              "corr": 0.6,
-              "rank": 11,
-              "nStocks": 46
-            },
-            {
-              "index": "0089",
               "sector": "2",
               "sectorName": "エネルギー資源",
-              "corr": 0.4433,
-              "rank": 17,
+              "corr": 0.998,
+              "rank": 1,
               "nStocks": 16
             },
             {
-              "index": "008A",
+              "index": "0082",
               "sector": "3",
               "sectorName": "建設・資材",
-              "corr": 0.4581,
-              "rank": 4,
+              "corr": 0.7376,
+              "rank": 1,
               "nStocks": 62
             },
             {
-              "index": "008B",
+              "index": "0083",
               "sector": "4",
               "sectorName": "素材・化学",
-              "corr": 0.4599,
-              "rank": 12,
+              "corr": 0.7365,
+              "rank": 3,
               "nStocks": 40
             },
             {
-              "index": "008C",
+              "index": "0084",
               "sector": "5",
               "sectorName": "医薬品",
-              "corr": 0.3791,
-              "rank": 17,
+              "corr": 0.5801,
+              "rank": 1,
               "nStocks": 32
             },
             {
-              "index": "008D",
+              "index": "0085",
               "sector": "6",
               "sectorName": "自動車・輸送機",
-              "corr": 0.523,
-              "rank": 10,
+              "corr": 0.8083,
+              "rank": 1,
               "nStocks": 17
             },
             {
-              "index": "008E",
+              "index": "0086",
               "sector": "7",
               "sectorName": "鉄鋼・非鉄",
-              "corr": 0.479,
-              "rank": 10,
+              "corr": 0.771,
+              "rank": 1,
               "nStocks": 9
             },
             {
-              "index": "008F",
+              "index": "0087",
               "sector": "8",
               "sectorName": "機械",
-              "corr": 0.5916,
-              "rank": 10,
+              "corr": 0.8262,
+              "rank": 1,
               "nStocks": 46
             },
             {
-              "index": "0090",
+              "index": "0088",
               "sector": "9",
               "sectorName": "電機・精密",
-              "corr": 0.534,
-              "rank": 7,
+              "corr": 0.897,
+              "rank": 1,
               "nStocks": 69
+            },
+            {
+              "index": "0089",
+              "sector": "10",
+              "sectorName": "情報通信・サービスその他",
+              "corr": 0.8141,
+              "rank": 1,
+              "nStocks": 489
+            },
+            {
+              "index": "008A",
+              "sector": "11",
+              "sectorName": "電気・ガス",
+              "corr": 0.349,
+              "rank": 15,
+              "nStocks": 25
+            },
+            {
+              "index": "008B",
+              "sector": "12",
+              "sectorName": "運輸・物流",
+              "corr": 0.4845,
+              "rank": 9,
+              "nStocks": 12
+            },
+            {
+              "index": "008C",
+              "sector": "13",
+              "sectorName": "商社・卸売",
+              "corr": 0.8202,
+              "rank": 1,
+              "nStocks": 84
+            },
+            {
+              "index": "008D",
+              "sector": "14",
+              "sectorName": "小売",
+              "corr": 0.7777,
+              "rank": 1,
+              "nStocks": 105
+            },
+            {
+              "index": "008E",
+              "sector": "15",
+              "sectorName": "銀行",
+              "corr": 0.9989,
+              "rank": 1,
+              "nStocks": 79
+            },
+            {
+              "index": "008F",
+              "sector": "16",
+              "sectorName": "金融（除く銀行）",
+              "corr": 0.7677,
+              "rank": 2,
+              "nStocks": 26
+            },
+            {
+              "index": "0090",
+              "sector": "17",
+              "sectorName": "不動産",
+              "corr": 0.7512,
+              "rank": 1,
+              "nStocks": 46
             }
           ]
         }
