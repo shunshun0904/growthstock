@@ -10,9 +10,10 @@
 
 ここで確かめること:
   1. 指数は何が取れるか。
-     1回目の実測で `/indices/bars/daily?code=0000` が通ることが分かった
-     （`/indices/bars/daily/topix` と同じ内容が Code 付きで返る）。
-     つまり指数はコードで引ける。どのコードが存在するかを総当たりで測る。
+     実測で `/indices/bars/daily?date=YYYY-MM-DD` がその日の全指数を返すと
+     分かった（一覧エンドポイント /indices と /indices/master は403）。
+     総当たり（数字4桁＋英字拡張、1,234リクエスト）では66件しか見つからず、
+     date 指定の79件に届かなかった。列挙は date 指定で行う。
   2. 東証上場の ETF/ETN で代用できるか。
      これらは /equities/bars/daily に含まれるので取得先を増やさずに済む。
      銘柄コードは書き下ろさず、/equities/master が返した名称から探す。
@@ -56,11 +57,9 @@ OUT_MD = os.path.join(ROOT, "docs", "MARKET_DATA.md")
 # 特徴量に使うには、この日まで遡って値が無いと学習期間が削られる。
 EARLIEST_DATE = "2016-10-01"
 
-# 指数の総当たりで使う短い窓。存在確認だけなので数日で足りる
+# 指数の列挙に使う基準日。ここで返ったコードが、その日に存在した指数のすべて
+INDEX_ASOF = "2024-05-15"
 INDEX_WINDOW = {"from": "2024-05-01", "to": "2024-05-15"}
-
-# 総当たりのリクエスト上限。無制限にすると API を延々叩き続ける
-SWEEP_BUDGET = 2500
 
 # --------------------------------------------------------------------------- #
 # 1. 指数
@@ -71,9 +70,9 @@ SWEEP_BUDGET = 2500
 PARAM_SHAPES = [
     {},
     dict(INDEX_WINDOW),
-    {"date": "2024-05-15"},
+    {"date": INDEX_ASOF},
     {"code": "0000", **INDEX_WINDOW},
-    {"code": "0000", "date": "2024-05-15"},
+    {"code": "0000", "date": INDEX_ASOF},
 ]
 
 
@@ -100,81 +99,26 @@ def probe_param_shapes(client: JQuantsClient) -> List[dict]:
     return out
 
 
-def _sweep_codes() -> List[str]:
-    """総当たりするコード。数字4桁を全部。"""
-    return [f"{i:04d}" for i in range(1000)]
-
-
-def _extend_codes(hits: List[str]) -> List[str]:
+def enumerate_indices(client: JQuantsClient, date: str) -> dict:
     """
-    当たったコードの3文字プレフィックスについて、4文字目を英数字で広げる。
+    その日の全指数を1リクエストで取る。
 
-    JPX の指数コードには英字を含むものがありうるので、
-    数字だけの総当たりでは取りこぼす。ただし全部を広げると
-    リクエストが爆発するため、当たりの近傍だけに絞る。
+    一覧エンドポイント（/indices, /indices/master）は403だが、
+    /indices/bars/daily?date=... が実質の一覧として働く。
+    総当たりより速く、しかも取りこぼしが無い
+    （総当たり 1,234リクエストで66件 / date指定 1リクエストで79件）。
     """
-    alpha = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-    seen, out = set(), []
-    for h in hits:
-        pre = h[:3]
-        for c in alpha:
-            code = pre + c
-            if code not in seen:
-                seen.add(code)
-                out.append(code)
-    return out
-
-
-def _probe_index_code(client: JQuantsClient, code: str) -> dict:
-    try:
-        rows = client.get_paginated("/indices/bars/daily", {"code": code, **INDEX_WINDOW})
-    except JQuantsError as exc:
-        return {"ok": False, "error": str(exc)[:120]}
-    if not rows:
-        return {"ok": True, "rows": 0}
-    closes = []
+    rows = client.get_paginated("/indices/bars/daily", {"date": date})
+    detail = {}
     for r in rows:
+        code = str(r.get("Code"))
         try:
-            closes.append(float(r.get("C")))
+            close = float(r.get("C"))
         except (TypeError, ValueError):
-            pass
-    return {
-        "ok": True,
-        "rows": len(rows),
-        "keys": sorted(rows[0].keys()),
-        # 名称は返らないので、水準で見分けるしかない。
-        # TOPIX(0000) の水準が分かっているので相対的に当たりを付けられる
-        "close": round(statistics.median(closes), 2) if closes else None,
-    }
-
-
-def sweep_indices(client: JQuantsClient) -> dict:
-    """存在する指数コードを総当たりで探す。"""
-    spent, hits, results = 0, [], {}
-    for code in _sweep_codes():
-        if spent >= SWEEP_BUDGET:
-            break
-        r = _probe_index_code(client, code)
-        spent += 1
-        if r.get("ok") and r.get("rows"):
-            hits.append(code)
-            results[code] = r
-            print(f"    {code}: {r['rows']}日 終値中央値 {r['close']}")
-    print(f"  数字4桁: {len(hits)}件ヒット / {spent}リクエスト")
-
-    extended = _extend_codes(hits)
-    for code in extended:
-        if spent >= SWEEP_BUDGET:
-            break
-        r = _probe_index_code(client, code)
-        spent += 1
-        if r.get("ok") and r.get("rows"):
-            hits.append(code)
-            results[code] = r
-            print(f"    {code}: {r['rows']}日 終値中央値 {r['close']}  (英字拡張)")
-    print(f"  合計 {len(hits)}件ヒット / {spent}リクエスト（上限 {SWEEP_BUDGET}）")
-    return {"hits": sorted(results), "detail": results,
-            "requests": spent, "budget": SWEEP_BUDGET}
+            close = None
+        detail[code] = {"close": close, "keys": sorted(r.keys())}
+    print(f"  date={date}: {len(detail)}件")
+    return {"date": date, "hits": sorted(detail), "detail": detail}
 
 
 def index_history(client: JQuantsClient, code: str, end: str) -> dict:
@@ -323,17 +267,19 @@ def write_md(result: dict) -> None:
     L.append("")
 
     sw = result["indexSweep"]
-    L.append("## 存在する指数コード（総当たり）")
+    L.append("## 存在する指数コード")
     L.append("")
-    L.append("数字4桁の全域（0000〜0999）と、当たりの近傍を英字に広げた範囲を叩いた。")
-    L.append(f"リクエスト {sw['requests']:,} 件（上限 {sw['budget']:,}）で **{len(sw['hits'])} 件**が値を返した。")
+    L.append(f"`/indices/bars/daily?date={sw['date']}` が返した **{len(sw['hits'])} 件**。")
+    L.append("一覧エンドポイント（`/indices`, `/indices/master`）は403だが、")
+    L.append("日付指定がその日の全指数を返すので実質の一覧として使える。")
+    L.append("（数字4桁の総当たりでは 1,234リクエストで66件しか見つからず、取りこぼしていた）")
     L.append("")
     L.append("指数のレスポンスに**名称は入っていない**（列は Code / Date / O / H / L / C）。")
     L.append("どの指数かは水準から見当を付けるしかないので、下表には終値の中央値を併記する。")
     L.append("`0000` は TOPIX（`/indices/bars/daily/topix` と同じ内容が返る）。")
     L.append("")
     if sw["hits"]:
-        L.append("| コード | 2024-05-01〜15 の終値中央値 | 全期間の行数 | 最古 | 最新 |")
+        L.append(f"| コード | {sw['date']} の終値 | 全期間の行数 | 最古 | 最新 |")
         L.append("| --- | ---: | ---: | --- | --- |")
         for code in sw["hits"]:
             d = sw["detail"][code]
@@ -398,8 +344,8 @@ def main() -> int:
     result["paramShapes"] = probe_param_shapes(client)
     _save(result)
 
-    print("\n[2] 指数コードの総当たり")
-    result["indexSweep"] = sweep_indices(client)
+    print("\n[2] 指数の列挙（date 指定）")
+    result["indexSweep"] = enumerate_indices(client, INDEX_ASOF)
     _save(result)
 
     print("\n[3] 見つかった指数の遡及範囲")
