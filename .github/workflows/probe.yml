@@ -26,6 +26,10 @@ jobs:
         env:
           JQUANTS_API: ${{ secrets.JQUANTS_API }}
         run: |
+          # 新しいプローブを先に回す。後ろに置くと、先行するプローブが
+          # 落ちたときに（既定シェルは bash -e）そこで止まり、
+          # 今回測りたいものが測れないまま終わる
+          python3 research/probe_market_data.py
           python3 research/probe_fins_fields.py
           python3 research/probe_universe.py
           python3 research/probe_boundary.py
@@ -33,9 +37,9 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A docs/DATA_FIELDS.md
+          git add -A docs/DATA_FIELDS.md docs/MARKET_DATA.md
           if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
-          git commit -m "chore(research): /fins/summary の項目一覧を実測して更新"
+          git commit -m "chore(research): データ取得可否の実測結果を更新"
           for i in 1 2 3 4; do
             if git push; then exit 0; fi
             sleep $((2 ** i)); git pull --rebase
@@ -49,4 +53,5 @@ jobs:
           path: |
             research/probe_*.json
             docs/DATA_FIELDS.md
+            docs/MARKET_DATA.md
           if-no-files-found: warn
