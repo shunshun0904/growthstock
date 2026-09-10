@@ -50,7 +50,10 @@ concurrency:
 jobs:
   rebuild:
     runs-on: ubuntu-latest
-    timeout-minutes: 90   # プリセットが増えてウォークフォワードが長くなった
+    # 母集団が 12,484 -> 22,909 に増え、探索も 2プリセット × 2モデル
+    # （pointwise / ranker）になったので 90分では足りない。
+    # 途中で切られると探索結果が保存されず、API も CI 時間も無駄になる。
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
