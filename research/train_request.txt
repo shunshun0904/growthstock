@@ -1,4 +1,4 @@
-no
+yes
 # 1行目が "yes" のときだけ学習・評価（train_model / walkforward /
 # stratified_eval / within_date_signal）を実行する。
 #

@@ -151,6 +151,21 @@ def _cap_bands(df: pd.DataFrame, n_bands: int = CAP_BANDS) -> pd.Series:
     return band.astype("Int64").astype(str).fillna("na")
 
 
+def _composition_spread(frames: List[pd.DataFrame], key: pd.Series) -> float:
+    """
+    フォールド間で key の構成比が最大どれだけ違うか（0〜1）。
+
+    key は全行に対して与える（フォールド内で切り直さないこと）。
+    フォールド内で分位を取ると定義上どのフォールドも均等になり、
+    層別しているつもりで何も測っていないことになる。
+    """
+    if not frames:
+        return float("nan")
+    m = pd.DataFrame([key.loc[f.index].value_counts(normalize=True)
+                      for f in frames]).fillna(0.0)
+    return float((m.max() - m.min()).max())
+
+
 def _coarsen(levels: List[pd.Series], n_splits: int) -> pd.Series:
     """
     細かい層から順に使い、分割数に満たない層だけを1段粗い層に落とす。
@@ -394,6 +409,11 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
                "fold_pos_rate_spread": round(float(
                    max(v["label"].mean() for _, v in folds)
                    - min(v["label"].mean() for _, v in folds)), 4),
+               # 規模構成がフォールド間でどれだけ違うか（構成比の最大差、pt）。
+               # 合成データでは 2.803pt -> 0.233pt に締まることを確認したが、
+               # 実データで確認する手段が無かった。ここに残せば毎回検証できる。
+               "fold_cap_spread_pt": round(_composition_spread(
+                   [v for _, v in folds], _cap_bands(df)) * 100, 3),
                "n_trials": n_trials}
     if verbose:
         pr_txt = " ".join(f"{x:.4f}" for x in at.get("fold_scores", []))
@@ -410,6 +430,8 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
               + f"（幅 {(max(rates)-min(rates))*100:.3f}pt）")
         print(f"  [tune] 訓練窓の正例率 : "
               + " ".join(f"{t['label'].mean()*100:.2f}%" for t, _ in folds))
+        print(f"  [tune] 検証窓の構成ずれ: "
+              f"時価総額帯 {LAST_CV['fold_cap_spread_pt']:.3f}pt")
     return best
 
 
