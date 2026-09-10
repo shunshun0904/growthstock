@@ -1,0 +1,16 @@
+no
+# 1行目が "yes" のときだけ設計の掃引（research/sweep_design.py）を実行する。
+#
+# 掃引はモデルを19回学習するので、学習ゲート（train_request.txt）と
+# 同じ扱いにする。既定は no。
+#
+# 掃引が測るのは「設計の差」だけで、採用案の実力ではない。
+# ハイパーパラメータを全設計で共通に固定しているため
+# （設計ごとに探索し直すと、設計の差と探索の差が混ざる）。
+# 採用案が決まったら、あらためて tune_request.txt を yes にして
+# 正規に探索し直すこと。
+#
+# 52週高値の設計を含めるには、先に別データセットが要る:
+#   SWEEP_HIGH_WINDOW=245 python3 research/build_dataset.py \
+#       --out research/_data/dataset_w245.parquet
+# 無ければその設計だけ飛ばす（理由を出す）。

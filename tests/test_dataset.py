@@ -1753,6 +1753,35 @@ class TestSweepDesign(unittest.TestCase):
         got = S.fresh_break(panel, 20).to_numpy()
         np.testing.assert_array_equal(got, panel["is_fresh_break"].to_numpy())
 
+    def test_edge_ci_straddles_zero_when_there_is_no_edge(self):
+        """
+        スコアと実際のリターンが無関係なら、区間は0をまたぐこと。
+        またがない実装だと、選べていないのに「選んだ意味があった」と読める。
+        """
+        S = self.S
+        rng = np.random.default_rng(0)
+        n = 3000
+        dates = (pd.to_datetime("2025-06-16")
+                 + pd.to_timedelta(rng.integers(0, 250, n), unit="D"))
+        t = pd.DataFrame({"Date": dates, "score": rng.normal(size=n),
+                          "ref_end": rng.normal(0.03, 0.25, n)})
+        lo, hi = S.edge_ci(t, n_boot=300, seed=0)
+        self.assertLessEqual(lo, 0.0)
+        self.assertGreaterEqual(hi, 0.0)
+
+    def test_edge_ci_excludes_zero_when_the_edge_is_real(self):
+        """スコアが本当にリターンを当てているなら、区間は0を含まないこと。"""
+        S = self.S
+        rng = np.random.default_rng(1)
+        n = 3000
+        dates = (pd.to_datetime("2025-06-16")
+                 + pd.to_timedelta(rng.integers(0, 250, n), unit="D"))
+        sc = rng.normal(size=n)
+        t = pd.DataFrame({"Date": dates, "score": sc,
+                          "ref_end": 0.03 + 0.15 * sc + rng.normal(0, 0.15, n)})
+        lo, hi = S.edge_ci(t, n_boot=300, seed=0)
+        self.assertGreater(lo, 0.0)
+
     def test_longer_cooldown_is_a_subset(self):
         """
         クールダウンを伸ばすと母集団は必ず狭くなる（部分集合）。

@@ -167,6 +167,26 @@ jobs:
             python3 -c "import json,os;p='research/lgbm_params.json';d=json.load(open(p)) if os.path.exists(p) else {};print(f'保存済み: {len(d)}プリセット')" | tee -a tune.log
           fi
 
+      # 母集団・ラベル設計の掃引。モデルを19回学習するので、
+      # 学習ゲートと同じく既定では行わない。
+      # research/sweep_request.txt の1行目を "yes" にすると走る。
+      #
+      # 52週高値の設計はデータセットごと別に要る。ここで作ってから掃引する。
+      # 既定のデータセット（dataset.parquet）は上書きしない
+      - name: Sweep population and label design (opt-in)
+        run: |
+          REQ=$(grep -v '^#' research/sweep_request.txt 2>/dev/null | head -1 | tr -d '[:space:]' || true)
+          if [ "$REQ" = "yes" ]; then
+            SWEEP_HIGH_WINDOW=245 python3 research/build_dataset.py \
+              --out research/_data/dataset_w245.parquet 2>&1 | tail -20
+            # 上の実行で dataset_meta.json が52週のもので上書きされる。
+            # 後段（EDA ページなど）が既定の meta を読むので必ず戻す
+            python3 research/build_dataset.py 2>&1 | tail -5
+            python3 research/sweep_design.py 2>&1 | tee sweep.log
+          else
+            echo "設計の掃引は行わない（research/sweep_request.txt が no）" | tee sweep.log
+          fi
+
       # 学習は既定では行わない。
       # EDA で特徴量の欠損・異常値を確認し、利用者が明示的に許可してから走らせる。
       # 特徴量がおかしいまま学習しても結果が無駄になり、EDA を先に出す意味が消える。
@@ -251,6 +271,7 @@ jobs:
             sec "特徴量辞書" dict.log
             sec "重要度ページ" importance.log
             sec "パラメータ探索" tune.log 40
+            sec "設計の掃引" sweep.log 60
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Commit outputs
@@ -259,7 +280,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           mkdir -p research/samples
           cp research/_data/label_comparison.json research/samples/label_comparison.json
-          git add -A research/samples research/viewer research/lgbm_params.json research/eda.json research/eda_report.html research/importance_report.html research/feature_dict.html docs/MODEL_RESULTS.md docs/MODEL_WALKFORWARD.md docs/MODEL_WITHIN_DATE.md docs/MODEL_FUNDAMENTAL_COVERAGE.md docs/DATA_VALIDATION.md docs/MODEL_STRATIFIED.md
+          git add -A research/samples research/viewer research/lgbm_params.json research/eda.json research/eda_report.html research/importance_report.html research/feature_dict.html docs/MODEL_RESULTS.md docs/MODEL_WALKFORWARD.md docs/MODEL_WITHIN_DATE.md docs/MODEL_FUNDAMENTAL_COVERAGE.md docs/DATA_VALIDATION.md docs/MODEL_STRATIFIED.md docs/MODEL_DESIGN_SWEEP.md
           # git diff は未追跡ファイルを見ないため、staged の差分で判定する
           if git diff --cached --quiet; then
             echo "変更なし"; exit 0
@@ -282,6 +303,7 @@ jobs:
             research/_data/walkforward.json
             research/_data/within_date.json
             research/_data/stratified.json
+            research/_data/sweep_design.json
             research/_data/fundamental_coverage.json
             research/_data/validation.json
             research/eda.json
@@ -295,4 +317,5 @@ jobs:
             docs/MODEL_FUNDAMENTAL_COVERAGE.md
             docs/DATA_VALIDATION.md
             docs/MODEL_STRATIFIED.md
+            docs/MODEL_DESIGN_SWEEP.md
           retention-days: 30

@@ -314,7 +314,46 @@ def run_design(design: Design, frame: pd.DataFrame, cols: List[str],
     if a and b:
         row["edge_end_median"] = round(b["end_median"] - a["end_median"], 2)
         row["edge_win_rate"] = round(b["win_rate"] - a["win_rate"], 4)
+        lo, hi = edge_ci(t)
+        row["edge_end_ci"] = [lo, hi]
+        row["edge_significant"] = bool(lo > 0)
     return row
+
+
+def edge_ci(t: pd.DataFrame, k_pct: float = 5.0, n_boot: int = 1000,
+            seed: int = 0) -> Tuple[float, float]:
+    """
+    「上位k% - 全件」の終盤リターン中央値の差に、95%区間を付ける。
+
+    上位5%は200件ほどしかない。中央値の差が +0.5pt 出ても、それが
+    誤差なのかは目視では分からない。区間が0をまたぐなら
+    「選んだ意味があった」とは言えない。
+
+    リサンプルは日付単位（ブロックブートストラップ）にする。
+    同じ日の銘柄は地合いを共有していて独立ではないので、行単位で
+    resample すると実際より狭い区間が出る（有意でないものが有意に見える）。
+    """
+    rng = np.random.default_rng(seed)
+    end = t["ref_end"].to_numpy(dtype=float)
+    score = t["score"].to_numpy(dtype=float)
+    groups = [np.flatnonzero(t["Date"].to_numpy() == d)
+              for d in pd.unique(t["Date"])]
+    diffs = []
+    for _ in range(n_boot):
+        pick = rng.integers(0, len(groups), len(groups))
+        idx = np.concatenate([groups[i] for i in pick])
+        e, sc = end[idx], score[idx]
+        ok = np.isfinite(e)
+        e, sc = e[ok], sc[ok]
+        if len(e) < 40:
+            continue
+        n = max(1, int(len(e) * k_pct / 100))
+        top = e[np.argsort(sc, kind="stable")[-n:]]
+        diffs.append(float(np.median(top) - np.median(e)) * 100)
+    if not diffs:
+        return (float("nan"), float("nan"))
+    lo, hi = np.percentile(diffs, [2.5, 97.5])
+    return (round(float(lo), 2), round(float(hi), 2))
 
 
 # --------------------------------------------------------------------------- #
@@ -491,6 +530,13 @@ def _rows_ok(results: List[Dict]) -> List[Dict]:
     return [r for r in results if "pr_auc" in r]
 
 
+def _ci_text(r: Dict) -> str:
+    ci = r.get("edge_end_ci")
+    if not ci or any(v is None or not np.isfinite(v) for v in ci):
+        return ""
+    return f"[{ci[0]:+.2f},{ci[1]:+.2f}]"
+
+
 def _print_table(results: List[Dict]) -> None:
     ok = _rows_ok(results)
     if not ok:
@@ -502,7 +548,7 @@ def _print_table(results: List[Dict]) -> None:
     print("-" * 132)
     print(f"{'軸':<14}{'設計':<18}{'母集団':>8}{'正例率':>8}{'評価n':>7}"
           f"{'PR-AUC':>9}{'対無情報':>9}{'ROC-AUC':>9}{'日付内':>8}"
-          f"{'Lift@5%':>9}{'上位5%終盤':>11}{'全件終盤':>10}{'差':>7}")
+          f"{'Lift@5%':>9}{'上位5%終盤':>11}{'全件終盤':>10}{'差':>7}{'95%区間':>17}")
     print("-" * 132)
     for r in ok:
         b, a = r.get("outcome_top5", {}), r.get("outcome_all", {})
@@ -514,12 +560,15 @@ def _print_table(results: List[Dict]) -> None:
               f"{r['within_date_auc']:>8.4f}{r['lift@5%']:>8.2f}x"
               f"{b.get('end_median', float('nan')):>+10.2f}%"
               f"{a.get('end_median', float('nan')):>+9.2f}%"
-              f"{r.get('edge_end_median', float('nan')):>+6.2f}{mark}")
+              f"{r.get('edge_end_median', float('nan')):>+6.2f}"
+              f"{_ci_text(r):>17}{mark}")
     print("-" * 132)
     print("終盤 = 参照ホライズン60営業日後の5日平均終値が基準日終値から何%か。")
     print("      ラベル定義に依存しないので、ラベルを変えた設計どうしでも比べられる。")
     print("      「差」= 上位5% - 全件。選んだことの価値。ここが動かないなら")
     print("      ROC-AUC が上がっても上がったのは指標であって実力ではない。")
+    print("      95%区間は日付単位のブロックブートストラップ（B=1000）。")
+    print("      0 をまたぐなら「選んだ意味があった」とは言えない。")
     print("      * = 基準より ROC-AUC と PR-AUC(対無情報) の両方が上")
 
 
@@ -554,8 +603,8 @@ def _write_doc(path: str, payload: Dict) -> None:
         "",
         "## 結果",
         "",
-        "| 軸 | 設計 | 母集団 | 正例率 | 評価n | PR-AUC | 対無情報 | ROC-AUC | 日付内AUC | Lift@5% | 上位5%終盤 | 全件終盤 | 差 |",
-        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| 軸 | 設計 | 母集団 | 正例率 | 評価n | PR-AUC | 対無情報 | ROC-AUC | 日付内AUC | Lift@5% | 上位5%終盤 | 全件終盤 | 差 | 差の95%区間 |",
+        "|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|:---:|",
     ]
     for r in ok:
         b, a = r.get("outcome_top5", {}), r.get("outcome_all", {})
@@ -566,7 +615,8 @@ def _write_doc(path: str, payload: Dict) -> None:
             f"| {r['roc_auc']:.4f} | {r['within_date_auc']:.4f} | {r['lift@5%']:.2f}x "
             f"| {b.get('end_median', float('nan')):+.2f}% "
             f"| {a.get('end_median', float('nan')):+.2f}% "
-            f"| {r.get('edge_end_median', float('nan')):+.2f}pt |")
+            f"| {r.get('edge_end_median', float('nan')):+.2f}pt "
+            f"| {_ci_text(r) or '—'} |")
     skipped = [r for r in payload["results"] if "skipped" in r]
     if skipped:
         L += ["", "## 測れなかった設計", ""]
