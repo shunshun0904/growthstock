@@ -981,6 +981,81 @@ class TestQuarterSequenceFeatures(unittest.TestCase):
         self.assertAlmostEqual(r["ROE_chg_3q"], 40.0)   # 50-10
 
 
+class TestFundRequirementKeepsTurnarounds(unittest.TestCase):
+    """
+    決算の完全性フィルタが、赤字->黒字転換の会社を落としてはいけない。
+
+    full4 は eps_growth / sales_growth（前年同期が0以下だと欠測という定義）を
+    要求していたため、前年4期すべて黒字だった会社しか残さなかった。
+    実測で eps_growth_turn が全10,116行 0、eps_growth_sym_q0 の max が
+    99.939（+100 は前期<0<今期のときだけ）と、転換が1件も無い状態になっていた。
+    赤字->黒字転換は株価が最も動くイベントなので、これは大きな取りこぼしになる。
+    """
+
+    def _panel(self, eps_by_year, sales=100.0):
+        """2会計年度ぶんの四半期開示。eps_by_year は [1年目, 2年目] の単一四半期EPS。"""
+        rows = []
+        for y, eps in enumerate(eps_by_year):
+            fy_start = pd.Timestamp("2020-04-01") + pd.DateOffset(years=y)
+            for qi, qt in enumerate(["1Q", "2Q", "3Q", "FY"], start=1):
+                rows.append({
+                    "Code": "1234", "CurPerType": qt,
+                    # 累計開示なので、単一四半期 eps の qi 倍を入れる
+                    "DiscDate": fy_start + pd.DateOffset(months=3 * qi, days=45),
+                    "CurFYSt": fy_start, "DiscTime": "15:00",
+                    "Sales": sales * qi, "OP": eps * qi, "NP": eps * qi,
+                    "EPS": eps * qi, "Eq": 1000.0, "TA": 2000.0, "ROE": 5.0 * qi,
+                    "FOP": 100.0, "ShOutFY": 100.0, "TrShFY": 0.0,
+                })
+        return pd.DataFrame(rows)
+
+    def _latest(self, eps_by_year):
+        from build_dataset import quarterize_panel
+        q = quarterize_panel(self._panel(eps_by_year))
+        return q.iloc[-1]
+
+    def test_turn_flag_fires_on_a_real_turnaround(self):
+        """前年赤字・今期黒字なら転換フラグが立つ。立たないなら定義か経路が壊れている。"""
+        r = self._latest([-20.0, 30.0])
+        self.assertEqual(r["eps_growth_turn"], 1.0)
+
+    def test_full4_rejects_a_turnaround_but_full4_sym_keeps_it(self):
+        """
+        これが full4 を full4_sym に変えた理由そのもの。
+        非対称の成長率は前年赤字だと欠測になるので、転換した会社は
+        full4 の要求を満たせない。対称版なら定義できるので残る。
+        """
+        from build_dataset import FUND_REQUIREMENT_SETS
+        r = self._latest([-20.0, 30.0])
+        asym = [c for c in FUND_REQUIREMENT_SETS["full4"] if c.startswith("eps_growth")]
+        sym = [c for c in FUND_REQUIREMENT_SETS["full4_sym"] if c.startswith("eps_growth")]
+        self.assertTrue(all(pd.isna(r[c]) for c in asym),
+                        f"前年赤字でも非対称版が値を持っている: "
+                        f"{ {c: r[c] for c in asym} }")
+        self.assertTrue(all(pd.notna(r[c]) for c in sym),
+                        f"対称版が欠測になっている（転換が落ちる）: "
+                        f"{ {c: r[c] for c in sym} }")
+
+    def test_both_sets_keep_a_company_that_stayed_profitable(self):
+        """ずっと黒字なら、どちらの要求でも残る（対称版が甘すぎないことの確認）。"""
+        from build_dataset import FUND_REQUIREMENT_SETS
+        r = self._latest([10.0, 30.0])
+        self.assertEqual(r["eps_growth_turn"], 0.0)
+        for key in ("full4", "full4_sym"):
+            cols = [c for c in FUND_REQUIREMENT_SETS[key] if c.startswith("eps_growth")]
+            self.assertTrue(all(pd.notna(r[c]) for c in cols),
+                            f"{key} が黒字継続の会社を落としている")
+
+    def test_the_applied_requirement_is_the_symmetric_one(self):
+        """既定を固定する。黙って戻ると転換がまた全部消える。"""
+        import build_dataset as B
+        self.assertEqual(B.FUND_REQUIREMENT, "full4_sym")
+        self.assertIn(B.FUND_REQUIREMENT, B.FUND_REQUIREMENT_SETS)
+        # 要求の強さは full4 と同じでなければならない（緩めたわけではない）
+        self.assertEqual(len(B.FUND_REQUIREMENT_SETS["full4_sym"]),
+                         len(B.FUND_REQUIREMENT_SETS["full4"]))
+
+
 class TestDefaultLabel(unittest.TestCase):
     """
     既定の定義を固定する。ここが黙って変わると過去の結果と比較できなくなる。

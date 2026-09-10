@@ -194,12 +194,29 @@ FUND_REQUIREMENT_SETS = {
                   "ROE_chg1", "ROE_chg2", "op_margin_chg1", "op_margin_chg2"],
 }
 #: 実際に適用する要求。FUND_REQUIREMENT_SETS のキー。
-#: full4 = 売上・EPS の3段の差分と、ROE・営業利益率の2段の差分が
-#: すべて作れること。4決算そろっている行だけが残る。
-#: 実測では 17,580 -> 10,116（57.5%）に減るが、正例率は 7.49% -> 7.48% と動かない。
-#: 「決算が揃っている銘柄」と「揃っていない銘柄」でブレイクの起きやすさに
-#: 差が無いので、絞っても正例側に偏りは入らない。
-FUND_REQUIREMENT = "full4"
+#:
+#: full4_sym = 売上・EPS の3段の差分（対称変化率）と、ROE・営業利益率の
+#: 2段の差分がすべて作れること。要求の強さは full4 と同じ10列。
+#:
+#: full4 から full4_sym に変えた理由:
+#:   full4 は eps_growth / sales_growth（前年同期が0以下だと欠測）を要求するので、
+#:   前年4期すべて黒字だった会社しか残らなかった。実測でその副作用が出ていた。
+#:     eps_growth_turn / sales_growth_turn  全10,116行が 0（赤字->黒字が1件も無い）
+#:     equity_ratio_pos_ratio               全行 1.0
+#:     eps_growth_sym_q0 の max             99.939（+100 は前期<0<今期のときだけ）
+#:     同 p5                                -100.000（黒字->赤字転落は5%以上ある）
+#:   赤字企業を落とさないために _sym を用意したのに、別の入口で同じことが
+#:   起きていた。赤字->黒字転換は株価が最も動くイベントなので損失が大きい。
+#:
+#: 実測（絞る前 17,580件 / 正例率 11.55%）:
+#:     full4      10,116件 (57.5%) 正例率 11.64%
+#:     full4_sym  12,484件 (71.0%) 正例率 11.82%   ← 採用
+#:   +2,368件（+23.4%）戻るが正例率はほぼ動かないので、絞り方を変えても
+#:   正例側に偏りは入らない。
+#:
+#: 赤字銘柄を候補から外したいなら、この列の欠測に頼るのではなく
+#: FUND_QUALITY（増収増益フィルタ）で明示的に指定すること。
+FUND_REQUIREMENT = "full4_sym"
 
 # --- 決算の中身で母集団を絞る --- #
 # 決算を特徴量として薄く効かせるより、対象を選ぶ側に使う。
@@ -586,8 +603,13 @@ def report_fund_completeness(samples: pd.DataFrame) -> None:
     """
     n = len(samples)
     lab = samples["label"]
+    # 赤字->黒字転換が何件残るかも一緒に出す。
+    # full4 は eps_growth（前年同期が0以下だと欠測）を要求していたため、
+    # 転換した会社を1件残らず落としていた。件数を毎回出しておけば、
+    # 同じことが起きたときに残存件数と正例率だけでは見えない差に気づける。
+    turn = pd.to_numeric(samples.get("eps_growth_turn"), errors="coerce")
     print(f"[fund] 決算の完全性で絞った場合の残存（絞る前 {n:,}件 / "
-          f"正例率 {lab.mean()*100:.2f}%）")
+          f"正例率 {lab.mean()*100:.2f}% / 黒字転換 {int((turn == 1).sum()):,}件）")
     for name, cols in FUND_REQUIREMENT_SETS.items():
         have = [c for c in cols if c in samples.columns]
         if len(have) != len(cols):
@@ -596,9 +618,10 @@ def report_fund_completeness(samples: pd.DataFrame) -> None:
         m = samples[have].notna().all(axis=1) if have else pd.Series(True, index=samples.index)
         k = int(m.sum())
         rate = lab[m].mean() * 100 if k else float("nan")
+        n_turn = int((turn[m] == 1).sum()) if turn is not None else 0
         mark = " ← 採用" if name == FUND_REQUIREMENT else ""
         print(f"  {name:<9} {k:>7,}件 ({k/n*100:5.1f}%) 正例率 {rate:5.2f}% "
-              f"/ 要求{len(cols)}列{mark}")
+              f"/ 黒字転換 {n_turn:>5,}件 / 要求{len(cols)}列{mark}")
 
 
 def report_fund_quality(samples: pd.DataFrame) -> None:
