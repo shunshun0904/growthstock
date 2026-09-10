@@ -104,7 +104,22 @@ GROUPS: Dict[str, List[str]] = {
     # 従来の成長率定義では欠測として捨てられていた
     "turnaround": ["eps_growth_turn", "sales_growth_turn"],
     # --- 市場環境（これを外すとモデルは相場局面を暗記しやすくなる）---
-    "market": ["topix_ret_20", "topix_ret_120"],
+    #
+    # ここの列はすべて「その日は全銘柄同じ値」である。
+    # 同じ日の銘柄の順位付けには寄与せず、日ごとの水準を動かすだけ。
+    # 日付内AUC や LTR で効かないのはそのため。
+    #
+    # 元は TOPIX の20日/120日リターンだけだった。
+    # 日経225(13210)・金(15400)・東証グロース250(25160) は
+    # 既に日次バーに入っている（docs/MARKET_DATA.md の実測）ので、
+    # 取得を増やさずに軸を足せる。
+    # 効いているかどうかは all と all_no_market の差で測る。
+    "market": ["topix_ret_20", "topix_ret_120",
+               "topix_vol_20", "topix_ma200_gap",
+               "nk225_ret_20", "nk225_ret_120",
+               "gold_ret_20", "gold_ret_120",
+               "growth250_ret_20", "growth250_ret_120",
+               "risk_off_20"],
 }
 
 #: 横断面正規化（同じ日付内でのパーセンタイル順位）を作る対象の列。

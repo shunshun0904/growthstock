@@ -1185,6 +1185,116 @@ def add_cross_sectional_ranks(df: pd.DataFrame, cols: List[str],
 
 
 # --------------------------------------------------------------------------- #
+# 市場環境（地合い）
+# --------------------------------------------------------------------------- #
+
+# 地合いの軸に使う上場商品。コードは推測ではなく、/equities/master が返した
+# 名称から特定した（research/probe_market_data.py の実測 / docs/MARKET_DATA.md）。
+#
+#   13210  ＮＥＸＴ ＦＵＮＤＳ 日経２２５連動型上場投信
+#          2016-10-03〜 / 出来高0の日 0.0% / 売買代金の中央値 78.5億円
+#   15400  純金上場信託（現物国内保管型）
+#          2016-10-03〜 / 出来高0の日 0.0% / 売買代金の中央値  6.3億円
+#   25160  東証グロース250ＥＴＦ
+#          2018-02-01〜 / 出来高0の日 0.0% / 売買代金の中央値  4.5億円
+#
+# なぜ指数ではなく ETF なのか:
+#   指数は /indices/bars/daily?code=... で引ける（79件が存在する）が、
+#   レスポンスに名称が無く（列は Code/Date/O/H/L/C）、
+#   どのコードが何なのかを確定できない。既知は TOPIX=0000 だけ。
+#   ETF は名称で特定でき、しかも /equities/bars/daily に含まれるので
+#   取得を増やさずに済む（日次バーは毎日全4,441銘柄を取っている）。
+#
+# 出来高0の日が1日も無いことを実測済み。出来高0の日があると
+# 前日終値が据え置かれ、リターンが人為的に0になる。
+MACRO_ETFS = {
+    "nk225": "13210",
+    "gold": "15400",
+    "growth250": "25160",
+}
+
+
+def _macro_series(bars: pd.DataFrame, label: str, code: str) -> Optional[pd.DataFrame]:
+    """
+    日次バーから1銘柄の終値系列を取り出し、20日・120日リターンにする。
+
+    水準そのものは特徴量にしない。TOPIX 2,700 という値は
+    「2024年」とほぼ同義で、モデルが相場局面を暗記する入口になる。
+
+    分割・併合をまたぐので終値は調整後（AdjC）を使う。
+    """
+    sub = bars[bars["_code"] == code]
+    if sub.empty:
+        print(f"[warn] 市場環境: コード {code}（{label}）が日次バーに無い。この軸は欠測になる")
+        return None
+    col = "AdjC" if "AdjC" in sub.columns and sub["AdjC"].notna().any() else "C"
+    s = sub[["Date", col]].rename(columns={col: label}).copy()
+    s["Date"] = pd.to_datetime(s["Date"])
+    s[label] = pd.to_numeric(s[label], errors="coerce")
+    s = (s.dropna().sort_values("Date")
+         .drop_duplicates("Date", keep="last").reset_index(drop=True))
+    if s.empty:
+        print(f"[warn] 市場環境: コード {code}（{label}）の終値が全て欠測")
+        return None
+    out = pd.DataFrame({"Date": s["Date"]})
+    out[f"{label}_ret_20"] = s[label].pct_change(20) * 100
+    out[f"{label}_ret_120"] = s[label].pct_change(120) * 100
+    print(f"[merge] 市場環境 {label}({code}) [{col}]: {len(s):,}日 "
+          f"{s['Date'].min().date()}〜{s['Date'].max().date()}")
+    return out
+
+
+def market_environment(bars: pd.DataFrame, topix: pd.DataFrame) -> pd.DataFrame:
+    """
+    日付ごとの市場環境を1枚にまとめる。
+
+    ここで作る列はすべて「その日は全銘柄同じ値」である。
+    したがって同じ日の銘柄の順位付けには寄与せず、
+    日ごとの正例率の水準を動かすだけになる。
+    横断面正規化（RAW_FOR_RANK）の対象から外してあるのはそのため。
+
+    列数を増やしすぎると危ない。母集団は1,739日しかなく、しかも
+    ラベルが60日先を見るので隣り合う日は強く相関する。
+    日付単位の実効的な標本数は数十しかない。
+    効いているかどうかは all と all_no_market の差で測る。
+    """
+    tp = topix.copy()
+    tp["Date"] = pd.to_datetime(tp["Date"])
+    tp["topix"] = pd.to_numeric(tp["topix"], errors="coerce")
+    tp = (tp.dropna().sort_values("Date")
+          .drop_duplicates("Date", keep="last").reset_index(drop=True))
+    env = pd.DataFrame({"Date": tp["Date"]})
+    env["topix_ret_20"] = tp["topix"].pct_change(20) * 100
+    env["topix_ret_120"] = tp["topix"].pct_change(120) * 100
+    # 局面の「荒さ」。リターンとは別の軸で、下げそのものより
+    # 荒れているかどうかがブレイクの続きやすさに効く、という仮説
+    env["topix_vol_20"] = tp["topix"].pct_change().rolling(20).std() * 100
+    # 長期の傾き。20日・120日リターンは直近の勢いしか見ていない
+    env["topix_ma200_gap"] = (tp["topix"] / tp["topix"].rolling(200).mean() - 1) * 100
+
+    # 日次バーは1,000万行規模なので、コードの文字列化と絞り込みは1度だけ。
+    # 銘柄ごとに astype(str) を呼ぶと軸の数だけ全件を走査することになる
+    code_col = bars["Code"].astype(str).str.strip()
+    picked = bars[code_col.isin(set(MACRO_ETFS.values()))].copy()
+    picked["_code"] = code_col[code_col.isin(set(MACRO_ETFS.values()))]
+
+    for label, code in MACRO_ETFS.items():
+        part = _macro_series(picked, label, code)
+        if part is None:
+            env[f"{label}_ret_20"] = np.nan
+            env[f"{label}_ret_120"] = np.nan
+            continue
+        env = env.merge(part, on="Date", how="outer")
+
+    env = env.sort_values("Date").reset_index(drop=True)
+    # 金とTOPIXの差。リスクオフの度合い。
+    # 木は特徴量どうしの引き算ができない（分割しかしない）ので、
+    # 両方を入れておくだけでは差を見たことにならない
+    env["risk_off_20"] = env["gold_ret_20"] - env["topix_ret_20"]
+    return env
+
+
+# --------------------------------------------------------------------------- #
 # 組み立て
 # --------------------------------------------------------------------------- #
 
@@ -1454,17 +1564,16 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
         if f"{c}_code" not in samples.columns:
             samples[f"{c}_code"] = np.nan
 
-    # --- 市場環境（TOPIX） --- #
-    print("[merge] TOPIX の市場環境特徴量を結合")
-    tp = topix.copy()
-    tp["Date"] = pd.to_datetime(tp["Date"])
-    tp = tp.sort_values("Date").reset_index(drop=True)
-    tp["topix_ret_20"] = tp["topix"].pct_change(20) * 100
-    tp["topix_ret_120"] = tp["topix"].pct_change(120) * 100
+    # --- 市場環境（地合い） --- #
+    print("[merge] 市場環境の特徴量を結合")
+    env = market_environment(bars, topix)
     samples = pd.merge_asof(
-        samples.sort_values("Date"), tp[["Date", "topix_ret_20", "topix_ret_120"]],
-        on="Date", direction="backward",
+        samples.sort_values("Date"), env, on="Date", direction="backward",
     )
+    for c in [c for c in env.columns if c != "Date"]:
+        miss = float(samples[c].isna().mean() * 100)
+        if miss > 0:
+            print(f"[merge] 市場環境 {c}: 欠測 {miss:.1f}%")
 
     # --- 最終的な特徴量セット --- #
     samples["log_trading_value"] = np.log1p(samples["tv_ma20"])

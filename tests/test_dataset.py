@@ -22,7 +22,7 @@ from build_dataset import (  # noqa: E402
     clip_divergent, mark_new_highs, attach_rise_label, RiseConfig,
     HOLD_DAYS, HORIZON_END, HORIZON_START, HIGH_WINDOW, LabelConfig,
     _lag_available, add_cross_sectional_ranks, attach_labels, breakout_flags,
-    price_panel, quarterize_panel,
+    price_panel, quarterize_panel, market_environment, MACRO_ETFS,
 )
 
 
@@ -1168,6 +1168,93 @@ class TestQuarterizePanel(unittest.TestCase):
         noise[["Sales", "OP", "NP", "EPS"]] = np.nan
         q = quarterize_panel(pd.concat([fins, noise], ignore_index=True))
         self.assertNotIn("2025-09-01", set(q["DiscDate"].astype(str).str[:10]))
+
+
+class TestMarketEnvironment(unittest.TestCase):
+    """
+    市場環境（地合い）の特徴量。
+
+    ここは「その日は全銘柄同じ値」であることが前提で、
+    横断面正規化の対象から外している。前提が崩れると
+    順位化の設計そのものが合わなくなるので固定する。
+    """
+
+    @staticmethod
+    def _topix(n=400, start="2020-01-01"):
+        d0 = dt.date.fromisoformat(start)
+        return pd.DataFrame({
+            "Date": [(d0 + dt.timedelta(days=i)).isoformat() for i in range(n)],
+            "topix": [1000.0 * (1.001 ** i) for i in range(n)],
+        })
+
+    @classmethod
+    def _bars(cls, n=400, start="2020-01-01", codes=None):
+        codes = codes if codes is not None else list(MACRO_ETFS.values())
+        frames = []
+        for k, code in enumerate(codes):
+            closes = [100.0 * (1.0 + 0.0005 * (k + 1)) ** i for i in range(n)]
+            frames.append(make_bars(closes, code=code, start=start))
+        return pd.concat(frames, ignore_index=True)
+
+    def test_every_market_feature_is_actually_produced(self):
+        """
+        features.py の market グループにあって build_dataset が作らない列は、
+        データセットから黙って落ちる。列名のずれを検出する。
+        """
+        import features as F
+        env = market_environment(self._bars(), self._topix())
+        missing = [c for c in F.GROUPS["market"] if c not in env.columns]
+        self.assertEqual(missing, [], f"market グループにあるのに作られない列: {missing}")
+
+    def test_one_value_per_date(self):
+        env = market_environment(self._bars(), self._topix())
+        self.assertEqual(len(env), env["Date"].nunique())
+
+    def test_levels_are_not_features(self):
+        """水準そのものは入れない。TOPIX 2,700 は『2024年』とほぼ同義になる。"""
+        env = market_environment(self._bars(), self._topix())
+        for label in MACRO_ETFS:
+            self.assertNotIn(label, env.columns)
+        self.assertNotIn("topix", env.columns)
+
+    def test_returns_use_adjusted_close(self):
+        """
+        分割をまたぐと素の終値は半値に飛ぶ。調整後（AdjC）を使っていないと
+        その日のリターンが -50% になる。
+        """
+        bars = self._bars()
+        code = MACRO_ETFS["nk225"]
+        m = bars["Code"] == code
+        # 素の終値だけを途中から半分にする（AdjC はそのまま）
+        idx = bars.index[m][200:]
+        bars.loc[idx, "C"] = bars.loc[idx, "C"] / 2
+        env = market_environment(bars, self._topix())
+        r = env.loc[env["Date"] == pd.Timestamp("2020-07-19"), "nk225_ret_20"]
+        self.assertTrue(r.notna().all())
+        self.assertGreater(float(r.iloc[0]), -10.0)
+
+    def test_missing_code_does_not_break_the_build(self):
+        """
+        データセットは保存済みの生データから作り直す。
+        古いスナップショットに ETF が入っていなくても、
+        その軸が欠測になるだけで組み立て自体は通ること。
+        """
+        bars = self._bars(codes=[MACRO_ETFS["nk225"]])
+        env = market_environment(bars, self._topix())
+        self.assertTrue(env["gold_ret_20"].isna().all())
+        self.assertTrue(env["nk225_ret_20"].notna().any())
+
+    def test_risk_off_is_the_difference(self):
+        env = market_environment(self._bars(), self._topix())
+        row = env.dropna(subset=["risk_off_20"]).iloc[-1]
+        self.assertAlmostEqual(
+            row["risk_off_20"], row["gold_ret_20"] - row["topix_ret_20"], places=9)
+
+    def test_market_features_are_not_ranked(self):
+        """全銘柄共通の値を日付内で順位化しても情報にならない。"""
+        import features as F
+        for c in F.GROUPS["market"]:
+            self.assertNotIn(c, F.RAW_FOR_RANK, c)
 
 
 if __name__ == "__main__":
