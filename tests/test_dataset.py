@@ -1615,5 +1615,159 @@ class TestPopulationFlags(unittest.TestCase):
             self.assertNotIn(c, F.RAW_FOR_RANK, c)
 
 
+class TestSweepOverride(unittest.TestCase):
+    """
+    掃引が母集団の定義を差し替える口。既定の挙動を変えないことが要件。
+
+    ここが黙って効くと、気づかないまま別の母集団で学習してしまう。
+    「効いていないこと」と「効いたら必ず記録が残ること」の両方を固定する。
+    """
+
+    def test_no_env_means_no_change(self):
+        """環境変数が無ければ既定値のまま、記録も空。"""
+        import build_dataset as B
+        self.assertEqual(B.HIGH_WINDOW, 368)
+        self.assertEqual(B.BREAKOUT_COOLDOWN, 20)
+        self.assertEqual(B.MIN_TRADING_VALUE, 0.1)
+        self.assertEqual(B.SWEEP_OVERRIDES, {})
+
+    def test_env_overrides_and_is_recorded(self):
+        """効いたときは値が変わり、SWEEP_OVERRIDES に残る。"""
+        import build_dataset as B
+        B.SWEEP_OVERRIDES.clear()
+        os.environ["SWEEP_TESTKEY"] = "245"
+        try:
+            self.assertEqual(B._sweep_override("TESTKEY", 368, int), 245)
+            self.assertEqual(B.SWEEP_OVERRIDES, {"TESTKEY": 245})
+        finally:
+            os.environ.pop("SWEEP_TESTKEY", None)
+            B.SWEEP_OVERRIDES.clear()
+
+    def test_blank_env_is_treated_as_absent(self):
+        """空文字は「指定なし」。CI で未設定の変数が空で入ることがある。"""
+        import build_dataset as B
+        B.SWEEP_OVERRIDES.clear()
+        os.environ["SWEEP_TESTKEY"] = "  "
+        try:
+            self.assertEqual(B._sweep_override("TESTKEY", 368, int), 368)
+            self.assertEqual(B.SWEEP_OVERRIDES, {})
+        finally:
+            os.environ.pop("SWEEP_TESTKEY", None)
+
+    def test_label_config_follows_the_override(self):
+        """
+        DEFAULT_LABEL はクラス定義時に既定値を焼き込むので、
+        差し替えが LabelConfig まで届いているかを別に確かめる。
+        ここが届いていないと、環境変数を入れても同じ母集団のまま回る。
+        """
+        import build_dataset as B
+        self.assertEqual(B.DEFAULT_LABEL.high_window, B.HIGH_WINDOW)
+
+
+class TestSweepDesign(unittest.TestCase):
+    """
+    設計の掃引（research/sweep_design.py）。
+
+    比較の土台が崩れると結果が全部無意味になるので、
+    「1因子だけ動く」「評価期間が共通」「エンバーゴが設計に追随する」
+    「物差しがラベルに依存しない」の4点を固定する。
+    """
+
+    def setUp(self):
+        import sweep_design as S
+        self.S = S
+
+    def test_each_variant_moves_exactly_one_factor(self):
+        """基準から2つ以上動いていたら、どちらが効いたか分からなくなる。"""
+        S = self.S
+        fields = [f for f in S.BASE.__dataclass_fields__
+                  if f not in ("key", "axis", "label")]
+        for d in S.DESIGNS:
+            if d.key == "base":
+                continue
+            diff = [f for f in fields if getattr(d, f) != getattr(S.BASE, f)]
+            self.assertEqual(len(diff), 1,
+                             f"{d.key} が動かした因子: {diff}")
+
+    def test_design_keys_are_unique(self):
+        keys = [d.key for d in self.S.DESIGNS]
+        self.assertEqual(len(keys), len(set(keys)))
+
+    def test_embargo_follows_the_design_horizon(self):
+        """
+        ホライズンを伸ばした設計は、エンバーゴも同じだけ伸びること。
+        伸びないと訓練末尾のラベルが評価期間の値動きで決まる（リーク）。
+        """
+        S = self.S
+        ts = pd.Timestamp("2025-06-16")
+        short = S.train_end_for(S._var("h40", "x", "x", horizon=40), ts)
+        base = S.train_end_for(S.BASE, ts)
+        long_ = S.train_end_for(S._var("h120", "x", "x", horizon=120), ts)
+        self.assertGreater(short, base)
+        self.assertLess(long_, base)
+        # 60営業日 × 1.45（train_model.TRADING_TO_CALENDAR）≒ 87暦日。
+        # 換算を train_model から取ると、そこが変わったとき無言で追随して
+        # しまう。学習側と揃っていることを確かめたいので数値で固定する
+        self.assertEqual((ts - base).days, 87)
+
+    def test_reference_horizon_is_fixed(self):
+        """
+        物差しの参照ホライズンは設計から独立。ここが設計に追随すると
+        「ラベルを変えても意味が変わらない物差し」でなくなる。
+        """
+        S = self.S
+        self.assertEqual(S.REF_RISE.horizon, S.REF_HORIZON)
+        self.assertEqual(S.REF_RISE.keep_days, 0)
+        self.assertIsNone(S.REF_RISE.end_ratio)
+        self.assertFalse(S.REF_RISE.require_uptrend)
+        # ホライズンを動かす設計があっても REF は動かない
+        moved = [d for d in S.DESIGNS if d.horizon != S.BASE.horizon]
+        self.assertTrue(moved, "ホライズンを動かす設計が無い")
+        self.assertEqual(S.REF_RISE.horizon, S.BASE.horizon)
+
+    def test_outcome_stats_ignores_the_label(self):
+        """物差しはラベルを見ない。ラベルを反転しても値が変わらないこと。"""
+        S = self.S
+        df = pd.DataFrame({
+            "label": [1.0, 0.0, 1.0, 0.0],
+            "ref_end": [0.10, -0.05, 0.20, 0.00],
+            "ref_rise": [0.30, 0.02, 0.40, 0.10],
+        })
+        a = S.outcome_stats(df)
+        b = S.outcome_stats(df.assign(label=1.0 - df["label"]))
+        self.assertEqual(a, b)
+        self.assertEqual(a["n"], 4)
+        self.assertAlmostEqual(a["end_median"], 5.0)
+        self.assertAlmostEqual(a["win_rate"], 0.5)   # 0.00 は勝ちに数えない
+
+    def test_fresh_break_matches_mark_new_highs(self):
+        """
+        クールダウンを付け替える関数が、本体と同じ式であること。
+        ずれると母集団が静かに変わり、比較の土台が崩れる。
+        """
+        S = self.S
+        closes = [100 + i for i in range(60)]
+        bars = make_bars(closes, start="2020-01-01")
+        panel = price_panel(bars, LabelConfig(high_window=5))
+        panel = mark_new_highs(panel, cooldown=20, on_high=True)
+        got = S.fresh_break(panel, 20).to_numpy()
+        np.testing.assert_array_equal(got, panel["is_fresh_break"].to_numpy())
+
+    def test_longer_cooldown_is_a_subset(self):
+        """
+        クールダウンを伸ばすと母集団は必ず狭くなる（部分集合）。
+        だからデータセットを作り直さずに行を絞るだけでよい。
+        """
+        S = self.S
+        closes = [100 + (i % 7) + i * 0.5 for i in range(120)]
+        bars = make_bars(closes, start="2020-01-01")
+        panel = price_panel(bars, LabelConfig(high_window=10))
+        panel = mark_new_highs(panel, cooldown=5, on_high=True)
+        short = S.fresh_break(panel, 5).to_numpy()
+        long_ = S.fresh_break(panel, 40).to_numpy()
+        self.assertTrue(short[long_].all(),
+                        "クールダウン40の新規ブレイクが5の部分集合になっていない")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

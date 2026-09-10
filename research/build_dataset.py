@@ -46,10 +46,33 @@ HORIZON_END = 120       # 予測ホライズンの終了（営業日）= 約6ヶ
 HOLD_DAYS = 20          # ブレイク後の定着を見る日数
 HOLD_DRAWDOWN = 0.92    # ブレイク時終値の-8%を割らないこと
 VOL_MULTIPLE = 1.5      # ブレイク日の出来高が20日平均の何倍以上か
+def _sweep_override(name: str, default, cast):
+    """
+    設計の掃引（research/sweep_design.py）から母集団の定義を差し替えるための口。
+
+    環境変数 SWEEP_<name> が入っているときだけ効く。既定の挙動は変えない。
+    掃引は「52週にすると母集団が増えるが分離力はどうなるか」のように、
+    データセットごと作り直さないと測れない軸があるので必要になる。
+
+    黙って効くと事故になる（気づかないまま別の母集団で学習してしまう）ので、
+    効いたときは必ず標準出力に出し、dataset_meta.json にも残す。
+    """
+    raw = os.environ.get(f"SWEEP_{name}")
+    if raw is None or raw.strip() == "":
+        return default
+    val = cast(raw.strip())
+    SWEEP_OVERRIDES[name] = val
+    print(f"[sweep] {name} を環境変数で {default} -> {val} に差し替え")
+    return val
+
+
+#: 実際に効いた差し替え。既定で回すかぎり空のまま。
+SWEEP_OVERRIDES: dict = {}
+
 # 78週 ≒ 368営業日。52週(245日)から広げた。
 # 52週だと「1年前の高値を1円抜いただけ」も母集団に入り、
 # 抜けた水準の重みが軽い。1年半ぶりの高値なら上値の戻り売りが薄い。
-HIGH_WINDOW = 368
+HIGH_WINDOW = _sweep_override("HIGH_WINDOW", 368, int)
 SUSTAIN_DAYS = 60       # ブレイク60営業日後の水準を見る
 SUSTAIN_RATIO = 1.0     # ブレイク時終値を下回らないこと
 
@@ -118,7 +141,7 @@ BREAKOUT_ON_HIGH = True
 # 高値更新が10日続くと、ほぼ同じ特徴量・重なるラベルのサンプルが10件でき、
 # 件数が水増しされるうえサンプル間が独立でなくなる。
 # 直前 BREAKOUT_COOLDOWN 営業日に更新が無い日だけを「新規のブレイク」とみなす。
-BREAKOUT_COOLDOWN = 20
+BREAKOUT_COOLDOWN = _sweep_override("BREAKOUT_COOLDOWN", 20, int)
 
 # --- 目的変数（母集団が breakout のとき）--- #
 # 更新日の終値から、先 RISE_HORIZON 営業日以内に RISE_THRESHOLD 以上上昇したか。
@@ -318,7 +341,7 @@ MAX_RHIGH_AT_T = 95.0   # 基準日ですでに高値圏の銘柄は対象外
 # 完全に外さない理由は運用側にある。売買代金が小さい銘柄は
 # 実際には買えない（スプレッド・約定不能・スリッページ）ので、
 # 統計が良くなっても利益に直結しない。
-MIN_TRADING_VALUE = 0.1
+MIN_TRADING_VALUE = _sweep_override("MIN_TRADING_VALUE", 0.1, float)
 #: 残存件数と正例率を出す閾値の候補（億円）。None は「絞らない」
 LIQUIDITY_LADDER = (None, 0.05, 0.1, 0.3, 0.5, 1.0, 3.0)
 
@@ -1932,6 +1955,11 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
         "n": int(len(out)), "positiveRate": round(float(out["label"].mean()), 4),
         "features": feature_cols,
         "from": str(out["Date"].min().date()), "to": str(out["Date"].max().date()),
+        # 既定で回すかぎり空。掃引で母集団を差し替えたときだけ中身が入る。
+        # これが空でないデータセットを既定の学習に使ってはいけない
+        "sweepOverrides": dict(SWEEP_OVERRIDES),
+        "cooldown": BREAKOUT_COOLDOWN,
+        "minTradingValue": MIN_TRADING_VALUE,
     }
     with open(os.path.join(os.path.dirname(out_path), "dataset_meta.json"),
               "w", encoding="utf-8") as fh:
