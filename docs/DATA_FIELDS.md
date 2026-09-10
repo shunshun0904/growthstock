@@ -157,7 +157,7 @@
 | `/fins/statements` | NG | — | HTTP 403 https://api.jquants.com/v2/fins/statements?date=2024-05-15 : {"message": "The requested endpoint does not exist |
 | `/fins/dividend` | NG | — | HTTP 403 https://api.jquants.com/v2/fins/dividend?date=2024-05-15 : {"message": "This API is not available on your subsc |
 | `/fins/fs_details` | NG | — | HTTP 403 https://api.jquants.com/v2/fins/fs_details?date=2024-05-15 : {"message": "The requested endpoint does not exist |
-| `/equities/master` | OK | 4441 | 14項目 |
+| `/equities/master` | OK | 4444 | 14項目 |
 | `/equities/bars/daily` | OK | 4359 | 18項目 |
 | `/markets/margin-interest` | OK | 0 | 0項目 |
 | `/markets/short-selling` | NG | — | HTTP 403 https://api.jquants.com/v2/markets/short-selling?date=2024-05-15 : {"message": "The requested endpoint does not |
