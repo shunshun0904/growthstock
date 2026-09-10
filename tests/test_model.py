@@ -758,7 +758,7 @@ class TestYearStratifiedFolds(unittest.TestCase):
         best = tune(self._df(), ["a"], n_trials=2, n_splits=5, scheme="year",
                     verbose=False)
         self.assertEqual(best["n_estimators"], SEARCH_N_ESTIMATORS)
-        self.assertEqual(SEARCH_N_ESTIMATORS, 100)
+        self.assertEqual(SEARCH_N_ESTIMATORS, 200)
 
     def test_unknown_scheme_stops(self):
         from tuning import tune

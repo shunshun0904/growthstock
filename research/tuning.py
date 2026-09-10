@@ -61,7 +61,11 @@ PARAMS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 #: early stopping で本数を決めると、検証窓のばらつきがそのまま本数に乗り、
 #: 試行ごとに「別の大きさのモデル」を比べることになる。
 #: 本数を固定すれば、比べているのは残りのパラメータの違いだけになる。
-SEARCH_N_ESTIMATORS = 100
+#:
+#: 学習にもこの本数がそのまま使われる（fit_models は探索済みの
+#: n_estimators を読む）。本数を変えたら、以前の探索結果と混ぜて
+#: 比べないこと。木の数が違うモデルの比較になる。
+SEARCH_N_ESTIMATORS = 200
 
 # 探索しないもの（固定）。再現性のため。
 FIXED = {
