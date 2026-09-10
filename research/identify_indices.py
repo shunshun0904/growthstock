@@ -61,18 +61,37 @@ INDEX_ASOF = "2024-05-15"
 MIN_CORR = 0.80
 MIN_GAP = 0.05
 
-#: 業種の系列を組むときに使う銘柄。ETF/ETN は市場区分が「その他」で返るので、
-#: 内国株の区分だけを残す（実測: docs/MARKET_DATA.md の市場区分の内訳）。
+#: 業種の系列を組むときに残す市場区分（**名称**の断片）。
+#:
+#: master_hist の Mkt は数値コード（実測で 101〜113 の8種）であって名称ではない。
+#: 最初これを名称と決めつけて絞り込み、1,000万行が0行になった。
+#: 名称の列（MktNm）がある場合だけ使い、無ければ絞らない。
+#:
+#: 絞らなくても実害は小さい。ETF/ETN には決算が無いので株数が付かず、
+#: 時価総額の重みが作れずに落ちる。
 DOMESTIC_MARKETS = ("プライム", "スタンダード", "グロース", "市場第一部",
                     "市場第二部", "マザーズ", "JASDAQ")
+#: 市場区分の名称が入っている可能性のある列。実測で見つかったものを使う
+MARKET_NAME_COLS = ("MktNm", "MarketCodeName")
 
 
 # --------------------------------------------------------------------------- #
 # 指数
 # --------------------------------------------------------------------------- #
 
+#: 取得した指数リターンの置き場。解析でつまずいても API を叩き直さないため。
+#: 「取得結果は解析より先に保存する」は probe_fins_fields.py で一度学んだこと。
+INDEX_CACHE = os.path.join(DATA_DIR, "index_returns.parquet")
+
+
 def fetch_index_returns(client: JQuantsClient, end: str) -> pd.DataFrame:
     """全指数の日次リターン（列=コード、行=日付）。"""
+    if os.path.exists(INDEX_CACHE):
+        cached = pd.read_parquet(INDEX_CACHE)
+        cached.index = pd.to_datetime(cached.index)
+        print(f"[index] キャッシュを使用: {INDEX_CACHE} "
+              f"({cached.shape[1]}系列 / {cached.shape[0]}日)")
+        return cached
     codes = sorted({str(r.get("Code"))
                     for r in client.get_paginated(
                         "/indices/bars/daily", {"date": INDEX_ASOF})})
@@ -98,6 +117,9 @@ def fetch_index_returns(client: JQuantsClient, end: str) -> pd.DataFrame:
     out = pd.DataFrame(series).sort_index()
     print(f"[index] {out.shape[1]}系列 / {out.shape[0]}日 "
           f"{out.index.min().date()}〜{out.index.max().date()}")
+    os.makedirs(DATA_DIR, exist_ok=True)
+    out.to_parquet(INDEX_CACHE)
+    print(f"[index] 保存: {INDEX_CACHE}")
     return out
 
 
@@ -159,7 +181,9 @@ def sector_returns(axis: str) -> pd.DataFrame:
     mh = _load("master_hist")
     mh["Date"] = pd.to_datetime(mh["Date"])
     mh["Code"] = mh["Code"].astype(str)
-    keep = [c for c in (axis, "Mkt") if c in mh.columns]
+    print(f"[sector] master_hist の項目: {sorted(mh.columns)}")
+    name_col = next((c for c in MARKET_NAME_COLS if c in mh.columns), None)
+    keep = [c for c in (axis, name_col) if c and c in mh.columns]
     if axis not in keep:
         raise SystemExit(f"[fatal] master_hist に {axis} がありません。列: {sorted(mh.columns)}")
     mh = (mh[["Date", "Code"] + keep].dropna(subset=["Date", "Code"])
@@ -167,11 +191,21 @@ def sector_returns(axis: str) -> pd.DataFrame:
     bars = pd.merge_asof(bars.sort_values("Date"), mh,
                          on="Date", by="Code", direction="backward")
 
-    if "Mkt" in bars.columns:
+    if name_col and name_col in bars.columns:
         before = len(bars)
-        mk = bars["Mkt"].astype(str)
-        bars = bars[mk.apply(lambda m: any(k in m for k in DOMESTIC_MARKETS))]
-        print(f"[sector] 内国株に限定: {before:,} -> {len(bars):,}行")
+        mk = bars[name_col].astype(str)
+        kept = bars[mk.apply(lambda m: any(k in m for k in DOMESTIC_MARKETS))]
+        # 絞った結果が空なら、絞り方が間違っている。
+        # 黙って0行のまま進むと、後段が意味不明な失敗をする
+        if kept.empty:
+            print(f"[warn] {name_col} で絞ると0行になった（値の例: "
+                  f"{sorted(mk.unique())[:5]}）。絞らずに進む")
+        else:
+            bars = kept
+            print(f"[sector] 内国株に限定: {before:,} -> {len(bars):,}行")
+    else:
+        print("[sector] 市場区分の名称が無いので絞らない"
+              "（ETF/ETN は決算が無く株数が付かないので、重みの段階で落ちる）")
 
     bars = bars.dropna(subset=[axis])
     bars = bars.sort_values(["Code", "Date"])
@@ -181,6 +215,10 @@ def sector_returns(axis: str) -> pd.DataFrame:
     bars["w"] = (g["C"].shift(1) * g["shares"].shift(1))
     bars = bars.dropna(subset=["ret", "w"])
     bars = bars[bars["w"] > 0]
+
+    if bars.empty:
+        raise SystemExit(f"[fatal] {axis} の系列を作れる行が残っていません。"
+                         "業種・株数・リターンのどれかが全滅している")
 
     bars["wr"] = bars["w"] * bars["ret"]
     grp = bars.groupby(["Date", axis], sort=True)
@@ -193,8 +231,15 @@ def sector_returns(axis: str) -> pd.DataFrame:
     wide["ALL"] = (allg["wr"] / allg["w"])
 
     n = bars.groupby(["Date", axis], sort=True).size().unstack(axis)
+    med = n.stack().median()
     print(f"[sector] {axis}: {wide.shape[1] - 1}業種 / {wide.shape[0]}日 "
-          f"（1業種あたりの銘柄数 中央値 {int(n.stack().median())}）")
+          f"（1業種あたりの銘柄数 中央値 "
+          f"{'—' if pd.isna(med) else int(med)}）")
+    # 銘柄数が極端に少ない業種は、指数と対応させても偶然の相関になりやすい。
+    # 相関を見る前に気づけるよう出す
+    thin = n.median().sort_values().head(5)
+    print("[sector] 銘柄数が少ない業種: " + " / ".join(
+        f"{k}:{'—' if pd.isna(v) else int(v)}" for k, v in thin.items()))
     return wide
 
 

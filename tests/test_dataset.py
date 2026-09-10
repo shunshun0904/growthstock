@@ -1302,6 +1302,16 @@ class TestIndexIdentification(unittest.TestCase):
         self.assertAlmostEqual(r["gap"], 0.0, places=6)
         self.assertFalse(r["confident"])
 
+    def test_market_code_is_not_treated_as_a_name(self):
+        """
+        master_hist の Mkt は数値コード（実測 101〜113）であって名称ではない。
+        名称と決めつけて絞り込み、1,000万行が0行になった。
+        """
+        import identify_indices as I
+        self.assertNotIn("Mkt", I.MARKET_NAME_COLS)
+        for c in I.MARKET_NAME_COLS:
+            self.assertTrue(c.endswith("Nm") or c.endswith("Name"), c)
+
     def test_too_few_days_is_not_matched(self):
         """日数が足りない指数に業種を割り当てると、偶然の相関を拾う。"""
         import identify_indices as I
