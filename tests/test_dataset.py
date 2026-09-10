@@ -1265,6 +1265,52 @@ class TestMarketEnvironment(unittest.TestCase):
             self.assertNotIn(c, F.RAW_FOR_RANK, c)
 
 
+class TestIndexIdentification(unittest.TestCase):
+    """
+    指数コードは名称を返さないので、業種との対応は相関で決めるしかない。
+    1位だけを見て決めると、業種どうしがもともと相関するぶんを
+    「一致した」と読み違える。
+    """
+
+    @staticmethod
+    def _frames():
+        import numpy as np
+        rng = np.random.default_rng(0)
+        days = pd.bdate_range("2020-01-01", periods=600)
+        a = pd.Series(rng.normal(0, 0.01, len(days)), index=days)
+        b = pd.Series(rng.normal(0, 0.01, len(days)), index=days)
+        sec = pd.DataFrame({"A": a, "B": b, "ALL": (a + b) / 2})
+        idx = pd.DataFrame({"X": a + rng.normal(0, 0.001, len(days))}, index=days)
+        return idx, sec
+
+    def test_picks_the_matching_sector_and_reports_the_runner_up(self):
+        import identify_indices as I
+        idx, sec = self._frames()
+        (r,) = I.match(idx, sec, min_days=100)
+        self.assertEqual(r["best"], "A")
+        self.assertGreater(r["corr"], 0.9)
+        self.assertIn(r["second"], ("ALL", "B"))
+        self.assertTrue(r["confident"])
+
+    def test_a_close_second_is_not_confident(self):
+        """2位と僅差なら「どちらか分からない」。○にしてはいけない。"""
+        import identify_indices as I
+        idx, sec = self._frames()
+        sec = sec.copy()
+        sec["A2"] = sec["A"]          # 同じ系列を2本置く
+        (r,) = I.match(idx, sec, min_days=100)
+        self.assertAlmostEqual(r["gap"], 0.0, places=6)
+        self.assertFalse(r["confident"])
+
+    def test_too_few_days_is_not_matched(self):
+        """日数が足りない指数に業種を割り当てると、偶然の相関を拾う。"""
+        import identify_indices as I
+        idx, sec = self._frames()
+        (r,) = I.match(idx.iloc[:50], sec, min_days=100)
+        self.assertNotIn("best", r)
+        self.assertEqual(r["note"], "日数不足")
+
+
 class TestPopulationOrigin(unittest.TestCase):
     """
     母集団の制約を外して増えた行を、チャートで見られるように分類する。

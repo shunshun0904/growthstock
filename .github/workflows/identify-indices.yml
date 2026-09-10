@@ -1,0 +1,84 @@
+name: Identify Index Codes
+
+# 指数コードが「どの業種の指数か」を実測で同定する。
+#
+# /indices/bars/daily は名称を返さない（列は Code/Date/O/H/L/C）ので、
+# 手元の株価データから業種別の時価総額加重リターンを組み、
+# 各指数の日次リターンとの相関で対応を決める。
+#
+# 他のワークフローでは足りない:
+#   probe.yml            … APIキーはあるが生データを落としてこない
+#   rebuild-from-*.yml   … 生データはあるが APIキーが無い
+# 両方が要るのでここに分ける。
+on:
+  workflow_dispatch:
+  push:
+    branches: ['claude/breakout-model']
+    paths: ['research/identify_indices.py', '.github/workflows/identify-indices.yml']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: identify-indices
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  identify:
+    runs-on: ubuntu-latest
+    # 日次バーは1,000万行規模。銘柄ごとの merge_asof と groupby に時間がかかる
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r research/requirements.txt
+
+      - name: Download raw data (release)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p research/_data
+          gh release download data-raw --dir research/_data --clobber
+          ls -lh research/_data
+
+      - name: Identify
+        env:
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+        run: python3 research/identify_indices.py 2>&1 | tee identify.log
+
+      - name: Commit mapping
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A docs/INDEX_MAPPING.md research/index_mapping.json
+          if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
+          git commit -m "chore(research): 指数コードと業種の対応を実測して更新"
+          for i in 1 2 3 4; do
+            if git push; then exit 0; fi
+            sleep $((2 ** i)); git pull --rebase
+          done
+          exit 1
+
+      - name: Summary
+        if: always()
+        run: |
+          { echo '## 指数コードの同定'; echo '```'
+            if [ -f identify.log ]; then tail -80 identify.log; else echo "(実行せず)"; fi
+            echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: index-mapping
+          path: |
+            research/index_mapping.json
+            docs/INDEX_MAPPING.md
+            identify.log
+          if-no-files-found: warn
