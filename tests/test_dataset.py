@@ -24,6 +24,7 @@ from build_dataset import (  # noqa: E402
     _lag_available, add_cross_sectional_ranks, attach_labels, breakout_flags,
     price_panel, quarterize_panel, market_environment, MACRO_ETFS,
     cap_band, fund_complete_flag, CAP_BAND_EDGES, FUND_REQUIREMENT_SETS,
+    SECTOR_INDEX, S33_TO_INDEX, attach_sector_index, sector_index_returns,
 )
 
 
@@ -1378,6 +1379,108 @@ class TestIndexIdentification(unittest.TestCase):
         (r,) = I.match(idx.iloc[:50], sec, min_days=100)
         self.assertNotIn("best", r)
         self.assertEqual(r["note"], "日数不足")
+
+
+class TestSectorIndexFeatures(unittest.TestCase):
+    """
+    業種指数は market グループと違い、日付内で銘柄ごとに値が変わる。
+    そこが崩れると、この特徴量を足す意味そのものが無くなる。
+    """
+
+    @staticmethod
+    def _indices(codes, n=200, start="2020-01-01"):
+        d0 = dt.date.fromisoformat(start)
+        dates = [(d0 + dt.timedelta(days=i)).isoformat() for i in range(n)]
+        rows = []
+        for k, code in enumerate(codes):
+            for i, d in enumerate(dates):
+                rows.append({"Date": d, "Code": code,
+                             "C": 100.0 * (1.0 + 0.001 * (k + 1)) ** i})
+        return pd.DataFrame(rows)
+
+    @staticmethod
+    def _samples(s33_list, date="2020-06-01"):
+        return pd.DataFrame({
+            "Date": [pd.Timestamp(date)] * len(s33_list),
+            "Code": [f"{i:05d}" for i in range(len(s33_list))],
+            "S33": s33_list,
+            "ret_20d": [5.0] * len(s33_list),
+            "topix_ret_20": [1.0] * len(s33_list),
+        })
+
+    def test_mapping_covers_every_sector_exactly_once(self):
+        """業種と指数が1対1でなければ、どこかの業種に別の指数が付く。"""
+        self.assertEqual(len(SECTOR_INDEX), 33)
+        self.assertEqual(len({ix for ix, _, _ in SECTOR_INDEX}), 33)
+        self.assertEqual(len({s33 for _, s33, _ in SECTOR_INDEX}), 33)
+        self.assertEqual(len(S33_TO_INDEX), 33)
+
+    def test_index_codes_are_a_consecutive_hex_run(self):
+        """
+        同定した規則は「16進の連番」。10進で書くと 0039 の次が 0040 になり、
+        003A〜003F を飛ばしたことに気づけない。
+        """
+        vals = sorted(int(ix, 16) for ix, _, _ in SECTOR_INDEX)
+        self.assertEqual(vals, list(range(vals[0], vals[0] + 33)))
+
+    def test_values_differ_within_a_date(self):
+        """
+        同じ日でも業種が違えば違う値になること。
+        ここが定数になっていたら market グループと同じで、
+        日付内の順位付けには効かない。
+        """
+        codes = [S33_TO_INDEX["1050"], S33_TO_INDEX["3650"], S33_TO_INDEX["7050"]]
+        out = attach_sector_index(self._samples(["1050", "3650", "7050"]),
+                                  self._indices(codes))
+        self.assertEqual(out["sector_ret_20"].nunique(), 3)
+        self.assertEqual(out["rel_sector_20"].nunique(), 3)
+
+    def test_relative_is_the_difference(self):
+        codes = [S33_TO_INDEX["1050"], S33_TO_INDEX["3650"]]
+        out = attach_sector_index(self._samples(["1050", "3650"]),
+                                  self._indices(codes))
+        for _, r in out.iterrows():
+            self.assertAlmostEqual(r["rel_sector_20"],
+                                   r["ret_20d"] - r["sector_ret_20"], places=9)
+            self.assertAlmostEqual(r["sector_vs_topix_20"],
+                                   r["sector_ret_20"] - r["topix_ret_20"], places=9)
+
+    def test_unknown_sector_becomes_missing_not_zero(self):
+        """
+        知らない業種に 0 を当てると「業種が横ばい」という意味になる。
+        欠測は欠測のままにする。
+        """
+        codes = [S33_TO_INDEX["1050"]]
+        out = attach_sector_index(self._samples(["1050", "9999"]),
+                                  self._indices(codes))
+        self.assertTrue(pd.notna(out["sector_ret_20"].iloc[0]))
+        self.assertTrue(pd.isna(out["sector_ret_20"].iloc[1]))
+        self.assertTrue(pd.isna(out["rel_sector_20"].iloc[1]))
+
+    def test_missing_indices_does_not_break_the_build(self):
+        """指数を取れていない状態でも、その軸が欠測になるだけで通ること。"""
+        out = attach_sector_index(self._samples(["1050", "3650"]),
+                                  pd.DataFrame(columns=["Date", "Code", "C"]))
+        for c in ("sector_ret_20", "sector_ret_120",
+                  "rel_sector_20", "sector_vs_topix_20"):
+            self.assertTrue(out[c].isna().all(), c)
+
+    def test_levels_are_not_features(self):
+        """水準そのものは入れない。TOPIX と同じ理由（年号とほぼ同義になる）。"""
+        import features as F
+        for c in F.GROUPS["sector_index"]:
+            self.assertTrue(c.endswith(("_20", "_120")), c)
+
+    def test_returns_use_no_forward_fill(self):
+        """
+        欠測日を前日値で埋めてから変化率を取ると、値の無い日をまたいだ
+        ところで 0% のリターンが作られる。
+        """
+        code = S33_TO_INDEX["1050"]
+        ix = self._indices([code], n=60)
+        ix = ix.drop(index=ix.index[30:35])       # 途中の5日を落とす
+        ret = sector_index_returns(ix)
+        self.assertGreater(ret.notna().sum().sum(), 0)
 
 
 class TestPopulationOrigin(unittest.TestCase):

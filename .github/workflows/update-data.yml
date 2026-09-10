@@ -116,7 +116,7 @@ jobs:
           # 想定外の値を --reset に渡さない
           for k in $REQ; do
             case "$k" in
-              bars|fins|margin|topix|master) ;;
+              bars|fins|margin|topix|indices|master) ;;
               *) echo "未知の種別: $k"; exit 1 ;;
             esac
           done

@@ -230,6 +230,81 @@ def fetch_topix(client: JQuantsClient, start: dt.date, end: dt.date) -> pd.DataF
     return out.dropna().sort_values("Date").reset_index(drop=True)
 
 
+#: 指数を1リクエストで列挙できる件数（実測79件）。
+#: 未取得日がこれ以下なら日付指定のほうが少ないリクエストで済む
+INDEX_ENUM_SIZE = 79
+
+
+def fetch_indices_by_date(client: JQuantsClient, days: List[dt.date]) -> pd.DataFrame:
+    """
+    日付指定で全指数を取る。1リクエスト = その日の全指数（実測79件）。
+
+    日次更新はこちらが速い（1日1リクエスト）。
+    """
+    frames = []
+    for i, d in enumerate(days, 1):
+        rows = client.get_paginated("/indices/bars/daily", {"date": d.isoformat()})
+        if rows:
+            frames.append(pd.DataFrame.from_records(rows))
+        if i % 200 == 0 or i == len(days):
+            print(f"  [indices] {i}/{len(days)}日")
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def fetch_indices_by_code(client: JQuantsClient, start: dt.date, end: dt.date,
+                          as_of: dt.date) -> pd.DataFrame:
+    """
+    コード指定で全期間をまとめて取る。1リクエスト = 1指数の全期間。
+
+    初回の取り込みはこちらが速い。2,428営業日を日付指定で回すと
+    2,428リクエストになるが、コード指定なら79リクエストで済む。
+
+    どの指数が存在するかは日付指定で1回引いて列挙する
+    （一覧エンドポイント /indices と /indices/master は403。
+      docs/MARKET_DATA.md の実測）。
+    """
+    codes = sorted({str(r.get("Code"))
+                    for r in client.get_paginated(
+                        "/indices/bars/daily", {"date": as_of.isoformat()})})
+    if not codes:
+        raise JQuantsError(f"{as_of} の指数を列挙できませんでした")
+    print(f"  [indices] {as_of} 時点の指数: {len(codes)}件")
+    frames = []
+    for i, code in enumerate(codes, 1):
+        rows = client.get_paginated(
+            "/indices/bars/daily",
+            {"code": code, "from": start.isoformat(), "to": end.isoformat()})
+        if rows:
+            frames.append(pd.DataFrame.from_records(rows))
+        if i % 20 == 0 or i == len(codes):
+            print(f"  [indices] {i}/{len(codes)}件")
+    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+
+
+def fetch_indices(client: JQuantsClient, days: List[dt.date]) -> pd.DataFrame:
+    """
+    指数の日次バー。業種指数を特徴量に使うために要る。
+
+    どのコードがどの業種かは research/identify_indices.py で実測した
+    （docs/INDEX_MAPPING.md）。ここでは全件そのまま保存し、
+    どれを使うかは build_dataset.py 側で決める。
+
+    未取得日の数で取り方を切り替える。日付指定は1日1リクエスト、
+    コード指定は1指数1リクエスト。少ないほうを選ぶ。
+    """
+    if not days:
+        return pd.DataFrame()
+    if len(days) <= INDEX_ENUM_SIZE:
+        df = fetch_indices_by_date(client, days)
+    else:
+        df = fetch_indices_by_code(client, days[0], days[-1], days[-1])
+    if df.empty:
+        raise JQuantsError("指数のデータを取得できませんでした")
+    keep = [c for c in ("Date", "Code", "O", "H", "L", "C") if c in df.columns]
+    df = df[keep]
+    return _numify(df, [c for c in ("O", "H", "L", "C") if c in df.columns])
+
+
 def _numify(df: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
     for c in cols:
         if c in df.columns:
@@ -249,13 +324,15 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--pause", type=float, default=0.05,
                     help="リクエスト間隔(秒)。既定は控えめ（1日1リクエストのため）")
     ap.add_argument("--what", nargs="*",
-                    default=["bars", "fins", "margin", "topix", "master", "master_hist"],
-                    choices=["bars", "fins", "margin", "topix", "master",
-                             "master_hist"])
+                    default=["bars", "fins", "margin", "topix", "indices",
+                             "master", "master_hist"],
+                    choices=["bars", "fins", "margin", "topix", "indices",
+                             "master", "master_hist"])
     ap.add_argument("--incremental", action="store_true",
                     help="manifest を見て、まだ取得していない営業日だけを取得する")
     ap.add_argument("--reset", nargs="*", default=[],
-                    choices=["bars", "fins", "margin", "topix", "master", "master_hist"],
+                    choices=["bars", "fins", "margin", "topix", "indices",
+                             "master", "master_hist"],
                     help="指定した種別の保存済みデータと取得記録を消してから取得する。"
                          "取得する列を増やしたときに使う（既存 parquet には新しい列が"
                          "入っていないが、manifest 上は取得済みなので取り直されない）")
@@ -287,6 +364,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         jobs.append(("margin", lambda: fetch_margin(client, days)))
     if "topix" in args.what:
         jobs.append(("topix", lambda: fetch_topix(client, start, end)))
+    if "indices" in args.what:
+        jobs.append(("indices", lambda: fetch_indices(client, days)))
     if "master" in args.what:
         jobs.append(("master", lambda: fetch_master(client, days[-1])))
 
@@ -326,8 +405,8 @@ def _run_incremental(client: JQuantsClient, days: List[dt.date],
 
     total_new = 0
     for name in args.what:
-        if name == "topix":
-            continue  # topix は期間指定で一括取得するので後段でまとめて扱う
+        if name in ("topix", "indices"):
+            continue  # 期間・コード指定で一括取得するので後段でまとめて扱う
         if name == "master_hist":
             # 月次スナップショット。日付ループの共通処理には乗せず個別に扱う
             todo = data_store.missing_days(manifest, "master_hist", days)
@@ -409,6 +488,20 @@ def _run_incremental(client: JQuantsClient, days: List[dt.date],
             print(f"[topix] {len(df):,}行を追加 / 更新ファイル {len(written)}件")
         else:
             print("\n[topix] 取得済み。スキップします")
+
+    # 指数も TOPIX と同じく、取得済みでない日だけ取り直す。
+    # 未取得日が多ければコード指定、少なければ日付指定に切り替わる
+    if "indices" in args.what:
+        have = data_store.fetched_days(manifest, "indices")
+        todo_ix = [d for d in days if d.isoformat() not in have]
+        if todo_ix:
+            print(f"\n[indices] 未取得 {len(todo_ix)}日 -> {todo_ix[0]} 〜 {todo_ix[-1]}")
+            df = fetch_indices(client, todo_ix)
+            written = data_store.merge_into_years(args.out_dir, "indices", df, "Date")
+            data_store.mark_fetched(manifest, "indices", todo_ix)
+            print(f"[indices] {len(df):,}行を追加 / 更新ファイル {len(written)}件")
+        else:
+            print("\n[indices] 取得済み。スキップします")
 
     # 銘柄マスタは1リクエストで全銘柄が返る（実測4.2秒）ので毎回取り直す。
     # 新規上場・社名変更・市場区分変更を取りこぼさないため、差分にしない。

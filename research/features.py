@@ -113,6 +113,21 @@ GROUPS: Dict[str, List[str]] = {
     # 情報は増えない。層別（CV・評価）と特徴量で同じ帯を使うために置く。
     # 順位化はしない（帯の日付内順位は時価総額の順位と同じものになる）。
     "scale": ["cap_band", "fund_complete"],
+    # --- 業種指数 ---
+    #
+    # market グループと違い、ここは**日付内で銘柄ごとに値が変わる**。
+    # 同じ日でも業種が違えば違う値になるので、日付内の順位付けに効く
+    # （LTR と日付内AUC が使えるのはこちら）。
+    #
+    # 指数コードと業種の対応は research/identify_indices.py で実測した
+    # （docs/INDEX_MAPPING.md）。API は指数の名称を返さないので、
+    # 手元の株価から業種別リターンを組んで相関で同定してある。
+    #
+    # rel_sector_20 が本命。日付内診断で ret_20d は最も強い特徴量の
+    # ひとつ（AUC 0.607）だが、そこから業種ぶんを引けば
+    # 「地合いでも業種でもなく、その銘柄自身が強いか」になる。
+    "sector_index": ["sector_ret_20", "sector_ret_120",
+                     "rel_sector_20", "sector_vs_topix_20"],
     # --- 市場環境（これを外すとモデルは相場局面を暗記しやすくなる）---
     #
     # ここの列はすべて「その日は全銘柄同じ値」である。
@@ -139,7 +154,8 @@ GROUPS: Dict[str, List[str]] = {
 RAW_FOR_RANK: List[str] = [
     c for g in ("fund_level", "fund_lag", "fund_trend", "fund_streak", "price",
                 "breakout", "volume", "liquidity", "supply", "progress",
-                "valuation", "dividend", "cashflow", "efficiency", "guidance")
+                "valuation", "dividend", "cashflow", "efficiency", "guidance",
+                "sector_index")
     for c in GROUPS[g]
 ]
 
@@ -152,7 +168,7 @@ RAW_FOR_RANK: List[str] = [
 RANKED_GROUPS = ("fund_level", "fund_growth", "fund_lag", "fund_trend",
                  "fund_streak", "price", "breakout", "volume", "liquidity",
                  "supply", "progress", "valuation", "dividend", "efficiency",
-                 "cashflow", "guidance")
+                 "cashflow", "guidance", "sector_index")
 GROUPS.update({
     f"{g}_rank": [f"{c}_r" for c in GROUPS[g]] for g in RANKED_GROUPS
 })
@@ -166,7 +182,7 @@ ALL_GROUPS: List[str] = [
     "fund_level", "fund_lag", "fund_trend", "fund_streak", "price", "breakout",
     "volume", "liquidity", "supply", "progress", "valuation", "dividend",
     "cashflow", "efficiency", "guidance", "sector", "turnaround", "scale",
-    "market",
+    "sector_index", "market",
 ]
 
 #: 実験用のプリセット。グループ名の並びで指定する。

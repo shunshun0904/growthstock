@@ -1399,6 +1399,155 @@ def market_environment(bars: pd.DataFrame, topix: pd.DataFrame) -> pd.DataFrame:
 
 
 # --------------------------------------------------------------------------- #
+# 業種指数
+# --------------------------------------------------------------------------- #
+
+#: 指数コード -> 東証33業種コード -> 業種名。
+#:
+#: /indices/bars/daily は名称を返さない（列は Code/Date/O/H/L/C）ので、
+#: research/identify_indices.py で実測して同定した（docs/INDEX_MAPPING.md）。
+#: 手元の株価から業種別の時価総額加重リターンを組み、日次リターンの相関を取った。
+#:
+#: 「指数コードの16進の並び = 業種コードの昇順の並び」という規則で、
+#: 33対中19対が仮説の指す業種と1位一致した（偶然なら期待値1）。
+#: 並びも東証33業種の標準的な順序と一致している。
+#: 下のコメントは各対の相関と順位（1位なら直接確認できた対）。
+#:
+#: 1位一致しなかった14対は、手元の照合用系列が数銘柄しか無い業種に
+#: 集中している（ゴム製品2銘柄 / 海運業2 / 水産・農林業4 など）。
+#: 指数側の問題ではない。特徴量には API が返す本物の指数を使うので、
+#: 照合用系列の薄さは特徴量の質に影響しない。
+SECTOR_INDEX: List[tuple] = [
+    ("0040", "0050", "水産・農林業"),        # r=0.4628 順位8
+    ("0041", "1050", "鉱業"),                # r=0.9997 順位1
+    ("0042", "2050", "建設業"),              # r=0.6564 順位1
+    ("0043", "3050", "食料品"),              # r=0.6334 順位1
+    ("0044", "3100", "繊維製品"),            # r=0.6189 順位3
+    ("0045", "3150", "パルプ・紙"),          # r=0.5080 順位1
+    ("0046", "3200", "化学"),                # r=0.7225 順位3
+    ("0047", "3250", "医薬品"),              # r=0.5801 順位1
+    ("0048", "3300", "石油･石炭製品"),       # r=0.9979 順位1
+    ("0049", "3350", "ゴム製品"),            # r=0.4622 順位16
+    ("004A", "3400", "ガラス･土石製品"),     # r=0.6850 順位4
+    ("004B", "3450", "鉄鋼"),                # r=0.6263 順位2
+    ("004C", "3500", "非鉄金属"),            # r=0.7268 順位1
+    ("004D", "3550", "金属製品"),            # r=0.7320 順位2
+    ("004E", "3600", "機械"),                # r=0.8262 順位1
+    ("004F", "3650", "電気機器"),            # r=0.8921 順位1
+    ("0050", "3700", "輸送用機器"),          # r=0.8099 順位1
+    ("0051", "3750", "精密機器"),            # r=0.7471 順位1
+    ("0052", "3800", "その他製品"),          # r=0.6995 順位1
+    ("0053", "4050", "電気･ガス業"),         # r=0.3490 順位20
+    ("0054", "5050", "陸運業"),              # r=0.4546 順位8
+    ("0055", "5100", "海運業"),              # r=0.2941 順位21
+    ("0056", "5150", "空運業"),              # r=0.9996 順位1
+    ("0057", "5200", "倉庫･運輸関連業"),     # r=0.4242 順位24
+    ("0058", "5250", "情報･通信業"),         # r=0.7450 順位1
+    ("0059", "6050", "卸売業"),              # r=0.8202 順位1
+    ("005A", "6100", "小売業"),              # r=0.7777 順位1
+    ("005B", "7050", "銀行業"),              # r=0.9989 順位1
+    ("005C", "7100", "証券･商品先物取引業"), # r=0.7574 順位2
+    ("005D", "7150", "保険業"),              # r=0.6598 順位2
+    ("005E", "7200", "その他金融業"),        # r=0.5285 順位18
+    ("005F", "8050", "不動産業"),            # r=0.7512 順位1
+    ("0060", "9050", "サービス業"),          # r=0.8475 順位1
+]
+assert len(SECTOR_INDEX) == 33, "東証33業種と数が合っていない"
+#: 業種コード -> 指数コード
+S33_TO_INDEX = {s33: ix for ix, s33, _ in SECTOR_INDEX}
+
+
+def sector_index_returns(indices: pd.DataFrame) -> pd.DataFrame:
+    """
+    業種指数の20日・120日リターン（列=業種コード、行=日付）。
+
+    指数は分割の概念が無いので調整の区別は要らない。
+    水準そのものは使わない。TOPIX と同じ理由で、水準は年号とほぼ同義になる。
+    """
+    df = indices.copy()
+    df["Date"] = pd.to_datetime(df["Date"])
+    df["Code"] = df["Code"].astype(str).str.strip()
+    df["C"] = pd.to_numeric(df["C"], errors="coerce")
+    df = (df.dropna(subset=["Date", "Code", "C"])
+          .drop_duplicates(["Date", "Code"], keep="last"))
+    wide = df.pivot(index="Date", columns="Code", values="C").sort_index()
+
+    missing = [ix for ix in S33_TO_INDEX.values() if ix not in wide.columns]
+    if missing:
+        print(f"[warn] 業種指数のうち取得できていないコード: {missing}")
+
+    out = {}
+    for s33, ix in S33_TO_INDEX.items():
+        if ix not in wide.columns:
+            continue
+        col = wide[ix]
+        out[(s33, 20)] = col.pct_change(20, fill_method=None) * 100
+        out[(s33, 120)] = col.pct_change(120, fill_method=None) * 100
+    if not out:
+        return pd.DataFrame(index=wide.index)
+    res = pd.DataFrame(out)
+    res.columns = pd.MultiIndex.from_tuples(res.columns, names=["s33", "win"])
+    print(f"[merge] 業種指数: {len(S33_TO_INDEX) - len(missing)}業種 / "
+          f"{len(wide):,}日 {wide.index.min().date()}〜{wide.index.max().date()}")
+    return res
+
+
+def attach_sector_index(samples: pd.DataFrame, indices: pd.DataFrame) -> pd.DataFrame:
+    """
+    各サンプルに「その銘柄の業種の指数」を当てる。
+
+    業種は時点別（master_hist から merge_asof 済みの S33 列）。
+    最新の業種を過去に当てると、業種変更をまたいだところで別の業種の
+    指数が付く。
+
+    ここで作る列は市場環境（market グループ）と違って
+    **日付内で銘柄ごとに値が変わる**。同じ日でも業種が違えば違う値になり、
+    日付内の順位付けに効く。
+    """
+    cols = ["sector_ret_20", "sector_ret_120", "rel_sector_20", "sector_vs_topix_20"]
+    if indices is None or indices.empty or "S33" not in samples.columns:
+        if "S33" not in samples.columns:
+            print("[warn] S33 が無いので業種指数は付与しない")
+        for c in cols:
+            samples[c] = np.nan
+        return samples
+
+    ret = sector_index_returns(indices)
+    if ret.empty:
+        for c in cols:
+            samples[c] = np.nan
+        return samples
+
+    # 日付 × 業種で引く。merge_asof でなく reindex にするのは、
+    # 指数の営業日と株価の営業日が同じだから（どちらも東証の暦）。
+    # ずれた場合は欠測になり、下の欠測率で気づける
+    s33 = samples["S33"].astype(str).str.strip()
+    dates = pd.to_datetime(samples["Date"])
+    for win in (20, 120):
+        sub = ret.xs(win, axis=1, level="win")
+        idx = sub.index.get_indexer(dates)
+        vals = np.full(len(samples), np.nan)
+        colpos = {c: i for i, c in enumerate(sub.columns)}
+        arr = sub.to_numpy()
+        cpos = s33.map(colpos).to_numpy()
+        ok = (idx >= 0) & pd.notna(cpos)
+        if ok.any():
+            vals[ok] = arr[idx[ok], cpos[ok].astype(int)]
+        samples[f"sector_ret_{win}"] = vals
+
+    # 銘柄自身のリターンから業種ぶんを引く。
+    # 木は特徴量どうしの引き算ができないので、差は明示的に列にする
+    samples["rel_sector_20"] = samples["ret_20d"] - samples["sector_ret_20"]
+    # その業種が市場に対して強いか
+    samples["sector_vs_topix_20"] = samples["sector_ret_20"] - samples["topix_ret_20"]
+
+    for c in cols:
+        miss = float(samples[c].isna().mean() * 100)
+        print(f"[merge] 業種指数 {c}: 欠測 {miss:.1f}%")
+    return samples
+
+
+# --------------------------------------------------------------------------- #
 # 組み立て
 # --------------------------------------------------------------------------- #
 
@@ -1406,6 +1555,11 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     bars = load_parts("bars", data_dir)
     fins = load_parts("fins", data_dir)
     topix = load_parts("topix", data_dir)
+    try:
+        indices = load_parts("indices", data_dir)
+    except SystemExit:
+        print("[warn] indices データなし。業種指数は欠測として扱います")
+        indices = pd.DataFrame(columns=["Date", "Code", "C"])
     try:
         margin = load_parts("margin", data_dir)
     except SystemExit:
@@ -1683,6 +1837,12 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
         miss = float(samples[c].isna().mean() * 100)
         if miss > 0:
             print(f"[merge] 市場環境 {c}: 欠測 {miss:.1f}%")
+
+    # --- 業種指数 --- #
+    # market の後に置く。rel_sector_20 は ret_20d を、
+    # sector_vs_topix_20 は topix_ret_20 を使うので、両方が揃ってからでないと作れない
+    print("[merge] 業種指数を結合")
+    samples = attach_sector_index(samples, indices)
 
     # --- 最終的な特徴量セット --- #
     samples["log_trading_value"] = np.log1p(samples["tv_ma20"])
