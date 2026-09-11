@@ -94,11 +94,25 @@ jobs:
       - name: Train production model
         run: python3 research/train_production.py 2>&1 | tee retrain.log
 
-      - name: Commit model
+      # モデル本体は Release に置く。2.7MB のバイナリを毎週コミットすると
+      # 差分圧縮が効かず、年138MB リポジトリが膨らむ。
+      # meta.json（9KB）は git に残す。過去のモデルが「どういうものだったか」
+      # （学習日・訓練期間・較正表・スコア帯の実績）は追えるようにしておく。
+      - name: Upload model to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload data-raw research/model/model.txt \
+            research/model/oof.parquet --clobber
+
+      - name: Commit model metadata
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A research/model research/lgbm_params.json
+          # 以前コミットしていたバイナリを追跡から外す（1回だけ効く）
+          git rm --cached -q --ignore-unmatch research/model/model.txt \
+            research/model/oof.parquet
+          git add -A research/model/meta.json research/lgbm_params.json
           if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
           git commit -m "chore(model): 週次の再学習 ($(date -u '+%Y-%m-%d'))"
           for i in 1 2 3 4; do

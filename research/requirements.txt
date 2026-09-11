@@ -6,3 +6,8 @@ numpy==2.1.3
 scikit-learn==1.6.0
 lightgbm==4.7.0
 optuna==4.9.0
+
+# 予測ログを Google スプレッドシートへ追記するため（research/export_sheets.py）。
+# 認証情報が無ければそのステップは飛ばすので、他の処理はこれに依存しない。
+gspread==6.2.1
+google-auth==2.58.0

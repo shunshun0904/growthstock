@@ -1408,6 +1408,122 @@ class TestOutcomeVsSize(unittest.TestCase):
         self.assertGreater(e["ci"][0], 0.0)
         self.assertTrue(e["significant"])
 
+class FakeWorksheet:
+    """gspread の最小の代役。通信せずに sync の挙動を確かめる。"""
+
+    def __init__(self, values):
+        self.values = [list(r) for r in values]
+        self.appended = []
+        self.batches = []
+
+    def get_all_values(self):
+        return [list(r) for r in self.values]
+
+    def append_rows(self, rows, value_input_option=None):
+        self.appended.extend(rows)
+
+    def batch_update(self, updates, value_input_option=None):
+        self.batches.extend(updates)
+
+
+class TestSheetExport(unittest.TestCase):
+    """
+    スプレッドシートは利用者が手で書き込む台帳でもある。
+    こちらの書き込みで利用者の記入が消えることが最大の事故なので、
+    「触ってよい列しか触らない」を固定する。
+    """
+
+    def setUp(self):
+        import export_sheets as E
+        self.E = E
+        self.header = E.OWNED_COLS + E.TRACK_COLS + E.USER_COLS
+
+    @staticmethod
+    def _row(date="2026-09-10", code="1234", price=1000.0):
+        return {"予測日": date, "コード": code, "銘柄名": "テスト", "業種": "情報･通信業",
+                "順位": 1, "候補数": 5, "スコア": 0.38, "帯": 6,
+                "較正確率%": 23.2, "帯の正例率%": 22.8, "帯の実収益%": 0.59,
+                "帯の勝率%": 52.3, "必要上昇率%": 33.9, "予測時株価": price,
+                "時価総額(億)": 70.9, "売買代金(億/日)": 0.33, "日次ボラ%": 3.64,
+                "20日リターン%": 27.6, "地合い寄与": -0.18, "銘柄固有寄与": 0.28,
+                "PER": 138.1, "PBR": 7.21, "_jqCode": f"{code}0"}
+
+    def test_a1_handles_columns_past_z(self):
+        """列は31個あるので AA 以降に届く。桁上げを間違えると別の列を上書きする。"""
+        E = self.E
+        self.assertEqual(E.a1(1, 1), "A1")
+        self.assertEqual(E.a1(26, 3), "Z3")
+        self.assertEqual(E.a1(27, 3), "AA3")
+        self.assertEqual(E.a1(28, 10), "AB10")
+        self.assertEqual(E.a1(52, 2), "AZ2")
+
+    def test_appends_only_new_keys(self):
+        E = self.E
+        existing = [""] * len(self.header)
+        existing[self.header.index("予測日")] = "2026-09-10"
+        existing[self.header.index("コード")] = "1234"
+        ws = FakeWorksheet([self.header, existing])
+        rows = [self._row(code="1234"), self._row(code="5678")]
+        res = E.sync(ws, rows, pd.Series(dtype=float), None)
+        self.assertEqual(res["appended"], 1)
+        self.assertEqual(len(ws.appended), 1)
+        got = ws.appended[0][self.header.index("コード")]
+        self.assertEqual(got, "5678")
+
+    def test_never_writes_user_columns(self):
+        """建値・メモなどは見出しを作るだけ。値を書いたら利用者の記入を潰す。"""
+        E = self.E
+        ws = FakeWorksheet([self.header])
+        E.sync(ws, [self._row()], pd.Series({"12340": 1100.0}),
+               pd.Timestamp("2026-09-11"))
+        line = ws.appended[0]
+        for name in E.USER_COLS:
+            self.assertEqual(line[self.header.index(name)], "",
+                             f"{name} に書き込んでいる")
+
+    def test_tracking_update_finds_columns_by_name(self):
+        """
+        利用者が途中に列を挿しても、見出し名で探していれば正しい列に書く。
+        位置で決め打ちしていると、挿された瞬間に別の列を壊す。
+        """
+        E = self.E
+        header = list(self.header)
+        header.insert(3, "自分メモ")          # 利用者が挿した列
+        line = [""] * len(header)
+        line[header.index("予測日")] = "2026-09-10"
+        line[header.index("コード")] = "1234"
+        line[header.index("予測時株価")] = "1000"
+        line[header.index("自分メモ")] = "消えてはいけない"
+        ws = FakeWorksheet([header, line])
+        E.sync(ws, [], pd.Series({"12340": 1100.0}), pd.Timestamp("2026-09-11"))
+        # 騰落率の列に、正しい A1 で書かれていること
+        want_col = E.a1(header.index("騰落率%") + 1, 2)
+        ranges = {u["range"]: u["values"][0][0] for u in ws.batches}
+        self.assertIn(want_col, ranges)
+        self.assertAlmostEqual(ranges[want_col], 10.0)
+        # 利用者の列には1つも書いていない
+        memo_col = E.a1(header.index("自分メモ") + 1, 2)
+        self.assertNotIn(memo_col, ranges)
+
+    def test_track_values_leaves_gaps_empty(self):
+        """株価が取れない行は空。0 で埋めると『実測でゼロ』と混ざる。"""
+        E = self.E
+        self.assertEqual(E.track_values("99999", 100.0, "2026-09-10",
+                                        pd.Series(dtype=float), None), {})
+        self.assertEqual(E.track_values("12340", None, "2026-09-10",
+                                        pd.Series({"12340": 100.0}), None), {})
+
+    def test_rows_keep_every_candidate(self):
+        """上位だけに絞らない。選ばなかった側も後から検証したいので。"""
+        E = self.E
+        pred = {"candidates": [
+            {"date": "2026-09-10", "code": "1234", "jqCode": "12340",
+             "rankInDay": 1, "nInDay": 3, "score": 0.4, "band": 6},
+            {"date": "2026-09-10", "code": "5678", "jqCode": "56780",
+             "rankInDay": 3, "nInDay": 3, "score": 0.1, "band": 0},
+        ]}
+        self.assertEqual(len(E.rows_from_predictions(pred)), 2)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
-

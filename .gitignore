@@ -7,3 +7,8 @@ __pycache__/
 *.pyc
 .env
 research/_data/
+# モデル本体は GitHub Release（タグ data-raw）に置く。
+# 2.7MB のバイナリを毎週コミットすると差分圧縮が効かず、年138MB 膨らむ。
+# meta.json は小さいので git に残す（過去のモデルの素性を追うため）。
+research/model/model.txt
+research/model/oof.parquet

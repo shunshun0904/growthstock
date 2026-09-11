@@ -58,6 +58,22 @@ jobs:
       # 取り込みが失敗した日に、黙って昨日と同じ候補を出さないための関門。
       # 日次予測は取得を行わない（Update Data Store が唯一の書き手）ので、
       # 古ければここで止める。
+      # モデルは Release（タグ data-raw）に置く。2.7MB のバイナリを毎週
+      # コミットすると、差分圧縮が効かず年138MB リポジトリが膨らむため。
+      # まだ Release に上がっていない移行期は、git 側の版をそのまま使う。
+      - name: Download model (release)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p research/model
+          if gh release download data-raw --dir research/model --clobber \
+               --pattern 'model.txt' --pattern 'oof.parquet' 2>/dev/null; then
+            echo "Release のモデルを使う"
+          else
+            echo "Release にモデルが無いので、リポジトリ内の版を使う"
+          fi
+          ls -lh research/model
+
       - name: Check freshness
         run: python3 research/check_freshness.py --max-age 1
 
@@ -87,6 +103,23 @@ jobs:
             echo "当日の候補が無いので stocks.json はそのまま"; exit 0
           fi
           python3 scripts/jquants_data_fetcher.py --extra-codes $CODES 2>&1 | tail -15
+
+      # 長期の台帳。リポジトリ側は画面用で、predictions.json は毎日上書き、
+      # prediction_history.json は上位5件・400日で消えるので、
+      # 実績の検証と手売買の記録はスプレッドシートを正本にする。
+      #
+      # 認証情報が無い間も日次予測そのものは動かす（画面の更新を止めない）。
+      - name: Append to spreadsheet
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GSHEET_ID: ${{ secrets.GSHEET_ID }}
+        run: |
+          if [ -z "$GOOGLE_SERVICE_ACCOUNT_JSON" ] || [ -z "$GSHEET_ID" ]; then
+            echo "GOOGLE_SERVICE_ACCOUNT_JSON / GSHEET_ID が未設定のため飛ばします"
+            echo "（設定するとこの日から追記されます。過去分は遡りません）"
+            exit 0
+          fi
+          python3 research/export_sheets.py 2>&1 | tail -10
 
       - name: Commit predictions
         run: |
