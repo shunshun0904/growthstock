@@ -8,8 +8,11 @@ on:
     paths-ignore: ['README.md', 'docs/**']
   workflow_dispatch:
   workflow_run:
-    # データ更新が完了したら自動で再デプロイする
-    workflows: ['Fetch J-Quants Data']
+    # データ更新・予測が完了したら自動で再デプロイする。
+    #
+    # push で繋がないのは、GITHUB_TOKEN による push が
+    # 他のワークフローを起こさないため（GitHub のループ防止）。
+    workflows: ['Fetch J-Quants Data', 'Predict Breakouts']
     types: [completed]
 
 permissions:

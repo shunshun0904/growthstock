@@ -34,9 +34,12 @@ jobs:
     # 探索まで回すと長い。探索なしなら20分ほど
     timeout-minutes: 180
     steps:
+      # 公開ブランチ（＝既定ブランチ）に対して回す。
+      # 成果物をここに積まないと GitHub Pages の画面が更新されない。
+      # 調査は claude/breakout-model で進め、まとまったらこちらへマージする。
       - uses: actions/checkout@v4
         with:
-          ref: claude/breakout-model
+          ref: claude/jquants-browser-app-bwk19a
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
