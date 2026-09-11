@@ -1329,5 +1329,85 @@ class TestSmallFoldsAreSkipped(unittest.TestCase):
         self.assertEqual(res["folds"], [])
 
 
+
+class TestOutcomeVsSize(unittest.TestCase):
+    """
+    「モデルは大型の高値更新を買うだけを超えているか」を測る側の不変条件。
+
+    ここが崩れると、規模を選んでいるだけのものを実力と読んでしまう。
+    """
+
+    def setUp(self):
+        import outcome_check as O
+        self.O = O
+
+    @staticmethod
+    def _frame(n=600, seed=0):
+        rng = np.random.default_rng(seed)
+        dates = (pd.to_datetime("2025-01-06")
+                 + pd.to_timedelta(rng.integers(0, 60, n), unit="D"))
+        return pd.DataFrame({
+            "Date": dates,
+            "cap_band": rng.integers(0, 5, n).astype(float),
+            "log_market_cap": rng.normal(6, 1.2, n),
+            "score": rng.normal(size=n),
+            "ref_end": rng.normal(0.03, 0.25, n),
+        })
+
+    def test_band_selection_keeps_the_population_mix(self):
+        """
+        帯ごとに上位k%を取ると、選ばれた集合の帯構成が母集団と同じになること。
+        揃っていないと「大きい帯を多めに取った」効果が残る。
+        """
+        O = self.O
+        t = self._frame()
+        top = O.take_top_by_band(t, "score", 20.0)
+        want = t["cap_band"].value_counts(normalize=True).sort_index()
+        got = top["cap_band"].value_counts(normalize=True).sort_index()
+        for b in want.index:
+            self.assertAlmostEqual(got[b], want[b], delta=0.05,
+                                   msg=f"帯{b} の比率がずれている")
+
+    def test_band_selection_drops_rows_without_a_band(self):
+        """帯が欠測の行は揃えようがないので選ばない。"""
+        O = self.O
+        t = self._frame()
+        t.loc[t.index[:50], "cap_band"] = np.nan
+        top = O.take_top_by_band(t, "score", 50.0)
+        self.assertTrue(top["cap_band"].notna().all())
+
+    def test_paired_vs_itself_is_zero(self):
+        """
+        モデルのスコアがその規則そのものなら、差は0でなければならない。
+        0 にならないなら、2つの選び方が同じ行集合を見ていない。
+        """
+        O = self.O
+        t = self._frame()
+        t["score"] = t["log_market_cap"]
+        got = O.paired_vs(t, "score", "log_market_cap", True, 5.0, False,
+                          n_boot=80, seed=0)
+        self.assertAlmostEqual(got["diff"], 0.0, places=6)
+        self.assertAlmostEqual(got["ci"][0], 0.0, places=6)
+        self.assertAlmostEqual(got["ci"][1], 0.0, places=6)
+
+    def test_edge_ci_straddles_zero_for_a_useless_score(self):
+        """スコアが実収益と無関係なら、区間は0をまたぐこと。"""
+        O = self.O
+        t = self._frame(n=1200, seed=3)
+        e = O.edge_stats(t, "score", 5.0, by_band=False, n_boot=200, seed=0)
+        self.assertLessEqual(e["ci"][0], 0.0)
+        self.assertGreaterEqual(e["ci"][1], 0.0)
+        self.assertFalse(e["significant"])
+
+    def test_edge_ci_finds_a_real_edge(self):
+        """スコアが本当に当てているなら、区間は0を含まないこと。"""
+        O = self.O
+        t = self._frame(n=1200, seed=4)
+        t["ref_end"] = 0.03 + 0.2 * t["score"] + np.random.default_rng(5).normal(0, 0.1, len(t))
+        e = O.edge_stats(t, "score", 5.0, by_band=False, n_boot=200, seed=0)
+        self.assertGreater(e["ci"][0], 0.0)
+        self.assertTrue(e["significant"])
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
