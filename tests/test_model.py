@@ -1,0 +1,1413 @@
+#!/usr/bin/env python3
+"""
+research/train_model.py の評価ロジックの単体テスト。
+
+特徴量を足すたびに「ベースラインをわずかに上回った」が出る。
+その差が誤差かどうかを判定するのがブートストラップなので、
+判定器そのものが壊れていないことを既知のケースで固定する。
+
+  python3 tests/test_model.py
+"""
+import os
+import sys
+import unittest
+
+import numpy as np
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "research"))
+
+import pandas as pd  # noqa: E402
+
+from train_model import clean_score, evaluate, paired_bootstrap  # noqa: E402
+from walkforward import (  # noqa: E402
+    DEFAULT_PRESETS, REFERENCE, make_folds, run, sign_test, summarize,
+    uncovered_presets,
+)
+from within_date_signal import conditional, marginal  # noqa: E402
+from validate_metrics import check_identities, describe  # noqa: E402
+
+
+def _synthetic(n=8000, rate=0.2, seed=0):
+    rng = np.random.default_rng(seed)
+    y = (rng.random(n) < rate).astype(int)
+    return y, rng
+
+
+class TestCleanScore(unittest.TestCase):
+    def test_missing_becomes_worst(self):
+        out = clean_score(np.array([3.0, np.nan, 1.0, np.inf]))
+        self.assertTrue(np.isfinite(out).all())
+        self.assertEqual(out.argmax(), 0)          # 3.0 が最良のまま
+        self.assertLess(out[1], out[2])            # 欠測は最下位の 1.0 より下
+        self.assertLess(out[3], out[2])
+
+    def test_all_missing_does_not_crash(self):
+        out = clean_score(np.array([np.nan, np.nan]))
+        self.assertTrue(np.isfinite(out).all())
+
+    def test_missing_never_ranks_above_a_real_score(self):
+        """欠測を高評価にしてしまうと、予測できない銘柄を推奨してしまう。"""
+        y = np.array([0, 1, 0, 0])
+        r = evaluate("t", y, np.array([np.nan, 0.9, 0.1, 0.2]))
+        self.assertEqual(r["precision@1%"], 1.0)   # 上位1件は本物の正例
+
+
+class TestPrecisionAtK(unittest.TestCase):
+    """
+    上位k%は同点の扱いで値が変わる。素朴に argsort すると同点の順序は
+    配列の並び（＝日付順）が決め、「上位k%」ではなく「最初のk%」を測る。
+    """
+
+    def test_constant_score_gives_exactly_the_base_rate(self):
+        from train_model import precision_at_k
+        y = np.zeros(1000, dtype=int)
+        y[:90] = 1                                  # 正例は先頭に固める
+        rate = float(y.mean())
+        for k in (1, 5, 10):
+            self.assertAlmostEqual(precision_at_k(y, np.zeros(1000), k),
+                                   rate, places=9)
+
+    def test_ordering_of_rows_does_not_change_the_answer(self):
+        """並べ替えても値が動かないこと。動くなら日付順を読んでいる。"""
+        from train_model import precision_at_k
+        rng = np.random.default_rng(3)
+        y = (rng.random(600) < 0.15).astype(int)
+        score = np.repeat([2.0, 1.0, 0.0], 200)     # 3値なので同点だらけ
+        base = precision_at_k(y, score, 5)
+        for seed in range(5):
+            p = np.random.default_rng(seed).permutation(len(y))
+            self.assertAlmostEqual(precision_at_k(y[p], score[p], 5),
+                                   base, places=9)
+
+    def test_a_perfect_score_still_reaches_one(self):
+        from train_model import precision_at_k
+        rng = np.random.default_rng(1)
+        y = (rng.random(400) < 0.2).astype(int)
+        self.assertEqual(precision_at_k(y, y.astype(float), 5), 1.0)
+
+
+class TestHoldoutSplit(unittest.TestCase):
+    """
+    直近1年をホールドアウトにする分割。ここが崩れると評価が全部無効になる。
+
+    以前は --val-start / --test-start に日付をベタ書きしていた。
+    データが伸びても評価期間が古いまま固定され、しかも探索の打ち切り日は
+    ウォークフォワードの min_train_months（根拠のない36という数字）から
+    導かれていて、探索に使えるデータが全体の2割に制限されていた。
+    """
+
+    def _dates(self, first="2018-07-12", last="2026-06-10", n=2000):
+        return pd.Series(pd.to_datetime(
+            np.linspace(pd.Timestamp(first).value, pd.Timestamp(last).value, n)
+        ))
+
+    def _frame(self, **kw):
+        d = self._dates(**kw)
+        rng = np.random.default_rng(0)
+        return pd.DataFrame({"Date": d, "Code": "1",
+                             "label": (rng.random(len(d)) < 0.11).astype(int)})
+
+    def test_holdout_is_the_last_n_months(self):
+        from train_model import holdout_bounds
+        d = self._dates()
+        _, test_start, dmax = holdout_bounds(d, holdout_months=12)
+        self.assertEqual(dmax, pd.Timestamp(d.max()))
+        self.assertEqual(test_start, dmax - pd.DateOffset(months=12))
+
+    def test_embargo_gap_matches_the_label_horizon(self):
+        """訓練最終日のラベルはこの先60営業日で決まる。詰めるとリークする。"""
+        from train_model import EMBARGO_DAYS, TRADING_TO_CALENDAR, holdout_bounds
+        train_end, test_start, _ = holdout_bounds(self._dates())
+        gap = (test_start - train_end).days
+        self.assertEqual(gap, int(round(EMBARGO_DAYS * TRADING_TO_CALENDAR)))
+
+    def test_train_is_entirely_before_test(self):
+        from train_model import holdout_split
+        parts = holdout_split(self._frame())
+        tr = pd.to_datetime(parts["train"]["Date"])
+        te = pd.to_datetime(parts["test"]["Date"])
+        self.assertGreater(len(tr), 0)
+        self.assertGreater(len(te), 0)
+        self.assertLess(tr.max(), te.min())
+
+    def test_no_row_is_in_both_sides(self):
+        from train_model import holdout_split
+        df = self._frame().reset_index(drop=True)
+        parts = holdout_split(df)
+        self.assertEqual(set(parts["train"].index) & set(parts["test"].index), set())
+
+    def test_longer_holdout_leaves_less_training_data(self):
+        from train_model import holdout_split
+        df = self._frame()
+        short = holdout_split(df, holdout_months=6)
+        long_ = holdout_split(df, holdout_months=18)
+        self.assertGreater(len(short["train"]), len(long_["train"]))
+        self.assertLess(len(short["test"]), len(long_["test"]))
+
+    def test_tuning_never_sees_the_holdout(self):
+        """
+        探索の打ち切り日が学習側の train_end と一致すること。
+        別々に決めると片方だけずれ、探索がホールドアウトを覗く。
+        """
+        import argparse
+        from run_tuning import tuning_cutoff
+        from train_model import holdout_bounds
+        d = self._dates()
+        for months in (6, 12, 18):
+            args = argparse.Namespace(holdout_months=months)
+            train_end, test_start, _ = holdout_bounds(d, months)
+            self.assertEqual(tuning_cutoff(d, args), train_end,
+                             f"holdout_months={months} でずれた")
+            self.assertLess(tuning_cutoff(d, args), test_start)
+
+
+class TestLearningToRank(unittest.TestCase):
+    """
+    実運用で問うのは「その日の候補のうちどれを買うか」なので、
+    日付をグループにして順位を直接最適化する。
+    「日付内の信号を拾えること」と「無いときに作り出さないこと」を固定する。
+    """
+
+    def _frame(self, n_dates=400, per_date=8, signal=True, seed=0):
+        rng = np.random.default_rng(seed)
+        rows = []
+        for d in pd.date_range("2020-01-01", periods=n_dates, freq="B"):
+            useful = rng.normal(0, 1, per_date)
+            lin = -2.0 + (useful * 1.5 if signal else 0.0)
+            lin += rng.normal(0, 1.5)          # 日ごとの水準差（地合い）
+            rows.append(pd.DataFrame({
+                "Date": d, "useful": useful,
+                "noise": rng.normal(0, 1, per_date),
+                "label": (rng.random(per_date)
+                          < 1 / (1 + np.exp(-lin))).astype(int)}))
+        return pd.concat(rows, ignore_index=True)
+
+    def _split(self, df, cut="2021-05-01"):
+        return df[df["Date"] < cut], df[df["Date"] >= cut]
+
+    def test_within_date_auc_is_half_for_a_constant_score(self):
+        from train_model import within_date_auc
+        df = self._frame(n_dates=60)
+        y = df["label"].to_numpy(dtype=int)
+        self.assertAlmostEqual(
+            within_date_auc(y, np.zeros(len(y)), df["Date"]), 0.5, places=9)
+
+    def test_within_date_auc_is_one_for_a_perfect_score(self):
+        from train_model import within_date_auc
+        df = self._frame(n_dates=60)
+        y = df["label"].to_numpy(dtype=int)
+        self.assertEqual(
+            within_date_auc(y, y.astype(float), df["Date"]), 1.0)
+
+    def test_ranker_learns_a_within_date_signal(self):
+        import tuning
+        from train_model import DateRanker, within_date_auc
+        tr, te = self._split(self._frame(signal=True))
+        cols = ["useful", "noise"]
+        p = dict(tuning.DEFAULT_PARAMS)
+        p["n_estimators"] = 100
+        sc = DateRanker(p).fit(tr, cols).predict_proba(
+            te[cols].to_numpy(dtype=float))[:, 1]
+        auc = within_date_auc(te["label"].to_numpy(dtype=int), sc, te["Date"])
+        self.assertGreater(auc, 0.65, f"日付内の信号を拾えていない: {auc:.4f}")
+
+    def test_ranker_does_not_invent_a_signal(self):
+        import tuning
+        from train_model import DateRanker, within_date_auc
+        tr, te = self._split(self._frame(signal=False))
+        cols = ["useful", "noise"]
+        p = dict(tuning.DEFAULT_PARAMS)
+        p["n_estimators"] = 100
+        sc = DateRanker(p).fit(tr, cols).predict_proba(
+            te[cols].to_numpy(dtype=float))[:, 1]
+        auc = within_date_auc(te["label"].to_numpy(dtype=int), sc, te["Date"])
+        self.assertLess(abs(auc - 0.5), 0.06, f"無い信号を作っている: {auc:.4f}")
+
+    def test_ranker_refuses_a_split_that_shares_dates(self):
+        """
+        行単位で切ると、その日の答えの一部を訓練で見ることになる。
+        黙って通すと成立しない学習をしたまま数字だけ出る。
+        """
+        import tuning
+        df = self._frame(n_dates=120)
+        with self.assertRaises(SystemExit):
+            tuning.tune(df, ["useful"], n_trials=1, scheme="year_cap",
+                        model="ranker")
+
+    def test_ltr_is_added_only_when_tuned(self):
+        """
+        探索結果が無いのに既定値で回すと、探索済みの pointwise と
+        条件が揃わない比較になる。無いときは足さない。
+        """
+        from train_model import fit_models, LTR_SUFFIX
+        import tuning
+        tr, _ = self._split(self._frame(n_dates=120))
+        cols = ["useful", "noise"]
+        p = dict(tuning.DEFAULT_PARAMS)
+        self.assertNotIn("LTR", fit_models(tr, cols, verbose=False,
+                                           preset="x", params_store={}))
+        got = fit_models(tr, cols, verbose=False, preset="x",
+                         params_store={f"x{LTR_SUFFIX}": p})
+        self.assertIn("LTR", got)
+
+
+class TestPairedBootstrap(unittest.TestCase):
+    """既知の答えがあるケースで、判定が正しく出ることを固定する。"""
+
+    def test_clearly_better_model_is_significant(self):
+        y, rng = _synthetic(seed=1)
+        ref = y * 0.5 + rng.normal(0, 1, len(y))
+        strong = y * 2.0 + rng.normal(0, 1, len(y))
+        out = paired_bootstrap(y, {"ref": ref, "strong": strong},
+                               reference="ref", n_boot=200, seed=1)
+        r = out[0]
+        self.assertGreater(r["ci_low"], 0)
+        self.assertGreater(r["p_better"], 0.99)
+
+    def test_identical_scores_give_exactly_zero(self):
+        """対応のある比較になっていれば、同じスコアの差は厳密に0になる。
+        ここが0でなければリサンプルが対になっていない。"""
+        y, rng = _synthetic(seed=2)
+        ref = y * 0.5 + rng.normal(0, 1, len(y))
+        out = paired_bootstrap(y, {"ref": ref, "copy": ref.copy()},
+                               reference="ref", n_boot=100, seed=2)
+        r = out[0]
+        self.assertEqual(r["diff"], 0.0)
+        self.assertEqual(r["ci_low"], 0.0)
+        self.assertEqual(r["ci_high"], 0.0)
+
+    def test_pure_noise_is_significantly_worse(self):
+        y, rng = _synthetic(seed=3)
+        ref = y * 0.5 + rng.normal(0, 1, len(y))
+        out = paired_bootstrap(y, {"ref": ref, "noise": rng.normal(0, 1, len(y))},
+                               reference="ref", n_boot=200, seed=3)
+        self.assertLess(out[0]["ci_high"], 0)
+
+    def test_tiny_difference_is_not_called_significant(self):
+        """本命のケース。ほぼ同じ2つのモデルを『有意』と言わないこと。"""
+        y, rng = _synthetic(seed=4)
+        ref = y * 0.5 + rng.normal(0, 1, len(y))
+        nudged = ref + rng.normal(0, 0.01, len(y))   # ごくわずかに違うだけ
+        out = paired_bootstrap(y, {"ref": ref, "nudged": nudged},
+                               reference="ref", n_boot=300, seed=4)
+        r = out[0]
+        self.assertLessEqual(r["ci_low"], 0)
+        self.assertGreaterEqual(r["ci_high"], 0)
+
+    def test_resamples_without_positives_are_redrawn(self):
+        """正例が極端に少なくても NaN を返さない。"""
+        rng = np.random.default_rng(5)
+        y = np.zeros(500, dtype=int)
+        y[:3] = 1
+        ref = rng.normal(0, 1, 500)
+        out = paired_bootstrap(y, {"ref": ref, "b": rng.normal(0, 1, 500)},
+                               reference="ref", n_boot=50, seed=5)
+        for key in ("diff", "ci_low", "ci_high", "p_better"):
+            self.assertFalse(np.isnan(out[0][key]), key)
+
+
+class TestSignTest(unittest.TestCase):
+    """符号検定。フォールド数が少ないので、何勝すれば有意かを把握しておく。"""
+
+    def test_unanimous_is_significant(self):
+        self.assertAlmostEqual(sign_test(8, 0), 2 / 256)
+        self.assertLess(sign_test(9, 0), 0.05)
+
+    def test_even_split_is_not_significant(self):
+        self.assertEqual(sign_test(4, 4), 1.0)
+
+    def test_symmetric(self):
+        self.assertEqual(sign_test(7, 2), sign_test(2, 7))
+
+    def test_nine_folds_needs_eight_wins(self):
+        """9フォールドでは 8勝1敗 でようやく有意。7勝2敗では足りない。
+        レポートの判定を読むときにこの厳しさを踏まえる必要がある。"""
+        self.assertLess(sign_test(8, 1), 0.05)
+        self.assertGreater(sign_test(7, 2), 0.05)
+
+    def test_no_folds_is_nan(self):
+        self.assertTrue(np.isnan(sign_test(0, 0)))
+
+
+class TestMakeFolds(unittest.TestCase):
+    def _folds(self, first="2017-09-29", last="2025-11-28", **kw):
+        kw.setdefault("min_train_months", 36)
+        kw.setdefault("test_months", 6)
+        kw.setdefault("step_months", 6)
+        kw.setdefault("embargo_days", 180)
+        return make_folds(pd.Series(pd.to_datetime([first, last])), **kw)
+
+    def test_test_windows_never_overlap(self):
+        """重なると同じサンプルが2フォールドに入り、独立でなくなる。"""
+        folds = self._folds()
+        self.assertGreater(len(folds), 1)
+        for a, b in zip(folds, folds[1:]):
+            self.assertLess(a.test_end, b.test_start)
+
+    def test_embargo_is_respected(self):
+        """訓練最終日のラベルがテスト期間に食い込まないこと。"""
+        for f in self._folds():
+            gap = (pd.Timestamp(f.test_start) - pd.Timestamp(f.train_end)).days
+            self.assertGreaterEqual(gap, int(180 * 1.45) - 1)
+
+    def test_training_window_expands(self):
+        folds = self._folds()
+        ends = [pd.Timestamp(f.train_end) for f in folds]
+        self.assertEqual(ends, sorted(ends))
+        self.assertEqual(len({f.train_start for f in folds}), 1)
+
+    def test_never_runs_past_the_data(self):
+        for f in self._folds():
+            self.assertLessEqual(pd.Timestamp(f.test_end), pd.Timestamp("2025-11-28"))
+
+    def test_too_short_a_period_yields_no_folds(self):
+        self.assertEqual(self._folds(last="2019-01-01"), [])
+
+
+class TestWalkForwardEndToEnd(unittest.TestCase):
+    """合成データで最後まで通ること。列名や集計の取り違えを検出する。"""
+
+    def _dataset(self, n_dates=60, n_codes=120, seed=0):
+        rng = np.random.default_rng(seed)
+        dates = pd.date_range("2017-09-29", periods=n_dates, freq="ME")
+        rows = []
+        for d in dates:
+            r_high = rng.uniform(0, 95, n_codes)
+            # r_high が高いほど正例になりやすい合成ラベル
+            p = 1 / (1 + np.exp(-(r_high - 70) / 10))
+            frame = {
+                "Date": d,
+                "Code": [f"{i:04d}" for i in range(n_codes)],
+                "r_high": r_high,
+                "r_high_r": rng.uniform(0, 1, n_codes),
+                "volume_trend": rng.normal(0, 1, n_codes),
+                "label": (rng.random(n_codes) < p).astype(int),
+            }
+            # ベースラインの8軸スコアが必要とする列
+            for c in ("ROE_q0", "credit_ratio", "eps_growth_q0", "market_cap",
+                      "op_margin_q0", "progress_vs_base", "sales_growth_q0",
+                      "tv_ma20"):
+                frame[c] = rng.normal(0, 1, n_codes)
+            rows.append(pd.DataFrame(frame))
+        return pd.concat(rows, ignore_index=True)
+
+    def test_runs_and_summarises(self):
+        df = self._dataset()
+        folds = make_folds(pd.to_datetime(df["Date"]), min_train_months=24,
+                           test_months=6, step_months=6, embargo_days=20)
+        self.assertGreaterEqual(len(folds), 2)
+
+        # 基準（無情報）は baseline_scores が必ず入れるので、
+        # 評価するセットは何でもよい
+        import features as Fx
+        Fx.GROUPS["_t"] = ["r_high", "volume_trend"]
+        Fx.PRESETS["_t"] = ["_t"]
+        try:
+            res = run(df, ["_t"], folds)
+        finally:
+            del Fx.GROUPS["_t"], Fx.PRESETS["_t"]
+
+        self.assertTrue(res["folds"])
+        self.assertTrue(res["summary"])
+        for s in res["summary"]:
+            self.assertEqual(s["wins"] + s["losses"] <= s["n_folds"], True)
+            self.assertGreaterEqual(s["best_diff"], s["worst_diff"])
+        # 基準そのものは要約に出さない（自分との差は常に0で無意味）
+        self.assertNotIn(REFERENCE, [s["name"] for s in res["summary"]])
+
+    def test_reference_scores_exactly_the_base_rate(self):
+        """
+        基準は無情報（全件同じスコア）。全件同点の PR-AUC はその窓の
+        正例率に一致する。だから「差」は正例率をどれだけ上回ったかになる。
+        この性質が崩れると、差の解釈が変わってしまう。
+        """
+        from train_model import baseline_scores, evaluate, REFERENCE_MODEL
+        df = self._dataset()
+        y = df["label"].to_numpy(dtype=int)
+        sc = baseline_scores(df)
+        self.assertEqual(list(sc), [REFERENCE_MODEL])
+        r = evaluate(REFERENCE_MODEL, y, sc[REFERENCE_MODEL])
+        self.assertAlmostEqual(r["pr_auc"], float(y.mean()), places=6)
+        self.assertAlmostEqual(r["roc_auc"], 0.5, places=6)
+        # 上位k%も同じく「無情報」でなければならない。
+        # 同点を配列順で切っていたときは Lift@5% が 1.87倍 / 0.42倍 と出て、
+        # 実際は「テスト期間の最初の5%の正例率」を測っていた。
+        for k in (1, 5, 10):
+            self.assertAlmostEqual(r[f"lift@{k}%"], 1.0, places=6,
+                                   msg=f"無情報の Lift@{k}% は1.00倍のはず")
+
+    def test_summarise_counts_wins_correctly(self):
+        per_fold = [
+            {"results": [{"name": REFERENCE, "pr_auc": 0.3, "diff_vs_ref": 0.0,
+                          "lift@5%": 1.0},
+                         {"name": "m", "pr_auc": 0.4, "diff_vs_ref": +0.1,
+                          "lift@5%": 1.2}]},
+            {"results": [{"name": REFERENCE, "pr_auc": 0.3, "diff_vs_ref": 0.0,
+                          "lift@5%": 1.0},
+                         {"name": "m", "pr_auc": 0.2, "diff_vs_ref": -0.1,
+                          "lift@5%": 0.8}]},
+        ]
+        s = summarize(per_fold)[0]
+        self.assertEqual((s["wins"], s["losses"], s["n_folds"]), (1, 1, 2))
+        self.assertAlmostEqual(s["mean_diff"], 0.0)
+        self.assertAlmostEqual(s["worst_diff"], -0.1)
+        self.assertAlmostEqual(s["best_diff"], +0.1)
+
+
+class TestWithinDateSignal(unittest.TestCase):
+    """日付内 AUC の診断。LTR に見込みがあるかの判断材料になるので、
+    「信号があるとき見つかる / 無いとき見つけない」の両方を固定する。"""
+
+    def _frame(self, n_dates=40, n_codes=200, seed=0, signal=True):
+        rng = np.random.default_rng(seed)
+        rows = []
+        for d in pd.date_range("2020-01-31", periods=n_dates, freq="ME"):
+            r_high = rng.uniform(0, 95, n_codes)
+            useful = rng.normal(0, 1, n_codes)
+            noise = rng.normal(0, 1, n_codes)
+            lin = (r_high - 60) / 15 + (useful * 1.2 if signal else 0.0)
+            # 局面ごとに正例率を大きく動かす（日付内AUCが影響されないことの確認）
+            lin += rng.normal(0, 2)
+            p = 1 / (1 + np.exp(-lin))
+            rows.append(pd.DataFrame({
+                "Date": d, "r_high": r_high, "useful": useful, "noise": noise,
+                "label": (rng.random(n_codes) < p).astype(int)}))
+        return pd.concat(rows, ignore_index=True)
+
+    def test_finds_a_real_within_date_signal(self):
+        df = self._frame(signal=True)
+        res = {r["feature"]: r for r in conditional(df, ["useful", "noise"])}
+        self.assertGreater(res["useful"]["mean_auc"], 0.6)
+        self.assertLess(res["useful"]["p_sign"], 0.05)
+
+    def test_does_not_invent_signal_from_noise(self):
+        df = self._frame(signal=True)
+        res = {r["feature"]: r for r in conditional(df, ["useful", "noise"])}
+        self.assertLess(res["noise"]["abs_edge"], 0.02)
+
+    def test_reports_nothing_when_only_r_high_matters(self):
+        """R_high だけが効く世界では、条件付けると全部 0.5 付近になるはず。
+        ここが誤って『信号あり』と出ると、無駄な LTR 実装に進んでしまう。"""
+        df = self._frame(signal=False)
+        for r in conditional(df, ["useful", "noise"]):
+            self.assertLess(r["abs_edge"], 0.02, r["feature"])
+
+    def _sparse_frame(self, n_dates=1700, per_date=7, seed=0, signal=True):
+        """
+        実データと同じ形。1日あたり数銘柄しかない。
+
+        以前の実装は日付ごとに AUC を出すのに1日30件を要求していたため、
+        この形では 1,739日のうち14日しか使えず、条件付きは0セルだった。
+        """
+        rng = np.random.default_rng(seed)
+        n = n_dates * per_date
+        r_high = rng.uniform(90, 100, n)
+        useful = rng.normal(0, 1, n)
+        noise = rng.normal(0, 1, n)
+        lin = -2.0 + (useful * 1.2 if signal else 0.0)
+        lin += np.repeat(rng.normal(0, 1.5, n_dates), per_date)  # 局面差
+        return pd.DataFrame({
+            "Date": np.repeat(pd.date_range("2018-07-12", periods=n_dates,
+                                            freq="B"), per_date),
+            "r_high": r_high, "useful": useful, "noise": noise,
+            "label": (rng.random(n) < 1 / (1 + np.exp(-lin))).astype(int)})
+
+    def test_sparse_dates_still_produce_a_measurement(self):
+        """
+        1日7銘柄でも測れること。ここが空になると LTR の判断材料が
+        「無い」ではなく「測れていない」になり、区別がつかなくなる。
+        """
+        df = self._sparse_frame()
+        marg = {r["feature"]: r for r in marginal(df, ["useful", "noise"])}
+        cond = {r["feature"]: r for r in conditional(df, ["useful", "noise"])}
+        self.assertTrue(marg and cond, "疎な日付で測定が空になっている")
+        for res in (marg, cond):
+            self.assertGreater(res["useful"]["n_pairs"], 1000)
+            # 使えた日付が全体のごく一部しかない、という状態を許さない
+            self.assertGreater(res["useful"]["n_dates"], 500)
+
+    def test_sparse_dates_find_the_signal_and_reject_noise(self):
+        df = self._sparse_frame(signal=True)
+        res = {r["feature"]: r for r in conditional(df, ["useful", "noise"])}
+        self.assertGreater(res["useful"]["mean_auc"], 0.6)
+        self.assertTrue(res["useful"]["significant"])
+        self.assertLess(res["noise"]["abs_edge"], 0.02)
+        self.assertFalse(res["noise"]["significant"])
+
+    def test_confidence_interval_uses_date_bootstrap(self):
+        """
+        ペアは日付内で相関する。ペア単位でリサンプルすると独立を仮定して
+        CI が狭く出るので、日付ごと引き直していることを確かめる。
+        同じ日のペアを複製して増やしても CI は狭くならないはず。
+        """
+        from within_date_signal import _date_pairs, _concordance, _summarise
+        df = self._sparse_frame(signal=True, per_date=7)
+        d_ids, pi, ni = _date_pairs(df)
+        x = df["useful"].to_numpy(dtype=float)
+        base = _summarise("useful", _concordance(x, pi, ni), d_ids)
+        # 同じペアを3重に持たせる（情報は増えていない）
+        dup = _summarise("useful",
+                         np.tile(_concordance(x, pi, ni), 3),
+                         np.tile(d_ids, 3))
+        w_base = base["ci_high"] - base["ci_low"]
+        w_dup = dup["ci_high"] - dup["ci_low"]
+        self.assertGreater(w_dup, w_base * 0.7,
+                           "ペアを複製しただけで CI が狭くなっている"
+                           f"（{w_base:.4f} -> {w_dup:.4f}）")
+
+    def test_rank_transform_does_not_change_within_date_auc(self):
+        """順位化は日付内の単調変換なので AUC は変わらない。
+        この前提で順位列を測定対象から外している。"""
+        import build_dataset as B
+        df = self._frame(signal=True)
+        df = B.add_cross_sectional_ranks(df, ["useful"])
+        res = {r["feature"]: r for r in marginal(df, ["useful", "useful_r"])}
+        self.assertAlmostEqual(res["useful"]["mean_auc"],
+                               res["useful_r"]["mean_auc"], places=10)
+
+
+class TestMetricValidation(unittest.TestCase):
+    """
+    PER/PBR/ROE/ROA は割り算で作るので分母が小さいと発散する。
+    「列はあるが値が壊れている」状態を検出できることを固定する。
+    """
+
+    def _clean(self, n=800, seed=0):
+        rng = np.random.default_rng(seed)
+        close = rng.uniform(100, 5000, n)
+        eps = rng.normal(50, 80, n)
+        bps = rng.uniform(50, 3000, n)
+        return pd.DataFrame({
+            "close": close, "eps_ttm": eps, "BPS": bps,
+            "earnings_yield": eps / close * 100,
+            "per": np.where(eps > 0, close / eps, np.nan),
+            "book_yield": bps / close,
+            "pbr": np.where(bps > 0, close / bps, np.nan),
+        })
+
+    def test_identities_hold_on_correct_data(self):
+        checks = {c["name"]: c for c in check_identities(self._clean())}
+        self.assertLess(checks["per × earnings_yield == 100"]["max_rel_err"], 1e-9)
+        self.assertLess(checks["pbr × book_yield == 1"]["max_rel_err"], 1e-9)
+
+    def test_detects_a_broken_ratio(self):
+        """片方の計算式がずれていれば恒等式で分かる。"""
+        df = self._clean()
+        df["per"] = df["close"] / (df["eps_ttm"] * 1.05)
+        c = check_identities(df)[0]
+        self.assertGreater(c["max_rel_err"], 1e-3)
+
+    def test_detects_sign_mismatch(self):
+        """株価は正なので per の符号は EPS の符号と一致するはず。"""
+        df = self._clean()
+        df["per"] = -df["per"]
+        c = [x for x in check_identities(df) if "sign(per)" in x["name"]][0]
+        self.assertGreater(c["mismatches"], 0)
+
+    def test_detects_infinities(self):
+        st = describe(pd.Series([1.0, np.inf, 2.0, -np.inf]), (0, 10))
+        self.assertEqual(st["n_inf"], 2)
+
+    def test_detects_an_all_zero_column(self):
+        st = describe(pd.Series([0.0] * 50), (0, 10))
+        self.assertEqual(st["zero_pct"], 100.0)
+
+    def test_detects_an_all_missing_column(self):
+        st = describe(pd.Series([np.nan] * 50), (0, 10))
+        self.assertEqual(st["present_pct"], 0.0)
+
+    def test_counts_values_outside_the_plausible_range(self):
+        """目安外は「異常」ではなく件数として出す。
+        ROE が100%を超えることは実在するので、切り捨ててはいけない。"""
+        st = describe(pd.Series([10.0, 50.0, 250.0, 900.0]), (-500.0, 500.0))
+        self.assertEqual(st["outside_plausible"], 1)   # 900 のみ
+        self.assertEqual(st["n_negative"], 0)
+
+
+class TestWalkForwardCoversNewPresets(unittest.TestCase):
+    """
+    DEFAULT_PRESETS は手で維持する一覧なので、
+    プリセットを足しても評価対象に入れ忘れる事故が実際に起きた。
+    """
+
+    def test_valuation_presets_are_evaluated(self):
+        """PER/PBR/ROA を足した効果を見るのが目的なので、既定に入れる。"""
+        for name in ("fundamental_v2", "rank_fundamental_v2", "valuation_only"):
+            self.assertIn(name, DEFAULT_PRESETS)
+
+    def test_paired_comparisons_are_complete(self):
+        """絶対値版と順位版は対で評価する。片方だけだと比較にならない。"""
+        for base in ("price_only", "technical", "all", "fundamental",
+                     "fundamental_v2"):
+            self.assertIn(base, DEFAULT_PRESETS, base)
+            self.assertIn(f"rank_{base}", DEFAULT_PRESETS, f"rank_{base}")
+
+    def test_uncovered_presets_are_reported(self):
+        """漏れを黙って通さないこと。"""
+        import features as F
+        self.assertEqual(uncovered_presets(list(F.PRESETS)), [])
+        self.assertIn("price_only", uncovered_presets(["technical"]))
+
+    def test_every_default_preset_exists(self):
+        import features as F
+        for name in DEFAULT_PRESETS:
+            self.assertIn(name, F.PRESETS, name)
+
+
+class TestTuningDoesNotSeeTestData(unittest.TestCase):
+    """
+    ハイパーパラメータ探索は「良さそうな設定を選ぶ」作業なので、
+    評価に使う期間を一度でも見ればリークになり、以降の評価が全部無効になる。
+    探索期間がすべてのテスト窓より前で打ち切られていることを固定する。
+    """
+
+    def _folds(self):
+        from train_model import EMBARGO_DAYS
+        return make_folds(pd.Series(pd.to_datetime(["2017-09-29", "2025-11-28"])),
+                          min_train_months=36, test_months=6, step_months=6,
+                          embargo_days=EMBARGO_DAYS), EMBARGO_DAYS
+
+    def test_cutoff_precedes_every_test_window(self):
+        folds, _ = self._folds()
+        cutoff = pd.Timestamp(folds[0].train_end)
+        for f in folds:
+            self.assertLess(cutoff, pd.Timestamp(f.test_start), f.index)
+
+    def test_cutoff_respects_the_embargo(self):
+        """打ち切り日のラベルが最初のテスト窓に食い込まないこと。"""
+        folds, embargo = self._folds()
+        cutoff = pd.Timestamp(folds[0].train_end)
+        gap = (pd.Timestamp(folds[0].test_start) - cutoff).days
+        self.assertGreaterEqual(gap, int(embargo * 1.45) - 1)
+
+    def test_cutoff_is_derived_from_folds_not_hardcoded(self):
+        """
+        フォールドの切り方を変えたら打ち切りも動くこと。
+        固定値を書いていると、切り方を変えた瞬間に静かにリークする。
+        """
+        from train_model import EMBARGO_DAYS
+        dates = pd.Series(pd.to_datetime(["2017-09-29", "2025-11-28"]))
+        a = make_folds(dates, min_train_months=36, test_months=6,
+                       step_months=6, embargo_days=EMBARGO_DAYS)[0].train_end
+        b = make_folds(dates, min_train_months=48, test_months=6,
+                       step_months=6, embargo_days=EMBARGO_DAYS)[0].train_end
+        self.assertNotEqual(a, b)
+
+
+class TestTuning(unittest.TestCase):
+    """探索そのものの挙動。"""
+
+    def _frame(self, n_dates=30, n=200, seed=0):
+        rng = np.random.default_rng(seed)
+        rows = []
+        for d in pd.date_range("2018-01-31", periods=n_dates, freq="ME"):
+            x1 = rng.normal(0, 1, n)
+            p = 1 / (1 + np.exp(-(1.5 * x1 - 1.0)))
+            rows.append(pd.DataFrame({
+                "Date": d, "x1": x1, "x2": rng.normal(0, 1, n),
+                "label": (rng.random(n) < p).astype(int)}))
+        return pd.concat(rows, ignore_index=True)
+
+    def test_inner_split_is_chronological(self):
+        """
+        内側検証をランダムに取ると、同一銘柄の隣接月が両側に入って
+        検証が簡単になりすぎ、必ず楽観的なパラメータが選ばれる。
+        """
+        import tuning
+        tr, va = tuning.chronological_split(self._frame())
+        self.assertLess(tr["Date"].max(), va["Date"].min())
+        self.assertGreater(len(tr), 0)
+        self.assertGreater(len(va), 0)
+
+    def test_reported_score_matches_the_returned_params(self):
+        """
+        報告した CV スコアが、返したパラメータで再現できること。
+
+        「良いスコアを報告しながら別のパラメータを返す」が起きると、
+        結果を信じてよいかが分からなくなる。
+        （既定値より必ず良くなることは保証しない。試行数が少なければ
+        TPE が既定値より良い設定を見つけないことは普通にある）
+        """
+        import tuning
+        df = self._frame()
+        cols = ["x1", "x2"]
+        best = tuning.tune(df, cols, n_trials=5, verbose=False, n_splits=3)
+        folds = tuning.year_folds(df, n_splits=3)
+        got = float(np.mean([
+            tuning._fit_one(best, tr, va, cols, early_stopping=False)[0]
+            for tr, va in folds]))
+        self.assertAlmostEqual(got, tuning.LAST_CV["mean_pr_auc"], places=3)
+
+    def test_tree_count_is_fixed_during_the_search(self):
+        """
+        本数を early stopping に決めさせると、試行ごとに別の大きさの
+        モデルを比べることになる。固定して他のパラメータだけを比べる。
+        """
+        import tuning
+        best = tuning.tune(self._frame(), ["x1", "x2"], n_trials=3, verbose=False,
+                           n_splits=3)
+        self.assertEqual(best["n_estimators"], tuning.SEARCH_N_ESTIMATORS)
+
+    def test_falls_back_to_defaults_without_both_classes(self):
+        import tuning
+        df = self._frame()
+        df["label"] = 0
+        best = tuning.tune(df, ["x1", "x2"], n_trials=3, verbose=False)
+        self.assertEqual(best["learning_rate"],
+                         tuning.DEFAULT_PARAMS["learning_rate"])
+
+    def test_params_for_returns_defaults_for_unknown_preset(self):
+        import tuning
+        p = tuning.params_for("__no_such_preset__", {})
+        self.assertEqual(p["num_leaves"], tuning.DEFAULT_PARAMS["num_leaves"])
+
+    def test_scale_pos_weight_handles_imbalance(self):
+        import tuning
+        y = np.array([0] * 90 + [1] * 10)
+        self.assertAlmostEqual(tuning.scale_pos_weight(y), 9.0)
+
+
+class TestTunedParamsArePersisted(unittest.TestCase):
+    """
+    探索結果は research/lgbm_params.json に残す。
+
+    最初これを research/_data/ に置いていたが、そこは .gitignore されており、
+    ワークフローのコンテナが終わると消えていた。
+    結果、毎回6分かけて探索し直していたのに、値はどこにも残っていなかった。
+    """
+
+    def test_params_path_is_not_in_the_ignored_data_dir(self):
+        import tuning
+        self.assertNotIn(f"_data{os.sep}", tuning.PARAMS_PATH)
+        self.assertTrue(tuning.PARAMS_PATH.endswith("lgbm_params.json"))
+
+    def test_data_dir_is_gitignored(self):
+        """前提の確認。ここが変わったら PARAMS_PATH の判断も変わる。"""
+        root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        ignore = open(os.path.join(root, ".gitignore"), encoding="utf-8").read()
+        self.assertIn("research/_data/", ignore)
+
+    def test_falls_back_to_defaults_when_file_is_absent(self):
+        import tuning
+        p = tuning.params_for("anything", {})
+        self.assertEqual(p["num_leaves"], tuning.DEFAULT_PARAMS["num_leaves"])
+
+
+class TestCapBandSource(unittest.TestCase):
+    """
+    規模の帯は、層別評価・特徴量・CV で同じ定義でなければならない。
+    別々に切ると、同じ「規模」という言葉が3か所で違うものを指す。
+    """
+
+    def test_prefers_the_dataset_band_over_quantiles(self):
+        import tuning as T
+        df = pd.DataFrame({
+            "log_market_cap": [1.0, 2.0, 3.0, 4.0, 5.0],
+            "cap_band": [0.0, 0.0, 0.0, 4.0, 4.0],
+        })
+        self.assertEqual(list(T._cap_bands(df)), ["0", "0", "0", "4", "4"])
+
+    def test_falls_back_to_quantiles_without_the_column(self):
+        import tuning as T
+        df = pd.DataFrame({"log_market_cap": [float(i) for i in range(100)]})
+        band = T._cap_bands(df)
+        self.assertEqual(band.nunique(), T.CAP_BANDS)
+
+    def test_missing_band_becomes_its_own_stratum(self):
+        """欠測を既存の帯に混ぜると、揃えたつもりの構成がずれる。"""
+        import tuning as T
+        df = pd.DataFrame({"cap_band": [0.0, np.nan, 4.0]})
+        self.assertEqual(list(T._cap_bands(df)), ["0", "na", "4"])
+
+
+class TestYearStratifiedFolds(unittest.TestCase):
+    """
+    探索の評価は年で層別した k 分割。
+
+    時系列分割はこの規模では推定が安定しなかった
+    （実測で分割ごとの PR-AUC が 0.036〜0.230 と6倍以上ばらついた）。
+    各フォールドを同じ年構成にすれば、局面の当たり外れが相殺される。
+    """
+
+    def _df(self, spec=((2018, 60), (2019, 300), (2020, 900), (2021, 1200))):
+        rng = np.random.default_rng(0)
+        rows = []
+        for year, n in spec:
+            a = rng.normal(0, 1, n)
+            rows.append(pd.DataFrame({
+                "Date": pd.date_range(f"{year}-01-05", f"{year}-12-25", periods=n),
+                "a": a,
+                "label": (rng.random(n) < 1 / (1 + np.exp(-(a * 0.7 - 2.6)))).astype(int)}))
+        return pd.concat(rows, ignore_index=True)
+
+    def test_every_fold_has_the_same_year_mix(self):
+        from tuning import year_folds
+        df = self._df()
+        folds = year_folds(df, n_splits=5, seed=0)
+        self.assertEqual(len(folds), 5)
+        mixes = []
+        for _, va in folds:
+            y = pd.to_datetime(va["Date"]).dt.year.value_counts(normalize=True)
+            mixes.append(y.sort_index().round(2).to_dict())
+        self.assertEqual(len(set(map(str, mixes))), 1, mixes)
+
+    def test_positive_rate_is_balanced_across_folds(self):
+        """
+        年だけで層別すると正例数が偏る。層は 年の束 × ラベル にする。
+
+        PR-AUC の下限は正例率そのものなので、フォールド間で正例率がずれると
+        スコアの差が実力の差なのか正例率の差なのか分からなくなる。
+        """
+        from tuning import year_folds
+        folds = year_folds(self._df(), n_splits=5)
+        va = [v["label"].mean() for _, v in folds]
+        tr = [t["label"].mean() for t, _ in folds]
+        self.assertLess(float(np.std(va)), 0.005, f"検証側が揃っていない: {va}")
+        # 訓練側は検証側の補集合なので、こちらも自動的に揃うはず。
+        # 揃っていなければ層別が効いていない
+        self.assertLess(float(np.std(tr)), 0.005, f"訓練側が揃っていない: {tr}")
+
+    def test_label_in_the_strata_is_what_keeps_it_balanced(self):
+        """
+        ラベルを層に入れると、正例率の幅が丸め誤差ぶんに固定される。
+        年だけの層別はシード次第で大きく暴れる。
+
+        「シードごとの勝ち負け」では検出できない（年だけでも偶然揃う
+        シードがある）。効いているのは平均ではなく最悪値と再現性なので、
+        そちらを固定する。実測（正例219件・5分割）:
+            ラベル入り  どのシードでも 0.610pt
+            年だけ      0.407 〜 5.691pt
+        """
+        from sklearn.model_selection import StratifiedKFold
+        from tuning import _year_groups, year_folds
+        df = self._df()
+        years = pd.to_datetime(df["Date"]).dt.year
+        only_year = _year_groups(years, df["label"], 5)
+
+        with_label, no_label = [], []
+        for seed in range(10):
+            r1 = [v["label"].mean() for _, v in year_folds(df, n_splits=5, seed=seed)]
+            skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=seed)
+            r2 = [df.iloc[va]["label"].mean() for _, va in skf.split(df, only_year)]
+            with_label.append(max(r1) - min(r1))
+            no_label.append(max(r2) - min(r2))
+
+        # 1. ラベルを入れた側はシードに依存しない（層の切り方で決まる）
+        self.assertAlmostEqual(max(with_label), min(with_label), places=6,
+                               msg=f"シードで変わっている: {with_label}")
+        # 2. その幅は丸め誤差の水準にとどまる
+        self.assertLess(max(with_label), 0.01, f"幅が大きすぎる: {with_label}")
+        # 3. 年だけの層別は最悪値がはるかに大きい。ここが縮まっているなら
+        #    このテストは何も検出していない
+        self.assertGreater(max(no_label), 4 * max(with_label),
+                           f"年だけでも揃ってしまい比較になっていない: {no_label}")
+
+    def _capped_df(self, n_per_year=None):
+        """時価総額を持ち、規模が小さいほど正例率が高いデータ（実測と同じ向き）。"""
+        spec = n_per_year or ((2018, 88), (2019, 755), (2020, 1335), (2021, 1627),
+                              (2022, 877), (2023, 2270), (2024, 2101))
+        rng = np.random.default_rng(0)
+        rows = []
+        for year, n in spec:
+            cap = rng.normal(9.5, 1.6, n)
+            tilt = np.clip(0.11 * (1.8 - 0.16 * (cap - 7.0)), 0.01, 0.4)
+            rows.append(pd.DataFrame({
+                "Date": pd.date_range(f"{year}-01-05", f"{year}-12-25", periods=n),
+                "log_market_cap": cap,
+                "label": (rng.random(n) < tilt).astype(int)}))
+        return pd.concat(rows, ignore_index=True).reset_index(drop=True)
+
+    @staticmethod
+    def _spread(frames, col):
+        """フォールド間で、その列の構成比が最大どれだけ違うか（pt）。"""
+        m = pd.DataFrame([f[col].value_counts(normalize=True)
+                          for f in frames]).fillna(0)
+        return float((m.max() - m.min()).max()) * 100
+
+    def test_cap_bands_must_be_global_not_per_fold(self):
+        """
+        帯は全期間の分位で切る。フォールド内で切ると定義上どのフォールドも
+        均等になり、層別しているつもりで何も測っていないことになる
+        （実際この誤りで「規模は既に揃っている」と読み違えた）。
+        """
+        from tuning import _cap_bands, CAP_BANDS
+        df = self._capped_df()
+        band = _cap_bands(df)
+        self.assertEqual(len(set(band)), CAP_BANDS)
+        # 全期間で切っているので、年ごとに見ると構成は均等にならない
+        by_year = pd.DataFrame([
+            band[pd.to_datetime(df["Date"]).dt.year == y].value_counts(normalize=True)
+            for y in sorted(pd.to_datetime(df["Date"]).dt.year.unique())]).fillna(0)
+        self.assertGreater(float((by_year.max() - by_year.min()).max()), 0.0)
+
+    def test_adding_cap_to_the_strata_balances_size_across_folds(self):
+        """
+        年とラベルだけで層別すると、規模の構成はフォールド間で放置される。
+        正例率が規模で 1.8倍違うので、規模構成がずれると難易度もずれる。
+        """
+        from tuning import year_folds, _cap_bands
+        df = self._capped_df()
+        df = df.assign(_band=_cap_bands(df))
+        without, with_cap = [], []
+        for seed in range(5):
+            a = [v for _, v in year_folds(df, n_splits=5, seed=seed, by_cap=False)]
+            b = [v for _, v in year_folds(df, n_splits=5, seed=seed, by_cap=True)]
+            without.append(self._spread(a, "_band"))
+            with_cap.append(self._spread(b, "_band"))
+        self.assertGreater(max(without), 1.0,
+                           f"規模が既に揃っていて比較にならない: {without}")
+        self.assertLess(max(with_cap), max(without) / 4,
+                        f"規模帯を層に入れても揃わない: {with_cap} vs {without}")
+
+    def test_cap_must_be_added_to_year_not_substituted_for_it(self):
+        """
+        年を規模で置き換えると、局面の当たり外れが相殺されなくなる。
+        時系列分割で起きたばらつきが戻るので、置き換えてはいけない。
+        """
+        from tuning import year_folds
+        df = self._capped_df().assign(_y=lambda d: pd.to_datetime(d["Date"]).dt.year)
+        both = [v for _, v in year_folds(df, n_splits=5, by_year=True, by_cap=True)]
+        cap_only = [v for _, v in year_folds(df, n_splits=5, by_year=False, by_cap=True)]
+        self.assertLess(self._spread(both, "_y"),
+                        self._spread(cap_only, "_y") / 4)
+
+    def test_label_stays_balanced_with_three_axes(self):
+        """軸を増やしても層が細かくなりすぎてラベルが崩れないこと。"""
+        from tuning import year_folds
+        df = self._capped_df()
+        rates = [v["label"].mean()
+                 for _, v in year_folds(df, n_splits=5, by_cap=True)]
+        self.assertLess(float(np.std(rates)), 0.005, rates)
+
+    def test_thin_strata_fall_back_instead_of_crashing(self):
+        """
+        StratifiedKFold は分割数未満の層で落ちる。細かい層が薄いときは
+        1段粗い層に落として、分割自体は必ず作れるようにする。
+        """
+        from tuning import year_folds
+        # 年ごとに 30件しかない。年×規模帯×ラベルにすると 1層あたり数件になる
+        df = self._capped_df(n_per_year=((2018, 30), (2019, 30), (2020, 30),
+                                         (2021, 30), (2022, 30)))
+        folds = year_folds(df, n_splits=5, by_cap=True)
+        self.assertEqual(len(folds), 5)
+
+    def test_unknown_scheme_still_rejected(self):
+        from tuning import tune
+        with self.assertRaises(SystemExit):
+            tune(self._df(), ["a"], n_trials=1, scheme="cap_only")
+
+    def _dated_df(self, per_date=7):
+        """1日あたり数銘柄しかない、実データと同じ形。"""
+        rng = np.random.default_rng(0)
+        spec = ((2018, 88), (2019, 755), (2020, 1335), (2021, 1627),
+                (2022, 877), (2023, 2270), (2024, 2101))
+        rows = []
+        for year, n in spec:
+            nd = max(1, int(n / per_date))
+            dates = pd.date_range(f"{year}-01-05", f"{year}-12-25", periods=nd)
+            cap = rng.normal(9.5, 1.6, n)
+            tilt = np.clip(0.11 * (1.8 - 0.16 * (cap - 7.0)), 0.01, 0.4)
+            rows.append(pd.DataFrame({
+                "Date": np.repeat(dates, per_date + 1)[:n],
+                "log_market_cap": cap,
+                "label": (rng.random(n) < tilt).astype(int)}))
+        return pd.concat(rows, ignore_index=True).reset_index(drop=True)
+
+    def test_date_grouping_keeps_a_day_in_one_fold(self):
+        """
+        同じ日の銘柄が訓練と検証に分かれてはいけない。
+        「その日の銘柄を並べ替える」ことを学習するのに、その日の答えの
+        一部を訓練で見ていることになる。
+        """
+        from tuning import year_folds
+        df = self._dated_df()
+        folds = year_folds(df, n_splits=5, by_cap=True, group_by_date=True)
+        self.assertEqual(len(folds), 5)
+        for tr, va in folds:
+            shared = set(tr["Date"]) & set(va["Date"])
+            self.assertEqual(shared, set(), f"日付が両側にある: {len(shared)}件")
+
+    def test_row_level_split_does_share_dates(self):
+        """
+        対照。行単位で切れば日付は必ず両側に現れる。
+        ここが空なら上のテストは何も検出していない。
+        """
+        from tuning import year_folds
+        df = self._dated_df()
+        folds = year_folds(df, n_splits=5, by_cap=True, group_by_date=False)
+        shared = sum(len(set(tr["Date"]) & set(va["Date"])) for tr, va in folds)
+        self.assertGreater(shared, 100, "行単位でも日付が分かれていない")
+
+    def test_date_grouping_still_balances_years(self):
+        """
+        日付単位にすると層の揃いは緩くなるが、年構成が崩れてはいけない。
+        日付レベルの層を作らず行単位の層を渡していたときは
+        年構成のずれが 8.8pt まで悪化した。
+        """
+        from tuning import year_folds
+        df = self._dated_df().assign(
+            _y=lambda d: pd.to_datetime(d["Date"]).dt.year)
+        vas = [v for _, v in year_folds(df, n_splits=5, by_cap=True,
+                                        group_by_date=True)]
+        m = pd.DataFrame([v["_y"].value_counts(normalize=True)
+                          for v in vas]).fillna(0)
+        self.assertLess(float((m.max() - m.min()).max()) * 100, 4.0)
+
+    def test_coarsen_never_leaves_a_stratum_below_n_splits(self):
+        """
+        細かい層に抜けた結果、残った粗い層のほうが分割数を割ることがある。
+        粗い層に100件あり96件が細かい層へ移れば、粗い層は4件になる。
+        StratifiedKFold はそこで警告を出して分割が偏る。
+        """
+        from tuning import _coarsen
+        rng = np.random.default_rng(0)
+        n, k = 400, 5
+        coarse = pd.Series(["a"] * n)
+        # a のうち大半を、それぞれ十分大きい細かい層へ移す。
+        # 端数だけが a に残るように作る
+        fine = pd.Series([f"f{i // 8}" for i in range(n)])
+        fine.iloc[-3:] = "tiny"            # 3件しかない層
+        out = _coarsen([coarse, fine], k)
+        sizes = out.value_counts()
+        self.assertTrue((sizes >= k).all(), f"分割数を割る層が残った: "
+                                            f"{sizes[sizes < k].to_dict()}")
+
+    def test_split_emits_no_sklearn_warning(self):
+        """分割が偏っていれば sklearn が警告を出す。出ないことを固定する。"""
+        import warnings
+        from tuning import year_folds
+        df = self._dated_df()
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UserWarning)
+            year_folds(df, n_splits=5, by_cap=True, group_by_date=True)
+
+    def test_fold_positive_rates_are_recorded(self):
+        """
+        揃っていることを実行のたびに記録する。記録が無いと、
+        実データで崩れても後から確かめられない。
+        """
+        import tuning
+        df = self._df()
+        cols = ["a"]
+        tuning.tune(df, cols, n_trials=2, n_splits=5, verbose=False)
+        cv = tuning.LAST_CV
+        self.assertEqual(len(cv["fold_pos_rate"]), 5)
+        self.assertAlmostEqual(cv["fold_pos_rate_spread"],
+                               max(cv["fold_pos_rate"]) - min(cv["fold_pos_rate"]),
+                               places=4)
+        self.assertLess(cv["fold_pos_rate_spread"], 0.02)
+
+    def test_small_years_are_merged(self):
+        """
+        StratifiedKFold は分割数未満の層で落ちる。
+        正例の少ない年（初期は決算4期分の履歴が要るぶん少ない）は隣に寄せる。
+        """
+        from tuning import year_folds
+        df = self._df(spec=((2017, 20), (2018, 60), (2019, 300), (2020, 900)))
+        folds = year_folds(df, n_splits=5, seed=0)   # 落ちなければよい
+        self.assertEqual(len(folds), 5)
+
+    def test_search_fixes_the_number_of_trees(self):
+        """
+        本数を early stopping に決めさせると、試行ごとに別の大きさの
+        モデルを比べることになる。固定して他のパラメータだけを比べる。
+        """
+        from tuning import tune, SEARCH_N_ESTIMATORS
+        best = tune(self._df(), ["a"], n_trials=2, n_splits=5, scheme="year",
+                    verbose=False)
+        self.assertEqual(best["n_estimators"], SEARCH_N_ESTIMATORS)
+        self.assertEqual(SEARCH_N_ESTIMATORS, 200)
+
+    def test_unknown_scheme_stops(self):
+        from tuning import tune
+        with self.assertRaises(SystemExit):
+            tune(self._df(), ["a"], n_trials=1, scheme="random", verbose=False)
+
+
+class TestTuningFolds(unittest.TestCase):
+    """
+    時系列分割（既定ではないが残してある）。
+    ランダム分割にすると同じ銘柄の隣接期間が訓練と検証の両方に入り、
+    必ず楽観的なパラメータが選ばれる。
+    """
+
+    def _df(self, days=1000, per_day=3):
+        rng = np.random.default_rng(0)
+        dates = pd.date_range("2018-07-01", periods=days, freq="D")
+        n = days * per_day
+        d = pd.DataFrame({"Date": np.repeat(dates, per_day),
+                          "a": rng.normal(0, 1, n)})
+        d["label"] = (rng.random(n) < 0.1).astype(int)
+        return d
+
+    def test_validation_always_follows_training(self):
+        from tuning import time_series_folds
+        folds = time_series_folds(self._df(), n_splits=5, embargo_days=60)
+        self.assertEqual(len(folds), 5)
+        for tr, va in folds:
+            t, v = pd.to_datetime(tr["Date"]), pd.to_datetime(va["Date"])
+            self.assertGreater(v.min(), t.max())
+
+    def test_embargo_is_respected(self):
+        """ラベルは先60営業日の情報を含む。隣接させると訓練が検証に食い込む。"""
+        from tuning import time_series_folds
+        folds = time_series_folds(self._df(), n_splits=5, embargo_days=60)
+        for tr, va in folds:
+            gap = (pd.to_datetime(va["Date"]).min()
+                   - pd.to_datetime(tr["Date"]).max()).days
+            self.assertGreaterEqual(gap, int(60 * 1.45) - 1)
+
+    def test_training_window_expands(self):
+        from tuning import time_series_folds
+        folds = time_series_folds(self._df(), n_splits=5, embargo_days=60)
+        sizes = [len(tr) for tr, _ in folds]
+        self.assertEqual(sizes, sorted(sizes))
+        starts = {pd.to_datetime(tr["Date"]).min() for tr, _ in folds}
+        self.assertEqual(len(starts), 1)
+
+    def test_record_of_the_search_is_not_passed_to_lightgbm(self):
+        """_cv は探索の記録。LGBMClassifier に渡すと未知の引数で落ちる。"""
+        from tuning import params_for
+        store = {"x": {"learning_rate": 0.1, "_cv": {"mean_pr_auc": 0.2}}}
+        got = params_for("x", store)
+        self.assertAlmostEqual(got["learning_rate"], 0.1)
+        self.assertFalse([k for k in got if k.startswith("_")])
+
+
+class TestReportWithoutBaselines(unittest.TestCase):
+    """
+    単変量ベースラインを廃止したあと、レポートが基準の PR-AUC を
+    baselines から引き続けていて IndexError で落ちていた。
+    基準はモデルなので experiments から引く。
+    """
+
+    def test_reference_pr_auc_comes_from_experiments(self):
+        from train_model import reference_pr_auc
+        exps = [{"preset": "technical",
+                 "results": {"test": [{"name": "LightGBM", "pr_auc": 0.13}]}}]
+        self.assertAlmostEqual(
+            reference_pr_auc(exps, {"test": []}, "LightGBM [technical]"), 0.13)
+        self.assertIsNone(
+            reference_pr_auc(exps, {"test": []}, "LightGBM [none]"))
+
+    def test_report_survives_empty_baselines(self):
+        import argparse
+        from train_model import _report
+        n = 40
+        df = pd.DataFrame({
+            "Date": pd.date_range("2020-01-01", periods=n, freq="D"),
+            "Code": ["1"] * n,
+            "label": ([0] * 35) + ([1] * 5)})
+        parts = {"train": df.iloc[:30], "test": df.iloc[30:]}
+        exps = [{"preset": "technical", "n_features": 3,
+                 "groups": ["price"],
+                 "results": {"test": [{"name": "LightGBM", "pr_auc": 0.13,
+                                       "roc_auc": 0.6, "precision@1%": 0.2,
+                                       "precision@5%": 0.2, "lift@5%": 1.5,
+                                       "base_rate": 0.1, "n": 10}]}}]
+        boot = [{"name": "LightGBM [all]", "pr_auc": 0.12, "diff": -0.01,
+                 "ci_low": -0.05, "ci_high": 0.03, "p_better": 0.3}]
+        args = argparse.Namespace(holdout_months=12, n_boot=100)
+        body = _report(df, parts, {"test": []}, exps, args, boot,
+                       "LightGBM [technical]")
+        self.assertIn("0.1300", body)
+        self.assertIn("LightGBM [technical]", body)
+
+
+class TestStratifiedEvaluation(unittest.TestCase):
+    """
+    層内で比べる枠組みを固定する。
+
+    母集団が高値更新日なので r_high は全件ほぼ100になり、層別の軸には使えない。
+    軸は時価総額（+20%上昇の起きやすさが規模で大きく違う。実測で
+    〜100億 43.9% に対し 3000億〜 18.7%）。
+    ここは stratified_eval.STRATIFY_BY を直接使い、軸を変えたら
+    テストも一緒に動くようにする。
+    """
+
+    def _frame(self, n_dates=12, n=400, seed=0):
+        from stratified_eval import STRATIFY_BY
+        rng = np.random.default_rng(seed)
+        rows = []
+        for d in pd.date_range("2020-01-31", periods=n_dates, freq="ME"):
+            x = rng.uniform(10, 95, n)
+            rows.append(pd.DataFrame({"Date": d, STRATIFY_BY: x,
+                                      "label": (rng.random(n) < x / 200).astype(int)}))
+        return pd.concat(rows, ignore_index=True)
+
+    def test_strata_are_assigned_within_each_date(self):
+        """局面で分布が動くので、日付をまたいで切ってはいけない。"""
+        from stratified_eval import assign_strata, N_STRATA
+        df = self._frame()
+        st = assign_strata(df)
+        for _, g in df.assign(_s=st).groupby("Date"):
+            self.assertEqual(g["_s"].nunique(), N_STRATA)
+
+    def test_axis_range_is_narrow_inside_a_stratum(self):
+        """層内では軸の差がほとんど無いことを確認する。これが枠組みの前提。"""
+        from stratified_eval import assign_strata, STRATIFY_BY
+        df = self._frame().assign(_s=lambda d: assign_strata(d))
+        overall = df[STRATIFY_BY].max() - df[STRATIFY_BY].min()
+        for (_, _), g in df.groupby(["Date", "_s"]):
+            self.assertLess(g[STRATIFY_BY].max() - g[STRATIFY_BY].min(), overall / 2)
+
+    def test_evaluate_within_rejects_tiny_or_degenerate_groups(self):
+        from stratified_eval import evaluate_within
+        self.assertIsNone(evaluate_within(np.array([1, 0]), np.array([1.0, 0.0])))
+        y = np.zeros(200, dtype=int)
+        self.assertIsNone(evaluate_within(y, np.random.rand(200)))
+        y[:20] = 1
+        self.assertIsNotNone(evaluate_within(y, np.random.rand(200)))
+
+    def test_lift_is_relative_to_the_stratum_base_rate(self):
+        """層ごとに正例率が違うので、PR-AUC の生値では比べられない。"""
+        from stratified_eval import evaluate_within
+        rng = np.random.default_rng(0)
+        y = (rng.random(500) < 0.3).astype(int)
+        res = evaluate_within(y, rng.random(500))
+        self.assertAlmostEqual(res["base_rate"], y.mean())
+        self.assertAlmostEqual(res["lift"], res["pr_auc"] / res["base_rate"])
+
+
+class TestEmbargoFollowsTheLabel(unittest.TestCase):
+    """
+    母集団を高値更新日にしたことでラベルが変わり、
+    確定に必要な将来日数が 180 -> 60 営業日になった。
+    エンバーゴをラベルに追随させないとリークする。
+    """
+
+    def test_embargo_matches_the_rise_horizon(self):
+        import build_dataset as B
+        from train_model import EMBARGO_DAYS
+        if B.POPULATION == "breakout":
+            self.assertEqual(EMBARGO_DAYS, B.RISE_HORIZON)
+        else:
+            self.assertEqual(EMBARGO_DAYS, B.DEFAULT_LABEL.forward_needed)
+
+    def test_embargo_is_not_hardcoded(self):
+        """固定値だと、ラベルを変えた瞬間に静かにリークする。"""
+        import inspect
+        import train_model
+        src = inspect.getsource(train_model)
+        self.assertIn("EMBARGO_DAYS = (B.RISE_HORIZON", src)
+
+
+class TestSmallFoldsAreSkipped(unittest.TestCase):
+    """
+    母集団を高値更新日に変えてサンプルが減り、
+    実際に「テスト0件」のフォールドが出た。
+    少数サンプルの PR-AUC は勝敗の符号がほぼ運で決まるので、評価に入れない。
+    """
+
+    def test_thresholds_are_set(self):
+        import walkforward as W
+        self.assertGreaterEqual(W.MIN_TEST_ROWS, 100)
+        self.assertGreaterEqual(W.MIN_TEST_POSITIVES, 10)
+
+    def test_empty_fold_produces_no_rows(self):
+        import walkforward as W
+        import features as Fx
+        df = pd.DataFrame({
+            "Date": pd.to_datetime(["2020-01-31"] * 10),
+            "Code": [f"{i}" for i in range(10)],
+            "r_high": np.linspace(10, 90, 10),
+            "volume_trend": np.ones(10),
+            "label": [0] * 9 + [1],
+        })
+        for c in ("ROE_q0", "credit_ratio", "eps_growth_q0", "market_cap",
+                  "op_margin_q0", "progress_vs_base", "sales_growth_q0",
+                  "tv_ma20"):
+            df[c] = 1.0
+        fold = W.Fold(1, "2020-01-01", "2020-01-31", "2020-02-01", "2020-02-28")
+        Fx.GROUPS["_t"] = ["r_high"]
+        Fx.PRESETS["_t"] = ["_t"]
+        try:
+            res = W.run(df, ["_t"], [fold])
+        finally:
+            del Fx.GROUPS["_t"], Fx.PRESETS["_t"]
+        self.assertEqual(res["folds"], [])
+
+
+
+class TestOutcomeVsSize(unittest.TestCase):
+    """
+    「モデルは大型の高値更新を買うだけを超えているか」を測る側の不変条件。
+
+    ここが崩れると、規模を選んでいるだけのものを実力と読んでしまう。
+    """
+
+    def setUp(self):
+        import outcome_check as O
+        self.O = O
+
+    @staticmethod
+    def _frame(n=600, seed=0):
+        rng = np.random.default_rng(seed)
+        dates = (pd.to_datetime("2025-01-06")
+                 + pd.to_timedelta(rng.integers(0, 60, n), unit="D"))
+        return pd.DataFrame({
+            "Date": dates,
+            "cap_band": rng.integers(0, 5, n).astype(float),
+            "log_market_cap": rng.normal(6, 1.2, n),
+            "score": rng.normal(size=n),
+            "ref_end": rng.normal(0.03, 0.25, n),
+        })
+
+    def test_band_selection_keeps_the_population_mix(self):
+        """
+        帯ごとに上位k%を取ると、選ばれた集合の帯構成が母集団と同じになること。
+        揃っていないと「大きい帯を多めに取った」効果が残る。
+        """
+        O = self.O
+        t = self._frame()
+        top = O.take_top_by_band(t, "score", 20.0)
+        want = t["cap_band"].value_counts(normalize=True).sort_index()
+        got = top["cap_band"].value_counts(normalize=True).sort_index()
+        for b in want.index:
+            self.assertAlmostEqual(got[b], want[b], delta=0.05,
+                                   msg=f"帯{b} の比率がずれている")
+
+    def test_band_selection_drops_rows_without_a_band(self):
+        """帯が欠測の行は揃えようがないので選ばない。"""
+        O = self.O
+        t = self._frame()
+        t.loc[t.index[:50], "cap_band"] = np.nan
+        top = O.take_top_by_band(t, "score", 50.0)
+        self.assertTrue(top["cap_band"].notna().all())
+
+    def test_paired_vs_itself_is_zero(self):
+        """
+        モデルのスコアがその規則そのものなら、差は0でなければならない。
+        0 にならないなら、2つの選び方が同じ行集合を見ていない。
+        """
+        O = self.O
+        t = self._frame()
+        t["score"] = t["log_market_cap"]
+        got = O.paired_vs(t, "score", "log_market_cap", True, 5.0, False,
+                          n_boot=80, seed=0)
+        self.assertAlmostEqual(got["diff"], 0.0, places=6)
+        self.assertAlmostEqual(got["ci"][0], 0.0, places=6)
+        self.assertAlmostEqual(got["ci"][1], 0.0, places=6)
+
+    def test_edge_ci_straddles_zero_for_a_useless_score(self):
+        """スコアが実収益と無関係なら、区間は0をまたぐこと。"""
+        O = self.O
+        t = self._frame(n=1200, seed=3)
+        e = O.edge_stats(t, "score", 5.0, by_band=False, n_boot=200, seed=0)
+        self.assertLessEqual(e["ci"][0], 0.0)
+        self.assertGreaterEqual(e["ci"][1], 0.0)
+        self.assertFalse(e["significant"])
+
+    def test_edge_ci_finds_a_real_edge(self):
+        """スコアが本当に当てているなら、区間は0を含まないこと。"""
+        O = self.O
+        t = self._frame(n=1200, seed=4)
+        t["ref_end"] = 0.03 + 0.2 * t["score"] + np.random.default_rng(5).normal(0, 0.1, len(t))
+        e = O.edge_stats(t, "score", 5.0, by_band=False, n_boot=200, seed=0)
+        self.assertGreater(e["ci"][0], 0.0)
+        self.assertTrue(e["significant"])
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
+

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import CompareView from './views/CompareView.jsx';
 import TimeMachineView from './views/TimeMachineView.jsx';
 import SimulatorView from './views/SimulatorView.jsx';
+import PredictionView from './views/PredictionView.jsx';
 import AddStockModal from './components/AddStockModal.jsx';
 import { computeScores } from './lib/scoring.js';
 import { SERIES_COLORS, fmtDateTime } from './lib/format.js';
@@ -9,8 +10,10 @@ import {
   loadDataset, loadManualStocks, saveManualStocks, loadVisibility, saveVisibility,
   manualStockFromForm, mergeStocks,
 } from './lib/store.js';
+import { loadPredictions, loadHistory } from './lib/predictions.js';
 
 const TABS = [
+  { id: 'prediction', label: 'ブレイク予測' },
   { id: 'compare', label: '8軸オクタゴン比較' },
   { id: 'timemachine', label: 'タイムマシーン' },
   { id: 'simulator', label: 'What-If シミュレーター' },
@@ -21,7 +24,10 @@ export default function App() {
   const [loadError, setLoadError] = useState(null);
   const [loading, setLoading] = useState(true);
   const [manual, setManual] = useState(() => loadManualStocks());
-  const [tab, setTab] = useState('compare');
+  const [pred, setPred] = useState(null);
+  const [predError, setPredError] = useState(null);
+  const [history, setHistory] = useState({ entries: [] });
+  const [tab, setTab] = useState('prediction');
   const [visibleIds, setVisibleIds] = useState(() => new Set());
   const [selectedId, setSelectedId] = useState(null);
   const [showAdd, setShowAdd] = useState(false);
@@ -32,6 +38,16 @@ export default function App() {
       .then((d) => { if (!cancelled) setDataset(d); })
       .catch((e) => { if (!cancelled) setLoadError(e.message); })
       .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  // 予測データは別ファイル。読めなくても他のタブは動かす
+  useEffect(() => {
+    let cancelled = false;
+    loadPredictions()
+      .then((d) => { if (!cancelled) setPred(d); })
+      .catch((e) => { if (!cancelled) setPredError(e.message); });
+    loadHistory().then((h) => { if (!cancelled) setHistory(h); });
     return () => { cancelled = true; };
   }, []);
 
@@ -83,6 +99,27 @@ export default function App() {
     });
     setSelectedId(stock.id);
     setShowAdd(false);
+  }, []);
+
+  /**
+   * 予測タブで見つけた候補を、オクタゴン側で見られるように手入力銘柄として足す。
+   *
+   * 予測パイプラインが持っている実測値をそのまま渡す。
+   * ここで値を作らないこと（作ると画面の数字の出どころが分からなくなる）。
+   */
+  const sendToOctagon = useCallback((stock) => {
+    setManual((prev) => {
+      if (prev.some((s) => s.id === stock.id)) return prev;
+      const next = [...prev, stock];
+      saveManualStocks(next);
+      return next;
+    });
+    setVisibleIds((prev) => {
+      const next = new Set(prev).add(stock.id);
+      saveVisibility([...next]);
+      return next;
+    });
+    setSelectedId(stock.id);
   }, []);
 
   const deleteManual = useCallback((id) => {
@@ -153,6 +190,30 @@ export default function App() {
               <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ 銘柄を追加</button>
             </div>
           </div>
+        )}
+
+        {tab === 'prediction' && (
+          predError ? (
+            <div className="banner warn">
+              <span>⚠</span>
+              <div>
+                <strong>ブレイク予測データを読み込めませんでした。</strong>
+                <div style={{ marginTop: 4 }}>{predError}</div>
+                <div style={{ marginTop: 8 }}>
+                  <code>Predict Breakouts</code> ワークフローを実行すると
+                  <code>public/data/predictions.json</code> が生成されます。
+                </div>
+              </div>
+            </div>
+          ) : !pred ? (
+            <div className="empty">予測データを読み込んでいます…</div>
+          ) : (
+            <PredictionView
+              data={pred} history={history}
+              onSendToOctagon={sendToOctagon}
+              sentIds={new Set(manual.map((s) => s.id))}
+            />
+          )
         )}
 
         {!loading && rows.length > 0 && (

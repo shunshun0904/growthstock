@@ -1,0 +1,57 @@
+name: Probe Data Availability
+
+# モデル構築の前提となるデータ量 (銘柄数・遡及範囲・一括取得の可否) を実測する。
+on:
+  workflow_dispatch:
+  # workflow_dispatch はデフォルトブランチにファイルが無いと呼べないため、
+  # 調査用ブランチでは push でも起動できるようにしておく
+  push:
+    branches: ['claude/breakout-model']
+    # research/** にすると rebuild_run_id.txt を触るたびに発火し、
+    # API 呼び出しを無駄に使う。probe 関連のファイルだけに絞る。
+    paths: ['research/probe_*.py', '.github/workflows/probe.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Probe
+        env:
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+        run: |
+          # 新しいプローブを先に回す。後ろに置くと、先行するプローブが
+          # 落ちたときに（既定シェルは bash -e）そこで止まり、
+          # 今回測りたいものが測れないまま終わる
+          python3 research/probe_market_data.py
+          python3 research/probe_fins_fields.py
+          python3 research/probe_universe.py
+          python3 research/probe_boundary.py
+      - name: Commit field report
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A docs/DATA_FIELDS.md docs/MARKET_DATA.md
+          if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
+          git commit -m "chore(research): データ取得可否の実測結果を更新"
+          for i in 1 2 3 4; do
+            if git push; then exit 0; fi
+            sleep $((2 ** i)); git pull --rebase
+          done
+          exit 1
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: probe-result
+          path: |
+            research/probe_*.json
+            docs/DATA_FIELDS.md
+            docs/MARKET_DATA.md
+          if-no-files-found: warn

@@ -9,6 +9,9 @@ import {
   scoreTechnical, scoreVolume, scoreCreditRatio, scoreProgress,
   liquidityTier, institutionalLevel, priceZone, computeScores, AXES,
 } from '../src/lib/scoring.js';
+import {
+  candidateToStock, marketTone, bandLabel, bandColor,
+} from '../src/lib/predictions.js';
 
 const close = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-9, msg ?? `${a} != ${b}`);
 
@@ -247,4 +250,43 @@ test('§6.1 性能: 1000銘柄ぶんの再計算が16ms以内', () => {
   trial();  // JIT ウォームアップ
   const best = Math.min(...Array.from({ length: 5 }, trial));
   assert.ok(best < 16, `1000件の再計算に最短でも ${best.toFixed(1)}ms かかった`);
+});
+
+/* ------------------------------------------------------------------ *
+ * ブレイク予測タブの変換
+ * ------------------------------------------------------------------ */
+
+test('candidateToStock は取れていない指標を 0 で埋めない', () => {
+  // 0 で埋めると「実測でゼロ」と「データが無い」の区別が消える。
+  // 8軸スコアは null の軸を平均から外す設計なので、ここが崩れると
+  // 存在しない評価をでっち上げることになる。
+  const s = candidateToStock({
+    jqCode: '12345', code: '1234', name: 'テスト', date: '2026-09-10',
+    rankInDay: 1, close: 1000, rHigh: 99.2, tradingValue: 3.4,
+    roe: null, opMargin: undefined, epsGrowth: 12.5, salesGrowth: null,
+  });
+  assert.equal(s.metrics.price, 1000);
+  assert.equal(s.metrics.epsGrowth, 12.5);
+  assert.equal(s.metrics.roe, null);
+  assert.equal(s.metrics.opMargin, null);
+  assert.equal(s.metrics.salesGrowth, null);
+  assert.equal(s.origin, 'prediction');
+  assert.equal(s.id, 'pred:12345');
+});
+
+test('marketTone は地合い寄与の中央値で向きを決める', () => {
+  const mk = (v) => ({ contrib: { marketContrib: v } });
+  assert.equal(marketTone([mk(-0.3), mk(-0.2), mk(-0.1)]).label, '向かい風');
+  assert.equal(marketTone([mk(0.3), mk(0.2), mk(0.1)]).label, '追い風');
+  assert.equal(marketTone([mk(0.01), mk(0.0), mk(-0.01)]).label, '中立');
+  assert.equal(marketTone([]), null);
+  // 寄与が取れていない候補は無視する（0 として数えない）
+  assert.equal(marketTone([mk(null), mk(-0.3), mk(-0.2), mk(-0.25)]).label, '向かい風');
+});
+
+test('bandLabel / bandColor は帯が無いとき落ちない', () => {
+  assert.equal(bandLabel(undefined), '—');
+  assert.equal(bandLabel(9), '最上位');
+  assert.equal(bandLabel(0), '下位');
+  assert.ok(bandColor(null).length > 0);
 });

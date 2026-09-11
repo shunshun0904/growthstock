@@ -1,0 +1,7 @@
+no
+# 1行目が "yes" のときだけ Optuna 探索を実行する。
+# それ以外なら research/lgbm_params.json の探索済みパラメータを使う。
+#
+# ボラ正規化ラベル（VOL_NORM_K=1.2）での探索は実施済み。
+# 結果は research/lgbm_params.json（6キー）。
+# 旧ラベル（固定+20%）の探索結果は research/lgbm_params_fixed20.json に退避。

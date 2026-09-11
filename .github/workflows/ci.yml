@@ -27,6 +27,16 @@ jobs:
       - name: データパイプラインの単体テスト
         run: python3 tests/test_fetcher.py
 
+      # research/ 配下は pandas / scikit-learn が要る。
+      # ここを回していなかったため、特徴量の列がデータセットから
+      # 黙って落ちる不具合を実際の学習実行まで検出できなかった。
+      - name: 研究コードの単体テスト
+        run: |
+          pip install -r research/requirements.txt
+          python3 tests/test_dataset.py
+          python3 tests/test_model.py
+          python3 tests/test_data_store.py
+
       - name: ビルド
         run: npm run build
 

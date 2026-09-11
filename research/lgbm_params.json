@@ -1,0 +1,314 @@
+{
+  "all": {
+    "objective": "binary",
+    "boosting_type": "gbdt",
+    "n_estimators": 200,
+    "random_state": 0,
+    "n_jobs": -1,
+    "verbose": -1,
+    "learning_rate": 0.013848594507182484,
+    "num_leaves": 127,
+    "min_child_samples": 68,
+    "subsample": 0.8595580780775716,
+    "colsample_bytree": 0.8158294510312332,
+    "reg_alpha": 0.11521756627710303,
+    "reg_lambda": 2.6992094233515285e-08,
+    "subsample_freq": 1,
+    "_cv": {
+      "scheme": "year_cap_date",
+      "model": "classifier",
+      "n_estimators": 200,
+      "n_splits": 5,
+      "mean_pr_auc": 0.4016,
+      "std": 0.0285,
+      "fold_scores": [
+        0.3718,
+        0.4465,
+        0.3853,
+        0.3812,
+        0.4233
+      ],
+      "mean_roc_auc": 0.7186,
+      "roc_std": 0.0092,
+      "fold_roc": [
+        0.7053,
+        0.7335,
+        0.7207,
+        0.714,
+        0.7194
+      ],
+      "base_rate": 0.1872,
+      "fold_pos_rate": [
+        0.192,
+        0.1953,
+        0.1763,
+        0.1806,
+        0.192
+      ],
+      "fold_pos_rate_spread": 0.019,
+      "fold_cap_spread_pt": 2.038,
+      "n_trials": 50
+    },
+    "_n_features": 151
+  },
+  "all_no_sector_index": {
+    "objective": "binary",
+    "boosting_type": "gbdt",
+    "n_estimators": 200,
+    "random_state": 0,
+    "n_jobs": -1,
+    "verbose": -1,
+    "learning_rate": 0.033049793209617005,
+    "num_leaves": 107,
+    "min_child_samples": 87,
+    "subsample": 0.8884805476946375,
+    "colsample_bytree": 0.850638979330827,
+    "reg_alpha": 0.0042888600778675946,
+    "reg_lambda": 3.566025853290545e-06,
+    "subsample_freq": 1,
+    "_cv": {
+      "scheme": "year_cap_date",
+      "model": "classifier",
+      "n_estimators": 200,
+      "n_splits": 5,
+      "mean_pr_auc": 0.4008,
+      "std": 0.0217,
+      "fold_scores": [
+        0.3778,
+        0.4374,
+        0.3899,
+        0.386,
+        0.4127
+      ],
+      "mean_roc_auc": 0.7197,
+      "roc_std": 0.0094,
+      "fold_roc": [
+        0.7081,
+        0.7322,
+        0.7265,
+        0.7097,
+        0.7221
+      ],
+      "base_rate": 0.1872,
+      "fold_pos_rate": [
+        0.192,
+        0.1953,
+        0.1763,
+        0.1806,
+        0.192
+      ],
+      "fold_pos_rate_spread": 0.019,
+      "fold_cap_spread_pt": 2.038,
+      "n_trials": 50
+    },
+    "_n_features": 147
+  },
+  "all_no_market": {
+    "objective": "binary",
+    "boosting_type": "gbdt",
+    "n_estimators": 200,
+    "random_state": 0,
+    "n_jobs": -1,
+    "verbose": -1,
+    "learning_rate": 0.09238243156251386,
+    "num_leaves": 82,
+    "min_child_samples": 13,
+    "subsample": 0.8814186386305604,
+    "colsample_bytree": 0.9194508375788643,
+    "reg_alpha": 8.439613386590763,
+    "reg_lambda": 2.342348171787987e-08,
+    "subsample_freq": 1,
+    "_cv": {
+      "scheme": "year_cap_date",
+      "model": "classifier",
+      "n_estimators": 200,
+      "n_splits": 5,
+      "mean_pr_auc": 0.3337,
+      "std": 0.0145,
+      "fold_scores": [
+        0.3271,
+        0.3423,
+        0.3341,
+        0.3109,
+        0.354
+      ],
+      "mean_roc_auc": 0.672,
+      "roc_std": 0.006,
+      "fold_roc": [
+        0.6658,
+        0.6814,
+        0.6765,
+        0.6682,
+        0.6681
+      ],
+      "base_rate": 0.1872,
+      "fold_pos_rate": [
+        0.192,
+        0.1953,
+        0.1763,
+        0.1806,
+        0.192
+      ],
+      "fold_pos_rate_spread": 0.019,
+      "fold_cap_spread_pt": 2.038,
+      "n_trials": 50
+    },
+    "_n_features": 140
+  },
+  "all__ltr": {
+    "objective": "binary",
+    "boosting_type": "gbdt",
+    "n_estimators": 200,
+    "random_state": 0,
+    "n_jobs": -1,
+    "verbose": -1,
+    "learning_rate": 0.08063649209278179,
+    "num_leaves": 126,
+    "min_child_samples": 51,
+    "subsample": 0.9143510000151472,
+    "colsample_bytree": 0.92143829988084,
+    "reg_alpha": 7.806249102834744e-05,
+    "reg_lambda": 0.16901582746783897,
+    "subsample_freq": 1,
+    "_cv": {
+      "scheme": "year_cap_date",
+      "model": "ranker",
+      "n_estimators": 200,
+      "n_splits": 5,
+      "mean_pr_auc": 0.3273,
+      "std": 0.0207,
+      "fold_scores": [
+        0.3203,
+        0.3643,
+        0.3324,
+        0.3032,
+        0.3165
+      ],
+      "mean_roc_auc": 0.6655,
+      "roc_std": 0.0131,
+      "fold_roc": [
+        0.6613,
+        0.6808,
+        0.6809,
+        0.6556,
+        0.649
+      ],
+      "base_rate": 0.1872,
+      "fold_pos_rate": [
+        0.192,
+        0.1953,
+        0.1763,
+        0.1806,
+        0.192
+      ],
+      "fold_pos_rate_spread": 0.019,
+      "fold_cap_spread_pt": 2.038,
+      "n_trials": 50
+    },
+    "_n_features": 151
+  },
+  "all_no_sector_index__ltr": {
+    "objective": "binary",
+    "boosting_type": "gbdt",
+    "n_estimators": 200,
+    "random_state": 0,
+    "n_jobs": -1,
+    "verbose": -1,
+    "learning_rate": 0.16797099751421612,
+    "num_leaves": 126,
+    "min_child_samples": 18,
+    "subsample": 0.9751942151551729,
+    "colsample_bytree": 0.7105819477462382,
+    "reg_alpha": 2.0752783517583747e-05,
+    "reg_lambda": 0.0015890857143294576,
+    "subsample_freq": 1,
+    "_cv": {
+      "scheme": "year_cap_date",
+      "model": "ranker",
+      "n_estimators": 200,
+      "n_splits": 5,
+      "mean_pr_auc": 0.3315,
+      "std": 0.0206,
+      "fold_scores": [
+        0.3105,
+        0.3619,
+        0.3456,
+        0.308,
+        0.3316
+      ],
+      "mean_roc_auc": 0.6635,
+      "roc_std": 0.0133,
+      "fold_roc": [
+        0.6499,
+        0.6784,
+        0.6806,
+        0.6515,
+        0.6572
+      ],
+      "base_rate": 0.1872,
+      "fold_pos_rate": [
+        0.192,
+        0.1953,
+        0.1763,
+        0.1806,
+        0.192
+      ],
+      "fold_pos_rate_spread": 0.019,
+      "fold_cap_spread_pt": 2.038,
+      "n_trials": 50
+    },
+    "_n_features": 147
+  },
+  "all_no_market__ltr": {
+    "objective": "binary",
+    "boosting_type": "gbdt",
+    "n_estimators": 200,
+    "random_state": 0,
+    "n_jobs": -1,
+    "verbose": -1,
+    "learning_rate": 0.09076163746907183,
+    "num_leaves": 87,
+    "min_child_samples": 55,
+    "subsample": 0.938543740811302,
+    "colsample_bytree": 0.900389911575529,
+    "reg_alpha": 0.00018605809471528234,
+    "reg_lambda": 0.010640479486175492,
+    "subsample_freq": 1,
+    "_cv": {
+      "scheme": "year_cap_date",
+      "model": "ranker",
+      "n_estimators": 200,
+      "n_splits": 5,
+      "mean_pr_auc": 0.3032,
+      "std": 0.0169,
+      "fold_scores": [
+        0.2928,
+        0.3313,
+        0.2828,
+        0.2973,
+        0.312
+      ],
+      "mean_roc_auc": 0.6466,
+      "roc_std": 0.0135,
+      "fold_roc": [
+        0.6409,
+        0.6714,
+        0.6396,
+        0.6321,
+        0.6489
+      ],
+      "base_rate": 0.1872,
+      "fold_pos_rate": [
+        0.192,
+        0.1953,
+        0.1763,
+        0.1806,
+        0.192
+      ],
+      "fold_pos_rate_spread": 0.019,
+      "fold_cap_spread_pt": 2.038,
+      "n_trials": 50
+    },
+    "_n_features": 140
+  }
+}

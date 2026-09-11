@@ -1,0 +1,153 @@
+name: Update Data Store
+
+# 生データを GitHub Release (タグ data-raw) に保存し、差分だけを取得する。
+#
+# 全期間の取得は約2.5時間かかるため、毎回取り直すのは現実的でない。
+# 保存済みを取り出して「まだ取っていない営業日」だけを取得し、書き戻す。
+#   初回        : 約2.5時間
+#   日次更新    : 約5秒（1営業日ぶん）
+#   定義の再検証: 0秒（取得不要）
+on:
+  workflow_dispatch:
+    inputs:
+      from:
+        description: '取得開始日 (省略時は 2016-10-01)'
+        required: false
+        default: '2016-10-01'
+      to:
+        description: '取得終了日 (省略時は今日)'
+        required: false
+        default: ''
+      reset:
+        description: '取り直す種別（スペース区切り。例: fins）。取得する列を増やしたとき用'
+        required: false
+        default: ''
+  schedule:
+    # 平日 21:30 JST (= 12:30 UTC)。日次データが出そろった後に差分を取り込む
+    - cron: '30 12 * * 1-5'
+  # workflow_dispatch はデフォルトブランチにファイルが無いと呼べない。
+  # 調査用ブランチからは、このファイルを更新して起動する。
+  # 1行目に --reset に渡す種別を書く（空なら通常の差分取得）
+  push:
+    branches: ['claude/breakout-model']
+    paths: ['research/refetch_request.txt']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-data-store
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: data-raw
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r research/requirements.txt
+
+      - name: Ensure release exists
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" \
+              --title "J-Quants 生データ" \
+              --notes "J-Quants API V2 から取得した日次株価・財務・信用残・TOPIX。年別 parquet と manifest.json。差分取得の状態は manifest.json が持つ。" \
+              --latest=false
+            echo "リリースを作成しました"
+          else
+            echo "リリースは既にあります"
+          fi
+
+      - name: Download stored data
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p research/_data
+          # 初回はアセットが無いので失敗を許容する
+          gh release download "$RELEASE_TAG" --dir research/_data --clobber || \
+            echo "保存済みデータなし（初回実行）"
+          ls -lh research/_data || true
+
+      # master は master.parquet として1ファイルで持つ。
+      # master_YYYY.parquet は、日付ループの catch-all バグで
+      # 信用残のデータが master の名前で書かれてしまったもの。
+      # 保存側にも残っているので消す。
+      - name: Remove stray master_YYYY files
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          stray=(research/_data/master_[0-9]*.parquet)
+          if [ ${#stray[@]} -eq 0 ]; then
+            echo "不要な master_* はありません"; exit 0
+          fi
+          for f in "${stray[@]}"; do
+            n=$(basename "$f")
+            echo "削除: $n"
+            rm -f "$f"
+            gh release delete-asset "$RELEASE_TAG" "$n" --yes || \
+              echo "  (Release 側には無し)"
+          done
+
+      - name: Fetch missing days
+        env:
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+        run: |
+          TO="${{ inputs.to }}"
+          [ -z "$TO" ] && TO=$(date -u +%Y-%m-%d)
+          FROM="${{ inputs.from }}"
+          [ -z "$FROM" ] && FROM="2016-10-01"
+          RESET=""
+          REQ="${{ inputs.reset }}"
+          # push 起動のときは inputs が空なので、要求ファイルの1行目を読む
+          if [ -z "$REQ" ] && [ -f research/refetch_request.txt ]; then
+            REQ=$(grep -v '^#' research/refetch_request.txt | head -1 | tr -d '\r')
+          fi
+          # 想定外の値を --reset に渡さない
+          for k in $REQ; do
+            case "$k" in
+              bars|fins|margin|topix|indices|master) ;;
+              *) echo "未知の種別: $k"; exit 1 ;;
+            esac
+          done
+          [ -n "$REQ" ] && RESET="--reset $REQ"
+          echo "reset 対象: ${REQ:-なし}"
+          python3 research/jq_bulk.py --incremental $RESET \
+            --from "$FROM" --to "$TO" 2>&1 | tee fetch.log
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          files=(research/_data/*.parquet research/_data/manifest.json)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "アップロードするファイルがありません"; exit 1
+          fi
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
+          echo "${#files[@]} ファイルをアップロードしました"
+
+      - name: Summary
+        run: |
+          {
+            echo "## 差分取得"
+            echo '```'
+            tail -40 fetch.log
+            echo '```'
+            echo "## 保存済みファイル"
+            echo '```'
+            ls -lh research/_data
+            echo '```'
+            echo ""
+            echo "保存先: [Release \`$RELEASE_TAG\`](https://github.com/${{ github.repository }}/releases/tag/$RELEASE_TAG)"
+          } >> "$GITHUB_STEP_SUMMARY"

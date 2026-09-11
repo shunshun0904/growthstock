@@ -1,0 +1,321 @@
+name: Rebuild From Stored Data
+
+# 保存済みの生データからデータセット・ラベル検証データ・ビューアを作り直す。
+# 取得をやり直さずに後段だけを回せるので、ラベル定義を変えての再検証が即座にできる。
+#
+# 生データの取得元は2通り:
+#   source=release  … GitHub Release (タグ data-raw)。既定。update-data.yml が作る
+#   source=artifact … 指定した実行の artifact。Release ができる前の移行用
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: '生データの取得元'
+        type: choice
+        options: [release, artifact]
+        default: release
+      run_id:
+        description: 'source=artifact のとき、artifact を持つ実行のID'
+        required: false
+      train:
+        description: '学習・評価まで実行する（既定は EDA まで）'
+        type: choice
+        options: ['no', 'yes']
+        default: 'no'
+  push:
+    branches: ['claude/breakout-model']
+    paths: ['research/rebuild_run_id.txt']
+
+permissions:
+  contents: write
+  actions: read
+
+# 既定の run シェルは `bash -e` で pipefail が入らない。
+# 全ステップが `python3 ... 2>&1 | tee x.log` の形なので、
+# スクリプトが落ちても tee の終了コード0が採用され、ステップは成功扱いになる。
+# 実際 EDA が例外で落ちたまま「成功」で通り、結果が更新されないことに気づけなかった。
+# `shell: bash` を指定すると GitHub は `bash --noprofile --norc -eo pipefail` を使う。
+defaults:
+  run:
+    shell: bash
+
+# 同時に走らせない。
+# 実際に2つのランが並行し、古いほうが後に終わって
+# 新しい結果を上書きしかけた（両方が docs/*.md を同じブランチにコミットするため）。
+# 新しいほうを優先し、古いほうは打ち切る。
+concurrency:
+  group: rebuild-from-stored-data
+  cancel-in-progress: true
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    # 母集団が 12,484 -> 22,909 に増え、探索も 2プリセット × 2モデル
+    # （pointwise / ranker）になったので 90分では足りない。
+    # 途中で切られると探索結果が保存されず、API も CI 時間も無駄になる。
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r research/requirements.txt
+
+      - name: Resolve run id
+        id: rid
+        run: |
+          if [ -n "${{ inputs.run_id }}" ]; then
+            echo "id=${{ inputs.run_id }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "id=$(tr -d '[:space:]' < research/rebuild_run_id.txt)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download raw data (release)
+        if: inputs.source != 'artifact'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p research/_data
+          gh release download data-raw --dir research/_data --clobber
+
+      - name: Download raw data (artifact)
+        if: inputs.source == 'artifact'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: raw-*
+          merge-multiple: true
+          path: research/_data
+          run-id: ${{ steps.rid.outputs.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - run: ls -lh research/_data
+
+      - name: Compare label definitions
+        run: python3 research/compare_label_defs.py 2>&1 | tee compare.log
+      - name: Build dataset
+        run: python3 research/build_dataset.py 2>&1 | tee build.log
+
+      # 決算特徴量が0勝9敗だったが、ROE_chg は94.4%が欠測だった。
+      # 「予測力が無い」のか「値が入っていない」のかを切り分ける。
+      - name: Fundamental coverage
+        run: python3 research/fundamental_coverage.py 2>&1 | tee coverage.log
+
+      # 学習の前に特徴量の EDA。欠損・異常値・分布・冗長性を集計する。
+      # 描画はしない（データセットは CI 側にしかないので、集計だけ出して手元で描く）
+      - name: EDA stats
+        run: python3 research/eda_stats.py 2>&1 | tee eda.log
+
+      # 集計をそのまま読むページに組む。手で書くと作り直しのたびに書き直しになる
+      - name: EDA report
+        run: python3 research/eda_report.py 2>&1 | tee eda_report.log
+
+      # 特徴量の意味の一覧。features.py から作るので、列を足せば一緒に増える
+      - name: Feature dictionary
+        run: python3 research/feature_dict.py 2>&1 | tee dict.log
+
+      # PER/PBR/ROE/ROA は割り算で作るので分母が小さいと発散する。
+      # 値が壊れたまま学習しないよう、モデルに入れる前に検査する。
+      - name: Validate metrics
+        run: python3 research/validate_metrics.py 2>&1 | tee validate.log
+
+      # モデルを使わないデータ診断なので学習ゲートの外に置く。
+      # 学習し直さずに測り方を検証できるようにするため
+      # （閾値が母集団に追随しておらず、1,739日のうち14日しか
+      #   使えていないことに長く気づけなかった）
+      - name: Within-date signal
+        run: python3 research/within_date_signal.py 2>&1 | tee within.log
+
+      - name: Export label samples
+        run: python3 research/export_label_samples.py 2>&1 | tee labels.log
+
+      # ハイパーパラメータ探索は既定では行わない。
+      # 特徴量を試している段階では毎回6分かかるのが無駄で、
+      # 探索済みのパラメータ（research/lgbm_params.json）を使い回す。
+      # 運用開始前にあらためて探索する。
+      #
+      # 実行したいときは research/tune_request.txt の1行目を "yes" にする。
+      # 探索期間はホールドアウト（直近1年）より前に限る。run_tuning.py が
+      # train_model.holdout_bounds から機械的に導くので、学習側と必ず揃う。
+      # ここを間違えると以降の評価が全部無効になる。
+      - name: Tune LightGBM (opt-in)
+        run: |
+          # pipefail 下では head が先に閉じて grep が SIGPIPE で落ちうる。
+          # ここは「読めなければ no」でよいので失敗を無害化する
+          REQ=$(grep -v '^#' research/tune_request.txt 2>/dev/null | head -1 | tr -d '[:space:]' || true)
+          if [ "$REQ" = "yes" ]; then
+            # 層は「年の束 × 時価総額帯 × ラベル」、分割は日付単位。
+            # 行単位で切ると、ある日の7銘柄が訓練側と検証側に分かれる。
+            # 同じ日の銘柄は地合いを共有するので、分けると検証が楽になり
+            # CV が楽観側に出る（LTR では答えの一部を訓練で見ることになる）。
+            # 引き換えに層の揃いは緩くなる（年構成 0.06pt -> 1.7pt）。
+            # 日付をまたげない以上これが下限で、リークを残すよりよい
+            PRESETS=$(grep -v '^#' research/tune_presets.txt | tr '\n' ' ')
+            python3 research/run_tuning.py --n-trials 50 --cv year_cap_date \
+              --features $PRESETS --n-splits 5 2>&1 | tee tune.log
+            # LTR は目的関数が違うので別に探索する（鍵も __ltr で分ける）。
+            # 探索の指標は pointwise と同じ PR-AUC にしてある。
+            # 指標まで変えると「順位を直接最適化したから良くなった」のか
+            # 「別の指標で選んだから良くなった」のか分からなくなる
+            LTR=$(grep -v '^#' research/ltr_request.txt 2>/dev/null | head -1 | tr -d '[:space:]' || true)
+            if [ "$LTR" = "yes" ]; then
+              python3 research/run_tuning.py --n-trials 50 --cv year_cap_date \
+                --model ranker --features $PRESETS --n-splits 5 2>&1 | tee -a tune.log
+            fi
+          else
+            echo "探索は行わない（research/lgbm_params.json を使用）" | tee tune.log
+            python3 -c "import json,os;p='research/lgbm_params.json';d=json.load(open(p)) if os.path.exists(p) else {};print(f'保存済み: {len(d)}プリセット')" | tee -a tune.log
+          fi
+
+      # 母集団・ラベル設計の掃引。モデルを19回学習するので、
+      # 学習ゲートと同じく既定では行わない。
+      # research/sweep_request.txt の1行目を "yes" にすると走る。
+      #
+      # 52週高値の設計はデータセットごと別に要る。ここで作ってから掃引する。
+      # 既定のデータセット（dataset.parquet）は上書きしない
+      - name: Sweep population and label design (opt-in)
+        run: |
+          REQ=$(grep -v '^#' research/sweep_request.txt 2>/dev/null | head -1 | tr -d '[:space:]' || true)
+          if [ "$REQ" = "yes" ]; then
+            SWEEP_HIGH_WINDOW=245 python3 research/build_dataset.py \
+              --out research/_data/dataset_w245.parquet 2>&1 | tail -20
+            # 上の実行で dataset_meta.json が52週のもので上書きされる。
+            # 後段（EDA ページなど）が既定の meta を読むので必ず戻す
+            python3 research/build_dataset.py 2>&1 | tail -5
+            python3 research/sweep_design.py 2>&1 | tee sweep.log
+          else
+            echo "設計の掃引は行わない（research/sweep_request.txt が no）" | tee sweep.log
+          fi
+
+      # 学習は既定では行わない。
+      # EDA で特徴量の欠損・異常値を確認し、利用者が明示的に許可してから走らせる。
+      # 特徴量がおかしいまま学習しても結果が無駄になり、EDA を先に出す意味が消える。
+      #
+      # 許可の与え方は2通り:
+      #   ・workflow_dispatch の train を yes にする（その1回だけ）
+      #   ・research/train_request.txt の1行目を "yes" にする（push 起動でも効く）
+      - name: Resolve train gate
+        id: gate
+        run: |
+          REQ="${{ inputs.train }}"
+          if [ -z "$REQ" ]; then
+            REQ=$(grep -v '^#' research/train_request.txt 2>/dev/null | head -1 | tr -d '[:space:]' || true)
+          fi
+          if [ "$REQ" = "yes" ]; then
+            echo "train=yes" >> "$GITHUB_OUTPUT"
+            echo "学習・評価まで実行する"
+          else
+            echo "train=no" >> "$GITHUB_OUTPUT"
+            echo "学習は行わない（EDA まで）。許可するには train=yes か research/train_request.txt の1行目を yes にする"
+          fi
+
+      - name: Train and evaluate
+        if: steps.gate.outputs.train == 'yes'
+        run: |
+          # 評価する特徴量セットは research/eval_presets.txt で指定する。
+          # 探索の条件が揃っていないセットを混ぜると、特徴量の差ではなく
+          # パラメータの差を見ることになる
+          PRESETS=$(grep -v '^#' research/eval_presets.txt | tr '\n' ' ')
+          echo "評価するセット: $PRESETS"
+          # 分割はデータ末尾から機械的に決まる（直近1年をホールドアウト）。
+          # 日付を手で書くと、データが伸びたときに評価期間が古いまま固定される
+          python3 research/train_model.py --features $PRESETS 2>&1 | tee train.log
+
+      # モデルが実際に何を使っているか。学習した場合だけ意味がある
+      - name: Feature importance
+        if: steps.gate.outputs.train == 'yes'
+        run: python3 research/importance_report.py 2>&1 | tee importance.log
+
+      # 単一分割はテスト期間が1つしかなく、局面差と実力差を分離できない。
+      # 訓練窓を伸ばしながらテスト窓を進め、複数局面で同じ比較を繰り返す。
+      - name: Walk-forward evaluation
+        if: steps.gate.outputs.train == 'yes'
+        run: |
+          PRESETS=$(grep -v '^#' research/eval_presets.txt | tr '\n' ' ')
+          python3 research/walkforward.py --features $PRESETS 2>&1 | tee walkforward.log
+
+      # 時価総額（対数）の分位で層別した評価。
+      # 母集団を高値更新日にしたので、残る最大の交絡は規模。
+      # 層を切らずに測ると「小型を上に持ってきただけ」と区別できない。
+      - name: Stratified evaluation
+        if: steps.gate.outputs.train == 'yes'
+        run: |
+          PRESETS=$(grep -v '^#' research/eval_presets.txt | tr '\n' ' ')
+          python3 research/stratified_eval.py --features $PRESETS 2>&1 | tee strat.log
+
+      - name: Build viewer
+        run: |
+          mkdir -p research/samples
+          cp research/_data/label_samples.json research/samples/label_samples.json
+          python3 research/viewer/build_viewer.py
+
+      # 学習をスキップすると walkforward.log などは存在しない。
+      # bash -e なので tail が失敗するとこのステップごと落ちる。無い分は「実行せず」と書く。
+      - name: Step summary
+        run: |
+          sec() {
+            echo "## $1"; echo '```'
+            if [ -f "$2" ]; then tail -"${3:-500}" "$2"; else echo "(実行せず)"; fi
+            echo '```'
+          }
+          {
+            sec "データセット構築" build.log
+            sec "ラベル検証データ" labels.log
+            sec "ウォークフォワード" walkforward.log 40
+            sec "日付内の分離力" within.log 30
+            sec "R_high 層別" strat.log 30
+            sec "決算カバレッジ" coverage.log
+            sec "指標の検証" validate.log
+            sec "EDA" eda.log
+            sec "EDA ページ" eda_report.log
+            sec "特徴量辞書" dict.log
+            sec "重要度ページ" importance.log
+            sec "パラメータ探索" tune.log 40
+            sec "設計の掃引" sweep.log 60
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit outputs
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          mkdir -p research/samples
+          cp research/_data/label_comparison.json research/samples/label_comparison.json
+          git add -A research/samples research/viewer research/lgbm_params.json research/eda.json research/eda_report.html research/importance_report.html research/feature_dict.html docs/MODEL_RESULTS.md docs/MODEL_WALKFORWARD.md docs/MODEL_WITHIN_DATE.md docs/MODEL_FUNDAMENTAL_COVERAGE.md docs/DATA_VALIDATION.md docs/MODEL_STRATIFIED.md docs/MODEL_DESIGN_SWEEP.md
+          # git diff は未追跡ファイルを見ないため、staged の差分で判定する
+          if git diff --cached --quiet; then
+            echo "変更なし"; exit 0
+          fi
+          git commit -m "chore(research): ラベル検証データとビューアを更新"
+          for i in 1 2 3 4; do
+            if git push; then exit 0; fi
+            sleep $((2 ** i)); git pull --rebase
+          done
+          exit 1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: label-review
+          path: |
+            research/samples/label_samples.json
+            research/viewer/label_review.html
+            research/_data/label_comparison.json
+            research/_data/results.json
+            research/_data/walkforward.json
+            research/_data/within_date.json
+            research/_data/stratified.json
+            research/_data/sweep_design.json
+            research/_data/fundamental_coverage.json
+            research/_data/validation.json
+            research/eda.json
+            research/eda_report.html
+            research/importance_report.html
+            research/feature_dict.html
+            research/lgbm_params.json
+            docs/MODEL_RESULTS.md
+            docs/MODEL_WALKFORWARD.md
+            docs/MODEL_WITHIN_DATE.md
+            docs/MODEL_FUNDAMENTAL_COVERAGE.md
+            docs/DATA_VALIDATION.md
+            docs/MODEL_STRATIFIED.md
+            docs/MODEL_DESIGN_SWEEP.md
+          retention-days: 30

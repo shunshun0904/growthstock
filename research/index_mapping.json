@@ -1,0 +1,2573 @@
+{
+  "measuredAt": "2026-09-10T13:14:57.617182+00:00",
+  "minCorr": 0.8,
+  "minGap": 0.05,
+  "axes": {
+    "S33": [
+      {
+        "index": "0000",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8348,
+        "second": "3650",
+        "secondCorr": 0.8,
+        "gap": 0.0348,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電気機器"
+      },
+      {
+        "index": "0028",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8046,
+        "second": "3650",
+        "secondCorr": 0.7857,
+        "gap": 0.0189,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電気機器"
+      },
+      {
+        "index": "0029",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8055,
+        "second": "3650",
+        "secondCorr": 0.7777,
+        "gap": 0.0278,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電気機器"
+      },
+      {
+        "index": "002A",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.816,
+        "second": "3650",
+        "secondCorr": 0.7934,
+        "gap": 0.0226,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電気機器"
+      },
+      {
+        "index": "002B",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8228,
+        "second": "3650",
+        "secondCorr": 0.7719,
+        "gap": 0.0509,
+        "confident": true,
+        "bestName": "全銘柄",
+        "secondName": "電気機器"
+      },
+      {
+        "index": "002C",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8276,
+        "second": "3650",
+        "secondCorr": 0.7966,
+        "gap": 0.031,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電気機器"
+      },
+      {
+        "index": "002D",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8357,
+        "second": "3650",
+        "secondCorr": 0.7624,
+        "gap": 0.0733,
+        "confident": true,
+        "bestName": "全銘柄",
+        "secondName": "電気機器"
+      },
+      {
+        "index": "002E",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8323,
+        "second": "3650",
+        "secondCorr": 0.7987,
+        "gap": 0.0336,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電気機器"
+      },
+      {
+        "index": "002F",
+        "days": 1949,
+        "best": "ALL",
+        "corr": 0.8448,
+        "second": "3650",
+        "secondCorr": 0.7718,
+        "gap": 0.073,
+        "confident": true,
+        "bestName": "全銘柄",
+        "secondName": "電気機器"
+      },
+      {
+        "index": "0040",
+        "days": 2403,
+        "best": "3050",
+        "corr": 0.5122,
+        "second": "3300",
+        "secondCorr": 0.5055,
+        "gap": 0.0066,
+        "confident": false,
+        "bestName": "食料品",
+        "secondName": "石油･石炭製品"
+      },
+      {
+        "index": "0041",
+        "days": 2403,
+        "best": "1050",
+        "corr": 0.9997,
+        "second": "3300",
+        "secondCorr": 0.7443,
+        "gap": 0.2553,
+        "confident": true,
+        "bestName": "鉱業",
+        "secondName": "石油･石炭製品"
+      },
+      {
+        "index": "0042",
+        "days": 2403,
+        "best": "2050",
+        "corr": 0.6564,
+        "second": "6050",
+        "secondCorr": 0.6499,
+        "gap": 0.0065,
+        "confident": false,
+        "bestName": "建設業",
+        "secondName": "卸売業"
+      },
+      {
+        "index": "0043",
+        "days": 2403,
+        "best": "3050",
+        "corr": 0.6334,
+        "second": "6100",
+        "secondCorr": 0.5845,
+        "gap": 0.049,
+        "confident": false,
+        "bestName": "食料品",
+        "secondName": "小売業"
+      },
+      {
+        "index": "0044",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.6521,
+        "second": "6050",
+        "secondCorr": 0.6217,
+        "gap": 0.0303,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "卸売業"
+      },
+      {
+        "index": "0045",
+        "days": 2403,
+        "best": "3150",
+        "corr": 0.508,
+        "second": "3300",
+        "secondCorr": 0.5043,
+        "gap": 0.0037,
+        "confident": false,
+        "bestName": "パルプ・紙",
+        "secondName": "石油･石炭製品"
+      },
+      {
+        "index": "0046",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.7636,
+        "second": "3650",
+        "secondCorr": 0.7432,
+        "gap": 0.0204,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電気機器"
+      },
+      {
+        "index": "0047",
+        "days": 2403,
+        "best": "3250",
+        "corr": 0.5801,
+        "second": "ALL",
+        "secondCorr": 0.578,
+        "gap": 0.0021,
+        "confident": false,
+        "bestName": "医薬品",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "0048",
+        "days": 2403,
+        "best": "3300",
+        "corr": 0.9979,
+        "second": "1050",
+        "secondCorr": 0.7414,
+        "gap": 0.2565,
+        "confident": true,
+        "bestName": "石油･石炭製品",
+        "secondName": "鉱業"
+      },
+      {
+        "index": "0049",
+        "days": 2403,
+        "best": "3700",
+        "corr": 0.602,
+        "second": "ALL",
+        "secondCorr": 0.5681,
+        "gap": 0.034,
+        "confident": false,
+        "bestName": "輸送用機器",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "004A",
+        "days": 2403,
+        "best": "3650",
+        "corr": 0.7434,
+        "second": "ALL",
+        "secondCorr": 0.7278,
+        "gap": 0.0156,
+        "confident": false,
+        "bestName": "電気機器",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "004B",
+        "days": 2403,
+        "best": "3300",
+        "corr": 0.6277,
+        "second": "3450",
+        "secondCorr": 0.6263,
+        "gap": 0.0013,
+        "confident": false,
+        "bestName": "石油･石炭製品",
+        "secondName": "鉄鋼"
+      },
+      {
+        "index": "004C",
+        "days": 2403,
+        "best": "3500",
+        "corr": 0.7268,
+        "second": "3650",
+        "secondCorr": 0.6975,
+        "gap": 0.0293,
+        "confident": false,
+        "bestName": "非鉄金属",
+        "secondName": "電気機器"
+      },
+      {
+        "index": "004D",
+        "days": 2403,
+        "best": "3650",
+        "corr": 0.7357,
+        "second": "3550",
+        "secondCorr": 0.732,
+        "gap": 0.0037,
+        "confident": false,
+        "bestName": "電気機器",
+        "secondName": "金属製品"
+      },
+      {
+        "index": "004E",
+        "days": 2403,
+        "best": "3600",
+        "corr": 0.8262,
+        "second": "3650",
+        "secondCorr": 0.7878,
+        "gap": 0.0384,
+        "confident": false,
+        "bestName": "機械",
+        "secondName": "電気機器"
+      },
+      {
+        "index": "004F",
+        "days": 2403,
+        "best": "3650",
+        "corr": 0.8921,
+        "second": "ALL",
+        "secondCorr": 0.8053,
+        "gap": 0.0868,
+        "confident": true,
+        "bestName": "電気機器",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "0050",
+        "days": 2403,
+        "best": "3700",
+        "corr": 0.8099,
+        "second": "ALL",
+        "secondCorr": 0.6469,
+        "gap": 0.1629,
+        "confident": true,
+        "bestName": "輸送用機器",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "0051",
+        "days": 2403,
+        "best": "3750",
+        "corr": 0.7471,
+        "second": "ALL",
+        "secondCorr": 0.7049,
+        "gap": 0.0422,
+        "confident": false,
+        "bestName": "精密機器",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "0052",
+        "days": 2403,
+        "best": "3800",
+        "corr": 0.6995,
+        "second": "ALL",
+        "secondCorr": 0.6344,
+        "gap": 0.0651,
+        "confident": false,
+        "bestName": "その他製品",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "0053",
+        "days": 2403,
+        "best": "3300",
+        "corr": 0.5604,
+        "second": "7050",
+        "secondCorr": 0.4997,
+        "gap": 0.0607,
+        "confident": false,
+        "bestName": "石油･石炭製品",
+        "secondName": "銀行業"
+      },
+      {
+        "index": "0054",
+        "days": 2403,
+        "best": "5150",
+        "corr": 0.6435,
+        "second": "8050",
+        "secondCorr": 0.5024,
+        "gap": 0.1412,
+        "confident": false,
+        "bestName": "空運業",
+        "secondName": "不動産業"
+      },
+      {
+        "index": "0055",
+        "days": 2403,
+        "best": "3300",
+        "corr": 0.4317,
+        "second": "1050",
+        "secondCorr": 0.4251,
+        "gap": 0.0066,
+        "confident": false,
+        "bestName": "石油･石炭製品",
+        "secondName": "鉱業"
+      },
+      {
+        "index": "0056",
+        "days": 2403,
+        "best": "5150",
+        "corr": 0.9996,
+        "second": "8050",
+        "secondCorr": 0.4237,
+        "gap": 0.576,
+        "confident": true,
+        "bestName": "空運業",
+        "secondName": "不動産業"
+      },
+      {
+        "index": "0057",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.6011,
+        "second": "6050",
+        "secondCorr": 0.5808,
+        "gap": 0.0203,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "卸売業"
+      },
+      {
+        "index": "0058",
+        "days": 2403,
+        "best": "5250",
+        "corr": 0.745,
+        "second": "ALL",
+        "secondCorr": 0.7175,
+        "gap": 0.0275,
+        "confident": false,
+        "bestName": "情報･通信業",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "0059",
+        "days": 2403,
+        "best": "6050",
+        "corr": 0.8202,
+        "second": "3300",
+        "secondCorr": 0.6974,
+        "gap": 0.1228,
+        "confident": true,
+        "bestName": "卸売業",
+        "secondName": "石油･石炭製品"
+      },
+      {
+        "index": "005A",
+        "days": 2403,
+        "best": "6100",
+        "corr": 0.7777,
+        "second": "ALL",
+        "secondCorr": 0.6411,
+        "gap": 0.1366,
+        "confident": false,
+        "bestName": "小売業",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "005B",
+        "days": 2403,
+        "best": "7050",
+        "corr": 0.9989,
+        "second": "7100",
+        "secondCorr": 0.6144,
+        "gap": 0.3846,
+        "confident": true,
+        "bestName": "銀行業",
+        "secondName": "証券･商品先物取引業"
+      },
+      {
+        "index": "005C",
+        "days": 2403,
+        "best": "7050",
+        "corr": 0.7791,
+        "second": "7100",
+        "secondCorr": 0.7574,
+        "gap": 0.0217,
+        "confident": false,
+        "bestName": "銀行業",
+        "secondName": "証券･商品先物取引業"
+      },
+      {
+        "index": "005D",
+        "days": 2403,
+        "best": "7050",
+        "corr": 0.7665,
+        "second": "7150",
+        "secondCorr": 0.6598,
+        "gap": 0.1067,
+        "confident": false,
+        "bestName": "銀行業",
+        "secondName": "保険業"
+      },
+      {
+        "index": "005E",
+        "days": 2403,
+        "best": "7050",
+        "corr": 0.7255,
+        "second": "ALL",
+        "secondCorr": 0.6896,
+        "gap": 0.0359,
+        "confident": false,
+        "bestName": "銀行業",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "005F",
+        "days": 2403,
+        "best": "8050",
+        "corr": 0.7512,
+        "second": "ALL",
+        "secondCorr": 0.6041,
+        "gap": 0.1471,
+        "confident": false,
+        "bestName": "不動産業",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "0060",
+        "days": 2403,
+        "best": "9050",
+        "corr": 0.8475,
+        "second": "ALL",
+        "secondCorr": 0.7467,
+        "gap": 0.1008,
+        "confident": true,
+        "bestName": "サービス業",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "0070",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8537,
+        "second": "5250",
+        "secondCorr": 0.8337,
+        "gap": 0.02,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "情報･通信業"
+      },
+      {
+        "index": "0075",
+        "days": 2403,
+        "best": "8050",
+        "corr": 0.4755,
+        "second": "ALL",
+        "secondCorr": 0.3865,
+        "gap": 0.089,
+        "confident": false,
+        "bestName": "不動産業",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "0080",
+        "days": 2403,
+        "best": "3050",
+        "corr": 0.635,
+        "second": "6100",
+        "secondCorr": 0.5869,
+        "gap": 0.0481,
+        "confident": false,
+        "bestName": "食料品",
+        "secondName": "小売業"
+      },
+      {
+        "index": "0081",
+        "days": 2403,
+        "best": "3300",
+        "corr": 0.9464,
+        "second": "1050",
+        "secondCorr": 0.9184,
+        "gap": 0.0281,
+        "confident": false,
+        "bestName": "石油･石炭製品",
+        "secondName": "鉱業"
+      },
+      {
+        "index": "0082",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.7247,
+        "second": "6050",
+        "secondCorr": 0.6932,
+        "gap": 0.0315,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "卸売業"
+      },
+      {
+        "index": "0083",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.7661,
+        "second": "3650",
+        "secondCorr": 0.7418,
+        "gap": 0.0242,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電気機器"
+      },
+      {
+        "index": "0084",
+        "days": 2403,
+        "best": "3250",
+        "corr": 0.5801,
+        "second": "ALL",
+        "secondCorr": 0.578,
+        "gap": 0.0021,
+        "confident": false,
+        "bestName": "医薬品",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "0085",
+        "days": 2403,
+        "best": "3700",
+        "corr": 0.808,
+        "second": "ALL",
+        "secondCorr": 0.6525,
+        "gap": 0.1555,
+        "confident": true,
+        "bestName": "輸送用機器",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "0086",
+        "days": 2403,
+        "best": "3500",
+        "corr": 0.6744,
+        "second": "3650",
+        "secondCorr": 0.6734,
+        "gap": 0.001,
+        "confident": false,
+        "bestName": "非鉄金属",
+        "secondName": "電気機器"
+      },
+      {
+        "index": "0087",
+        "days": 2403,
+        "best": "3600",
+        "corr": 0.8262,
+        "second": "3650",
+        "secondCorr": 0.7878,
+        "gap": 0.0384,
+        "confident": false,
+        "bestName": "機械",
+        "secondName": "電気機器"
+      },
+      {
+        "index": "0088",
+        "days": 2403,
+        "best": "3650",
+        "corr": 0.8898,
+        "second": "ALL",
+        "secondCorr": 0.8125,
+        "gap": 0.0774,
+        "confident": true,
+        "bestName": "電気機器",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "0089",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8047,
+        "second": "9050",
+        "secondCorr": 0.7848,
+        "gap": 0.0199,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "サービス業"
+      },
+      {
+        "index": "008A",
+        "days": 2403,
+        "best": "3300",
+        "corr": 0.5605,
+        "second": "7050",
+        "secondCorr": 0.4998,
+        "gap": 0.0606,
+        "confident": false,
+        "bestName": "石油･石炭製品",
+        "secondName": "銀行業"
+      },
+      {
+        "index": "008B",
+        "days": 2403,
+        "best": "5150",
+        "corr": 0.6796,
+        "second": "3300",
+        "secondCorr": 0.5453,
+        "gap": 0.1343,
+        "confident": false,
+        "bestName": "空運業",
+        "secondName": "石油･石炭製品"
+      },
+      {
+        "index": "008C",
+        "days": 2403,
+        "best": "6050",
+        "corr": 0.8202,
+        "second": "3300",
+        "secondCorr": 0.6974,
+        "gap": 0.1228,
+        "confident": true,
+        "bestName": "卸売業",
+        "secondName": "石油･石炭製品"
+      },
+      {
+        "index": "008D",
+        "days": 2403,
+        "best": "6100",
+        "corr": 0.7777,
+        "second": "ALL",
+        "secondCorr": 0.6411,
+        "gap": 0.1366,
+        "confident": false,
+        "bestName": "小売業",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "008E",
+        "days": 2403,
+        "best": "7050",
+        "corr": 0.9989,
+        "second": "7100",
+        "secondCorr": 0.6144,
+        "gap": 0.3845,
+        "confident": true,
+        "bestName": "銀行業",
+        "secondName": "証券･商品先物取引業"
+      },
+      {
+        "index": "008F",
+        "days": 2403,
+        "best": "7050",
+        "corr": 0.8151,
+        "second": "7100",
+        "secondCorr": 0.6831,
+        "gap": 0.132,
+        "confident": true,
+        "bestName": "銀行業",
+        "secondName": "証券･商品先物取引業"
+      },
+      {
+        "index": "0090",
+        "days": 2403,
+        "best": "8050",
+        "corr": 0.7512,
+        "second": "ALL",
+        "secondCorr": 0.6041,
+        "gap": 0.1471,
+        "confident": false,
+        "bestName": "不動産業",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "0500",
+        "days": 1026,
+        "best": "ALL",
+        "corr": 0.9985,
+        "second": "3600",
+        "secondCorr": 0.9141,
+        "gap": 0.0844,
+        "confident": true,
+        "bestName": "全銘柄",
+        "secondName": "機械"
+      },
+      {
+        "index": "0501",
+        "days": 1026,
+        "best": "ALL",
+        "corr": 0.8992,
+        "second": "3400",
+        "secondCorr": 0.848,
+        "gap": 0.0512,
+        "confident": true,
+        "bestName": "全銘柄",
+        "secondName": "ガラス･土石製品"
+      },
+      {
+        "index": "0502",
+        "days": 1026,
+        "best": "ALL",
+        "corr": 0.7196,
+        "second": "9050",
+        "secondCorr": 0.6918,
+        "gap": 0.0278,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "サービス業"
+      },
+      {
+        "index": "0503",
+        "days": 801,
+        "best": "ALL",
+        "corr": 0.9811,
+        "second": "3600",
+        "secondCorr": 0.9097,
+        "gap": 0.0714,
+        "confident": true,
+        "bestName": "全銘柄",
+        "secondName": "機械"
+      },
+      {
+        "index": "0504",
+        "days": 1004,
+        "best": "9050",
+        "corr": 0.7514,
+        "second": "5250",
+        "secondCorr": 0.6888,
+        "gap": 0.0626,
+        "confident": false,
+        "bestName": "サービス業",
+        "secondName": "情報･通信業"
+      },
+      {
+        "index": "6000",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8361,
+        "second": "3650",
+        "secondCorr": 0.8018,
+        "gap": 0.0343,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電気機器"
+      },
+      {
+        "index": "6095",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8362,
+        "second": "3650",
+        "secondCorr": 0.8018,
+        "gap": 0.0344,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電気機器"
+      },
+      {
+        "index": "6096",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8288,
+        "second": "3650",
+        "secondCorr": 0.8005,
+        "gap": 0.0283,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電気機器"
+      },
+      {
+        "index": "8100",
+        "days": 2403,
+        "best": "7050",
+        "corr": 0.8334,
+        "second": "ALL",
+        "secondCorr": 0.761,
+        "gap": 0.0724,
+        "confident": true,
+        "bestName": "銀行業",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "812C",
+        "days": 2403,
+        "best": "7050",
+        "corr": 0.8338,
+        "second": "ALL",
+        "secondCorr": 0.7539,
+        "gap": 0.0799,
+        "confident": true,
+        "bestName": "銀行業",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "812D",
+        "days": 2403,
+        "best": "7050",
+        "corr": 0.7682,
+        "second": "ALL",
+        "secondCorr": 0.7636,
+        "gap": 0.0046,
+        "confident": false,
+        "bestName": "銀行業",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "8200",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8584,
+        "second": "3650",
+        "secondCorr": 0.8352,
+        "gap": 0.0231,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電気機器"
+      },
+      {
+        "index": "822C",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8482,
+        "second": "3650",
+        "secondCorr": 0.831,
+        "gap": 0.0172,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電気機器"
+      },
+      {
+        "index": "822D",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8752,
+        "second": "3650",
+        "secondCorr": 0.789,
+        "gap": 0.0862,
+        "confident": true,
+        "bestName": "全銘柄",
+        "secondName": "電気機器"
+      },
+      {
+        "index": "8501",
+        "days": 2403,
+        "best": "8050",
+        "corr": 0.4489,
+        "second": "ALL",
+        "secondCorr": 0.3499,
+        "gap": 0.099,
+        "confident": false,
+        "bestName": "不動産業",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "8502",
+        "days": 2403,
+        "best": "8050",
+        "corr": 0.4043,
+        "second": "ALL",
+        "secondCorr": 0.3356,
+        "gap": 0.0687,
+        "confident": false,
+        "bestName": "不動産業",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "8503",
+        "days": 2403,
+        "best": "8050",
+        "corr": 0.4905,
+        "second": "ALL",
+        "secondCorr": 0.4117,
+        "gap": 0.0788,
+        "confident": false,
+        "bestName": "不動産業",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "B507",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8287,
+        "second": "3650",
+        "secondCorr": 0.8005,
+        "gap": 0.0282,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電気機器"
+      }
+    ],
+    "S17": [
+      {
+        "index": "0000",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8348,
+        "second": "9",
+        "secondCorr": 0.816,
+        "gap": 0.0187,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電機・精密"
+      },
+      {
+        "index": "0028",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8046,
+        "second": "9",
+        "secondCorr": 0.8003,
+        "gap": 0.0043,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電機・精密"
+      },
+      {
+        "index": "0029",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8055,
+        "second": "9",
+        "secondCorr": 0.7945,
+        "gap": 0.011,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電機・精密"
+      },
+      {
+        "index": "002A",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.816,
+        "second": "9",
+        "secondCorr": 0.809,
+        "gap": 0.007,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電機・精密"
+      },
+      {
+        "index": "002B",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8228,
+        "second": "9",
+        "secondCorr": 0.7889,
+        "gap": 0.0339,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電機・精密"
+      },
+      {
+        "index": "002C",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8276,
+        "second": "9",
+        "secondCorr": 0.8128,
+        "gap": 0.0148,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電機・精密"
+      },
+      {
+        "index": "002D",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8357,
+        "second": "9",
+        "secondCorr": 0.776,
+        "gap": 0.0597,
+        "confident": true,
+        "bestName": "全銘柄",
+        "secondName": "電機・精密"
+      },
+      {
+        "index": "002E",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8323,
+        "second": "9",
+        "secondCorr": 0.815,
+        "gap": 0.0173,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電機・精密"
+      },
+      {
+        "index": "002F",
+        "days": 1949,
+        "best": "ALL",
+        "corr": 0.8448,
+        "second": "9",
+        "secondCorr": 0.7877,
+        "gap": 0.0571,
+        "confident": true,
+        "bestName": "全銘柄",
+        "secondName": "電機・精密"
+      },
+      {
+        "index": "0040",
+        "days": 2403,
+        "best": "1",
+        "corr": 0.5326,
+        "second": "13",
+        "secondCorr": 0.5037,
+        "gap": 0.0289,
+        "confident": false,
+        "bestName": "食品",
+        "secondName": "商社・卸売"
+      },
+      {
+        "index": "0041",
+        "days": 2403,
+        "best": "2",
+        "corr": 0.9358,
+        "second": "13",
+        "secondCorr": 0.4642,
+        "gap": 0.4716,
+        "confident": true,
+        "bestName": "エネルギー資源",
+        "secondName": "商社・卸売"
+      },
+      {
+        "index": "0042",
+        "days": 2403,
+        "best": "3",
+        "corr": 0.6973,
+        "second": "13",
+        "secondCorr": 0.6499,
+        "gap": 0.0474,
+        "confident": false,
+        "bestName": "建設・資材",
+        "secondName": "商社・卸売"
+      },
+      {
+        "index": "0043",
+        "days": 2403,
+        "best": "1",
+        "corr": 0.6477,
+        "second": "14",
+        "secondCorr": 0.5845,
+        "gap": 0.0633,
+        "confident": false,
+        "bestName": "食品",
+        "secondName": "小売"
+      },
+      {
+        "index": "0044",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.6521,
+        "second": "13",
+        "secondCorr": 0.6217,
+        "gap": 0.0303,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "商社・卸売"
+      },
+      {
+        "index": "0045",
+        "days": 2403,
+        "best": "15",
+        "corr": 0.488,
+        "second": "16",
+        "secondCorr": 0.4792,
+        "gap": 0.0088,
+        "confident": false,
+        "bestName": "銀行",
+        "secondName": "金融（除く銀行）"
+      },
+      {
+        "index": "0046",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.7636,
+        "second": "9",
+        "secondCorr": 0.7588,
+        "gap": 0.0048,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電機・精密"
+      },
+      {
+        "index": "0047",
+        "days": 2403,
+        "best": "5",
+        "corr": 0.5801,
+        "second": "ALL",
+        "secondCorr": 0.578,
+        "gap": 0.0021,
+        "confident": false,
+        "bestName": "医薬品",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "0048",
+        "days": 2403,
+        "best": "2",
+        "corr": 0.9276,
+        "second": "15",
+        "secondCorr": 0.5796,
+        "gap": 0.348,
+        "confident": true,
+        "bestName": "エネルギー資源",
+        "secondName": "銀行"
+      },
+      {
+        "index": "0049",
+        "days": 2403,
+        "best": "6",
+        "corr": 0.6153,
+        "second": "ALL",
+        "secondCorr": 0.5681,
+        "gap": 0.0472,
+        "confident": false,
+        "bestName": "自動車・輸送機",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "004A",
+        "days": 2403,
+        "best": "9",
+        "corr": 0.7558,
+        "second": "ALL",
+        "secondCorr": 0.7278,
+        "gap": 0.028,
+        "confident": false,
+        "bestName": "電機・精密",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "004B",
+        "days": 2403,
+        "best": "2",
+        "corr": 0.6137,
+        "second": "15",
+        "secondCorr": 0.5773,
+        "gap": 0.0364,
+        "confident": false,
+        "bestName": "エネルギー資源",
+        "secondName": "銀行"
+      },
+      {
+        "index": "004C",
+        "days": 2403,
+        "best": "7",
+        "corr": 0.7823,
+        "second": "9",
+        "secondCorr": 0.6999,
+        "gap": 0.0824,
+        "confident": false,
+        "bestName": "鉄鋼・非鉄",
+        "secondName": "電機・精密"
+      },
+      {
+        "index": "004D",
+        "days": 2403,
+        "best": "9",
+        "corr": 0.7421,
+        "second": "ALL",
+        "secondCorr": 0.7214,
+        "gap": 0.0207,
+        "confident": false,
+        "bestName": "電機・精密",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "004E",
+        "days": 2403,
+        "best": "8",
+        "corr": 0.8262,
+        "second": "9",
+        "secondCorr": 0.7953,
+        "gap": 0.0309,
+        "confident": false,
+        "bestName": "機械",
+        "secondName": "電機・精密"
+      },
+      {
+        "index": "004F",
+        "days": 2403,
+        "best": "9",
+        "corr": 0.8962,
+        "second": "ALL",
+        "secondCorr": 0.8053,
+        "gap": 0.0909,
+        "confident": true,
+        "bestName": "電機・精密",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "0050",
+        "days": 2403,
+        "best": "6",
+        "corr": 0.809,
+        "second": "ALL",
+        "secondCorr": 0.6469,
+        "gap": 0.1621,
+        "confident": true,
+        "bestName": "自動車・輸送機",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "0051",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.7049,
+        "second": "9",
+        "secondCorr": 0.7038,
+        "gap": 0.0012,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電機・精密"
+      },
+      {
+        "index": "0052",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.6344,
+        "second": "10",
+        "secondCorr": 0.6138,
+        "gap": 0.0206,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "情報通信・サービスその他"
+      },
+      {
+        "index": "0053",
+        "days": 2403,
+        "best": "2",
+        "corr": 0.5321,
+        "second": "15",
+        "secondCorr": 0.4997,
+        "gap": 0.0323,
+        "confident": false,
+        "bestName": "エネルギー資源",
+        "secondName": "銀行"
+      },
+      {
+        "index": "0054",
+        "days": 2403,
+        "best": "17",
+        "corr": 0.5024,
+        "second": "14",
+        "secondCorr": 0.4992,
+        "gap": 0.0031,
+        "confident": false,
+        "bestName": "不動産",
+        "secondName": "小売"
+      },
+      {
+        "index": "0055",
+        "days": 2403,
+        "best": "2",
+        "corr": 0.4586,
+        "second": "ALL",
+        "secondCorr": 0.4159,
+        "gap": 0.0427,
+        "confident": false,
+        "bestName": "エネルギー資源",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "0056",
+        "days": 2403,
+        "best": "17",
+        "corr": 0.4237,
+        "second": "15",
+        "secondCorr": 0.3924,
+        "gap": 0.0313,
+        "confident": false,
+        "bestName": "不動産",
+        "secondName": "銀行"
+      },
+      {
+        "index": "0057",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.6011,
+        "second": "13",
+        "secondCorr": 0.5808,
+        "gap": 0.0203,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "商社・卸売"
+      },
+      {
+        "index": "0058",
+        "days": 2403,
+        "best": "10",
+        "corr": 0.7401,
+        "second": "ALL",
+        "secondCorr": 0.7175,
+        "gap": 0.0225,
+        "confident": false,
+        "bestName": "情報通信・サービスその他",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "0059",
+        "days": 2403,
+        "best": "13",
+        "corr": 0.8202,
+        "second": "2",
+        "secondCorr": 0.6952,
+        "gap": 0.125,
+        "confident": true,
+        "bestName": "商社・卸売",
+        "secondName": "エネルギー資源"
+      },
+      {
+        "index": "005A",
+        "days": 2403,
+        "best": "14",
+        "corr": 0.7777,
+        "second": "ALL",
+        "secondCorr": 0.6411,
+        "gap": 0.1366,
+        "confident": false,
+        "bestName": "小売",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "005B",
+        "days": 2403,
+        "best": "15",
+        "corr": 0.9989,
+        "second": "16",
+        "secondCorr": 0.6507,
+        "gap": 0.3482,
+        "confident": true,
+        "bestName": "銀行",
+        "secondName": "金融（除く銀行）"
+      },
+      {
+        "index": "005C",
+        "days": 2403,
+        "best": "15",
+        "corr": 0.7791,
+        "second": "16",
+        "secondCorr": 0.7129,
+        "gap": 0.0663,
+        "confident": false,
+        "bestName": "銀行",
+        "secondName": "金融（除く銀行）"
+      },
+      {
+        "index": "005D",
+        "days": 2403,
+        "best": "15",
+        "corr": 0.7665,
+        "second": "16",
+        "secondCorr": 0.6952,
+        "gap": 0.0714,
+        "confident": false,
+        "bestName": "銀行",
+        "secondName": "金融（除く銀行）"
+      },
+      {
+        "index": "005E",
+        "days": 2403,
+        "best": "15",
+        "corr": 0.7255,
+        "second": "16",
+        "secondCorr": 0.7205,
+        "gap": 0.005,
+        "confident": false,
+        "bestName": "銀行",
+        "secondName": "金融（除く銀行）"
+      },
+      {
+        "index": "005F",
+        "days": 2403,
+        "best": "17",
+        "corr": 0.7512,
+        "second": "ALL",
+        "secondCorr": 0.6041,
+        "gap": 0.1471,
+        "confident": false,
+        "bestName": "不動産",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "0060",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.7467,
+        "second": "10",
+        "secondCorr": 0.7467,
+        "gap": 0.0,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "情報通信・サービスその他"
+      },
+      {
+        "index": "0070",
+        "days": 2403,
+        "best": "10",
+        "corr": 0.8685,
+        "second": "ALL",
+        "secondCorr": 0.8537,
+        "gap": 0.0147,
+        "confident": false,
+        "bestName": "情報通信・サービスその他",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "0075",
+        "days": 2403,
+        "best": "17",
+        "corr": 0.4755,
+        "second": "ALL",
+        "secondCorr": 0.3865,
+        "gap": 0.089,
+        "confident": false,
+        "bestName": "不動産",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "0080",
+        "days": 2403,
+        "best": "1",
+        "corr": 0.6496,
+        "second": "14",
+        "secondCorr": 0.5869,
+        "gap": 0.0627,
+        "confident": false,
+        "bestName": "食品",
+        "secondName": "小売"
+      },
+      {
+        "index": "0081",
+        "days": 2403,
+        "best": "2",
+        "corr": 0.998,
+        "second": "15",
+        "secondCorr": 0.5555,
+        "gap": 0.4424,
+        "confident": true,
+        "bestName": "エネルギー資源",
+        "secondName": "銀行"
+      },
+      {
+        "index": "0082",
+        "days": 2403,
+        "best": "3",
+        "corr": 0.7376,
+        "second": "ALL",
+        "secondCorr": 0.7247,
+        "gap": 0.0129,
+        "confident": false,
+        "bestName": "建設・資材",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "0083",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.7661,
+        "second": "9",
+        "secondCorr": 0.7582,
+        "gap": 0.0079,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電機・精密"
+      },
+      {
+        "index": "0084",
+        "days": 2403,
+        "best": "5",
+        "corr": 0.5801,
+        "second": "ALL",
+        "secondCorr": 0.578,
+        "gap": 0.0021,
+        "confident": false,
+        "bestName": "医薬品",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "0085",
+        "days": 2403,
+        "best": "6",
+        "corr": 0.8083,
+        "second": "ALL",
+        "secondCorr": 0.6525,
+        "gap": 0.1558,
+        "confident": true,
+        "bestName": "自動車・輸送機",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "0086",
+        "days": 2403,
+        "best": "7",
+        "corr": 0.771,
+        "second": "9",
+        "secondCorr": 0.6756,
+        "gap": 0.0953,
+        "confident": false,
+        "bestName": "鉄鋼・非鉄",
+        "secondName": "電機・精密"
+      },
+      {
+        "index": "0087",
+        "days": 2403,
+        "best": "8",
+        "corr": 0.8262,
+        "second": "9",
+        "secondCorr": 0.7953,
+        "gap": 0.0309,
+        "confident": false,
+        "bestName": "機械",
+        "secondName": "電機・精密"
+      },
+      {
+        "index": "0088",
+        "days": 2403,
+        "best": "9",
+        "corr": 0.897,
+        "second": "ALL",
+        "secondCorr": 0.8125,
+        "gap": 0.0845,
+        "confident": true,
+        "bestName": "電機・精密",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "0089",
+        "days": 2403,
+        "best": "10",
+        "corr": 0.8141,
+        "second": "ALL",
+        "secondCorr": 0.8047,
+        "gap": 0.0094,
+        "confident": false,
+        "bestName": "情報通信・サービスその他",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "008A",
+        "days": 2403,
+        "best": "2",
+        "corr": 0.5322,
+        "second": "15",
+        "secondCorr": 0.4998,
+        "gap": 0.0323,
+        "confident": false,
+        "bestName": "エネルギー資源",
+        "secondName": "銀行"
+      },
+      {
+        "index": "008B",
+        "days": 2403,
+        "best": "17",
+        "corr": 0.5319,
+        "second": "2",
+        "secondCorr": 0.5271,
+        "gap": 0.0049,
+        "confident": false,
+        "bestName": "不動産",
+        "secondName": "エネルギー資源"
+      },
+      {
+        "index": "008C",
+        "days": 2403,
+        "best": "13",
+        "corr": 0.8202,
+        "second": "2",
+        "secondCorr": 0.6952,
+        "gap": 0.125,
+        "confident": true,
+        "bestName": "商社・卸売",
+        "secondName": "エネルギー資源"
+      },
+      {
+        "index": "008D",
+        "days": 2403,
+        "best": "14",
+        "corr": 0.7777,
+        "second": "ALL",
+        "secondCorr": 0.6411,
+        "gap": 0.1366,
+        "confident": false,
+        "bestName": "小売",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "008E",
+        "days": 2403,
+        "best": "15",
+        "corr": 0.9989,
+        "second": "16",
+        "secondCorr": 0.6507,
+        "gap": 0.3482,
+        "confident": true,
+        "bestName": "銀行",
+        "secondName": "金融（除く銀行）"
+      },
+      {
+        "index": "008F",
+        "days": 2403,
+        "best": "15",
+        "corr": 0.8151,
+        "second": "16",
+        "secondCorr": 0.7677,
+        "gap": 0.0474,
+        "confident": false,
+        "bestName": "銀行",
+        "secondName": "金融（除く銀行）"
+      },
+      {
+        "index": "0090",
+        "days": 2403,
+        "best": "17",
+        "corr": 0.7512,
+        "second": "ALL",
+        "secondCorr": 0.6041,
+        "gap": 0.1471,
+        "confident": false,
+        "bestName": "不動産",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "0500",
+        "days": 1026,
+        "best": "ALL",
+        "corr": 0.9985,
+        "second": "8",
+        "secondCorr": 0.9141,
+        "gap": 0.0844,
+        "confident": true,
+        "bestName": "全銘柄",
+        "secondName": "機械"
+      },
+      {
+        "index": "0501",
+        "days": 1026,
+        "best": "ALL",
+        "corr": 0.8992,
+        "second": "3",
+        "secondCorr": 0.8683,
+        "gap": 0.0309,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "建設・資材"
+      },
+      {
+        "index": "0502",
+        "days": 1026,
+        "best": "10",
+        "corr": 0.7237,
+        "second": "ALL",
+        "secondCorr": 0.7196,
+        "gap": 0.004,
+        "confident": false,
+        "bestName": "情報通信・サービスその他",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "0503",
+        "days": 801,
+        "best": "ALL",
+        "corr": 0.9811,
+        "second": "8",
+        "secondCorr": 0.9097,
+        "gap": 0.0714,
+        "confident": true,
+        "bestName": "全銘柄",
+        "secondName": "機械"
+      },
+      {
+        "index": "0504",
+        "days": 1004,
+        "best": "10",
+        "corr": 0.7687,
+        "second": "ALL",
+        "secondCorr": 0.682,
+        "gap": 0.0867,
+        "confident": false,
+        "bestName": "情報通信・サービスその他",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "6000",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8361,
+        "second": "9",
+        "secondCorr": 0.8182,
+        "gap": 0.018,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電機・精密"
+      },
+      {
+        "index": "6095",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8362,
+        "second": "9",
+        "secondCorr": 0.8181,
+        "gap": 0.0181,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電機・精密"
+      },
+      {
+        "index": "6096",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8288,
+        "second": "9",
+        "secondCorr": 0.8176,
+        "gap": 0.0113,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電機・精密"
+      },
+      {
+        "index": "8100",
+        "days": 2403,
+        "best": "15",
+        "corr": 0.8334,
+        "second": "ALL",
+        "secondCorr": 0.761,
+        "gap": 0.0724,
+        "confident": true,
+        "bestName": "銀行",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "812C",
+        "days": 2403,
+        "best": "15",
+        "corr": 0.8338,
+        "second": "ALL",
+        "secondCorr": 0.7539,
+        "gap": 0.0799,
+        "confident": true,
+        "bestName": "銀行",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "812D",
+        "days": 2403,
+        "best": "15",
+        "corr": 0.7682,
+        "second": "ALL",
+        "secondCorr": 0.7636,
+        "gap": 0.0046,
+        "confident": false,
+        "bestName": "銀行",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "8200",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8584,
+        "second": "9",
+        "secondCorr": 0.8513,
+        "gap": 0.0071,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電機・精密"
+      },
+      {
+        "index": "822C",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8482,
+        "second": "9",
+        "secondCorr": 0.847,
+        "gap": 0.0013,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電機・精密"
+      },
+      {
+        "index": "822D",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8752,
+        "second": "9",
+        "secondCorr": 0.8048,
+        "gap": 0.0704,
+        "confident": true,
+        "bestName": "全銘柄",
+        "secondName": "電機・精密"
+      },
+      {
+        "index": "8501",
+        "days": 2403,
+        "best": "17",
+        "corr": 0.4489,
+        "second": "ALL",
+        "secondCorr": 0.3499,
+        "gap": 0.099,
+        "confident": false,
+        "bestName": "不動産",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "8502",
+        "days": 2403,
+        "best": "17",
+        "corr": 0.4043,
+        "second": "ALL",
+        "secondCorr": 0.3356,
+        "gap": 0.0687,
+        "confident": false,
+        "bestName": "不動産",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "8503",
+        "days": 2403,
+        "best": "17",
+        "corr": 0.4905,
+        "second": "ALL",
+        "secondCorr": 0.4117,
+        "gap": 0.0788,
+        "confident": false,
+        "bestName": "不動産",
+        "secondName": "全銘柄"
+      },
+      {
+        "index": "B507",
+        "days": 2403,
+        "best": "ALL",
+        "corr": 0.8287,
+        "second": "9",
+        "secondCorr": 0.8176,
+        "gap": 0.0112,
+        "confident": false,
+        "bestName": "全銘柄",
+        "secondName": "電機・精密"
+      }
+    ]
+  },
+  "offset": {
+    "S33": {
+      "axis": "S33",
+      "nSectors": 33,
+      "runs": [
+        {
+          "from": "0040",
+          "to": "0060",
+          "rank1": 19,
+          "n": 33,
+          "medianCorr": 0.7225,
+          "pairs": [
+            {
+              "index": "0040",
+              "sector": "0050",
+              "sectorName": "水産・農林業",
+              "corr": 0.4628,
+              "rank": 8,
+              "nStocks": 4
+            },
+            {
+              "index": "0041",
+              "sector": "1050",
+              "sectorName": "鉱業",
+              "corr": 0.9997,
+              "rank": 1,
+              "nStocks": 6
+            },
+            {
+              "index": "0042",
+              "sector": "2050",
+              "sectorName": "建設業",
+              "corr": 0.6564,
+              "rank": 1,
+              "nStocks": 36
+            },
+            {
+              "index": "0043",
+              "sector": "3050",
+              "sectorName": "食料品",
+              "corr": 0.6334,
+              "rank": 1,
+              "nStocks": 18
+            },
+            {
+              "index": "0044",
+              "sector": "3100",
+              "sectorName": "繊維製品",
+              "corr": 0.6189,
+              "rank": 3,
+              "nStocks": 48
+            },
+            {
+              "index": "0045",
+              "sector": "3150",
+              "sectorName": "パルプ・紙",
+              "corr": 0.508,
+              "rank": 1,
+              "nStocks": 7
+            },
+            {
+              "index": "0046",
+              "sector": "3200",
+              "sectorName": "化学",
+              "corr": 0.7225,
+              "rank": 3,
+              "nStocks": 33
+            },
+            {
+              "index": "0047",
+              "sector": "3250",
+              "sectorName": "医薬品",
+              "corr": 0.5801,
+              "rank": 1,
+              "nStocks": 32
+            },
+            {
+              "index": "0048",
+              "sector": "3300",
+              "sectorName": "石油･石炭製品",
+              "corr": 0.9979,
+              "rank": 1,
+              "nStocks": 10
+            },
+            {
+              "index": "0049",
+              "sector": "3350",
+              "sectorName": "ゴム製品",
+              "corr": 0.4622,
+              "rank": 16,
+              "nStocks": 2
+            },
+            {
+              "index": "004A",
+              "sector": "3400",
+              "sectorName": "ガラス･土石製品",
+              "corr": 0.685,
+              "rank": 4,
+              "nStocks": 10
+            },
+            {
+              "index": "004B",
+              "sector": "3450",
+              "sectorName": "鉄鋼",
+              "corr": 0.6263,
+              "rank": 2,
+              "nStocks": 5
+            },
+            {
+              "index": "004C",
+              "sector": "3500",
+              "sectorName": "非鉄金属",
+              "corr": 0.7268,
+              "rank": 1,
+              "nStocks": 5
+            },
+            {
+              "index": "004D",
+              "sector": "3550",
+              "sectorName": "金属製品",
+              "corr": 0.732,
+              "rank": 2,
+              "nStocks": 18
+            },
+            {
+              "index": "004E",
+              "sector": "3600",
+              "sectorName": "機械",
+              "corr": 0.8262,
+              "rank": 1,
+              "nStocks": 46
+            },
+            {
+              "index": "004F",
+              "sector": "3650",
+              "sectorName": "電気機器",
+              "corr": 0.8921,
+              "rank": 1,
+              "nStocks": 54
+            },
+            {
+              "index": "0050",
+              "sector": "3700",
+              "sectorName": "輸送用機器",
+              "corr": 0.8099,
+              "rank": 1,
+              "nStocks": 15
+            },
+            {
+              "index": "0051",
+              "sector": "3750",
+              "sectorName": "精密機器",
+              "corr": 0.7471,
+              "rank": 1,
+              "nStocks": 16
+            },
+            {
+              "index": "0052",
+              "sector": "3800",
+              "sectorName": "その他製品",
+              "corr": 0.6995,
+              "rank": 1,
+              "nStocks": 35
+            },
+            {
+              "index": "0053",
+              "sector": "4050",
+              "sectorName": "電気･ガス業",
+              "corr": 0.349,
+              "rank": 20,
+              "nStocks": 25
+            },
+            {
+              "index": "0054",
+              "sector": "5050",
+              "sectorName": "陸運業",
+              "corr": 0.4546,
+              "rank": 8,
+              "nStocks": 7
+            },
+            {
+              "index": "0055",
+              "sector": "5100",
+              "sectorName": "海運業",
+              "corr": 0.2941,
+              "rank": 21,
+              "nStocks": 2
+            },
+            {
+              "index": "0056",
+              "sector": "5150",
+              "sectorName": "空運業",
+              "corr": 0.9996,
+              "rank": 1,
+              "nStocks": 5
+            },
+            {
+              "index": "0057",
+              "sector": "5200",
+              "sectorName": "倉庫･運輸関連業",
+              "corr": 0.4242,
+              "rank": 24,
+              "nStocks": 4
+            },
+            {
+              "index": "0058",
+              "sector": "5250",
+              "sectorName": "情報･通信業",
+              "corr": 0.745,
+              "rank": 1,
+              "nStocks": 242
+            },
+            {
+              "index": "0059",
+              "sector": "6050",
+              "sectorName": "卸売業",
+              "corr": 0.8202,
+              "rank": 1,
+              "nStocks": 84
+            },
+            {
+              "index": "005A",
+              "sector": "6100",
+              "sectorName": "小売業",
+              "corr": 0.7777,
+              "rank": 1,
+              "nStocks": 105
+            },
+            {
+              "index": "005B",
+              "sector": "7050",
+              "sectorName": "銀行業",
+              "corr": 0.9989,
+              "rank": 1,
+              "nStocks": 79
+            },
+            {
+              "index": "005C",
+              "sector": "7100",
+              "sectorName": "証券･商品先物取引業",
+              "corr": 0.7574,
+              "rank": 2,
+              "nStocks": 15
+            },
+            {
+              "index": "005D",
+              "sector": "7150",
+              "sectorName": "保険業",
+              "corr": 0.6598,
+              "rank": 2,
+              "nStocks": 6
+            },
+            {
+              "index": "005E",
+              "sector": "7200",
+              "sectorName": "その他金融業",
+              "corr": 0.5285,
+              "rank": 18,
+              "nStocks": 9
+            },
+            {
+              "index": "005F",
+              "sector": "8050",
+              "sectorName": "不動産業",
+              "corr": 0.7512,
+              "rank": 1,
+              "nStocks": 46
+            },
+            {
+              "index": "0060",
+              "sector": "9050",
+              "sectorName": "サービス業",
+              "corr": 0.8475,
+              "rank": 1,
+              "nStocks": 213
+            }
+          ]
+        }
+      ]
+    },
+    "S17": {
+      "axis": "S17",
+      "nSectors": 17,
+      "runs": [
+        {
+          "from": "0080",
+          "to": "0090",
+          "rank1": 13,
+          "n": 17,
+          "medianCorr": 0.771,
+          "pairs": [
+            {
+              "index": "0080",
+              "sector": "1",
+              "sectorName": "食品",
+              "corr": 0.6496,
+              "rank": 1,
+              "nStocks": 21
+            },
+            {
+              "index": "0081",
+              "sector": "2",
+              "sectorName": "エネルギー資源",
+              "corr": 0.998,
+              "rank": 1,
+              "nStocks": 16
+            },
+            {
+              "index": "0082",
+              "sector": "3",
+              "sectorName": "建設・資材",
+              "corr": 0.7376,
+              "rank": 1,
+              "nStocks": 62
+            },
+            {
+              "index": "0083",
+              "sector": "4",
+              "sectorName": "素材・化学",
+              "corr": 0.7365,
+              "rank": 3,
+              "nStocks": 40
+            },
+            {
+              "index": "0084",
+              "sector": "5",
+              "sectorName": "医薬品",
+              "corr": 0.5801,
+              "rank": 1,
+              "nStocks": 32
+            },
+            {
+              "index": "0085",
+              "sector": "6",
+              "sectorName": "自動車・輸送機",
+              "corr": 0.8083,
+              "rank": 1,
+              "nStocks": 17
+            },
+            {
+              "index": "0086",
+              "sector": "7",
+              "sectorName": "鉄鋼・非鉄",
+              "corr": 0.771,
+              "rank": 1,
+              "nStocks": 9
+            },
+            {
+              "index": "0087",
+              "sector": "8",
+              "sectorName": "機械",
+              "corr": 0.8262,
+              "rank": 1,
+              "nStocks": 46
+            },
+            {
+              "index": "0088",
+              "sector": "9",
+              "sectorName": "電機・精密",
+              "corr": 0.897,
+              "rank": 1,
+              "nStocks": 69
+            },
+            {
+              "index": "0089",
+              "sector": "10",
+              "sectorName": "情報通信・サービスその他",
+              "corr": 0.8141,
+              "rank": 1,
+              "nStocks": 489
+            },
+            {
+              "index": "008A",
+              "sector": "11",
+              "sectorName": "電気・ガス",
+              "corr": 0.349,
+              "rank": 15,
+              "nStocks": 25
+            },
+            {
+              "index": "008B",
+              "sector": "12",
+              "sectorName": "運輸・物流",
+              "corr": 0.4845,
+              "rank": 9,
+              "nStocks": 12
+            },
+            {
+              "index": "008C",
+              "sector": "13",
+              "sectorName": "商社・卸売",
+              "corr": 0.8202,
+              "rank": 1,
+              "nStocks": 84
+            },
+            {
+              "index": "008D",
+              "sector": "14",
+              "sectorName": "小売",
+              "corr": 0.7777,
+              "rank": 1,
+              "nStocks": 105
+            },
+            {
+              "index": "008E",
+              "sector": "15",
+              "sectorName": "銀行",
+              "corr": 0.9989,
+              "rank": 1,
+              "nStocks": 79
+            },
+            {
+              "index": "008F",
+              "sector": "16",
+              "sectorName": "金融（除く銀行）",
+              "corr": 0.7677,
+              "rank": 2,
+              "nStocks": 26
+            },
+            {
+              "index": "0090",
+              "sector": "17",
+              "sectorName": "不動産",
+              "corr": 0.7512,
+              "rank": 1,
+              "nStocks": 46
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "sectors": {
+    "S33": {
+      "0050": {
+        "name": "水産・農林業",
+        "stocks": 4
+      },
+      "1050": {
+        "name": "鉱業",
+        "stocks": 6
+      },
+      "2050": {
+        "name": "建設業",
+        "stocks": 36
+      },
+      "3050": {
+        "name": "食料品",
+        "stocks": 18
+      },
+      "3100": {
+        "name": "繊維製品",
+        "stocks": 48
+      },
+      "3150": {
+        "name": "パルプ・紙",
+        "stocks": 7
+      },
+      "3200": {
+        "name": "化学",
+        "stocks": 33
+      },
+      "3250": {
+        "name": "医薬品",
+        "stocks": 32
+      },
+      "3300": {
+        "name": "石油･石炭製品",
+        "stocks": 10
+      },
+      "3350": {
+        "name": "ゴム製品",
+        "stocks": 2
+      },
+      "3400": {
+        "name": "ガラス･土石製品",
+        "stocks": 10
+      },
+      "3450": {
+        "name": "鉄鋼",
+        "stocks": 5
+      },
+      "3500": {
+        "name": "非鉄金属",
+        "stocks": 5
+      },
+      "3550": {
+        "name": "金属製品",
+        "stocks": 18
+      },
+      "3600": {
+        "name": "機械",
+        "stocks": 46
+      },
+      "3650": {
+        "name": "電気機器",
+        "stocks": 54
+      },
+      "3700": {
+        "name": "輸送用機器",
+        "stocks": 15
+      },
+      "3750": {
+        "name": "精密機器",
+        "stocks": 16
+      },
+      "3800": {
+        "name": "その他製品",
+        "stocks": 35
+      },
+      "4050": {
+        "name": "電気･ガス業",
+        "stocks": 25
+      },
+      "5050": {
+        "name": "陸運業",
+        "stocks": 7
+      },
+      "5100": {
+        "name": "海運業",
+        "stocks": 2
+      },
+      "5150": {
+        "name": "空運業",
+        "stocks": 5
+      },
+      "5200": {
+        "name": "倉庫･運輸関連業",
+        "stocks": 4
+      },
+      "5250": {
+        "name": "情報･通信業",
+        "stocks": 242
+      },
+      "6050": {
+        "name": "卸売業",
+        "stocks": 84
+      },
+      "6100": {
+        "name": "小売業",
+        "stocks": 105
+      },
+      "7050": {
+        "name": "銀行業",
+        "stocks": 79
+      },
+      "7100": {
+        "name": "証券･商品先物取引業",
+        "stocks": 15
+      },
+      "7150": {
+        "name": "保険業",
+        "stocks": 6
+      },
+      "7200": {
+        "name": "その他金融業",
+        "stocks": 9
+      },
+      "8050": {
+        "name": "不動産業",
+        "stocks": 46
+      },
+      "9050": {
+        "name": "サービス業",
+        "stocks": 213
+      },
+      "9999": {
+        "name": "その他",
+        "stocks": 1
+      },
+      "ALL": {
+        "name": "全銘柄",
+        "stocks": null
+      }
+    },
+    "S17": {
+      "1": {
+        "name": "食品",
+        "stocks": 21
+      },
+      "10": {
+        "name": "情報通信・サービスその他",
+        "stocks": 489
+      },
+      "11": {
+        "name": "電気・ガス",
+        "stocks": 25
+      },
+      "12": {
+        "name": "運輸・物流",
+        "stocks": 12
+      },
+      "13": {
+        "name": "商社・卸売",
+        "stocks": 84
+      },
+      "14": {
+        "name": "小売",
+        "stocks": 105
+      },
+      "15": {
+        "name": "銀行",
+        "stocks": 79
+      },
+      "16": {
+        "name": "金融（除く銀行）",
+        "stocks": 26
+      },
+      "17": {
+        "name": "不動産",
+        "stocks": 46
+      },
+      "2": {
+        "name": "エネルギー資源",
+        "stocks": 16
+      },
+      "3": {
+        "name": "建設・資材",
+        "stocks": 62
+      },
+      "4": {
+        "name": "素材・化学",
+        "stocks": 40
+      },
+      "5": {
+        "name": "医薬品",
+        "stocks": 32
+      },
+      "6": {
+        "name": "自動車・輸送機",
+        "stocks": 17
+      },
+      "7": {
+        "name": "鉄鋼・非鉄",
+        "stocks": 9
+      },
+      "8": {
+        "name": "機械",
+        "stocks": 46
+      },
+      "9": {
+        "name": "電機・精密",
+        "stocks": 69
+      },
+      "99": {
+        "name": "その他",
+        "stocks": 1
+      },
+      "ALL": {
+        "name": "全銘柄",
+        "stocks": null
+      }
+    }
+  },
+  "control": {
+    "index": "0000",
+    "days": 2403,
+    "best": "ALL",
+    "corr": 0.8348,
+    "second": "3650",
+    "secondCorr": 0.8,
+    "gap": 0.0348,
+    "confident": false,
+    "bestName": "全銘柄",
+    "secondName": "電気機器"
+  }
+}

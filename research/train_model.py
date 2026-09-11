@@ -1,0 +1,689 @@
+#!/usr/bin/env python3
+"""
+新高値ブレイクアウト予測モデルの学習と評価。
+
+設計は docs/MODEL_DESIGN.md を参照。方法論上の要点:
+
+  * 分割は時系列。ランダム分割は使わない
+    （同一日の銘柄間が強く相関し、ラベル窓が重なるため、
+      ランダム分割は必ず楽観的な数字を出す）
+  * **直近1年をホールドアウトにし、それ以前を探索と学習に使う**。
+    成績はこの1本だけから出す。境界はデータ末尾から機械的に決めるので
+    （holdout_bounds）、データが伸びれば評価期間も自動で前に進む
+  * 訓練とホールドアウトの間にエンバーゴを置く。日数はラベル定義から導出する
+    （訓練最終日のラベルは forward_needed 営業日先の情報を含むため。
+      ここをハードコードするとラベル変更時に静かにリークする）
+  * ハイパーパラメータの探索も同じ境界で打ち切る（run_tuning.py）。
+    学習側と別々に決めると片方だけずれてリークする
+  * Accuracy は使わない。正例が少数なので「全部起きない」でも高く出る
+  * 無情報（一定スコア）に勝てなければ「特徴量に予測力なし」と結論する
+  * その差は対応のあるブートストラップで有意性を確認する
+    （PR-AUC の 0.004 差が誤差かどうかは目視では判断できない）
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from typing import Dict, List, Tuple
+
+import numpy as np
+import pandas as pd
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import average_precision_score, roc_auc_score
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import features as F  # noqa: E402
+import tuning  # noqa: E402
+import build_dataset as B  # noqa: E402
+from build_dataset import DEFAULT_LABEL  # noqa: E402
+
+DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_data")
+
+#: 比較の基準。全件同じスコアを出す「無情報」。
+#: PR-AUC はその窓の正例率に一致するので、差は
+#: 「正例率をどれだけ上回ったか」になる。
+#: 母集団やラベル定義を変えても意味が変わらない。
+REFERENCE_MODEL = "無情報（一定スコア）"
+
+#: レポートに出すラベル定義の名前。母集団で中身が変わる。
+LABEL_NAME = (B.DEFAULT_RISE.name if B.POPULATION == "breakout"
+              else DEFAULT_LABEL.name)
+
+# エンバーゴはラベル定義から導く。ハードコードするとラベルを変えたときにリークする。
+# 採用定義 E は sustain_days=60 を含むため 120+60 = 180営業日必要。
+# 母集団が breakout のときのラベルは「先 RISE_HORIZON 営業日以内の上昇」なので、
+# 確定に必要な将来日数は RISE_HORIZON。従来の定義E（180営業日）より大幅に短い。
+# ここをラベルに追随させないとリークする。
+EMBARGO_DAYS = (B.RISE_HORIZON if B.POPULATION == "breakout"
+                else DEFAULT_LABEL.forward_needed)
+
+
+# --------------------------------------------------------------------------- #
+# 分割
+# --------------------------------------------------------------------------- #
+
+# 営業日→暦日の換算。年間約250営業日 / 365日 なので 1営業日 ≒ 1.45暦日。
+# walkforward / stratified_eval / run_tuning もここから読む（定義を1か所にする）。
+TRADING_TO_CALENDAR = 1.45
+
+#: 評価用に取り分ける直近の月数。
+#:
+#: 1年にしてある。半年だと決算期が一巡せず、評価窓に季節性の偏りが乗る
+#: （3月期末企業が大半なので、4〜9月と10〜3月では出てくる決算が違う）。
+#: 長くすると評価は安定するが、学習に使える期間が削れて直近の相場を
+#: 学習できなくなる。1年が両方の妥協点。
+HOLDOUT_MONTHS = 12
+
+#: 学習後に成績を出す分割。ホールドアウト1本だけにしてある。
+#: 以前は val / test の2本を出していたが、val は早期打ち切りにも
+#: 使っておらず、数字が2つ並ぶぶん都合のよいほうを読む余地を作るだけだった。
+EVAL_SPLITS = ("test",)
+
+
+def holdout_bounds(dates, holdout_months: int = HOLDOUT_MONTHS,
+                   embargo_days: int = EMBARGO_DAYS):
+    """
+    直近 holdout_months ヶ月を評価用に取り分ける境界を返す。
+
+        |------ 探索 + 学習 ------|--エンバーゴ--|--- ホールドアウト ---|
+                            train_end        test_start          dmax
+
+    ここが探索・学習・評価すべての基準になる。run_tuning.py も
+    この関数から探索の打ち切り日を取る（別々に決めるとリークする）。
+    戻り値は (train_end, test_start, dmax)。
+    """
+    d = pd.to_datetime(pd.Series(dates))
+    dmax = pd.Timestamp(d.max())
+    test_start = dmax - pd.DateOffset(months=holdout_months)
+    embargo = pd.Timedelta(days=int(round(embargo_days * TRADING_TO_CALENDAR)))
+    return test_start - embargo, test_start, dmax
+
+
+def holdout_split(df: pd.DataFrame, holdout_months: int = HOLDOUT_MONTHS
+                  ) -> Dict[str, pd.DataFrame]:
+    """
+    学習用とホールドアウトに分ける。境界にエンバーゴを入れる。
+
+    エンバーゴぶん（ラベル確定に必要な将来日数）は捨てる。
+    訓練最終日のサンプルのラベルはその先60営業日の値動きで決まるので、
+    詰めるとホールドアウト期間の情報が訓練側に入る。
+    """
+    d = pd.to_datetime(df["Date"])
+    train_end, test_start, dmax = holdout_bounds(d, holdout_months)
+
+    parts = {
+        "train": df[d <= train_end],
+        "test": df[d >= test_start],
+    }
+    dropped = int(((d > train_end) & (d < test_start)).sum())
+    print(f"  ホールドアウト: 直近{holdout_months}ヶ月（{test_start.date()} 〜 {dmax.date()}）")
+    print(f"  エンバーゴで捨てる: {dropped:,}件 "
+          f"（{train_end.date()} 〜 {test_start.date()}）")
+    for name, p in parts.items():
+        if len(p) == 0:
+            raise SystemExit(f"{name} が空です。--holdout-months を見直してください")
+        dd = pd.to_datetime(p["Date"])
+        print(f"  {name:<6} {len(p):>8,}件  {dd.min().date()} 〜 {dd.max().date()}  "
+              f"正例率 {p['label'].mean()*100:5.2f}%")
+    return parts
+
+
+# --------------------------------------------------------------------------- #
+# 評価
+# --------------------------------------------------------------------------- #
+
+def precision_at_k(y_true: np.ndarray, score: np.ndarray, k_pct: float) -> float:
+    """
+    スコア上位 k% の的中率。実運用（上位n銘柄だけ見る）に最も近い指標。
+
+    同点は「その中からランダムに選んだときの期待値」で扱う。
+    素朴に argsort で上位n件を取ると、同点の並びは配列の順序（＝日付順）で
+    決まってしまう。定数スコアではそれが全件同点になり、
+    「テスト期間の最初の5%の正例率」を測っているだけの数字が出る。
+    実際それで無情報モデルに Lift@5% 1.87倍 / 0.42倍 という
+    意味のない値が並んだ。同点を期待値で割れば、定数スコアは
+    必ず全体の正例率（Lift 1.00倍）になる。
+    """
+    n = max(1, int(len(score) * k_pct / 100))
+    y_true = np.asarray(y_true, dtype=float)
+    score = np.asarray(score, dtype=float)
+    if n >= len(score):
+        return float(y_true.mean())
+
+    # n件目の値を境にして、それより大きいものは確実に入る。
+    # ちょうど同点のものは、残り枠を等確率で分け合う。
+    cut = np.partition(score, -n)[-n]
+    above = score > cut
+    tied = score == cut
+    n_above = int(above.sum())
+    n_tied = int(tied.sum())
+    hits = float(y_true[above].sum())
+    remaining = n - n_above
+    if remaining > 0 and n_tied > 0:
+        hits += remaining * float(y_true[tied].mean())
+    return hits / n
+
+
+def clean_score(score: np.ndarray) -> np.ndarray:
+    """欠測スコアは最下位として扱う（予測できないものを高評価にしない）。"""
+    score = np.asarray(score, dtype=float)
+    ok = np.isfinite(score)
+    if not ok.any():
+        return np.zeros_like(score)
+    return np.where(ok, score, score[ok].min() - 1.0)
+
+
+def evaluate(name: str, y: np.ndarray, score: np.ndarray, dates=None) -> Dict:
+    score = clean_score(score)
+    base_rate = float(y.mean())
+    res = {
+        "name": name,
+        "n": int(len(y)),
+        "base_rate": base_rate,
+        "pr_auc": float(average_precision_score(y, score)),
+        "roc_auc": float(roc_auc_score(y, score)),
+    }
+    # 実運用で問うのは「その日の候補のうちどれを買うか」なので、
+    # 日付をまたいだ順位ではなく日付内の並べ替えを別に測る。
+    # 全体の PR-AUC が同じでも、こちらは差がつくことがある
+    if dates is not None:
+        res["within_date_auc"] = within_date_auc(y, score, dates)
+    for k in (1, 5, 10):
+        p = precision_at_k(y, score, k)
+        res[f"precision@{k}%"] = p
+        res[f"lift@{k}%"] = p / base_rate if base_rate > 0 else float("nan")
+    return res
+
+
+def paired_bootstrap(y: np.ndarray, scores: Dict[str, np.ndarray], reference: str,
+                     n_boot: int = 1000, seed: int = 0) -> List[Dict]:
+    """
+    PR-AUC の差が誤差の範囲かを、対応のあるブートストラップで測る。
+
+    テスト期間は1年ほどしかなく、n が同じでも PR-AUC の差 0.004 が
+    意味のある差なのかは目視では判断できない。特徴量を足すたびに
+    「わずかに上回った」が出るので、毎回ここで判定する。
+
+    同一のリサンプルで全モデルを評価する（対応のある比較）。
+    そうしないとモデル間の差にリサンプル自体のばらつきが混ざる。
+    """
+    y = np.asarray(y, dtype=int)
+    clean = {k: clean_score(v) for k, v in scores.items()}
+    names = [k for k in clean if k != reference]
+    diffs = {k: np.empty(n_boot, dtype=float) for k in names}
+    rng = np.random.default_rng(seed)
+    n = len(y)
+
+    done = 0
+    while done < n_boot:
+        idx = rng.integers(0, n, size=n)
+        yb = y[idx]
+        # 正例が無いリサンプルでは PR-AUC が定義できない。引き直す
+        if yb.sum() == 0 or yb.sum() == len(yb):
+            continue
+        ref_ap = average_precision_score(yb, clean[reference][idx])
+        for k in names:
+            diffs[k][done] = average_precision_score(yb, clean[k][idx]) - ref_ap
+        done += 1
+
+    out = []
+    for k in names:
+        d = diffs[k]
+        out.append({
+            "name": k,
+            "pr_auc": float(average_precision_score(y, clean[k])),
+            "diff": float(average_precision_score(y, clean[k])
+                          - average_precision_score(y, clean[reference])),
+            "ci_low": float(np.percentile(d, 2.5)),
+            "ci_high": float(np.percentile(d, 97.5)),
+            "p_better": float((d > 0).mean()),
+        })
+    out.sort(key=lambda r: -r["diff"])
+    return out
+
+
+def report(rows: List[Dict], title: str) -> str:
+    lines = [f"\n### {title}", "",
+             "| モデル | PR-AUC | ROC-AUC | P@1% | P@5% | P@10% | Lift@5% |",
+             "| --- | ---: | ---: | ---: | ---: | ---: | ---: |"]
+    for r in rows:
+        lines.append(
+            f"| {r['name']} | {r['pr_auc']:.4f} | {r['roc_auc']:.4f} | "
+            f"{r['precision@1%']*100:.1f}% | {r['precision@5%']*100:.1f}% | "
+            f"{r['precision@10%']*100:.1f}% | {r['lift@5%']:.2f}x |"
+        )
+    lines.append(f"\n（正例率 = {rows[0]['base_rate']*100:.2f}% / n = {rows[0]['n']:,}）")
+    return "\n".join(lines)
+
+
+# --------------------------------------------------------------------------- #
+# ベースライン
+# --------------------------------------------------------------------------- #
+
+def baseline_scores(df: pd.DataFrame) -> Dict[str, np.ndarray]:
+    """
+    基準は「無情報」1つだけにする。
+
+    かつては「R_high のみ」「出来高モメンタムのみ」「既存の8軸スコア」を
+    基準にしていたが、これは月末を母集団にしてラベルが
+    「先1〜6ヶ月で52週高値を抜くか」だった時代の設計。
+    いまの母集団は高値更新日そのもので、R_high は全件ほぼ100の定数になる。
+
+    別のモデルを基準にするのもやめた。探索の条件が揃っていないモデル同士を
+    比べると、特徴量の差ではなくパラメータの差を見てしまう
+    （実際それで誤った結論を出しかけた）。
+
+    残すのは無情報（全件同じスコア）だけ。全件同点の PR-AUC は
+    その窓の正例率に一致するので、差は「正例率をどれだけ上回ったか」に
+    なる。母集団やラベルの定義を変えても意味が変わらない唯一の基準。
+    """
+    return {REFERENCE_MODEL: np.zeros(len(df), dtype=float)}
+
+
+# --------------------------------------------------------------------------- #
+# 学習
+# --------------------------------------------------------------------------- #
+
+def lgbm_importance(gbm, cols: List[str]) -> List[Dict]:
+    """
+    LightGBM の特徴量重要度。gain（分割で減った損失の合計）を主に見る。
+
+    split（使われた回数）だけだと、値の種類が多い列がただ多く選ばれる。
+    gain は「その分割がどれだけ効いたか」なので、寄与の大きさに近い。
+    どちらも出して、片方だけ大きい列は解釈のときに疑えるようにする。
+    """
+    booster = gbm.booster_
+    gain = booster.feature_importance(importance_type="gain")
+    split = booster.feature_importance(importance_type="split")
+    total = float(gain.sum()) or 1.0
+    rows = [{"col": c, "gain": float(g), "share": float(g) / total,
+             "split": int(sp)}
+            for c, g, sp in zip(cols, gain, split)]
+    rows.sort(key=lambda r: -r["gain"])
+    return rows
+
+
+#: LTR のパラメータを保存するときの接尾辞。
+#: 同じ特徴量セットでも目的関数が違うので、pointwise と同じ鍵に入れると
+#: どちらのパラメータか分からなくなる。
+LTR_SUFFIX = "__ltr"
+
+
+class DateRanker:
+    """
+    LGBMRanker を「同じ日の銘柄を並べ替える」形で使うための薄い包み。
+
+    実運用で問うのは「その日に高値更新した数銘柄のうちどれを買うか」なので、
+    日付をグループにして順位を直接最適化する。日付内診断では
+    r_high を揃えても分離力が残る特徴量が39個あり、最適化する情報は存在する
+    （docs/MODEL_WITHIN_DATE.md）。
+
+    出力はスコアであって確率ではない。PR-AUC / ROC-AUC / 上位k% は
+    すべて順位だけで決まるのでそのまま使えるが、確率として読まないこと。
+    predict_proba の形にしているのは、既存の評価経路をそのまま通すため。
+    """
+
+    def __init__(self, params: Dict):
+        import lightgbm as lgb
+        # 目的関数だけ差し替える。scale_pos_weight は ranker に無い
+        p = {k: v for k, v in params.items()
+             if k not in ("objective", "scale_pos_weight")}
+        self.model = lgb.LGBMRanker(objective="lambdarank", **p)
+
+    def fit(self, train: pd.DataFrame, features: List[str]) -> "DateRanker":
+        # LGBMRanker はグループが連続していることを要求する
+        d = train.sort_values("Date", kind="stable")
+        sizes = d.groupby("Date", sort=True).size().to_numpy()
+        self.model.fit(d[features].to_numpy(dtype=float),
+                       d["label"].to_numpy(dtype=int), group=sizes)
+        return self
+
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
+        s = self.model.predict(X)
+        return np.column_stack([-s, s])
+
+
+def within_date_auc(y: np.ndarray, score: np.ndarray, dates) -> float:
+    """
+    同一日内の（正例, 負例）ペアで、正例のほうがスコアが高い割合。
+
+    実運用で効くのはこれで、日付をまたいだ順位は使わない。
+    日付ごとに AUC を出して平均すると1日あたり数銘柄しかない母集団では
+    推定が立たないので、ペアを全日から集めてプールする
+    （research/within_date_signal.py と同じ測り方）。
+    """
+    y = np.asarray(y, dtype=int)
+    s = clean_score(score)
+    codes = pd.factorize(pd.Series(dates), sort=True)[0]
+    hit = tot = 0.0
+    for c in np.unique(codes):
+        m = codes == c
+        yp, sp = y[m], s[m]
+        pos, neg = sp[yp == 1], sp[yp == 0]
+        if len(pos) == 0 or len(neg) == 0:
+            continue
+        d = pos[:, None] - neg[None, :]
+        hit += float((d > 0).sum() + 0.5 * (d == 0).sum())
+        tot += d.size
+    return hit / tot if tot else float("nan")
+
+
+def fit_models(train: pd.DataFrame, features: List[str],
+               verbose: bool = True, preset: str = "",
+               params_store: Dict | None = None) -> Dict:
+    """
+    LightGBM と ロジスティック回帰 を学習する。
+
+    LightGBM のハイパーパラメータは research/tuning.py が Optuna で
+    探索した結果を使う（research/_data/lgbm_params.json）。
+    探索結果が無ければ既定値。
+
+    木の本数は探索時に early stopping で決めた本数を固定して使う。
+    ここで再び early stopping を掛けると検証用の切り出しが必要になり、
+    フォールドごとに訓練量が変わって比較の条件が揃わない。
+    """
+    import lightgbm as lgb
+
+    Xtr = train[features].to_numpy(dtype=float)
+    ytr = train["label"].to_numpy(dtype=int)
+
+    params = tuning.params_for(preset, params_store)
+    if verbose:
+        print(f"\n[fit] LightGBM (木{params['n_estimators']}本 "
+              f"/ lr {params['learning_rate']:.3f} "
+              f"/ 葉 {params['num_leaves']})")
+    gbm = lgb.LGBMClassifier(**params,
+                             scale_pos_weight=tuning.scale_pos_weight(ytr))
+    gbm.fit(Xtr, ytr)
+
+    if verbose:
+        print("[fit] ロジスティック回帰（解釈用）")
+    lr = make_pipeline(
+        SimpleImputer(strategy="median"),
+        StandardScaler(),
+        LogisticRegression(max_iter=2000, class_weight="balanced", C=0.5),
+    )
+    lr.fit(Xtr, ytr)
+
+    out = {"LightGBM": gbm, "ロジスティック回帰": lr}
+
+    # LTR は探索済みパラメータがあるときだけ足す。
+    # 既定値で回すと、探索済みの pointwise と条件が揃わない比較になる
+    store = tuning.load_params() if params_store is None else params_store
+    ltr_key = f"{preset}{LTR_SUFFIX}"
+    if ltr_key in store:
+        rp = tuning.params_for(ltr_key, store)
+        if verbose:
+            print(f"[fit] LTR / LGBMRanker (木{rp['n_estimators']}本 "
+                  f"/ lr {rp['learning_rate']:.3f} / 葉 {rp['num_leaves']})")
+        out["LTR"] = DateRanker(rp).fit(train, features)
+
+    return out
+
+
+def main(argv: List[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description="ブレイクアウト予測モデルの学習と評価")
+    ap.add_argument("--dataset", default=os.path.join(DATA_DIR, "dataset.parquet"))
+    ap.add_argument("--n-boot", type=int, default=1000,
+                    help="ブートストラップ反復回数。0で無効")
+    ap.add_argument("--holdout-months", type=int, default=HOLDOUT_MONTHS,
+                    help="評価用に取り分ける直近の月数")
+    ap.add_argument("--features", nargs="*", default=None,
+                    help=f"評価する特徴量セット。既定は全プリセット。"
+                         f"利用可能: {sorted(F.PRESETS)}")
+    ap.add_argument("--out", default=os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "docs", "MODEL_RESULTS.md"))
+    args = ap.parse_args(argv)
+
+    if not os.path.exists(args.dataset):
+        raise SystemExit(f"{args.dataset} がありません。先に build_dataset.py を実行してください")
+
+    df = pd.read_parquet(args.dataset)
+    print(f"[data] {len(df):,}サンプル / 正例率 {df['label'].mean()*100:.2f}%")
+    print(f"[label] 定義: {LABEL_NAME}")
+    print(f"[split] エンバーゴ {EMBARGO_DAYS}営業日（ラベル定義から自動導出）\n")
+
+    parts = holdout_split(df, args.holdout_months)
+
+    presets = args.features or list(F.PRESETS.keys())
+    unknown = [p for p in presets if p not in F.PRESETS]
+    if unknown:
+        raise SystemExit(f"未知の特徴量セット: {unknown}. 利用可能: {sorted(F.PRESETS)}")
+
+    # --- ベースラインは特徴量セットに依らないので先に1度だけ算出する ---
+    baselines: Dict[str, List[Dict]] = {}
+    test_scores: Dict[str, np.ndarray] = {}
+    for split in EVAL_SPLITS:
+        part = parts[split]
+        y = part["label"].to_numpy(dtype=int)
+        bs = baseline_scores(part)
+        baselines[split] = [evaluate(n, y, sc, part["Date"])
+                            for n, sc in bs.items()]
+        if split == "test":
+            test_scores.update(bs)
+
+    # --- 特徴量セットごとに学習・評価 ---
+    params_store = tuning.load_params()
+    if params_store:
+        print(f"[tune] 探索済みパラメータ {len(params_store)}件を使用")
+    else:
+        print("[tune] 探索結果が無いため既定値を使用")
+    # 探索済みのセットと既定値のセットを混ぜて比べると、比較が不公平になる。
+    # 既定値は木2000本・early stopping 無しなので、列の多いセットほど過学習する。
+    # 実際これで「決算を足すと悪くなる」という誤った結論を出しかけた。
+    untuned = [p_ for p_ in presets if p_ not in params_store]
+    if untuned and params_store:
+        print(f"[warn] 探索結果が無いセット（既定値 木{tuning.DEFAULT_PARAMS['n_estimators']}本）: "
+              + " ".join(untuned))
+        print("[warn] 探索済みのセットと同じ土俵ではない。"
+              "比較するなら research/tune_request.txt を yes にして探索し直すこと")
+    experiments: List[Dict] = []
+    for preset in presets:
+        cols = F.columns(preset)
+        missing = [c for c in cols if c not in df.columns]
+        if missing:
+            print(f"[skip] {preset}: 列がありません {missing}")
+            continue
+        print(f"\n{'='*70}\n[experiment] {F.describe(preset)}\n{'='*70}")
+        models = fit_models(parts["train"], cols, preset=preset,
+                            params_store=params_store)
+        rec = {"preset": preset, "groups": F.PRESETS[preset], "n_features": len(cols),
+               "results": {}}
+        for split in EVAL_SPLITS:
+            part = parts[split]
+            y = part["label"].to_numpy(dtype=int)
+            X = part[cols].to_numpy(dtype=float)
+            rows = []
+            for mname, model in models.items():
+                sc = model.predict_proba(X)[:, 1]
+                rows.append(evaluate(f"{mname}", y, sc, part["Date"]))
+                if split == "test":
+                    test_scores[f"{mname} [{preset}]"] = sc
+            rec["results"][split] = rows
+            best = max(rows, key=lambda r: r["pr_auc"])
+            print(f"  {split:<5} 最良 {best['name']}: "
+                  f"PR-AUC {best['pr_auc']:.4f} / Lift@5% {best['lift@5%']:.2f}x")
+        rec["_models"] = models
+        rec["_cols"] = cols
+        rec["importance"] = lgbm_importance(models["LightGBM"], cols)
+        experiments.append(rec)
+
+    if not experiments:
+        raise SystemExit("実行できた実験がありません")
+
+    # --- 基準との差が誤差かを判定 ---
+    # 全モデルを対象にすると遅いので、上位と「順位版 vs 絶対値版」の対に絞る。
+    y_test = parts["test"]["label"].to_numpy(dtype=int)
+    REF = (REFERENCE_MODEL if REFERENCE_MODEL in test_scores
+           else max(test_scores, key=lambda k: average_precision_score(
+               y_test, clean_score(test_scores[k]))))
+    ranked = sorted((k for k in test_scores if k != REF),
+                    key=lambda k: -average_precision_score(y_test, clean_score(test_scores[k])))
+    pairs = [f"{m} [{p_}]"
+             for base in ("price_only", "technical", "all", "fundamental")
+             for p_ in (base, f"rank_{base}")
+             for m in ("ロジスティック回帰", "LightGBM")]
+    keep = list(dict.fromkeys(ranked[:6] + [k for k in pairs if k in test_scores]))
+    print(f"\n[bootstrap] {len(keep)}モデル × {args.n_boot}回 の対応のあるブートストラップ")
+    boot = paired_bootstrap(y_test, {REF: test_scores[REF],
+                                     **{k: test_scores[k] for k in keep}},
+                            reference=REF, n_boot=args.n_boot)
+    for r in boot[:5]:
+        print(f"  {r['name']:<40} 差 {r['diff']:+.4f} "
+              f"[{r['ci_low']:+.4f}, {r['ci_high']:+.4f}] P(差>0)={r['p_better']:.3f}")
+
+    # --- レポート ---
+    body = _report(df, parts, baselines, experiments, args, boot, REF)
+    os.makedirs(os.path.dirname(args.out), exist_ok=True)
+    with open(args.out, "w", encoding="utf-8") as fh:
+        fh.write(body + "\n")
+    print(f"\n[done] {args.out}")
+
+    payload = {
+        "labelConfig": LABEL_NAME,
+        "embargoDays": EMBARGO_DAYS,
+        "split": {"holdout_months": args.holdout_months},
+        "baselines": baselines,
+        "bootstrap": {"reference": REF, "n_boot": args.n_boot, "test": boot},
+        "experiments": [{k: v for k, v in e.items() if not k.startswith("_")}
+                        for e in experiments],
+    }
+    with open(os.path.join(DATA_DIR, "results.json"), "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False, indent=2)
+    return 0
+
+
+def reference_pr_auc(experiments, baselines, ref: str):
+    """基準モデルのテスト PR-AUC を引く。見つからなければ None。"""
+    for e in experiments:
+        for r in e.get("results", {}).get("test", []):
+            if f"{r['name']} [{e['preset']}]" == ref or r["name"] == ref:
+                return r["pr_auc"]
+    for b in (baselines or {}).get("test", []):
+        if b["name"] == ref:
+            return b["pr_auc"]
+    return None
+
+
+def _report(df, parts, baselines, experiments, args, boot=None, ref="") -> str:
+    """実測値だけを並べたレポートを組み立てる。"""
+    _tend, _tstart, _dmax = holdout_bounds(pd.to_datetime(df["Date"]),
+                                           args.holdout_months)
+    lines = [
+        "# 新高値ブレイクアウト予測モデル 結果",
+        "",
+        "`research/train_model.py` の出力。**実測値のみ**を記載する。",
+        "設計と方法論は [MODEL_DESIGN.md](MODEL_DESIGN.md) を参照。",
+        "",
+        "## 条件",
+        "",
+        f"- **ラベル定義**: {LABEL_NAME}",
+        f"- データセット: {len(df):,}サンプル / 全体の正例率 **{df['label'].mean()*100:.2f}%**",
+        f"- 期間: {pd.to_datetime(df['Date']).min().date()} 〜 {pd.to_datetime(df['Date']).max().date()}"
+        f" / 銘柄数 {df['Code'].nunique():,}",
+        f"- 分割: **直近{args.holdout_months}ヶ月をホールドアウト**（{_tstart.date()} 〜 {_dmax.date()}）。"
+        f"それ以前を探索と学習に使う",
+        f"- **エンバーゴ {EMBARGO_DAYS}営業日**（ラベル確定に必要な将来日数から自動導出）。"
+        f"{_tend.date()} 〜 {_tstart.date()} は捨てる",
+        "- ハイパーパラメータの探索もホールドアウトより前だけで行う"
+        "（`research/run_tuning.py` が同じ境界から打ち切り日を取る）",
+        "",
+    ]
+    for name, part in parts.items():
+        d = pd.to_datetime(part["Date"])
+        lines.append(f"  - {name}: {len(part):,}件 / {d.min().date()} 〜 {d.max().date()}"
+                     f" / 正例率 {part['label'].mean()*100:.2f}%")
+    lines.append("")
+
+    for split, title in ((("test"), f"ホールドアウト（直近{args.holdout_months}ヶ月）— 唯一の成績"),):
+        rows = list(baselines[split])
+        for e in experiments:
+            for r in e["results"][split]:
+                rows.append({**r, "name": f"{r['name']} [{e['preset']}]"})
+        rows.sort(key=lambda r: -r["pr_auc"])
+        lines += ["", f"## {title}", "",
+                  "| モデル | PR-AUC | ROC-AUC | 日付内AUC | P@1% | P@5% | Lift@5% |",
+                  "| --- | ---: | ---: | ---: | ---: | ---: | ---: |"]
+        for r in rows:
+            wd = r.get("within_date_auc")
+            wd_txt = f"{wd:.4f}" if wd is not None and wd == wd else "—"
+            lines.append(f"| {r['name']} | {r['pr_auc']:.4f} | {r['roc_auc']:.4f} | "
+                         f"{wd_txt} | "
+                         f"{r['precision@1%']*100:.1f}% | {r['precision@5%']*100:.1f}% | "
+                         f"{r['lift@5%']:.2f}x |")
+        lines.append(f"\n（正例率 = {rows[0]['base_rate']*100:.2f}% / n = {rows[0]['n']:,}）")
+
+    # --- 基準との差の有意性 ---
+    if boot:
+        # 基準はモデルなので experiments から引く。
+        # ベースラインを廃止したあとも baselines を見ていて落ちていた。
+        ref_ap = reference_pr_auc(experiments, baselines, ref)
+        ref_ap_txt = f"{ref_ap:.4f}" if ref_ap is not None else "—"
+        lines += ["", f"## 差は誤差か（対応のあるブートストラップ B={args.n_boot}）", "",
+                  f"基準は **{ref}**（テスト PR-AUC {ref_ap_txt}）。",
+                  "単変量のベースラインは廃止した。母集団を高値更新日にした時点で",
+                  "「高値からの距離」は全銘柄で同じになり、それを基準にしても",
+                  "何も言えないため。全件同じスコアを与える無情報モデルなら、",
+                  "PR-AUC はその窓の正例率に一致し、差は「正例率をどれだけ",
+                  "上回ったか」になる。母集団やラベルの定義を変えても意味が変わらない。",
+                  "95%CI が 0 をまたぐ場合、その差は誤差と区別できない。", "",
+                  "| モデル | PR-AUC | 差 | 95%CI | P(差>0) | 判定 |",
+                  "| --- | ---: | ---: | :---: | ---: | --- |"]
+        for r in boot:
+            sig = "有意" if r["ci_low"] > 0 else ("有意に劣る" if r["ci_high"] < 0 else "誤差")
+            lines.append(f"| {r['name']} | {r['pr_auc']:.4f} | {r['diff']:+.4f} | "
+                         f"[{r['ci_low']:+.4f}, {r['ci_high']:+.4f}] | "
+                         f"{r['p_better']:.3f} | {sig} |")
+
+    # --- 特徴量セット別の要約 ---
+    lines += ["", "## 特徴量セット別の比較（テストデータ・2モデルのうち良いほう）", "",
+              "| セット | 列数 | 構成 | PR-AUC | Lift@5% |",
+              "| --- | ---: | --- | ---: | ---: |"]
+    for e in sorted(experiments,
+                    key=lambda e: -max(r["pr_auc"] for r in e["results"]["test"])):
+        best = max(e["results"]["test"], key=lambda r: r["pr_auc"])
+        lines.append(f"| `{e['preset']}` | {e['n_features']} | {' + '.join(e['groups'])} | "
+                     f"{best['pr_auc']:.4f} | {best['lift@5%']:.2f}x |")
+
+    # --- 特徴量の寄与 ---
+    best_exp = max(experiments, key=lambda e: max(r["pr_auc"] for r in e["results"]["test"]))
+    # _models は学習経路でしか付かない（結果だけから組み直すときは無い）
+    lr = best_exp.get("_models", {}).get("ロジスティック回帰")
+    if lr is not None:
+        coefs = lr.named_steps["logisticregression"].coef_[0]
+        imp = sorted(zip(best_exp["_cols"], coefs), key=lambda x: -abs(x[1]))[:15]
+        lines += ["", f"## 特徴量の寄与（`{best_exp['preset']}` のロジスティック回帰・標準化係数 上位15）",
+                  "", "| 特徴量 | 係数 | 向き |", "| --- | ---: | --- |"]
+        for name, c in imp:
+            lines.append(f"| `{name}` | {c:+.3f} | {'ブレイクしやすい' if c > 0 else 'しにくい'} |")
+
+    lines += ["", "## 読み方", "",
+              "- **PR-AUC** が主指標。下限は正例率で、それを大きく上回るほど良い",
+              "- **Lift@5%** は「スコア上位5%の正例率 ÷ 全体の正例率」。1.0 なら無意味。"
+              "同点は期待値で分けるので、無情報モデルは必ず 1.00倍 になる",
+              f"- **{REFERENCE_MODEL}** を上回らなければ、"
+              "**特徴量に予測力が無い**という結論になる",
+              "- この表はテスト期間1本の結果でしかない。局面をまたいで再現するかは"
+              "[MODEL_WALKFORWARD.md](MODEL_WALKFORWARD.md)、"
+              "規模の効果を除いても残るかは"
+              "[MODEL_STRATIFIED.md](MODEL_STRATIFIED.md) で見る",
+              "- 数字が極端に良い場合はまずリークを疑う"
+              "（`tests/test_dataset.py` の先読み検出テストを参照）",
+              "",
+              "## 特徴量を足して試すには",
+              "",
+              "1. `research/features.py` の `GROUPS` に列を足す",
+              "2. `research/build_dataset.py` でその列を作る",
+              "3. データセットを再構築（Release から読むので数分・API取得なし）",
+              "4. `PRESETS` にセットを1行足して再学習",
+              ]
+    return "\n".join(lines)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
