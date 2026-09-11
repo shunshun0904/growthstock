@@ -8,7 +8,7 @@ import { computeScores } from './lib/scoring.js';
 import { SERIES_COLORS, fmtDateTime } from './lib/format.js';
 import {
   loadDataset, loadManualStocks, saveManualStocks, loadVisibility, saveVisibility,
-  manualStockFromForm, mergeStocks,
+  manualStockFromForm, mergeStocks, resetSavedState,
 } from './lib/store.js';
 import { loadPredictions, loadHistory } from './lib/predictions.js';
 
@@ -122,6 +122,14 @@ export default function App() {
     setSelectedId(stock.id);
   }, []);
 
+  /** 保存済みの手入力銘柄と表示状態を消して初期状態に戻す。 */
+  const resetAll = useCallback(() => {
+    resetSavedState();
+    setManual([]);
+    setVisibleIds(new Set());
+    setSelectedId(null);
+  }, []);
+
   const deleteManual = useCallback((id) => {
     setManual((prev) => {
       const next = prev.filter((s) => s.id !== id);
@@ -159,6 +167,21 @@ export default function App() {
           {dataset?.generatedAt ? (
             <>データ取得: <span className="num">{fmtDateTime(dataset.generatedAt)}</span></>
           ) : '—'}
+          {manual.length > 0 && (
+            <div>
+              <button
+                className="btn btn-ghost" style={{ fontSize: 11 }}
+                title="手入力・予測から追加した銘柄と、表示状態の保存を消します"
+                onClick={() => {
+                  if (window.confirm(
+                    `追加した${manual.length}銘柄と表示状態の保存を消します。よろしいですか？`
+                  )) resetAll();
+                }}
+              >
+                追加した{manual.length}銘柄をリセット
+              </button>
+            </div>
+          )}
         </div>
       </header>
 
@@ -172,10 +195,9 @@ export default function App() {
               <strong>J-Quants データを読み込めませんでした。</strong>
               <div style={{ marginTop: 4 }}>{loadError}</div>
               <div style={{ marginTop: 8 }}>
-                GitHub リポジトリの <code>Actions</code> タブから
-                <code>Fetch J-Quants Data</code> を手動実行すると
-                <code>public/data/stocks.json</code> が生成されます。
-                それまでは「+ 銘柄を追加」で手入力した銘柄のみ分析できます。
+                <code>public/data/stocks.json</code> は日次の
+                <code>Predict Breakouts</code> が、その日の予測上位を取得して書き出します。
+                それまでは「ブレイク予測」タブと、手入力した銘柄のみ利用できます。
               </div>
             </div>
           </div>
@@ -183,11 +205,20 @@ export default function App() {
 
         {!loading && dataset && <DataNotices dataset={dataset} />}
 
-        {!loading && rows.length === 0 && (
+        {!loading && rows.length === 0 && tab !== 'prediction' && (
           <div className="card empty">
             分析対象の銘柄がありません。
             <div style={{ marginTop: 'var(--s4)' }}>
-              <button className="btn btn-primary" onClick={() => setShowAdd(true)}>+ 銘柄を追加</button>
+              「ブレイク予測」タブで候補を選び、
+              <b>「8軸オクタゴンで見る」</b>から送ると、ここで分析できます。
+            </div>
+            <div style={{ marginTop: 'var(--s4)' }}>
+              <button className="btn btn-primary" onClick={() => setTab('prediction')}>
+                ブレイク予測を見る
+              </button>
+              <button className="btn" style={{ marginLeft: 8 }} onClick={() => setShowAdd(true)}>
+                + 銘柄を手入力
+              </button>
             </div>
           </div>
         )}

@@ -324,5 +324,54 @@ class TestFieldMatching(unittest.TestCase):
                           "FIN_COLS は None（全項目保持）であるべき")
 
 
+class TestWatchlistAndExtraCodes(unittest.TestCase):
+    """
+    ウォッチリストは空にしてあり、日次の予測が「その日の上位」を足す。
+
+    空で落ちると取得ワークフローが毎回失敗して他の更新まで止まるので、
+    空を許すこと自体が要件。
+    """
+
+    def test_shipped_watchlist_is_empty(self):
+        """
+        既定のウォッチリストは空。特定銘柄を毎日見たいときだけ足す。
+        サンプル銘柄が残っていると、予測とは無関係な銘柄が画面を占める。
+        """
+        import json
+        import os
+        path = os.path.join(ROOT, "scripts", "watchlist.json")
+        d = json.load(open(path, encoding="utf-8"))
+        self.assertEqual(d["stocks"], [])
+
+    def test_load_watchlist_accepts_an_empty_list(self):
+        import json
+        import tempfile
+        from jquants_data_fetcher import load_watchlist
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False,
+                                         encoding="utf-8") as fh:
+            json.dump({"stocks": []}, fh)
+            path = fh.name
+        try:
+            self.assertEqual(load_watchlist(path), [])
+        finally:
+            os.unlink(path)
+
+    def test_extra_codes_are_deduped_against_the_watchlist(self):
+        """
+        4桁と5桁が混ざっても同じ銘柄は1回だけ。
+        normalize_code を通さずに比べると、同じ銘柄を2回取得して
+        画面にも2つ並ぶ。
+        """
+        from jquants_data_fetcher import normalize_code
+        targets = [{"code": "7203", "note": ""}]
+        known = {normalize_code(t["code"]) for t in targets}
+        for c in ["72030", "3845", "3845"]:
+            if normalize_code(c) in known:
+                continue
+            known.add(normalize_code(c))
+            targets.append({"code": c, "note": "x"})
+        self.assertEqual([t["code"] for t in targets], ["7203", "3845"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

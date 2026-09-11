@@ -11,10 +11,10 @@
 const LS_MANUAL = 'focus.manualStocks.v1';
 const LS_VISIBLE = 'focus.visible.v1';
 
-const DATA_URL = `${import.meta.env.BASE_URL}data/stocks.json`;
+const DATA_URL = () => `${import.meta.env?.BASE_URL ?? '/'}data/stocks.json`;
 
 export async function loadDataset() {
-  const res = await fetch(DATA_URL, { cache: 'no-cache' });
+  const res = await fetch(DATA_URL(), { cache: 'no-cache' });
   if (!res.ok) {
     throw new Error(
       `データファイルを読み込めませんでした (HTTP ${res.status})。` +
@@ -53,6 +53,19 @@ export function saveManualStocks(stocks) {
     localStorage.setItem(LS_MANUAL, JSON.stringify(stocks));
   } catch {
     /* プライベートウィンドウ等で書けなくても致命的ではない */
+  }
+}
+
+/**
+ * 手入力銘柄と表示状態を全部消す。
+ *
+ * ウォッチリストを空にしたので、画面に残るのは利用者が足した銘柄だけになる。
+ * 古い銘柄が localStorage に残って消せないと、画面を初期状態に戻す手段が
+ * 「ブラウザのサイトデータを消す」しかなくなる。
+ */
+export function resetSavedState() {
+  for (const k of [LS_MANUAL, LS_VISIBLE]) {
+    try { localStorage.removeItem(k); } catch { /* 消せなくても致命的ではない */ }
   }
 }
 
@@ -118,7 +131,20 @@ export function manualStockFromForm(form) {
 }
 
 /** J-Quants 由来 / 手入力 の銘柄を1つのリストに束ねる (id を必ず付与)。 */
+/**
+ * J-Quants 由来の銘柄と、利用者が足した銘柄をまとめる。
+ *
+ * 同じ銘柄が両側にあるときは J-Quants 側を残す。
+ * 予測タブから送った銘柄は「その日の値」しか持たないが、日次の取得が
+ * 同じ銘柄を拾うと過去スナップショットと株価履歴の付いた版が入る。
+ * 両方を並べると、利用者が薄いほうを選んでタイムマシーンが
+ * 「過去時点がありません」になる。厚いほうを残す。
+ */
 export function mergeStocks(dataset, manual) {
   const fromApi = (dataset?.stocks ?? []).map((s) => ({ ...s, id: `jq-${s.jqCode || s.code}` }));
-  return [...fromApi, ...manual];
+  const apiCodes = new Set(fromApi.map((s) => String(s.jqCode || s.code)));
+  const rest = (manual ?? []).filter(
+    (s) => !apiCodes.has(String(s.jqCode || s.code))
+  );
+  return [...fromApi, ...rest];
 }

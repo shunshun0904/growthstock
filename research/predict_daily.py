@@ -162,6 +162,8 @@ def main(argv=None) -> int:
     ap.add_argument("--out-dir", default=PUBLIC_DIR)
     ap.add_argument("--days", type=int, default=5,
                     help="直近何営業日ぶんを出すか（画面で日を切り替えられる）")
+    ap.add_argument("--top-codes", type=int, default=10,
+                    help="詳細（スナップショット・株価履歴）を取りに行く上位何銘柄か")
     args = ap.parse_args(argv)
 
     booster, meta = load_model(args.model_dir)
@@ -285,6 +287,19 @@ def main(argv=None) -> int:
     print(f"[done] {out_path} ({os.path.getsize(out_path)/1e3:.0f}KB)")
 
     update_history(args, rows, days)
+
+    # その日の上位コードを素のテキストで出す。
+    # 取得スクリプト（scripts/jquants_data_fetcher.py --extra-codes）へ渡して、
+    # スナップショットと株価履歴を作らせるため。これが無いと
+    # タイムマシーン（過去比較）が予測候補で使えない。
+    latest = pd.Timestamp(days[-1]).date().isoformat()
+    top = sorted((x for x in rows if x["date"] == latest),
+                 key=lambda x: x["rankInDay"])[:args.top_codes]
+    codes_path = os.path.join(args.data_dir, "top_codes.txt")
+    with open(codes_path, "w", encoding="utf-8") as fh:
+        fh.write(" ".join(x["code"] for x in top))
+    print(f"[done] {codes_path} （{len(top)}銘柄: "
+          f"{' '.join(x['code'] for x in top)}）")
     return 0
 
 

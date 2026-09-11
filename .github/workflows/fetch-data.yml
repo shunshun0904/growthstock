@@ -14,11 +14,14 @@ on:
         type: boolean
         required: false
         default: false
-  schedule:
-    # 平日 21:00 JST (= 12:00 UTC)。東証の日次データが出そろった後に実行する。
-    # V2 の APIキーには V1 のような 1週間の有効期限がないため、
-    # ダッシュボードでキーを再発行しない限り定期実行は動き続ける。
-    - cron: '0 12 * * 1-5'
+  # 定期実行は止めてある。
+  #
+  # public/data/stocks.json は Predict Breakouts が持つようになった
+  # （その日の予測上位を --extra-codes で足して取得する）。
+  # ここでも定期的に走らせると、watchlist だけの薄い stocks.json を
+  # 書いてから予測側が上書きすることになり、その間ダッシュボードが空になる。
+  # 常時見たい銘柄がある場合は scripts/watchlist.json に足せば、
+  # 予測側の取得に一緒に載る。手動実行はそのまま使える。
 
 permissions:
   contents: write

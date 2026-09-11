@@ -797,6 +797,9 @@ def load_watchlist(path: str) -> List[dict]:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(description="J-Quants から成長株分析用データを取得する")
     parser.add_argument("--codes", nargs="*", help="銘柄コード (指定時はウォッチリストを無視)")
+    parser.add_argument("--extra-codes", nargs="*", default=None,
+                        help="ウォッチリストに足す銘柄コード。"
+                             "日次予測が「その日の上位銘柄」を渡すのに使う")
     parser.add_argument("--watchlist", default=DEFAULT_WATCHLIST)
     parser.add_argument("--output", default=DEFAULT_OUTPUT)
     parser.add_argument("--check-auth", action="store_true", help="認証疎通のみ確認して終了")
@@ -843,7 +846,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         [{"code": c, "note": ""} for c in args.codes]
         if args.codes else load_watchlist(args.watchlist)
     )
+    # ウォッチリストに加えて、その日の予測上位を足す。
+    # 常時見る銘柄（watchlist）と、日替わりの候補を1つの画面に載せるため。
+    if args.extra_codes:
+        known = {normalize_code(t["code"]) for t in targets}
+        added = 0
+        for c in args.extra_codes:
+            if normalize_code(c) in known:
+                continue
+            known.add(normalize_code(c))
+            targets.append({"code": c, "note": "ブレイク予測の当日上位"})
+            added += 1
+        print(f"[run] 予測上位から {added} 銘柄を追加")
     print(f"[run] 対象 {len(targets)} 銘柄")
+    if not targets:
+        # ウォッチリストを空にした直後など。ここで落とすと、
+        # 取得ワークフローが毎回失敗して他の更新まで止まる
+        print("[warn] 対象が0件です。空の stocks.json を書き出します")
 
     stocks: List[dict] = []
     failures: List[dict] = []
@@ -856,7 +875,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"[warn] {item['code']} をスキップ: {exc}", file=sys.stderr)
             failures.append({"code": item["code"], "reason": str(exc)})
 
-    if not stocks:
+    if not stocks and targets:
         print("[FATAL] 1銘柄も取得できませんでした", file=sys.stderr)
         return 1
 

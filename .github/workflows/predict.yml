@@ -55,6 +55,12 @@ jobs:
           gh release download data-raw --dir research/_data --clobber
           ls -lh research/_data | head -5
 
+      # 取り込みが失敗した日に、黙って昨日と同じ候補を出さないための関門。
+      # 日次予測は取得を行わない（Update Data Store が唯一の書き手）ので、
+      # 古ければここで止める。
+      - name: Check freshness
+        run: python3 research/check_freshness.py --max-age 1
+
       # 予測したい行（今日のブレイク）はラベルがまだ確定していないので、
       # --keep-unlabeled を付けて残す。学習には絶対に使わないデータセット
       - name: Build prediction dataset
@@ -65,11 +71,29 @@ jobs:
       - name: Score today's candidates
         run: python3 research/predict_daily.py 2>&1 | tee predict.log
 
+      # その日の上位銘柄を、既存の取得スクリプトに通して stocks.json を作る。
+      #
+      # これが無いと、予測タブで見つけた銘柄をオクタゴンへ送っても
+      # 「過去時点のスナップショットがありません」になり、
+      # タイムマシーン（過去比較）が使えない。スナップショットと株価履歴は
+      # この取得スクリプトだけが作れる。
+      - name: Fetch details for today's picks
+        env:
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+        run: |
+          CODES=$(cat research/_data/top_codes.txt 2>/dev/null || true)
+          echo "対象: $CODES"
+          if [ -z "$CODES" ]; then
+            echo "当日の候補が無いので stocks.json はそのまま"; exit 0
+          fi
+          python3 scripts/jquants_data_fetcher.py --extra-codes $CODES 2>&1 | tail -15
+
       - name: Commit predictions
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A public/data/predictions.json public/data/prediction_history.json
+          git add -A public/data/predictions.json public/data/prediction_history.json \
+            public/data/stocks.json
           if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
           git commit -m "chore(data): ブレイク予測を更新 ($(date -u '+%Y-%m-%d %H:%M UTC'))"
           for i in 1 2 3 4; do

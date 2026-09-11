@@ -12,6 +12,7 @@ import {
 import {
   candidateToStock, marketTone, bandLabel, bandColor,
 } from '../src/lib/predictions.js';
+import { mergeStocks } from '../src/lib/store.js';
 
 const close = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-9, msg ?? `${a} != ${b}`);
 
@@ -289,4 +290,26 @@ test('bandLabel / bandColor は帯が無いとき落ちない', () => {
   assert.equal(bandLabel(9), '最上位');
   assert.equal(bandLabel(0), '下位');
   assert.ok(bandColor(null).length > 0);
+});
+
+test('mergeStocks は同じ銘柄なら J-Quants 側（履歴つき）を残す', () => {
+  // 予測タブから送った銘柄は「その日の値」しか持たない。
+  // 日次取得が同じ銘柄を拾ったら、そちらにはスナップショットと株価履歴がある。
+  // 両方並ぶと、薄いほうを選んだときにタイムマシーンが使えなくなる。
+  const dataset = {
+    stocks: [{ code: '3845', jqCode: '38450', name: 'テスト', snapshots: { now: {}, m3: {} } }],
+  };
+  const manual = [
+    { id: 'pred:38450', code: '3845', jqCode: '38450', name: 'テスト', metrics: {} },
+    { id: 'pred:99990', code: '9999', jqCode: '99990', name: '別銘柄', metrics: {} },
+  ];
+  const merged = mergeStocks(dataset, manual);
+  assert.equal(merged.length, 2);
+  assert.equal(merged[0].id, 'jq-38450');
+  assert.ok(merged[0].snapshots, 'J-Quants 側のスナップショットが残っていない');
+  assert.equal(merged[1].id, 'pred:99990');
+});
+
+test('mergeStocks は manual が未定義でも落ちない', () => {
+  assert.deepEqual(mergeStocks(null, undefined), []);
 });

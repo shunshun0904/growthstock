@@ -53,6 +53,30 @@ jobs:
           mkdir -p research/_data
           gh release download data-raw --dir research/_data --clobber
 
+      # 土曜は Update Data Store（平日21:30）が走らない。
+      # 金曜の取り込みが失敗していると、気づかないまま先週のデータで
+      # 学習し直すことになるので、ここで自分で差分を取りに行く。
+      # manifest を見て未取得の営業日だけ取るので、揃っていれば数秒で終わる。
+      - name: Fetch incremental (J-Quants)
+        env:
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+        run: |
+          python3 research/jq_bulk.py --incremental \
+            --from 2016-10-01 --to "$(date -u '+%Y-%m-%d')" 2>&1 | tail -20
+
+      # 取りに行ったうえで古いなら、取得そのものが壊れている。学習しない
+      - name: Check freshness
+        run: python3 research/check_freshness.py --max-age 2
+
+      - name: Upload refreshed raw data
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          files=(research/_data/*.parquet research/_data/manifest.json)
+          if [ ${#files[@]} -eq 0 ]; then echo "アップロードなし"; exit 0; fi
+          gh release upload data-raw "${files[@]}" --clobber
+
       # 学習用。ラベル未確定の行は入れない（--keep-unlabeled を付けない）
       - name: Build dataset
         run: python3 research/build_dataset.py 2>&1 | tail -20
