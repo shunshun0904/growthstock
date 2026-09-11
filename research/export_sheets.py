@@ -112,6 +112,119 @@ def track_values(jq_code: str, price_at_pick, pick_date: str,
             "経過営業日": days}
 
 
+def _mask(v: Optional[str]) -> str:
+    """先頭だけ残して伏せる。公開ログに完全な値を残さないため。"""
+    if not v:
+        return "無し"
+    v = str(v)
+    if "@" in v:
+        local, _, domain = v.partition("@")
+        suffix = ".".join(domain.rsplit(".", 3)[-3:]) if "." in domain else domain
+        return f"{local[:4]}…@…{suffix}"
+    return f"{v[:4]}…（{len(v)}文字）"
+
+
+def describe_credentials(raw: str) -> str:
+    """
+    認証情報の「形」だけを説明する（値そのものは絶対に出力しない）。
+
+    ここで一番多い取り違えは、サービスアカウントの鍵(JSON)ではなく
+    APIキー（AIza... の文字列）を登録してしまうこと。APIキーは
+    公開データの読み取り用で、非公開シートへの書き込みには使えない。
+    エラーだけ見ても原因が分からないので、形の段階で言い当てる。
+    """
+    v = (raw or "").strip()
+    if not v:
+        return "未設定"
+    out = [f"長さ {len(v)} 文字"]
+    if v.startswith("AIza"):
+        out.append(
+            "APIキーの形式 (AIza...)"
+            "\n      → これは公開データ読み取り用のキーで、非公開シートへの"
+            "\n        書き込みには使えません。"
+            "\n        サービスアカウントの『鍵(JSON)』の中身を貼ってください"
+            "\n        （{ \"type\": \"service_account\", ... } で始まる文字列）")
+        return " / ".join(out)
+    if not v.startswith("{"):
+        out.append("JSON ではない（{ で始まっていない）"
+                   "\n      → 鍵ファイルの中身をそのまま貼り付けてください")
+        return " / ".join(out)
+    try:
+        info = json.loads(v)
+    except json.JSONDecodeError as e:
+        return " / ".join(out + [f"JSON として読めない: {e}"])
+    out.append(f"type={info.get('type')}")
+    # client_email と project_id は認証情報ではないが、公開リポジトリの
+    # Actions ログに残るので伏せる。診断に要るのは「入っているか」までで、
+    # 完全な値は利用者が GCP の画面で見られる。private_key は当然出さない
+    out.append(f"client_email={_mask(info.get('client_email'))}")
+    out.append(f"project_id={_mask(info.get('project_id'))}")
+    out.append("private_key=" + ("あり" if info.get("private_key") else "無し"))
+    if info.get("type") != "service_account":
+        out.append("→ type が service_account ではありません")
+    return " / ".join(out)
+
+
+def check(sheet_id: str, title: str) -> int:
+    """
+    疎通テスト。認証・シートを開く・書き込み権限、の3つを順に確かめる。
+
+    書き込みは一時ワークシートを作って1セル書き、読み戻してから消す。
+    既存のシートには触らない。読めるだけでは足りない（追記できないと
+    毎晩ここで失敗する）ので、実際に書いて確かめる。
+    """
+    raw = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "")
+    print(f"[1/4] 認証情報の形: {describe_credentials(raw)}")
+    if not raw.strip():
+        print("      GOOGLE_SERVICE_ACCOUNT_JSON が未設定です")
+        return 1
+    if not sheet_id:
+        print("[fatal] GSHEET_ID が未設定です（シートURLの /d/ と /edit の間）")
+        return 1
+    print(f"[2/4] シートID: 長さ {len(sheet_id)} 文字")
+
+    try:
+        book = open_sheet(sheet_id)
+    except SystemExit:
+        raise
+    except Exception as e:
+        print(f"[fatal] シートを開けませんでした: {type(e).__name__}: {e}")
+        print("      よくある原因:")
+        print("        ・シートをサービスアカウントに共有していない")
+        print("          → GCP の [IAMと管理 » サービスアカウント] で")
+        print("            該当アカウントのメールアドレスを確認し、")
+        print("            シートの共有に『編集者』で追加してください")
+        print("        ・GSHEET_ID が違う（URLの /d/ と /edit の間だけ）")
+        print("        ・Google Sheets API が有効になっていない")
+        return 1
+    print(f"[3/4] シートを開けました: 「{book.title}」 / "
+          f"既存のワークシート: {[w.title for w in book.worksheets()]}")
+
+    tmp = None
+    try:
+        tmp = book.add_worksheet(title="_疎通テスト", rows=2, cols=2)
+        stamp = pd.Timestamp.utcnow().isoformat()
+        tmp.update([["疎通テスト", stamp]], "A1")
+        back = tmp.get("A1:B1")
+        ok = bool(back) and back[0][0] == "疎通テスト"
+        print(f"[4/4] 書き込み: {'成功' if ok else '書けたが読み戻せない'}（読み戻し: {back}）")
+    except Exception as e:
+        print(f"[fatal] 書き込めませんでした: {type(e).__name__}: {e}")
+        print("      共有の権限が『閲覧者』になっていないか確認してください"
+              "（『編集者』が必要です）")
+        return 1
+    finally:
+        if tmp is not None:
+            try:
+                book.del_worksheet(tmp)
+                print("      一時ワークシートは削除しました")
+            except Exception as e:
+                print(f"[warn] 一時ワークシート「_疎通テスト」を消せませんでした: {e}"
+                      "\n      手で削除してください")
+    print("\n[OK] 認証・シート・書き込み権限ともに問題ありません")
+    return 0
+
+
 def open_sheet(sheet_id: str):
     """サービスアカウントでシートを開く。認証情報は環境変数から読むだけで、出力しない。"""
     import gspread
@@ -234,7 +347,12 @@ def main(argv=None) -> int:
     ap.add_argument("--title", default=SHEET_TITLE)
     ap.add_argument("--dry-run", action="store_true",
                     help="通信せず、書き込む内容だけ出す")
+    ap.add_argument("--check", action="store_true",
+                    help="疎通テストのみ。予測データは書かない")
     args = ap.parse_args(argv)
+
+    if args.check:
+        return check(args.sheet_id, args.title)
 
     pred = json.load(open(args.predictions, encoding="utf-8"))
     rows = rows_from_predictions(pred)

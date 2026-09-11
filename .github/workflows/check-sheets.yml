@@ -1,0 +1,51 @@
+name: Check Spreadsheet Access
+
+# Google スプレッドシートへの疎通テスト（手動実行のみ）。
+#
+# 認証・シートを開く・書き込み権限 の3つを順に確かめる。
+# 日次予測（Predict Breakouts）を丸ごと回すと20分ほどかかるうえ
+# コミットまで走ってしまうので、設定の確認はこちらで済ませる。
+#
+# 生データもモデルも要らないので、数十秒で終わる。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-sheets
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      # 疎通テストに要るのは認証まわりだけ。
+      # pandas / lightgbm まで入れると数分かかって確認が遅くなる
+      - name: Install
+        run: pip install -q gspread==6.2.1 google-auth==2.58.0 pandas==2.2.3
+
+      - name: Check
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GSHEET_ID: ${{ secrets.GSHEET_ID }}
+        run: python3 research/export_sheets.py --check 2>&1 | tee check.log
+
+      - name: Summary
+        if: always()
+        run: |
+          { echo '## スプレッドシートの疎通テスト'; echo '```'
+            if [ -f check.log ]; then cat check.log; else echo "(実行せず)"; fi
+            echo '```'; } >> "$GITHUB_STEP_SUMMARY"
