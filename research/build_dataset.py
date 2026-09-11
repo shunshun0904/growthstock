@@ -147,7 +147,27 @@ BREAKOUT_COOLDOWN = _sweep_override("BREAKOUT_COOLDOWN", 20, int)
 # 更新日の終値から、先 RISE_HORIZON 営業日以内に RISE_THRESHOLD 以上上昇したか。
 # 終値ベースで測る（高値ベースだと「一瞬触れただけ」を正例にしてしまう）。
 RISE_HORIZON = 60        # 営業日。約3ヶ月
-RISE_THRESHOLD = 0.20    # +20%
+RISE_THRESHOLD = 0.20    # +20%。VOL_NORM_K が None のときだけ効く
+
+# --- 到達しきい値を銘柄自身のボラティリティで測る --- #
+#
+# 固定の +20% は銘柄ごとの難易度がまったく揃っていない。実測の60営業日σは
+#   中央 15.0% / p5 6.0% / p95 47.8%   （8倍の開き）
+# なので、同じ +20% が静かな銘柄には 3.3σ、荒い銘柄には 0.42σ にあたる。
+# 正例になりやすさが定義の時点で銘柄ごとに何倍も違っていた。
+#
+# その結果、モデルは「上がる銘柄を当てる係」ではなく
+# 「荒い銘柄を選ぶ係」になっていた。実測（docs/MODEL_DESIGN_SWEEP.md）:
+#   固定+20% の上位5%   日次ボラ中央 3.32%（母集団 1.78%）
+#   同じ期間に高ボラ順で機械的に買うと 実収益 -21.15pt / 勝率25.9%
+#
+# しきい値を k×σ（σ = vol_20d/100 × √horizon）にすると選ぶ銘柄が反転し、
+# 10窓のウォークフォワードでも実収益の差が +5.02pt [+3.19,+5.96] と有意になった
+# （docs/MODEL_DESIGN_WALKFORWARD.md）。k は 1.0〜1.6σ のどれでも有意で、
+# 1.2σ が最も良かったので採用する。
+#
+# None にすると固定 RISE_THRESHOLD に戻る。
+VOL_NORM_K: Optional[float] = 1.2
 
 # --- 継続の軸 --- #
 # 「到達したか」だけだと、一瞬吹き上げてすぐ下落トレンドに入った銘柄も
@@ -166,8 +186,8 @@ RISE_THRESHOLD = 0.20    # +20%
 # 緩い案なら 11.55% / 2,030件で、正例が1.5倍になる。
 # 差の714件はチャートで見ると「+20%に届いたあと10〜20日で失速した」群で、
 # 買えないほど悪いわけではない。まずは推定を安定させることを優先する。
-KEEP_DAYS = 10           # +20%以上で引けた日が通算10営業日以上
-END_RATIO = 0.10         # 60営業日後もまだ +10%以上
+KEEP_DAYS = 0            # 維持日数の条件。0 なら課さない
+END_RATIO = 0.10         # 60営業日後もまだ +10%以上（ボラ正規化時は比例させる）
 END_WINDOW = 5           # 終盤の水準は5営業日平均で見る（1日の綾を拾わない）
 TREND_SHORT = 20         # 短期移動平均（営業日）
 TREND_LONG = 60          # 長期移動平均（営業日）
@@ -294,15 +314,28 @@ class RiseConfig:
     trend_short: int = TREND_SHORT
     trend_long: int = TREND_LONG
     require_uptrend: bool = REQUIRE_UPTREND
+    #: 到達しきい値を k×σ で測る。None なら固定の threshold（VOL_NORM_K 参照）
+    vol_norm_k: Optional[float] = VOL_NORM_K
+
+    @property
+    def normalised(self) -> bool:
+        return self.vol_norm_k is not None
 
     @property
     def name(self) -> str:
         m = round(self.horizon / 20)
-        base = f"{m}ヶ月内+{self.threshold*100:.0f}%"
+        if self.normalised:
+            base = f"{m}ヶ月内+{self.vol_norm_k:.1f}σ"
+        else:
+            base = f"{m}ヶ月内+{self.threshold*100:.0f}%"
         if self.keep_days:
             base += f" / 維持{self.keep_days}日"
         if self.end_ratio is not None:
-            base += f" / 終盤+{self.end_ratio*100:.0f}%"
+            # ボラ正規化のときは終盤も同じ比率で伸縮する
+            if self.normalised:
+                base += f" / 終盤+{self.end_ratio / self.threshold:.2f}倍"
+            else:
+                base += f" / 終盤+{self.end_ratio*100:.0f}%"
         if self.require_uptrend:
             base += f" / MA{self.trend_short}>=MA{self.trend_long}"
         return base
@@ -312,8 +345,11 @@ DEFAULT_RISE = RiseConfig()
 
 #: 未来の値から作った列。特徴量に混ぜたらリークになる。
 #: meta として持ち出すが、features に紛れ込んでいないか build() で必ず確認する。
+#: rise_need / end_need は未来の値ではないが、ラベル定義そのものの列なので
+#: 特徴量には入れない（vol_20d の単調変換で、特徴量としては冗長でもある）。
 FUTURE_COLS = ["label", "future_max_close", "future_rise",
-               "keep_days_cnt", "end_level", "uptrend_end"]
+               "keep_days_cnt", "end_level", "uptrend_end",
+               "rise_need", "end_need"]
 
 # --- 除外条件 (docs/MODEL_DESIGN.md §2.2) --- #
 MAX_RHIGH_AT_T = 95.0   # 基準日ですでに高値圏の銘柄は対象外
@@ -437,6 +473,14 @@ def price_panel(bars: pd.DataFrame, cfg: LabelConfig = DEFAULT_LABEL) -> pd.Data
 
     g = df.groupby("Code", sort=False)
 
+    # --- ボラティリティ（20営業日の日次リターン標準偏差、%） --- #
+    # もとは add_breakout_context で作っていたが、ラベルより後に走るので
+    # 「到達しきい値を銘柄自身のσで測る」定義に使えなかった。
+    # 定義を2箇所に持つと必ずずれるので、ここ1箇所で作って両方が使う。
+    _ret1 = df["close"] / g["close"].shift(1) - 1.0
+    df["vol_20d"] = _ret1.groupby(df["Code"], sort=False).transform(
+        lambda s: s.rolling(20, min_periods=15).std()) * 100.0
+
     # --- 52週高値（当日を含む / 含まない の2種類が要る） --- #
     # 含む  : 基準日時点の高値接近率 R_high の分母
     # 含まない: ブレイク判定（「それまでの高値」を上抜けたか）の基準
@@ -546,12 +590,17 @@ def mark_new_highs(df: pd.DataFrame, cooldown: int = BREAKOUT_COOLDOWN,
     return df
 
 
-def _days_above(close: np.ndarray, horizon: int, level: float) -> np.ndarray:
+def _days_above(close: np.ndarray, horizon: int, level) -> np.ndarray:
     """
     各 t について、t+1 〜 t+horizon の終値が close[t]*level 以上だった日数。
 
     しきい値が行ごと（close[t] 倍）に動くので、固定値の rolling では書けない。
     銘柄1本ぶんの窓行列を作って一気に数える。
+
+    level はスカラーでも行ごとの配列でもよい。配列にするのは
+    「到達しきい値を銘柄自身のσで測る」定義のため（VOL_NORM_K 参照）。
+    level が欠測の行は 0 ではなく NaN にする。0 にすると
+    「一度も届かなかった」と「そもそも判定できない」が混ざる。
     """
     n = len(close)
     out = np.full(n, np.nan)
@@ -560,19 +609,54 @@ def _days_above(close: np.ndarray, horizon: int, level: float) -> np.ndarray:
     win = np.lib.stride_tricks.sliding_window_view(close, horizon)  # win[k] = close[k:k+horizon]
     fwd = win[1:]              # t 行目 = close[t+1 : t+1+horizon]
     m = fwd.shape[0]           # = n - horizon
-    out[:m] = (fwd >= (close[:m] * level)[:, None]).sum(axis=1)
+    lv = np.asarray(level, dtype=float)
+    thr = close[:m] * (lv if lv.ndim == 0 else lv[:m])
+    cnt = (fwd >= thr[:, None]).sum(axis=1).astype(float)
+    out[:m] = np.where(np.isnan(thr), np.nan, cnt)
     return out
 
 
-def _by_code(df: pd.DataFrame, values: np.ndarray, fn) -> np.ndarray:
-    """銘柄ごとの連続区間に fn を適用する。df は Code,Date でソート済みが前提。"""
+def _by_code(df: pd.DataFrame, values: np.ndarray, fn,
+             level: Optional[np.ndarray] = None) -> np.ndarray:
+    """
+    銘柄ごとの連続区間に fn を適用する。df は Code,Date でソート済みが前提。
+
+    level を渡すと同じ区間で切って第2引数に渡す。行ごとに動くしきい値を
+    銘柄の区間に正しく対応させるため（丸ごと渡すと位置がずれる）。
+    """
     out = np.full(len(df), np.nan)
     codes = df["Code"].to_numpy()
     starts = np.flatnonzero(np.r_[True, codes[1:] != codes[:-1]])
     ends = np.r_[starts[1:], len(codes)]
     for a, b in zip(starts, ends):
-        out[a:b] = fn(values[a:b])
+        out[a:b] = fn(values[a:b]) if level is None else fn(values[a:b], level[a:b])
     return out
+
+
+def rise_thresholds(vol_20d, cfg: RiseConfig = DEFAULT_RISE):
+    """
+    cfg が課す (到達しきい値, 終盤の必要水準) を行ごとに返す。
+
+    固定%なら全行同じ値、ボラ正規化なら銘柄自身の期間σの k 倍。
+    ラベルを作る側（attach_rise_label）と、データセットから引き直す側
+    （export_label_samples.verdict）が同じ式を使うための1箇所。
+    2箇所に書くと必ずずれる。実際、ボラ正規化に変えたとき引き直し側が
+    固定値のままで 2,364件食い違った（テストと assert が捕まえた）。
+
+    vol_20d は %（日次リターン標準偏差×100）で渡すこと。
+    """
+    vol = pd.to_numeric(pd.Series(vol_20d), errors="coerce")
+    if cfg.normalised:
+        need = cfg.vol_norm_k * vol / 100.0 * np.sqrt(cfg.horizon)
+    else:
+        need = pd.Series(float(cfg.threshold), index=vol.index)
+    if cfg.end_ratio is None:
+        end_need = pd.Series(np.nan, index=vol.index)
+    elif cfg.normalised:
+        end_need = (cfg.end_ratio / cfg.threshold) * need
+    else:
+        end_need = pd.Series(float(cfg.end_ratio), index=vol.index)
+    return need, end_need
 
 
 def attach_rise_label(df: pd.DataFrame, cfg: RiseConfig = DEFAULT_RISE) -> pd.DataFrame:
@@ -607,14 +691,29 @@ def attach_rise_label(df: pd.DataFrame, cfg: RiseConfig = DEFAULT_RISE) -> pd.Da
     df["future_max_close"] = g["close"].transform(future_max).where(have_forward)
     ratio = df["future_max_close"] / df["close"] - 1.0
     df["future_rise"] = ratio
-    hit = ratio >= cfg.threshold
+
+    # --- 到達に必要な上昇率 --- #
+    # 固定なら全行同じ。ボラ正規化なら銘柄自身の期間σの k 倍。
+    # 実際に課したしきい値を列として残す。残さないと、後段
+    # （ファネル・ラベル比較・チャート）が cfg.threshold を見てしまい、
+    # 行ごとに違うしきい値を1つの数字で語ることになる。
+    if cfg.normalised and "vol_20d" not in df.columns:
+        raise SystemExit(
+            "vol_20d がありません。ボラ正規化ラベルには price_panel が必要です")
+    need, end_need = rise_thresholds(
+        df["vol_20d"] if cfg.normalised else pd.Series(np.nan, index=df.index), cfg)
+    need.index = df.index
+    end_need.index = df.index
+    df["rise_need"] = need
+    hit = ratio >= need
 
     close = df["close"].to_numpy(dtype=float)
 
     # --- 維持日数 --- #
     if cfg.keep_days:
         df["keep_days_cnt"] = _by_code(
-            df, close, lambda a: _days_above(a, h, 1.0 + cfg.threshold))
+            df, close, lambda a, lv: _days_above(a, h, lv),
+            level=(1.0 + need).to_numpy(dtype=float))
     else:
         df["keep_days_cnt"] = np.nan
 
@@ -638,12 +737,17 @@ def attach_rise_label(df: pd.DataFrame, cfg: RiseConfig = DEFAULT_RISE) -> pd.Da
     up = (ma_s >= ma_l).where(ma_s.notna() & ma_l.notna())
     df["uptrend_end"] = up.groupby(df["Code"], sort=False).shift(-h)
 
+    # --- 終盤に必要な水準 --- #
+    # 固定なら end_ratio そのまま。ボラ正規化なら到達しきい値と同じ比率で伸縮
+    # （+20%に対する+10% = 半分、という関係を σ 版でも保つ）。rise_thresholds 参照
+    df["end_need"] = end_need
+
     # --- 合成 --- #
     ok = hit.copy()
     if cfg.keep_days:
         ok &= df["keep_days_cnt"] >= cfg.keep_days
     if cfg.end_ratio is not None:
-        ok &= df["end_level"] >= cfg.end_ratio
+        ok &= df["end_level"] >= df["end_need"]
     if cfg.require_uptrend:
         ok &= df["uptrend_end"] == 1.0
 
@@ -651,6 +755,10 @@ def attach_rise_label(df: pd.DataFrame, cfg: RiseConfig = DEFAULT_RISE) -> pd.Da
     # 課していない条件の入力までは要求しない
     # （終盤条件を切っているのに終盤の値が無いから未確定、では筋が通らない）。
     determined = df["future_max_close"].notna()
+    if cfg.normalised:
+        # しきい値そのものが作れない行（上場直後などで vol_20d が欠測）は
+        # 「起きなかった」ではなく「判定できない」
+        determined &= need.notna()
     if cfg.end_ratio is not None:
         determined &= end_close.notna()
     if cfg.require_uptrend:
@@ -819,15 +927,23 @@ def report_rise_funnel(samples: pd.DataFrame,
     if d.empty:
         return
     n = len(d)
-    steps = [(f"到達（{cfg.horizon}営業日以内に +{cfg.threshold*100:.0f}%）",
-              d["future_rise"] >= cfg.threshold)]
+    # しきい値は行ごとに違いうるので、cfg の数字ではなく実際に課した列で判定する
+    need = (d["rise_need"] if "rise_need" in d.columns
+            else pd.Series(float(cfg.threshold), index=d.index))
+    lab = (f"{cfg.vol_norm_k:.1f}σ" if cfg.normalised
+           else f"{cfg.threshold*100:.0f}%")
+    steps = [(f"到達（{cfg.horizon}営業日以内に +{lab}）", d["future_rise"] >= need)]
     if cfg.keep_days:
-        steps.append((f"維持（+{cfg.threshold*100:.0f}%以上で引けた日 >= {cfg.keep_days}日）",
+        steps.append((f"維持（+{lab}以上で引けた日 >= {cfg.keep_days}日）",
                       d["keep_days_cnt"] >= cfg.keep_days))
     if cfg.end_ratio is not None:
+        end_need = (d["end_need"] if "end_need" in d.columns
+                    else pd.Series(float(cfg.end_ratio), index=d.index))
+        ratio_lab = (f"{cfg.end_ratio / cfg.threshold:.2f}倍" if cfg.normalised
+                     else f"+{cfg.end_ratio*100:.0f}%")
         steps.append((f"終盤（{cfg.horizon}営業日後の{cfg.end_window}日平均 >= "
-                      f"+{cfg.end_ratio*100:.0f}%）",
-                      d["end_level"] >= cfg.end_ratio))
+                      f"{ratio_lab}）",
+                      d["end_level"] >= end_need))
     if cfg.require_uptrend:
         steps.append((f"トレンド（MA{cfg.trend_short} >= MA{cfg.trend_long}）",
                       d["uptrend_end"] == 1.0))
@@ -870,10 +986,10 @@ def add_breakout_context(df: pd.DataFrame) -> pd.DataFrame:
 
     # 直近20営業日の上昇率。すでに走った後か、静かなところからの初動か
     df["ret_20d"] = (df["close"] / g["close"].shift(20) - 1.0) * 100.0
-    # ボラティリティ（20営業日の日次リターン標準偏差）
-    ret1 = df["close"] / g["close"].shift(1) - 1.0
-    df["vol_20d"] = ret1.groupby(df["Code"], sort=False).transform(
-        lambda s: s.rolling(20, min_periods=15).std()) * 100.0
+    # vol_20d は price_panel で作る（ラベルのしきい値に使うので、
+    # ラベル計算より前に存在している必要がある）。ここでは作り直さない。
+    if "vol_20d" not in df.columns:
+        raise SystemExit("vol_20d がありません。price_panel を先に通してください")
     return df
 
 

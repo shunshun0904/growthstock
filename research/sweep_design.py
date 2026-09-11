@@ -75,12 +75,15 @@ DATASETS = {
 
 #: 実収益の物差しに使う参照ホライズン。全設計で固定する。
 #: ラベルの horizon を動かしてもこちらは動かさない。動かしたら比較にならない。
+#: vol_norm_k=None を明示するのは、build_dataset の既定がボラ正規化に
+#: 変わっても物差しの側は動かさないため（動くと過去の掃引と比べられなくなる）。
 REF_HORIZON = 60
 REF_RISE = B.RiseConfig(horizon=REF_HORIZON, threshold=0.20, keep_days=0,
-                        end_ratio=None, require_uptrend=False)
+                        end_ratio=None, require_uptrend=False, vol_norm_k=None)
 
 #: ラベル計算に要る列だけ。パネルは1,000万行規模あるので丸ごと copy しない。
-PANEL_COLS = ["Code", "Date", "close", "is_new_high", "high52w", "tv_ma20"]
+PANEL_COLS = ["Code", "Date", "close", "is_new_high", "high52w", "tv_ma20",
+              "vol_20d"]
 
 
 # --------------------------------------------------------------------------- #
@@ -115,9 +118,13 @@ class Design:
 
     @property
     def rise(self) -> B.RiseConfig:
+        # vol_norm_k=None を明示する。掃引はボラ正規化を自前で計算する
+        # （vol_normalised_label）ので、build_dataset の既定が変わっても
+        # ここは固定%のままでなければ「1因子だけ動かす」が崩れる
         return B.RiseConfig(horizon=self.horizon, threshold=self.threshold,
                             keep_days=self.keep_days, end_ratio=self.end_ratio,
-                            require_uptrend=self.require_uptrend)
+                            require_uptrend=self.require_uptrend,
+                            vol_norm_k=None)
 
     @property
     def forward_needed(self) -> int:

@@ -39,6 +39,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from build_dataset import (  # noqa: E402
     DEFAULT_RISE, HIGH_WINDOW, POPULATION, RISE_HORIZON, RISE_THRESHOLD,
+    rise_thresholds,
     RiseConfig, add_breakout_context, attach_labels, attach_rise_label,
     breakout_flags, mark_new_highs, price_panel,
 )
@@ -51,7 +52,11 @@ from build_dataset import (  # noqa: E402
 #: したがって食い違うのは「採用案では正例だが厳しい案では負例」の1組だけで、
 #: 緩めたことで何が正例に戻ったのかは、そこを見れば分かる。
 CFG_ADOPTED = DEFAULT_RISE
-CFG_STRICT = RiseConfig(keep_days=20, end_ratio=0.15, require_uptrend=True)
+#: 採用案より厳しい案。採用案の真部分集合でなければ「緩めて戻った分」を
+#: 切り出せない。しきい値の k を上げるだけなら到達も終盤も必ず部分集合になる。
+#: 1.6σ は掃引でも実収益の差が有意だった側（+5.84pt [+3.95,+7.30]）。
+CFG_STRICT = RiseConfig(vol_norm_k=1.6, keep_days=0, end_ratio=0.10,
+                        require_uptrend=True)
 
 #: 母集団を広げる前の制約。「どの行が新しく入ったか」を出すための基準。
 #:
@@ -101,12 +106,19 @@ def verdict(df: pd.DataFrame, cfg: RiseConfig) -> pd.Series:
 
     2案は同じ材料（future_rise / keep_days_cnt / end_level / uptrend_end）に
     しきい値を変えて当てるだけなので、パネルを作り直す必要はない。
+
+    しきい値は build_dataset.rise_thresholds から取る。ここに式を書くと
+    ボラ正規化のように行ごとに動く定義でずれる（実際ずれて、
+    引き直しが dataset と 2,364件食い違った）。
     """
-    ok = pd.to_numeric(df["future_rise"], errors="coerce") >= cfg.threshold
+    need, end_need = rise_thresholds(df.get("vol_20d"), cfg)
+    need.index = df.index
+    end_need.index = df.index
+    ok = pd.to_numeric(df["future_rise"], errors="coerce") >= need
     if cfg.keep_days:
         ok &= pd.to_numeric(df["keep_days_cnt"], errors="coerce") >= cfg.keep_days
     if cfg.end_ratio is not None:
-        ok &= pd.to_numeric(df["end_level"], errors="coerce") >= cfg.end_ratio
+        ok &= pd.to_numeric(df["end_level"], errors="coerce") >= end_need
     if cfg.require_uptrend:
         ok &= pd.to_numeric(df["uptrend_end"], errors="coerce") == 1.0
     return ok.fillna(False)
@@ -133,6 +145,15 @@ def build_case(panel: pd.DataFrame, code: str, t_date: pd.Timestamp,
     ma_l = g["close"].rolling(cfg.trend_long, min_periods=cfg.trend_long).mean()
 
     close_t = float(g.iloc[i]["close"])
+    # しきい値はその銘柄の vol_20d から決まる（ボラ正規化）。
+    # 固定値で線を引くと、チャートに出る線と実際の判定がずれる
+    vol_t = float(g.iloc[i].get("vol_20d", np.nan))
+    _need, _end_need = rise_thresholds(pd.Series([vol_t]), CFG_ADOPTED)
+    need_a = float(_need.iloc[0])
+    end_need_a = float(_end_need.iloc[0])
+    _need_s, _end_need_s = rise_thresholds(pd.Series([vol_t]), CFG_STRICT)
+    need_s = float(_need_s.iloc[0])
+    end_need_s = float(_end_need_s.iloc[0])
     # 判定期間は t+1 〜 t+RISE_HORIZON。当日は含まない
     h_lo, h_hi = i + 1, min(len(g) - 1, i + RISE_HORIZON)
     fwd = g.iloc[h_lo:h_hi + 1]["close"] if h_lo <= h_hi else pd.Series(dtype=float)
@@ -140,11 +161,11 @@ def build_case(panel: pd.DataFrame, code: str, t_date: pd.Timestamp,
     fwd_min = float(fwd.min()) if len(fwd) else float("nan")
     end_close = float(g.iloc[h_hi]["close"]) if h_lo <= h_hi else float("nan")
 
-    # +20% に最初に到達した日（到達していればあるはず）
+    # 到達しきい値に最初に届いた日（到達していればあるはず）
     hit_pos = None
     keep_days = None
-    if len(fwd):
-        above = fwd.to_numpy() >= close_t * (1 + cfg.threshold)
+    if len(fwd) and np.isfinite(need_a):
+        above = fwd.to_numpy() >= close_t * (1 + need_a)
         keep_days = int(above.sum())
         hits = np.where(above)[0]
         if len(hits):
@@ -174,8 +195,12 @@ def build_case(panel: pd.DataFrame, code: str, t_date: pd.Timestamp,
         "horizon": [t_pos + 1, t_pos + RISE_HORIZON],
         "closeAtT": r(close_t, 1),
         # 目標ライン。チャートに水平線として引く
-        "target": r(close_t * (1 + RISE_THRESHOLD), 1),
-        "thresholdPct": round(RISE_THRESHOLD * 100, 1),
+        "target": r(close_t * (1 + need_a), 1),
+        "thresholdPct": r(need_a * 100, 1),
+        "targetStrict": r(close_t * (1 + need_s), 1),
+        "thresholdPctStrict": r(need_s * 100, 1),
+        # この銘柄の日次ボラ。しきい値がなぜその水準なのかを見るため
+        "vol20d": r(vol_t),
         "hitPos": hit_pos,
         # 継続の材料。採用案と厳しい案のどちらの線を越えたかを1件ずつ見られるようにする
         "bucket": bucket,
@@ -183,10 +208,10 @@ def build_case(panel: pd.DataFrame, code: str, t_date: pd.Timestamp,
         "keepDaysAdopted": CFG_ADOPTED.keep_days,
         "keepDaysStrict": CFG_STRICT.keep_days,
         "endLevel": r(end_level),
-        "endLineAdopted": r(close_t * (1 + CFG_ADOPTED.end_ratio), 1),
-        "endLineStrict": r(close_t * (1 + CFG_STRICT.end_ratio), 1),
-        "endRatioAdopted": round(CFG_ADOPTED.end_ratio * 100, 1),
-        "endRatioStrict": round(CFG_STRICT.end_ratio * 100, 1),
+        "endLineAdopted": r(close_t * (1 + end_need_a), 1),
+        "endLineStrict": r(close_t * (1 + end_need_s), 1),
+        "endRatioAdopted": r(end_need_a * 100, 1),
+        "endRatioStrict": r(end_need_s * 100, 1),
         "uptrendEnd": uptrend,
         "maxGain": r((fwd_max / close_t - 1) * 100),
         "maxDraw": r((fwd_min / close_t - 1) * 100),
@@ -245,7 +270,9 @@ def main(argv: List[str] | None = None) -> int:
     # 厳しい案は採用案の真部分集合なので、食い違うのは loosened_in の1組だけ。
     strict = verdict(ds, CFG_STRICT)
     adopted = verdict(ds, CFG_ADOPTED)
-    reached = pd.to_numeric(ds["future_rise"], errors="coerce") >= RISE_THRESHOLD
+    _need_all, _ = rise_thresholds(ds.get("vol_20d"), CFG_ADOPTED)
+    _need_all.index = ds.index
+    reached = pd.to_numeric(ds["future_rise"], errors="coerce") >= _need_all
     reached = reached.fillna(False)
 
     assert int((strict & ~adopted).sum()) == 0, \
@@ -271,7 +298,8 @@ def main(argv: List[str] | None = None) -> int:
         ("pos_added_fund", "正例（決算を緩めて入った）", 1,
          (origin == "added_fund") & adopted),
         ("reached_only", "到達したが継続せず", 0, ~adopted & reached),
-        ("not_reached", "未到達（+20%に届かず）", 0, ~adopted & ~reached),
+        # しきい値は銘柄ごとに違うので「+20%」とは書けない
+        ("not_reached", "未到達（しきい値に届かず）", 0, ~adopted & ~reached),
     ]
     covered = np.zeros(len(ds), dtype=int)
     for _, _, _, m in buckets:
@@ -366,7 +394,11 @@ def main(argv: List[str] | None = None) -> int:
         "generatedAt": pd.Timestamp.utcnow().isoformat(),
         "definition": {
             "riseHorizon": RISE_HORIZON,
-            "riseThreshold": round(RISE_THRESHOLD * 100, 1),
+            # 固定%なら全行同じ。ボラ正規化なら銘柄ごとに違うので None にして、
+            # 1件ごとの thresholdPct を見てもらう
+            "riseThreshold": (None if DEFAULT_RISE.normalised
+                              else round(RISE_THRESHOLD * 100, 1)),
+            "volNormK": DEFAULT_RISE.vol_norm_k,
             "population": POPULATION,
             "highWeeks": round(HIGH_WINDOW / 245 * 52),
             "keepDays": DEFAULT_RISE.keep_days,
@@ -378,7 +410,11 @@ def main(argv: List[str] | None = None) -> int:
             "note": (f"母集団 = {round(HIGH_WINDOW / 245 * 52)}週高値を更新した日"
                      "（高値ベース、連続更新は初回のみ）。"
                      f"正例 = 到達（先{RISE_HORIZON}営業日以内に終値で"
-                     f"+{RISE_THRESHOLD*100:.0f}%以上）かつ継続（{DEFAULT_RISE.name}）"),
+                     + (f"その銘柄自身の{RISE_HORIZON}営業日σの"
+                        f"{DEFAULT_RISE.vol_norm_k}倍以上"
+                        if DEFAULT_RISE.normalised
+                        else f"+{RISE_THRESHOLD*100:.0f}%以上")
+                     + f"）かつ継続（{DEFAULT_RISE.name}）"),
         },
         "datasetStats": {
             "n": int(len(ds)),

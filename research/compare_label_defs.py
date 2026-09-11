@@ -42,8 +42,11 @@ W52, W78 = 245, 368
 #:
 #: 到達のみ = 従来の定義。継続の条件を1つずつ足して効果を分離し、
 #: 最後に全部入り（＝現在の既定）と、さらに厳しくした案を置く。
+# vol_norm_k=None は「固定%のしきい値」。build_dataset の既定は
+# ボラ正規化（VOL_NORM_K）に変わったので、旧定義を並べるほうは明示して固定する
 _REACH = dict(horizon=60, threshold=0.20, keep_days=0, end_ratio=None,
-              require_uptrend=False)
+              require_uptrend=False, vol_norm_k=None)
+_FIXED = dict(vol_norm_k=None)
 CONFIGS: List[Tuple[int, RiseConfig, str]] = [
     (W52, RiseConfig(**_REACH),                                  "旧定義（52週・到達のみ）"),
     (W78, RiseConfig(**_REACH),                                  "78週・到達のみ"),
@@ -51,11 +54,20 @@ CONFIGS: List[Tuple[int, RiseConfig, str]] = [
     (W78, RiseConfig(**{**_REACH, "end_ratio": 0.10}),           "78週・+終盤10%"),
     (W78, RiseConfig(**{**_REACH, "require_uptrend": True}),     "78週・+トレンド"),
     (W78, RiseConfig(keep_days=10, end_ratio=0.10,
-                     require_uptrend=True),                      "78週・継続すべて（緩い案）"),
+                     require_uptrend=True, **_FIXED),            "78週・継続すべて（旧・緩い案）"),
     (W78, RiseConfig(keep_days=20, end_ratio=0.15,
-                     require_uptrend=True),                      "78週・継続すべて（採用）"),
+                     require_uptrend=True, **_FIXED),            "78週・継続すべて（旧・厳しい案）"),
     (W52, RiseConfig(keep_days=10, end_ratio=0.10,
-                     require_uptrend=True),                      "52週・継続すべて"),
+                     require_uptrend=True, **_FIXED),            "52週・継続すべて"),
+    # --- ボラ正規化（現在の採用）--- #
+    # 到達しきい値を銘柄自身の期間σの k 倍にする。固定%との違いは
+    # 「静かな銘柄にも荒い銘柄にも同じ難易度を課す」こと。
+    (W78, RiseConfig(vol_norm_k=1.0, keep_days=0, end_ratio=0.10,
+                     require_uptrend=True),                      "78週・1.0σ"),
+    (W78, RiseConfig(vol_norm_k=1.2, keep_days=0, end_ratio=0.10,
+                     require_uptrend=True),                      "78週・1.2σ（採用）"),
+    (W78, RiseConfig(vol_norm_k=1.6, keep_days=0, end_ratio=0.10,
+                     require_uptrend=True),                      "78週・1.6σ"),
 ]
 
 
@@ -68,7 +80,9 @@ def panel_for(bars: pd.DataFrame, high_window: int) -> pd.DataFrame:
 #: ラベル計算と絞り込みに要る列だけ。
 #: パネルは1,000万行規模あり、定義ごとに丸ごと copy すると
 #: ランナーのメモリが持たない。
-NEEDED = ["Code", "Date", "close", "is_fresh_break", "high52w", "tv_ma20"]
+NEEDED = ["Code", "Date", "close", "is_fresh_break", "high52w", "tv_ma20",
+          # ボラ正規化ラベルはしきい値を銘柄自身のσから作るので vol_20d が要る
+          "vol_20d"]
 
 
 def evaluate(panel: pd.DataFrame, cfg: RiseConfig, high_window: int) -> Dict:
@@ -92,11 +106,12 @@ def evaluate(panel: pd.DataFrame, cfg: RiseConfig, high_window: int) -> Dict:
                 "note": "サンプルが残らない"}
 
     # 継続条件を1つずつ重ねたときの正例数。どの条件がどれだけ削ったかを見る
-    conds = [("到達", s["future_rise"] >= cfg.threshold)]
+    # しきい値は行ごとに違いうるので、実際に課した列で判定する
+    conds = [("到達", s["future_rise"] >= s["rise_need"])]
     if cfg.keep_days:
         conds.append((f"維持{cfg.keep_days}日", s["keep_days_cnt"] >= cfg.keep_days))
     if cfg.end_ratio is not None:
-        conds.append((f"終盤+{cfg.end_ratio*100:.0f}%", s["end_level"] >= cfg.end_ratio))
+        conds.append(("終盤", s["end_level"] >= s["end_need"]))
     if cfg.require_uptrend:
         conds.append(("トレンド", s["uptrend_end"] == 1.0))
     cascade, mask = {}, pd.Series(True, index=s.index)
