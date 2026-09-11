@@ -146,8 +146,22 @@ def describe_credentials(raw: str) -> str:
             "\n        （{ \"type\": \"service_account\", ... } で始まる文字列）")
         return " / ".join(out)
     if not v.startswith("{"):
-        out.append("JSON ではない（{ で始まっていない）"
-                   "\n      → 鍵ファイルの中身をそのまま貼り付けてください")
+        out.append("JSON ではない（{ で始まっていない）")
+        if len(v) == 40 and all(c in "0123456789abcdefABCDEF" for c in v):
+            out.append(
+                "40桁の16進 → サービスアカウントの『鍵ID』の可能性が高いです"
+                "\n      → 鍵IDは識別子であって認証情報ではありません。"
+                "\n        鍵を作成したときにダウンロードされた JSON ファイルの"
+                "\n        中身（{ \"type\": \"service_account\", ... }）を貼ってください。"
+                "\n        ダウンロードし損ねた場合は、鍵を作り直せば再取得できます")
+        elif "@" in v and v.endswith("gserviceaccount.com"):
+            out.append(
+                "サービスアカウントの『メールアドレス』のようです"
+                "\n      → これはシートの共有先に使うもので、認証情報ではありません。"
+                "\n        鍵(JSON)の中身を貼ってください")
+        else:
+            out.append("→ 鍵ファイルの中身をそのまま貼り付けてください"
+                       "\n        （{ \"type\": \"service_account\", ... } で始まります）")
         return " / ".join(out)
     try:
         info = json.loads(v)
