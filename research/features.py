@@ -315,6 +315,30 @@ def columns(preset: str) -> List[str]:
             if c not in drop and not (c in seen or seen.add(c))]
 
 
+def group_of(col: str) -> str:
+    """
+    列がどのグループのものかを返す。分からなければ空文字。
+
+    寄与分解を「地合い」「決算」のような大区分にまとめるときに使う。
+    グループは重なりがある（fund_level と fund_growth は同じ列を含む）ので、
+    先に見つかったほうを返す。順位版（_rank）は元のグループに寄せると
+    同じ軸が二重に数えられるので、_rank グループとして別に返す。
+    """
+    for name, cols in GROUPS.items():
+        if col in cols:
+            return name
+    return ""
+
+
+def column_groups() -> Dict[str, str]:
+    """列 -> グループ の対応をまとめて作る（毎回 group_of を回すより速い）。"""
+    out: Dict[str, str] = {}
+    for name, cols in GROUPS.items():
+        for c in cols:
+            out.setdefault(c, name)
+    return out
+
+
 def all_columns() -> List[str]:
     """データセットに作るべき全列。build_dataset.py が使う。
 

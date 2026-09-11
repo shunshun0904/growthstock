@@ -1,0 +1,88 @@
+name: Retrain Weekly
+
+# 運用に出すモデルを作り直す（週次・土曜）。
+#
+# 日次の予測はこのワークフローが保存したモデルを読むだけで、学習はしない。
+# 毎日学習し直すと、その日の予測が「今日のモデル」に依存して
+# 前日と比較できなくなるため。
+on:
+  schedule:
+    # 土曜 09:00 JST (= 00:00 UTC)。平日の取り込みが全部終わった後
+    - cron: '0 0 * * 6'
+  workflow_dispatch:
+    inputs:
+      tune:
+        description: 'ハイパーパラメータも探索し直す（30分ほど延びる）'
+        type: choice
+        options: ['no', 'yes']
+        default: 'no'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: retrain-weekly
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    # 探索まで回すと長い。探索なしなら20分ほど
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/breakout-model
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r research/requirements.txt
+
+      - name: Download raw data (release)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p research/_data
+          gh release download data-raw --dir research/_data --clobber
+
+      # 学習用。ラベル未確定の行は入れない（--keep-unlabeled を付けない）
+      - name: Build dataset
+        run: python3 research/build_dataset.py 2>&1 | tail -20
+
+      # 探索は既定では行わない。特徴量も母集団も変えていないのに毎週探索すると、
+      # 週ごとにパラメータが揺れて、予測の変化が「相場」なのか
+      # 「パラメータ」なのか分からなくなる。
+      - name: Tune (opt-in)
+        if: inputs.tune == 'yes'
+        run: |
+          PRESETS=$(grep -v '^#' research/tune_presets.txt | tr '\n' ' ')
+          python3 research/run_tuning.py --n-trials 50 --cv year_cap_date \
+            --features $PRESETS --n-splits 5 2>&1 | tail -30
+
+      - name: Train production model
+        run: python3 research/train_production.py 2>&1 | tee retrain.log
+
+      - name: Commit model
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A research/model research/lgbm_params.json
+          if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
+          git commit -m "chore(model): 週次の再学習 ($(date -u '+%Y-%m-%d'))"
+          for i in 1 2 3 4; do
+            if git push; then exit 0; fi
+            sleep $((2 ** i)); git pull --rebase
+          done
+          exit 1
+
+      - name: Summary
+        if: always()
+        run: |
+          { echo '## 週次の再学習'; echo '```'
+            if [ -f retrain.log ]; then tail -40 retrain.log; else echo "(実行せず)"; fi
+            echo '```'; } >> "$GITHUB_STEP_SUMMARY"

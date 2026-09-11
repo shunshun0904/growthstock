@@ -1,0 +1,83 @@
+name: Predict Breakouts
+
+# その日の新規ブレイクを採点して、ダッシュボードが読む JSON を書く（日次）。
+#
+# 生データの取り込み（Update Data Store, 平日21:30 JST）が終わってから走らせる。
+# 固定時刻で待つのではなく workflow_run で繋ぐ。取得が遅れた日に
+# 古いデータで予測してしまうのを防ぐため。
+on:
+  workflow_run:
+    workflows: ['Update Data Store']
+    types: [completed]
+  workflow_dispatch:
+  # 取り込みが失敗した日でも、手前のデータで一応出しておく保険。
+  # 平日 23:00 JST (= 14:00 UTC)
+  schedule:
+    - cron: '0 14 * * 1-5'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: predict-breakouts
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  predict:
+    # 取り込みが失敗した後に workflow_run で起動された場合は走らせない
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/breakout-model
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r research/requirements.txt
+
+      - name: Download raw data (release)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p research/_data
+          gh release download data-raw --dir research/_data --clobber
+          ls -lh research/_data | head -5
+
+      # 予測したい行（今日のブレイク）はラベルがまだ確定していないので、
+      # --keep-unlabeled を付けて残す。学習には絶対に使わないデータセット
+      - name: Build prediction dataset
+        run: |
+          python3 research/build_dataset.py --keep-unlabeled \
+            --out research/_data/dataset_predict.parquet 2>&1 | tail -25
+
+      - name: Score today's candidates
+        run: python3 research/predict_daily.py 2>&1 | tee predict.log
+
+      - name: Commit predictions
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A public/data/predictions.json public/data/prediction_history.json
+          if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
+          git commit -m "chore(data): ブレイク予測を更新 ($(date -u '+%Y-%m-%d %H:%M UTC'))"
+          for i in 1 2 3 4; do
+            if git push; then exit 0; fi
+            sleep $((2 ** i)); git pull --rebase
+          done
+          exit 1
+
+      - name: Summary
+        if: always()
+        run: |
+          { echo '## ブレイク予測'; echo '```'
+            if [ -f predict.log ]; then cat predict.log; else echo "(実行せず)"; fi
+            echo '```'; } >> "$GITHUB_STEP_SUMMARY"

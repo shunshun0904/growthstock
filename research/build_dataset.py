@@ -69,6 +69,13 @@ def _sweep_override(name: str, default, cast):
 #: 実際に効いた差し替え。既定で回すかぎり空のまま。
 SWEEP_OVERRIDES: dict = {}
 
+#: True にすると、ラベルが確定していない行も残す。
+#:
+#: 学習では必ず False。ラベルの無い行を混ぜると訓練できない。
+#: True にするのは日次予測のときだけで、予測したい行（今日のブレイク）は
+#: 定義上まだラベルが無いため。build_dataset.py --keep-unlabeled で立つ。
+KEEP_UNLABELED = False
+
 # 78週 ≒ 368営業日。52週(245日)から広げた。
 # 52週だと「1年前の高値を1円抜いただけ」も母集団に入り、
 # 抜けた水準の重みが軽い。1年半ぶりの高値なら上値の戻り売りが薄い。
@@ -1800,8 +1807,14 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
 
     # --- 除外条件 --- #
     before = len(samples)
-    samples = samples[samples["label"].notna()]
-    print(f"[filter] ラベル未確定を除外: {before:,} -> {len(samples):,}")
+    if KEEP_UNLABELED:
+        # 予測用。今日のブレイクはラベルが確定していない（先60営業日ぶんの
+        # 値動きがまだ無い）ので、落とすと予測したい行が消える。
+        n_un = int(samples["label"].isna().sum())
+        print(f"[filter] ラベル未確定を残す（予測用）: {n_un:,}件が未確定のまま")
+    else:
+        samples = samples[samples["label"].notna()]
+        print(f"[filter] ラベル未確定を除外: {before:,} -> {len(samples):,}")
 
     before = len(samples)
     samples = samples[samples["high52w"].notna()]
@@ -2043,10 +2056,18 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
         raise SystemExit(f"[fatal] 未来の列が特徴量に含まれています: {leak}")
 
     out = samples[meta_cols + feature_cols].copy()
-    out["label"] = out["label"].astype(int)
+    # 予測用は未確定（NaN）が残るので int にできない。
+    # Int64（欠測を持てる整数）にして、学習側では notna() で弾く
+    out["label"] = (out["label"].astype("Int64") if KEEP_UNLABELED
+                    else out["label"].astype(int))
 
     print(f"\n[result] {len(out):,}サンプル / 特徴量{len(feature_cols)}個")
-    print(f"[result] 正例率: {out['label'].mean()*100:.2f}%  ({int(out['label'].sum()):,}件)")
+    _lab = out["label"].dropna()
+    if len(_lab):
+        print(f"[result] 正例率: {_lab.mean()*100:.2f}%  ({int(_lab.sum()):,}件) "
+              f"/ ラベル未確定 {int(out['label'].isna().sum()):,}件")
+    else:
+        print(f"[result] ラベルは全行未確定（予測用）: {len(out):,}件")
     print(f"[result] 期間: {out['Date'].min().date()} 〜 {out['Date'].max().date()}")
     print(f"[result] 銘柄数: {out['Code'].nunique():,}")
 
@@ -2068,17 +2089,22 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
             "name": DEFAULT_LABEL.name,
             "forward_needed": DEFAULT_LABEL.forward_needed,
         },
-        "n": int(len(out)), "positiveRate": round(float(out["label"].mean()), 4),
+        "n": int(len(out)),
+        "positiveRate": (None if out["label"].notna().sum() == 0
+                         else round(float(out["label"].mean()), 4)),
         "features": feature_cols,
         "from": str(out["Date"].min().date()), "to": str(out["Date"].max().date()),
         # 既定で回すかぎり空。掃引で母集団を差し替えたときだけ中身が入る。
         # これが空でないデータセットを既定の学習に使ってはいけない
         "sweepOverrides": dict(SWEEP_OVERRIDES),
+        # 予測用に作ったデータセットかどうか。True のものを学習に使ってはいけない
+        "keepUnlabeled": bool(KEEP_UNLABELED),
+        "nUnlabeled": int(out["label"].isna().sum()),
         "cooldown": BREAKOUT_COOLDOWN,
         "minTradingValue": MIN_TRADING_VALUE,
     }
-    with open(os.path.join(os.path.dirname(out_path), "dataset_meta.json"),
-              "w", encoding="utf-8") as fh:
+    meta_path = os.path.splitext(out_path)[0] + "_meta.json"
+    with open(meta_path, "w", encoding="utf-8") as fh:
         json.dump(meta, fh, ensure_ascii=False, indent=2)
     print(f"[label] 定義: {DEFAULT_LABEL.name} "
           f"(ラベル確定に将来 {DEFAULT_LABEL.forward_needed} 営業日)")
@@ -2093,7 +2119,12 @@ def main(argv: List[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="ブレイクアウト予測の学習データを構築する")
     ap.add_argument("--data-dir", default=DATA_DIR)
     ap.add_argument("--out", default=os.path.join(DATA_DIR, "dataset.parquet"))
+    ap.add_argument("--keep-unlabeled", action="store_true",
+                    help="ラベル未確定の行も残す（日次予測用。学習には使わない）")
     args = ap.parse_args(argv)
+    if args.keep_unlabeled:
+        globals()["KEEP_UNLABELED"] = True
+        print("[mode] ラベル未確定の行を残す（予測用データセット）")
     build(args.data_dir, args.out)
     return 0
 
