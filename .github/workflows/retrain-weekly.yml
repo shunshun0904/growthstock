@@ -22,10 +22,10 @@ on:
   workflow_dispatch:
     inputs:
       tune:
-        description: 'ハイパーパラメータも探索し直す（30分ほど延びる）'
+        description: 'ハイパーパラメータを探索し直す（実測+36分。no にすると保存済みを使う）'
         type: choice
-        options: ['no', 'yes']
-        default: 'no'
+        options: ['yes', 'no']
+        default: 'yes'
 
 permissions:
   contents: write
@@ -91,11 +91,18 @@ jobs:
       - name: Build dataset
         run: python3 research/build_dataset.py 2>&1 | tail -20
 
-      # 探索は既定では行わない。特徴量も母集団も変えていないのに毎週探索すると、
-      # 週ごとにパラメータが揺れて、予測の変化が「相場」なのか
-      # 「パラメータ」なのか分からなくなる。
-      - name: Tune (opt-in)
-        if: inputs.tune == 'yes'
+      # 毎週探索する。精度を優先する判断（本番モデルは LGBMClassifier なので
+      # pointwise のみ。LTR は本番で使っていないので探索しない）。
+      #
+      # 引き換えに、特徴量も母集団も変えていないのにパラメータが週ごとに動く。
+      # 予測が変わったときに「相場が変わった」のか「パラメータが変わった」のかを
+      # 切り分けられなくなるので、下の Commit model metadata で lgbm_params.json の
+      # 差分を実行要約に出し、何が動いたかを毎週見えるようにしてある。
+      #
+      # 実測: 3プリセット × 50試行 × 5分割 で約36分（pointwise のみ）。
+      # 参考にした実績は 73.5分 だが、あれは LTR の探索も回した6パスぶん。
+      - name: Tune
+        if: github.event_name == 'schedule' || inputs.tune == 'yes'
         run: |
           PRESETS=$(grep -v '^#' research/tune_presets.txt | tr '\n' ' ')
           python3 research/run_tuning.py --n-trials 50 --cv year_cap_date \
@@ -119,6 +126,12 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # 毎週探索するぶん、選ばれたパラメータが週ごとに動く。何が動いたかを
+          # 要約に残す。予測の変化の出どころを切り分ける手がかりになる
+          { echo '### パラメータの変化（先週 -> 今週）'
+            echo '```diff'
+            git diff -- research/lgbm_params.json | tail -n +5 | head -60 || true
+            echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           # 以前コミットしていたバイナリを追跡から外す（1回だけ効く）
           git rm --cached -q --ignore-unmatch research/model/model.txt \
             research/model/oof.parquet
