@@ -1,4 +1,34 @@
 {
+  "cat": {
+    "_cv": {
+      "algo": "cat",
+      "base_rate": 0.187,
+      "fold_scores": [
+        0.3333,
+        0.4155,
+        0.3737,
+        0.4108,
+        0.3822
+      ],
+      "mean_pr_auc": 0.3831,
+      "mean_roc_auc": 0.7048,
+      "n_estimators": 200,
+      "n_splits": 5,
+      "n_trials": 50,
+      "scheme": "year_cap_date",
+      "std": 0.0296,
+      "train_rows": 17449,
+      "train_to": "2025-03-21"
+    },
+    "params": {
+      "bagging_temperature": 0.5740247439591976,
+      "border_count": 128,
+      "depth": 8,
+      "l2_leaf_reg": 4.696527616536786,
+      "learning_rate": 0.07498798466791336,
+      "random_strength": 0.004087645006472714
+    }
+  },
   "lgbm": {
     "_cv": {
       "algo": "lgbm",
@@ -28,6 +58,38 @@
       "reg_alpha": 0.0006123118838168495,
       "reg_lambda": 1.6541557698992595e-07,
       "subsample": 0.9018294782610089
+    }
+  },
+  "xgb": {
+    "_cv": {
+      "algo": "xgb",
+      "base_rate": 0.187,
+      "fold_scores": [
+        0.339,
+        0.4646,
+        0.3755,
+        0.4119,
+        0.3984
+      ],
+      "mean_pr_auc": 0.3979,
+      "mean_roc_auc": 0.7139,
+      "n_estimators": 200,
+      "n_splits": 5,
+      "n_trials": 50,
+      "scheme": "year_cap_date",
+      "std": 0.0415,
+      "train_rows": 17449,
+      "train_to": "2025-03-21"
+    },
+    "params": {
+      "colsample_bytree": 0.9067014388156474,
+      "gamma": 5.210215605563603e-06,
+      "learning_rate": 0.03882206421173463,
+      "max_depth": 10,
+      "min_child_weight": 9.838268149242104,
+      "reg_alpha": 0.00039994011747731644,
+      "reg_lambda": 0.021175180431501975,
+      "subsample": 0.9930007502218928
     }
   }
 }
