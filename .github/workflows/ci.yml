@@ -41,6 +41,7 @@ jobs:
           python3 tests/test_model.py
           python3 tests/test_data_store.py
           python3 tests/test_entry_policy.py
+          python3 tests/test_exit_timing.py
 
       - name: ビルド
         run: npm run build
