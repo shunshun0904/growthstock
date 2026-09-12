@@ -329,7 +329,7 @@ input[type='range']::-moz-range-thumb {
 
 .pred-main {
   width: 100%; display: grid; align-items: center; gap: var(--s3);
-  grid-template-columns: 32px minmax(160px, 1.4fr) minmax(90px, 1fr)
+  grid-template-columns: 32px minmax(150px, 1.25fr) minmax(150px, 1.15fr)
                          repeat(3, minmax(74px, 0.7fr)) 68px;
   padding: var(--s3) var(--s4);
   background: none; border: 0; text-align: left;
@@ -348,6 +348,24 @@ input[type='range']::-moz-range-thumb {
 .pred-bar em { font-style: normal; font-size: 11px; color: var(--text-dim); }
 .pred-cell { display: flex; flex-direction: column; line-height: 1.3; }
 
+/* モデル別のスコア（折りたたみ行）。5本の縦棒を横に並べる。
+   棒の高さは各モデル自身の過去スコア分布での位置。モデルをまたいで
+   生スコアを比べられないので、位置に揃えてある。 */
+.pred-ms { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.pred-ms > .lab { display: flex; align-items: baseline; gap: 2px; white-space: nowrap; }
+.pred-ms > .lab .sep { margin: 0 3px; }
+.pred-ms-row { display: flex; align-items: flex-end; gap: 4px; }
+.pred-ms-i { display: flex; flex-direction: column; align-items: center;
+  gap: 1px; flex: 1 1 0; min-width: 0; }
+.pred-ms-i em { font-style: normal; font-size: 10px; color: var(--text-dim);
+  line-height: 1; }
+/* 棒の器。高さ固定で下揃え。中の b が割合ぶん伸びる */
+.pred-ms-i i { display: flex; align-items: flex-end; width: 100%; max-width: 22px;
+  height: 18px; background: var(--bg-input); border-radius: 2px; }
+.pred-ms-i i b { display: block; width: 100%; border-radius: 2px; min-height: 2px; }
+.pred-ms-i .k { font-size: 9px; letter-spacing: 0.02em; color: var(--text-faint);
+  line-height: 1; }
+
 .pred-detail { border-top: 1px solid var(--border-soft); padding: var(--s4);
   background: var(--bg-card); }
 .pred-detail-grid {
@@ -360,6 +378,8 @@ input[type='range']::-moz-range-thumb {
 
 .pred-split { display: flex; gap: var(--s5); margin-bottom: var(--s3); flex-wrap: wrap; }
 .pred-split > span { display: flex; align-items: baseline; gap: 6px; }
+/* ラベルを折り返させない。狭いカラムだと日本語が1文字ずつ縦に割れる */
+.pred-split .lab { white-space: nowrap; }
 
 .pred-bars { display: flex; flex-direction: column; gap: 4px; }
 .pred-b { display: grid; grid-template-columns: minmax(90px, 1fr) 1fr 58px;
@@ -398,5 +418,7 @@ input[type='range']::-moz-range-thumb {
 
 @media (max-width: 760px) {
   .pred-main { grid-template-columns: 28px 1fr 60px; row-gap: 6px; }
-  .pred-main .pred-cell, .pred-main .pred-bar { grid-column: 2 / -1; }
+  .pred-main .pred-cell, .pred-main .pred-bar,
+  .pred-main .pred-ms { grid-column: 2 / -1; }
+  .pred-ms-i i { max-width: none; }
 }

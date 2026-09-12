@@ -14,6 +14,9 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const DIST = path.join(ROOT, 'dist');
 const FIXTURE = path.join(ROOT, 'tests', 'fixtures', 'synthetic-stocks.json');
+// 予測タブも合成データで描く。実データを使うと、その日の候補数や
+// モデルの有無で結果が変わり、失敗したときに再現できない
+const PRED_FIXTURE = path.join(ROOT, 'tests', 'fixtures', 'synthetic-predictions.json');
 const SHOTS = path.join(ROOT, 'docs');
 fs.mkdirSync(SHOTS, { recursive: true });
 
@@ -26,7 +29,11 @@ const server = http.createServer((req, res) => {
   let rel = decodeURIComponent(req.url.split('?')[0]);
   if (rel === '/') rel = '/index.html';
   // データファイルだけは合成フィクスチャに差し替える
-  const file = rel === '/data/stocks.json' ? FIXTURE : path.join(DIST, rel);
+  const fixtures = {
+    '/data/stocks.json': FIXTURE,
+    '/data/predictions.json': PRED_FIXTURE,
+  };
+  const file = fixtures[rel] || path.join(DIST, rel);
   if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
     res.writeHead(404).end('not found');
     return;
@@ -60,8 +67,41 @@ const consoleErrors = [];
 page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
 page.on('pageerror', (e) => consoleErrors.push(`pageerror: ${e.message}`));
 
-console.log('\n== 8軸オクタゴン比較 View ==');
+console.log('\n== ブレイク予測 View ==');
 await page.goto(base, { waitUntil: 'networkidle' });
+await page.waitForSelector('.pred-row', { timeout: 15000 });
+
+const predBody = await page.textContent('body');
+const nRows = await page.locator('.pred-row').count();
+check(nRows === 5, `候補が5件描画される (実際: ${nRows})`);
+
+// モデル別の縦棒。5モデル × 候補数 だけ出る
+const strips = await page.locator('.pred-ms-i').count();
+check(strips === nRows * 5, `モデル別の棒が ${nRows}行 × 5モデル (実際: ${strips})`);
+const shorts = await page.locator('.pred-row').first().locator('.pred-ms-i .k')
+  .allTextContents();
+check(shorts.join(',') === 'LGB,XGB,CAT,LR,NN',
+  `モデルの並び順が行をまたいで固定 (実際: ${shorts.join(',')})`);
+check(predBody.includes('が上位10%'), '一致度（上位10%と見たモデル数）が表示される');
+check(predBody.includes('並べているモデル'), 'モデル一覧パネルが表示される');
+check(predBody.includes('ニューラルネット') && predBody.includes('ロジスティック回帰'),
+  '5モデルの日本語名が出る');
+check(!predBody.includes('NaN'), '予測タブに NaN が出ていない');
+check(!predBody.includes('undefined'), '予測タブに undefined が出ていない');
+
+// 1件目（5モデルとも高い候補）を開いて、モデル別の見立てを確かめる
+await page.locator('.pred-row').first().locator('.pred-main').click();
+await page.waitForSelector('.pred-detail', { timeout: 5000 });
+const detail = await page.textContent('.pred-detail');
+check(detail.includes('モデル別の見立て'), '詳細にモデル別の見立てが出る');
+check(detail.includes('混ぜていません'), 'アンサンブルではないと明示される');
+const detailBars = await page.locator('.pred-detail .pred-b').count();
+check(detailBars >= 5, `詳細にモデル別の棒が5本以上ある (実際: ${detailBars})`);
+await page.screenshot({ path: path.join(SHOTS, 'screenshot-prediction.png') });
+await page.locator('.pred-row').first().locator('.pred-main').click();
+
+console.log('\n== 8軸オクタゴン比較 View ==');
+await page.getByRole('tab', { name: '8軸オクタゴン比較' }).click();
 await page.waitForSelector('.recharts-surface', { timeout: 15000 });
 
 const body = await page.textContent('body');

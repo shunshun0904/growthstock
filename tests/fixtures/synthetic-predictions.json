@@ -1,0 +1,1176 @@
+{
+ "generatedAt": "2026-09-11T17:40:51.492853+00:00",
+ "asOf": "2026-09-11",
+ "dates": [
+  "2026-09-11"
+ ],
+ "candidates": [
+  {
+   "code": "9082",
+   "jqCode": "90820",
+   "name": "大和自動車交通",
+   "sector": "陸運業",
+   "market": "スタンダード",
+   "scale": "-",
+   "date": "2026-09-11",
+   "score": 0.128547,
+   "rankInDay": 1,
+   "nInDay": 5,
+   "pctInDay": 20.0,
+   "pctHistorical": 4.8,
+   "band": 0,
+   "calibProb": 10.2,
+   "bandPositiveRate": 11.2,
+   "bandEndMedian": -0.9,
+   "bandWinRate": 46.7,
+   "close": 2466.0,
+   "marketCap": 109.79,
+   "tradingValue": 0.17,
+   "vol20d": 6.32,
+   "needPct": 58.8,
+   "ret20d": 35.05,
+   "rHigh": 81.12,
+   "breakMargin": -14.52,
+   "baseLength": 235.0,
+   "creditRatio": null,
+   "per": 43.09,
+   "pbr": 1.13,
+   "divYield": 0.41,
+   "epsGrowth": null,
+   "salesGrowth": 5.09,
+   "roe": 2.6,
+   "opMargin": 1.76,
+   "volumeTrend": 4969.23,
+   "progressRate": -6.6,
+   "high52w": 3040.0,
+   "contrib": {
+    "base": -0.5861,
+    "top": [
+     {
+      "col": "vol_20d",
+      "ja": "直近20営業日の日次リターン標準偏差（%）。値動きの荒さ",
+      "contrib": -0.8163
+     },
+     {
+      "col": "volume_trend",
+      "ja": "その日の出来高 ÷ 直前20日平均（%）",
+      "contrib": -0.2137
+     },
+     {
+      "col": "gold_ret_120",
+      "ja": "金価格の直近120営業日リターン（%）",
+      "contrib": -0.1244
+     },
+     {
+      "col": "nk225_ret_120",
+      "ja": "日経225の直近120営業日リターン（%）",
+      "contrib": -0.0954
+     },
+     {
+      "col": "close_position",
+      "ja": "その日の値幅の中で終値がどこにあるか（0=安値引け, 100=高値引け）",
+      "contrib": 0.0513
+     },
+     {
+      "col": "ROE_chg_3q",
+      "ja": "",
+      "contrib": 0.0505
+     },
+     {
+      "col": "mkt_code",
+      "ja": "市場区分コード（時点別）。2022年4月の再編を跨ぐので時点別が必須",
+      "contrib": 0.0482
+     },
+     {
+      "col": "sector_ret_120",
+      "ja": "その銘柄の業種指数の直近120営業日リターン（%）",
+      "contrib": -0.0415
+     },
+     {
+      "col": "rel_sector_20",
+      "ja": "銘柄の20日リターン − 業種の20日リターン（pt）。業種内での相対的な強さ",
+      "contrib": -0.0411
+     },
+     {
+      "col": "credit_ratio",
+      "ja": "信用買残 ÷ 信用売残。需給の重さ",
+      "contrib": 0.0404
+     },
+     {
+      "col": "break_margin",
+      "ja": "それまでの78週高値をどれだけ上回ったか（%）",
+      "contrib": 0.031
+     },
+     {
+      "col": "growth250_ret_20",
+      "ja": "東証グロース250の直近20営業日リターン（%）。ETF 25160 から算出",
+      "contrib": -0.0293
+     },
+     {
+      "col": "gold_ret_20",
+      "ja": "金価格の直近20営業日リターン（%）。ETF 15400（純金上場信託）から算出",
+      "contrib": 0.0287
+     },
+     {
+      "col": "topix_vol_20",
+      "ja": "TOPIX 日次リターンの直近20営業日標準偏差（%）。局面の荒さ",
+      "contrib": 0.028
+     },
+     {
+      "col": "op_margin_chg2",
+      "ja": "",
+      "contrib": -0.0257
+     },
+     {
+      "col": "nk225_ret_20",
+      "ja": "日経225の直近20営業日リターン（%）。ETF 13210 の調整後終値から算出",
+      "contrib": 0.0256
+     }
+    ],
+    "groups": {
+     "株価・ブレイク": -0.7266,
+     "地合い（市場環境）": -0.186,
+     "バリュエーション・配当": -0.1065,
+     "需給・流動性・市場": -0.1003,
+     "業種指数": -0.0858,
+     "決算（変化）": -0.0745,
+     "決算（水準）": -0.0478,
+     "母集団のフラグ": -0.0003
+    },
+    "marketContrib": -0.186,
+    "marketShare": 14.0,
+    "stockContrib": -1.1417
+   },
+   "byModel": {
+    "lgbm": {
+     "score": 0.53,
+     "pctHistorical": 96.0
+    },
+    "xgb": {
+     "score": 0.55,
+     "pctHistorical": 100.0
+    },
+    "cat": {
+     "score": 0.4405,
+     "pctHistorical": 78.1
+    },
+    "logit": {
+     "score": 0.55,
+     "pctHistorical": 100.0
+    },
+    "mlp": {
+     "score": 0.55,
+     "pctHistorical": 100.0
+    }
+   },
+   "agree90": 4,
+   "nModels": 5,
+   "pctMean": 94.8
+  },
+  {
+   "code": "9434",
+   "jqCode": "94340",
+   "name": "ソフトバンク",
+   "sector": "情報･通信業",
+   "market": "プライム",
+   "scale": "TOPIX Core30",
+   "date": "2026-09-11",
+   "score": 0.450501,
+   "rankInDay": 2,
+   "nInDay": 5,
+   "pctInDay": 40.0,
+   "pctHistorical": 80.5,
+   "band": 8,
+   "calibProb": 25.1,
+   "bandPositiveRate": 24.8,
+   "bandEndMedian": 1.54,
+   "bandWinRate": 55.8,
+   "close": 246.9,
+   "marketCap": 118133.75,
+   "tradingValue": 167.54,
+   "vol20d": 0.93,
+   "needPct": 8.6,
+   "ret20d": 5.11,
+   "rHigh": 99.52,
+   "breakMargin": -0.4,
+   "baseLength": 260.0,
+   "creditRatio": 7.83,
+   "per": 21.58,
+   "pbr": 4.06,
+   "divYield": 3.56,
+   "epsGrowth": 3.0,
+   "salesGrowth": 9.41,
+   "roe": 11.98,
+   "opMargin": 16.66,
+   "volumeTrend": 164.05,
+   "progressRate": 2.48,
+   "high52w": 248.1,
+   "contrib": {
+    "base": -0.5861,
+    "top": [
+     {
+      "col": "vol_20d",
+      "ja": "直近20営業日の日次リターン標準偏差（%）。値動きの荒さ",
+      "contrib": 0.6014
+     },
+     {
+      "col": "nk225_ret_120",
+      "ja": "日経225の直近120営業日リターン（%）",
+      "contrib": -0.0872
+     },
+     {
+      "col": "mkt_code",
+      "ja": "市場区分コード（時点別）。2022年4月の再編を跨ぐので時点別が必須",
+      "contrib": 0.085
+     },
+     {
+      "col": "credit_ratio",
+      "ja": "信用買残 ÷ 信用売残。需給の重さ",
+      "contrib": 0.0757
+     },
+     {
+      "col": "topix_ma200_gap",
+      "ja": "TOPIX が200日移動平均からどれだけ離れているか（%）。長期の傾き",
+      "contrib": 0.0669
+     },
+     {
+      "col": "nk225_ret_20",
+      "ja": "日経225の直近20営業日リターン（%）。ETF 13210 の調整後終値から算出",
+      "contrib": -0.0636
+     },
+     {
+      "col": "growth250_ret_120",
+      "ja": "東証グロース250の直近120営業日リターン（%）",
+      "contrib": -0.0542
+     },
+     {
+      "col": "pbr",
+      "ja": "株価純資産倍率（株価 ÷ BPS）",
+      "contrib": -0.0541
+     },
+     {
+      "col": "gold_ret_120",
+      "ja": "金価格の直近120営業日リターン（%）",
+      "contrib": -0.0464
+     },
+     {
+      "col": "volume_trend",
+      "ja": "その日の出来高 ÷ 直前20日平均（%）",
+      "contrib": 0.0401
+     },
+     {
+      "col": "earnings_yield",
+      "ja": "PER の逆数（%）。1÷PER なので PER が発散しても安定する",
+      "contrib": -0.0382
+     },
+     {
+      "col": "book_yield",
+      "ja": "PBR の逆数",
+      "contrib": -0.0292
+     },
+     {
+      "col": "gold_ret_20",
+      "ja": "金価格の直近20営業日リターン（%）。ETF 15400（純金上場信託）から算出",
+      "contrib": 0.0287
+     },
+     {
+      "col": "r_high_3m",
+      "ja": "3ヶ月前の同じ指標。どこから上がってきたか",
+      "contrib": -0.0282
+     },
+     {
+      "col": "log_trading_value",
+      "ja": "20日平均売買代金の対数。流動性",
+      "contrib": 0.0278
+     },
+     {
+      "col": "per",
+      "ja": "株価収益率（株価 ÷ 1株利益TTM）",
+      "contrib": -0.0278
+     }
+    ],
+    "groups": {
+     "株価・ブレイク": 0.5858,
+     "需給・流動性・市場": 0.2437,
+     "地合い（市場環境）": -0.156,
+     "決算（変化）": -0.1457,
+     "バリュエーション・配当": -0.1296,
+     "決算（水準）": -0.0159,
+     "業種指数": 0.0046,
+     "母集団のフラグ": 0.0005
+    },
+    "marketContrib": -0.156,
+    "marketShare": 12.2,
+    "stockContrib": 0.5435
+   },
+   "byModel": {
+    "lgbm": {
+     "score": 0.549,
+     "pctHistorical": 99.8
+    },
+    "xgb": {
+     "score": 0.392,
+     "pctHistorical": 68.4
+    },
+    "cat": {
+     "score": 0.4615,
+     "pctHistorical": 82.3
+    },
+    "logit": {
+     "score": 0.526,
+     "pctHistorical": 95.2
+    },
+    "mlp": {
+     "score": 0.3705,
+     "pctHistorical": 64.1
+    }
+   },
+   "agree90": 2,
+   "nModels": 5,
+   "pctMean": 82.0
+  },
+  {
+   "code": "1671",
+   "jqCode": "16710",
+   "name": "シンプレクス・アセット・マネジメント株式会社　ＷＴＩ原油価格連動型上場投信",
+   "sector": "その他",
+   "market": "その他",
+   "scale": "-",
+   "date": "2026-09-11",
+   "score": 0.475324,
+   "rankInDay": 3,
+   "nInDay": 5,
+   "pctInDay": 60.0,
+   "pctHistorical": 84.1,
+   "band": 8,
+   "calibProb": 25.1,
+   "bandPositiveRate": 24.8,
+   "bandEndMedian": 1.54,
+   "bandWinRate": 55.8,
+   "close": 6085.0,
+   "marketCap": null,
+   "tradingValue": 10.86,
+   "vol20d": 2.34,
+   "needPct": 21.7,
+   "ret20d": 18.09,
+   "rHigh": 97.58,
+   "breakMargin": 1.28,
+   "baseLength": 91.0,
+   "creditRatio": 1.51,
+   "per": null,
+   "pbr": null,
+   "divYield": null,
+   "epsGrowth": null,
+   "salesGrowth": null,
+   "roe": null,
+   "opMargin": null,
+   "volumeTrend": 427.95,
+   "progressRate": null,
+   "high52w": 6236.0,
+   "contrib": {
+    "base": -0.5861,
+    "top": [
+     {
+      "col": "sector_ret_120",
+      "ja": "その銘柄の業種指数の直近120営業日リターン（%）",
+      "contrib": 0.1704
+     },
+     {
+      "col": "gold_ret_120",
+      "ja": "金価格の直近120営業日リターン（%）",
+      "contrib": -0.1637
+     },
+     {
+      "col": "nk225_ret_20",
+      "ja": "日経225の直近20営業日リターン（%）。ETF 13210 の調整後終値から算出",
+      "contrib": -0.1074
+     },
+     {
+      "col": "nk225_ret_120",
+      "ja": "日経225の直近120営業日リターン（%）",
+      "contrib": -0.0874
+     },
+     {
+      "col": "pbr",
+      "ja": "株価純資産倍率（株価 ÷ BPS）",
+      "contrib": 0.0763
+     },
+     {
+      "col": "growth250_ret_120",
+      "ja": "東証グロース250の直近120営業日リターン（%）",
+      "contrib": -0.066
+     },
+     {
+      "col": "topix_ma200_gap",
+      "ja": "TOPIX が200日移動平均からどれだけ離れているか（%）。長期の傾き",
+      "contrib": 0.0543
+     },
+     {
+      "col": "topix_ret_120",
+      "ja": "TOPIX の直近120営業日リターン（%）",
+      "contrib": 0.051
+     },
+     {
+      "col": "r_high",
+      "ja": "78週高値に対する終値の位置（%）。母集団が高値更新日なので全件ほぼ100",
+      "contrib": 0.043
+     },
+     {
+      "col": "s33_code",
+      "ja": "東証33業種コード（時点別）",
+      "contrib": -0.0425
+     },
+     {
+      "col": "close_position",
+      "ja": "その日の値幅の中で終値がどこにあるか（0=安値引け, 100=高値引け）",
+      "contrib": 0.0417
+     },
+     {
+      "col": "topix_ret_20",
+      "ja": "TOPIX の直近20営業日リターン（%）。相場環境",
+      "contrib": -0.0413
+     },
+     {
+      "col": "equity_ratio_chg1",
+      "ja": "",
+      "contrib": 0.0406
+     },
+     {
+      "col": "mkt_code",
+      "ja": "市場区分コード（時点別）。2022年4月の再編を跨ぐので時点別が必須",
+      "contrib": 0.0342
+     },
+     {
+      "col": "ret_20d",
+      "ja": "直近20営業日の上昇率（%）。すでに走った後か、静かなところからの初動か",
+      "contrib": -0.0336
+     },
+     {
+      "col": "equity_ratio_chg_3q",
+      "ja": "",
+      "contrib": 0.0329
+     }
+    ],
+    "groups": {
+     "地合い（市場環境）": -0.3048,
+     "決算（変化）": 0.2407,
+     "決算（水準）": 0.1718,
+     "業種指数": 0.1422,
+     "バリュエーション・配当": 0.1329,
+     "株価・ブレイク": 0.0726,
+     "需給・流動性・市場": 0.0323,
+     "母集団のフラグ": -0.0003
+    },
+    "marketContrib": -0.3048,
+    "marketShare": 27.8,
+    "stockContrib": 0.7921
+   },
+   "byModel": {
+    "lgbm": {
+     "score": 0.367,
+     "pctHistorical": 63.4
+    },
+    "xgb": {
+     "score": 0.3405,
+     "pctHistorical": 58.1
+    },
+    "cat": {
+     "score": 0.479,
+     "pctHistorical": 85.8
+    },
+    "logit": {
+     "score": 0.321,
+     "pctHistorical": 54.2
+    },
+    "mlp": {
+     "score": 0.393,
+     "pctHistorical": 68.6
+    }
+   },
+   "agree90": 0,
+   "nModels": 5,
+   "pctMean": 66.0
+  },
+  {
+   "code": "1699",
+   "jqCode": "16990",
+   "name": "野村アセットマネジメント株式会社　ＮＥＸＴ　ＦＵＮＤＳ　ＮＯＭＵＲＡ　原油インデックス連動型上場投信",
+   "sector": "その他",
+   "market": "その他",
+   "scale": "-",
+   "date": "2026-09-11",
+   "score": 0.503268,
+   "rankInDay": 4,
+   "nInDay": 5,
+   "pctInDay": 80.0,
+   "pctHistorical": 87.6,
+   "band": 8,
+   "calibProb": 25.1,
+   "bandPositiveRate": 24.8,
+   "bandEndMedian": 1.54,
+   "bandWinRate": 55.8,
+   "close": 698.1,
+   "marketCap": null,
+   "tradingValue": 1.93,
+   "vol20d": 2.06,
+   "needPct": 19.2,
+   "ret20d": 12.02,
+   "rHigh": 98.12,
+   "breakMargin": -0.95,
+   "baseLength": 80.0,
+   "creditRatio": 11.09,
+   "per": null,
+   "pbr": null,
+   "divYield": null,
+   "epsGrowth": null,
+   "salesGrowth": null,
+   "roe": null,
+   "opMargin": null,
+   "volumeTrend": 382.4,
+   "progressRate": null,
+   "high52w": 711.5,
+   "contrib": {
+    "base": -0.5861,
+    "top": [
+     {
+      "col": "gold_ret_120",
+      "ja": "金価格の直近120営業日リターン（%）",
+      "contrib": -0.1251
+     },
+     {
+      "col": "nk225_ret_20",
+      "ja": "日経225の直近20営業日リターン（%）。ETF 13210 の調整後終値から算出",
+      "contrib": -0.1002
+     },
+     {
+      "col": "sector_ret_120",
+      "ja": "その銘柄の業種指数の直近120営業日リターン（%）",
+      "contrib": 0.0985
+     },
+     {
+      "col": "nk225_ret_120",
+      "ja": "日経225の直近120営業日リターン（%）",
+      "contrib": -0.0918
+     },
+     {
+      "col": "topix_ma200_gap",
+      "ja": "TOPIX が200日移動平均からどれだけ離れているか（%）。長期の傾き",
+      "contrib": 0.0828
+     },
+     {
+      "col": "pbr",
+      "ja": "株価純資産倍率（株価 ÷ BPS）",
+      "contrib": 0.0724
+     },
+     {
+      "col": "growth250_ret_120",
+      "ja": "東証グロース250の直近120営業日リターン（%）",
+      "contrib": -0.0657
+     },
+     {
+      "col": "topix_ret_120",
+      "ja": "TOPIX の直近120営業日リターン（%）",
+      "contrib": 0.061
+     },
+     {
+      "col": "vol_20d",
+      "ja": "直近20営業日の日次リターン標準偏差（%）。値動きの荒さ",
+      "contrib": 0.0512
+     },
+     {
+      "col": "gold_ret_20",
+      "ja": "金価格の直近20営業日リターン（%）。ETF 15400（純金上場信託）から算出",
+      "contrib": 0.0505
+     },
+     {
+      "col": "mkt_code",
+      "ja": "市場区分コード（時点別）。2022年4月の再編を跨ぐので時点別が必須",
+      "contrib": 0.0459
+     },
+     {
+      "col": "credit_ratio",
+      "ja": "信用買残 ÷ 信用売残。需給の重さ",
+      "contrib": 0.0453
+     },
+     {
+      "col": "r_high",
+      "ja": "78週高値に対する終値の位置（%）。母集団が高値更新日なので全件ほぼ100",
+      "contrib": 0.0427
+     },
+     {
+      "col": "topix_ret_20",
+      "ja": "TOPIX の直近20営業日リターン（%）。相場環境",
+      "contrib": -0.0415
+     },
+     {
+      "col": "s33_code",
+      "ja": "東証33業種コード（時点別）",
+      "contrib": -0.0412
+     },
+     {
+      "col": "volume_trend",
+      "ja": "その日の出来高 ÷ 直前20日平均（%）",
+      "contrib": 0.041
+     }
+    ],
+    "groups": {
+     "地合い（市場環境）": -0.2007,
+     "株価・ブレイク": 0.1882,
+     "決算（変化）": 0.1815,
+     "決算（水準）": 0.1432,
+     "バリュエーション・配当": 0.1189,
+     "需給・流動性・市場": 0.1057,
+     "業種指数": 0.0632,
+     "母集団のフラグ": -0.001
+    },
+    "marketContrib": -0.2007,
+    "marketShare": 20.0,
+    "stockContrib": 0.7998
+   },
+   "byModel": {
+    "lgbm": {
+     "score": 0.2365,
+     "pctHistorical": 37.3
+    },
+    "xgb": {
+     "score": 0.401,
+     "pctHistorical": 70.2
+    },
+    "cat": {
+     "score": 0.2955,
+     "pctHistorical": 49.1
+    },
+    "logit": {
+     "score": 0.2715,
+     "pctHistorical": 44.3
+    },
+    "mlp": {
+     "score": 0.409,
+     "pctHistorical": 71.8
+    }
+   },
+   "agree90": 0,
+   "nModels": 5,
+   "pctMean": 54.5
+  },
+  {
+   "code": "9324",
+   "jqCode": "93240",
+   "name": "安田倉庫",
+   "sector": "倉庫･運輸関連業",
+   "market": "プライム",
+   "scale": "TOPIX Small 2",
+   "date": "2026-09-11",
+   "score": 0.514135,
+   "rankInDay": 5,
+   "nInDay": 5,
+   "pctInDay": 100.0,
+   "pctHistorical": 88.9,
+   "band": 8,
+   "calibProb": 25.1,
+   "bandPositiveRate": 24.8,
+   "bandEndMedian": 1.54,
+   "bandWinRate": 55.8,
+   "close": 2655.0,
+   "marketCap": 762.27,
+   "tradingValue": 2.32,
+   "vol20d": 0.96,
+   "needPct": 8.9,
+   "ret20d": 3.71,
+   "rHigh": 98.7,
+   "breakMargin": -0.45,
+   "baseLength": 142.0,
+   "creditRatio": 1.09,
+   "per": 7.58,
+   "pbr": 0.73,
+   "divYield": 2.79,
+   "epsGrowth": 554.44,
+   "salesGrowth": -2.65,
+   "roe": 9.66,
+   "opMargin": 4.94,
+   "volumeTrend": 153.06,
+   "progressRate": -1.0,
+   "high52w": 2690.0,
+   "contrib": {
+    "base": -0.5861,
+    "top": [
+     {
+      "col": "vol_20d",
+      "ja": "直近20営業日の日次リターン標準偏差（%）。値動きの荒さ",
+      "contrib": 0.6059
+     },
+     {
+      "col": "mkt_code",
+      "ja": "市場区分コード（時点別）。2022年4月の再編を跨ぐので時点別が必須",
+      "contrib": 0.1407
+     },
+     {
+      "col": "credit_ratio",
+      "ja": "信用買残 ÷ 信用売残。需給の重さ",
+      "contrib": -0.1202
+     },
+     {
+      "col": "nk225_ret_120",
+      "ja": "日経225の直近120営業日リターン（%）",
+      "contrib": -0.0798
+     },
+     {
+      "col": "gold_ret_120",
+      "ja": "金価格の直近120営業日リターン（%）",
+      "contrib": -0.0738
+     },
+     {
+      "col": "topix_ma200_gap",
+      "ja": "TOPIX が200日移動平均からどれだけ離れているか（%）。長期の傾き",
+      "contrib": 0.0637
+     },
+     {
+      "col": "nk225_ret_20",
+      "ja": "日経225の直近20営業日リターン（%）。ETF 13210 の調整後終値から算出",
+      "contrib": -0.0566
+     },
+     {
+      "col": "growth250_ret_120",
+      "ja": "東証グロース250の直近120営業日リターン（%）",
+      "contrib": -0.0478
+     },
+     {
+      "col": "earnings_yield",
+      "ja": "PER の逆数（%）。1÷PER なので PER が発散しても安定する",
+      "contrib": 0.0475
+     },
+     {
+      "col": "gold_ret_20",
+      "ja": "金価格の直近20営業日リターン（%）。ETF 15400（純金上場信託）から算出",
+      "contrib": 0.0445
+     },
+     {
+      "col": "volume_trend",
+      "ja": "その日の出来高 ÷ 直前20日平均（%）",
+      "contrib": 0.0365
+     },
+     {
+      "col": "div_yield",
+      "ja": "配当利回り（%）",
+      "contrib": 0.0356
+     },
+     {
+      "col": "book_yield",
+      "ja": "PBR の逆数",
+      "contrib": 0.0336
+     },
+     {
+      "col": "pbr",
+      "ja": "株価純資産倍率（株価 ÷ BPS）",
+      "contrib": 0.0332
+     },
+     {
+      "col": "sales_growth_q0",
+      "ja": "",
+      "contrib": -0.0313
+     },
+     {
+      "col": "base_length",
+      "ja": "前回の高値更新から何営業日空いたか。長い保ち合いからの初回ほど強い、という仮説",
+      "contrib": 0.0308
+     }
+    ],
+    "groups": {
+     "株価・ブレイク": 0.6879,
+     "バリュエーション・配当": 0.215,
+     "地合い（市場環境）": -0.145,
+     "決算（変化）": -0.1204,
+     "決算（水準）": -0.0516,
+     "需給・流動性・市場": 0.029,
+     "業種指数": 0.0268,
+     "母集団のフラグ": 0.0009
+    },
+    "marketContrib": -0.145,
+    "marketShare": 11.4,
+    "stockContrib": 0.7877
+   },
+   "byModel": {
+    "lgbm": {
+     "score": 0.2945,
+     "pctHistorical": 48.9
+    },
+    "xgb": {
+     "score": 0.2785,
+     "pctHistorical": 45.7
+    },
+    "cat": {
+     "score": 0.1675,
+     "pctHistorical": 23.5
+    },
+    "logit": {
+     "score": 0.3315,
+     "pctHistorical": 56.3
+    },
+    "mlp": {
+     "score": 0.224,
+     "pctHistorical": 34.8
+    }
+   },
+   "agree90": 0,
+   "nModels": 5,
+   "pctMean": 41.8
+  }
+ ],
+ "model": {
+  "trainedAt": "2026-09-11T04:48:19.317647+00:00",
+  "label": "3ヶ月内+1.2σ / 終盤+0.50倍 / MA20>=MA60",
+  "volNormK": 1.2,
+  "riseHorizon": 60,
+  "highWindow": 368,
+  "preset": "all",
+  "nFeatures": 151,
+  "nTrain": 22887,
+  "trainFrom": "2018-04-03",
+  "trainTo": "2026-06-16",
+  "positiveRate": 0.2085,
+  "minTradingValue": 0.1,
+  "cv": {
+   "scheme": "year_cap_date",
+   "model": "classifier",
+   "n_estimators": 200,
+   "n_splits": 5,
+   "mean_pr_auc": 0.4016,
+   "std": 0.0285,
+   "fold_scores": [
+    0.3718,
+    0.4465,
+    0.3853,
+    0.3812,
+    0.4233
+   ],
+   "mean_roc_auc": 0.7186,
+   "roc_std": 0.0092,
+   "fold_roc": [
+    0.7053,
+    0.7335,
+    0.7207,
+    0.714,
+    0.7194
+   ],
+   "base_rate": 0.1872,
+   "fold_pos_rate": [
+    0.192,
+    0.1953,
+    0.1763,
+    0.1806,
+    0.192
+   ],
+   "fold_pos_rate_spread": 0.019,
+   "fold_cap_spread_pt": 2.038,
+   "n_trials": 50
+  }
+ },
+ "scoreBands": {
+  "n_bands": 10,
+  "bands": [
+   {
+    "band": 0,
+    "score_lo": 0.03747,
+    "score_hi": 0.163092,
+    "n": 1644,
+    "positive_rate": 0.1125,
+    "end_median": -0.9,
+    "end_mean": 1.71,
+    "win_rate": 0.4665,
+    "n_outcome": 1644
+   },
+   {
+    "band": 1,
+    "score_lo": 0.163121,
+    "score_hi": 0.209151,
+    "n": 1643,
+    "positive_rate": 0.1814,
+    "end_median": 1.11,
+    "end_mean": 4.5,
+    "win_rate": 0.5295,
+    "n_outcome": 1643
+   },
+   {
+    "band": 2,
+    "score_lo": 0.209152,
+    "score_hi": 0.24485,
+    "n": 1643,
+    "positive_rate": 0.2094,
+    "end_median": 0.55,
+    "end_mean": 4.12,
+    "win_rate": 0.5149,
+    "n_outcome": 1643
+   },
+   {
+    "band": 3,
+    "score_lo": 0.244853,
+    "score_hi": 0.278275,
+    "n": 1643,
+    "positive_rate": 0.2027,
+    "end_median": 0.26,
+    "end_mean": 3.34,
+    "win_rate": 0.51,
+    "n_outcome": 1643
+   },
+   {
+    "band": 4,
+    "score_lo": 0.278277,
+    "score_hi": 0.313335,
+    "n": 1643,
+    "positive_rate": 0.2215,
+    "end_median": 0.46,
+    "end_mean": 3.61,
+    "win_rate": 0.5125,
+    "n_outcome": 1643
+   },
+   {
+    "band": 5,
+    "score_lo": 0.313356,
+    "score_hi": 0.350996,
+    "n": 1643,
+    "positive_rate": 0.2264,
+    "end_median": 0.44,
+    "end_mean": 2.87,
+    "win_rate": 0.5173,
+    "n_outcome": 1643
+   },
+   {
+    "band": 6,
+    "score_lo": 0.351037,
+    "score_hi": 0.392719,
+    "n": 1643,
+    "positive_rate": 0.2276,
+    "end_median": 0.59,
+    "end_mean": 3.03,
+    "win_rate": 0.5228,
+    "n_outcome": 1643
+   },
+   {
+    "band": 7,
+    "score_lo": 0.392741,
+    "score_hi": 0.447498,
+    "n": 1643,
+    "positive_rate": 0.2514,
+    "end_median": 1.53,
+    "end_mean": 3.12,
+    "win_rate": 0.5508,
+    "n_outcome": 1643
+   },
+   {
+    "band": 8,
+    "score_lo": 0.447557,
+    "score_hi": 0.525626,
+    "n": 1643,
+    "positive_rate": 0.2483,
+    "end_median": 1.54,
+    "end_mean": 3.02,
+    "win_rate": 0.5581,
+    "n_outcome": 1643
+   },
+   {
+    "band": 9,
+    "score_lo": 0.525638,
+    "score_hi": 0.83429,
+    "n": 1643,
+    "positive_rate": 0.3682,
+    "end_median": 3.56,
+    "end_mean": 4.8,
+    "win_rate": 0.636,
+    "n_outcome": 1643
+   }
+  ],
+  "base_positive_rate": 0.2249,
+  "base_end_median": 1.01,
+  "base_win_rate": 0.5319,
+  "n": 16431
+ },
+ "calibration": {
+  "x": [
+   0.03747,
+   0.096833,
+   0.120614,
+   0.137147,
+   0.151791,
+   0.163092,
+   0.173437,
+   0.184073,
+   0.193141,
+   0.201229,
+   0.209151,
+   0.216858,
+   0.225029,
+   0.231646,
+   0.238927,
+   0.24485,
+   0.251665,
+   0.258248,
+   0.265085,
+   0.272074,
+   0.278275,
+   0.284851,
+   0.292146,
+   0.299724,
+   0.306184,
+   0.313335,
+   0.319863,
+   0.327619,
+   0.335003,
+   0.342491,
+   0.350996,
+   0.358808,
+   0.366435,
+   0.37444,
+   0.383229,
+   0.392719,
+   0.402409,
+   0.412891,
+   0.424165,
+   0.435782,
+   0.447498,
+   0.459845,
+   0.47413,
+   0.490071,
+   0.506687,
+   0.525626,
+   0.546862,
+   0.573979,
+   0.610944,
+   0.662149,
+   0.83429
+  ],
+  "y": [
+   0.0,
+   0.0833,
+   0.0833,
+   0.1227,
+   0.1649,
+   0.1682,
+   0.1682,
+   0.182,
+   0.1859,
+   0.1949,
+   0.2036,
+   0.2036,
+   0.2036,
+   0.2063,
+   0.2063,
+   0.2063,
+   0.2063,
+   0.2063,
+   0.2063,
+   0.2063,
+   0.2063,
+   0.212,
+   0.212,
+   0.212,
+   0.2246,
+   0.2246,
+   0.2246,
+   0.2246,
+   0.2319,
+   0.2319,
+   0.2319,
+   0.2319,
+   0.2319,
+   0.2319,
+   0.2319,
+   0.2337,
+   0.2508,
+   0.2508,
+   0.2508,
+   0.2508,
+   0.2508,
+   0.2508,
+   0.2508,
+   0.2508,
+   0.2508,
+   0.2508,
+   0.3095,
+   0.3095,
+   0.3587,
+   0.4872,
+   1.0
+  ],
+  "method": "isotonic",
+  "note": "out-of-fold 予測で作った実測の対応。最終モデルは全期間で学習するぶん訓練量が多く、スコア分布がわずかにずれるので近似として読むこと"
+ },
+ "notes": [
+  "スコアは較正されていない生の出力。確率として読まず、同じ日の候補の中での順位と、スコア帯の過去実績で読むこと。",
+  "スコア帯の実績は out-of-fold 予測（その行より前のデータだけで学習したモデルの採点）で数えた実測値。",
+  "寄与は TreeSHAP による対数オッズ空間の分解。確率の差ではないので、押し上げ／押し下げの相対の大きさとして読む。",
+  "（これは合成フィクスチャです。実測値ではありません）"
+ ],
+ "models": [
+  {
+   "algo": "lgbm",
+   "name": "LightGBM",
+   "note": "勾配ブースティング（葉単位で成長）。本番の基準モデル",
+   "trainedAt": "2026-09-06T12:31:00+00:00",
+   "nOof": 16431,
+   "scoreBands": {},
+   "cv": {
+    "mean_pr_auc": 0.4029,
+    "mean_roc_auc": 0.7,
+    "n_splits": 5,
+    "n_trials": 50
+   }
+  },
+  {
+   "algo": "xgb",
+   "name": "XGBoost",
+   "note": "勾配ブースティング（深さ単位で成長）。木の形が違う",
+   "trainedAt": "2026-09-06T12:31:00+00:00",
+   "nOof": 16431,
+   "scoreBands": {},
+   "cv": {
+    "mean_pr_auc": 0.3979,
+    "mean_roc_auc": 0.7,
+    "n_splits": 5,
+    "n_trials": 50
+   }
+  },
+  {
+   "algo": "cat",
+   "name": "CatBoost",
+   "note": "勾配ブースティング（欠損と正則化の扱いが違う）",
+   "trainedAt": "2026-09-06T12:31:00+00:00",
+   "nOof": 16431,
+   "scoreBands": {},
+   "cv": {
+    "mean_pr_auc": 0.3831,
+    "mean_roc_auc": 0.7,
+    "n_splits": 5,
+    "n_trials": 50
+   }
+  },
+  {
+   "algo": "logit",
+   "name": "ロジスティック回帰",
+   "note": "線形モデル。特徴量の足し算で判断するので、木とは外す銘柄が違う",
+   "trainedAt": "2026-09-06T12:31:00+00:00",
+   "nOof": 16431,
+   "scoreBands": {},
+   "cv": {
+    "mean_pr_auc": 0.2897,
+    "mean_roc_auc": 0.7,
+    "n_splits": 5,
+    "n_trials": 50
+   }
+  },
+  {
+   "algo": "mlp",
+   "name": "ニューラルネット",
+   "note": "ニューラルネット。滑らかな交互作用を見る。木とも線形とも違う",
+   "trainedAt": "2026-09-06T12:31:00+00:00",
+   "nOof": 16431,
+   "scoreBands": {},
+   "cv": {
+    "mean_pr_auc": 0.3044,
+    "mean_roc_auc": 0.7,
+    "n_splits": 5,
+    "n_trials": 50
+   }
+  }
+ ],
+ "_fixture": "tests/fixtures/synthetic-predictions.json（合成データ）"
+}

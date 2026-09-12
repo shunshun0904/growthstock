@@ -54,6 +54,50 @@ export function bandColor(band) {
   return 'var(--red)';
 }
 
+/**
+ * パーセンタイル（過去スコア分布での位置）を帯の色に揃える。
+ *
+ * 帯は out-of-fold スコアの10分位なので、パーセンタイル p の行は
+ * おおよそ帯 floor(p/10)+1 に入る。別の色関数を作ると同じ水準が
+ * 場所によって違う色になるので、bandColor に寄せる。
+ */
+export function pctColor(pct) {
+  if (!Number.isFinite(pct)) return 'var(--text-faint)';
+  return bandColor(Math.floor(pct / 10) + 1);
+}
+
+/** モデル別の棒に添える短い記号。日本語名は横に並べると幅が足りない。 */
+export const MODEL_SHORT = {
+  lgbm: 'LGB', xgb: 'XGB', cat: 'CAT', logit: 'LR', mlp: 'NN', rf: 'RF',
+};
+
+/**
+ * 候補1件を「モデル別に並べられる形」にする。
+ *
+ * 混ぜない（アンサンブルにしない）。学習器が違えばスコアのスケールも
+ * 意味も違うので、各モデル自身の過去スコア分布での位置に揃えて返す。
+ * 買うかどうかは、並んだ5つを見て人間が決める。
+ *
+ * 並び順は payload の models（= research/models.py の ALGOS 順）に従う。
+ * 候補ごとにスコア順で並べ替えると、行をまたいで同じ位置が同じモデルに
+ * ならず、縦に読めなくなる。
+ */
+export function modelRows(candidate, models) {
+  const per = candidate?.byModel;
+  if (!per) return [];
+  const order = (models?.length ? models.map((m) => m.algo) : Object.keys(per))
+    .filter((a) => per[a]);
+  const meta = new Map((models || []).map((m) => [m.algo, m]));
+  return order.map((algo) => ({
+    algo,
+    name: meta.get(algo)?.name || algo,
+    note: meta.get(algo)?.note || '',
+    short: MODEL_SHORT[algo] || algo.slice(0, 3).toUpperCase(),
+    pct: per[algo].pctHistorical,
+    score: per[algo].score,
+  }));
+}
+
 export function bandLabel(band) {
   if (!Number.isFinite(band)) return '—';
   if (band >= 9) return '最上位';
