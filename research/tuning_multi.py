@@ -166,10 +166,12 @@ def _space_mlp(trial) -> Dict:
     ラベルが60営業日先を見るので隣接日が強く相関する）で大きな網を
     張ると、局面を覚えるだけになる。
     """
-    n1 = trial.suggest_categorical("h1", [16, 32, 64, 128])
-    two = trial.suggest_categorical("two_layers", [False, True])
+    # h1 / two_layers のまま返す。hidden_layer_sizes への変換は build が行う。
+    # Optuna が保存するのは suggest した名前（h1, two_layers）なので、
+    # ここで別の名前に変えると、保存したパラメータを build に渡せなくなる
     return {
-        "hidden_layer_sizes": (n1, max(8, n1 // 2)) if two else (n1,),
+        "h1": trial.suggest_categorical("h1", [16, 32, 64, 128]),
+        "two_layers": trial.suggest_categorical("two_layers", [False, True]),
         "alpha": trial.suggest_float("alpha", 1e-5, 10.0, log=True),
         "learning_rate_init": trial.suggest_float("learning_rate_init",
                                                   1e-4, 1e-2, log=True),
@@ -280,6 +282,12 @@ def build(algo: str, params: Dict, y: np.ndarray,
         # Pipeline 経由では渡しにくいので今回は入れない。
         # （しきい値運用はスコアの順位だけを使うので、確率の水準が
         #   多数派に寄っていても順位が保たれれば運用には影響しない）
+        # 探索空間が返す h1 / two_layers を層構成に直す。MLPClassifier は
+        # この2つを知らないので、ここで必ず畳んでから渡す
+        if "h1" in p:
+            n1 = int(p.pop("h1"))
+            two = bool(p.pop("two_layers", False))
+            p["hidden_layer_sizes"] = (n1, max(8, n1 // 2)) if two else (n1,)
         return make_pipeline(
             preprocess(cols or []),
             MLPClassifier(max_iter=200, early_stopping=True,
