@@ -174,6 +174,12 @@ def score_others(cand: pd.DataFrame, cols: List[str],
     scores: Dict[str, np.ndarray] = {}
     info: List[Dict] = []
     for algo in M.available(model_dir):
+        if algo == M.BASELINE:
+            # 基準モデルはここで採点しない。呼び出し側が本番モデル
+            # （model.txt）のスコアをそのまま byModel に入れる。
+            # 同じ LightGBM の別の当てはめを並べると、上位10%の重複が
+            # 52.8% しかないため、画面に矛盾した2本が出る
+            continue
         try:
             model, meta = M.load(algo, model_dir)
             if model is None:
@@ -302,13 +308,26 @@ def main(argv=None) -> int:
     # --- 他モデルの採点を各候補に載せる --- #
     # アンサンブルはしない。並べるだけ。買うかの判断は人間が統合的に行う
     others, model_info = score_others(cand, cols, args.model_dir)
-    hist_by_algo = {}
     if others:
         import models as M
-        for algo in others:
-            hist_by_algo[algo] = M.hist_scores(algo, args.model_dir)
+        hist_by_algo = {a: M.hist_scores(a, args.model_dir) for a in others}
+        # 基準モデルを画面の並びの先頭に置く。採点し直さず、上で計算した
+        # 本番モデルのスコアとパーセンタイルをそのまま使う。これで
+        # 順位・帯・SHAP と、画面の LightGBM の棒が必ず一致する
+        model_info.insert(0, {
+            "algo": M.BASELINE, "name": M.JA.get(M.BASELINE, M.BASELINE),
+            "note": M.NOTE.get(M.BASELINE, ""),
+            "trainedAt": meta["trainedAt"],
+            # 旧い meta.json には nOof が無い（追加したのは後）。
+            # スコア帯の件数が同じものなので、そちらから拾う
+            "nOof": meta.get("nOof") or meta.get("scoreBands", {}).get("n"),
+            "scoreBands": meta.get("scoreBands", {}),
+            "cv": meta.get("tuning", {}),
+            "baseline": True,
+        })
         for i, x in enumerate(rows):
-            per = {}
+            per = {M.BASELINE: {"score": x["score"],
+                                "pctHistorical": x["pctHistorical"]}}
             for algo, sc in others.items():
                 v = float(sc[i])
                 per[algo] = {

@@ -365,6 +365,11 @@ input[type='range']::-moz-range-thumb {
 .pred-ms-i i b { display: block; width: 100%; border-radius: 2px; min-height: 2px; }
 .pred-ms-i .k { font-size: 9px; letter-spacing: 0.02em; color: var(--text-faint);
   line-height: 1; }
+/* 塊の区切り。木3本と木以外2本は相関が違うので、同列に読ませない */
+.pred-ms-sep { flex: 0 0 1px; align-self: stretch; margin: 0 3px;
+  background: var(--border); }
+.pred-fam { margin: 4px 0 1px; }
+.pred-fam:first-child { margin-top: 0; }
 
 .pred-detail { border-top: 1px solid var(--border-soft); padding: var(--s4);
   background: var(--bg-card); }

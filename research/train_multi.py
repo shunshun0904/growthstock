@@ -14,6 +14,15 @@ research/model/{model.txt, meta.json, oof.parquet} を作っている。そこ�
 ここは research/model/models/<algo>/ 以下だけを作る。このスクリプトが
 丸ごと失敗しても、基準モデル（lgbm）による日次予測は動き続ける。
 
+基準モデルはここで作り直さない
+---------------------------
+既定の対象は models.EXTRA（xgb / cat / logit / mlp）で、lgbm は入らない。
+同じ LightGBM を別のパラメータで当てはめると、内側検証の PR-AUC はほぼ
+同じ（0.4016 対 0.4029）のに上位10%の重複が 52.8% しかなく、画面に
+「LightGBM」が2本並んで最大62pt ずれる。順位・帯・較正・SHAP の基準は
+本番モデルなので、画面の LightGBM もそれに一本化する。
+--models lgbm を明示すれば比較用に作れる（画面には使わない）。
+
 何を作るか
 ---------
 モデルごとに3つ。
@@ -135,8 +144,9 @@ def main(argv=None) -> int:
     ap.add_argument("--data-dir", default=DATA_DIR)
     ap.add_argument("--dataset", default=os.path.join(DATA_DIR, "dataset.parquet"))
     ap.add_argument("--out-dir", default=MODEL_DIR)
-    ap.add_argument("--models", default=",".join(M.ALGOS),
-                    help=f"学習するモデル（カンマ区切り）。既定: {','.join(M.ALGOS)}")
+    ap.add_argument("--models", default=",".join(M.EXTRA),
+                    help=f"学習するモデル（カンマ区切り）。既定: {','.join(M.EXTRA)}"
+                         f"。基準モデル({M.BASELINE})は train_production.py が作る")
     ap.add_argument("--features", default="all")
     args = ap.parse_args(argv)
 

@@ -7,6 +7,14 @@ scikit-learn==1.6.0
 lightgbm==4.7.0
 optuna==4.9.0
 
+# 画面に並べる複数モデル（research/models.py）。日次予測がこれらの
+# 学習済みモデルを読み込むので、予測側にも入っていないと
+# 「読めないモデルは飛ばす」経路に落ちて画面から静かに消える。
+# joblib は scikit-learn の依存だが、保存形式を握っているので明示する。
+xgboost==3.2.0
+catboost==1.2.10
+joblib==1.6.0
+
 # 予測ログを Google スプレッドシートへ追記するため（research/export_sheets.py）。
 # 認証情報が無ければそのステップは飛ばすので、他の処理はこれに依存しない。
 gspread==6.2.1

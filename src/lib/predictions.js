@@ -72,6 +72,24 @@ export const MODEL_SHORT = {
 };
 
 /**
+ * モデルの塊。実測のスコア相関で2つに分かれる（docs/MODEL_LINEUP.md）。
+ *
+ *   木3つ      相関 0.80〜0.89 / 上位10%の重複 50〜58%
+ *   木以外2つ  相関 0.823      / 重複 44.7%
+ *   塊をまたぐ 相関 0.63〜0.71 / 重複 29〜33%
+ *
+ * 木3本が揃って高いのは「同じ見方が3回出ている」だけで、3つの独立した
+ * 賛成ではない。塊をまたいで揃ったときだけ、見方の違うモデルが同じ結論に
+ * 達したと読める。その読み違いを防ぐために画面で区切る。
+ */
+export const MODEL_FAMILY = {
+  lgbm: 'tree', xgb: 'tree', cat: 'tree', rf: 'tree',
+  logit: 'other', mlp: 'other',
+};
+
+export const FAMILY_JA = { tree: '決定木系', other: '木以外' };
+
+/**
  * 候補1件を「モデル別に並べられる形」にする。
  *
  * 混ぜない（アンサンブルにしない）。学習器が違えばスコアのスケールも
@@ -93,6 +111,7 @@ export function modelRows(candidate, models) {
     name: meta.get(algo)?.name || algo,
     note: meta.get(algo)?.note || '',
     short: MODEL_SHORT[algo] || algo.slice(0, 3).toUpperCase(),
+    family: MODEL_FAMILY[algo] || 'other',
     pct: per[algo].pctHistorical,
     score: per[algo].score,
   }));

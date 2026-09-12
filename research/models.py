@@ -47,8 +47,29 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import tuning_multi as TM  # noqa: E402
 
-#: 本番で回すモデル。RF は lgbm との相関 0.858 で冗長なため入れない
+#: 画面に並べる順。RF は lgbm との相関 0.858 で冗長なため入れない
 ALGOS = ("lgbm", "xgb", "cat", "logit", "mlp")
+
+#: 基準モデル。日次予測の順位・スコア帯・較正・SHAP・追跡ファイルは
+#: すべてこのモデルのもの。research/model/{model.txt, meta.json, oof.parquet}
+#: に置かれ、train_production.py が作る
+BASELINE = "lgbm"
+
+#: train_multi.py が作るモデル。基準モデルは含めない。
+#:
+#: なぜ含めないか（実測）
+#: --------------------
+#: 同じ LightGBM を別のパラメータで当てはめると、内側検証の PR-AUC は
+#: ほぼ同じ（本番 0.4016 / 探索 0.4029）なのに、選ぶ銘柄が大きく変わる。
+#:
+#:   Spearman 相関            0.863
+#:   上位10%の重複            52.8%（= 47%は別の銘柄）
+#:   パーセンタイルの絶対差   中央 8.6pt / 90%分位 25.8pt / 最大 62.7pt
+#:
+#: 画面に「LightGBM」が2本あって45ptずれていると、どちらを見ればよいのか
+#: 分からない。順位・帯・SHAP の基準になっているのは本番モデルなので、
+#: 画面の LightGBM も本番モデルに一本化する。
+EXTRA = tuple(a for a in ALGOS if a != BASELINE)
 
 #: 画面に出す日本語名。棒グラフのラベルに使う
 JA = {

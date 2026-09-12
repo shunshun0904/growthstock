@@ -83,6 +83,11 @@ const shorts = await page.locator('.pred-row').first().locator('.pred-ms-i .k')
 check(shorts.join(',') === 'LGB,XGB,CAT,LR,NN',
   `モデルの並び順が行をまたいで固定 (実際: ${shorts.join(',')})`);
 check(predBody.includes('が上位10%'), '一致度（上位10%と見たモデル数）が表示される');
+// 塊の区切り（木3本 | 木以外2本）が各行に1本入る
+const seps = await page.locator('.pred-ms-sep').count();
+check(seps === nRows, `塊の区切りが各行に1本ある (実際: ${seps})`);
+check(predBody.includes('決定木系') && predBody.includes('木以外'),
+  '塊の名前が一覧パネルに出る');
 check(predBody.includes('並べているモデル'), 'モデル一覧パネルが表示される');
 check(predBody.includes('ニューラルネット') && predBody.includes('ロジスティック回帰'),
   '5モデルの日本語名が出る');
@@ -97,6 +102,9 @@ check(detail.includes('モデル別の見立て'), '詳細にモデル別の見�
 check(detail.includes('混ぜていません'), 'アンサンブルではないと明示される');
 const detailBars = await page.locator('.pred-detail .pred-b').count();
 check(detailBars >= 5, `詳細にモデル別の棒が5本以上ある (実際: ${detailBars})`);
+const fams = await page.locator('.pred-detail .pred-fam').allTextContents();
+check(fams.join(',') === '決定木系,木以外',
+  `詳細のモデル別が塊で分かれる (実際: ${fams.join(',')})`);
 await page.screenshot({ path: path.join(SHOTS, 'screenshot-prediction.png') });
 await page.locator('.pred-row').first().locator('.pred-main').click();
 

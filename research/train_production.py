@@ -229,6 +229,9 @@ def main(argv=None) -> int:
         "trainFrom": str(ds["Date"].min().date()),
         "trainTo": str(ds["Date"].max().date()),
         "positiveRate": round(float(ds["label"].mean()), 4),
+        # 画面の「並べているモデル」が追加モデルと同じ列で並べるために使う。
+        # 追加モデル（research/models.py）の meta と名前を揃えてある
+        "nOof": int(len(oof)),
         "referenceHorizon": S.REF_HORIZON,
         "calibration": calib,
         "scoreBands": bands,

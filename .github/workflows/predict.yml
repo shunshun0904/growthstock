@@ -74,6 +74,28 @@ jobs:
           fi
           ls -lh research/model
 
+          # 画面に並べる追加モデル。Release ではアセット名が衝突しないよう
+          # <algo>_model.joblib の形で上がっているので、research/models.py が
+          # 見る research/model/models/<algo>/ の形に並べ直す。
+          # meta.json は git 側（週次学習がコミットする）から来る。
+          # 片方だけ揃っていない場合は models.load が (None, None) を返し、
+          # そのモデルだけ画面から外れる。日次予測は止まらない。
+          if gh release download data-raw --dir /tmp/extra --clobber \
+               --pattern '*_model.joblib' --pattern '*_oof.parquet' 2>/dev/null; then
+            shopt -s nullglob
+            for f in /tmp/extra/*_model.joblib; do
+              a=$(basename "$f" _model.joblib)
+              mkdir -p "research/model/models/$a"
+              mv "$f" "research/model/models/$a/model.joblib"
+              [ -f "/tmp/extra/${a}_oof.parquet" ] \
+                && mv "/tmp/extra/${a}_oof.parquet" "research/model/models/$a/oof.parquet"
+            done
+            echo "追加モデル: $(ls -d research/model/models/*/ 2>/dev/null | wc -l)個"
+            python3 research/model_lineup.py || true
+          else
+            echo "Release に追加モデルが無い（基準モデルだけで予測する）"
+          fi
+
       - name: Check freshness
         run: python3 research/check_freshness.py --max-age 1
 

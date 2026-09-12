@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { fmt, fmtInt, fmtSigned, fmtOku, fmtDate, fmtDateTime, DASH } from '../lib/format.js';
-import { bandColor, bandLabel, pctColor, modelRows, MODEL_SHORT, marketTone,
-  candidateToStock } from '../lib/predictions.js';
+import { bandColor, bandLabel, pctColor, modelRows, MODEL_SHORT, MODEL_FAMILY,
+  FAMILY_JA, marketTone, candidateToStock } from '../lib/predictions.js';
 
 /**
  * ブレイク予測タブ。
@@ -178,15 +178,22 @@ function ModelStrip({ rows, agree, n }) {
         )}
       </span>
       <span className="pred-ms-row">
-        {rows.map((r) => (
-          <span key={r.algo} className="pred-ms-i"
-                title={`${r.name}: 過去スコア分布の下から ${fmt(r.pct, 1, '%')}`
-                       + `（生スコア ${fmt(r.score, 4)}）`}>
-            <em className="num">{fmt(r.pct, 0)}</em>
-            <i><b style={{ height: `${Math.max(3, r.pct ?? 0)}%`,
-                           background: pctColor(r.pct) }} /></i>
-            <span className="k">{r.short}</span>
-          </span>
+        {rows.map((r, i) => (
+          <React.Fragment key={r.algo}>
+            {/* 塊が変わる位置で区切る。木3本が揃っても独立した3票ではない */}
+            {i > 0 && r.family !== rows[i - 1].family && (
+              <span className="pred-ms-sep" aria-hidden="true" />
+            )}
+            <span className="pred-ms-i"
+                  title={`${r.name}（${FAMILY_JA[r.family]}）: `
+                         + `過去スコア分布の下から ${fmt(r.pct, 1, '%')}`
+                         + `／生スコア ${fmt(r.score, 4)}`}>
+              <em className="num">{fmt(r.pct, 0)}</em>
+              <i><b style={{ height: `${Math.max(3, r.pct ?? 0)}%`,
+                             background: pctColor(r.pct) }} /></i>
+              <span className="k">{r.short}</span>
+            </span>
+          </React.Fragment>
         ))}
       </span>
     </span>
@@ -232,15 +239,20 @@ function Detail({ c, models, onSend, sent }) {
               揃えてあります。
             </p>
             <div className="pred-bars">
-              {mr.map((r) => (
-                <div key={r.algo} className="pred-b" title={r.note}>
-                  <span className="k">{r.name}</span>
-                  <span className="t">
-                    <i style={{ width: `${Math.max(2, r.pct ?? 0)}%`,
-                                background: pctColor(r.pct) }} />
-                  </span>
-                  <span className="v num">{fmt(r.pct, 1)}</span>
-                </div>
+              {mr.map((r, i) => (
+                <React.Fragment key={r.algo}>
+                  {(i === 0 || r.family !== mr[i - 1].family) && (
+                    <div className="pred-fam lab">{FAMILY_JA[r.family]}</div>
+                  )}
+                  <div className="pred-b" title={r.note}>
+                    <span className="k">{r.name}</span>
+                    <span className="t">
+                      <i style={{ width: `${Math.max(2, r.pct ?? 0)}%`,
+                                  background: pctColor(r.pct) }} />
+                    </span>
+                    <span className="v num">{fmt(r.pct, 1)}</span>
+                  </div>
+                </React.Fragment>
               ))}
             </div>
             <div className="pred-split" style={{ marginTop: 10 }}>
@@ -254,8 +266,11 @@ function Detail({ c, models, onSend, sent }) {
               </span>
             </div>
             <p className="sub" style={{ margin: '8px 0 0' }}>
-              5つが揃って高い銘柄は、どの見方をしても上位という意味です。
-              1つだけ高い銘柄は、そのモデルの癖を見ている可能性があります。
+              実測のスコア相関で、木3つ（0.80〜0.89）と木以外2つ（0.823）の
+              2つの塊に分かれます。塊の中は<b>同じ見方が繰り返されているだけ</b>
+              なので、木3本が揃っても独立した3票ではありません。
+              <b>塊をまたいで揃ったとき</b>だけ、見方の違うモデルが同じ結論に
+              達したと読めます（塊をまたぐ相関は 0.63〜0.71）。
               平均は出していません。混ぜた数字を1つ出すと、呼び名が何であれ
               アンサンブルになるためです。
             </p>
@@ -404,13 +419,14 @@ function ModelLineup({ models }) {
       <div className="tbl-wrap">
         <table className="tbl">
           <thead>
-            <tr><th>記号</th><th>モデル</th><th>何を見ているか</th>
+            <tr><th>記号</th><th>塊</th><th>モデル</th><th>何を見ているか</th>
               <th>学習日</th><th>OOF件数</th><th>探索PR-AUC</th></tr>
           </thead>
           <tbody>
             {models.map((m) => (
               <tr key={m.algo}>
                 <td className="num">{MODEL_SHORT[m.algo] || m.algo}</td>
+                <td className="sub">{FAMILY_JA[MODEL_FAMILY[m.algo]] || DASH}</td>
                 <td>{m.name}</td>
                 <td className="sub" style={{ textAlign: 'left', whiteSpace: 'normal' }}>
                   {m.note || DASH}
