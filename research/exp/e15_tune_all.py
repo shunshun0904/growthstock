@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """
-実験15: 5モデルすべてを同じ条件で探索する。
+実験15: 5モデルすべてを同じ条件で探索する（週次でも回る）。
+
+    python3 research/exp/e15_tune_all.py            # 必要なものだけ探索
+    python3 research/exp/e15_tune_all.py --force    # 全部やり直す
+    python3 research/exp/e15_tune_all.py mlp        # モデルを指定
 
 なぜ全部探索するか
 -----------------
@@ -18,7 +22,17 @@
 
 探索が終わったら、探索済みパラメータで out-of-fold を作り直して
 運用指標（しきい値運用・翌営業日の寄り買い・40営業日後の5日平均終値売り）
-で並べる。
+で並べる（research/exp/e16_lineup.py）。
+
+いつ探索し直すか
+--------------
+訓練データの最終日（`_cv["train_to"]`）が動いていたら探索する。週次で
+新しい営業日が積まれると母集団が変わるので、そのときは50試行やり直す。
+動いていなければ保存済みを使う（同じデータで探索し直しても、乱数種が
+同じなので同じ答えになるだけ）。
+
+実測の探索時間（50試行×5分割、Optuna の試行記録より）
+  xgb 21分 / logit 51分 / cat 7分 / mlp 7分 = 合計86分
 """
 from __future__ import annotations
 
@@ -38,7 +52,9 @@ N_TRIALS = 50
 
 
 def main() -> int:
-    algos = sys.argv[1:] or list(TM.ALGOS)
+    args = [a for a in sys.argv[1:] if not a.startswith("-")]
+    force = "--force" in sys.argv
+    algos = args or list(TM.ALGOS)
     df = lab.frame()
     cols = F.columns("all")
     d = pd.to_datetime(df["Date"])
@@ -50,11 +66,19 @@ def main() -> int:
     print()
 
     store = TM.load()
+    train_to = str(train_end.date())
     for algo in algos:
-        if algo in store:
+        prev = store.get(algo, {}).get("_cv", {})
+        # 訓練データの最終日が同じなら探索し直さない。同じデータ・同じ種なら
+        # 同じ答えになるだけで、時間だけ掛かる。
+        # 日付が動いていれば母集団が変わっているので50試行やり直す
+        if prev and prev.get("train_to") == train_to and not force:
             print(f"  [{algo}] 探索済みを読む "
-                  f"(PR-AUC {store[algo]['_cv']['mean_pr_auc']:.4f})")
+                  f"(PR-AUC {prev['mean_pr_auc']:.4f} / 訓練最終日 {train_to})")
             continue
+        if prev:
+            print(f"  [{algo}] 訓練最終日が {prev.get('train_to')} から "
+                  f"{train_to} に動いたので探索し直す")
         t0 = time.time()
         store[algo] = TM.tune(algo, sub, cols, n_trials=N_TRIALS)
         # 途中で落ちても結果を失わないよう、1つ終わるたびに保存する

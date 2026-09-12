@@ -20,6 +20,10 @@
   それ以外の列（建値・手仕舞い・メモなど）は読みも書きもしない。
 ・行は追記のみ。既存行を作り直さない。
   作り直すと、その行に書かれた手入力が消える。
+・このスクリプトが書く列が増えたときは、**見出し行の右端に足す**。
+  途中に挿し込むと既存セルがずれて、利用者の記入が別の列に移る。
+  列の探索は名前なので、右端にあっても正しく書ける。位置が気になるときは
+  利用者が手でドラッグして動かしてよい（名前を変えないこと）。
 
   GOOGLE_SERVICE_ACCOUNT_JSON='{...}' GSHEET_ID=... python3 research/export_sheets.py
   python3 research/export_sheets.py --dry-run   # 通信せず、書く内容だけ出す
@@ -36,6 +40,9 @@ from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import models as M  # noqa: E402
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(HERE, "_data")
 PUBLIC_DIR = os.path.join(os.path.dirname(HERE), "public", "data")
@@ -51,6 +58,20 @@ OWNED_COLS = [
     "日次ボラ%", "20日リターン%", "地合い寄与", "銘柄固有寄与", "PER", "PBR",
 ]
 
+# 注: 順位・帯・スコア・較正確率はすべて基準モデル（LightGBM）のもの。
+# モデル別の列（MODEL_COLS）は隣に並べる参考値で、順位には効かない。
+
+#: モデル別の列。画面に並べている5モデルと同じ順・同じ記号。
+#:
+#: 入れるのは**そのモデル自身の過去スコア分布での位置**（0〜100）だけ。
+#: 生スコアは学習器ごとにスケールも意味も違うので、台帳に並べても
+#: 足したり比べたりできない。位置なら同じ物差しになる。
+#:
+#: 「一致」は上位10%と見ているモデルの数。独立した判定の数え上げで、
+#: スコアを混ぜた値ではない（アンサンブルはしない方針）。
+MODEL_COLS = [f"{M.SHORT.get(a, a[:3].upper())}%" for a in M.ALGOS]
+AGREE_COL = "一致(上位10%)"
+
 #: 毎回更新する列。実行のたびに最新の株価で書き直す。
 TRACK_COLS = ["現在値", "騰落率%", "経過営業日"]
 
@@ -61,10 +82,26 @@ KEY_COLS = ("予測日", "コード")
 
 
 def rows_from_predictions(pred: Dict) -> List[Dict]:
-    """全候補を1行ずつにする。上位だけに絞らない（選ばなかった側も検証したいので）。"""
+    """
+    全候補を1行ずつにする。上位だけに絞らない（選ばなかった側も検証したいので）。
+
+    モデル別の列は、その予測ファイルが持っているモデルだけ埋める。
+    5モデルを学習する前の予測ファイル（byModel が無い）でも落ちない。
+    """
+    # 予測ファイルが持っているモデルの順。無ければ models.ALGOS の順
+    algos = [m["algo"] for m in (pred.get("models") or [])] or list(M.ALGOS)
+    short = {m["algo"]: m.get("short") for m in (pred.get("models") or [])}
     out = []
     for c in pred["candidates"]:
         ct = c.get("contrib") or {}
+        per = c.get("byModel") or {}
+        # そのモデル自身の過去分布での位置。生スコアは入れない
+        # （学習器ごとにスケールが違い、台帳で比べられないため）
+        by_model = {
+            f"{short.get(a) or M.SHORT.get(a, a[:3].upper())}%":
+                (per.get(a) or {}).get("pctHistorical")
+            for a in algos if a in per
+        }
         out.append({
             "予測日": c["date"], "コード": c["code"], "銘柄名": c.get("name") or "",
             "業種": c.get("sector") or "",
@@ -83,6 +120,9 @@ def rows_from_predictions(pred: Dict) -> List[Dict]:
             "地合い寄与": ct.get("marketContrib"),
             "銘柄固有寄与": ct.get("stockContrib"),
             "PER": c.get("per"), "PBR": c.get("pbr"),
+            **by_model,
+            AGREE_COL: (f"{c['agree90']}/{c['nModels']}"
+                        if c.get("nModels") else None),
             "_jqCode": c["jqCode"],
         })
     return out
@@ -265,11 +305,36 @@ def ensure_worksheet(book, title: str):
         return ws, False
     except Exception:
         pass
-    header = OWNED_COLS + TRACK_COLS + USER_COLS
+    header = OWNED_COLS + MODEL_COLS + [AGREE_COL] + TRACK_COLS + USER_COLS
     ws = book.add_worksheet(title=title, rows=2000, cols=max(30, len(header) + 5))
     ws.update([header], "A1")
     ws.freeze(rows=1)
     return ws, True
+
+
+def ensure_columns(ws, header: List[str], dry_run: bool = False) -> List[str]:
+    """
+    このスクリプトが書く列のうち、見出しに無いものを**右端に足す**。
+
+    列が増えたときに黙って書き落とさないため。sync は名前で列を探すので、
+    見出しに無い列の値は捨てられる（このセッションで実際にモデル別の列で
+    起きかけた）。ここで見出しを伸ばしておけば、次の追記から入る。
+
+    途中に挿し込まないのが肝。挿すと既存セルがずれて、利用者が書いた
+    建値やメモが別の列に移る。右端への追加は空セルへの書き込みなので、
+    既存の中身に触らない。並び順が気になるときは利用者が手で動かしてよい
+    （名前を変えなければ、そのまま正しく書き込まれる）。
+    """
+    want = OWNED_COLS + MODEL_COLS + [AGREE_COL] + TRACK_COLS
+    missing = [c for c in want if c not in header]
+    if not missing:
+        return header
+    print(f"[header] 見出しに無い列を右端に足す: {missing}")
+    if dry_run:
+        return header + missing
+    start = len(header) + 1
+    ws.update([missing], f"{a1(start, 1)}:{a1(start + len(missing) - 1, 1)}")
+    return header + missing
 
 
 def a1(col_idx: int, row_idx: int) -> str:
@@ -286,7 +351,7 @@ def sync(ws, rows: List[Dict], closes, as_of, dry_run: bool = False) -> Dict[str
     values = ws.get_all_values()
     if not values:
         raise SystemExit("シートが空です。見出し行が作られていません")
-    header = values[0]
+    header = ensure_columns(ws, values[0], dry_run=dry_run)
     pos = {name: i for i, name in enumerate(header)}
     missing = [c for c in KEY_COLS if c not in pos]
     if missing:
@@ -313,8 +378,12 @@ def sync(ws, rows: List[Dict], closes, as_of, dry_run: bool = False) -> Dict[str
             line[pos[name]] = "" if v is None else v
         appended.append(line)
 
-    # --- 既存行の追跡列だけ更新する --- #
+    # --- 既存行を更新する（追跡列と、空のままのモデル別列だけ） --- #
     updates = []
+    # 列が増えた直後は、直近5営業日ぶんの既存行にモデル別の値が入っていない。
+    # 空のセルにだけ入れる。既に値があるセルは触らない（利用者が手で
+    # 上書きしている可能性がある。この台帳は手書きと同居する前提）
+    backfill = [c for c in MODEL_COLS + [AGREE_COL] if c in pos]
     by_key = {(x["予測日"], x["コード"]): x for x in rows}
     for (d, code), r in seen.items():
         x = by_key.get((d, code))
@@ -322,6 +391,16 @@ def sync(ws, rows: List[Dict], closes, as_of, dry_run: bool = False) -> Dict[str
         jq = None
         if x:
             price, jq = x.get("予測時株価"), x["_jqCode"]
+            line = values[r - 1]
+            for name in backfill:
+                v = x.get(name)
+                if v is None:
+                    continue
+                cur = line[pos[name]] if len(line) > pos[name] else ""
+                if str(cur).strip():
+                    continue
+                updates.append({"range": a1(pos[name] + 1, r),
+                                "values": [[v]]})
         else:
             # シートにあってこの日の予測に無い行（過去分）。
             # 予測時株価は行から読む。コードは5桁に直す
@@ -381,12 +460,18 @@ def main(argv=None) -> int:
 
     if args.dry_run:
         # 通信しないので、見出しは初期構成を仮定して整合だけ見る
-        header = OWNED_COLS + TRACK_COLS + USER_COLS
+        header = OWNED_COLS + MODEL_COLS + [AGREE_COL] + TRACK_COLS + USER_COLS
         print(f"[dry-run] 列 {len(header)}個: {' / '.join(header)}")
         unknown = sorted({k for x in rows for k in x
                           if not k.startswith('_') and k not in header})
         if unknown:
             raise SystemExit(f"見出しに無い項目を書こうとしています: {unknown}")
+        mc = [c for c in MODEL_COLS + [AGREE_COL]]
+        print(f"[dry-run] モデル別: {' / '.join(mc)}")
+        for x in rows[:5]:
+            print("  " + " ".join(
+                f"{c}={x.get(c) if x.get(c) is not None else '—'}"
+                for c in [ "予測日", "コード"] + mc))
         for x in rows[:3]:
             tv = track_values(x["_jqCode"], x.get("予測時株価"), x["予測日"],
                               closes, as_of)

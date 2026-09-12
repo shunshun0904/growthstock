@@ -36,6 +36,9 @@ jobs:
           python3 tests/test_dataset.py
           python3 tests/test_model.py
           python3 tests/test_data_store.py
+          # 台帳（スプレッドシート）は利用者の手入力と同居する。
+          # 列が増えたときに既存セルがずれないことを回帰で押さえる
+          python3 tests/test_sheets.py
 
       - name: ビルド
         run: npm run build

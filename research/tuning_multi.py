@@ -54,9 +54,16 @@ PARAMS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 #: Optuna の試行を保存する場所。
 #:
 #: これが無いと、コンテナが再起動したとき（この環境では実際に2回起きた）
-#: 試行が全部消える。MLP は50試行×5分割で約2時間かかるので、保存なしでは
-#: 現実的に完走できない。load_if_exists=True で再実行すると、
-#: 完了済みの試行を引き継いで残りだけを回す。
+#: 試行が全部消える。実測の探索時間（50試行×5分割）は
+#: xgb 21分 / logit 51分 / cat 7分 / mlp 7分 で、合計86分。
+#: 途中で落ちたときに全部やり直すのは重いので、完了済みの試行を
+#: 引き継いで残りだけを回す。
+#:
+#: 引き継ぎは「同じ訓練データに対するやり直し」だけに効かせる。
+#: 週次で新しい営業日が積まれると母集団が変わり、先週の試行は別のデータで
+#: 測った値になる。それを同じ study に混ぜると、best_value が
+#: 「先週のデータで高かった試行」に決まってしまう。だから study 名に
+#: 訓練データの最終日を入れる（下の tune を参照）。
 #:
 #: research/_data/ の下に置く（gitignore 済み）。探索結果そのものは
 #: multi_params.json に出すので、この DB はやり直しのための作業ファイル。
@@ -352,15 +359,23 @@ def tune(algo: str, df: pd.DataFrame, cols: List[str], *, n_trials: int = 50,
         trial.set_user_attr("score_std", float(np.std(prs)))
         return float(np.mean(prs))
 
+    train_to = str(pd.to_datetime(df["Date"]).max().date())
     os.makedirs(os.path.dirname(STUDY_DB), exist_ok=True)
     study = optuna.create_study(
         direction="maximize",
         sampler=optuna.samplers.TPESampler(seed=seed),
         storage=f"sqlite:///{STUDY_DB}",
-        # study 名に n_trials を入れてはいけない。試行数を変えるだけで
-        # 別の study になり、引き継ぎが効かなくなる（実際それで効かなかった）。
-        # 問題を決めるのは algo と分割数だけ
-        study_name=f"{algo}_s{n_splits}",
+        # study 名は「解こうとしている問題」を表すものだけで作る。
+        #
+        # n_trials は入れない。試行数を変えるだけで別の study になり、
+        # 引き継ぎが効かなくなる（実際それで効かなかった）。
+        #
+        # 訓練データの最終日は入れる。週次で営業日が積まれると母集団が
+        # 変わるので、先週の試行は「別のデータで測った値」になる。
+        # 同じ study に混ぜると best_value が先週のデータで決まってしまう。
+        # 日付を入れておけば、週が変われば自動的に新しい study から
+        # 50試行やり直し、同じ週のやり直しでは試行を引き継ぐ
+        study_name=f"{algo}_s{n_splits}_{train_to}",
         load_if_exists=True,
     )
     done = len([t for t in study.trials
@@ -383,7 +398,9 @@ def tune(algo: str, df: pd.DataFrame, cols: List[str], *, n_trials: int = 50,
             "base_rate": round(float(np.mean(
                 [v["label"].mean() for _, v in folds])), 4),
             "train_rows": int(len(df)),
-            "train_to": str(pd.to_datetime(df["Date"]).max().date()),
+            # 次に探索すべきかの判定に使う（research/exp/e15_tune_all.py）。
+            # 訓練データの最終日が動いていれば母集団が変わっている
+            "train_to": train_to,
         },
     }
     if verbose:

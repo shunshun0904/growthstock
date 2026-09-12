@@ -194,6 +194,7 @@ def score_others(cand: pd.DataFrame, cols: List[str],
             scores[algo] = M.predict(model, X)
             info.append({
                 "algo": algo, "name": meta.get("name", algo),
+                "short": M.SHORT.get(algo, algo[:3].upper()),
                 "note": meta.get("note", ""),
                 "trainedAt": meta.get("trainedAt"),
                 "nOof": meta.get("nOof"),
@@ -316,6 +317,7 @@ def main(argv=None) -> int:
         # 順位・帯・SHAP と、画面の LightGBM の棒が必ず一致する
         model_info.insert(0, {
             "algo": M.BASELINE, "name": M.JA.get(M.BASELINE, M.BASELINE),
+            "short": M.SHORT.get(M.BASELINE, "LGB"),
             "note": M.NOTE.get(M.BASELINE, ""),
             "trainedAt": meta["trainedAt"],
             # 旧い meta.json には nOof が無い（追加したのは後）。

@@ -80,6 +80,16 @@ JA = {
     "mlp": "ニューラルネット",
 }
 
+#: 棒グラフ・スプレッドシートの列名に使う短い記号。
+#:
+#: 画面（src/lib/predictions.js）とスプレッドシート（export_sheets.py）で
+#: 同じ記号を使いたいので、ここを正本にして predictions.json に載せる。
+#: JS 側にも同じ表があるが、payload の short を優先して読む
+SHORT = {
+    "lgbm": "LGB", "xgb": "XGB", "cat": "CAT",
+    "logit": "LR", "mlp": "NN", "rf": "RF",
+}
+
 #: それぞれ何を見ているか。画面の説明に使う
 NOTE = {
     "lgbm": "勾配ブースティング（葉単位で成長）。本番の基準モデル",

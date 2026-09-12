@@ -66,7 +66,12 @@ export function pctColor(pct) {
   return bandColor(Math.floor(pct / 10) + 1);
 }
 
-/** モデル別の棒に添える短い記号。日本語名は横に並べると幅が足りない。 */
+/**
+ * モデル別の棒に添える短い記号。日本語名は横に並べると幅が足りない。
+ *
+ * 正本は research/models.py の SHORT で、predictions.json の
+ * models[].short に載ってくる。ここはそれが無い古い予測ファイル用の控え。
+ */
 export const MODEL_SHORT = {
   lgbm: 'LGB', xgb: 'XGB', cat: 'CAT', logit: 'LR', mlp: 'NN', rf: 'RF',
 };
@@ -110,7 +115,8 @@ export function modelRows(candidate, models) {
     algo,
     name: meta.get(algo)?.name || algo,
     note: meta.get(algo)?.note || '',
-    short: MODEL_SHORT[algo] || algo.slice(0, 3).toUpperCase(),
+    short: meta.get(algo)?.short || MODEL_SHORT[algo]
+           || algo.slice(0, 3).toUpperCase(),
     family: MODEL_FAMILY[algo] || 'other',
     pct: per[algo].pctHistorical,
     score: per[algo].score,
