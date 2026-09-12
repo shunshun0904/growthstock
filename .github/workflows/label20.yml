@@ -2,6 +2,8 @@ name: Label 20d EDA
 
 # 目的変数の地平を60営業日から20営業日へ変えたときに何が入れ替わるかを集計し、
 # 入れ替わったケースのチャートを書き出す。**学習はしない。**
+#
+# 2026-09-12 の判断で 20日化は採用しないことにしたため、これは再検討用。
 # 出力は docs/LABEL20_EDA.md と research/viewer/label20_review.html。
 on:
   workflow_dispatch:
@@ -9,15 +11,8 @@ on:
       n_per_bucket:
         description: '入れ替わった群ごとに何件チャートにするか'
         default: '30'
-  # workflow_dispatch はデフォルトブランチにファイルが無いと呼べないため、
-  # 調査用ブランチでは push でも起動できるようにしておく（probe.yml と同じ理由）。
-  push:
-    branches: ['claude/charming-ride-vq8hz4']
-    paths:
-      - 'research/label20.py'
-      - 'research/label20_eval.py'
-      - 'research/viewer/label20_template.html'
-      - '.github/workflows/label20.yml'
+  # 20日化は採用しない判断になったので、push では起動しない。
+  # 再検討するときに手動で回す（research/label20.py のコメント参照）。
 
 permissions:
   contents: write
