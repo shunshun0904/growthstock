@@ -27,6 +27,10 @@ jobs:
       - name: データパイプラインの単体テスト
         run: python3 tests/test_fetcher.py
 
+      # プローブは標準ライブラリのみで動くので、pip install の前に置ける
+      - name: プローブの単体テスト
+        run: python3 tests/test_probe_minute.py
+
       # research/ 配下は pandas / scikit-learn が要る。
       # ここを回していなかったため、特徴量の列がデータセットから
       # 黙って落ちる不具合を実際の学習実行まで検出できなかった。

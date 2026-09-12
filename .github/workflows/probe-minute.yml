@@ -1,0 +1,67 @@
+name: Probe Minute Bars
+
+# 株価分足 /equities/bars/minute が、この契約で実際に何を返すかを実測する。
+# 設計の前提（docs/ENTRY_TIMING_DESIGN.md §5.3）を確かめるためのもの。
+on:
+  workflow_dispatch:
+  # workflow_dispatch はデフォルトブランチにファイルが無いと呼べないため、
+  # 調査用ブランチでは push でも起動できるようにしておく（probe.yml と同じ理由）。
+  # 対象をプローブ関連のファイルだけに絞る。research/** にすると
+  # 無関係な更新のたびに発火し、API 呼び出しを無駄に使う。
+  push:
+    branches: ['claude/charming-ride-vq8hz4']
+    paths:
+      - 'research/probe_minute_bars.py'
+      - '.github/workflows/probe-minute.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # 依存は標準ライブラリのみ（他の probe_*.py と同じ）。pip install は不要。
+      - name: Probe
+        env:
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+        run: python3 research/probe_minute_bars.py
+
+      # 分足が引けない（未契約・プラン外）場合もプローブは終了コード0で終わる。
+      # 「叩いたが権限が無かった」は失敗ではなく測定結果であり、
+      # その事実こそ docs/MINUTE_DATA.md に残したいもの。
+      - name: Summary
+        if: always()
+        run: |
+          if [ -f docs/MINUTE_DATA.md ]; then
+            cat docs/MINUTE_DATA.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "docs/MINUTE_DATA.md が生成されませんでした" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Commit report
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A docs/MINUTE_DATA.md
+          if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
+          git commit -m "chore(research): 分足の取得可否の実測結果を更新"
+          for i in 1 2 3 4; do
+            if git push; then exit 0; fi
+            sleep $((2 ** i)); git pull --rebase
+          done
+          exit 1
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: probe-minute-result
+          path: |
+            research/probe_minute_bars.json
+            docs/MINUTE_DATA.md
+          if-no-files-found: warn
