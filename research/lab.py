@@ -322,6 +322,60 @@ def logit(seed: int = SEED, *, scaler: str = "quantile", **kw) -> Fit:
 
 
 # --------------------------------------------------------------------------- #
+# 回帰（ラベルを使わず実収益を直接当てる）
+# --------------------------------------------------------------------------- #
+
+def lgbm_reg(seed: int = SEED, *, objective: str = "huber", **kw) -> Fit:
+    """
+    実収益を直接の目的変数にする LightGBM。
+
+    分類器は「1.2σ 上昇したか」の二値を当てる。この二値は決算直後に
+    ボラが跳ねるぶんしきい値が上がり、実収益がいちばん良い局面
+    （経過0-5日で+3.91%）を失敗扱いにしていた。回帰なら、その歪みを
+    通さずに実収益そのものを狙える。
+
+    objective は既定で huber。実収益は裾が重く（5%分位 -20%台、
+    95%分位 +40%台）、二乗誤差だと少数の大当たりに引きずられて
+    中央付近の順位付けが崩れる。
+    """
+    import lightgbm as lgb
+
+    p = dict(n_estimators=600, learning_rate=0.05, num_leaves=31,
+             min_child_samples=20, subsample=0.8, subsample_freq=1,
+             colsample_bytree=0.8, reg_lambda=1.0, n_jobs=-1,
+             objective=objective, verbose=-1, random_state=seed, **kw)
+
+    def fit(X: np.ndarray, y: np.ndarray) -> Fitted:
+        m = lgb.LGBMRegressor(**p)
+        m.fit(X, y)
+        return lambda Z: m.predict(Z)
+
+    return fit
+
+
+def ridge_reg(seed: int = SEED, *, alpha: float = 10.0) -> Fit:
+    """
+    実収益を当てる線形回帰。欠損は中央値補完 + 欠損指示子、標準化。
+
+    分類側では標準化が分位変換に勝った（窓SD 1.73 vs 3.34）ので、
+    こちらも標準化にする。
+    """
+    from sklearn.impute import SimpleImputer
+    from sklearn.linear_model import Ridge
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import StandardScaler
+
+    def fit(X: np.ndarray, y: np.ndarray) -> Fitted:
+        m = make_pipeline(
+            SimpleImputer(strategy="median", add_indicator=True),
+            StandardScaler(), Ridge(alpha=alpha, random_state=seed))
+        m.fit(X, y)
+        return lambda Z: m.predict(Z)
+
+    return fit
+
+
+# --------------------------------------------------------------------------- #
 # 実行
 # --------------------------------------------------------------------------- #
 
@@ -335,7 +389,8 @@ class Result:
 
 
 def run(df: pd.DataFrame, fit: Fit, *, cols: Optional[Sequence[str]] = None,
-        name: str = "model", prep=None, quiet: bool = True) -> Result:
+        name: str = "model", prep=None, quiet: bool = True,
+        target: str = "label") -> Result:
     """
     ウォークフォワードで out-of-fold のスコアを作り、指標まで出す。
 
@@ -345,7 +400,9 @@ def run(df: pd.DataFrame, fit: Fit, *, cols: Optional[Sequence[str]] = None,
     """
     cols = list(cols if cols is not None else F.columns("all"))
     d = pd.to_datetime(df["Date"])
-    lab = df["label"].notna()
+    # 目的変数が使える行だけを対象にする。回帰のときは実収益が確定して
+    # いる行、分類のときはラベルが確定している行
+    lab = df[target].notna()
     parts = []
     for f in folds(df):
         tr = df[(d <= f.train_end) & lab]
@@ -357,7 +414,8 @@ def run(df: pd.DataFrame, fit: Fit, *, cols: Optional[Sequence[str]] = None,
             Xte = te[cols].to_numpy(dtype=float)
         else:
             Xtr, Xte = prep(tr, te, cols)
-        ytr = tr["label"].to_numpy(dtype=int)
+        ytr = (tr[target].to_numpy(dtype=int) if target == "label"
+               else tr[target].to_numpy(dtype=float))
         predict = fit(Xtr, ytr)
         keep = ["Code", "Date"] + [c for c in OUT_COLS if c in te.columns]
         part = te[keep].copy()
@@ -379,7 +437,7 @@ SEEDS = (42, 7, 123, 2024, 31337)
 
 def run_multi(df: pd.DataFrame, make_fit: Callable[[int], Fit], *,
               seeds: Sequence[int] = SEEDS, cols: Optional[Sequence[str]] = None,
-              name: str = "model", prep=None) -> Result:
+              name: str = "model", prep=None, target: str = "label") -> Result:
     """
     種を変えて走らせ、スコアを平均する。
 
@@ -398,7 +456,7 @@ def run_multi(df: pd.DataFrame, make_fit: Callable[[int], Fit], *,
     per_seed: List[Result] = []
     for s in seeds:
         per_seed.append(run(df, make_fit(s), cols=cols, name=f"{name}#{s}",
-                            prep=prep))
+                            prep=prep, target=target))
     key = [c for c in (["Code", "Date", "fold"] + list(OUT_COLS))
            if c in per_seed[0].oof.columns]
     acc = per_seed[0].oof[key].copy()
