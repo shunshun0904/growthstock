@@ -359,9 +359,12 @@ input[type='range']::-moz-range-thumb {
   gap: 1px; flex: 1 1 0; min-width: 0; }
 .pred-ms-i em { font-style: normal; font-size: 10px; color: var(--text-dim);
   line-height: 1; }
-/* 棒の器。高さ固定で下揃え。中の b が割合ぶん伸びる */
+/* 棒の器。高さ固定で下揃え。中の b が割合ぶん伸びる。
+   枠線を付けて 0〜100 の目盛りを見えるようにする。器が見えないと
+   共通の基準線が無く、棒の高さを目で比べられない */
 .pred-ms-i i { display: flex; align-items: flex-end; width: 100%; max-width: 22px;
-  height: 18px; background: var(--bg-input); border-radius: 2px; }
+  height: 22px; background: var(--bg-input); border: 1px solid var(--border);
+  border-radius: 2px; box-sizing: border-box; }
 .pred-ms-i i b { display: block; width: 100%; border-radius: 2px; min-height: 2px; }
 .pred-ms-i .k { font-size: 9px; letter-spacing: 0.02em; color: var(--text-faint);
   line-height: 1; }
@@ -419,6 +422,11 @@ input[type='range']::-moz-range-thumb {
 .tbl td:nth-child(3), .tbl th:nth-child(3) { text-align: left; }
 .tbl tr.tot td { border-top: 1px solid var(--border); color: var(--text-dim);
   font-weight: 600; }
+/* モデル一覧は文字列の表。既定の .tbl（数値用の右寄せ）だと見出しだけ
+   右端に寄って中身と揃わない。列ごとに明示する */
+.tbl-lineup th, .tbl-lineup td { text-align: left; }
+.tbl-lineup th:nth-child(n+5), .tbl-lineup td:nth-child(n+5) { text-align: right; }
+.tbl-lineup td:nth-child(4) { white-space: normal; min-width: 22em; }
 .tbl tbody tr:hover { background: var(--bg-raised); }
 
 @media (max-width: 760px) {

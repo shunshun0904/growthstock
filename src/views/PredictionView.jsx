@@ -417,7 +417,7 @@ function ModelLineup({ models }) {
         </span>
       </div>
       <div className="tbl-wrap">
-        <table className="tbl">
+        <table className="tbl tbl-lineup">
           <thead>
             <tr><th>記号</th><th>塊</th><th>モデル</th><th>何を見ているか</th>
               <th>学習日</th><th>OOF件数</th><th>探索PR-AUC</th></tr>
@@ -428,9 +428,7 @@ function ModelLineup({ models }) {
                 <td className="num">{MODEL_SHORT[m.algo] || m.algo}</td>
                 <td className="sub">{FAMILY_JA[MODEL_FAMILY[m.algo]] || DASH}</td>
                 <td>{m.name}</td>
-                <td className="sub" style={{ textAlign: 'left', whiteSpace: 'normal' }}>
-                  {m.note || DASH}
-                </td>
+                <td className="sub">{m.note || DASH}</td>
                 <td className="num">{fmtDate(m.trainedAt)}</td>
                 <td className="num">{fmtInt(m.nOof)}</td>
                 <td className="num">{fmt(m.cv?.mean_pr_auc, 4)}</td>
