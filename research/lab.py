@@ -125,15 +125,24 @@ def _spw(y: np.ndarray) -> float:
 
 
 def lgbm(params: Optional[Dict] = None, *, balance: bool = True,
-         preset: str = "all") -> Fit:
-    """本番と同じ LightGBM。params 未指定なら探索済みのものを使う。"""
+         preset: str = "all", seed: Optional[int] = None) -> Fit:
+    """
+    本番と同じ LightGBM。params 未指定なら探索済みのものを使う。
+
+    seed を渡すと乱数種を上書きする。探索済みパラメータは自前の
+    random_state を持っている（探索時のもの）ので、setdefault では
+    上書きされない。種を振る実験では必ず明示的に渡すこと。
+    """
     import lightgbm as lgb
     import tuning
 
     p = dict(tuning.params_for(preset) if params is None else params)
     p = {k: v for k, v in p.items() if not k.startswith("_")}
     p.setdefault("verbose", -1)
-    p.setdefault("random_state", SEED)
+    if seed is not None:
+        p["random_state"] = seed
+    else:
+        p.setdefault("random_state", SEED)
 
     def fit(X: np.ndarray, y: np.ndarray) -> Fitted:
         kw = dict(p)
@@ -155,6 +164,8 @@ class Result:
     name: str
     oof: pd.DataFrame
     metrics: Dict = field(default_factory=dict)
+    #: run_multi のときだけ、種ごとの結果が入る
+    per_seed: List["Result"] = field(default_factory=list)
 
 
 def run(df: pd.DataFrame, fit: Fit, *, cols: Optional[Sequence[str]] = None,
@@ -193,6 +204,49 @@ def run(df: pd.DataFrame, fit: Fit, *, cols: Optional[Sequence[str]] = None,
         raise SystemExit("out-of-fold を作れません")
     oof = pd.concat(parts, ignore_index=True)
     return Result(name=name, oof=oof, metrics=metrics(oof))
+
+
+#: 種平均に使う乱数種。実験00 で測ったばらつきはこの5種によるもの
+SEEDS = (42, 7, 123, 2024, 31337)
+
+
+def run_multi(df: pd.DataFrame, make_fit: Callable[[int], Fit], *,
+              seeds: Sequence[int] = SEEDS, cols: Optional[Sequence[str]] = None,
+              name: str = "model", prep=None) -> Result:
+    """
+    種を変えて走らせ、スコアを平均する。
+
+    種平均は3つを同時にやる。
+
+      1. 乱数の揺れを均す。実験00 で測ったとおり、単一種だと上位5%収益は
+         レンジ0.81pt も動く。5種平均なら標準誤差が 1/√5 になり、
+         検出できる効果が 0.8pt -> 0.4pt に下がる。
+      2. それ自体がアンサンブル。同じ学習器でも種が違えば誤りの出方が違うので、
+         平均すると分散が落ちる。単一種より良くなるのが普通。
+      3. 種ごとの結果も残すので、この設定自体のばらつきが後から出せる。
+
+    平均は確率の単純平均。同じ学習器・同じ目的関数なのでスケールが揃っており、
+    順位平均にする理由がない（較正の意味も保たれる）。
+    """
+    per_seed: List[Result] = []
+    for s in seeds:
+        per_seed.append(run(df, make_fit(s), cols=cols, name=f"{name}#{s}",
+                            prep=prep))
+    key = ["Code", "Date", "label", "ref_end", "ref_rise", "fold"]
+    acc = per_seed[0].oof[key].copy()
+    acc["score"] = np.mean([r.oof["score"].to_numpy() for r in per_seed], axis=0)
+    return Result(name=name, oof=acc, metrics=metrics(acc), per_seed=per_seed)
+
+
+def spread(res: Result, key: str = "end_5") -> Dict:
+    """種ごとのばらつきを返す（run_multi の結果にだけ意味がある）。"""
+    rs = res.per_seed
+    if not rs:
+        return {}
+    v = np.array([r.metrics[key] for r in rs], dtype=float)
+    return {"mean": float(v.mean()), "sd": float(v.std(ddof=1)),
+            "min": float(v.min()), "max": float(v.max()),
+            "avg_of_ensemble": float(res.metrics[key])}
 
 
 # --------------------------------------------------------------------------- #
