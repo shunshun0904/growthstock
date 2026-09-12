@@ -13,3 +13,4 @@ research/_data/
 research/model/model.txt
 research/model/oof.parquet
 research/_data/lab.parquet
+research/_data/oof/

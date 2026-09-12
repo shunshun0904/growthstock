@@ -298,7 +298,19 @@ def metrics(oof: pd.DataFrame) -> Dict:
     # 運用そのものの指標。毎日「その日の1位」を1つ買ったらどうなるか。
     # 上位k% は日をまたいだ選択（いつ買うか）と日の中の選択（何を買うか）が
     # 混ざっている。こちらは日数を固定するので、銘柄選定の腕だけが出る。
-    best = oof.loc[oof.groupby("Date")["score"].idxmax()]
+    #
+    # 同点は乱数で割る。idxmax は最初の行を返すので、スコアが同点のとき
+    # 行順（=コード順）で決まってしまう。日付定数の特徴量だけのモデルは
+    # その日の全候補が同スコアになるため、これをやると「毎日いちばん小さい
+    # コードを買う」戦略を測ることになり、偶然の偏りが実力に見える。
+    rng = np.random.default_rng(SEED)
+    tb = oof.assign(_tb=rng.random(len(oof)))
+    best = (tb.sort_values(["score", "_tb"])
+              .groupby("Date", sort=False).tail(1))
+    # 同点がどれだけあったかも出す。多ければ pick1 は読めない
+    top_by_day = oof.groupby("Date")["score"].transform("max")
+    out["pick1_tied"] = float((oof["score"] >= top_by_day - 1e-12)
+                              .groupby(oof["Date"]).mean().mean())
     be = pd.to_numeric(best["ref_end"], errors="coerce")
     out["pick1_end"] = float(be.mean()) * 100
     out["pick1_pos"] = float(best["label"].mean())
@@ -390,7 +402,7 @@ COLS = [("pr_auc", "PR-AUC", "{:.4f}"), ("roc_auc", "ROC-AUC", "{:.4f}"),
         ("auc_in_day", "日付内AUC", "{:.4f}"), ("end_5", "上位5%収益", "{:+.2f}%"),
         ("lift_5", "対母集団", "{:+.2f}pt"),
         ("pick1_end", "毎日1位", "{:+.2f}%"), ("pick1_lift", "対その日平均", "{:+.2f}pt"),
-        ("pick1_win", "1位の勝率", "{:.1%}")]
+        ("pick1_win", "1位の勝率", "{:.1%}"), ("pick1_tied", "同点率", "{:.1%}")]
 
 
 def table(results: Dict[str, Result]) -> str:
