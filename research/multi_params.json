@@ -1,0 +1,33 @@
+{
+  "lgbm": {
+    "_cv": {
+      "algo": "lgbm",
+      "base_rate": 0.187,
+      "fold_scores": [
+        0.3474,
+        0.4558,
+        0.3844,
+        0.4202,
+        0.4066
+      ],
+      "mean_pr_auc": 0.4029,
+      "mean_roc_auc": 0.7186,
+      "n_estimators": 200,
+      "n_splits": 5,
+      "n_trials": 50,
+      "scheme": "year_cap_date",
+      "std": 0.0361,
+      "train_rows": 17449,
+      "train_to": "2025-03-21"
+    },
+    "params": {
+      "colsample_bytree": 0.8140081021157072,
+      "learning_rate": 0.045375810225213864,
+      "min_child_samples": 70,
+      "num_leaves": 114,
+      "reg_alpha": 0.0006123118838168495,
+      "reg_lambda": 1.6541557698992595e-07,
+      "subsample": 0.9018294782610089
+    }
+  }
+}
