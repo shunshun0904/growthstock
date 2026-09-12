@@ -51,10 +51,38 @@ import tuning
 PARAMS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                            "multi_params.json")
 
+#: Optuna の試行を保存する場所。
+#:
+#: これが無いと、コンテナが再起動したとき（この環境では実際に2回起きた）
+#: 試行が全部消える。MLP は50試行×5分割で約2時間かかるので、保存なしでは
+#: 現実的に完走できない。load_if_exists=True で再実行すると、
+#: 完了済みの試行を引き継いで残りだけを回す。
+#:
+#: research/_data/ の下に置く（gitignore 済み）。探索結果そのものは
+#: multi_params.json に出すので、この DB はやり直しのための作業ファイル。
+STUDY_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "_data", "optuna_multi.db")
+
+#: one-hot すべき列。整数コードだが順序に意味がない。
+#:
+#: 木は閾値分割なので生の整数でも致命的ではない（並びは最適でないが
+#: 分割の組み合わせで表現できる）。線形と MLP は値の大小をそのまま
+#: 重みに掛けるので、s33_code=5250 を 1050 の5倍として扱ってしまう。
+#:
+#: 実測: logit を最初に走らせたときこれを見落としていた。
+#:       「唯一 t>=2 を超えた」という結果は不利な条件下のもの。
+CATEGORICAL = ("s33_code", "s17_code", "mkt_code", "scalecat_code")
+
+#: 整数列だが順序に意味があるので one-hot にしない
+#:   cap_band        時価総額帯 0〜4。大小に意味がある
+#:   *_up_streak     連続改善回数 0〜3。多いほど良い
+#:   has_dividend 等 二値なのでそのまま
+ORDINAL_KEEP = ("cap_band",)
+
 #: 木の本数。lgbm の探索と同じ値に固定する
 N_ESTIMATORS = tuning.SEARCH_N_ESTIMATORS      # 200
 SEED = 0
-ALGOS = ("lgbm", "xgb", "cat", "rf", "logit")
+ALGOS = ("lgbm", "xgb", "cat", "logit", "mlp")
 
 
 # --------------------------------------------------------------------------- #
@@ -125,9 +153,33 @@ def _space_logit(trial) -> Dict:
     }
 
 
+def _space_mlp(trial) -> Dict:
+    """
+    多層パーセプトロン。
+
+    木とも線形とも関数クラスが違う。木は特徴量空間を階段状に切るが、
+    MLP は滑らかな交互作用を表現する。同じデータでも外す銘柄が変わる
+    はずで、それが「並べて見る」価値になる。単体性能ではなく
+    誤りの出方の違いを狙って入れる。
+
+    層は浅く小さく取る。実効標本数が数十しかない問題（1,949日あるが
+    ラベルが60営業日先を見るので隣接日が強く相関する）で大きな網を
+    張ると、局面を覚えるだけになる。
+    """
+    n1 = trial.suggest_categorical("h1", [16, 32, 64, 128])
+    two = trial.suggest_categorical("two_layers", [False, True])
+    return {
+        "hidden_layer_sizes": (n1, max(8, n1 // 2)) if two else (n1,),
+        "alpha": trial.suggest_float("alpha", 1e-5, 10.0, log=True),
+        "learning_rate_init": trial.suggest_float("learning_rate_init",
+                                                  1e-4, 1e-2, log=True),
+        "batch_size": trial.suggest_categorical("batch_size", [128, 256, 512]),
+    }
+
+
 SPACES: Dict[str, Callable] = {
     "lgbm": _space_lgbm, "xgb": _space_xgb, "cat": _space_cat,
-    "rf": _space_rf, "logit": _space_logit,
+    "rf": _space_rf, "logit": _space_logit, "mlp": _space_mlp,
 }
 
 
@@ -135,8 +187,46 @@ SPACES: Dict[str, Callable] = {
 # アルゴリズムごとの学習
 # --------------------------------------------------------------------------- #
 
-def build(algo: str, params: Dict, y: np.ndarray):
-    """パラメータから学習器を組む。不均衡の補正も algo ごとに違う。"""
+def preprocess(cols: List[str]):
+    """
+    線形・MLP 用の前処理。木には不要（閾値分割なので単調変換に不変）。
+
+    カテゴリ列は one-hot。整数コードのまま線形モデルに渡すと
+    s33_code=5250 を 1050 の5倍として重みに掛けてしまう。
+    未知のカテゴリは handle_unknown="ignore" で全ゼロにする
+    （検証期間に訓練期間で見なかった業種が出ても落ちない）。
+
+    数値列は中央値補完 + 欠損指示子 + 標準化。補完も標準化も
+    ColumnTransformer の中なので fold ごとに訓練側だけから決まる。
+    標準化を使うのは、分位変換が窓ごとの安定性を損なうと実測で
+    分かっているため（窓SD 1.73 vs 3.34）。
+    """
+    from sklearn.compose import ColumnTransformer
+    from sklearn.impute import SimpleImputer
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import OneHotEncoder, StandardScaler
+
+    cat = [i for i, c in enumerate(cols) if c in CATEGORICAL]
+    num = [i for i, c in enumerate(cols) if c not in CATEGORICAL]
+    return ColumnTransformer([
+        ("cat", make_pipeline(
+            SimpleImputer(strategy="most_frequent"),
+            OneHotEncoder(handle_unknown="ignore", sparse_output=False)), cat),
+        ("num", make_pipeline(
+            SimpleImputer(strategy="median", add_indicator=True),
+            StandardScaler()), num),
+    ])
+
+
+def build(algo: str, params: Dict, y: np.ndarray,
+          cols: Optional[List[str]] = None):
+    """
+    パラメータから学習器を組む。探索と評価で同じものを使うため、
+    モデルの定義はここ1箇所に置く。
+
+    cols は線形・MLP の one-hot に要る（どの列がカテゴリかを知るため）。
+    木には不要。
+    """
     spw = tuning.scale_pos_weight(y)
     p = dict(params)
 
@@ -172,17 +262,29 @@ def build(algo: str, params: Dict, y: np.ndarray):
                                    random_state=SEED, **p))
 
     if algo == "logit":
-        from sklearn.impute import SimpleImputer
         from sklearn.linear_model import LogisticRegression
         from sklearn.pipeline import make_pipeline
-        from sklearn.preprocessing import StandardScaler
         # l1 は liblinear/saga のみ。saga は収束が遅いので liblinear にする
         solver = "liblinear" if p.get("penalty") == "l1" else "lbfgs"
         return make_pipeline(
-            SimpleImputer(strategy="median", add_indicator=True),
-            StandardScaler(),
+            preprocess(cols or []),
             LogisticRegression(max_iter=3000, class_weight="balanced",
                                random_state=SEED, solver=solver, **p))
+
+    if algo == "mlp":
+        from sklearn.neural_network import MLPClassifier
+        from sklearn.pipeline import make_pipeline
+        # 不均衡の補正: MLP は class_weight を持たないので、
+        # 代わりに early_stopping で過学習を抑えつつ学習率を探索に任せる。
+        # 重み付けが要るなら sample_weight を渡す形になるが、
+        # Pipeline 経由では渡しにくいので今回は入れない。
+        # （しきい値運用はスコアの順位だけを使うので、確率の水準が
+        #   多数派に寄っていても順位が保たれれば運用には影響しない）
+        return make_pipeline(
+            preprocess(cols or []),
+            MLPClassifier(max_iter=200, early_stopping=True,
+                          n_iter_no_change=10, validation_fraction=0.15,
+                          random_state=SEED, **p))
 
     raise ValueError(algo)
 
@@ -194,7 +296,7 @@ def fit_eval(algo: str, params: Dict, tr: pd.DataFrame, va: pd.DataFrame,
     ytr = tr["label"].to_numpy(dtype=int)
     Xva = va[cols].to_numpy(dtype=float)
     yva = va["label"].to_numpy(dtype=int)
-    m = build(algo, params, ytr)
+    m = build(algo, params, ytr, cols)
     m.fit(Xtr, ytr)
     prob = m.predict_proba(Xva)[:, 1]
     return (float(average_precision_score(yva, prob)),
@@ -242,9 +344,24 @@ def tune(algo: str, df: pd.DataFrame, cols: List[str], *, n_trials: int = 50,
         trial.set_user_attr("score_std", float(np.std(prs)))
         return float(np.mean(prs))
 
-    study = optuna.create_study(direction="maximize",
-                                sampler=optuna.samplers.TPESampler(seed=seed))
-    study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
+    os.makedirs(os.path.dirname(STUDY_DB), exist_ok=True)
+    study = optuna.create_study(
+        direction="maximize",
+        sampler=optuna.samplers.TPESampler(seed=seed),
+        storage=f"sqlite:///{STUDY_DB}",
+        # study 名に n_trials を入れてはいけない。試行数を変えるだけで
+        # 別の study になり、引き継ぎが効かなくなる（実際それで効かなかった）。
+        # 問題を決めるのは algo と分割数だけ
+        study_name=f"{algo}_s{n_splits}",
+        load_if_exists=True,
+    )
+    done = len([t for t in study.trials
+                if t.state == optuna.trial.TrialState.COMPLETE])
+    if done and verbose:
+        print(f"  [{algo}] 完了済み {done}試行を引き継ぐ（残り {max(0, n_trials-done)}）")
+    remain = max(0, n_trials - done)
+    if remain:
+        study.optimize(objective, n_trials=remain, show_progress_bar=False)
     at = study.best_trial.user_attrs
     out = {
         "params": dict(study.best_params),
