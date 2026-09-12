@@ -65,16 +65,63 @@ TOP_PCTS = (1, 5, 10)
 # データ
 # --------------------------------------------------------------------------- #
 
+#: 運用に合わせた実収益の既定。翌営業日の寄りで買い、h営業日後の
+#: 5営業日平均終値で売る。h=60 は現行ラベルのホライズンに合わせたもの。
+OUTCOME = "ret_o1_60"
+HORIZONS = (20, 40, 60, 120)
+
+
+def realized_returns(bars: pd.DataFrame) -> pd.DataFrame:
+    """
+    実運用に合わせた実収益を作る。
+
+    買い: **翌営業日の寄り**（AdjO[t+1]）
+      ブレイク当日の終値では買えない。候補が判明するのは終値が出た後で、
+      実際の発注は翌日になる。当日終値を基準にすると、低スコアの候補ほど
+      翌朝に大きくギャップアップする（最下位十分位で+1.50%）ぶんを
+      無償のハンデとして与えてしまい、モデルの優位を過小評価する。
+      実測では、寄りに直すと しきい値優位 +0.93pt -> +1.19pt、
+      t値 1.15 -> 1.72 に改善した。
+
+    売り: h営業日後の5営業日平均終値
+      1日だけの値だと、たまたまその日が押し目でも結果が変わる。
+      実際の手仕舞いは裁量なので、複数のホライズンを併記して形を見る。
+
+    株価は分割調整後（AdjO / AdjC）。未調整だと分割をまたいだ行で
+    見かけの大暴落になる。
+    """
+    b = bars[["Date", "Code", "AdjO", "AdjC"]].copy()
+    b["Date"] = pd.to_datetime(b["Date"])
+    b = b.sort_values(["Code", "Date"]).reset_index(drop=True)
+    g = b.groupby("Code", sort=False)
+    b["entry"] = g["AdjO"].shift(-1)
+    ma5 = g["AdjC"].transform(lambda s: s.rolling(5, min_periods=1).mean())
+    out = b[["Code", "Date", "entry"]].copy()
+    for h in HORIZONS:
+        exit_px = ma5.groupby(b["Code"], sort=False).shift(-h)
+        out[f"ret_o1_{h}"] = exit_px / b["entry"] - 1.0
+        out[f"ret_c0_{h}"] = exit_px / b["AdjC"] - 1.0
+    out["entry_gap"] = b["entry"] / b["AdjC"] - 1.0
+    return out.drop(columns=["entry"])
+
+
 def frame(rebuild: bool = False) -> pd.DataFrame:
     """
-    データセットに実収益（ref_end / ref_rise）を付けて返す。
+    データセットに実収益を付けて返す。
 
-    ref_end はラベル定義に一切依存しない物差し。
-    ラベルを変える実験をしても、これだけは同じ数字であり続ける。
+    2種類を持たせる。
+      ref_end / ref_rise  ラベル定義に依存しない従来の物差し
+                          （買い=当日終値、売り=60営業日後の5日平均）
+      ret_o1_* / ret_c0_* 運用に合わせた物差し。ret_o1 は翌日の寄り買い、
+                          ret_c0 は当日終値買い。h は 20/40/60/120 営業日
+
+    ラベルを変える実験をしても、これらは同じ数字であり続ける。
     """
     if not rebuild and os.path.exists(CACHE) \
             and os.path.getmtime(CACHE) >= os.path.getmtime(DATASET):
-        return pd.read_parquet(CACHE)
+        cached = pd.read_parquet(CACHE)
+        if OUTCOME in cached.columns:
+            return cached
 
     import sweep_design as S
 
@@ -86,8 +133,24 @@ def frame(rebuild: bool = False) -> pd.DataFrame:
     bars = pd.concat([pd.read_parquet(p) for p in paths], ignore_index=True)
     ref = S.reference_outcome(S.Panels(bars).get(B.HIGH_WINDOW))
     out = ds.merge(ref, on=["Code", "Date"], how="left")
+    out = out.merge(realized_returns(bars), on=["Code", "Date"], how="left")
     out.to_parquet(CACHE, index=False, compression="zstd")
     return out
+
+
+#: out-of-fold に持ち回す結果の列
+OUT_COLS = (["label", "ref_end", "ref_rise", "entry_gap"]
+            + [f"ret_o1_{h}" for h in HORIZONS]
+            + [f"ret_c0_{h}" for h in HORIZONS])
+
+
+def attach_outcomes(oof: pd.DataFrame, df: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+    """保存済みの out-of-fold に、後から足した実収益の列を埋める。"""
+    need = [c for c in OUT_COLS if c not in oof.columns]
+    if not need:
+        return oof
+    src = frame() if df is None else df
+    return oof.merge(src[["Code", "Date"] + need], on=["Code", "Date"], how="left")
 
 
 @dataclass(frozen=True)
@@ -280,7 +343,8 @@ def run(df: pd.DataFrame, fit: Fit, *, cols: Optional[Sequence[str]] = None,
             Xtr, Xte = prep(tr, te, cols)
         ytr = tr["label"].to_numpy(dtype=int)
         predict = fit(Xtr, ytr)
-        part = te[["Code", "Date", "label", "ref_end", "ref_rise"]].copy()
+        keep = ["Code", "Date"] + [c for c in OUT_COLS if c in te.columns]
+        part = te[keep].copy()
         part["score"] = np.asarray(predict(Xte), dtype=float)
         part["fold"] = f.index
         parts.append(part)
@@ -319,7 +383,8 @@ def run_multi(df: pd.DataFrame, make_fit: Callable[[int], Fit], *,
     for s in seeds:
         per_seed.append(run(df, make_fit(s), cols=cols, name=f"{name}#{s}",
                             prep=prep))
-    key = ["Code", "Date", "label", "ref_end", "ref_rise", "fold"]
+    key = [c for c in (["Code", "Date", "fold"] + list(OUT_COLS))
+           if c in per_seed[0].oof.columns]
     acc = per_seed[0].oof[key].copy()
     acc["score"] = np.mean([r.oof["score"].to_numpy() for r in per_seed], axis=0)
     return Result(name=name, oof=acc, metrics=metrics(acc), per_seed=per_seed)
@@ -365,9 +430,14 @@ def _auc_in_day(oof: pd.DataFrame) -> float:
 THR_PCT = 90
 
 
-def threshold_edge(oof: pd.DataFrame, pct: float = THR_PCT) -> Dict:
+def threshold_edge(oof: pd.DataFrame, pct: float = THR_PCT,
+                   outcome: str = OUTCOME) -> Dict:
     """
     「スコアが過去分布の上位(100-pct)%なら買う」運用を測る。
+
+    outcome は既定で ret_o1_60（翌営業日の寄りで買い、60営業日後の5日平均
+    終値で売る）。当日終値基準の ref_end を使うと、低スコアの候補が翌朝に
+    大きくギャップアップするぶんを無償で与えてしまい優位が過小に出る。
 
     これが運用そのものの指標。日付内の順位は使わない（買うかどうかは
     その日の1位かではなく、スコアの水準で決めるため）。
@@ -392,8 +462,8 @@ def threshold_edge(oof: pd.DataFrame, pct: float = THR_PCT) -> Dict:
         if not len(sel):
             continue
         picks.append(sel)
-        se = pd.to_numeric(sel["ref_end"], errors="coerce").mean()
-        ce = pd.to_numeric(cur["ref_end"], errors="coerce").mean()
+        se = pd.to_numeric(sel[outcome], errors="coerce").mean()
+        ce = pd.to_numeric(cur[outcome], errors="coerce").mean()
         per_fold.append(float(se - ce))
     if not picks:
         return {"thr_n": 0, "thr_lift": float("nan"), "thr_folds_won": 0,
@@ -401,10 +471,10 @@ def threshold_edge(oof: pd.DataFrame, pct: float = THR_PCT) -> Dict:
                 "thr_win": float("nan"), "thr_rate": 0.0,
                 "thr_lift_same_day": float("nan"), "thr_worst": float("nan")}
     sel = pd.concat(picks, ignore_index=True)
-    e = pd.to_numeric(sel["ref_end"], errors="coerce")
-    all_end = pd.to_numeric(uni["ref_end"], errors="coerce").mean()
+    e = pd.to_numeric(sel[outcome], errors="coerce")
+    all_end = pd.to_numeric(uni[outcome], errors="coerce").mean()
     same = uni[uni["Date"].isin(set(pd.Index(sel["Date"]).unique()))]
-    same_end = pd.to_numeric(same["ref_end"], errors="coerce").mean()
+    same_end = pd.to_numeric(same[outcome], errors="coerce").mean()
     return {
         "thr_n": int(len(sel)),
         "thr_rate": float(len(sel) / len(uni)),
@@ -434,7 +504,8 @@ def metrics(oof: pd.DataFrame) -> Dict:
 
     y = oof["label"].to_numpy(dtype=int)
     s = oof["score"].to_numpy(dtype=float)
-    end = pd.to_numeric(oof["ref_end"], errors="coerce")
+    col = OUTCOME if OUTCOME in oof.columns else "ref_end"
+    end = pd.to_numeric(oof[col], errors="coerce")
     out = {
         "n": int(len(oof)),
         "base_rate": float(y.mean()),
@@ -445,7 +516,7 @@ def metrics(oof: pd.DataFrame) -> Dict:
     }
     for k in TOP_PCTS:
         t = oof.nlargest(max(1, int(len(oof) * k / 100)), "score")
-        te = pd.to_numeric(t["ref_end"], errors="coerce")
+        te = pd.to_numeric(t[col], errors="coerce")
         out[f"p_at_{k}"] = float(t["label"].mean())
         out[f"end_{k}"] = float(te.mean()) * 100
         out[f"lift_{k}"] = out[f"end_{k}"] - out["base_end"]
@@ -466,18 +537,18 @@ def metrics(oof: pd.DataFrame) -> Dict:
     top_by_day = oof.groupby("Date")["score"].transform("max")
     out["pick1_tied"] = float((oof["score"] >= top_by_day - 1e-12)
                               .groupby(oof["Date"]).mean().mean())
-    be = pd.to_numeric(best["ref_end"], errors="coerce")
+    be = pd.to_numeric(best[col], errors="coerce")
     out["pick1_end"] = float(be.mean()) * 100
     out["pick1_pos"] = float(best["label"].mean())
     out["pick1_win"] = float((be > 0).mean())
     out["pick1_n"] = int(len(best))
     # 同じ日数だけランダムに1件選んだ場合（＝銘柄選定をしない場合）との差
     out["pick1_lift"] = out["pick1_end"] - float(
-        oof.groupby("Date")["ref_end"].mean().mean()) * 100
+        oof.groupby("Date")[col].mean().mean()) * 100
 
     # 運用の的。しきい値運用の優位と、その再現性
-    if "fold" in oof.columns:
-        out.update(threshold_edge(oof))
+    if "fold" in oof.columns and col in oof.columns:
+        out.update(threshold_edge(oof, outcome=col))
     return out
 
 
