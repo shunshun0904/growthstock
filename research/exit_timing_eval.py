@@ -105,7 +105,7 @@ def evaluate_subsets(panel: pd.DataFrame, ev: pd.DataFrame, fee_pct: float,
                 100.0 * float((ev["score"][m] >= thr).mean()), 1)
         sec["exits"] = X.compare_exits(F[m], entry[m], need[m], fee_pct)
         sec["peak60"] = X.peak_profile(F[m], entry[m], 60, fee_pct)
-        sec["peak120"] = X.peak_profile(F[m], entry[m], 120, fee_pct)
+        sec["peak120"] = X.peak_profile(F[m], entry[m], X.FORWARD_DAYS, fee_pct)
         # 形が期間で変わらないかを見る。変わるなら「一番良い日数」は選べない
         sec["by_period"] = []
         for tag, sel in (("訓練期間", m & ~is_test), ("テスト期間", m & is_test)):
@@ -173,7 +173,7 @@ def write_md(rep: Dict, path: str) -> None:
     A(f"- 実行日時: {rep['ranAt']}")
     A(f"- 日次バー: {rep['bars_rows']:,}行")
     A(f"- 手数料: 往復 {rep['fee_pct']}%")
-    A(f"- 先読み: {X.FORWARD_DAYS}営業日（約6ヶ月）")
+    A(f"- 先読み: {X.FORWARD_DAYS}営業日（約1年）")
     A(f"- 母集団: 先{X.FORWARD_DAYS}営業日ぶんの値動きを持つイベントに揃えた"
       f"（{rep['dropped_recent']:,}件が期間不足で外れた）")
     A("")
@@ -268,7 +268,7 @@ def write_md(rep: Dict, path: str) -> None:
         hist = pk.get("day_hist") or []
         if not hist:
             continue
-        A(f"### {sec['name']}（120営業日以内）")
+        A(f"### {sec['name']}（{X.FORWARD_DAYS}営業日以内）")
         A("")
         A(_t(["期間（営業日）", "件数", "割合"],
              [[f"{b['from']}〜{b['to']}", f"{b['n']:,}", f"{b['share']:.1f}%"]
@@ -285,6 +285,10 @@ def write_md(rep: Dict, path: str) -> None:
     A("- 分割調整後の終値で計算している。配当は含まない")
     A("- 一番良い保有日数をこのデータから選ぶこと自体が選択である。"
       "採用するなら訓練期間だけで決めて、テスト期間で確かめること")
+    A(f"- **地合いの上昇分が入っている。**{X.FORWARD_DAYS}営業日持てば、"
+      "その間の市場全体の上昇もそのまま乗る。"
+      "訓練期間とテスト期間で数字が大きく違うのはそのため。"
+      "銘柄選定の効き目だけを見たいなら、同期間の指数リターンを引く必要がある（未実施）")
     A("")
 
     with open(path, "w", encoding="utf-8") as fh:

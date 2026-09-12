@@ -109,8 +109,9 @@ def attach_scores(ev: pd.DataFrame, model_dir: str) -> Tuple[pd.DataFrame, Dict]
     ev["Date"] = pd.to_datetime(ev["Date"])
     ev["Code"] = ev["Code"].astype(str)
     oof["Code"] = oof["Code"].astype(str)
-    merged = ev.merge(oof[["Code", "Date", "score", "ref_end"]],
-                      on=["Code", "Date"], how="left")
+    cols = [c for c in ("Code", "Date", "score", "ref_end", "label")
+            if c in oof.columns]
+    merged = ev.merge(oof[cols], on=["Code", "Date"], how="left")
     n_hit = int(merged["score"].notna().sum())
     info.update({"available": n_hit > 0, "oof_rows": len(oof), "matched": n_hit})
     print(f"[score] out-of-fold {len(oof):,}件のうち {n_hit:,}件が突き合った")

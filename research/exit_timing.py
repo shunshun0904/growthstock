@@ -36,12 +36,16 @@ from typing import Dict, List, Optional, Sequence
 import numpy as np
 import pandas as pd
 
-#: 先読みする営業日数。既存ラベルの地平（60）の倍まで見る。
-#: 「3ヶ月より長く持つほうが良い」可能性を、見ないまま捨てないため。
-FORWARD_DAYS = 120
+#: 先読みする営業日数。既存ラベルの地平（60）の4倍。
+#:
+#: 最初は120で測ったが、最大値の31%が111〜120日目に付いていた。
+#: まだ上がり続けている途中で窓を閉じており、「どこで頭打ちになるか」を
+#: measurable にしていなかった。山を跨ぐところまで延ばす。
+#: 延ばした分だけ直近のイベントが母集団から外れるのは承知のうえ。
+FORWARD_DAYS = 250
 
 #: 固定日数で売る場合に並べる保有日数
-HORIZONS = (1, 3, 5, 10, 15, 20, 30, 40, 50, 60, 80, 100, 120)
+HORIZONS = (1, 3, 5, 10, 15, 20, 30, 40, 50, 60, 80, 100, 120, 150, 200, 250)
 
 #: 1ヶ月換算に使う営業日数
 MONTH_DAYS = 20
@@ -164,7 +168,8 @@ def peak_profile(F: np.ndarray, entry: np.ndarray, upto: int,
         out["day_q1"] = float(np.percentile(d, 25))
         out["day_q3"] = float(np.percentile(d, 75))
         # 10営業日ごとの山。どのあたりに寄っているかを形で見る
-        edges = np.arange(0, upto + 10, 10)
+        step = 10 if upto <= 120 else 25
+        edges = np.arange(0, upto + step, step)
         cnt, _ = np.histogram(d, bins=edges)
         out["day_hist"] = [{"from": int(edges[i]) + 1, "to": int(edges[i + 1]),
                             "n": int(cnt[i]),
