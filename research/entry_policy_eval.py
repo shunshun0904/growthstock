@@ -193,6 +193,13 @@ def evaluate(ev: pd.DataFrame, policies: Sequence[EP.Policy], costs: EP.Costs,
             }
     out["selected"] = sel
     out["flip"] = EP.flip_check(te, policies, costs)
+    # 「寄り成行で買ったら実際どうなるか」の散らばり。
+    # 平均だけ見て良し悪しを決めると、負ける年があることが見えない。
+    base = policies[0]   # compare() の基準と同じ（寄り成行）
+    out["baseline_spread"] = {
+        tag: (EP.summarize(sub, base, costs, False) if len(sub) else None)
+        for tag, sub in (("all", ev), ("train", tr), ("test", te))
+    }
     return out
 
 
@@ -375,6 +382,26 @@ def write_md(report: Dict, path: str) -> None:
       "「約定した分の平均」が基準より良くても1件あたりでは負けていないかを見る。")
     A("")
 
+    A("## 寄り成行で買ったときのばらつき")
+    A("")
+    A("平均だけ見ても、実際にどれくらい振れるかが分からない。"
+      "**基準（翌日寄り成行・60営業日保有）の1件あたりリターンの散らばり**を出す。")
+    A("")
+    body = []
+    for name, sec in report["subsets"].items():
+        for tag, ja in (("all", "全期間"), ("test", "テスト期間")):
+            b = (sec.get("baseline_spread") or {}).get(tag)
+            if not b:
+                continue
+            body.append([name, ja, f"{b['n']:,}",
+                         f"{b['mean']:+.2f}", f"{b['median']:+.2f}",
+                         f"{b['win_rate_if_filled']:.1f}%", f"{b['p05']:+.2f}"])
+    A("\n".join(_table(
+        ["部分集合", "期間", "件数", "平均", "中央値", "勝率", "下側5%"], body)))
+    A("")
+    A("平均が中央値より大きいのは、大きく伸びる少数が平均を押し上げているため。"
+      "**1件ずつの結果は大きく振れる。**下側5%は「20回に1回はこれ以下になる」水準。")
+    A("")
     A("## 母集団の作られ方")
     A("")
     A("\n".join(_table(["条件", "残った件数"],
