@@ -41,8 +41,10 @@ defaults:
 jobs:
   retrain:
     runs-on: ubuntu-latest
-    # 探索まで回すと長い。探索なしなら20分ほど
-    timeout-minutes: 180
+    # 探索まで回すと長い。探索なしなら20分ほど。
+    # 5モデルの探索を足したぶん上限を広げた（初回は MLP だけで約2時間）。
+    # 実際の打ち切りはステップ単位で掛けてあるので、ここは最後の砦
+    timeout-minutes: 330
     steps:
       # 公開ブランチ（＝既定ブランチ）に対して回す。
       # 成果物をここに積まないと GitHub Pages の画面が更新されない。
@@ -62,6 +64,10 @@ jobs:
         run: |
           mkdir -p research/_data
           gh release download data-raw --dir research/_data --clobber
+          # Optuna の試行 DB が降りてきたら、前週までの試行を引き継げる
+          ls -la research/_data/optuna_multi.db 2>/dev/null \
+            && echo "探索の試行 DB あり（引き継ぐ）" \
+            || echo "探索の試行 DB なし（ゼロから）"
 
       # 日曜は Update Data Store（平日21:30）が走らない。
       # 金曜の取り込みが失敗していると、気づかないまま先週のデータで
@@ -111,6 +117,42 @@ jobs:
       - name: Train production model
         run: python3 research/train_production.py 2>&1 | tee retrain.log
 
+      # 画面に並べる5モデルの探索。lgbm と完全に同じ条件
+      # （年×時価総額帯で層別・日付単位で分割・5分割 / PR-AUC / 50試行 /
+      #   木200本固定 / ホールドアウトより手前だけ）。
+      #
+      # Optuna の試行は research/_data/optuna_multi.db に溜まる。これは
+      # data-raw Release から降ってくるので、前週までの試行を引き継いで
+      # 足りないぶんだけ回す。毎週ゼロから50試行やり直さない。
+      - name: Tune extra models (opt-in)
+        if: github.event_name == 'schedule' || inputs.tune == 'yes'
+        # 打ち切られても Optuna の試行は DB に残り、来週その続きから回る。
+        # 実測: lgbm 36分 / xgb 13分 / cat 28分 / logit 3分 / mlp 126分。
+        # 初回だけ合計が長いので、ここで切って後段（学習・保存）を守る
+        timeout-minutes: 75
+        continue-on-error: true
+        run: |
+          python3 research/exp/e15_tune_all.py 2>&1 | tail -25
+
+      # 5モデルを学習して research/model/models/<algo>/ に置く。
+      # train_production.py（基準モデル）とは別のスクリプトなので、
+      # ここが丸ごと失敗しても日次予測は動き続ける。
+      - name: Train extra models
+        # 5モデル × 10窓の out-of-fold ＋ 全期間モデル。実測15分ほど
+        timeout-minutes: 60
+        continue-on-error: true
+        run: python3 research/train_multi.py 2>&1 | tee -a retrain.log
+
+      # 1モデルの失敗で他を止めない作りにしたぶん、静かに欠けたまま
+      # 運用が続くおそれがある。どれがいつ学習されたのかを毎週要約に出す
+      - name: Model lineup
+        if: always()
+        continue-on-error: true
+        run: |
+          { echo '### 画面に並ぶモデル'
+            python3 research/model_lineup.py --markdown || true
+          } >> "$GITHUB_STEP_SUMMARY"
+
       # モデル本体は Release に置く。2.7MB のバイナリを毎週コミットすると
       # 差分圧縮が効かず、年138MB リポジトリが膨らむ。
       # meta.json（9KB）は git に残す。過去のモデルが「どういうものだったか」
@@ -121,6 +163,21 @@ jobs:
         run: |
           gh release upload data-raw research/model/model.txt \
             research/model/oof.parquet --clobber
+          # 5モデルぶん。ファイル名が algo ごとに衝突するので、
+          # Release のアセット名に algo を入れて上げ直す
+          shopt -s nullglob
+          for d in research/model/models/*/; do
+            a=$(basename "$d")
+            for f in model.joblib oof.parquet; do
+              [ -f "$d$f" ] || continue
+              cp "$d$f" "/tmp/${a}_${f}"
+              gh release upload data-raw "/tmp/${a}_${f}" --clobber
+            done
+          done
+          # Optuna の試行 DB も上げる。来週これを降ろして試行を引き継ぐ
+          if [ -f research/_data/optuna_multi.db ]; then
+            gh release upload data-raw research/_data/optuna_multi.db --clobber
+          fi
 
       - name: Commit model metadata
         run: |
@@ -134,8 +191,11 @@ jobs:
             echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           # 以前コミットしていたバイナリを追跡から外す（1回だけ効く）
           git rm --cached -q --ignore-unmatch research/model/model.txt \
-            research/model/oof.parquet
-          git add -A research/model/meta.json research/lgbm_params.json
+            research/model/oof.parquet \
+            'research/model/models/*/model.joblib' \
+            'research/model/models/*/oof.parquet' 
+          git add -A research/model/meta.json research/lgbm_params.json \
+            research/multi_params.json research/model/models/*/meta.json
           if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
           git commit -m "chore(model): 週次の再学習 ($(date -u '+%Y-%m-%d'))"
           for i in 1 2 3 4; do

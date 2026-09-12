@@ -14,3 +14,5 @@ research/model/model.txt
 research/model/oof.parquet
 research/_data/lab.parquet
 research/_data/oof/
+research/model/models/*/model.joblib
+research/model/models/*/oof.parquet
