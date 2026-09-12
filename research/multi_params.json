@@ -60,6 +60,32 @@
       "subsample": 0.9018294782610089
     }
   },
+  "logit": {
+    "_cv": {
+      "algo": "logit",
+      "base_rate": 0.187,
+      "fold_scores": [
+        0.2554,
+        0.279,
+        0.2976,
+        0.3165,
+        0.3001
+      ],
+      "mean_pr_auc": 0.2897,
+      "mean_roc_auc": 0.6593,
+      "n_estimators": 200,
+      "n_splits": 5,
+      "n_trials": 50,
+      "scheme": "year_cap_date",
+      "std": 0.0209,
+      "train_rows": 17449,
+      "train_to": "2025-03-21"
+    },
+    "params": {
+      "C": 0.06891303571722805,
+      "penalty": "l1"
+    }
+  },
   "xgb": {
     "_cv": {
       "algo": "xgb",
