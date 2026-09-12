@@ -415,6 +415,17 @@ def threshold_edge(oof: pd.DataFrame, pct: float = THR_PCT) -> Dict:
         "thr_folds_won": int(sum(1 for x in per_fold if x > 0)),
         "thr_folds": int(len(per_fold)),
         "thr_worst": float(min(per_fold)) * 100,
+        # 「勝った窓」は0〜9の整数しか取らず、種を変えるだけで±1動く
+        # （実測レンジ1.0）。再現性の指標としては粗すぎるので、窓ごとの
+        # 優位を連続量として扱い、平均・標準偏差・t値も出す。
+        # t値は「窓をまたいで安定して正か」を1つの数字で表す。
+        "thr_fold_mean": float(np.mean(per_fold)) * 100,
+        "thr_fold_sd": float(np.std(per_fold, ddof=1)) * 100 if len(per_fold) > 1
+        else float("nan"),
+        "thr_t": (float(np.mean(per_fold) / (np.std(per_fold, ddof=1)
+                                             / np.sqrt(len(per_fold))))
+                  if len(per_fold) > 1 and np.std(per_fold, ddof=1) > 0
+                  else float("nan")),
     }
 
 
@@ -551,6 +562,8 @@ def compare(a: Result, b: Result, *, k: int = 5, seed: int = SEED) -> Dict:
 #: （metrics には残してあるので必要なら見られる）。
 COLS = [("thr_lift", "しきい値優位", "{:+.2f}pt"),
         ("thr_lift_same_day", "対同日候補", "{:+.2f}pt"),
+        ("thr_fold_mean", "窓平均", "{:+.2f}pt"), ("thr_fold_sd", "窓SD", "{:.2f}"),
+        ("thr_t", "t値", "{:+.2f}"),
         ("thr_folds_won", "勝った窓", "{:.0f}"), ("thr_worst", "最悪の窓", "{:+.2f}pt"),
         ("thr_end", "実収益", "{:+.2f}%"), ("thr_win", "勝率", "{:.1%}"),
         ("thr_n", "取引数", "{:,.0f}"),
