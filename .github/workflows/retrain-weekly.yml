@@ -42,7 +42,15 @@ jobs:
   retrain:
     runs-on: ubuntu-latest
     # 探索まで回すと長い。探索なしなら20分ほど。
-    # 5モデルの探索を足したぶん上限を広げた（初回は MLP だけで約2時間）。
+    #
+    # 毎週探索する構成での見積り（実測ベース）
+    #   前処理（取得・データセット作成）      約20分
+    #   本番モデルの探索（3プリセット×50試行）約36分
+    #   本番モデルの学習                      約3分
+    #   追加4モデルの探索                     約86分
+    #   追加4モデルの学習                     約3分
+    #   合計                                  約150分
+    #
     # 実際の打ち切りはステップ単位で掛けてあるので、ここは最後の砦
     timeout-minutes: 330
     steps:
@@ -117,19 +125,25 @@ jobs:
       - name: Train production model
         run: python3 research/train_production.py 2>&1 | tee retrain.log
 
-      # 画面に並べる5モデルの探索。lgbm と完全に同じ条件
-      # （年×時価総額帯で層別・日付単位で分割・5分割 / PR-AUC / 50試行 /
-      #   木200本固定 / ホールドアウトより手前だけ）。
+      # 画面に並べる追加4モデル（xgb / cat / logit / mlp）の探索。
+      # 基準モデルと完全に同じ条件（年×時価総額帯で層別・日付単位で分割・
+      # 5分割 / PR-AUC / 50試行 / 木200本固定 / ホールドアウトより手前だけ）。
       #
-      # Optuna の試行は research/_data/optuna_multi.db に溜まる。これは
-      # data-raw Release から降ってくるので、前週までの試行を引き継いで
-      # 足りないぶんだけ回す。毎週ゼロから50試行やり直さない。
+      # 毎週やり直す。営業日が積まれれば母集団が変わるため。判定は
+      # multi_params.json の _cv.train_to（訓練データの最終日）が動いたか。
+      #
+      # Optuna の study 名には訓練最終日が入っているので、週が変われば
+      # 自動的に新しい study になる。先週の試行（別のデータで測った値）が
+      # 混ざって best_value を決めてしまうことはない。
+      # DB（research/_data/optuna_multi.db）を data-raw Release 経由で
+      # 持ち回すのは、同じ週にやり直したときの保険（下のタイムアウトや
+      # コンテナ再起動で落ちた場合、完了済みの試行から再開できる）。
       - name: Tune extra models (opt-in)
         if: github.event_name == 'schedule' || inputs.tune == 'yes'
-        # 打ち切られても Optuna の試行は DB に残り、来週その続きから回る。
-        # 実測: lgbm 36分 / xgb 13分 / cat 28分 / logit 3分 / mlp 126分。
-        # 初回だけ合計が長いので、ここで切って後段（学習・保存）を守る
-        timeout-minutes: 75
+        # 実測（Optuna の試行記録）: xgb 21分 / logit 51分 / cat 7分 /
+        # mlp 7分 = 合計86分。データが増えるぶんの余裕を見て150分。
+        # 打ち切られても完了済みの試行は DB に残り、同じ週の再実行で続く
+        timeout-minutes: 150
         continue-on-error: true
         run: |
           python3 research/exp/e15_tune_all.py 2>&1 | tail -25
@@ -138,8 +152,8 @@ jobs:
       # train_production.py（基準モデル）とは別のスクリプトなので、
       # ここが丸ごと失敗しても日次予測は動き続ける。
       - name: Train extra models
-        # 5モデル × 10窓の out-of-fold ＋ 全期間モデル。実測15分ほど
-        timeout-minutes: 60
+        # 4モデル × 10窓の out-of-fold ＋ 全期間モデル。実測143秒
+        timeout-minutes: 30
         continue-on-error: true
         run: python3 research/train_multi.py 2>&1 | tee -a retrain.log
 
