@@ -12,3 +12,4 @@ research/_data/
 # meta.json は小さいので git に残す（過去のモデルの素性を追うため）。
 research/model/model.txt
 research/model/oof.parquet
+research/_data/lab.parquet
