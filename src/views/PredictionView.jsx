@@ -249,14 +249,15 @@ function Detail({ c, models, onSend, sent }) {
                 <b className="num">{c.agree90}/{c.nModels}</b>
               </span>
               <span>
-                <span className="lab">平均</span>
-                <b className="num">{fmt(c.pctMean, 1)}</b>
+                <span className="lab">順位・帯の基準</span>
+                <b>LightGBM</b>
               </span>
             </div>
             <p className="sub" style={{ margin: '8px 0 0' }}>
               5つが揃って高い銘柄は、どの見方をしても上位という意味です。
               1つだけ高い銘柄は、そのモデルの癖を見ている可能性があります。
-              平均は並べ方の都合で出しているだけで、統合された予測値ではありません。
+              平均は出していません。混ぜた数字を1つ出すと、呼び名が何であれ
+              アンサンブルになるためです。
             </p>
           </div>
         )}

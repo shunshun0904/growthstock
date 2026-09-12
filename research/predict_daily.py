@@ -320,17 +320,19 @@ def main(argv=None) -> int:
             x["byModel"] = per
             pcts = [d["pctHistorical"] for d in per.values()
                     if d["pctHistorical"] is not None]
-            # 何個のモデルが「上位10%」と見ているか。一致度の目安
+            # 何個のモデルが「上位10%」と見ているか。独立した判定の数え上げで、
+            # スコアを混ぜた値ではない。
+            #
+            # ここで平均パーセンタイルを作らないのは意図的。平均を出すと、
+            # 呼び名が「表示順」でも中身は5モデルのアンサンブルになる。
+            # 並べて人間が決める運用なので、混ぜた数字は画面に出さない
             x["agree90"] = int(sum(1 for p in pcts if p >= 90))
             x["nModels"] = len(pcts)
-            # 表示順に使う平均。予測値ではない（アンサンブルではない）
-            x["pctMean"] = round(float(np.mean(pcts)), 1) if pcts else None
 
-    # 表示順。モデル別の平均パーセンタイルがあればそれで、無ければ基準モデル。
-    # これは並べ方の都合で、統合された予測値という意味ではない
-    def order_key(x):
-        return x["pctMean"] if x.get("pctMean") is not None else x["score"] * 100
-    rows.sort(key=lambda x: (x["date"], order_key(x)), reverse=True)
+    # 表示順・順位はどちらも基準モデルのスコア（上の rank_in_day と同じ）。
+    # 帯・較正・追跡ファイルも基準モデル基準なので、ここだけ別の物差しで
+    # 並べると、同じ行の中で順位と帯が食い違う
+    rows.sort(key=lambda x: (x["date"], x["score"]), reverse=True)
 
     payload = {
         "generatedAt": pd.Timestamp.utcnow().isoformat(),
@@ -361,9 +363,9 @@ def main(argv=None) -> int:
             "モデル別の値は混ぜていない（アンサンブルではない）。"
             "学習器が違えばスコアのスケールも意味も違うので、"
             "各モデル自身の過去スコア分布での位置に揃えて並べてある。",
-            "一致度は「上位10%と見ているモデルの数」。"
-            "表示順の平均パーセンタイルは並べ方の都合であって、"
-            "統合された予測値ではない。",
+            "一致度は「上位10%と見ているモデルの数」。独立した判定の数え上げで、"
+            "スコアを混ぜた値ではない。順位と帯は基準モデル（LightGBM）の"
+            "スコアで付けてあり、他のモデルは並べて見るためのもの。",
         ],
     }
     os.makedirs(args.out_dir, exist_ok=True)
