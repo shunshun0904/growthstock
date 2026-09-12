@@ -30,7 +30,7 @@ import glob
 import json
 import os
 import sys
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -153,6 +153,53 @@ def ref_returns(panel: pd.DataFrame, picks: pd.DataFrame) -> pd.Series:
     return (cur / picks["closeAtPick"] - 1.0) * 100.0
 
 
+def score_others(cand: pd.DataFrame, cols: List[str],
+                 model_dir: str) -> Tuple[Dict[str, np.ndarray], List[Dict]]:
+    """
+    基準モデル以外でも採点する。
+
+    アンサンブルはしない。5つのスコアを混ぜて1つにはせず、画面に並べて
+    人間が統合判断する。実測で lgbm と logit のスコア相関は 0.412、
+    上位10%の重複は12%しかなく、ほぼ別の銘柄を選んでいる。
+
+    モデル間で生スコアは比較できない（学習器が違えばスケールも意味も違う）。
+    画面に出すのは各モデル自身の過去スコア分布での位置（pctHistorical）。
+
+    1モデルの読込や採点が失敗しても他を止めない。週次学習で1つだけ
+    転んだ日に、日次予測まで落とさないため。
+    """
+    import models as M
+
+    X = cand[cols].to_numpy(dtype=float)
+    scores: Dict[str, np.ndarray] = {}
+    info: List[Dict] = []
+    for algo in M.available(model_dir):
+        try:
+            model, meta = M.load(algo, model_dir)
+            if model is None:
+                continue
+            want = meta.get("features") or cols
+            if list(want) != list(cols):
+                # 特徴量セットが違うモデルは、同じ X を食わせられない。
+                # 黙って別の列で採点すると意味のないスコアが画面に出る
+                print(f"  [{algo}] 特徴量が一致しないため飛ばす "
+                      f"({len(want)}列 vs {len(cols)}列)")
+                continue
+            scores[algo] = M.predict(model, X)
+            info.append({
+                "algo": algo, "name": meta.get("name", algo),
+                "note": meta.get("note", ""),
+                "trainedAt": meta.get("trainedAt"),
+                "nOof": meta.get("nOof"),
+                "scoreBands": meta.get("scoreBands", {}),
+                "cv": meta.get("tuning", {}),
+            })
+            print(f"  [{algo}] 採点 {len(cand):,}件")
+        except Exception as exc:          # noqa: BLE001
+            print(f"  [{algo}] 失敗: {type(exc).__name__}: {exc}")
+    return scores, info
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="当日のブレイク候補を採点する")
     ap.add_argument("--data-dir", default=DATA_DIR)
@@ -252,7 +299,38 @@ def main(argv=None) -> int:
             # --- 内部挙動 --- #
             "contrib": contrib[i],
         })
-    rows.sort(key=lambda x: (x["date"], -x["score"]), reverse=True)
+    # --- 他モデルの採点を各候補に載せる --- #
+    # アンサンブルはしない。並べるだけ。買うかの判断は人間が統合的に行う
+    others, model_info = score_others(cand, cols, args.model_dir)
+    hist_by_algo = {}
+    if others:
+        import models as M
+        for algo in others:
+            hist_by_algo[algo] = M.hist_scores(algo, args.model_dir)
+        for i, x in enumerate(rows):
+            per = {}
+            for algo, sc in others.items():
+                v = float(sc[i])
+                per[algo] = {
+                    "score": round(v, 6),
+                    # モデルごとに別の過去分布で位置を出す。
+                    # 共通の分布を使うとスケールの違いが混ざる
+                    "pctHistorical": M.pct_historical(v, hist_by_algo[algo]),
+                }
+            x["byModel"] = per
+            pcts = [d["pctHistorical"] for d in per.values()
+                    if d["pctHistorical"] is not None]
+            # 何個のモデルが「上位10%」と見ているか。一致度の目安
+            x["agree90"] = int(sum(1 for p in pcts if p >= 90))
+            x["nModels"] = len(pcts)
+            # 表示順に使う平均。予測値ではない（アンサンブルではない）
+            x["pctMean"] = round(float(np.mean(pcts)), 1) if pcts else None
+
+    # 表示順。モデル別の平均パーセンタイルがあればそれで、無ければ基準モデル。
+    # これは並べ方の都合で、統合された予測値という意味ではない
+    def order_key(x):
+        return x["pctMean"] if x.get("pctMean") is not None else x["score"] * 100
+    rows.sort(key=lambda x: (x["date"], order_key(x)), reverse=True)
 
     payload = {
         "generatedAt": pd.Timestamp.utcnow().isoformat(),
@@ -271,6 +349,8 @@ def main(argv=None) -> int:
         },
         "scoreBands": meta["scoreBands"],
         "calibration": meta["calibration"],
+        # 画面に並べるモデルの素性。基準モデル(lgbm)も含む
+        "models": model_info,
         "notes": [
             "スコアは較正されていない生の出力。確率として読まず、"
             "同じ日の候補の中での順位と、スコア帯の過去実績で読むこと。",
@@ -278,6 +358,12 @@ def main(argv=None) -> int:
             "学習したモデルの採点）で数えた実測値。",
             "寄与は TreeSHAP による対数オッズ空間の分解。"
             "確率の差ではないので、押し上げ／押し下げの相対の大きさとして読む。",
+            "モデル別の値は混ぜていない（アンサンブルではない）。"
+            "学習器が違えばスコアのスケールも意味も違うので、"
+            "各モデル自身の過去スコア分布での位置に揃えて並べてある。",
+            "一致度は「上位10%と見ているモデルの数」。"
+            "表示順の平均パーセンタイルは並べ方の都合であって、"
+            "統合された予測値ではない。",
         ],
     }
     os.makedirs(args.out_dir, exist_ok=True)
