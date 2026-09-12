@@ -155,6 +155,93 @@ def lgbm(params: Optional[Dict] = None, *, balance: bool = True,
     return fit
 
 
+def xgb(seed: int = SEED, **kw) -> Fit:
+    """XGBoost。欠損は LightGBM と同様にネイティブで扱える。"""
+    import xgboost as xgbm
+
+    p = dict(n_estimators=600, learning_rate=0.05, max_depth=6,
+             subsample=0.8, colsample_bytree=0.8, reg_lambda=1.0,
+             tree_method="hist", n_jobs=-1, random_state=seed,
+             eval_metric="logloss", **kw)
+
+    def fit(X, y):
+        m = xgbm.XGBClassifier(**p, scale_pos_weight=_spw(y))
+        m.fit(X, y)
+        return lambda Z: m.predict_proba(Z)[:, 1]
+
+    return fit
+
+
+def cat(seed: int = SEED, **kw) -> Fit:
+    """CatBoost。欠損の扱いと正則化の仕方が LightGBM と違うので、
+    アンサンブルの相方として誤りの出方が変わることを期待する。"""
+    from catboost import CatBoostClassifier
+
+    p = dict(iterations=600, learning_rate=0.05, depth=6, l2_leaf_reg=3.0,
+             random_seed=seed, verbose=0, allow_writing_files=False, **kw)
+
+    def fit(X, y):
+        m = CatBoostClassifier(**p, scale_pos_weight=_spw(y))
+        m.fit(X, y)
+        return lambda Z: m.predict_proba(Z)[:, 1]
+
+    return fit
+
+
+def rf(seed: int = SEED, **kw) -> Fit:
+    """
+    ランダムフォレスト。欠損を扱えないので中央値で埋める。
+
+    埋める値は訓練側だけで決めて検証側に当てる（Pipeline が fold の中で
+    fit されるので、検証側の分布は漏れない）。
+    """
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.impute import SimpleImputer
+    from sklearn.pipeline import make_pipeline
+
+    def fit(X, y):
+        m = make_pipeline(
+            SimpleImputer(strategy="median"),
+            RandomForestClassifier(n_estimators=500, min_samples_leaf=5,
+                                   max_features="sqrt", n_jobs=-1,
+                                   class_weight="balanced_subsample",
+                                   random_state=seed, **kw))
+        m.fit(X, y)
+        return lambda Z: m.predict_proba(Z)[:, 1]
+
+    return fit
+
+
+def logit(seed: int = SEED, *, scaler: str = "quantile", **kw) -> Fit:
+    """
+    ロジスティック回帰。木と違って前処理が結果を左右するので、
+    欠損補完とスケール変換をここで試せるようにしてある。
+
+      quantile … 分位変換で正規分布に寄せる。外れ値に強い
+      standard … 平均0分散1。外れ値の影響が残る
+
+    株価系の特徴量は裾が重いので quantile を既定にした。
+    """
+    from sklearn.impute import SimpleImputer
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.pipeline import make_pipeline
+    from sklearn.preprocessing import QuantileTransformer, StandardScaler
+
+    tf = (QuantileTransformer(output_distribution="normal", n_quantiles=1000,
+                              random_state=seed)
+          if scaler == "quantile" else StandardScaler())
+
+    def fit(X, y):
+        m = make_pipeline(
+            SimpleImputer(strategy="median", add_indicator=True), tf,
+            LogisticRegression(max_iter=2000, C=0.1, class_weight="balanced",
+                               random_state=seed, **kw))
+        m.fit(X, y)
+        return lambda Z: m.predict_proba(Z)[:, 1]
+
+    return fit
+
+
 # --------------------------------------------------------------------------- #
 # 実行
 # --------------------------------------------------------------------------- #
@@ -274,6 +361,63 @@ def _auc_in_day(oof: pd.DataFrame) -> float:
     return float(np.average(vals, weights=weights))
 
 
+#: しきい値運用の既定。画面の pctHistorical がこれを超えたら買う想定
+THR_PCT = 90
+
+
+def threshold_edge(oof: pd.DataFrame, pct: float = THR_PCT) -> Dict:
+    """
+    「スコアが過去分布の上位(100-pct)%なら買う」運用を測る。
+
+    これが運用そのものの指標。日付内の順位は使わない（買うかどうかは
+    その日の1位かではなく、スコアの水準で決めるため）。
+
+    しきい値は窓ごとに「それより前の窓のスコア分布」から出す。全期間の
+    分布を使うと未来を見てしきい値を決めることになり、実測で約0.9pt
+    楽観側に出た。窓1 は参照分布が無いので対象外。
+
+    再現性を必ず一緒に返す。平均が良くても、勝ちが1つの窓に偏っていれば
+    その優位は再現しない（実測では pooled 上位5%の44%が窓9 に集中していた）。
+    """
+    folds = sorted(oof["fold"].unique())
+    picks, per_fold = [], []
+    uni = oof[oof["fold"] > folds[0]]
+    for f in folds:
+        ref = oof.loc[oof["fold"] < f, "score"].to_numpy()
+        if len(ref) < 500:
+            continue
+        thr = float(np.percentile(ref, pct))
+        cur = oof[oof["fold"] == f]
+        sel = cur[cur["score"] > thr]
+        if not len(sel):
+            continue
+        picks.append(sel)
+        se = pd.to_numeric(sel["ref_end"], errors="coerce").mean()
+        ce = pd.to_numeric(cur["ref_end"], errors="coerce").mean()
+        per_fold.append(float(se - ce))
+    if not picks:
+        return {"thr_n": 0, "thr_lift": float("nan"), "thr_folds_won": 0,
+                "thr_folds": 0, "thr_end": float("nan"),
+                "thr_win": float("nan"), "thr_rate": 0.0,
+                "thr_lift_same_day": float("nan"), "thr_worst": float("nan")}
+    sel = pd.concat(picks, ignore_index=True)
+    e = pd.to_numeric(sel["ref_end"], errors="coerce")
+    all_end = pd.to_numeric(uni["ref_end"], errors="coerce").mean()
+    same = uni[uni["Date"].isin(set(pd.Index(sel["Date"]).unique()))]
+    same_end = pd.to_numeric(same["ref_end"], errors="coerce").mean()
+    return {
+        "thr_n": int(len(sel)),
+        "thr_rate": float(len(sel) / len(uni)),
+        "thr_end": float(e.mean()) * 100,
+        "thr_lift": float(e.mean() - all_end) * 100,
+        "thr_lift_same_day": float(e.mean() - same_end) * 100,
+        "thr_win": float((e > 0).mean()),
+        "thr_folds_won": int(sum(1 for x in per_fold if x > 0)),
+        "thr_folds": int(len(per_fold)),
+        "thr_worst": float(min(per_fold)) * 100,
+    }
+
+
 def metrics(oof: pd.DataFrame) -> Dict:
     from sklearn.metrics import average_precision_score, roc_auc_score
 
@@ -319,6 +463,10 @@ def metrics(oof: pd.DataFrame) -> Dict:
     # 同じ日数だけランダムに1件選んだ場合（＝銘柄選定をしない場合）との差
     out["pick1_lift"] = out["pick1_end"] - float(
         oof.groupby("Date")["ref_end"].mean().mean()) * 100
+
+    # 運用の的。しきい値運用の優位と、その再現性
+    if "fold" in oof.columns:
+        out.update(threshold_edge(oof))
     return out
 
 
@@ -398,11 +546,15 @@ def compare(a: Result, b: Result, *, k: int = 5, seed: int = SEED) -> Dict:
     return out
 
 
-COLS = [("pr_auc", "PR-AUC", "{:.4f}"), ("roc_auc", "ROC-AUC", "{:.4f}"),
-        ("auc_in_day", "日付内AUC", "{:.4f}"), ("end_5", "上位5%収益", "{:+.2f}%"),
-        ("lift_5", "対母集団", "{:+.2f}pt"),
-        ("pick1_end", "毎日1位", "{:+.2f}%"), ("pick1_lift", "対その日平均", "{:+.2f}pt"),
-        ("pick1_win", "1位の勝率", "{:.1%}"), ("pick1_tied", "同点率", "{:.1%}")]
+#: 表に出す列。運用の的（しきい値運用）を左に置き、ラベル基準は参考として右に。
+#: 日付内AUC と 毎日1位 は運用と無関係なので既定の表からは外した
+#: （metrics には残してあるので必要なら見られる）。
+COLS = [("thr_lift", "しきい値優位", "{:+.2f}pt"),
+        ("thr_lift_same_day", "対同日候補", "{:+.2f}pt"),
+        ("thr_folds_won", "勝った窓", "{:.0f}"), ("thr_worst", "最悪の窓", "{:+.2f}pt"),
+        ("thr_end", "実収益", "{:+.2f}%"), ("thr_win", "勝率", "{:.1%}"),
+        ("thr_n", "取引数", "{:,.0f}"),
+        ("pr_auc", "PR-AUC", "{:.4f}"), ("roc_auc", "ROC-AUC", "{:.4f}")]
 
 
 def table(results: Dict[str, Result]) -> str:
