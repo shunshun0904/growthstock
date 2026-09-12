@@ -77,22 +77,51 @@ def get_oof(df: pd.DataFrame, name: str, cols) -> pd.DataFrame:
 
 
 def select(oof: pd.DataFrame, mode: str, k: int = K) -> pd.DataFrame:
-    """3通りの選び方。返すのは選ばれた行。"""
+    """
+    3通りの選び方。返すのは選ばれた行。
+
+    同点は必ず乱数で割る。スコアやその順位が同じ行を nlargest に渡すと
+    行順（=日付順）で切れてしまい、「古い日だけ」を測ることになる。
+    実際 within_day を大域しきい値で切ったとき、選ばれた行が窓1〜7 に
+    限られ、窓8〜10 が丸ごと欠けていた。
+    """
+    rng = np.random.default_rng(lab.SEED)
+    o = oof.assign(_tb=rng.random(len(oof)))
+
+    if mode == "within_day":
+        # 日付内順位は1位が全部 1.0 で並ぶので大域のしきい値では切れない。
+        # 各日の1位を取る。運用（毎晩1件買う）と同じ形であり、
+        # 日数が固定されるのでタイミングの力が消え、銘柄選定だけが残る。
+        return (o.sort_values(["score", "_tb"])
+                 .groupby("Date", sort=False).tail(1))
+
     n = max(1, int(len(oof) * k / 100))
     if mode == "pooled":
-        key = oof["score"]
+        o["_k"] = o["score"]
     elif mode == "per_fold":
-        key = oof.groupby("fold")["score"].rank(pct=True)
-    elif mode == "within_day":
-        key = oof.groupby("Date")["score"].rank(pct=True)
+        o["_k"] = o.groupby("fold")["score"].rank(pct=True)
     else:
         raise ValueError(mode)
-    return oof.assign(_k=key).nlargest(n, "_k")
+    return o.sort_values(["_k", "_tb"], ascending=False).head(n)
 
 
-def stats(oof: pd.DataFrame, sel: pd.DataFrame) -> dict:
+def benchmark(oof: pd.DataFrame, mode: str) -> float:
+    """
+    その選び方に対して「腕がない場合」の水準。
+
+    pooled / per_fold は全行から選ぶので、母集団の平均が比較相手。
+    within_day は毎日1件選ぶので、比較相手は「毎日でたらめに1件選ぶ」
+    = 日ごとの平均を日で等重み平均したもの。母集団の平均と比べると、
+    候補数の多い日に重みが寄ってしまい比較にならない。
+    """
+    if mode == "within_day":
+        return float(oof.groupby("Date")["ref_end"].mean().mean())
+    return float(pd.to_numeric(oof["ref_end"], errors="coerce").mean())
+
+
+def stats(oof: pd.DataFrame, sel: pd.DataFrame, mode: str) -> dict:
     e = pd.to_numeric(sel["ref_end"], errors="coerce")
-    base = pd.to_numeric(oof["ref_end"], errors="coerce").mean()
+    base = benchmark(oof, mode)
     return {"n": len(sel), "end": float(e.mean()) * 100,
             "lift": float(e.mean() - base) * 100,
             "pos": float(sel["label"].mean()) * 100,
@@ -100,20 +129,45 @@ def stats(oof: pd.DataFrame, sel: pd.DataFrame) -> dict:
             "n_days": int(sel["Date"].nunique())}
 
 
+def _buckets(sel: pd.DataFrame, days: pd.Index) -> list:
+    """
+    選ばれた行を日付ごとの配列に振り分ける。
+
+    日付は整数コードで扱う。pd.unique(Series) は numpy.datetime64 を返すのに
+    groupby のキーは pandas.Timestamp で、両者はハッシュが一致しないことがある。
+    dict 引きにすると全部外れて静かに空になる（実際それで落ちた）ので、
+    pd.Index.get_indexer で位置に直し、型に依存しない形にする。
+    """
+    out = [[] for _ in range(len(days))]
+    if len(sel):
+        idx = days.get_indexer(pd.Index(sel["Date"]))
+        v = pd.to_numeric(sel["ref_end"], errors="coerce").to_numpy(dtype=float)
+        for i, j in enumerate(idx):
+            if j >= 0:
+                out[j].append(v[i])
+    return [np.asarray(x, dtype=float) for x in out]
+
+
 def ci_diff(a: pd.DataFrame, b: pd.DataFrame, mode: str, n_boot: int = 2000) -> tuple:
-    """同じ日付ブロックで再抽出して、b - a の区間を出す。"""
-    sa, sb = select(a, mode), select(b, mode)
+    """
+    同じ日付ブロックで再抽出して、b - a の区間を出す。
+
+    日付単位で振り直すのは、同じ日の銘柄が地合いを共有するため。
+    行単位で振ると独立標本を仮定することになり区間が不当に狭くなる。
+    両モデルで同じ日の並びを使うので、差は対になっている。
+    """
+    days = pd.Index(pd.unique(a["Date"]))
+    ba = _buckets(select(a, mode), days)
+    bb = _buckets(select(b, mode), days)
     rng = np.random.default_rng(lab.SEED)
-    days = pd.unique(a["Date"])
-    ia = {d: g["ref_end"].to_numpy(dtype=float) for d, g in sa.groupby("Date")}
-    ib = {d: g["ref_end"].to_numpy(dtype=float) for d, g in sb.groupby("Date")}
-    draws = np.empty(n_boot)
+    draws = np.full(n_boot, np.nan)
     for i in range(n_boot):
-        pick = rng.choice(days, len(days), replace=True)
-        va = np.concatenate([ia[d] for d in pick if d in ia]) if len(pick) else np.array([])
-        vb = np.concatenate([ib[d] for d in pick if d in ib]) if len(pick) else np.array([])
-        draws[i] = (np.nanmean(vb) if len(vb) else np.nan) \
-            - (np.nanmean(va) if len(va) else np.nan)
+        pick = rng.integers(0, len(days), len(days))
+        va = [ba[j] for j in pick if ba[j].size]
+        vb = [bb[j] for j in pick if bb[j].size]
+        if not va or not vb:
+            continue
+        draws[i] = np.nanmean(np.concatenate(vb)) - np.nanmean(np.concatenate(va))
     lo, hi = np.nanpercentile(draws, [2.5, 97.5])
     return float(lo) * 100, float(hi) * 100, float(np.nanmean(draws > 0))
 
@@ -140,15 +194,15 @@ def main() -> int:
         print(f"  {'モデル':<20}{'件数':>7}{'日数':>7}{'実収益':>10}{'対母集団':>10}"
               f"{'正例率':>8}{'勝率':>8}")
         for name, o in oofs.items():
-            s = stats(o, select(o, mode))
+            s = stats(o, select(o, mode), mode)
             print(f"  {name:<20}{s['n']:>7,}{s['n_days']:>7,}{s['end']:>+9.2f}%"
                   f"{s['lift']:>+9.2f}pt{s['pos']:>7.1f}%{s['win']:>7.1f}%")
         print()
         a = oofs["base(151)"]
         for name in ("stock_only(140)", "market_only(11)"):
             lo, hi, p = ci_diff(a, oofs[name], mode)
-            d = stats(oofs[name], select(oofs[name], mode))["end"] - \
-                stats(a, select(a, mode))["end"]
+            d = stats(oofs[name], select(oofs[name], mode), mode)["end"] - \
+                stats(a, select(a, mode), mode)["end"]
             print(f"    {name:<20} base との差 {d:+.2f}pt [{lo:+.2f}, {hi:+.2f}] "
                   f"改善確率 {p*100:>3.0f}%")
 
