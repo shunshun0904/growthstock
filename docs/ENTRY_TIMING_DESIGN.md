@@ -412,7 +412,9 @@ $P_{\text{exit}}$ は既存ラベルの地平（60営業日）に合わせ、全
 
 ---
 
-## 13. Phase 0（今回）でやったこと
+## 13. 実装（Phase 0 と Phase 1）
+
+### Phase 0 — 分足が何を返すか
 
 `research/probe_minute_bars.py` と `.github/workflows/probe-minute.yml` を追加した。
 実測結果は `docs/MINUTE_DATA.md` に出る。§5.3 の7項目を測る。
@@ -422,6 +424,28 @@ $P_{\text{exit}}$ は既存ラベルの地平（60営業日）に合わせ、全
 403 を見て「キーが失効した」と誤診することはない。
 
 契約後に同じワークフローを再実行すれば、同じ形式で全項目が埋まる。
+
+**実測結果（2026-09-12）**: 日足は通るのに分足だけ 403
+（`This API is not available on your subscription.`）。
+キーの失効ではなく、アドオンが契約に含まれていない状態である。
+
+### Phase 1 — 日足10年での方策比較
+
+| ファイル | 役割 |
+| --- | --- |
+| `research/entry_policy.py` | 方策の執行・約定判定・集計・日単位ブートストラップ。API も Release も読まないので合成データで単体テストできる |
+| `research/entry_policy_eval.py` | 生データを読んで報告を書く入口 |
+| `tests/test_entry_policy.py` | 約定判定の境界を固定する（指値ちょうど・指値より下で寄る・期限の当日） |
+| `.github/workflows/entry-policy.yml` | Release の日次バーを読んで回す |
+| `docs/ENTRY_POLICY_PHASE1.md` | 出力 |
+
+比較する方策の格子は `entry_policy.default_policies()` に**先に固定**してある
+（深さ6種 × 期限3種 × 基準2種 × 未約定の扱い2種 ＝ 72件、
+それに寄り成行とギャップ上限5種を足して78件）。
+結果を見てから広げると、そのぶん偶然の勝者が増える（§10）。
+
+合格ラインと契約の判断は `entry_policy_eval.verdict()` が
+§11・§12 に書いたとおりに機械的に当てる。文章で足したり引いたりしない。
 
 ---
 

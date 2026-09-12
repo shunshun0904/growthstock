@@ -1,0 +1,111 @@
+name: Entry Policy Phase 1
+
+# エントリー方策の期待値比較（日足10年・分足なし）。
+# 設計は docs/ENTRY_TIMING_DESIGN.md、出力は docs/ENTRY_POLICY_PHASE1.md。
+#
+# 生データは取りに行かない。Release（タグ data-raw）に置いてあるものを読む。
+# 全期間の取得は2.5時間かかるので、評価のたびに叩き直す理由が無い。
+on:
+  workflow_dispatch:
+    inputs:
+      test_start:
+        description: 'テスト期間の開始日'
+        default: '2024-10-01'
+      n_boot:
+        description: 'ブートストラップ回数'
+        default: '2000'
+  # workflow_dispatch はデフォルトブランチにファイルが無いと呼べないため、
+  # 調査用ブランチでは push でも起動できるようにしておく（probe.yml と同じ理由）。
+  push:
+    branches: ['claude/charming-ride-vq8hz4']
+    paths:
+      - 'research/entry_policy.py'
+      - 'research/entry_policy_eval.py'
+      - '.github/workflows/entry-policy.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: entry-policy-phase1
+  cancel-in-progress: true
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r research/requirements.txt
+
+      # 方策の比較に要るのは日次バーだけ。財務も信用残も使わないので、
+      # Release の全アセット（240MB超）を落とす理由が無い。
+      - name: Download daily bars (release)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p research/_data
+          gh release download data-raw --dir research/_data --clobber \
+            --pattern 'bars_*.parquet' || true
+          if ! ls research/_data/bars_*.parquet >/dev/null 2>&1; then
+            echo "bars_*.parquet が取れなかったので、全アセットを落とす"
+            gh release download data-raw --dir research/_data --clobber
+          fi
+          ls -lh research/_data
+
+      # スコアがあれば「上位だけ買う」形でも測れる。無くても全件で回る。
+      - name: Download out-of-fold scores (release, optional)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p research/model
+          if gh release download data-raw --dir research/model --clobber \
+               --pattern 'oof.parquet' 2>/dev/null; then
+            echo "out-of-fold スコアを使う"
+          else
+            echo "out-of-fold スコアが無いので全件のみで評価する"
+          fi
+
+      - name: Evaluate
+        run: |
+          python3 research/entry_policy_eval.py \
+            --test-start "${{ inputs.test_start || '2024-10-01' }}" \
+            --n-boot "${{ inputs.n_boot || '2000' }}" 2>&1 | tee eval.log
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo '```'
+            tail -40 eval.log 2>/dev/null || echo "ログなし"
+            echo '```'
+            echo
+            cat docs/ENTRY_POLICY_PHASE1.md 2>/dev/null || true
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: entry-policy-phase1
+          path: |
+            docs/ENTRY_POLICY_PHASE1.md
+            research/entry_policy_phase1.json
+            eval.log
+          if-no-files-found: warn
+
+      - name: Commit report
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A docs/ENTRY_POLICY_PHASE1.md
+          if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
+          git commit -m "chore(research): エントリー方策の比較結果を更新"
+          for i in 1 2 3 4; do
+            if git push; then exit 0; fi
+            sleep $((2 ** i)); git pull --rebase
+          done
+          exit 1
