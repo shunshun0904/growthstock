@@ -221,5 +221,64 @@ class TestSubsets(unittest.TestCase):
         self.assertAlmostEqual(prof["score_mean"], 0.4833, places=3)
 
 
+class TestBenchmark(unittest.TestCase):
+    """指数を引く部分。位置ではなく日付で突き合わせているか。"""
+
+    def topix(self, dates, values):
+        return pd.DataFrame({"Date": pd.to_datetime(dates), "topix": values})
+
+    def test_aligns_by_date(self):
+        p = panel({"A": [100, 110, 120]})
+        ev = events(p, [("A", 0)])
+        tp = self.topix([d.date() for d in p["Date"]], [1000.0, 1100.0, 1210.0])
+        BM = X.benchmark_matrix(p, ev, tp, days=2)
+        np.testing.assert_allclose(BM[0], [1000.0, 1100.0, 1210.0])
+
+    def test_missing_index_day_is_nan_not_carried(self):
+        p = panel({"A": [100, 110, 120]})
+        ev = events(p, [("A", 0)])
+        # 2日目の指数が無い。前の値で埋めない
+        tp = self.topix([p["Date"][0].date(), p["Date"][2].date()],
+                        [1000.0, 1210.0])
+        BM = X.benchmark_matrix(p, ev, tp, days=2)
+        self.assertAlmostEqual(BM[0][0], 1000.0)
+        self.assertTrue(np.isnan(BM[0][1]))
+        self.assertAlmostEqual(BM[0][2], 1210.0)
+
+    def test_excess_subtracts_index_move(self):
+        # 銘柄 +20%、指数 +10% -> 超過 +10pt
+        F = np.array([[100.0, 120.0]])
+        BM = np.array([[1000.0, 1100.0]])
+        rows = X.fixed_horizon(F, np.array([100.0]), fee_pct=0.0,
+                               horizons=(1,), bm=BM)
+        self.assertAlmostEqual(rows[0]["mean"], 20.0)
+        self.assertAlmostEqual(rows[0]["excess_mean"], 10.0)
+        self.assertAlmostEqual(rows[0]["excess_win"], 100.0)
+
+    def test_excess_can_be_negative_while_raw_is_positive(self):
+        # 上がったが指数のほうが上がった
+        F = np.array([[100.0, 105.0]])
+        BM = np.array([[1000.0, 1200.0]])
+        rows = X.fixed_horizon(F, np.array([100.0]), fee_pct=0.0,
+                               horizons=(1,), bm=BM)
+        self.assertGreater(rows[0]["mean"], 0)
+        self.assertLess(rows[0]["excess_mean"], 0)
+
+    def test_no_benchmark_omits_excess_keys(self):
+        rows = X.fixed_horizon(np.array([[100.0, 110.0]]), np.array([100.0]),
+                               fee_pct=0.0, horizons=(1,))
+        self.assertNotIn("excess_mean", rows[0])
+
+    def test_target_exit_excess_uses_actual_exit_day(self):
+        # 2日目に到達して売る。指数もその日で測る
+        F = np.array([[100.0, 105.0, 120.0]])
+        BM = np.array([[1000.0, 1050.0, 1100.0]])
+        r = X.target_exit(F, np.array([100.0]), np.array([0.10]),
+                          horizon=2, fee_pct=0.0, bm=BM)
+        self.assertAlmostEqual(r["hold_days"], 2)
+        self.assertAlmostEqual(r["mean"], 20.0)
+        self.assertAlmostEqual(r["excess_mean"], 10.0)   # 20 - 10
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

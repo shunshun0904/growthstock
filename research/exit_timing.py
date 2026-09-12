@@ -56,6 +56,19 @@ MONTH_DAYS = 20
 _REL_EPS = 1e-12
 
 
+def _forward_index(panel: pd.DataFrame, ev: pd.DataFrame, days: int):
+    """各イベントの t, t+1, ..., t+days が panel の何行目かと、その有効性。"""
+    if "_pos" not in ev.columns:
+        raise SystemExit("ev に _pos がありません。panel に通し番号を振ってください")
+    remaining = panel.groupby("Code", sort=False).cumcount(
+        ascending=False).to_numpy()
+    pos = ev["_pos"].to_numpy(dtype=int)
+    offs = np.arange(days + 1)
+    idx = np.minimum(pos[:, None] + offs[None, :], len(panel) - 1)
+    ok = offs[None, :] <= remaining[pos][:, None]
+    return idx, ok
+
+
 def forward_matrix(panel: pd.DataFrame, ev: pd.DataFrame,
                    days: int = FORWARD_DAYS) -> np.ndarray:
     """
@@ -65,16 +78,61 @@ def forward_matrix(panel: pd.DataFrame, ev: pd.DataFrame,
     銘柄の末尾を越えた先は NaN にする。0 で埋めない
     （「まだ先が無い」と「値が0」は別物）。
     """
-    if "_pos" not in ev.columns:
-        raise SystemExit("ev に _pos がありません。panel に通し番号を振ってください")
+    idx, ok = _forward_index(panel, ev, days)
     close = panel["close"].to_numpy(dtype=float)
-    remaining = panel.groupby("Code", sort=False).cumcount(
-        ascending=False).to_numpy()
-    pos = ev["_pos"].to_numpy(dtype=int)
-    offs = np.arange(days + 1)
-    idx = np.minimum(pos[:, None] + offs[None, :], len(close) - 1)
-    ok = offs[None, :] <= remaining[pos][:, None]
     return np.where(ok, close[idx], np.nan)
+
+
+def benchmark_matrix(panel: pd.DataFrame, ev: pd.DataFrame,
+                     topix: pd.DataFrame, days: int = FORWARD_DAYS) -> np.ndarray:
+    """
+    forward_matrix と同じ形で、**その銘柄の各営業日と同じ日付の** TOPIX 終値を返す。
+
+    なぜ要るか: 250営業日持てば、その間の市場全体の上昇もそのまま乗る。
+    「長く持つほど良い」が地合いなのか銘柄選定なのかは、指数を引かないと分からない。
+
+    日付で突き合わせる。位置で合わせると、売買が成立しなかった日がある銘柄で
+    「その銘柄の250日目」と「市場の250日目」がずれる。
+    """
+    idx, ok = _forward_index(panel, ev, days)
+    dates = panel["Date"].to_numpy("datetime64[ns]")[idx]
+    tp = topix.dropna().sort_values("Date")
+    td = pd.to_datetime(tp["Date"]).to_numpy("datetime64[ns]")
+    tv = pd.to_numeric(tp["topix"], errors="coerce").to_numpy(dtype=float)
+    j = np.searchsorted(td, dates)
+    jc = np.clip(j, 0, len(td) - 1)
+    hit = (j < len(td)) & (td[jc] == dates)
+    return np.where(ok & hit, tv[jc], np.nan)
+
+
+def _excess(ret: np.ndarray, bm: Optional[np.ndarray],
+            exit_col: np.ndarray) -> Optional[np.ndarray]:
+    """
+    銘柄のリターン（手数料込み）から、同じ期間の指数リターン（手数料なし）を引く。
+
+    指数側に手数料を掛けないので、超過はわずかに銘柄に不利な側に出る。
+    向きが分かっていれば、その方が安全。
+    """
+    if bm is None:
+        return None
+    rows = np.arange(len(ret))
+    base = bm[:, 0]
+    px = bm[rows, exit_col]
+    bret = (px / base - 1.0) * 100.0
+    return ret - bret
+
+
+def _excess_stats(exc: Optional[np.ndarray]) -> Dict[str, float]:
+    if exc is None:
+        return {}
+    ok = np.isfinite(exc)
+    if not ok.any():
+        return {}
+    e = exc[ok]
+    return {"excess_n": int(ok.sum()),
+            "excess_mean": round(float(e.mean()), 3),
+            "excess_median": round(float(np.median(e)), 3),
+            "excess_win": round(100.0 * float((e > 0).mean()), 2)}
 
 
 def _stats(ret: np.ndarray, hold: np.ndarray) -> Dict[str, float]:
@@ -101,7 +159,8 @@ def _stats(ret: np.ndarray, hold: np.ndarray) -> Dict[str, float]:
 
 
 def fixed_horizon(F: np.ndarray, entry: np.ndarray, fee_pct: float = 0.05,
-                  horizons: Sequence[int] = HORIZONS) -> List[Dict]:
+                  horizons: Sequence[int] = HORIZONS,
+                  bm: Optional[np.ndarray] = None) -> List[Dict]:
     """t+k の終値で売る。k ごとの成績を並べる。"""
     out = []
     for k in horizons:
@@ -110,13 +169,15 @@ def fixed_horizon(F: np.ndarray, entry: np.ndarray, fee_pct: float = 0.05,
         ret = (F[:, k] / entry - 1.0) * 100.0 - fee_pct
         row = {"rule": f"{k}営業日で売る", "kind": "fixed", "k": k}
         row.update(_stats(ret, np.full(len(ret), k)))
+        row.update(_excess_stats(_excess(ret, bm, np.full(len(ret), k))))
         out.append(row)
     return out
 
 
 def target_exit(F: np.ndarray, entry: np.ndarray, need: np.ndarray,
                 horizon: int = 60, fee_pct: float = 0.05,
-                ratio: float = 1.0, label: str = "") -> Dict:
+                ratio: float = 1.0, label: str = "",
+                bm: Optional[np.ndarray] = None) -> Dict:
     """
     ラベル準拠の出口。基準日終値から `ratio × need` 以上に達した
     最初の日の終値で売る。届かなければ horizon 日目の終値で売る。
@@ -138,6 +199,7 @@ def target_exit(F: np.ndarray, entry: np.ndarray, need: np.ndarray,
            "ratio": ratio, "horizon": horizon,
            "hit_rate": round(100.0 * float(any_hit.mean()), 2)}
     row.update(_stats(ret, first))
+    row.update(_excess_stats(_excess(ret, bm, first)))
     return row
 
 
@@ -180,17 +242,18 @@ def peak_profile(F: np.ndarray, entry: np.ndarray, upto: int,
 
 def compare_exits(F: np.ndarray, entry: np.ndarray, need: np.ndarray,
                   fee_pct: float = 0.05,
-                  horizons: Sequence[int] = HORIZONS) -> List[Dict]:
+                  horizons: Sequence[int] = HORIZONS,
+                  bm: Optional[np.ndarray] = None) -> List[Dict]:
     """固定日数とラベル準拠を1つの表に並べる。"""
-    rows = fixed_horizon(F, entry, fee_pct, horizons)
+    rows = fixed_horizon(F, entry, fee_pct, horizons, bm=bm)
     rows.append(target_exit(F, entry, need, horizon=60, fee_pct=fee_pct,
-                            ratio=1.0,
+                            ratio=1.0, bm=bm,
                             label="到達しきい値(+1.2σ√60)に届いたら売る / 60日で打ち切り"))
     rows.append(target_exit(F, entry, need, horizon=60, fee_pct=fee_pct,
-                            ratio=0.5,
+                            ratio=0.5, bm=bm,
                             label="到達しきい値の半分で売る / 60日で打ち切り"))
     rows.append(target_exit(F, entry, need, horizon=120, fee_pct=fee_pct,
-                            ratio=1.0,
+                            ratio=1.0, bm=bm,
                             label="到達しきい値に届いたら売る / 120日で打ち切り"))
     return rows
 

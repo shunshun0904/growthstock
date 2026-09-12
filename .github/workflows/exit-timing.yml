@@ -39,15 +39,16 @@ jobs:
           cache: pip
       - run: pip install -r research/requirements.txt
 
-      # 方策の比較に要るのは日次バーだけ。財務も信用残も使わないので、
+      # 要るのは日次バーと TOPIX だけ。財務も信用残も使わないので、
       # Release の全アセット（240MB超）を落とす理由が無い。
-      - name: Download daily bars (release)
+      # TOPIX は超過リターン（地合いを引いた分）に要る。
+      - name: Download daily bars and TOPIX (release)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p research/_data
           gh release download data-raw --dir research/_data --clobber \
-            --pattern 'bars_*.parquet' || true
+            --pattern 'bars_*.parquet' --pattern 'topix_*.parquet' || true
           if ! ls research/_data/bars_*.parquet >/dev/null 2>&1; then
             echo "bars_*.parquet が取れなかったので、全アセットを落とす"
             gh release download data-raw --dir research/_data --clobber
