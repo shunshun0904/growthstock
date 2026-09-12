@@ -1,0 +1,385 @@
+<title>ラベル20日化レビュー</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Noto+Sans+JP:wght@400;500;700&display=swap">
+<style>
+/* ------------------------------------------------------------------
+   既存の label_review.html と同じ視覚言語（トレーディング端末寄りの
+   ダーク単一テーマ）。親アプリ src/styles.css の系統を踏襲する。
+   このページ固有の追加は「2つの地平を並べて見せる」ための2色だけ。
+   ------------------------------------------------------------------ */
+:root {
+  --ground:#0a0e17; --surface:#141b2b; --surface-2:#111725;
+  --border:#1f2937; --border-soft:#172033;
+  --ink:#e8edf6; --ink-2:#97a3b8; --ink-3:#5c6980;
+
+  --series:#3987e5;              /* 終値 */
+  --ma-s:#c8862e;                /* MA5 */
+  --ma-m:#7a5ba8;                /* MA20 */
+  --ma-l:#4b6a8c;                /* MA60 */
+
+  --h20:#e0a03c;                 /* 新案（20日）＝このページの主役 */
+  --h20-band:rgba(224,160,60,.20);
+  --h60:#8494ad;                 /* 現行（60日）＝参照 */
+  --h60-band:rgba(132,148,173,.09);
+
+  --ok:#25a55f; --ng:#d03b3b;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:"Noto Sans JP",-apple-system,BlinkMacSystemFont,"Hiragino Sans",system-ui,sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  margin:0; background:var(--ground); color:var(--ink);
+  font-family:var(--sans); font-size:14px; line-height:1.65;
+  -webkit-font-smoothing:antialiased;
+}
+.num { font-family:var(--mono); font-variant-numeric:tabular-nums; }
+.wrap { max-width:1320px; margin:0 auto; padding-block:32px 72px; padding-inline:20px; }
+
+header { border-bottom:1px solid var(--border); padding-bottom:22px; }
+.eyebrow { font-family:var(--mono); font-size:10.5px; letter-spacing:.16em;
+           text-transform:uppercase; color:var(--ink-3); margin:0 0 7px; }
+h1 { margin:0 0 8px; font-size:clamp(20px,3vw,26px); font-weight:700;
+     letter-spacing:.01em; text-wrap:balance; }
+.sub { color:var(--ink-2); font-size:13.5px; max-width:70ch; margin:0; }
+
+/* ---------- 変更点：2つの地平を左右に置く ---------- */
+.defs { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+        gap:14px; margin-top:26px; }
+.def { border:1px solid var(--border); border-radius:4px; padding:15px 17px;
+       background:var(--surface-2); }
+.def.now { border-left:3px solid var(--h60); }
+.def.next { border-left:3px solid var(--h20); background:var(--surface); }
+.def h2 { margin:0 0 3px; font-size:13px; font-weight:700; letter-spacing:.02em; }
+.def .tag { font-family:var(--mono); font-size:10px; letter-spacing:.1em;
+            text-transform:uppercase; color:var(--ink-3); }
+.def dl { margin:11px 0 0; display:grid; grid-template-columns:auto 1fr;
+          gap:5px 14px; font-size:12.5px; }
+.def dt { color:var(--ink-3); }
+.def dd { margin:0; color:var(--ink-2); }
+.def dd b { color:var(--ink); font-weight:600; }
+
+/* ---------- 遷移表 ---------- */
+.matrix { margin-top:28px; border:1px solid var(--border); border-radius:4px;
+          overflow:hidden; background:var(--surface); }
+.matrix table { width:100%; border-collapse:collapse; font-size:13px; }
+.matrix th, .matrix td { padding:11px 14px; text-align:right;
+                         border-bottom:1px solid var(--border-soft); }
+.matrix th:first-child, .matrix td:first-child { text-align:left; color:var(--ink-2); }
+.matrix thead th { font-family:var(--mono); font-size:10.5px; letter-spacing:.09em;
+                   text-transform:uppercase; color:var(--ink-3); font-weight:400;
+                   background:var(--surface-2); }
+.matrix tbody tr:last-child td { border-bottom:0; }
+.matrix .flip { color:var(--h20); font-weight:600; }
+.matrix .muted { color:var(--ink-3); }
+
+/* ---------- 操作 ---------- */
+.bar { position:sticky; top:0; z-index:5; margin-top:30px;
+       display:flex; flex-wrap:wrap; gap:8px; align-items:center;
+       padding:12px 0; background:var(--ground);
+       border-bottom:1px solid var(--border); }
+.tab { font-family:var(--mono); font-size:12px; padding:7px 13px; cursor:pointer;
+       border:1px solid var(--border); border-radius:3px; background:var(--surface-2);
+       color:var(--ink-2); }
+.tab[aria-pressed="true"] { border-color:var(--h20); color:var(--ink);
+                            background:var(--surface); }
+.tab:focus-visible, .toggle:focus-visible { outline:2px solid var(--h20);
+                                            outline-offset:2px; }
+.toggle { margin-left:auto; display:flex; align-items:center; gap:7px;
+          font-size:12px; color:var(--ink-2); cursor:pointer; }
+
+/* ---------- カード ---------- */
+.grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(420px,1fr));
+        gap:16px; margin-top:20px; }
+@media (max-width:520px){ .grid { grid-template-columns:1fr; } }
+.card { border:1px solid var(--border); border-radius:4px; background:var(--surface);
+        padding:14px 15px 12px; }
+.card header { border:0; padding:0; display:flex; align-items:baseline;
+               gap:9px; flex-wrap:wrap; }
+.card .code { font-family:var(--mono); font-size:14px; font-weight:600; }
+.card .nm { font-size:12.5px; color:var(--ink-2); }
+.card .when { margin-left:auto; font-family:var(--mono); font-size:11px;
+              color:var(--ink-3); }
+.chart { margin-top:9px; }
+.chart svg { display:block; width:100%; height:auto; }
+.chart svg text { font-family:var(--mono); }
+.b20 { fill:var(--h20-band); stroke:rgba(224,160,60,.45); stroke-width:1; }
+.b60 { fill:var(--h60-band); }
+.s-close { stroke:var(--series); }
+.s-ma5   { stroke:var(--ma-s); }
+.s-ma20  { stroke:var(--ma-m); }
+.s-ma60  { stroke:var(--ma-l); }
+.l20 { stroke:var(--h20); }  .t20 { fill:var(--h20); }
+.l60 { stroke:var(--h60); }  .t60 { fill:var(--h60); }
+.s-tline { stroke:var(--ink-3); }
+.dot20 { fill:var(--h20); }
+
+.verdicts { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px; }
+.v { border:1px solid var(--border); border-radius:3px; padding:8px 10px; }
+.v.now { border-left:3px solid var(--h60); }
+.v.next { border-left:3px solid var(--h20); }
+.v .hd { font-family:var(--mono); font-size:10px; letter-spacing:.09em;
+         text-transform:uppercase; color:var(--ink-3); }
+.v .out { font-size:13px; font-weight:700; margin-top:2px; }
+.v .out.pos { color:var(--ok); }
+.v .out.neg { color:var(--ng); }
+.chips { display:flex; flex-wrap:wrap; gap:5px; margin-top:6px; }
+.chip { font-family:var(--mono); font-size:10.5px; padding:2px 6px; border-radius:2px;
+        border:1px solid var(--border); color:var(--ink-3); }
+.chip.y { color:var(--ok); border-color:rgba(37,165,95,.4); }
+.chip.n { color:var(--ng); border-color:rgba(208,59,59,.4); }
+.figs { display:flex; gap:14px; margin-top:7px; font-size:11.5px; color:var(--ink-3); }
+.figs b { color:var(--ink-2); font-weight:500; }
+
+.legend { display:flex; flex-wrap:wrap; gap:13px; margin-top:14px;
+          font-size:11.5px; color:var(--ink-3); }
+.legend i { display:inline-block; width:15px; height:0; border-top-width:2px;
+            border-top-style:solid; vertical-align:middle; margin-right:5px; }
+.empty { padding:40px 0; color:var(--ink-3); text-align:center; }
+footer { margin-top:44px; padding-top:18px; border-top:1px solid var(--border);
+         font-size:12px; color:var(--ink-3); }
+@media (prefers-reduced-motion:no-preference){ .card { transition:border-color .15s; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">Label horizon review</p>
+    <h1>ラベルを20営業日ベースに変えると何が入れ替わるか</h1>
+    <p class="sub">78週高値を更新した日を母集団に、目的変数の地平を60営業日から20営業日へ縮めた。
+      正負が入れ替わったケースだけをチャートで並べてある。学習はまだしていない。</p>
+    <div class="defs" id="defs"></div>
+    <div class="matrix" id="matrix"></div>
+  </header>
+
+  <div class="bar" id="bar"></div>
+  <div class="grid" id="grid"></div>
+  <div class="empty" id="empty" hidden>該当するケースがない</div>
+
+  <footer id="foot"></footer>
+</div>
+
+<script>
+const DATA = __DATA__;
+const CASES = DATA.cases || [];
+const S = DATA.summary || {};
+const BUCKET_JA = {
+  pos_neg: "60日では正例 → 20日では負例",
+  neg_pos: "60日では負例 → 20日では正例",
+};
+const $ = (id) => document.getElementById(id);
+const fmt = (v, d = 1) => (v === null || v === undefined || !isFinite(v))
+  ? "—" : Number(v).toFixed(d);
+const pct = (v, d = 1) => (v === null || v === undefined || !isFinite(v))
+  ? "—" : (v >= 0 ? "+" : "") + Number(v).toFixed(d) + "%";
+
+let showLong = true;
+let bucket = "pos_neg";
+
+/* ---------- 定義の要約 ---------- */
+function renderDefs() {
+  const c = (S.config || {});
+  const rows = [
+    ["now", "現行", c.cfg60, "60", "+27.9%", "+13.9%", "MA20 ≧ MA60"],
+    ["next", "新案", c.cfg20, "20", "+16.1%", "+8.0%", "MA5 ≧ MA20"],
+  ];
+  $("defs").innerHTML = rows.map(([cls, ttl, cfg, h, need, end, tr]) => `
+    <div class="def ${cls}">
+      <span class="tag">${cls === "now" ? "現行" : "新案"}</span>
+      <h2>${ttl}：判定期間 ${h} 営業日</h2>
+      <dl>
+        <dt>到達</dt><dd>1.2σ√${h}　<b>σ=3%/日なら ${need}</b></dd>
+        <dt>終盤</dt><dd>最後の5日平均が到達の半分　<b>${end}</b></dd>
+        <dt>トレンド</dt><dd><b>${tr}</b></dd>
+        <dt>定義名</dt><dd class="num">${(cfg && cfg.name) || "—"}</dd>
+      </dl>
+    </div>`).join("");
+}
+
+/* ---------- 遷移表 ---------- */
+function renderMatrix() {
+  const t = S.transition;
+  if (!t) { $("matrix").hidden = true; return; }
+  const cell = (n, p, flip) =>
+    `<td class="num ${flip ? "flip" : "muted"}">${n.toLocaleString()}<span class="muted"> (${fmt(p)}%)</span></td>`;
+  $("matrix").innerHTML = `<table>
+    <thead><tr><th>両方とも判定できた ${t.n.toLocaleString()} 件</th>
+      <th>20日で正例</th><th>20日で負例</th><th>計</th></tr></thead>
+    <tbody>
+      <tr><th>60日で正例</th>
+        ${cell(t.pos_pos, t.pos_pos_pct, false)}${cell(t.pos_neg, t.pos_neg_pct, true)}
+        <td class="num muted">${(t.pos_pos + t.pos_neg).toLocaleString()}</td></tr>
+      <tr><th>60日で負例</th>
+        ${cell(t.neg_pos, t.neg_pos_pct, true)}${cell(t.neg_neg, t.neg_neg_pct, false)}
+        <td class="num muted">${(t.neg_pos + t.neg_neg).toLocaleString()}</td></tr>
+      <tr><th>計</th>
+        <td class="num muted">${(t.pos_pos + t.neg_pos).toLocaleString()}</td>
+        <td class="num muted">${(t.pos_neg + t.neg_neg).toLocaleString()}</td>
+        <td class="num muted">${t.n.toLocaleString()}</td></tr>
+    </tbody></table>`;
+}
+
+/* ---------- 操作 ---------- */
+function renderBar() {
+  const counts = {};
+  for (const c of CASES) counts[c.bucket] = (counts[c.bucket] || 0) + 1;
+  $("bar").innerHTML =
+    Object.keys(BUCKET_JA).map((k) =>
+      `<button class="tab" type="button" data-b="${k}" aria-pressed="${k === bucket}">
+         ${BUCKET_JA[k]}<span class="num"> ${counts[k] || 0}</span></button>`).join("") +
+    `<label class="toggle"><input type="checkbox" id="toggleLong" ${showLong ? "checked" : ""}>
+       60日側の線も出す</label>`;
+  for (const b of $("bar").querySelectorAll(".tab")) {
+    b.addEventListener("click", () => { bucket = b.dataset.b; renderBar(); renderCards(); });
+  }
+  $("toggleLong").addEventListener("change", (e) => {
+    showLong = e.target.checked; renderCards();
+  });
+}
+
+/* ---------- チャート ---------- */
+const W = 560, H = 214, PAD = { t: 11, r: 54, b: 16, l: 8 };
+
+function chart(c) {
+  const n = c.close.length;
+  if (!n) return "";
+  const series = [c.close, c.ma5, c.ma20, showLong ? c.ma60 : null];
+  const lines = [c.h20.target, c.h20.endLine];
+  if (showLong) lines.push(c.h60.target, c.h60.endLine);
+  let lo = Infinity, hi = -Infinity;
+  for (const s of series) for (const v of (s || [])) {
+    if (v !== null && isFinite(v)) { if (v < lo) lo = v; if (v > hi) hi = v; }
+  }
+  for (const v of lines) if (v !== null && isFinite(v)) {
+    if (v < lo) lo = v; if (v > hi) hi = v;
+  }
+  if (!isFinite(lo) || !isFinite(hi)) return "";
+  const span = (hi - lo) || 1;
+  lo -= span * 0.06; hi += span * 0.06;
+  const X = (i) => PAD.l + (i / Math.max(1, n - 1)) * (W - PAD.l - PAD.r);
+  const Y = (v) => PAD.t + (1 - (v - lo) / (hi - lo)) * (H - PAD.t - PAD.b);
+
+  const path = (arr) => {
+    let d = "", pen = false;
+    for (let i = 0; i < n; i++) {
+      const v = arr && arr[i];
+      if (v === null || v === undefined || !isFinite(v)) { pen = false; continue; }
+      d += (pen ? "L" : "M") + X(i).toFixed(1) + " " + Y(v).toFixed(1) + " ";
+      pen = true;
+    }
+    return d.trim();
+  };
+  const band = (from, to, cls) => {
+    const a = Math.max(0, Math.min(n - 1, from)), b = Math.max(0, Math.min(n - 1, to));
+    return `<rect class="${cls}" x="${X(a).toFixed(1)}" y="${PAD.t}"
+      width="${Math.max(1, X(b) - X(a)).toFixed(1)}"
+      height="${H - PAD.t - PAD.b}"></rect>`;
+  };
+  /* 4本の水平線のラベルは値が近いと重なって読めなくなる。
+     線はそのまま、文字だけを最低 10px 離して置き直す。 */
+  const marks = [];
+  const mark = (v, cls, dash, label) => {
+    if (v === null || v === undefined || !isFinite(v)) return;
+    marks.push({ y: Y(v), cls, dash, label });
+  };
+  const emitMarks = () => {
+    if (!marks.length) return "";
+    const sorted = marks.slice().sort((a, b) => a.y - b.y);
+    const GAP = 10, top = PAD.t + 4, bot = H - PAD.b - 2;
+    let prev = -Infinity;
+    for (const m of sorted) {
+      m.ty = Math.min(bot, Math.max(top, m.y, prev + GAP));
+      prev = m.ty;
+    }
+    const over = sorted.length ? sorted[sorted.length - 1].ty - bot : 0;
+    if (over > 0) for (const m of sorted) m.ty = Math.max(top, m.ty - over);
+    return sorted.map((m) => `
+      <line class="l${m.cls}" x1="${PAD.l}" y1="${m.y.toFixed(1)}"
+        x2="${(W - PAD.r).toFixed(1)}" y2="${m.y.toFixed(1)}"
+        stroke-width="1" stroke-dasharray="${m.dash}" fill="none"></line>
+      <text class="t${m.cls}" x="${(W - PAD.r + 4).toFixed(1)}"
+        y="${m.ty.toFixed(1)}" dy="3" font-size="9">${m.label}</text>`).join("");
+  };
+
+  const tx = X(c.tPos).toFixed(1);
+  const hp = c.h20.hitPos;
+  const hit20 = (hp !== null && hp !== undefined && hp >= 0 && hp < n
+                 && c.close[hp] !== null && isFinite(c.close[hp]))
+    ? `<circle class="dot20" cx="${X(hp).toFixed(1)}" cy="${Y(c.close[hp]).toFixed(1)}"
+         r="3"></circle>` : "";
+
+  return `<svg viewBox="0 0 ${W} ${H}" role="img"
+      aria-label="${c.code} の値動きと、2つの判定期間">
+    ${showLong ? band(c.tPos + 1, c.tPos + 60, "b60") : ""}
+    ${band(c.tPos + 1, c.tPos + 20, "b20")}
+    <line class="s-tline" x1="${tx}" y1="${PAD.t}" x2="${tx}" y2="${H - PAD.b}"
+      stroke-width="1" stroke-dasharray="2 3"></line>
+    ${(() => {
+      if (showLong) { mark(c.h60.target, "60", "5 4", "到達60");
+                      mark(c.h60.endLine, "60", "1 3", "終盤60"); }
+      mark(c.h20.target, "20", "5 4", "到達20");
+      mark(c.h20.endLine, "20", "1 3", "終盤20");
+      return emitMarks();
+    })()}
+    ${showLong ? `<path class="s-ma60" d="${path(c.ma60)}" stroke-width="1"
+      stroke-dasharray="4 3" fill="none"></path>` : ""}
+    <path class="s-ma20" d="${path(c.ma20)}" stroke-width="1" fill="none"></path>
+    <path class="s-ma5" d="${path(c.ma5)}" stroke-width="1" fill="none"></path>
+    <path class="s-close" d="${path(c.close)}" stroke-width="1.7" fill="none"
+      stroke-linejoin="round"></path>
+    ${hit20}
+  </svg>`;
+}
+
+/* ---------- 判定バッジ ---------- */
+function verdict(h, cls, ttl) {
+  const chip = (ok, t) =>
+    `<span class="chip ${ok === true ? "y" : ok === false ? "n" : ""}">${t} ${
+      ok === true ? "○" : ok === false ? "×" : "—"}</span>`;
+  return `<div class="v ${cls}">
+    <div class="hd">${ttl}</div>
+    <div class="out ${h.label ? "pos" : "neg"}">${h.label ? "正例" : "負例"}</div>
+    <div class="chips">${chip(h.reached, "到達")}${chip(h.endOk, "終盤")}${chip(h.trendOk, "トレンド")}</div>
+    <div class="figs"><span>最大 <b class="num">${pct(h.maxGainPct)}</b></span>
+      <span>終盤 <b class="num">${pct(h.endLevelPct)}</b></span>
+      <span>要 <b class="num">${pct(h.thresholdPct)}</b></span></div>
+  </div>`;
+}
+
+function renderCards() {
+  const list = CASES.filter((c) => c.bucket === bucket);
+  $("empty").hidden = list.length > 0;
+  $("grid").innerHTML = list.map((c) => `
+    <article class="card">
+      <header>
+        <span class="code">${c.code}</span>
+        ${c.name ? `<span class="nm">${c.name}</span>` : ""}
+        <span class="when">${c.t}　σ ${fmt(c.volAtT, 2)}%</span>
+      </header>
+      <div class="chart">${chart(c)}</div>
+      <div class="verdicts">
+        ${verdict(c.h60, "now", "現行 60営業日")}
+        ${verdict(c.h20, "next", "新案 20営業日")}
+      </div>
+    </article>`).join("");
+}
+
+function renderFoot() {
+  $("foot").innerHTML = `
+    <div class="legend">
+      <span><i style="border-color:var(--series)"></i>終値</span>
+      <span><i style="border-color:var(--ma-s)"></i>MA5</span>
+      <span><i style="border-color:var(--ma-m)"></i>MA20</span>
+      <span><i style="border-color:var(--ma-l);border-top-style:dashed"></i>MA60</span>
+      <span><i style="border-color:var(--h20);border-top-style:dashed"></i>到達しきい値</span>
+      <span><i style="border-color:var(--h20);border-top-style:dotted"></i>終盤の水準</span>
+      <span>帯 = 判定期間（濃い＝20日 / 薄い＝60日）</span>
+      <span>●＝20日の到達日</span>
+    </div>
+    <p>${(S.n_events || 0).toLocaleString()} 件の高値更新日から、入れ替わった
+      ${((S.transition || {}).flipped || 0).toLocaleString()} 件のうち
+      ${CASES.length} 件を年をまたいで抽出した。集計は docs/LABEL20_EDA.md。</p>`;
+}
+
+renderDefs(); renderMatrix(); renderBar(); renderCards(); renderFoot();
+</script>

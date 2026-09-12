@@ -12,3 +12,6 @@ research/_data/
 # meta.json は小さいので git に残す（過去のモデルの素性を追うため）。
 research/model/model.txt
 research/model/oof.parquet
+
+# 検証チャートのデータは HTML に埋め込まれる。両方置くと同じ中身を二重に積む
+research/samples/label20_samples.json

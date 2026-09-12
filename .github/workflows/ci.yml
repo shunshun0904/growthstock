@@ -42,6 +42,7 @@ jobs:
           python3 tests/test_data_store.py
           python3 tests/test_entry_policy.py
           python3 tests/test_exit_timing.py
+          python3 tests/test_label20.py
 
       - name: ビルド
         run: npm run build

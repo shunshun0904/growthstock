@@ -1,0 +1,96 @@
+name: Label 20d EDA
+
+# 目的変数の地平を60営業日から20営業日へ変えたときに何が入れ替わるかを集計し、
+# 入れ替わったケースのチャートを書き出す。**学習はしない。**
+# 出力は docs/LABEL20_EDA.md と research/viewer/label20_review.html。
+on:
+  workflow_dispatch:
+    inputs:
+      n_per_bucket:
+        description: '入れ替わった群ごとに何件チャートにするか'
+        default: '30'
+  # workflow_dispatch はデフォルトブランチにファイルが無いと呼べないため、
+  # 調査用ブランチでは push でも起動できるようにしておく（probe.yml と同じ理由）。
+  push:
+    branches: ['claude/charming-ride-vq8hz4']
+    paths:
+      - 'research/label20.py'
+      - 'research/label20_eval.py'
+      - 'research/viewer/label20_template.html'
+      - '.github/workflows/label20.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: label20-eda
+  cancel-in-progress: true
+
+jobs:
+  eda:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r research/requirements.txt
+
+      # 要るのは日次バーだけ。ラベルは株価だけから決まるので、
+      # 財務も信用残も指数も読まない。
+      - name: Download daily bars (release)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p research/_data
+          gh release download data-raw --dir research/_data --clobber \
+            --pattern 'bars_*.parquet' || true
+          if ! ls research/_data/bars_*.parquet >/dev/null 2>&1; then
+            echo "bars_*.parquet が取れなかったので、全アセットを落とす"
+            gh release download data-raw --dir research/_data --clobber
+          fi
+          ls -lh research/_data
+
+      - name: Compare labels
+        run: |
+          python3 research/label20_eval.py \
+            --n-per-bucket "${{ inputs.n_per_bucket || '30' }}" 2>&1 | tee eda.log
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo '```'
+            tail -30 eda.log 2>/dev/null || echo "ログなし"
+            echo '```'
+            echo
+            cat docs/LABEL20_EDA.md 2>/dev/null || true
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: label20-eda
+          path: |
+            docs/LABEL20_EDA.md
+            research/viewer/label20_review.html
+            research/samples/label20_samples.json
+            eda.log
+          if-no-files-found: warn
+
+      # JSON はコミットしない。HTML に同じ中身が埋め込んであるので、
+      # 両方置くと同じデータを二重に git へ積むことになる。
+      - name: Commit report and viewer
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A docs/LABEL20_EDA.md research/viewer/label20_review.html
+          if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
+          git commit -m "chore(research): 20日ラベルの集計と検証チャートを更新"
+          for i in 1 2 3 4; do
+            if git push; then exit 0; fi
+            sleep $((2 ** i)); git pull --rebase
+          done
+          exit 1
