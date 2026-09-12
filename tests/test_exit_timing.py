@@ -280,5 +280,50 @@ class TestBenchmark(unittest.TestCase):
         self.assertAlmostEqual(r["excess_mean"], 10.0)   # 20 - 10
 
 
+class TestBootstrapCI(unittest.TestCase):
+    """超過の区間。日単位で回しているか、NaN を列ごとに除けているか。"""
+
+    def test_zero_variation_gives_zero_width(self):
+        dates = pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03"] * 4)
+        mat = np.full((12, 1), 2.0)
+        ci = X.bootstrap_mean_ci(dates, mat, n_boot=200, seed=1)[0]
+        self.assertAlmostEqual(ci["mean"], 2.0)
+        self.assertAlmostEqual(ci["lo"], 2.0)
+        self.assertAlmostEqual(ci["hi"], 2.0)
+
+    def test_single_day_cannot_be_resampled_apart(self):
+        dates = pd.to_datetime(["2024-01-01"] * 8)
+        mat = np.arange(8, dtype=float).reshape(8, 1)
+        ci = X.bootstrap_mean_ci(dates, mat, n_boot=200, seed=1)[0]
+        self.assertAlmostEqual(ci["lo"], ci["hi"], places=9)
+
+    def test_nan_is_dropped_per_column(self):
+        dates = pd.to_datetime(["2024-01-01", "2024-01-02"] * 3)
+        mat = np.array([[1.0, np.nan], [1.0, 5.0], [1.0, np.nan],
+                        [1.0, 5.0], [1.0, np.nan], [1.0, 5.0]])
+        cis = X.bootstrap_mean_ci(dates, mat, n_boot=200, seed=1)
+        self.assertAlmostEqual(cis[0]["mean"], 1.0)
+        self.assertAlmostEqual(cis[1]["mean"], 5.0)   # NaN を0として数えない
+
+    def test_all_nan_column(self):
+        dates = pd.to_datetime(["2024-01-01", "2024-01-02"])
+        mat = np.full((2, 1), np.nan)
+        ci = X.bootstrap_mean_ci(dates, mat, n_boot=100, seed=1)[0]
+        self.assertIsNone(ci["lo"])
+
+    def test_excess_matrix_columns_match_horizons(self):
+        F = np.array([[100.0, 110.0, 120.0, 130.0]])
+        BM = np.array([[1000.0, 1000.0, 1000.0, 1000.0]])
+        E = X.excess_matrix(F, np.array([100.0]), BM, 0.0, (1, 3))
+        self.assertEqual(E.shape, (1, 2))
+        np.testing.assert_allclose(E[0], [10.0, 30.0])
+
+    def test_excess_matrix_skips_out_of_range(self):
+        F = np.array([[100.0, 110.0]])
+        BM = np.array([[1000.0, 1000.0]])
+        E = X.excess_matrix(F, np.array([100.0]), BM, 0.0, (1, 60))
+        self.assertEqual(E.shape, (1, 1))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

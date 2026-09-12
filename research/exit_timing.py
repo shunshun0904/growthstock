@@ -258,6 +258,73 @@ def compare_exits(F: np.ndarray, entry: np.ndarray, need: np.ndarray,
     return rows
 
 
+def bootstrap_mean_ci(dates, mat: np.ndarray, n_boot: int = 1000,
+                      seed: int = 0) -> List[Dict[str, float]]:
+    """
+    列ごとに「平均の95%区間」を、**日単位**の復元抽出で出す。
+
+    行単位で回してはいけない。同じ日のブレイクは地合いを共有していて
+    独立でないため、区間が実際より狭く出る。
+
+    NaN は列ごとに除く（保有日数によって値が取れる件数が違うため）。
+    列をまたいで同じ抽出を使うので、区間どうしの比較も筋が通る。
+    """
+    n, n_col = mat.shape
+    out: List[Dict[str, float]] = []
+    finite = np.isfinite(mat)
+    with np.errstate(invalid="ignore"):
+        obs = np.where(finite.any(axis=0),
+                       np.nansum(np.where(finite, mat, 0.0), axis=0)
+                       / np.maximum(finite.sum(axis=0), 1), np.nan)
+    if n == 0 or n_boot <= 0:
+        return [{"mean": None, "lo": None, "hi": None, "p_gt0": None}
+                for _ in range(n_col)]
+
+    codes, _ = pd.factorize(np.asarray(dates))
+    n_dates = int(codes.max()) + 1
+    sums = np.zeros((n_dates, n_col))
+    cnts = np.zeros((n_dates, n_col))
+    np.add.at(sums, codes, np.where(finite, mat, 0.0))
+    np.add.at(cnts, codes, finite.astype(float))
+
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, n_dates, size=(n_boot, n_dates))
+    flat = (np.arange(n_boot)[:, None] * n_dates + idx).ravel()
+    w = np.bincount(flat, minlength=n_boot * n_dates).astype(float)
+    w = w.reshape(n_boot, n_dates)
+
+    S = w @ sums
+    C = w @ cnts
+    with np.errstate(invalid="ignore", divide="ignore"):
+        means = np.where(C > 0, S / np.where(C > 0, C, 1.0), np.nan)
+
+    for i in range(n_col):
+        col = means[:, i]
+        col = col[np.isfinite(col)]
+        if col.size == 0:
+            out.append({"mean": None, "lo": None, "hi": None, "p_gt0": None})
+            continue
+        out.append({
+            "mean": round(float(obs[i]), 3) if np.isfinite(obs[i]) else None,
+            "lo": round(float(np.percentile(col, 2.5)), 3),
+            "hi": round(float(np.percentile(col, 97.5)), 3),
+            "p_gt0": round(float((col > 0).mean()), 3),
+        })
+    return out
+
+
+def excess_matrix(F: np.ndarray, entry: np.ndarray, bm: np.ndarray,
+                  fee_pct: float, horizons: Sequence[int]) -> np.ndarray:
+    """保有日数ごとの超過リターンを (件数, 保有日数) に並べる。区間を付けるため。"""
+    cols = []
+    for k in horizons:
+        if k >= F.shape[1]:
+            continue
+        ret = (F[:, k] / entry - 1.0) * 100.0 - fee_pct
+        cols.append(_excess(ret, bm, np.full(len(ret), k)))
+    return np.column_stack(cols) if cols else np.zeros((len(F), 0))
+
+
 # --------------------------------------------------------------------------- #
 # 候補の選び方
 # --------------------------------------------------------------------------- #

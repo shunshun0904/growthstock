@@ -102,7 +102,8 @@ def restrict_to_full_window(panel: pd.DataFrame, ev: pd.DataFrame,
 
 def evaluate_subsets(panel: pd.DataFrame, ev: pd.DataFrame, fee_pct: float,
                      test_start: str,
-                     topix: Optional[pd.DataFrame] = None) -> List[Dict]:
+                     topix: Optional[pd.DataFrame] = None,
+                     n_boot: int = 1000) -> List[Dict]:
     F = X.forward_matrix(panel, ev, days=X.FORWARD_DAYS)
     BM = (X.benchmark_matrix(panel, ev, topix, days=X.FORWARD_DAYS)
           if topix is not None else None)
@@ -127,6 +128,14 @@ def evaluate_subsets(panel: pd.DataFrame, ev: pd.DataFrame, fee_pct: float,
                 100.0 * float((ev["score"][m] >= thr).mean()), 1)
         sec["exits"] = X.compare_exits(F[m], entry[m], need[m], fee_pct,
                                        bm=BM[m] if BM is not None else None)
+        if BM is not None:
+            ks = [k for k in X.HORIZONS if k < F.shape[1]]
+            E = X.excess_matrix(F[m], entry[m], BM[m], fee_pct, ks)
+            cis = X.bootstrap_mean_ci(ev["Date"].to_numpy()[m], E, n_boot)
+            by_k = dict(zip(ks, cis))
+            for r in sec["exits"]:
+                if r.get("k") in by_k:
+                    r["excess_ci"] = by_k[r["k"]]
         sec["peak60"] = X.peak_profile(F[m], entry[m], 60, fee_pct)
         sec["peak120"] = X.peak_profile(F[m], entry[m], X.FORWARD_DAYS, fee_pct)
         # 形が期間で変わらないかを見る。変わるなら「一番良い日数」は選べない
@@ -178,6 +187,13 @@ def _t(header: List[str], rows: List[List]) -> str:
     for r in rows:
         out.append("| " + " | ".join(str(c) for c in r) + " |")
     return "\n".join(out)
+
+
+def _ci(ci: Optional[Dict], fallback=None) -> str:
+    """平均と95%区間。区間が無ければ平均だけ。"""
+    if not ci or ci.get("lo") is None:
+        return _num(fallback)
+    return f"{ci['mean']:+.2f} [{ci['lo']:+.2f}, {ci['hi']:+.2f}]"
 
 
 def _num(v, fmt="{:+.2f}"):
@@ -261,7 +277,7 @@ def write_md(rep: Dict, path: str) -> None:
         for r in sec["exits"]:
             body.append([
                 r["rule"], f"{r['n']:,}",
-                _num(r.get("excess_mean")),
+                _ci(r.get("excess_ci"), r.get("excess_mean")),
                 _num(r.get("excess_win"), "{:.1f}") + (
                     "%" if np.isfinite(r.get("excess_win", np.nan)) else ""),
                 _num(r.get("mean")), _num(r.get("median")),
@@ -271,8 +287,13 @@ def write_md(rep: Dict, path: str) -> None:
                 _num(r.get("per_month")),
                 f"{r['hit_rate']:.0f}%" if r.get("hit_rate") is not None else "—",
             ])
-        A(_t(["出口", "件数", "**TOPIX超過**", "超過勝率", "素の平均", "中央値",
-              "勝率", "下側5%", "平均保有日数", "1ヶ月換算", "到達率"], body))
+        A(_t(["出口", "件数", "**TOPIX超過 [95%区間]**", "超過勝率", "素の平均",
+              "中央値", "勝率", "下側5%", "平均保有日数", "1ヶ月換算", "到達率"],
+             body))
+        A("")
+        A("区間は**日単位**の復元抽出（同じ日のブレイクは地合いを共有していて"
+          "独立でないため、行単位だと区間が実際より狭く出る）。"
+          "**区間が0を跨いでいる行は、超過があるとは言えない。**")
         A("")
         pk = sec["peak60"]
         A(f"60日以内の最大値で売れた場合（後知恵）: 平均 {_num(pk.get('peak_mean'))}% / "
@@ -340,6 +361,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--model-dir", default=MODEL_DIR)
     ap.add_argument("--test-start", default="2024-10-01")
     ap.add_argument("--fee", type=float, default=0.05)
+    ap.add_argument("--n-boot", type=int, default=1000)
     ap.add_argument("--min-trading-value", type=float, default=0.1)
     ap.add_argument("--out-md", default=OUT_MD)
     ap.add_argument("--out-json", default=OUT_JSON)
@@ -353,7 +375,8 @@ def main(argv: Optional[List[str]] = None) -> int:
         raise SystemExit("イベントが0件。生データを確認してください")
 
     print("\n[eval] 部分集合ごとに出口を比べる")
-    sections = evaluate_subsets(panel, ev, args.fee, args.test_start, topix)
+    sections = evaluate_subsets(panel, ev, args.fee, args.test_start, topix,
+                                args.n_boot)
 
     rep = {
         "ranAt": dt.datetime.now(dt.timezone.utc).isoformat(),
