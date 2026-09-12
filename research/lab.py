@@ -294,6 +294,19 @@ def metrics(oof: pd.DataFrame) -> Dict:
         out[f"p_at_{k}"] = float(t["label"].mean())
         out[f"end_{k}"] = float(te.mean()) * 100
         out[f"lift_{k}"] = out[f"end_{k}"] - out["base_end"]
+
+    # 運用そのものの指標。毎日「その日の1位」を1つ買ったらどうなるか。
+    # 上位k% は日をまたいだ選択（いつ買うか）と日の中の選択（何を買うか）が
+    # 混ざっている。こちらは日数を固定するので、銘柄選定の腕だけが出る。
+    best = oof.loc[oof.groupby("Date")["score"].idxmax()]
+    be = pd.to_numeric(best["ref_end"], errors="coerce")
+    out["pick1_end"] = float(be.mean()) * 100
+    out["pick1_pos"] = float(best["label"].mean())
+    out["pick1_win"] = float((be > 0).mean())
+    out["pick1_n"] = int(len(best))
+    # 同じ日数だけランダムに1件選んだ場合（＝銘柄選定をしない場合）との差
+    out["pick1_lift"] = out["pick1_end"] - float(
+        oof.groupby("Date")["ref_end"].mean().mean()) * 100
     return out
 
 
@@ -373,10 +386,11 @@ def compare(a: Result, b: Result, *, k: int = 5, seed: int = SEED) -> Dict:
     return out
 
 
-COLS = [("n", "件数", "{:,}"), ("pr_auc", "PR-AUC", "{:.4f}"),
-        ("roc_auc", "ROC-AUC", "{:.4f}"), ("auc_in_day", "日付内AUC", "{:.4f}"),
-        ("p_at_5", "P@5%", "{:.1%}"), ("end_5", "上位5%収益", "{:+.2f}%"),
-        ("lift_5", "対母集団", "{:+.2f}pt"), ("end_1", "上位1%収益", "{:+.2f}%")]
+COLS = [("pr_auc", "PR-AUC", "{:.4f}"), ("roc_auc", "ROC-AUC", "{:.4f}"),
+        ("auc_in_day", "日付内AUC", "{:.4f}"), ("end_5", "上位5%収益", "{:+.2f}%"),
+        ("lift_5", "対母集団", "{:+.2f}pt"),
+        ("pick1_end", "毎日1位", "{:+.2f}%"), ("pick1_lift", "対その日平均", "{:+.2f}pt"),
+        ("pick1_win", "1位の勝率", "{:.1%}")]
 
 
 def table(results: Dict[str, Result]) -> str:
