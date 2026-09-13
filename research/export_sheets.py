@@ -63,14 +63,26 @@ OWNED_COLS = [
 
 #: モデル別の列。画面に並べている5モデルと同じ順・同じ記号。
 #:
-#: 入れるのは**そのモデル自身の過去スコア分布での位置**（0〜100）だけ。
-#: 生スコアは学習器ごとにスケールも意味も違うので、台帳に並べても
-#: 足したり比べたりできない。位置なら同じ物差しになる。
+#: 2種類を並べる。
+#:
+#:   LGB%     そのモデル自身の過去スコア分布での位置（0〜100）。
+#:            **モデルをまたいで比べられるのはこちらだけ。**
+#:            画面の棒グラフと同じ値
+#:   LGBスコア モデルが出した生の値。学習器ごとにスケールも意味も違うので
+#:            モデル間で大小を比べてはいけない。同じモデルの中で日を
+#:            またいで追う、しきい値を自分で引き直す、といった用途向け
+#:
+#: 位置だけだと元に戻せない（順位に潰れていて、後から別のしきい値で
+#: 切り直せない）ので、生スコアも残す。
 #:
 #: 「一致」は上位10%と見ているモデルの数。独立した判定の数え上げで、
 #: スコアを混ぜた値ではない（アンサンブルはしない方針）。
 MODEL_COLS = [f"{M.SHORT.get(a, a[:3].upper())}%" for a in M.ALGOS]
+SCORE_COLS = [f"{M.SHORT.get(a, a[:3].upper())}スコア" for a in M.ALGOS]
 AGREE_COL = "一致(上位10%)"
+
+#: 既存の「スコア」列は基準モデル（LightGBM）の生スコアで、LGBスコアと同じ値。
+#: 運用開始時から入っている列なので、過去行との連続性のために残す。
 
 #: 毎回更新する列。実行のたびに最新の株価で書き直す。
 TRACK_COLS = ["現在値", "騰落率%", "経過営業日"]
@@ -95,13 +107,13 @@ def rows_from_predictions(pred: Dict) -> List[Dict]:
     for c in pred["candidates"]:
         ct = c.get("contrib") or {}
         per = c.get("byModel") or {}
-        # そのモデル自身の過去分布での位置。生スコアは入れない
-        # （学習器ごとにスケールが違い、台帳で比べられないため）
-        by_model = {
-            f"{short.get(a) or M.SHORT.get(a, a[:3].upper())}%":
-                (per.get(a) or {}).get("pctHistorical")
-            for a in algos if a in per
-        }
+        by_model = {}
+        for a in algos:
+            if a not in per:
+                continue
+            tag = short.get(a) or M.SHORT.get(a, a[:3].upper())
+            by_model[f"{tag}%"] = per[a].get("pctHistorical")
+            by_model[f"{tag}スコア"] = per[a].get("score")
         out.append({
             "予測日": c["date"], "コード": c["code"], "銘柄名": c.get("name") or "",
             "業種": c.get("sector") or "",
@@ -305,7 +317,7 @@ def ensure_worksheet(book, title: str):
         return ws, False
     except Exception:
         pass
-    header = OWNED_COLS + MODEL_COLS + [AGREE_COL] + TRACK_COLS + USER_COLS
+    header = OWNED_COLS + MODEL_COLS + SCORE_COLS + [AGREE_COL] + TRACK_COLS + USER_COLS
     ws = book.add_worksheet(title=title, rows=2000, cols=max(30, len(header) + 5))
     ws.update([header], "A1")
     ws.freeze(rows=1)
@@ -325,7 +337,7 @@ def ensure_columns(ws, header: List[str], dry_run: bool = False) -> List[str]:
     既存の中身に触らない。並び順が気になるときは利用者が手で動かしてよい
     （名前を変えなければ、そのまま正しく書き込まれる）。
     """
-    want = OWNED_COLS + MODEL_COLS + [AGREE_COL] + TRACK_COLS
+    want = OWNED_COLS + MODEL_COLS + SCORE_COLS + [AGREE_COL] + TRACK_COLS
     missing = [c for c in want if c not in header]
     if not missing:
         return header
@@ -383,7 +395,7 @@ def sync(ws, rows: List[Dict], closes, as_of, dry_run: bool = False) -> Dict[str
     # 列が増えた直後は、直近5営業日ぶんの既存行にモデル別の値が入っていない。
     # 空のセルにだけ入れる。既に値があるセルは触らない（利用者が手で
     # 上書きしている可能性がある。この台帳は手書きと同居する前提）
-    backfill = [c for c in MODEL_COLS + [AGREE_COL] if c in pos]
+    backfill = [c for c in MODEL_COLS + SCORE_COLS + [AGREE_COL] if c in pos]
     by_key = {(x["予測日"], x["コード"]): x for x in rows}
     for (d, code), r in seen.items():
         x = by_key.get((d, code))
@@ -460,13 +472,13 @@ def main(argv=None) -> int:
 
     if args.dry_run:
         # 通信しないので、見出しは初期構成を仮定して整合だけ見る
-        header = OWNED_COLS + MODEL_COLS + [AGREE_COL] + TRACK_COLS + USER_COLS
+        header = OWNED_COLS + MODEL_COLS + SCORE_COLS + [AGREE_COL] + TRACK_COLS + USER_COLS
         print(f"[dry-run] 列 {len(header)}個: {' / '.join(header)}")
         unknown = sorted({k for x in rows for k in x
                           if not k.startswith('_') and k not in header})
         if unknown:
             raise SystemExit(f"見出しに無い項目を書こうとしています: {unknown}")
-        mc = [c for c in MODEL_COLS + [AGREE_COL]]
+        mc = [c for c in MODEL_COLS + SCORE_COLS + [AGREE_COL]]
         print(f"[dry-run] モデル別: {' / '.join(mc)}")
         for x in rows[:5]:
             print("  " + " ".join(

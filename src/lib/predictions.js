@@ -13,8 +13,20 @@
  * URL は使うときに組み立てる。
  */
 const base = () => import.meta.env?.BASE_URL ?? '/';
-const PRED_URL = () => `${base()}data/predictions.json`;
-const HIST_URL = () => `${base()}data/prediction_history.json`;
+
+/**
+ * ビルド識別子。取得 URL に付けて、古い JSON を掴まないようにする。
+ *
+ * データが変わるのは必ずデプロイを伴う（予測ワークフローが JSON を
+ * コミットし、それが Pages の再デプロイを起こす）ので、デプロイごとに
+ * 変わるこの値を付ければ URL が必ず変わる。ブラウザにも CDN にも
+ * 古い中身を返す余地が無くなる。
+ *
+ * 素の node（単体テスト）では define が効かないので、既定値を置く。
+ */
+const BUILD = typeof __BUILD_ID__ === 'string' ? __BUILD_ID__ : 'dev';
+const PRED_URL = () => `${base()}data/predictions.json?v=${BUILD}`;
+const HIST_URL = () => `${base()}data/prediction_history.json?v=${BUILD}`;
 
 async function getJson(url) {
   const res = await fetch(url, { cache: 'no-cache' });

@@ -11,7 +11,10 @@
 const LS_MANUAL = 'focus.manualStocks.v1';
 const LS_VISIBLE = 'focus.visible.v1';
 
-const DATA_URL = () => `${import.meta.env?.BASE_URL ?? '/'}data/stocks.json`;
+// ビルド識別子を付けて、古い JSON を掴まないようにする（predictions.js と同じ理由）
+const BUILD = typeof __BUILD_ID__ === 'string' ? __BUILD_ID__ : 'dev';
+const DATA_URL = () =>
+  `${import.meta.env?.BASE_URL ?? '/'}data/stocks.json?v=${BUILD}`;
 
 export async function loadDataset() {
   const res = await fetch(DATA_URL(), { cache: 'no-cache' });

@@ -5,6 +5,14 @@
     <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content="J-Quants API による8軸モメンタム・スコアリング成長株分析ダッシュボード" />
+    <!-- この HTML だけは必ず取り直させる。
+         JS と CSS はファイル名に中身のハッシュが入るので、いくらでも
+         キャッシュしてよい。逆に、そのファイル名を指しているのが
+         この HTML なので、ここが古いと古いファイル名を読みに行き、
+         新しい版を出したのに画面が変わらない、という事故になる。 -->
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
     <title>GrowthStockAnalyzer — Focus</title>
   </head>
   <body>

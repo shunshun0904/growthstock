@@ -115,12 +115,22 @@ class TestRows(unittest.TestCase):
         self.assertEqual(r["LR%"], 40.5)
         self.assertEqual(r[ES.AGREE_COL], "3/5")
 
-    def test_raw_scores_are_not_written(self):
-        """生スコアは入れない。学習器ごとにスケールが違い、台帳で比べられない。"""
-        rows = ES.rows_from_predictions(PRED)
-        for r in rows:
-            for k in r:
-                self.assertNotIn("score", str(k).lower())
+    def test_raw_scores_are_written_too(self):
+        """
+        位置だけだと元に戻せない（順位に潰れていて、後から別のしきい値で
+        切り直せない）ので、生スコアも残す。
+        """
+        r = ES.rows_from_predictions(PRED)[0]
+        self.assertEqual(r["LGBスコア"], 0.42)
+        self.assertEqual(r["LRスコア"], 0.20)
+        # 位置と生スコアが取り違えられていないこと
+        self.assertEqual(r["LGB%"], 95.1)
+        self.assertNotEqual(r["LGB%"], r["LGBスコア"])
+
+    def test_baseline_score_matches_legacy_column(self):
+        """既存の「スコア」列は基準モデルの生スコア。LGBスコアと一致する。"""
+        r = ES.rows_from_predictions(PRED)[0]
+        self.assertEqual(r["スコア"], r["LGBスコア"])
 
     def test_old_payload_without_bymodel(self):
         """5モデルを学習する前の予測ファイルでも落ちない。"""
@@ -134,6 +144,7 @@ class TestRows(unittest.TestCase):
         self.assertEqual(len(rows), 2)
         self.assertIsNone(rows[0][ES.AGREE_COL])
         self.assertNotIn("LGB%", rows[0])
+        self.assertNotIn("LGBスコア", rows[0])
 
 
 class TestSync(unittest.TestCase):
@@ -160,7 +171,7 @@ class TestSync(unittest.TestCase):
         self.assertEqual(header.index("メモ"),
                          self.OLD_HEADER.index("メモ"))
         # 新しい列は右端に付いている
-        for c in ES.MODEL_COLS + [ES.AGREE_COL]:
+        for c in ES.MODEL_COLS + ES.SCORE_COLS + [ES.AGREE_COL]:
             self.assertIn(c, header)
             self.assertGreater(header.index(c), header.index("メモ"))
 
@@ -196,7 +207,8 @@ class TestSync(unittest.TestCase):
     def test_filled_model_cell_is_not_overwritten(self):
         """既に値があるモデル別セルは触らない（手で直している可能性がある）。"""
         ws = self._old_sheet()
-        ws.values[0] = self.OLD_HEADER + ES.MODEL_COLS + [ES.AGREE_COL]
+        ws.values[0] = (self.OLD_HEADER + ES.MODEL_COLS + ES.SCORE_COLS
+                        + [ES.AGREE_COL])
         p = {h: i for i, h in enumerate(ws.values[0])}
         line = ws.values[1] + [""] * (len(ws.values[0]) - len(ws.values[1]))
         line[p["LGB%"]] = "99.9"          # 手で書いた値
@@ -217,11 +229,13 @@ class TestSync(unittest.TestCase):
         self.assertEqual(got["コード"], "5678")
         self.assertEqual(got["LGB%"], 20.0)
         self.assertEqual(got["NN%"], 12.0)
+        self.assertEqual(got["LGBスコア"], 0.11)
+        self.assertEqual(got["NNスコア"], 0.07)
         self.assertEqual(got[ES.AGREE_COL], "0/5")
 
     def test_user_reordered_columns_still_work(self):
         """利用者が列をドラッグして動かしても、名前で探すので正しく入る。"""
-        header = (["メモ", "建値"] + ES.MODEL_COLS + [ES.AGREE_COL]
+        header = (["メモ", "建値"] + ES.MODEL_COLS + ES.SCORE_COLS + [ES.AGREE_COL]
                   + ES.OWNED_COLS + ES.TRACK_COLS
                   + [c for c in ES.USER_COLS if c not in ("メモ", "建値")])
         ws = FakeWorksheet([header])
@@ -233,8 +247,8 @@ class TestSync(unittest.TestCase):
         self.assertEqual(got["メモ"], "")
 
     def test_header_is_not_touched_when_nothing_is_missing(self):
-        header = (ES.OWNED_COLS + ES.MODEL_COLS + [ES.AGREE_COL]
-                  + ES.TRACK_COLS + ES.USER_COLS)
+        header = (ES.OWNED_COLS + ES.MODEL_COLS + ES.SCORE_COLS
+                  + [ES.AGREE_COL] + ES.TRACK_COLS + ES.USER_COLS)
         ws = FakeWorksheet([header])
         ES.sync(ws, ES.rows_from_predictions(PRED), {}, None)
         self.assertEqual(ws.updates, [], "見出しを不要に書き換えた")

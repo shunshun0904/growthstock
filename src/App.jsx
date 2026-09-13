@@ -19,6 +19,13 @@ const TABS = [
   { id: 'simulator', label: 'What-If シミュレーター' },
 ];
 
+/**
+ * ビルド識別子。vite.config.js が define で埋める。
+ * 素の node（単体テスト）では define が効かないので既定値を置く。
+ */
+const BUILD_ID = typeof __BUILD_ID__ === 'string' ? __BUILD_ID__ : 'dev';
+const BUILT_AT = typeof __BUILT_AT__ === 'string' ? __BUILT_AT__ : '';
+
 export default function App() {
   const [dataset, setDataset] = useState(null);
   const [loadError, setLoadError] = useState(null);
@@ -167,6 +174,12 @@ export default function App() {
           {dataset?.generatedAt ? (
             <>データ取得: <span className="num">{fmtDateTime(dataset.generatedAt)}</span></>
           ) : '—'}
+          {/* どの版を見ているかを画面から確かめられるようにする。
+              これが無いと「更新されていない」ときに、配信が古いのか
+              手元のブラウザが古いのかを切り分けられない */}
+          <div title={`ビルド ${BUILD_ID}（${BUILT_AT}）`}>
+            <span className="num">build {BUILD_ID}</span>
+          </div>
           {manual.length > 0 && (
             <div>
               <button
