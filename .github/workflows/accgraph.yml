@@ -1,0 +1,135 @@
+name: Accounting Graph Baseline
+
+# 会計フローグラフのデータセットを作り、ベースラインを比較する。
+#
+# GNN はまだ入っていない。まずこのワークフローが出す表を埋め、
+# GNN がそれを上回るかどうかで有効性を判断する。
+#
+# 生データは Release（タグ data-raw）から落とす。API キーは要らない
+# （update-data.yml / build-model.yml が取得済みのものを使う）。
+on:
+  workflow_dispatch:
+    inputs:
+      from:
+        description: '対象とする決算発表日の下限 (YYYY-MM-DD、空なら全期間)'
+        type: string
+        default: ''
+      benchmark:
+        description: '超過リターンの控除ベンチマーク'
+        type: choice
+        options: ['topix', 'sector']
+        default: 'topix'
+      horizon:
+        description: '保有営業日数'
+        type: choice
+        options: ['5', '10', '20']
+        default: '20'
+      cost_bps:
+        description: '往復の取引コスト (bp)'
+        type: string
+        default: '30'
+      commit:
+        description: '結果を docs/ACCGRAPH_BASELINE.md にコミットする'
+        type: boolean
+        default: true
+  push:
+    branches: ['claude/accounting-graph-gnn-prediction-27z98y']
+    paths:
+      - 'research/accgraph/**'
+      - '.github/workflows/accgraph.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: accgraph
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    # 日次バーは1,000万行規模。pivot とラベル付けに時間がかかる。
+    # 学習は LightGBM の多クラス × フォールド数なのでその後ろに乗る
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r research/requirements.txt
+
+      # スキーマと生成文書がずれていないか。ずれたまま結果を出すと、
+      # 表に書いてある定義と実際の計算が別物になる
+      - name: Check schema doc
+        run: python3 research/accgraph/docgen.py --check
+
+      - name: Unit tests
+        run: python3 tests/test_accgraph.py
+
+      - name: Download raw data (release)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p research/_data
+          gh release download data-raw --dir research/_data --clobber
+          ls -lh research/_data
+
+      - name: Build dataset
+        run: |
+          args=()
+          if [ -n "${{ inputs.from }}" ]; then args+=(--from "${{ inputs.from }}"); fi
+          python3 research/accgraph/build.py "${args[@]}" 2>&1 | tee build.log
+
+      - name: Evaluate baselines
+        run: |
+          python3 research/accgraph/evaluate.py \
+            --benchmark "${{ inputs.benchmark || 'topix' }}" \
+            --horizon "${{ inputs.horizon || '20' }}" \
+            --cost-bps "${{ inputs.cost_bps || '30' }}" \
+            2>&1 | tee evaluate.log
+
+      - name: Summary
+        if: always()
+        run: |
+          { echo '## データセット構築'; echo '```'
+            if [ -f build.log ]; then tail -60 build.log; else echo "(実行せず)"; fi
+            echo '```'
+            echo '## ベースライン比較'
+            if [ -f docs/ACCGRAPH_BASELINE.md ]; then
+              cat docs/ACCGRAPH_BASELINE.md
+            else
+              echo "(実行せず)"
+            fi; } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: accgraph
+          path: |
+            docs/ACCGRAPH_BASELINE.md
+            research/_data/accgraph/meta.parquet
+            research/_data/accgraph/schema.json
+            research/_data/accgraph/baseline_results.json
+            build.log
+            evaluate.log
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Commit results
+        if: inputs.commit != false
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A docs/ACCGRAPH_BASELINE.md
+          if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
+          git commit -m "chore(accgraph): ベースライン比較を更新 ($(date -u '+%Y-%m-%d %H:%M UTC'))"
+          for i in 1 2 3 4; do
+            if git push; then exit 0; fi
+            sleep $((2 ** i)); git pull --rebase
+          done
+          exit 1

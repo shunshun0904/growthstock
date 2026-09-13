@@ -39,6 +39,9 @@ jobs:
           # 台帳（スプレッドシート）は利用者の手入力と同居する。
           # 列が増えたときに既存セルがずれないことを回帰で押さえる
           python3 tests/test_sheets.py
+          # 会計フローグラフ。リーク検査とラベル定義を合成データで固定している。
+          # ここが通らないまま結果を出すと、表の定義と実際の計算がずれる
+          python3 tests/test_accgraph.py
 
       - name: ビルド
         run: npm run build

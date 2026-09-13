@@ -243,16 +243,82 @@ python3 scripts/jquants_data_fetcher.py                # watchlist 全件
 
 ---
 
-## 7. ディレクトリ構成
+## 7. 研究ライン — 会計フローグラフ（`research/accgraph/`）
+
+決算（PL・BS・CF）を勘定科目のグラフとして表し、決算発表後の
+**ベンチマーク控除後リターン**を3クラスに分類する研究ラインです。
+ダッシュボードとは独立していて、生データ（`research/_data/*.parquet`）だけを共有します。
+
+現在の到達点は**データ層とベースライン比較まで**で、GNN はまだ入っていません。
+まずベースラインの表を埋め、GNN がそれを上回るかどうかで有効性を判断します。
+
+### 取得できるデータの制約（実測）
+
+| エンドポイント | 実測 | 影響 |
+| --- | :-: | --- |
+| `/fins/summary` | OK | PL・BS の集計値と CF 3区分が取れる |
+| `/fins/details` | **HTTP 403** | 減価償却費・運転資本・売上原価などの**内訳は取れない** |
+
+`CFO` / `CFI` / `CFF` の開示率は 1Q 9.9% / 2Q 76.0% / 3Q 8.2% / 通期 88.8%
+（`docs/DATA_FIELDS.md` の実測）。つまり大半の企業は CF を**半期でしか出しません**。
+そのため 1Q・3Q の CF ノードは欠測のままマスクし、2Q・通期は「半期ぶんを
+1四半期あたりに直した値」として持ちます。詳細は
+[`docs/ACCOUNTING_GRAPH.md`](docs/ACCOUNTING_GRAPH.md)。
+
+### 使い方
+
+```bash
+pip install -r research/requirements.txt
+
+python3 research/accgraph/schema.py     # スキーマの要約を見る
+python3 research/accgraph/docgen.py     # docs/ACCOUNTING_GRAPH.md を作り直す
+python3 research/accgraph/build.py      # データセットを作る (要 research/_data)
+python3 research/accgraph/evaluate.py   # ベースラインを比較して docs に書き出す
+python3 tests/test_accgraph.py          # 単体テスト
+```
+
+生データが手元に無い場合は、GitHub Actions の `Accounting Graph Baseline`
+ワークフローを実行してください（Release のタグ `data-raw` から生データを取ります）。
+
+### 設計上、必ず守っていること
+
+| 事故 | 対策 | 検査 |
+| --- | --- | --- |
+| 過去の期に後日の訂正値が混ざる | 各決算の発表日を基準に as-of 結合で版を選ぶ | `leakage.check_asof` |
+| 発表前の株価でエントリーする | 一律で**翌営業日の始値**を起点にする | `leakage.check_labels` |
+| ラベルがテスト期間の価格で決まる | Purge（ラベル確定日）＋ Embargo（緩衝期間） | `splits.walk_forward` |
+| 上場廃止銘柄が黙って消える | 除外理由と件数を毎回出す | `labels.report_universe` |
+| 株式分割でリターンが壊れる | 調整後価格で測る | `tests/test_accgraph.py` |
+| 欠測を 0 と取り違える | `is_missing` を立てたうえで 0 を置く | `leakage.check_features` |
+
+効率的市場仮説の下では、この種の予測が安定して当たるとは想定していません。
+Accuracy 55% を大きく超える行が出たら、まずリークを疑ってください。
+
+---
+
+## 8. ディレクトリ構成
 
 ```
 ├── .github/workflows/
 │   ├── fetch-data.yml       # J-Quants V2 データ取得 (secrets.JQUANTS_API)
 │   ├── deploy-pages.yml     # GitHub Pages へのビルド & デプロイ
+│   ├── accgraph.yml         # 会計フローグラフのデータ構築 + ベースライン比較
 │   └── ci.yml               # テスト + ビルド + ブラウザ描画テスト
 ├── scripts/
 │   ├── jquants_data_fetcher.py   # データ取得・指標算出パイプライン
 │   └── watchlist.json            # 分析対象銘柄 (編集して再実行)
+├── research/accgraph/            # 会計フローグラフ研究ライン
+│   ├── schema.py                 # ノード・エッジ定義（階層的標準化つき）
+│   ├── panel.py                  # 発表時点で見えていた値に組み直す (as-of)
+│   ├── labels.py                 # 翌営業日始値起点の超過リターン・3クラス
+│   ├── build.py                  # グラフ系列データセットの構築
+│   ├── splits.py                 # Purged / Embargo つき時系列分割
+│   ├── baselines.py              # ロジスティック回帰 / LightGBM / MLP
+│   ├── backtest.py               # 取引コスト控除後の損益
+│   ├── evaluate.py               # 評価の入口 (CLI)
+│   ├── leakage.py                # リーク検査
+│   ├── synthetic.py              # テスト用の決定的な合成データ
+│   └── docgen.py                 # docs/ACCOUNTING_GRAPH.md の生成
 ├── public/data/stocks.json       # 生成データ (ワークフローが上書き)
 ├── src/
 │   ├── lib/scoring.js            # 8軸スコアリングエンジン
@@ -263,13 +329,14 @@ python3 scripts/jquants_data_fetcher.py                # watchlist 全件
 └── tests/
     ├── scoring.test.js           # スコアリング単体テスト
     ├── test_fetcher.py           # パイプライン単体テスト
+    ├── test_accgraph.py          # 会計フローグラフ（リーク検査・ラベル定義）
     ├── smoke.mjs                 # Chromium 実描画テスト
     └── fixtures/                 # UI 検証用の合成データ
 ```
 
 ---
 
-## 8. 免責
+## 9. 免責
 
 本ツールは投資判断の**支援**を目的としたものであり、投資勧誘・投資助言を行うものではありません。
 スコアはあくまで公開データを機械的に加工した指標であり、将来の価格を予測するものではありません。
