@@ -1,8 +1,1830 @@
 {
-  "generatedAt": "2026-09-11T17:41:11.832789+00:00",
+  "generatedAt": "2026-09-13T03:32:49.941001+00:00",
   "source": "J-Quants API V2 (https://jpx-jquants.com/)",
   "apiVersion": "v2",
   "stocks": [
+    {
+      "code": "1699",
+      "jqCode": "16990",
+      "name": "野村アセットマネジメント株式会社　ＮＥＸＴ　ＦＵＮＤＳ　ＮＯＭＵＲＡ　原油インデックス連動型上場投信",
+      "nameEn": "NEXT FUNDS NOMURA Crude Oil Long Index Linked Exchange Traded Fund",
+      "sector": "その他",
+      "market": "その他",
+      "scale": "-",
+      "note": "ブレイク予測の当日上位",
+      "asOf": "2026-09-11",
+      "metrics": {
+        "date": "2026-09-11",
+        "price": 698.1,
+        "high52w": 711.5,
+        "highRatio": 98.11665495432186,
+        "tradingValue": 6.56625879,
+        "turnoverValue": 6.63369109,
+        "volumeTrend": 382.3995153890405,
+        "volume": 940590.0,
+        "ma20Volume": 245970.5,
+        "epsGrowth": null,
+        "salesGrowth": null,
+        "roe": null,
+        "opMargin": null,
+        "progressRate": null,
+        "quarter": null,
+        "sharesOutstanding": null,
+        "fiscalPeriod": null,
+        "disclosedDate": null,
+        "opMarginBasis": null,
+        "roeBasis": null,
+        "creditRatio": 7.958730488833432,
+        "marginLong": 6888520.0,
+        "marginShort": 865530.0,
+        "marginDate": "2026-09-04",
+        "marketCap": null,
+        "label": "現在",
+        "asOf": "2026-09-11"
+      },
+      "snapshots": {
+        "now": {
+          "date": "2026-09-11",
+          "price": 698.1,
+          "high52w": 711.5,
+          "highRatio": 98.11665495432186,
+          "tradingValue": 6.56625879,
+          "turnoverValue": 6.63369109,
+          "volumeTrend": 382.3995153890405,
+          "volume": 940590.0,
+          "ma20Volume": 245970.5,
+          "epsGrowth": null,
+          "salesGrowth": null,
+          "roe": null,
+          "opMargin": null,
+          "progressRate": null,
+          "quarter": null,
+          "sharesOutstanding": null,
+          "fiscalPeriod": null,
+          "disclosedDate": null,
+          "opMarginBasis": null,
+          "roeBasis": null,
+          "creditRatio": 7.958730488833432,
+          "marginLong": 6888520.0,
+          "marginShort": 865530.0,
+          "marginDate": "2026-09-04",
+          "marketCap": null,
+          "label": "現在",
+          "asOf": "2026-09-11"
+        },
+        "m3": {
+          "date": "2026-06-12",
+          "price": 631.6,
+          "high52w": 704.8,
+          "highRatio": 89.61407491486948,
+          "tradingValue": 2.43147052,
+          "turnoverValue": 2.44547349,
+          "volumeTrend": 79.11019779090675,
+          "volume": 384970.0,
+          "ma20Volume": 486625.0,
+          "epsGrowth": null,
+          "salesGrowth": null,
+          "roe": null,
+          "opMargin": null,
+          "progressRate": null,
+          "quarter": null,
+          "sharesOutstanding": null,
+          "fiscalPeriod": null,
+          "disclosedDate": null,
+          "opMarginBasis": null,
+          "roeBasis": null,
+          "creditRatio": 3.573402588186594,
+          "marginLong": 3625610.0,
+          "marginShort": 1014610.0,
+          "marginDate": "2026-06-12",
+          "marketCap": null,
+          "label": "3ヶ月前",
+          "asOf": "2026-06-12"
+        },
+        "m6": {
+          "date": "2026-03-12",
+          "price": 580.0,
+          "high52w": 594.2,
+          "highRatio": 97.61023224503533,
+          "tradingValue": 52.244602,
+          "turnoverValue": 52.81763303,
+          "volumeTrend": 508.60014398035094,
+          "volume": 9007690.0,
+          "ma20Volume": 1771075.0,
+          "epsGrowth": null,
+          "salesGrowth": null,
+          "roe": null,
+          "opMargin": null,
+          "progressRate": null,
+          "quarter": null,
+          "sharesOutstanding": null,
+          "fiscalPeriod": null,
+          "disclosedDate": null,
+          "opMarginBasis": null,
+          "roeBasis": null,
+          "creditRatio": 16.290693770411746,
+          "marginLong": 5337320.0,
+          "marginShort": 327630.0,
+          "marginDate": "2026-03-06",
+          "marketCap": null,
+          "label": "6ヶ月前",
+          "asOf": "2026-03-12"
+        }
+      },
+      "milestones": [
+        {
+          "date": "2026-02-20",
+          "type": "breakout",
+          "title": "52週高値を更新",
+          "detail": "終値 444円 が過去52週の最高値 433円 を上抜け"
+        },
+        {
+          "date": "2026-03-03",
+          "type": "volume_spike",
+          "title": "出来高急増（大口買い痕跡）",
+          "detail": "出来高 2,073,670株 = 20日平均の 2.6倍・陽線"
+        },
+        {
+          "date": "2026-03-04",
+          "type": "volume_spike",
+          "title": "出来高急増（大口買い痕跡）",
+          "detail": "出来高 2,664,470株 = 20日平均の 3.1倍・陽線"
+        },
+        {
+          "date": "2026-03-05",
+          "type": "volume_spike",
+          "title": "出来高急増（大口買い痕跡）",
+          "detail": "出来高 2,100,690株 = 20日平均の 2.2倍・陽線"
+        },
+        {
+          "date": "2026-03-10",
+          "type": "volume_spike",
+          "title": "出来高急増（大口買い痕跡）",
+          "detail": "出来高 7,299,910株 = 20日平均の 6.7倍・陽線"
+        },
+        {
+          "date": "2026-03-16",
+          "type": "volume_spike",
+          "title": "出来高急増（大口買い痕跡）",
+          "detail": "出来高 9,862,860株 = 20日平均の 3.9倍・陽線"
+        },
+        {
+          "date": "2026-03-17",
+          "type": "volume_spike",
+          "title": "出来高急増（大口買い痕跡）",
+          "detail": "出来高 6,377,650株 = 20日平均の 2.1倍・陽線"
+        },
+        {
+          "date": "2026-03-23",
+          "type": "breakout",
+          "title": "52週高値を更新",
+          "detail": "終値 638円 が過去52週の最高値 637円 を上抜け"
+        },
+        {
+          "date": "2026-04-30",
+          "type": "breakout",
+          "title": "52週高値を更新",
+          "detail": "終値 684円 が過去52週の最高値 639円 を上抜け"
+        },
+        {
+          "date": "2026-07-13",
+          "type": "volume_spike",
+          "title": "出来高急増（大口買い痕跡）",
+          "detail": "出来高 2,044,010株 = 20日平均の 4.6倍・陽線"
+        },
+        {
+          "date": "2026-07-14",
+          "type": "volume_spike",
+          "title": "出来高急増（大口買い痕跡）",
+          "detail": "出来高 3,215,290株 = 20日平均の 6.3倍・陽線"
+        }
+      ],
+      "quarters": [],
+      "history": [
+        {
+          "date": "2025-09-11",
+          "close": 389.3
+        },
+        {
+          "date": "2025-09-17",
+          "close": 390.2
+        },
+        {
+          "date": "2025-09-22",
+          "close": 385.6
+        },
+        {
+          "date": "2025-09-26",
+          "close": 403.6
+        },
+        {
+          "date": "2025-10-01",
+          "close": 383.7
+        },
+        {
+          "date": "2025-10-06",
+          "close": 385.2
+        },
+        {
+          "date": "2025-10-09",
+          "close": 397.3
+        },
+        {
+          "date": "2025-10-15",
+          "close": 371.1
+        },
+        {
+          "date": "2025-10-20",
+          "close": 362.5
+        },
+        {
+          "date": "2025-10-23",
+          "close": 387.8
+        },
+        {
+          "date": "2025-10-28",
+          "close": 388.3
+        },
+        {
+          "date": "2025-10-31",
+          "close": 391.0
+        },
+        {
+          "date": "2025-11-06",
+          "close": 390.6
+        },
+        {
+          "date": "2025-11-11",
+          "close": 391.4
+        },
+        {
+          "date": "2025-11-14",
+          "close": 390.4
+        },
+        {
+          "date": "2025-11-19",
+          "close": 398.4
+        },
+        {
+          "date": "2025-11-25",
+          "close": 388.1
+        },
+        {
+          "date": "2025-11-28",
+          "close": 386.9
+        },
+        {
+          "date": "2025-12-03",
+          "close": 386.1
+        },
+        {
+          "date": "2025-12-08",
+          "close": 394.7
+        },
+        {
+          "date": "2025-12-11",
+          "close": 385.4
+        },
+        {
+          "date": "2025-12-16",
+          "close": 372.4
+        },
+        {
+          "date": "2025-12-19",
+          "close": 371.9
+        },
+        {
+          "date": "2025-12-24",
+          "close": 386.8
+        },
+        {
+          "date": "2025-12-29",
+          "close": 381.2
+        },
+        {
+          "date": "2026-01-06",
+          "close": 386.2
+        },
+        {
+          "date": "2026-01-09",
+          "close": 391.0
+        },
+        {
+          "date": "2026-01-15",
+          "close": 405.9
+        },
+        {
+          "date": "2026-01-20",
+          "close": 400.7
+        },
+        {
+          "date": "2026-01-23",
+          "close": 405.5
+        },
+        {
+          "date": "2026-01-28",
+          "close": 406.0
+        },
+        {
+          "date": "2026-02-02",
+          "close": 402.8
+        },
+        {
+          "date": "2026-02-05",
+          "close": 423.6
+        },
+        {
+          "date": "2026-02-10",
+          "close": 426.6
+        },
+        {
+          "date": "2026-02-16",
+          "close": 410.7
+        },
+        {
+          "date": "2026-02-19",
+          "close": 431.1
+        },
+        {
+          "date": "2026-02-25",
+          "close": 439.0
+        },
+        {
+          "date": "2026-03-02",
+          "close": 473.9
+        },
+        {
+          "date": "2026-03-05",
+          "close": 491.3
+        },
+        {
+          "date": "2026-03-10",
+          "close": 540.4
+        },
+        {
+          "date": "2026-03-13",
+          "close": 599.3
+        },
+        {
+          "date": "2026-03-18",
+          "close": 585.4
+        },
+        {
+          "date": "2026-03-24",
+          "close": 586.0
+        },
+        {
+          "date": "2026-03-27",
+          "close": 605.7
+        },
+        {
+          "date": "2026-04-01",
+          "close": 572.6
+        },
+        {
+          "date": "2026-04-06",
+          "close": 594.9
+        },
+        {
+          "date": "2026-04-09",
+          "close": 583.8
+        },
+        {
+          "date": "2026-04-14",
+          "close": 599.6
+        },
+        {
+          "date": "2026-04-17",
+          "close": 591.0
+        },
+        {
+          "date": "2026-04-22",
+          "close": 587.4
+        },
+        {
+          "date": "2026-04-27",
+          "close": 623.7
+        },
+        {
+          "date": "2026-05-01",
+          "close": 660.5
+        },
+        {
+          "date": "2026-05-11",
+          "close": 649.4
+        },
+        {
+          "date": "2026-05-14",
+          "close": 656.6
+        },
+        {
+          "date": "2026-05-19",
+          "close": 696.2
+        },
+        {
+          "date": "2026-05-22",
+          "close": 676.1
+        },
+        {
+          "date": "2026-05-27",
+          "close": 637.9
+        },
+        {
+          "date": "2026-06-01",
+          "close": 642.0
+        },
+        {
+          "date": "2026-06-04",
+          "close": 664.6
+        },
+        {
+          "date": "2026-06-09",
+          "close": 651.1
+        },
+        {
+          "date": "2026-06-12",
+          "close": 631.6
+        },
+        {
+          "date": "2026-06-17",
+          "close": 574.2
+        },
+        {
+          "date": "2026-06-22",
+          "close": 574.5
+        },
+        {
+          "date": "2026-06-25",
+          "close": 539.1
+        },
+        {
+          "date": "2026-06-30",
+          "close": 544.7
+        },
+        {
+          "date": "2026-07-03",
+          "close": 539.5
+        },
+        {
+          "date": "2026-07-08",
+          "close": 566.2
+        },
+        {
+          "date": "2026-07-13",
+          "close": 586.6
+        },
+        {
+          "date": "2026-07-16",
+          "close": 608.9
+        },
+        {
+          "date": "2026-07-22",
+          "close": 645.0
+        },
+        {
+          "date": "2026-07-27",
+          "close": 624.9
+        },
+        {
+          "date": "2026-07-30",
+          "close": 631.0
+        },
+        {
+          "date": "2026-08-04",
+          "close": 589.2
+        },
+        {
+          "date": "2026-08-07",
+          "close": 583.3
+        },
+        {
+          "date": "2026-08-13",
+          "close": 626.6
+        },
+        {
+          "date": "2026-08-18",
+          "close": 650.5
+        },
+        {
+          "date": "2026-08-21",
+          "close": 654.2
+        },
+        {
+          "date": "2026-08-26",
+          "close": 620.0
+        },
+        {
+          "date": "2026-08-31",
+          "close": 652.0
+        },
+        {
+          "date": "2026-09-03",
+          "close": 654.0
+        },
+        {
+          "date": "2026-09-08",
+          "close": 659.9
+        },
+        {
+          "date": "2026-09-11",
+          "close": 698.1
+        }
+      ],
+      "sources": {
+        "price": "jquants",
+        "high52w": "jquants",
+        "highRatio": "jquants",
+        "tradingValue": "jquants",
+        "volumeTrend": "jquants",
+        "epsGrowth": "unavailable",
+        "salesGrowth": "unavailable",
+        "roe": "unavailable",
+        "opMargin": "unavailable",
+        "progressRate": "unavailable",
+        "creditRatio": "jquants",
+        "marketCap": "unavailable"
+      },
+      "origin": "jquants"
+    },
+    {
+      "code": "9434",
+      "jqCode": "94340",
+      "name": "ソフトバンク",
+      "nameEn": "SoftBank Corp.",
+      "sector": "情報･通信業",
+      "market": "プライム",
+      "scale": "TOPIX Core30",
+      "note": "ブレイク予測の当日上位",
+      "asOf": "2026-09-11",
+      "metrics": {
+        "date": "2026-09-11",
+        "price": 246.9,
+        "high52w": 248.1,
+        "highRatio": 99.51632406287789,
+        "tradingValue": 275.4843537,
+        "turnoverValue": 273.3380397,
+        "volumeTrend": 164.05338406888114,
+        "volume": 111577300.0,
+        "ma20Volume": 68012800.0,
+        "epsGrowth": 2.9999999999999956,
+        "salesGrowth": 9.4118888349617,
+        "roe": 11.976238059204357,
+        "opMargin": 14.651441383879746,
+        "progressRate": 27.481636363636362,
+        "quarter": 1,
+        "sharesOutstanding": 47846798882.0,
+        "fiscalPeriod": "1Q",
+        "disclosedDate": "2026-08-04",
+        "opMarginBasis": "TTM (直近4四半期)",
+        "roeBasis": "TTM純利益 / 自己資本 で算出",
+        "creditRatio": 8.630765355917262,
+        "marginLong": 27413900.0,
+        "marginShort": 3176300.0,
+        "marginDate": "2026-09-04",
+        "marketCap": 118133.746439658,
+        "label": "現在",
+        "asOf": "2026-09-11"
+      },
+      "snapshots": {
+        "now": {
+          "date": "2026-09-11",
+          "price": 246.9,
+          "high52w": 248.1,
+          "highRatio": 99.51632406287789,
+          "tradingValue": 275.4843537,
+          "turnoverValue": 273.3380397,
+          "volumeTrend": 164.05338406888114,
+          "volume": 111577300.0,
+          "ma20Volume": 68012800.0,
+          "epsGrowth": 2.9999999999999956,
+          "salesGrowth": 9.4118888349617,
+          "roe": 11.976238059204357,
+          "opMargin": 14.651441383879746,
+          "progressRate": 27.481636363636362,
+          "quarter": 1,
+          "sharesOutstanding": 47846798882.0,
+          "fiscalPeriod": "1Q",
+          "disclosedDate": "2026-08-04",
+          "opMarginBasis": "TTM (直近4四半期)",
+          "roeBasis": "TTM純利益 / 自己資本 で算出",
+          "creditRatio": 8.630765355917262,
+          "marginLong": 27413900.0,
+          "marginShort": 3176300.0,
+          "marginDate": "2026-09-04",
+          "marketCap": 118133.746439658,
+          "label": "現在",
+          "asOf": "2026-09-11"
+        },
+        "m3": {
+          "date": "2026-06-12",
+          "price": 213.5,
+          "high52w": 247.9,
+          "highRatio": 86.12343686970553,
+          "tradingValue": 196.105728,
+          "turnoverValue": 195.5235437,
+          "volumeTrend": 126.05806289316462,
+          "volume": 91852800.0,
+          "ma20Volume": 72865470.0,
+          "epsGrowth": -28.415300546448062,
+          "salesGrowth": 6.370586409030945,
+          "roe": 0.193,
+          "opMargin": 14.812095449715004,
+          "progressRate": null,
+          "quarter": 4,
+          "sharesOutstanding": 47801264883.0,
+          "fiscalPeriod": "FY",
+          "disclosedDate": "2026-05-11",
+          "opMarginBasis": "TTM (直近4四半期)",
+          "roeBasis": "J-Quants 提供値 (ROE)",
+          "creditRatio": 10.860170919226881,
+          "marginLong": 35455200.0,
+          "marginShort": 3264700.0,
+          "marginDate": "2026-06-12",
+          "marketCap": 102055.700525205,
+          "label": "3ヶ月前",
+          "asOf": "2026-06-12"
+        },
+        "m6": {
+          "date": "2026-03-12",
+          "price": 213.8,
+          "high52w": 247.9,
+          "highRatio": 86.24445340863251,
+          "tradingValue": 175.9676624,
+          "turnoverValue": 175.827141,
+          "volumeTrend": 92.99091623249899,
+          "volume": 82304800.0,
+          "ma20Volume": 88508430.0,
+          "epsGrowth": 21.030042918454907,
+          "salesGrowth": 8.14639649412071,
+          "roe": 12.806191019680984,
+          "opMargin": 15.174014925771672,
+          "progressRate": 86.6807843137255,
+          "quarter": 3,
+          "sharesOutstanding": 47763467941.0,
+          "fiscalPeriod": "3Q",
+          "disclosedDate": "2026-02-09",
+          "opMarginBasis": "TTM (直近4四半期)",
+          "roeBasis": "TTM純利益 / 自己資本 で算出",
+          "creditRatio": 51.17137367915466,
+          "marginLong": 53269400.0,
+          "marginShort": 1041000.0,
+          "marginDate": "2026-03-06",
+          "marketCap": 102118.294457858,
+          "label": "6ヶ月前",
+          "asOf": "2026-03-12"
+        }
+      },
+      "milestones": [
+        {
+          "date": "2025-11-05",
+          "type": "earnings",
+          "title": "2Q 決算発表",
+          "detail": "（単一四半期換算）売上 17,422億円 / 営業利益 3,382億円"
+        },
+        {
+          "date": "2025-11-21",
+          "type": "volume_spike",
+          "title": "出来高急増（大口買い痕跡）",
+          "detail": "出来高 184,461,100株 = 20日平均の 3.0倍・陽線"
+        },
+        {
+          "date": "2026-02-09",
+          "type": "earnings",
+          "title": "3Q 決算発表",
+          "detail": "（単一四半期換算）売上 17,946億円 / 営業利益 2,552億円"
+        },
+        {
+          "date": "2026-05-11",
+          "type": "earnings",
+          "title": "FY 決算発表",
+          "detail": "（単一四半期換算）売上 18,433億円 / 営業利益 1,584億円"
+        },
+        {
+          "date": "2026-08-04",
+          "type": "earnings",
+          "title": "1Q 決算発表",
+          "detail": "（単一四半期換算）売上 18,147億円 / 営業利益 3,023億円"
+        },
+        {
+          "date": "2026-09-10",
+          "type": "breakout",
+          "title": "52週高値を更新",
+          "detail": "終値 243円 が過去52週の最高値 243円 を上抜け"
+        }
+      ],
+      "quarters": [
+        {
+          "fiscalYearStart": "2024-04-01",
+          "quarter": 1,
+          "period": "1Q",
+          "disclosedDate": "2024-08-06",
+          "periodEnd": "2024-06-30",
+          "qNetSales": 1535722000000.0,
+          "qOperatingProfit": 303927000000.0,
+          "qProfit": 162510000000.0,
+          "qEps": 34.32,
+          "cumNetSales": 1535722000000.0,
+          "cumOperatingProfit": 303927000000.0,
+          "cumProfit": 162510000000.0,
+          "cumEps": 34.32,
+          "forecastNetSales": 6200000000000.0,
+          "forecastOperatingProfit": 900000000000.0,
+          "forecastProfit": 500000000000.0,
+          "forecastEps": 10.51,
+          "equity": 3912144000000.0,
+          "totalAssets": 15690883000000.0,
+          "sharesIssued": 4760899670.0,
+          "treasuryShares": 40706959.0,
+          "reportedRoe": null
+        },
+        {
+          "fiscalYearStart": "2024-04-01",
+          "quarter": 2,
+          "period": "2Q",
+          "disclosedDate": "2024-11-08",
+          "periodEnd": "2024-09-30",
+          "qNetSales": 1616357000000.0,
+          "qOperatingProfit": 281962000000.0,
+          "qProfit": 161347000000.0,
+          "qEps": -27.490000000000002,
+          "cumNetSales": 3152079000000.0,
+          "cumOperatingProfit": 585889000000.0,
+          "cumProfit": 323857000000.0,
+          "cumEps": 6.83,
+          "forecastNetSales": 6350000000000.0,
+          "forecastOperatingProfit": 950000000000.0,
+          "forecastProfit": 510000000000.0,
+          "forecastEps": 10.66,
+          "equity": 3986476000000.0,
+          "totalAssets": 15469392000000.0,
+          "sharesIssued": 47679372700.0,
+          "treasuryShares": 310351350.0,
+          "reportedRoe": null
+        },
+        {
+          "fiscalYearStart": "2024-04-01",
+          "quarter": 3,
+          "period": "3Q",
+          "disclosedDate": "2025-02-10",
+          "periodEnd": "2024-12-31",
+          "qNetSales": 1659384000000.0,
+          "qOperatingProfit": 235972000000.0,
+          "qProfit": 112753000000.0,
+          "qEps": 2.33,
+          "cumNetSales": 4811463000000.0,
+          "cumOperatingProfit": 821861000000.0,
+          "cumProfit": 436610000000.0,
+          "cumEps": 9.16,
+          "forecastNetSales": 6350000000000.0,
+          "forecastOperatingProfit": 950000000000.0,
+          "forecastProfit": 510000000000.0,
+          "forecastEps": 10.66,
+          "equity": 4163960000000.0,
+          "totalAssets": 16304840000000.0,
+          "sharesIssued": 47702192700.0,
+          "treasuryShares": 279869350.0,
+          "reportedRoe": null
+        },
+        {
+          "fiscalYearStart": "2024-04-01",
+          "quarter": 4,
+          "period": "FY",
+          "disclosedDate": "2025-05-08",
+          "periodEnd": "2025-03-31",
+          "qNetSales": 1732886000000.0,
+          "qOperatingProfit": 167155000000.0,
+          "qProfit": 89523000000.0,
+          "qEps": 1.83,
+          "cumNetSales": 6544349000000.0,
+          "cumOperatingProfit": 989016000000.0,
+          "cumProfit": 526133000000.0,
+          "cumEps": 10.99,
+          "forecastNetSales": null,
+          "forecastOperatingProfit": null,
+          "forecastProfit": null,
+          "forecastEps": null,
+          "equity": 4265371000000.0,
+          "totalAssets": 16102195000000.0,
+          "sharesIssued": 47751490700.0,
+          "treasuryShares": 184234180.0,
+          "reportedRoe": 0.205
+        },
+        {
+          "fiscalYearStart": "2025-04-01",
+          "quarter": 1,
+          "period": "1Q",
+          "disclosedDate": "2025-08-05",
+          "periodEnd": "2025-06-30",
+          "qNetSales": 1658615000000.0,
+          "qOperatingProfit": 290734000000.0,
+          "qProfit": 145310000000.0,
+          "qEps": 3.0,
+          "cumNetSales": 1658615000000.0,
+          "cumOperatingProfit": 290734000000.0,
+          "cumProfit": 145310000000.0,
+          "cumEps": 3.0,
+          "forecastNetSales": 6700000000000.0,
+          "forecastOperatingProfit": 1000000000000.0,
+          "forecastProfit": 540000000000.0,
+          "forecastEps": 11.22,
+          "equity": 4287195000000.0,
+          "totalAssets": 17062224000000.0,
+          "sharesIssued": 47814281700.0,
+          "treasuryShares": 184234183.0,
+          "reportedRoe": null
+        },
+        {
+          "fiscalYearStart": "2025-04-01",
+          "quarter": 2,
+          "period": "2Q",
+          "disclosedDate": "2025-11-05",
+          "periodEnd": "2025-09-30",
+          "qNetSales": 1742220000000.0,
+          "qOperatingProfit": 338160000000.0,
+          "qProfit": 203445000000.0,
+          "qEps": 4.22,
+          "cumNetSales": 3400835000000.0,
+          "cumOperatingProfit": 628894000000.0,
+          "cumProfit": 348755000000.0,
+          "cumEps": 7.22,
+          "forecastNetSales": 6700000000000.0,
+          "forecastOperatingProfit": 1000000000000.0,
+          "forecastProfit": 540000000000.0,
+          "forecastEps": 11.22,
+          "equity": 4477563000000.0,
+          "totalAssets": 17579167000000.0,
+          "sharesIssued": 47908265700.0,
+          "treasuryShares": 171342693.0,
+          "reportedRoe": null
+        },
+        {
+          "fiscalYearStart": "2025-04-01",
+          "quarter": 3,
+          "period": "3Q",
+          "disclosedDate": "2026-02-09",
+          "periodEnd": "2025-12-31",
+          "qNetSales": 1794564000000.0,
+          "qOperatingProfit": 255250000000.0,
+          "qProfit": 136768000000.0,
+          "qEps": 2.8199999999999994,
+          "cumNetSales": 5195399000000.0,
+          "cumOperatingProfit": 884144000000.0,
+          "cumProfit": 485523000000.0,
+          "cumEps": 10.04,
+          "forecastNetSales": 6950000000000.0,
+          "forecastOperatingProfit": 1020000000000.0,
+          "forecastProfit": 543000000000.0,
+          "forecastEps": 11.28,
+          "equity": 4490375000000.0,
+          "totalAssets": 18243656000000.0,
+          "sharesIssued": 47934429700.0,
+          "treasuryShares": 170961759.0,
+          "reportedRoe": null
+        },
+        {
+          "fiscalYearStart": "2025-04-01",
+          "quarter": 4,
+          "period": "FY",
+          "disclosedDate": "2026-05-11",
+          "periodEnd": "2026-03-31",
+          "qNetSales": 1843281000000.0,
+          "qOperatingProfit": 158432000000.0,
+          "qProfit": 65236000000.0,
+          "qEps": 1.3100000000000005,
+          "cumNetSales": 7038680000000.0,
+          "cumOperatingProfit": 1042576000000.0,
+          "cumProfit": 550759000000.0,
+          "cumEps": 11.35,
+          "forecastNetSales": null,
+          "forecastOperatingProfit": null,
+          "forecastProfit": null,
+          "forecastEps": null,
+          "equity": 4668455000000.0,
+          "totalAssets": 18502175000000.0,
+          "sharesIssued": 47971989700.0,
+          "treasuryShares": 170724817.0,
+          "reportedRoe": 0.193
+        },
+        {
+          "fiscalYearStart": "2026-04-01",
+          "quarter": 1,
+          "period": "1Q",
+          "disclosedDate": "2026-08-04",
+          "periodEnd": "2026-06-30",
+          "qNetSales": 1814722000000.0,
+          "qOperatingProfit": 302298000000.0,
+          "qProfit": 150070000000.0,
+          "qEps": 3.09,
+          "cumNetSales": 1814722000000.0,
+          "cumOperatingProfit": 302298000000.0,
+          "cumProfit": 150070000000.0,
+          "cumEps": 3.09,
+          "forecastNetSales": 7500000000000.0,
+          "forecastOperatingProfit": 1100000000000.0,
+          "forecastProfit": 560000000000.0,
+          "forecastEps": 11.54,
+          "equity": 4638510000000.0,
+          "totalAssets": 19342584000000.0,
+          "sharesIssued": 48017366700.0,
+          "treasuryShares": 170567818.0,
+          "reportedRoe": null
+        }
+      ],
+      "history": [
+        {
+          "date": "2025-09-11",
+          "close": 229.2
+        },
+        {
+          "date": "2025-09-17",
+          "close": 229.8
+        },
+        {
+          "date": "2025-09-22",
+          "close": 225.9
+        },
+        {
+          "date": "2025-09-26",
+          "close": 229.5
+        },
+        {
+          "date": "2025-10-01",
+          "close": 216.3
+        },
+        {
+          "date": "2025-10-06",
+          "close": 217.1
+        },
+        {
+          "date": "2025-10-09",
+          "close": 216.3
+        },
+        {
+          "date": "2025-10-15",
+          "close": 215.0
+        },
+        {
+          "date": "2025-10-20",
+          "close": 217.7
+        },
+        {
+          "date": "2025-10-23",
+          "close": 220.1
+        },
+        {
+          "date": "2025-10-28",
+          "close": 219.4
+        },
+        {
+          "date": "2025-10-31",
+          "close": 218.7
+        },
+        {
+          "date": "2025-11-06",
+          "close": 215.7
+        },
+        {
+          "date": "2025-11-11",
+          "close": 223.2
+        },
+        {
+          "date": "2025-11-14",
+          "close": 222.4
+        },
+        {
+          "date": "2025-11-19",
+          "close": 225.6
+        },
+        {
+          "date": "2025-11-25",
+          "close": 225.0
+        },
+        {
+          "date": "2025-11-28",
+          "close": 223.2
+        },
+        {
+          "date": "2025-12-03",
+          "close": 215.5
+        },
+        {
+          "date": "2025-12-08",
+          "close": 216.6
+        },
+        {
+          "date": "2025-12-11",
+          "close": 216.5
+        },
+        {
+          "date": "2025-12-16",
+          "close": 216.5
+        },
+        {
+          "date": "2025-12-19",
+          "close": 216.8
+        },
+        {
+          "date": "2025-12-24",
+          "close": 214.6
+        },
+        {
+          "date": "2025-12-29",
+          "close": 216.5
+        },
+        {
+          "date": "2026-01-06",
+          "close": 217.4
+        },
+        {
+          "date": "2026-01-09",
+          "close": 214.5
+        },
+        {
+          "date": "2026-01-15",
+          "close": 216.7
+        },
+        {
+          "date": "2026-01-20",
+          "close": 217.2
+        },
+        {
+          "date": "2026-01-23",
+          "close": 214.6
+        },
+        {
+          "date": "2026-01-28",
+          "close": 211.0
+        },
+        {
+          "date": "2026-02-02",
+          "close": 210.9
+        },
+        {
+          "date": "2026-02-05",
+          "close": 213.7
+        },
+        {
+          "date": "2026-02-10",
+          "close": 212.2
+        },
+        {
+          "date": "2026-02-16",
+          "close": 215.0
+        },
+        {
+          "date": "2026-02-19",
+          "close": 213.4
+        },
+        {
+          "date": "2026-02-25",
+          "close": 210.4
+        },
+        {
+          "date": "2026-03-02",
+          "close": 212.7
+        },
+        {
+          "date": "2026-03-05",
+          "close": 209.5
+        },
+        {
+          "date": "2026-03-10",
+          "close": 215.0
+        },
+        {
+          "date": "2026-03-13",
+          "close": 213.2
+        },
+        {
+          "date": "2026-03-18",
+          "close": 217.5
+        },
+        {
+          "date": "2026-03-24",
+          "close": 217.4
+        },
+        {
+          "date": "2026-03-27",
+          "close": 218.5
+        },
+        {
+          "date": "2026-04-01",
+          "close": 213.0
+        },
+        {
+          "date": "2026-04-06",
+          "close": 217.1
+        },
+        {
+          "date": "2026-04-09",
+          "close": 215.6
+        },
+        {
+          "date": "2026-04-14",
+          "close": 217.8
+        },
+        {
+          "date": "2026-04-17",
+          "close": 224.3
+        },
+        {
+          "date": "2026-04-22",
+          "close": 219.3
+        },
+        {
+          "date": "2026-04-27",
+          "close": 218.0
+        },
+        {
+          "date": "2026-05-01",
+          "close": 220.6
+        },
+        {
+          "date": "2026-05-11",
+          "close": 221.8
+        },
+        {
+          "date": "2026-05-14",
+          "close": 221.9
+        },
+        {
+          "date": "2026-05-19",
+          "close": 229.3
+        },
+        {
+          "date": "2026-05-22",
+          "close": 223.0
+        },
+        {
+          "date": "2026-05-27",
+          "close": 218.7
+        },
+        {
+          "date": "2026-06-01",
+          "close": 216.1
+        },
+        {
+          "date": "2026-06-04",
+          "close": 213.9
+        },
+        {
+          "date": "2026-06-09",
+          "close": 211.5
+        },
+        {
+          "date": "2026-06-12",
+          "close": 213.5
+        },
+        {
+          "date": "2026-06-17",
+          "close": 210.1
+        },
+        {
+          "date": "2026-06-22",
+          "close": 208.8
+        },
+        {
+          "date": "2026-06-25",
+          "close": 203.3
+        },
+        {
+          "date": "2026-06-30",
+          "close": 208.1
+        },
+        {
+          "date": "2026-07-03",
+          "close": 209.1
+        },
+        {
+          "date": "2026-07-08",
+          "close": 213.1
+        },
+        {
+          "date": "2026-07-13",
+          "close": 214.6
+        },
+        {
+          "date": "2026-07-16",
+          "close": 219.6
+        },
+        {
+          "date": "2026-07-22",
+          "close": 221.4
+        },
+        {
+          "date": "2026-07-27",
+          "close": 228.3
+        },
+        {
+          "date": "2026-07-30",
+          "close": 232.0
+        },
+        {
+          "date": "2026-08-04",
+          "close": 220.4
+        },
+        {
+          "date": "2026-08-07",
+          "close": 230.9
+        },
+        {
+          "date": "2026-08-13",
+          "close": 233.4
+        },
+        {
+          "date": "2026-08-18",
+          "close": 234.0
+        },
+        {
+          "date": "2026-08-21",
+          "close": 233.8
+        },
+        {
+          "date": "2026-08-26",
+          "close": 239.5
+        },
+        {
+          "date": "2026-08-31",
+          "close": 237.1
+        },
+        {
+          "date": "2026-09-03",
+          "close": 237.6
+        },
+        {
+          "date": "2026-09-08",
+          "close": 241.0
+        },
+        {
+          "date": "2026-09-11",
+          "close": 246.9
+        }
+      ],
+      "sources": {
+        "price": "jquants",
+        "high52w": "jquants",
+        "highRatio": "jquants",
+        "tradingValue": "jquants",
+        "volumeTrend": "jquants",
+        "epsGrowth": "jquants",
+        "salesGrowth": "jquants",
+        "roe": "jquants",
+        "opMargin": "jquants",
+        "progressRate": "jquants",
+        "creditRatio": "jquants",
+        "marketCap": "jquants"
+      },
+      "origin": "jquants"
+    },
+    {
+      "code": "1671",
+      "jqCode": "16710",
+      "name": "シンプレクス・アセット・マネジメント株式会社　ＷＴＩ原油価格連動型上場投信",
+      "nameEn": "Simplex WTI ETF",
+      "sector": "その他",
+      "market": "その他",
+      "scale": "-",
+      "note": "ブレイク予測の当日上位",
+      "asOf": "2026-09-11",
+      "metrics": {
+        "date": "2026-09-11",
+        "price": 6085.0,
+        "high52w": 6236.0,
+        "highRatio": 97.57857601026299,
+        "tradingValue": 42.7085461,
+        "turnoverValue": 43.39259876,
+        "volumeTrend": 427.9507640714912,
+        "volume": 701866.0,
+        "ma20Volume": 164006.25,
+        "epsGrowth": null,
+        "salesGrowth": null,
+        "roe": null,
+        "opMargin": null,
+        "progressRate": null,
+        "quarter": null,
+        "sharesOutstanding": null,
+        "fiscalPeriod": null,
+        "disclosedDate": null,
+        "opMarginBasis": null,
+        "roeBasis": null,
+        "creditRatio": 1.063867886987664,
+        "marginLong": 390331.0,
+        "marginShort": 366898.0,
+        "marginDate": "2026-09-04",
+        "marketCap": null,
+        "label": "現在",
+        "asOf": "2026-09-11"
+      },
+      "snapshots": {
+        "now": {
+          "date": "2026-09-11",
+          "price": 6085.0,
+          "high52w": 6236.0,
+          "highRatio": 97.57857601026299,
+          "tradingValue": 42.7085461,
+          "turnoverValue": 43.39259876,
+          "volumeTrend": 427.9507640714912,
+          "volume": 701866.0,
+          "ma20Volume": 164006.25,
+          "epsGrowth": null,
+          "salesGrowth": null,
+          "roe": null,
+          "opMargin": null,
+          "progressRate": null,
+          "quarter": null,
+          "sharesOutstanding": null,
+          "fiscalPeriod": null,
+          "disclosedDate": null,
+          "opMarginBasis": null,
+          "roeBasis": null,
+          "creditRatio": 1.063867886987664,
+          "marginLong": 390331.0,
+          "marginShort": 366898.0,
+          "marginDate": "2026-09-04",
+          "marketCap": null,
+          "label": "現在",
+          "asOf": "2026-09-11"
+        },
+        "m3": {
+          "date": "2026-06-12",
+          "price": 5164.0,
+          "high52w": 6008.0,
+          "highRatio": 85.9520639147803,
+          "tradingValue": 18.9554948,
+          "turnoverValue": 19.02615932,
+          "volumeTrend": 103.61566652392827,
+          "volume": 367070.0,
+          "ma20Volume": 354261.1,
+          "epsGrowth": null,
+          "salesGrowth": null,
+          "roe": null,
+          "opMargin": null,
+          "progressRate": null,
+          "quarter": null,
+          "sharesOutstanding": null,
+          "fiscalPeriod": null,
+          "disclosedDate": null,
+          "opMarginBasis": null,
+          "roeBasis": null,
+          "creditRatio": 1.2339213729973022,
+          "marginLong": 551590.0,
+          "marginShort": 447022.0,
+          "marginDate": "2026-06-12",
+          "marketCap": null,
+          "label": "3ヶ月前",
+          "asOf": "2026-06-12"
+        },
+        "m6": {
+          "date": "2026-03-12",
+          "price": 4858.0,
+          "high52w": 5000.0,
+          "highRatio": 97.16,
+          "tradingValue": 253.32245036,
+          "turnoverValue": 255.93126817,
+          "volumeTrend": 543.2400263986794,
+          "volume": 5214542.0,
+          "ma20Volume": 959896.5,
+          "epsGrowth": null,
+          "salesGrowth": null,
+          "roe": null,
+          "opMargin": null,
+          "progressRate": null,
+          "quarter": null,
+          "sharesOutstanding": null,
+          "fiscalPeriod": null,
+          "disclosedDate": null,
+          "opMarginBasis": null,
+          "roeBasis": null,
+          "creditRatio": 2.6692380999326333,
+          "marginLong": 649810.0,
+          "marginShort": 243444.0,
+          "marginDate": "2026-03-06",
+          "marketCap": null,
+          "label": "6ヶ月前",
+          "asOf": "2026-03-12"
+        }
+      },
+      "milestones": [
+        {
+          "date": "2026-02-20",
+          "type": "breakout",
+          "title": "52週高値を更新",
+          "detail": "終値 3,465円 が過去52週の最高値 3,435円 を上抜け"
+        },
+        {
+          "date": "2026-03-03",
+          "type": "volume_spike",
+          "title": "出来高急増（大口買い痕跡）",
+          "detail": "出来高 1,953,502株 = 20日平均の 5.8倍・陽線"
+        },
+        {
+          "date": "2026-03-04",
+          "type": "volume_spike",
+          "title": "出来高急増（大口買い痕跡）",
+          "detail": "出来高 2,307,652株 = 20日平均の 5.8倍・陽線"
+        },
+        {
+          "date": "2026-03-05",
+          "type": "volume_spike",
+          "title": "出来高急増（大口買い痕跡）",
+          "detail": "出来高 1,942,461株 = 20日平均の 4.0倍・陽線"
+        },
+        {
+          "date": "2026-03-06",
+          "type": "volume_spike",
+          "title": "出来高急増（大口買い痕跡）",
+          "detail": "出来高 2,328,148株 = 20日平均の 4.0倍・陽線"
+        },
+        {
+          "date": "2026-03-10",
+          "type": "volume_spike",
+          "title": "出来高急増（大口買い痕跡）",
+          "detail": "出来高 3,215,361株 = 20日平均の 4.8倍・陽線"
+        },
+        {
+          "date": "2026-03-16",
+          "type": "volume_spike",
+          "title": "出来高急増（大口買い痕跡）",
+          "detail": "出来高 2,839,796株 = 20日平均の 2.1倍・陽線"
+        },
+        {
+          "date": "2026-03-23",
+          "type": "breakout",
+          "title": "52週高値を更新",
+          "detail": "終値 5,306円 が過去52週の最高値 5,287円 を上抜け"
+        },
+        {
+          "date": "2026-04-30",
+          "type": "breakout",
+          "title": "52週高値を更新",
+          "detail": "終値 5,976円 が過去52週の最高値 5,527円 を上抜け"
+        },
+        {
+          "date": "2026-07-14",
+          "type": "volume_spike",
+          "title": "出来高急増（大口買い痕跡）",
+          "detail": "出来高 657,270株 = 20日平均の 2.4倍・陽線"
+        },
+        {
+          "date": "2026-07-22",
+          "type": "volume_spike",
+          "title": "出来高急増（大口買い痕跡）",
+          "detail": "出来高 538,553株 = 20日平均の 2.1倍・陽線"
+        },
+        {
+          "date": "2026-09-11",
+          "type": "breakout",
+          "title": "52週高値を更新",
+          "detail": "終値 6,085円 が過去52週の最高値 6,008円 を上抜け"
+        }
+      ],
+      "quarters": [],
+      "history": [
+        {
+          "date": "2025-09-11",
+          "close": 3017.0
+        },
+        {
+          "date": "2025-09-17",
+          "close": 3031.0
+        },
+        {
+          "date": "2025-09-22",
+          "close": 3006.0
+        },
+        {
+          "date": "2025-09-26",
+          "close": 3150.0
+        },
+        {
+          "date": "2025-10-01",
+          "close": 2979.0
+        },
+        {
+          "date": "2025-10-06",
+          "close": 2988.0
+        },
+        {
+          "date": "2025-10-09",
+          "close": 3088.0
+        },
+        {
+          "date": "2025-10-15",
+          "close": 2895.0
+        },
+        {
+          "date": "2025-10-20",
+          "close": 2785.0
+        },
+        {
+          "date": "2025-10-23",
+          "close": 3002.0
+        },
+        {
+          "date": "2025-10-28",
+          "close": 3011.0
+        },
+        {
+          "date": "2025-10-31",
+          "close": 3011.0
+        },
+        {
+          "date": "2025-11-06",
+          "close": 3001.0
+        },
+        {
+          "date": "2025-11-11",
+          "close": 3013.0
+        },
+        {
+          "date": "2025-11-14",
+          "close": 3007.0
+        },
+        {
+          "date": "2025-11-19",
+          "close": 3070.0
+        },
+        {
+          "date": "2025-11-25",
+          "close": 3001.0
+        },
+        {
+          "date": "2025-11-28",
+          "close": 2987.0
+        },
+        {
+          "date": "2025-12-03",
+          "close": 2991.0
+        },
+        {
+          "date": "2025-12-08",
+          "close": 3061.0
+        },
+        {
+          "date": "2025-12-11",
+          "close": 2983.0
+        },
+        {
+          "date": "2025-12-16",
+          "close": 2877.0
+        },
+        {
+          "date": "2025-12-19",
+          "close": 2873.0
+        },
+        {
+          "date": "2025-12-24",
+          "close": 2997.0
+        },
+        {
+          "date": "2025-12-29",
+          "close": 2954.0
+        },
+        {
+          "date": "2026-01-06",
+          "close": 2993.0
+        },
+        {
+          "date": "2026-01-09",
+          "close": 3027.0
+        },
+        {
+          "date": "2026-01-15",
+          "close": 3152.0
+        },
+        {
+          "date": "2026-01-20",
+          "close": 3119.0
+        },
+        {
+          "date": "2026-01-23",
+          "close": 3152.0
+        },
+        {
+          "date": "2026-01-28",
+          "close": 3171.0
+        },
+        {
+          "date": "2026-02-02",
+          "close": 3159.0
+        },
+        {
+          "date": "2026-02-05",
+          "close": 3314.0
+        },
+        {
+          "date": "2026-02-10",
+          "close": 3320.0
+        },
+        {
+          "date": "2026-02-16",
+          "close": 3206.0
+        },
+        {
+          "date": "2026-02-19",
+          "close": 3370.0
+        },
+        {
+          "date": "2026-02-25",
+          "close": 3420.0
+        },
+        {
+          "date": "2026-03-02",
+          "close": 3753.0
+        },
+        {
+          "date": "2026-03-05",
+          "close": 3992.0
+        },
+        {
+          "date": "2026-03-10",
+          "close": 4561.0
+        },
+        {
+          "date": "2026-03-13",
+          "close": 5029.0
+        },
+        {
+          "date": "2026-03-18",
+          "close": 4874.0
+        },
+        {
+          "date": "2026-03-24",
+          "close": 4843.0
+        },
+        {
+          "date": "2026-03-27",
+          "close": 4998.0
+        },
+        {
+          "date": "2026-04-01",
+          "close": 4974.0
+        },
+        {
+          "date": "2026-04-06",
+          "close": 5399.0
+        },
+        {
+          "date": "2026-04-09",
+          "close": 4953.0
+        },
+        {
+          "date": "2026-04-14",
+          "close": 5052.0
+        },
+        {
+          "date": "2026-04-17",
+          "close": 4960.0
+        },
+        {
+          "date": "2026-04-22",
+          "close": 4891.0
+        },
+        {
+          "date": "2026-04-27",
+          "close": 5243.0
+        },
+        {
+          "date": "2026-05-01",
+          "close": 5686.0
+        },
+        {
+          "date": "2026-05-11",
+          "close": 5433.0
+        },
+        {
+          "date": "2026-05-14",
+          "close": 5535.0
+        },
+        {
+          "date": "2026-05-19",
+          "close": 5940.0
+        },
+        {
+          "date": "2026-05-22",
+          "close": 5717.0
+        },
+        {
+          "date": "2026-05-27",
+          "close": 5368.0
+        },
+        {
+          "date": "2026-06-01",
+          "close": 5323.0
+        },
+        {
+          "date": "2026-06-04",
+          "close": 5601.0
+        },
+        {
+          "date": "2026-06-09",
+          "close": 5375.0
+        },
+        {
+          "date": "2026-06-12",
+          "close": 5164.0
+        },
+        {
+          "date": "2026-06-17",
+          "close": 4605.0
+        },
+        {
+          "date": "2026-06-22",
+          "close": 4633.0
+        },
+        {
+          "date": "2026-06-25",
+          "close": 4332.0
+        },
+        {
+          "date": "2026-06-30",
+          "close": 4355.0
+        },
+        {
+          "date": "2026-07-03",
+          "close": 4287.0
+        },
+        {
+          "date": "2026-07-08",
+          "close": 4544.0
+        },
+        {
+          "date": "2026-07-13",
+          "close": 4667.0
+        },
+        {
+          "date": "2026-07-16",
+          "close": 4960.0
+        },
+        {
+          "date": "2026-07-22",
+          "close": 5405.0
+        },
+        {
+          "date": "2026-07-27",
+          "close": 5227.0
+        },
+        {
+          "date": "2026-07-30",
+          "close": 5371.0
+        },
+        {
+          "date": "2026-08-04",
+          "close": 4929.0
+        },
+        {
+          "date": "2026-08-07",
+          "close": 4819.0
+        },
+        {
+          "date": "2026-08-13",
+          "close": 5200.0
+        },
+        {
+          "date": "2026-08-18",
+          "close": 5379.0
+        },
+        {
+          "date": "2026-08-21",
+          "close": 5457.0
+        },
+        {
+          "date": "2026-08-26",
+          "close": 5153.0
+        },
+        {
+          "date": "2026-08-31",
+          "close": 5464.0
+        },
+        {
+          "date": "2026-09-03",
+          "close": 5586.0
+        },
+        {
+          "date": "2026-09-08",
+          "close": 5674.0
+        },
+        {
+          "date": "2026-09-11",
+          "close": 6085.0
+        }
+      ],
+      "sources": {
+        "price": "jquants",
+        "high52w": "jquants",
+        "highRatio": "jquants",
+        "tradingValue": "jquants",
+        "volumeTrend": "jquants",
+        "epsGrowth": "unavailable",
+        "salesGrowth": "unavailable",
+        "roe": "unavailable",
+        "opMargin": "unavailable",
+        "progressRate": "unavailable",
+        "creditRatio": "jquants",
+        "marketCap": "unavailable"
+      },
+      "origin": "jquants"
+    },
     {
       "code": "9324",
       "jqCode": "93240",
@@ -763,1828 +2585,6 @@
         {
           "date": "2026-09-11",
           "close": 2655.0
-        }
-      ],
-      "sources": {
-        "price": "jquants",
-        "high52w": "jquants",
-        "highRatio": "jquants",
-        "tradingValue": "jquants",
-        "volumeTrend": "jquants",
-        "epsGrowth": "jquants",
-        "salesGrowth": "jquants",
-        "roe": "jquants",
-        "opMargin": "jquants",
-        "progressRate": "jquants",
-        "creditRatio": "jquants",
-        "marketCap": "jquants"
-      },
-      "origin": "jquants"
-    },
-    {
-      "code": "1699",
-      "jqCode": "16990",
-      "name": "野村アセットマネジメント株式会社　ＮＥＸＴ　ＦＵＮＤＳ　ＮＯＭＵＲＡ　原油インデックス連動型上場投信",
-      "nameEn": "NEXT FUNDS NOMURA Crude Oil Long Index Linked Exchange Traded Fund",
-      "sector": "その他",
-      "market": "その他",
-      "scale": "-",
-      "note": "ブレイク予測の当日上位",
-      "asOf": "2026-09-11",
-      "metrics": {
-        "date": "2026-09-11",
-        "price": 698.1,
-        "high52w": 711.5,
-        "highRatio": 98.11665495432186,
-        "tradingValue": 6.56625879,
-        "turnoverValue": 6.63369109,
-        "volumeTrend": 382.3995153890405,
-        "volume": 940590.0,
-        "ma20Volume": 245970.5,
-        "epsGrowth": null,
-        "salesGrowth": null,
-        "roe": null,
-        "opMargin": null,
-        "progressRate": null,
-        "quarter": null,
-        "sharesOutstanding": null,
-        "fiscalPeriod": null,
-        "disclosedDate": null,
-        "opMarginBasis": null,
-        "roeBasis": null,
-        "creditRatio": 7.958730488833432,
-        "marginLong": 6888520.0,
-        "marginShort": 865530.0,
-        "marginDate": "2026-09-04",
-        "marketCap": null,
-        "label": "現在",
-        "asOf": "2026-09-11"
-      },
-      "snapshots": {
-        "now": {
-          "date": "2026-09-11",
-          "price": 698.1,
-          "high52w": 711.5,
-          "highRatio": 98.11665495432186,
-          "tradingValue": 6.56625879,
-          "turnoverValue": 6.63369109,
-          "volumeTrend": 382.3995153890405,
-          "volume": 940590.0,
-          "ma20Volume": 245970.5,
-          "epsGrowth": null,
-          "salesGrowth": null,
-          "roe": null,
-          "opMargin": null,
-          "progressRate": null,
-          "quarter": null,
-          "sharesOutstanding": null,
-          "fiscalPeriod": null,
-          "disclosedDate": null,
-          "opMarginBasis": null,
-          "roeBasis": null,
-          "creditRatio": 7.958730488833432,
-          "marginLong": 6888520.0,
-          "marginShort": 865530.0,
-          "marginDate": "2026-09-04",
-          "marketCap": null,
-          "label": "現在",
-          "asOf": "2026-09-11"
-        },
-        "m3": {
-          "date": "2026-06-12",
-          "price": 631.6,
-          "high52w": 704.8,
-          "highRatio": 89.61407491486948,
-          "tradingValue": 2.43147052,
-          "turnoverValue": 2.44547349,
-          "volumeTrend": 79.11019779090675,
-          "volume": 384970.0,
-          "ma20Volume": 486625.0,
-          "epsGrowth": null,
-          "salesGrowth": null,
-          "roe": null,
-          "opMargin": null,
-          "progressRate": null,
-          "quarter": null,
-          "sharesOutstanding": null,
-          "fiscalPeriod": null,
-          "disclosedDate": null,
-          "opMarginBasis": null,
-          "roeBasis": null,
-          "creditRatio": 3.573402588186594,
-          "marginLong": 3625610.0,
-          "marginShort": 1014610.0,
-          "marginDate": "2026-06-12",
-          "marketCap": null,
-          "label": "3ヶ月前",
-          "asOf": "2026-06-12"
-        },
-        "m6": {
-          "date": "2026-03-12",
-          "price": 580.0,
-          "high52w": 594.2,
-          "highRatio": 97.61023224503533,
-          "tradingValue": 52.244602,
-          "turnoverValue": 52.81763303,
-          "volumeTrend": 508.60014398035094,
-          "volume": 9007690.0,
-          "ma20Volume": 1771075.0,
-          "epsGrowth": null,
-          "salesGrowth": null,
-          "roe": null,
-          "opMargin": null,
-          "progressRate": null,
-          "quarter": null,
-          "sharesOutstanding": null,
-          "fiscalPeriod": null,
-          "disclosedDate": null,
-          "opMarginBasis": null,
-          "roeBasis": null,
-          "creditRatio": 16.290693770411746,
-          "marginLong": 5337320.0,
-          "marginShort": 327630.0,
-          "marginDate": "2026-03-06",
-          "marketCap": null,
-          "label": "6ヶ月前",
-          "asOf": "2026-03-12"
-        }
-      },
-      "milestones": [
-        {
-          "date": "2026-02-20",
-          "type": "breakout",
-          "title": "52週高値を更新",
-          "detail": "終値 444円 が過去52週の最高値 433円 を上抜け"
-        },
-        {
-          "date": "2026-03-03",
-          "type": "volume_spike",
-          "title": "出来高急増（大口買い痕跡）",
-          "detail": "出来高 2,073,670株 = 20日平均の 2.6倍・陽線"
-        },
-        {
-          "date": "2026-03-04",
-          "type": "volume_spike",
-          "title": "出来高急増（大口買い痕跡）",
-          "detail": "出来高 2,664,470株 = 20日平均の 3.1倍・陽線"
-        },
-        {
-          "date": "2026-03-05",
-          "type": "volume_spike",
-          "title": "出来高急増（大口買い痕跡）",
-          "detail": "出来高 2,100,690株 = 20日平均の 2.2倍・陽線"
-        },
-        {
-          "date": "2026-03-10",
-          "type": "volume_spike",
-          "title": "出来高急増（大口買い痕跡）",
-          "detail": "出来高 7,299,910株 = 20日平均の 6.7倍・陽線"
-        },
-        {
-          "date": "2026-03-16",
-          "type": "volume_spike",
-          "title": "出来高急増（大口買い痕跡）",
-          "detail": "出来高 9,862,860株 = 20日平均の 3.9倍・陽線"
-        },
-        {
-          "date": "2026-03-17",
-          "type": "volume_spike",
-          "title": "出来高急増（大口買い痕跡）",
-          "detail": "出来高 6,377,650株 = 20日平均の 2.1倍・陽線"
-        },
-        {
-          "date": "2026-03-23",
-          "type": "breakout",
-          "title": "52週高値を更新",
-          "detail": "終値 638円 が過去52週の最高値 637円 を上抜け"
-        },
-        {
-          "date": "2026-04-30",
-          "type": "breakout",
-          "title": "52週高値を更新",
-          "detail": "終値 684円 が過去52週の最高値 639円 を上抜け"
-        },
-        {
-          "date": "2026-07-13",
-          "type": "volume_spike",
-          "title": "出来高急増（大口買い痕跡）",
-          "detail": "出来高 2,044,010株 = 20日平均の 4.6倍・陽線"
-        },
-        {
-          "date": "2026-07-14",
-          "type": "volume_spike",
-          "title": "出来高急増（大口買い痕跡）",
-          "detail": "出来高 3,215,290株 = 20日平均の 6.3倍・陽線"
-        }
-      ],
-      "quarters": [],
-      "history": [
-        {
-          "date": "2025-09-11",
-          "close": 389.3
-        },
-        {
-          "date": "2025-09-17",
-          "close": 390.2
-        },
-        {
-          "date": "2025-09-22",
-          "close": 385.6
-        },
-        {
-          "date": "2025-09-26",
-          "close": 403.6
-        },
-        {
-          "date": "2025-10-01",
-          "close": 383.7
-        },
-        {
-          "date": "2025-10-06",
-          "close": 385.2
-        },
-        {
-          "date": "2025-10-09",
-          "close": 397.3
-        },
-        {
-          "date": "2025-10-15",
-          "close": 371.1
-        },
-        {
-          "date": "2025-10-20",
-          "close": 362.5
-        },
-        {
-          "date": "2025-10-23",
-          "close": 387.8
-        },
-        {
-          "date": "2025-10-28",
-          "close": 388.3
-        },
-        {
-          "date": "2025-10-31",
-          "close": 391.0
-        },
-        {
-          "date": "2025-11-06",
-          "close": 390.6
-        },
-        {
-          "date": "2025-11-11",
-          "close": 391.4
-        },
-        {
-          "date": "2025-11-14",
-          "close": 390.4
-        },
-        {
-          "date": "2025-11-19",
-          "close": 398.4
-        },
-        {
-          "date": "2025-11-25",
-          "close": 388.1
-        },
-        {
-          "date": "2025-11-28",
-          "close": 386.9
-        },
-        {
-          "date": "2025-12-03",
-          "close": 386.1
-        },
-        {
-          "date": "2025-12-08",
-          "close": 394.7
-        },
-        {
-          "date": "2025-12-11",
-          "close": 385.4
-        },
-        {
-          "date": "2025-12-16",
-          "close": 372.4
-        },
-        {
-          "date": "2025-12-19",
-          "close": 371.9
-        },
-        {
-          "date": "2025-12-24",
-          "close": 386.8
-        },
-        {
-          "date": "2025-12-29",
-          "close": 381.2
-        },
-        {
-          "date": "2026-01-06",
-          "close": 386.2
-        },
-        {
-          "date": "2026-01-09",
-          "close": 391.0
-        },
-        {
-          "date": "2026-01-15",
-          "close": 405.9
-        },
-        {
-          "date": "2026-01-20",
-          "close": 400.7
-        },
-        {
-          "date": "2026-01-23",
-          "close": 405.5
-        },
-        {
-          "date": "2026-01-28",
-          "close": 406.0
-        },
-        {
-          "date": "2026-02-02",
-          "close": 402.8
-        },
-        {
-          "date": "2026-02-05",
-          "close": 423.6
-        },
-        {
-          "date": "2026-02-10",
-          "close": 426.6
-        },
-        {
-          "date": "2026-02-16",
-          "close": 410.7
-        },
-        {
-          "date": "2026-02-19",
-          "close": 431.1
-        },
-        {
-          "date": "2026-02-25",
-          "close": 439.0
-        },
-        {
-          "date": "2026-03-02",
-          "close": 473.9
-        },
-        {
-          "date": "2026-03-05",
-          "close": 491.3
-        },
-        {
-          "date": "2026-03-10",
-          "close": 540.4
-        },
-        {
-          "date": "2026-03-13",
-          "close": 599.3
-        },
-        {
-          "date": "2026-03-18",
-          "close": 585.4
-        },
-        {
-          "date": "2026-03-24",
-          "close": 586.0
-        },
-        {
-          "date": "2026-03-27",
-          "close": 605.7
-        },
-        {
-          "date": "2026-04-01",
-          "close": 572.6
-        },
-        {
-          "date": "2026-04-06",
-          "close": 594.9
-        },
-        {
-          "date": "2026-04-09",
-          "close": 583.8
-        },
-        {
-          "date": "2026-04-14",
-          "close": 599.6
-        },
-        {
-          "date": "2026-04-17",
-          "close": 591.0
-        },
-        {
-          "date": "2026-04-22",
-          "close": 587.4
-        },
-        {
-          "date": "2026-04-27",
-          "close": 623.7
-        },
-        {
-          "date": "2026-05-01",
-          "close": 660.5
-        },
-        {
-          "date": "2026-05-11",
-          "close": 649.4
-        },
-        {
-          "date": "2026-05-14",
-          "close": 656.6
-        },
-        {
-          "date": "2026-05-19",
-          "close": 696.2
-        },
-        {
-          "date": "2026-05-22",
-          "close": 676.1
-        },
-        {
-          "date": "2026-05-27",
-          "close": 637.9
-        },
-        {
-          "date": "2026-06-01",
-          "close": 642.0
-        },
-        {
-          "date": "2026-06-04",
-          "close": 664.6
-        },
-        {
-          "date": "2026-06-09",
-          "close": 651.1
-        },
-        {
-          "date": "2026-06-12",
-          "close": 631.6
-        },
-        {
-          "date": "2026-06-17",
-          "close": 574.2
-        },
-        {
-          "date": "2026-06-22",
-          "close": 574.5
-        },
-        {
-          "date": "2026-06-25",
-          "close": 539.1
-        },
-        {
-          "date": "2026-06-30",
-          "close": 544.7
-        },
-        {
-          "date": "2026-07-03",
-          "close": 539.5
-        },
-        {
-          "date": "2026-07-08",
-          "close": 566.2
-        },
-        {
-          "date": "2026-07-13",
-          "close": 586.6
-        },
-        {
-          "date": "2026-07-16",
-          "close": 608.9
-        },
-        {
-          "date": "2026-07-22",
-          "close": 645.0
-        },
-        {
-          "date": "2026-07-27",
-          "close": 624.9
-        },
-        {
-          "date": "2026-07-30",
-          "close": 631.0
-        },
-        {
-          "date": "2026-08-04",
-          "close": 589.2
-        },
-        {
-          "date": "2026-08-07",
-          "close": 583.3
-        },
-        {
-          "date": "2026-08-13",
-          "close": 626.6
-        },
-        {
-          "date": "2026-08-18",
-          "close": 650.5
-        },
-        {
-          "date": "2026-08-21",
-          "close": 654.2
-        },
-        {
-          "date": "2026-08-26",
-          "close": 620.0
-        },
-        {
-          "date": "2026-08-31",
-          "close": 652.0
-        },
-        {
-          "date": "2026-09-03",
-          "close": 654.0
-        },
-        {
-          "date": "2026-09-08",
-          "close": 659.9
-        },
-        {
-          "date": "2026-09-11",
-          "close": 698.1
-        }
-      ],
-      "sources": {
-        "price": "jquants",
-        "high52w": "jquants",
-        "highRatio": "jquants",
-        "tradingValue": "jquants",
-        "volumeTrend": "jquants",
-        "epsGrowth": "unavailable",
-        "salesGrowth": "unavailable",
-        "roe": "unavailable",
-        "opMargin": "unavailable",
-        "progressRate": "unavailable",
-        "creditRatio": "jquants",
-        "marketCap": "unavailable"
-      },
-      "origin": "jquants"
-    },
-    {
-      "code": "1671",
-      "jqCode": "16710",
-      "name": "シンプレクス・アセット・マネジメント株式会社　ＷＴＩ原油価格連動型上場投信",
-      "nameEn": "Simplex WTI ETF",
-      "sector": "その他",
-      "market": "その他",
-      "scale": "-",
-      "note": "ブレイク予測の当日上位",
-      "asOf": "2026-09-11",
-      "metrics": {
-        "date": "2026-09-11",
-        "price": 6085.0,
-        "high52w": 6236.0,
-        "highRatio": 97.57857601026299,
-        "tradingValue": 42.7085461,
-        "turnoverValue": 43.39259876,
-        "volumeTrend": 427.9507640714912,
-        "volume": 701866.0,
-        "ma20Volume": 164006.25,
-        "epsGrowth": null,
-        "salesGrowth": null,
-        "roe": null,
-        "opMargin": null,
-        "progressRate": null,
-        "quarter": null,
-        "sharesOutstanding": null,
-        "fiscalPeriod": null,
-        "disclosedDate": null,
-        "opMarginBasis": null,
-        "roeBasis": null,
-        "creditRatio": 1.063867886987664,
-        "marginLong": 390331.0,
-        "marginShort": 366898.0,
-        "marginDate": "2026-09-04",
-        "marketCap": null,
-        "label": "現在",
-        "asOf": "2026-09-11"
-      },
-      "snapshots": {
-        "now": {
-          "date": "2026-09-11",
-          "price": 6085.0,
-          "high52w": 6236.0,
-          "highRatio": 97.57857601026299,
-          "tradingValue": 42.7085461,
-          "turnoverValue": 43.39259876,
-          "volumeTrend": 427.9507640714912,
-          "volume": 701866.0,
-          "ma20Volume": 164006.25,
-          "epsGrowth": null,
-          "salesGrowth": null,
-          "roe": null,
-          "opMargin": null,
-          "progressRate": null,
-          "quarter": null,
-          "sharesOutstanding": null,
-          "fiscalPeriod": null,
-          "disclosedDate": null,
-          "opMarginBasis": null,
-          "roeBasis": null,
-          "creditRatio": 1.063867886987664,
-          "marginLong": 390331.0,
-          "marginShort": 366898.0,
-          "marginDate": "2026-09-04",
-          "marketCap": null,
-          "label": "現在",
-          "asOf": "2026-09-11"
-        },
-        "m3": {
-          "date": "2026-06-12",
-          "price": 5164.0,
-          "high52w": 6008.0,
-          "highRatio": 85.9520639147803,
-          "tradingValue": 18.9554948,
-          "turnoverValue": 19.02615932,
-          "volumeTrend": 103.61566652392827,
-          "volume": 367070.0,
-          "ma20Volume": 354261.1,
-          "epsGrowth": null,
-          "salesGrowth": null,
-          "roe": null,
-          "opMargin": null,
-          "progressRate": null,
-          "quarter": null,
-          "sharesOutstanding": null,
-          "fiscalPeriod": null,
-          "disclosedDate": null,
-          "opMarginBasis": null,
-          "roeBasis": null,
-          "creditRatio": 1.2339213729973022,
-          "marginLong": 551590.0,
-          "marginShort": 447022.0,
-          "marginDate": "2026-06-12",
-          "marketCap": null,
-          "label": "3ヶ月前",
-          "asOf": "2026-06-12"
-        },
-        "m6": {
-          "date": "2026-03-12",
-          "price": 4858.0,
-          "high52w": 5000.0,
-          "highRatio": 97.16,
-          "tradingValue": 253.32245036,
-          "turnoverValue": 255.93126817,
-          "volumeTrend": 543.2400263986794,
-          "volume": 5214542.0,
-          "ma20Volume": 959896.5,
-          "epsGrowth": null,
-          "salesGrowth": null,
-          "roe": null,
-          "opMargin": null,
-          "progressRate": null,
-          "quarter": null,
-          "sharesOutstanding": null,
-          "fiscalPeriod": null,
-          "disclosedDate": null,
-          "opMarginBasis": null,
-          "roeBasis": null,
-          "creditRatio": 2.6692380999326333,
-          "marginLong": 649810.0,
-          "marginShort": 243444.0,
-          "marginDate": "2026-03-06",
-          "marketCap": null,
-          "label": "6ヶ月前",
-          "asOf": "2026-03-12"
-        }
-      },
-      "milestones": [
-        {
-          "date": "2026-02-20",
-          "type": "breakout",
-          "title": "52週高値を更新",
-          "detail": "終値 3,465円 が過去52週の最高値 3,435円 を上抜け"
-        },
-        {
-          "date": "2026-03-03",
-          "type": "volume_spike",
-          "title": "出来高急増（大口買い痕跡）",
-          "detail": "出来高 1,953,502株 = 20日平均の 5.8倍・陽線"
-        },
-        {
-          "date": "2026-03-04",
-          "type": "volume_spike",
-          "title": "出来高急増（大口買い痕跡）",
-          "detail": "出来高 2,307,652株 = 20日平均の 5.8倍・陽線"
-        },
-        {
-          "date": "2026-03-05",
-          "type": "volume_spike",
-          "title": "出来高急増（大口買い痕跡）",
-          "detail": "出来高 1,942,461株 = 20日平均の 4.0倍・陽線"
-        },
-        {
-          "date": "2026-03-06",
-          "type": "volume_spike",
-          "title": "出来高急増（大口買い痕跡）",
-          "detail": "出来高 2,328,148株 = 20日平均の 4.0倍・陽線"
-        },
-        {
-          "date": "2026-03-10",
-          "type": "volume_spike",
-          "title": "出来高急増（大口買い痕跡）",
-          "detail": "出来高 3,215,361株 = 20日平均の 4.8倍・陽線"
-        },
-        {
-          "date": "2026-03-16",
-          "type": "volume_spike",
-          "title": "出来高急増（大口買い痕跡）",
-          "detail": "出来高 2,839,796株 = 20日平均の 2.1倍・陽線"
-        },
-        {
-          "date": "2026-03-23",
-          "type": "breakout",
-          "title": "52週高値を更新",
-          "detail": "終値 5,306円 が過去52週の最高値 5,287円 を上抜け"
-        },
-        {
-          "date": "2026-04-30",
-          "type": "breakout",
-          "title": "52週高値を更新",
-          "detail": "終値 5,976円 が過去52週の最高値 5,527円 を上抜け"
-        },
-        {
-          "date": "2026-07-14",
-          "type": "volume_spike",
-          "title": "出来高急増（大口買い痕跡）",
-          "detail": "出来高 657,270株 = 20日平均の 2.4倍・陽線"
-        },
-        {
-          "date": "2026-07-22",
-          "type": "volume_spike",
-          "title": "出来高急増（大口買い痕跡）",
-          "detail": "出来高 538,553株 = 20日平均の 2.1倍・陽線"
-        },
-        {
-          "date": "2026-09-11",
-          "type": "breakout",
-          "title": "52週高値を更新",
-          "detail": "終値 6,085円 が過去52週の最高値 6,008円 を上抜け"
-        }
-      ],
-      "quarters": [],
-      "history": [
-        {
-          "date": "2025-09-11",
-          "close": 3017.0
-        },
-        {
-          "date": "2025-09-17",
-          "close": 3031.0
-        },
-        {
-          "date": "2025-09-22",
-          "close": 3006.0
-        },
-        {
-          "date": "2025-09-26",
-          "close": 3150.0
-        },
-        {
-          "date": "2025-10-01",
-          "close": 2979.0
-        },
-        {
-          "date": "2025-10-06",
-          "close": 2988.0
-        },
-        {
-          "date": "2025-10-09",
-          "close": 3088.0
-        },
-        {
-          "date": "2025-10-15",
-          "close": 2895.0
-        },
-        {
-          "date": "2025-10-20",
-          "close": 2785.0
-        },
-        {
-          "date": "2025-10-23",
-          "close": 3002.0
-        },
-        {
-          "date": "2025-10-28",
-          "close": 3011.0
-        },
-        {
-          "date": "2025-10-31",
-          "close": 3011.0
-        },
-        {
-          "date": "2025-11-06",
-          "close": 3001.0
-        },
-        {
-          "date": "2025-11-11",
-          "close": 3013.0
-        },
-        {
-          "date": "2025-11-14",
-          "close": 3007.0
-        },
-        {
-          "date": "2025-11-19",
-          "close": 3070.0
-        },
-        {
-          "date": "2025-11-25",
-          "close": 3001.0
-        },
-        {
-          "date": "2025-11-28",
-          "close": 2987.0
-        },
-        {
-          "date": "2025-12-03",
-          "close": 2991.0
-        },
-        {
-          "date": "2025-12-08",
-          "close": 3061.0
-        },
-        {
-          "date": "2025-12-11",
-          "close": 2983.0
-        },
-        {
-          "date": "2025-12-16",
-          "close": 2877.0
-        },
-        {
-          "date": "2025-12-19",
-          "close": 2873.0
-        },
-        {
-          "date": "2025-12-24",
-          "close": 2997.0
-        },
-        {
-          "date": "2025-12-29",
-          "close": 2954.0
-        },
-        {
-          "date": "2026-01-06",
-          "close": 2993.0
-        },
-        {
-          "date": "2026-01-09",
-          "close": 3027.0
-        },
-        {
-          "date": "2026-01-15",
-          "close": 3152.0
-        },
-        {
-          "date": "2026-01-20",
-          "close": 3119.0
-        },
-        {
-          "date": "2026-01-23",
-          "close": 3152.0
-        },
-        {
-          "date": "2026-01-28",
-          "close": 3171.0
-        },
-        {
-          "date": "2026-02-02",
-          "close": 3159.0
-        },
-        {
-          "date": "2026-02-05",
-          "close": 3314.0
-        },
-        {
-          "date": "2026-02-10",
-          "close": 3320.0
-        },
-        {
-          "date": "2026-02-16",
-          "close": 3206.0
-        },
-        {
-          "date": "2026-02-19",
-          "close": 3370.0
-        },
-        {
-          "date": "2026-02-25",
-          "close": 3420.0
-        },
-        {
-          "date": "2026-03-02",
-          "close": 3753.0
-        },
-        {
-          "date": "2026-03-05",
-          "close": 3992.0
-        },
-        {
-          "date": "2026-03-10",
-          "close": 4561.0
-        },
-        {
-          "date": "2026-03-13",
-          "close": 5029.0
-        },
-        {
-          "date": "2026-03-18",
-          "close": 4874.0
-        },
-        {
-          "date": "2026-03-24",
-          "close": 4843.0
-        },
-        {
-          "date": "2026-03-27",
-          "close": 4998.0
-        },
-        {
-          "date": "2026-04-01",
-          "close": 4974.0
-        },
-        {
-          "date": "2026-04-06",
-          "close": 5399.0
-        },
-        {
-          "date": "2026-04-09",
-          "close": 4953.0
-        },
-        {
-          "date": "2026-04-14",
-          "close": 5052.0
-        },
-        {
-          "date": "2026-04-17",
-          "close": 4960.0
-        },
-        {
-          "date": "2026-04-22",
-          "close": 4891.0
-        },
-        {
-          "date": "2026-04-27",
-          "close": 5243.0
-        },
-        {
-          "date": "2026-05-01",
-          "close": 5686.0
-        },
-        {
-          "date": "2026-05-11",
-          "close": 5433.0
-        },
-        {
-          "date": "2026-05-14",
-          "close": 5535.0
-        },
-        {
-          "date": "2026-05-19",
-          "close": 5940.0
-        },
-        {
-          "date": "2026-05-22",
-          "close": 5717.0
-        },
-        {
-          "date": "2026-05-27",
-          "close": 5368.0
-        },
-        {
-          "date": "2026-06-01",
-          "close": 5323.0
-        },
-        {
-          "date": "2026-06-04",
-          "close": 5601.0
-        },
-        {
-          "date": "2026-06-09",
-          "close": 5375.0
-        },
-        {
-          "date": "2026-06-12",
-          "close": 5164.0
-        },
-        {
-          "date": "2026-06-17",
-          "close": 4605.0
-        },
-        {
-          "date": "2026-06-22",
-          "close": 4633.0
-        },
-        {
-          "date": "2026-06-25",
-          "close": 4332.0
-        },
-        {
-          "date": "2026-06-30",
-          "close": 4355.0
-        },
-        {
-          "date": "2026-07-03",
-          "close": 4287.0
-        },
-        {
-          "date": "2026-07-08",
-          "close": 4544.0
-        },
-        {
-          "date": "2026-07-13",
-          "close": 4667.0
-        },
-        {
-          "date": "2026-07-16",
-          "close": 4960.0
-        },
-        {
-          "date": "2026-07-22",
-          "close": 5405.0
-        },
-        {
-          "date": "2026-07-27",
-          "close": 5227.0
-        },
-        {
-          "date": "2026-07-30",
-          "close": 5371.0
-        },
-        {
-          "date": "2026-08-04",
-          "close": 4929.0
-        },
-        {
-          "date": "2026-08-07",
-          "close": 4819.0
-        },
-        {
-          "date": "2026-08-13",
-          "close": 5200.0
-        },
-        {
-          "date": "2026-08-18",
-          "close": 5379.0
-        },
-        {
-          "date": "2026-08-21",
-          "close": 5457.0
-        },
-        {
-          "date": "2026-08-26",
-          "close": 5153.0
-        },
-        {
-          "date": "2026-08-31",
-          "close": 5464.0
-        },
-        {
-          "date": "2026-09-03",
-          "close": 5586.0
-        },
-        {
-          "date": "2026-09-08",
-          "close": 5674.0
-        },
-        {
-          "date": "2026-09-11",
-          "close": 6085.0
-        }
-      ],
-      "sources": {
-        "price": "jquants",
-        "high52w": "jquants",
-        "highRatio": "jquants",
-        "tradingValue": "jquants",
-        "volumeTrend": "jquants",
-        "epsGrowth": "unavailable",
-        "salesGrowth": "unavailable",
-        "roe": "unavailable",
-        "opMargin": "unavailable",
-        "progressRate": "unavailable",
-        "creditRatio": "jquants",
-        "marketCap": "unavailable"
-      },
-      "origin": "jquants"
-    },
-    {
-      "code": "9434",
-      "jqCode": "94340",
-      "name": "ソフトバンク",
-      "nameEn": "SoftBank Corp.",
-      "sector": "情報･通信業",
-      "market": "プライム",
-      "scale": "TOPIX Core30",
-      "note": "ブレイク予測の当日上位",
-      "asOf": "2026-09-11",
-      "metrics": {
-        "date": "2026-09-11",
-        "price": 246.9,
-        "high52w": 248.1,
-        "highRatio": 99.51632406287789,
-        "tradingValue": 275.4843537,
-        "turnoverValue": 273.3380397,
-        "volumeTrend": 164.05338406888114,
-        "volume": 111577300.0,
-        "ma20Volume": 68012800.0,
-        "epsGrowth": 2.9999999999999956,
-        "salesGrowth": 9.4118888349617,
-        "roe": 11.976238059204357,
-        "opMargin": 14.651441383879746,
-        "progressRate": 27.481636363636362,
-        "quarter": 1,
-        "sharesOutstanding": 47846798882.0,
-        "fiscalPeriod": "1Q",
-        "disclosedDate": "2026-08-04",
-        "opMarginBasis": "TTM (直近4四半期)",
-        "roeBasis": "TTM純利益 / 自己資本 で算出",
-        "creditRatio": 8.630765355917262,
-        "marginLong": 27413900.0,
-        "marginShort": 3176300.0,
-        "marginDate": "2026-09-04",
-        "marketCap": 118133.746439658,
-        "label": "現在",
-        "asOf": "2026-09-11"
-      },
-      "snapshots": {
-        "now": {
-          "date": "2026-09-11",
-          "price": 246.9,
-          "high52w": 248.1,
-          "highRatio": 99.51632406287789,
-          "tradingValue": 275.4843537,
-          "turnoverValue": 273.3380397,
-          "volumeTrend": 164.05338406888114,
-          "volume": 111577300.0,
-          "ma20Volume": 68012800.0,
-          "epsGrowth": 2.9999999999999956,
-          "salesGrowth": 9.4118888349617,
-          "roe": 11.976238059204357,
-          "opMargin": 14.651441383879746,
-          "progressRate": 27.481636363636362,
-          "quarter": 1,
-          "sharesOutstanding": 47846798882.0,
-          "fiscalPeriod": "1Q",
-          "disclosedDate": "2026-08-04",
-          "opMarginBasis": "TTM (直近4四半期)",
-          "roeBasis": "TTM純利益 / 自己資本 で算出",
-          "creditRatio": 8.630765355917262,
-          "marginLong": 27413900.0,
-          "marginShort": 3176300.0,
-          "marginDate": "2026-09-04",
-          "marketCap": 118133.746439658,
-          "label": "現在",
-          "asOf": "2026-09-11"
-        },
-        "m3": {
-          "date": "2026-06-12",
-          "price": 213.5,
-          "high52w": 247.9,
-          "highRatio": 86.12343686970553,
-          "tradingValue": 196.105728,
-          "turnoverValue": 195.5235437,
-          "volumeTrend": 126.05806289316462,
-          "volume": 91852800.0,
-          "ma20Volume": 72865470.0,
-          "epsGrowth": -28.415300546448062,
-          "salesGrowth": 6.370586409030945,
-          "roe": 0.193,
-          "opMargin": 14.812095449715004,
-          "progressRate": null,
-          "quarter": 4,
-          "sharesOutstanding": 47801264883.0,
-          "fiscalPeriod": "FY",
-          "disclosedDate": "2026-05-11",
-          "opMarginBasis": "TTM (直近4四半期)",
-          "roeBasis": "J-Quants 提供値 (ROE)",
-          "creditRatio": 10.860170919226881,
-          "marginLong": 35455200.0,
-          "marginShort": 3264700.0,
-          "marginDate": "2026-06-12",
-          "marketCap": 102055.700525205,
-          "label": "3ヶ月前",
-          "asOf": "2026-06-12"
-        },
-        "m6": {
-          "date": "2026-03-12",
-          "price": 213.8,
-          "high52w": 247.9,
-          "highRatio": 86.24445340863251,
-          "tradingValue": 175.9676624,
-          "turnoverValue": 175.827141,
-          "volumeTrend": 92.99091623249899,
-          "volume": 82304800.0,
-          "ma20Volume": 88508430.0,
-          "epsGrowth": 21.030042918454907,
-          "salesGrowth": 8.14639649412071,
-          "roe": 12.806191019680984,
-          "opMargin": 15.174014925771672,
-          "progressRate": 86.6807843137255,
-          "quarter": 3,
-          "sharesOutstanding": 47763467941.0,
-          "fiscalPeriod": "3Q",
-          "disclosedDate": "2026-02-09",
-          "opMarginBasis": "TTM (直近4四半期)",
-          "roeBasis": "TTM純利益 / 自己資本 で算出",
-          "creditRatio": 51.17137367915466,
-          "marginLong": 53269400.0,
-          "marginShort": 1041000.0,
-          "marginDate": "2026-03-06",
-          "marketCap": 102118.294457858,
-          "label": "6ヶ月前",
-          "asOf": "2026-03-12"
-        }
-      },
-      "milestones": [
-        {
-          "date": "2025-11-05",
-          "type": "earnings",
-          "title": "2Q 決算発表",
-          "detail": "（単一四半期換算）売上 17,422億円 / 営業利益 3,382億円"
-        },
-        {
-          "date": "2025-11-21",
-          "type": "volume_spike",
-          "title": "出来高急増（大口買い痕跡）",
-          "detail": "出来高 184,461,100株 = 20日平均の 3.0倍・陽線"
-        },
-        {
-          "date": "2026-02-09",
-          "type": "earnings",
-          "title": "3Q 決算発表",
-          "detail": "（単一四半期換算）売上 17,946億円 / 営業利益 2,552億円"
-        },
-        {
-          "date": "2026-05-11",
-          "type": "earnings",
-          "title": "FY 決算発表",
-          "detail": "（単一四半期換算）売上 18,433億円 / 営業利益 1,584億円"
-        },
-        {
-          "date": "2026-08-04",
-          "type": "earnings",
-          "title": "1Q 決算発表",
-          "detail": "（単一四半期換算）売上 18,147億円 / 営業利益 3,023億円"
-        },
-        {
-          "date": "2026-09-10",
-          "type": "breakout",
-          "title": "52週高値を更新",
-          "detail": "終値 243円 が過去52週の最高値 243円 を上抜け"
-        }
-      ],
-      "quarters": [
-        {
-          "fiscalYearStart": "2024-04-01",
-          "quarter": 1,
-          "period": "1Q",
-          "disclosedDate": "2024-08-06",
-          "periodEnd": "2024-06-30",
-          "qNetSales": 1535722000000.0,
-          "qOperatingProfit": 303927000000.0,
-          "qProfit": 162510000000.0,
-          "qEps": 34.32,
-          "cumNetSales": 1535722000000.0,
-          "cumOperatingProfit": 303927000000.0,
-          "cumProfit": 162510000000.0,
-          "cumEps": 34.32,
-          "forecastNetSales": 6200000000000.0,
-          "forecastOperatingProfit": 900000000000.0,
-          "forecastProfit": 500000000000.0,
-          "forecastEps": 10.51,
-          "equity": 3912144000000.0,
-          "totalAssets": 15690883000000.0,
-          "sharesIssued": 4760899670.0,
-          "treasuryShares": 40706959.0,
-          "reportedRoe": null
-        },
-        {
-          "fiscalYearStart": "2024-04-01",
-          "quarter": 2,
-          "period": "2Q",
-          "disclosedDate": "2024-11-08",
-          "periodEnd": "2024-09-30",
-          "qNetSales": 1616357000000.0,
-          "qOperatingProfit": 281962000000.0,
-          "qProfit": 161347000000.0,
-          "qEps": -27.490000000000002,
-          "cumNetSales": 3152079000000.0,
-          "cumOperatingProfit": 585889000000.0,
-          "cumProfit": 323857000000.0,
-          "cumEps": 6.83,
-          "forecastNetSales": 6350000000000.0,
-          "forecastOperatingProfit": 950000000000.0,
-          "forecastProfit": 510000000000.0,
-          "forecastEps": 10.66,
-          "equity": 3986476000000.0,
-          "totalAssets": 15469392000000.0,
-          "sharesIssued": 47679372700.0,
-          "treasuryShares": 310351350.0,
-          "reportedRoe": null
-        },
-        {
-          "fiscalYearStart": "2024-04-01",
-          "quarter": 3,
-          "period": "3Q",
-          "disclosedDate": "2025-02-10",
-          "periodEnd": "2024-12-31",
-          "qNetSales": 1659384000000.0,
-          "qOperatingProfit": 235972000000.0,
-          "qProfit": 112753000000.0,
-          "qEps": 2.33,
-          "cumNetSales": 4811463000000.0,
-          "cumOperatingProfit": 821861000000.0,
-          "cumProfit": 436610000000.0,
-          "cumEps": 9.16,
-          "forecastNetSales": 6350000000000.0,
-          "forecastOperatingProfit": 950000000000.0,
-          "forecastProfit": 510000000000.0,
-          "forecastEps": 10.66,
-          "equity": 4163960000000.0,
-          "totalAssets": 16304840000000.0,
-          "sharesIssued": 47702192700.0,
-          "treasuryShares": 279869350.0,
-          "reportedRoe": null
-        },
-        {
-          "fiscalYearStart": "2024-04-01",
-          "quarter": 4,
-          "period": "FY",
-          "disclosedDate": "2025-05-08",
-          "periodEnd": "2025-03-31",
-          "qNetSales": 1732886000000.0,
-          "qOperatingProfit": 167155000000.0,
-          "qProfit": 89523000000.0,
-          "qEps": 1.83,
-          "cumNetSales": 6544349000000.0,
-          "cumOperatingProfit": 989016000000.0,
-          "cumProfit": 526133000000.0,
-          "cumEps": 10.99,
-          "forecastNetSales": null,
-          "forecastOperatingProfit": null,
-          "forecastProfit": null,
-          "forecastEps": null,
-          "equity": 4265371000000.0,
-          "totalAssets": 16102195000000.0,
-          "sharesIssued": 47751490700.0,
-          "treasuryShares": 184234180.0,
-          "reportedRoe": 0.205
-        },
-        {
-          "fiscalYearStart": "2025-04-01",
-          "quarter": 1,
-          "period": "1Q",
-          "disclosedDate": "2025-08-05",
-          "periodEnd": "2025-06-30",
-          "qNetSales": 1658615000000.0,
-          "qOperatingProfit": 290734000000.0,
-          "qProfit": 145310000000.0,
-          "qEps": 3.0,
-          "cumNetSales": 1658615000000.0,
-          "cumOperatingProfit": 290734000000.0,
-          "cumProfit": 145310000000.0,
-          "cumEps": 3.0,
-          "forecastNetSales": 6700000000000.0,
-          "forecastOperatingProfit": 1000000000000.0,
-          "forecastProfit": 540000000000.0,
-          "forecastEps": 11.22,
-          "equity": 4287195000000.0,
-          "totalAssets": 17062224000000.0,
-          "sharesIssued": 47814281700.0,
-          "treasuryShares": 184234183.0,
-          "reportedRoe": null
-        },
-        {
-          "fiscalYearStart": "2025-04-01",
-          "quarter": 2,
-          "period": "2Q",
-          "disclosedDate": "2025-11-05",
-          "periodEnd": "2025-09-30",
-          "qNetSales": 1742220000000.0,
-          "qOperatingProfit": 338160000000.0,
-          "qProfit": 203445000000.0,
-          "qEps": 4.22,
-          "cumNetSales": 3400835000000.0,
-          "cumOperatingProfit": 628894000000.0,
-          "cumProfit": 348755000000.0,
-          "cumEps": 7.22,
-          "forecastNetSales": 6700000000000.0,
-          "forecastOperatingProfit": 1000000000000.0,
-          "forecastProfit": 540000000000.0,
-          "forecastEps": 11.22,
-          "equity": 4477563000000.0,
-          "totalAssets": 17579167000000.0,
-          "sharesIssued": 47908265700.0,
-          "treasuryShares": 171342693.0,
-          "reportedRoe": null
-        },
-        {
-          "fiscalYearStart": "2025-04-01",
-          "quarter": 3,
-          "period": "3Q",
-          "disclosedDate": "2026-02-09",
-          "periodEnd": "2025-12-31",
-          "qNetSales": 1794564000000.0,
-          "qOperatingProfit": 255250000000.0,
-          "qProfit": 136768000000.0,
-          "qEps": 2.8199999999999994,
-          "cumNetSales": 5195399000000.0,
-          "cumOperatingProfit": 884144000000.0,
-          "cumProfit": 485523000000.0,
-          "cumEps": 10.04,
-          "forecastNetSales": 6950000000000.0,
-          "forecastOperatingProfit": 1020000000000.0,
-          "forecastProfit": 543000000000.0,
-          "forecastEps": 11.28,
-          "equity": 4490375000000.0,
-          "totalAssets": 18243656000000.0,
-          "sharesIssued": 47934429700.0,
-          "treasuryShares": 170961759.0,
-          "reportedRoe": null
-        },
-        {
-          "fiscalYearStart": "2025-04-01",
-          "quarter": 4,
-          "period": "FY",
-          "disclosedDate": "2026-05-11",
-          "periodEnd": "2026-03-31",
-          "qNetSales": 1843281000000.0,
-          "qOperatingProfit": 158432000000.0,
-          "qProfit": 65236000000.0,
-          "qEps": 1.3100000000000005,
-          "cumNetSales": 7038680000000.0,
-          "cumOperatingProfit": 1042576000000.0,
-          "cumProfit": 550759000000.0,
-          "cumEps": 11.35,
-          "forecastNetSales": null,
-          "forecastOperatingProfit": null,
-          "forecastProfit": null,
-          "forecastEps": null,
-          "equity": 4668455000000.0,
-          "totalAssets": 18502175000000.0,
-          "sharesIssued": 47971989700.0,
-          "treasuryShares": 170724817.0,
-          "reportedRoe": 0.193
-        },
-        {
-          "fiscalYearStart": "2026-04-01",
-          "quarter": 1,
-          "period": "1Q",
-          "disclosedDate": "2026-08-04",
-          "periodEnd": "2026-06-30",
-          "qNetSales": 1814722000000.0,
-          "qOperatingProfit": 302298000000.0,
-          "qProfit": 150070000000.0,
-          "qEps": 3.09,
-          "cumNetSales": 1814722000000.0,
-          "cumOperatingProfit": 302298000000.0,
-          "cumProfit": 150070000000.0,
-          "cumEps": 3.09,
-          "forecastNetSales": 7500000000000.0,
-          "forecastOperatingProfit": 1100000000000.0,
-          "forecastProfit": 560000000000.0,
-          "forecastEps": 11.54,
-          "equity": 4638510000000.0,
-          "totalAssets": 19342584000000.0,
-          "sharesIssued": 48017366700.0,
-          "treasuryShares": 170567818.0,
-          "reportedRoe": null
-        }
-      ],
-      "history": [
-        {
-          "date": "2025-09-11",
-          "close": 229.2
-        },
-        {
-          "date": "2025-09-17",
-          "close": 229.8
-        },
-        {
-          "date": "2025-09-22",
-          "close": 225.9
-        },
-        {
-          "date": "2025-09-26",
-          "close": 229.5
-        },
-        {
-          "date": "2025-10-01",
-          "close": 216.3
-        },
-        {
-          "date": "2025-10-06",
-          "close": 217.1
-        },
-        {
-          "date": "2025-10-09",
-          "close": 216.3
-        },
-        {
-          "date": "2025-10-15",
-          "close": 215.0
-        },
-        {
-          "date": "2025-10-20",
-          "close": 217.7
-        },
-        {
-          "date": "2025-10-23",
-          "close": 220.1
-        },
-        {
-          "date": "2025-10-28",
-          "close": 219.4
-        },
-        {
-          "date": "2025-10-31",
-          "close": 218.7
-        },
-        {
-          "date": "2025-11-06",
-          "close": 215.7
-        },
-        {
-          "date": "2025-11-11",
-          "close": 223.2
-        },
-        {
-          "date": "2025-11-14",
-          "close": 222.4
-        },
-        {
-          "date": "2025-11-19",
-          "close": 225.6
-        },
-        {
-          "date": "2025-11-25",
-          "close": 225.0
-        },
-        {
-          "date": "2025-11-28",
-          "close": 223.2
-        },
-        {
-          "date": "2025-12-03",
-          "close": 215.5
-        },
-        {
-          "date": "2025-12-08",
-          "close": 216.6
-        },
-        {
-          "date": "2025-12-11",
-          "close": 216.5
-        },
-        {
-          "date": "2025-12-16",
-          "close": 216.5
-        },
-        {
-          "date": "2025-12-19",
-          "close": 216.8
-        },
-        {
-          "date": "2025-12-24",
-          "close": 214.6
-        },
-        {
-          "date": "2025-12-29",
-          "close": 216.5
-        },
-        {
-          "date": "2026-01-06",
-          "close": 217.4
-        },
-        {
-          "date": "2026-01-09",
-          "close": 214.5
-        },
-        {
-          "date": "2026-01-15",
-          "close": 216.7
-        },
-        {
-          "date": "2026-01-20",
-          "close": 217.2
-        },
-        {
-          "date": "2026-01-23",
-          "close": 214.6
-        },
-        {
-          "date": "2026-01-28",
-          "close": 211.0
-        },
-        {
-          "date": "2026-02-02",
-          "close": 210.9
-        },
-        {
-          "date": "2026-02-05",
-          "close": 213.7
-        },
-        {
-          "date": "2026-02-10",
-          "close": 212.2
-        },
-        {
-          "date": "2026-02-16",
-          "close": 215.0
-        },
-        {
-          "date": "2026-02-19",
-          "close": 213.4
-        },
-        {
-          "date": "2026-02-25",
-          "close": 210.4
-        },
-        {
-          "date": "2026-03-02",
-          "close": 212.7
-        },
-        {
-          "date": "2026-03-05",
-          "close": 209.5
-        },
-        {
-          "date": "2026-03-10",
-          "close": 215.0
-        },
-        {
-          "date": "2026-03-13",
-          "close": 213.2
-        },
-        {
-          "date": "2026-03-18",
-          "close": 217.5
-        },
-        {
-          "date": "2026-03-24",
-          "close": 217.4
-        },
-        {
-          "date": "2026-03-27",
-          "close": 218.5
-        },
-        {
-          "date": "2026-04-01",
-          "close": 213.0
-        },
-        {
-          "date": "2026-04-06",
-          "close": 217.1
-        },
-        {
-          "date": "2026-04-09",
-          "close": 215.6
-        },
-        {
-          "date": "2026-04-14",
-          "close": 217.8
-        },
-        {
-          "date": "2026-04-17",
-          "close": 224.3
-        },
-        {
-          "date": "2026-04-22",
-          "close": 219.3
-        },
-        {
-          "date": "2026-04-27",
-          "close": 218.0
-        },
-        {
-          "date": "2026-05-01",
-          "close": 220.6
-        },
-        {
-          "date": "2026-05-11",
-          "close": 221.8
-        },
-        {
-          "date": "2026-05-14",
-          "close": 221.9
-        },
-        {
-          "date": "2026-05-19",
-          "close": 229.3
-        },
-        {
-          "date": "2026-05-22",
-          "close": 223.0
-        },
-        {
-          "date": "2026-05-27",
-          "close": 218.7
-        },
-        {
-          "date": "2026-06-01",
-          "close": 216.1
-        },
-        {
-          "date": "2026-06-04",
-          "close": 213.9
-        },
-        {
-          "date": "2026-06-09",
-          "close": 211.5
-        },
-        {
-          "date": "2026-06-12",
-          "close": 213.5
-        },
-        {
-          "date": "2026-06-17",
-          "close": 210.1
-        },
-        {
-          "date": "2026-06-22",
-          "close": 208.8
-        },
-        {
-          "date": "2026-06-25",
-          "close": 203.3
-        },
-        {
-          "date": "2026-06-30",
-          "close": 208.1
-        },
-        {
-          "date": "2026-07-03",
-          "close": 209.1
-        },
-        {
-          "date": "2026-07-08",
-          "close": 213.1
-        },
-        {
-          "date": "2026-07-13",
-          "close": 214.6
-        },
-        {
-          "date": "2026-07-16",
-          "close": 219.6
-        },
-        {
-          "date": "2026-07-22",
-          "close": 221.4
-        },
-        {
-          "date": "2026-07-27",
-          "close": 228.3
-        },
-        {
-          "date": "2026-07-30",
-          "close": 232.0
-        },
-        {
-          "date": "2026-08-04",
-          "close": 220.4
-        },
-        {
-          "date": "2026-08-07",
-          "close": 230.9
-        },
-        {
-          "date": "2026-08-13",
-          "close": 233.4
-        },
-        {
-          "date": "2026-08-18",
-          "close": 234.0
-        },
-        {
-          "date": "2026-08-21",
-          "close": 233.8
-        },
-        {
-          "date": "2026-08-26",
-          "close": 239.5
-        },
-        {
-          "date": "2026-08-31",
-          "close": 237.1
-        },
-        {
-          "date": "2026-09-03",
-          "close": 237.6
-        },
-        {
-          "date": "2026-09-08",
-          "close": 241.0
-        },
-        {
-          "date": "2026-09-11",
-          "close": 246.9
         }
       ],
       "sources": {
