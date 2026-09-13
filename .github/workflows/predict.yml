@@ -131,7 +131,13 @@ jobs:
       # 実績の検証と手売買の記録はスプレッドシートを正本にする。
       #
       # 認証情報が無い間も日次予測そのものは動かす（画面の更新を止めない）。
+      # 台帳への追記が失敗しても、後続（予測 JSON のコミット＝画面の更新）は
+      # 止めない。実際に列を足す処理の不具合で失敗し、その日の予測が画面に
+      # 反映されないところだった。画面が主で台帳が従なので、従の失敗で主を
+      # 落とさない。失敗そのものは実行結果に赤で残り、下の Summary にも出る。
       - name: Append to spreadsheet
+        continue-on-error: true
+        id: sheets
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           GSHEET_ID: ${{ secrets.GSHEET_ID }}
@@ -160,6 +166,11 @@ jobs:
       - name: Summary
         if: always()
         run: |
-          { echo '## ブレイク予測'; echo '```'
+          { echo '## ブレイク予測'
+            if [ "${{ steps.sheets.outcome }}" = "failure" ]; then
+              echo '> ⚠ **スプレッドシートへの追記に失敗しました。**'
+              echo '> 画面は更新済みですが、台帳にはこの日の行が入っていません。'
+            fi
+            echo '```'
             if [ -f predict.log ]; then cat predict.log; else echo "(実行せず)"; fi
             echo '```'; } >> "$GITHUB_STEP_SUMMARY"

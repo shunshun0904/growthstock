@@ -344,6 +344,21 @@ def ensure_columns(ws, header: List[str], dry_run: bool = False) -> List[str]:
     print(f"[header] 見出しに無い列を右端に足す: {missing}")
     if dry_run:
         return header + missing
+
+    # シートのグリッドを先に広げる。
+    #
+    # 行は append_rows が勝手に増やしてくれるが、**列は増えない**。
+    # グリッドの外に書こうとすると Google 側が 400 で撥ねる。
+    #   APIError: [400]: Range ('予測ログ'!AL1:AP1) exceeds grid limits.
+    #             Max rows: 2000, max columns: 37
+    # 実際にこれで失敗した。列を足す機能を入れるなら、器を広げるところまでが
+    # 一式になる。
+    need = len(header) + len(missing)
+    have = getattr(ws, "col_count", None)
+    if have is not None and have < need:
+        print(f"[header] 列の器を {have} -> {need} に広げる")
+        ws.add_cols(need - have)
+
     start = len(header) + 1
     ws.update([missing], f"{a1(start, 1)}:{a1(start + len(missing) - 1, 1)}")
     return header + missing

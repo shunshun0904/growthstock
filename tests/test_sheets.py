@@ -28,16 +28,37 @@ import export_sheets as ES  # noqa: E402
 class FakeWorksheet:
     """gspread のワークシートのうち、export_sheets が使う分だけ真似る。"""
 
-    def __init__(self, values):
+    def __init__(self, values, col_count=None):
         self.values = [list(r) for r in values]
         self.appended = []
         self.batches = []
         self.updates = []
+        # グリッドの幅。実物と同じく、ここを超える書き込みは撥ねる。
+        # 既定は「ちょうど見出しぶん」＝新しい列を足すには拡張が要る状態
+        self.col_count = col_count if col_count is not None else len(self.values[0])
+
+    def add_cols(self, n):
+        self.col_count += n
 
     def get_all_values(self):
         return [list(r) for r in self.values]
 
+    def _check(self, range_name):
+        """実物のグリッド制限を真似る。範囲外なら Google と同じく撥ねる。"""
+        if not range_name:
+            return
+        last = range_name.split(":")[-1]
+        col = 0
+        for ch in last:
+            if ch.isalpha():
+                col = col * 26 + (ord(ch.upper()) - 64)
+        if col > self.col_count:
+            raise RuntimeError(
+                f"Range ({range_name}) exceeds grid limits. "
+                f"max columns: {self.col_count}")
+
     def update(self, values, range_name=None, **kw):
+        self._check(range_name)
         self.updates.append((range_name, values))
         # 見出し行の右端追加だけ再現する
         if range_name and range_name.endswith("1") and values:
@@ -60,6 +81,8 @@ class FakeWorksheet:
         self.appended.extend([list(r) for r in rows])
 
     def batch_update(self, updates, **kw):
+        for u in updates:
+            self._check(u["range"])
         self.batches.extend(updates)
 
 
@@ -209,6 +232,9 @@ class TestSync(unittest.TestCase):
         ws = self._old_sheet()
         ws.values[0] = (self.OLD_HEADER + ES.MODEL_COLS + ES.SCORE_COLS
                         + [ES.AGREE_COL])
+        # 見出しを差し替えたら器も合わせる。実物では、見出しが42列ある
+        # シートのグリッドが31列ということはありえない
+        ws.col_count = len(ws.values[0])
         p = {h: i for i, h in enumerate(ws.values[0])}
         line = ws.values[1] + [""] * (len(ws.values[0]) - len(ws.values[1]))
         line[p["LGB%"]] = "99.9"          # 手で書いた値
@@ -245,6 +271,28 @@ class TestSync(unittest.TestCase):
         self.assertEqual(got["コード"], "1234")
         self.assertEqual(got["LGB%"], 95.1)
         self.assertEqual(got["メモ"], "")
+
+    def test_grid_is_widened_before_writing_new_columns(self):
+        """
+        列を足すときは、先にシートの器を広げる。
+
+        行は append_rows が勝手に増やすが、列は増えない。グリッドの外に
+        書こうとすると Google が 400 で撥ねる。実際にこれで日次予測が
+        失敗した（Range AL1:AP1 exceeds grid limits, max columns: 37）。
+        """
+        ws = self._old_sheet()
+        before = ws.col_count
+        ES.sync(ws, ES.rows_from_predictions(PRED), {}, None)
+        want = len(self.OLD_HEADER) + len(ES.MODEL_COLS) + len(ES.SCORE_COLS) + 1
+        self.assertGreaterEqual(ws.col_count, want,
+                                f"器が広がっていない（{before} のまま）")
+        self.assertEqual(len(ws.values[0]), want)
+
+    def test_fake_sheet_rejects_out_of_grid_writes(self):
+        """この代役が実物と同じく範囲外を撥ねること自体を確かめる。"""
+        ws = FakeWorksheet([["A", "B"]], col_count=2)
+        with self.assertRaises(RuntimeError):
+            ws.update([["x"]], "C1:C1")
 
     def test_header_is_not_touched_when_nothing_is_missing(self):
         header = (ES.OWNED_COLS + ES.MODEL_COLS + ES.SCORE_COLS
