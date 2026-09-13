@@ -129,7 +129,11 @@ jobs:
           if-no-files-found: warn
 
       - name: Commit results
-        if: inputs.commit != false
+        # push で起動したときは inputs が空になる。'' != false は
+        # GitHub の式評価だと数値比較（0 vs 0）に落ちて false になり、
+        # 実行しても結果がコミットされないまま終わっていた。
+        # イベント種別で分けて、手動実行のときだけチェックボックスを見る
+        if: github.event_name != 'workflow_dispatch' || inputs.commit
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
