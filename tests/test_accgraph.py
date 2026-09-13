@@ -10,6 +10,7 @@ research/accgraph/ の単体テスト。
 
   python3 tests/test_accgraph.py
 """
+import json
 import os
 import shutil
 import sys
@@ -23,8 +24,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "research"))
 
 from accgraph import (  # noqa: E402
-    backtest, baselines, build, labels as L, leakage, panel, schema, splits,
-    synthetic,
+    backtest, baselines, build, eda, eda_report, labels as L, leakage, panel,
+    schema, splits, synthetic,
 )
 
 
@@ -462,6 +463,85 @@ class TestEndToEnd(unittest.TestCase):
         want = mats["s_TA"] - mats["s_Eq"]
         ok = ~np.isnan(want)
         np.testing.assert_allclose(got[ok], want[ok])
+
+
+class TestEda(unittest.TestCase):
+    """EDA の集計と組版。合成データで一度通し、結果の形を固定する。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="accgraph_eda_")
+        raw = os.path.join(cls.tmp, "raw")
+        cls.out = os.path.join(cls.tmp, "out")
+        synthetic.write_all(raw, n_codes=8, start_year=2018, n_years=5)
+        build.build(data_dir=raw, out_dir=cls.out)
+        cls.d = eda.run(cls.out, liquid_only=False, ic_min_n=50)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_has_every_section(self):
+        for k in ("availability", "label", "features", "ic", "structure"):
+            self.assertIn(k, self.d, f"{k} が集計に無い")
+
+    def test_json_is_serialisable(self):
+        """
+        NaN や numpy 型が混ざっていると json.dump は通っても読み手が壊れる。
+        allow_nan=False で「素の JSON として読めるか」を確かめる。
+        """
+        json.dumps(self.d, allow_nan=False)
+
+    def test_cash_flow_coverage_shows_the_half_year_pattern(self):
+        """
+        EDA が CF の半期開示を見えるようにしていること。
+        ここが 100% に見えたら、欠測を値と取り違えている。
+        """
+        nodes = {n["id"]: n for n in self.d["availability"]["nodes"]}
+        cfo = nodes["cfo"]
+        self.assertLess(cfo["by_quarter"]["1"], 1.0)
+        self.assertLess(cfo["by_quarter"]["3"], 1.0)
+        self.assertGreater(cfo["by_quarter"]["2"], 99.0)
+        self.assertGreater(cfo["by_quarter"]["4"], 99.0)
+        self.assertAlmostEqual(cfo["median_span"], 2.0)
+        # 売上高は毎期開示されるので、比較対象として全期そろう
+        self.assertGreater(nodes["sales"]["overall"], 99.0)
+
+    def test_class_shares_sum_to_100(self):
+        for h, blk in self.d["label"]["horizons"].items():
+            for bench in ("topix", "sector"):
+                if bench not in blk:
+                    continue
+                total = sum(blk[bench]["share"].values())
+                self.assertAlmostEqual(total, 100.0, places=6,
+                                       msg=f"{h}日 {bench} の構成比が100%でない")
+
+    def test_report_renders(self):
+        html = eda_report.build(self.d)
+        self.assertIn("<title>", html)
+        # <html>/<body> を付けない（Artifact としてそのまま出せる形）
+        self.assertNotIn("<body", html)
+        for marker in ("何が取れて、何が取れないか", "目的変数の分布と偏り",
+                       "特徴量の診断", "グラフ構造の診断"):
+            self.assertIn(marker, html)
+        # 色だけに意味を持たせない: 凡例と表が必ず入っている
+        self.assertIn('class="key"', html)
+        self.assertIn("表で見る", html)
+
+    def test_report_survives_an_empty_aggregate(self):
+        """
+        集計が空でも組版で落ちないこと。データが足りない時期に
+        ワークフローが止まると、原因の切り分けができなくなる。
+        """
+        thin = {"n_samples": 0, "n_codes": 0, "period": ["-", "-"],
+                "availability": {"nodes": [], "edges": [], "seq_len_hist": {},
+                                 "full_seq_pct": float("nan"),
+                                 "samples_by_year": {}},
+                "label": {"horizons": {}}, "features": {"stats": {},
+                "constant": [], "redundant": [], "hist": {}, "n_columns": 0},
+                "ic": {}, "structure": {}}
+        html = eda_report.build(thin)
+        self.assertIn("<title>", html)
 
 
 class TestGeneratedDoc(unittest.TestCase):

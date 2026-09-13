@@ -270,12 +270,29 @@ python3 scripts/jquants_data_fetcher.py                # watchlist 全件
 ```bash
 pip install -r research/requirements.txt
 
-python3 research/accgraph/schema.py     # スキーマの要約を見る
-python3 research/accgraph/docgen.py     # docs/ACCOUNTING_GRAPH.md を作り直す
-python3 research/accgraph/build.py      # データセットを作る (要 research/_data)
-python3 research/accgraph/evaluate.py   # ベースラインを比較して docs に書き出す
-python3 tests/test_accgraph.py          # 単体テスト
+python3 research/accgraph/schema.py      # スキーマの要約を見る
+python3 research/accgraph/docgen.py      # docs/ACCOUNTING_GRAPH.md を作り直す
+python3 research/accgraph/build.py       # データセットを作る (要 research/_data)
+python3 research/accgraph/eda.py         # EDA の集計 -> _data/accgraph/eda.json
+python3 research/accgraph/eda_report.py  # 集計を組版 -> docs/accgraph_eda.html
+python3 research/accgraph/evaluate.py    # ベースラインを比較して docs に書き出す
+python3 tests/test_accgraph.py           # 単体テスト
 ```
+
+### EDA（探索的データ解析）
+
+`docs/accgraph_eda.html` は単体で開ける HTML で、次の4点を見ます。
+
+| 節 | 見るもの |
+| --- | --- |
+| 何が取れて、何が取れないか | ノード別の充足率を四半期・年で。CF の半期開示がどこまで効くか |
+| 目的変数の分布と偏り | 超過リターンの分布とクラス比が、年・四半期・業種・流動性・決算の混雑度でどう変わるか |
+| 特徴量の診断 | 欠損・打ち切り・定数列・冗長な組み合わせ・分布 |
+| 単変量の情報量 | 各特徴量と超過リターンの順位相関。材料がそもそもあるか |
+| グラフ構造の診断 | CF の符号の型、営業CF÷営業利益、エッジごとの比率と符号一致 |
+
+集計（`eda.py`）と組版（`eda_report.py`）を分けてあります。データセットは
+CI 側にしか無いので、図を直すたびに再集計が要る作りにしないためです。
 
 生データが手元に無い場合は、GitHub Actions の `Accounting Graph Baseline`
 ワークフローを実行してください（Release のタグ `data-raw` から生データを取ります）。
@@ -317,6 +334,8 @@ Accuracy 55% を大きく超える行が出たら、まずリークを疑って�
 │   ├── backtest.py               # 取引コスト控除後の損益
 │   ├── evaluate.py               # 評価の入口 (CLI)
 │   ├── leakage.py                # リーク検査
+│   ├── eda.py                    # EDA の集計 (JSON)
+│   ├── eda_report.py             # EDA の組版 (単体HTML)
 │   ├── synthetic.py              # テスト用の決定的な合成データ
 │   └── docgen.py                 # docs/ACCOUNTING_GRAPH.md の生成
 ├── public/data/stocks.json       # 生成データ (ワークフローが上書き)
