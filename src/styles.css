@@ -435,3 +435,39 @@ input[type='range']::-moz-range-thumb {
   .pred-main .pred-ms { grid-column: 2 / -1; }
   .pred-ms-i i { max-width: none; }
 }
+
+/* ---------------------------------------------------------- 決算サンキー */
+/* 既存トークンだけで組む。色の選定根拠は EarningsSankey.jsx に実測値つきで
+   書いてある（費用の灰は彩度を落として沈ませるのが狙い） */
+
+.sankey { display: flex; flex-direction: column; gap: var(--s3); }
+.sankey-modes { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+.sankey-modes .btn.on {
+  color: var(--text); background: var(--bg-raised);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+.sankey-modes .sub { margin-left: var(--s3); font-size: 11.5px;
+  color: var(--text-faint); }
+.sankey-modes .sep { color: var(--text-faint); margin: 0 6px; }
+
+/* 図そのものは横に長い。狭い画面では横スクロールさせ、縦には潰さない
+   （潰すと帯の太さ＝金額の比が読めなくなる） */
+.sankey-plot { overflow-x: auto; }
+.sankey-plot svg { min-width: 680px; display: block; }
+
+.sk-name { font-size: 12px; fill: var(--text-dim); }
+.sk-val  { font-size: 12px; fill: var(--text); font-family: var(--mono); }
+.sk-pct  { fill: var(--text-faint); }
+
+.sankey-legend { display: flex; flex-wrap: wrap; gap: var(--s4);
+  font-size: 11.5px; color: var(--text-dim); }
+.sankey-legend span { display: flex; align-items: center; gap: 6px; }
+.sankey-legend i { width: 12px; height: 12px; border-radius: 3px; display: block; }
+.sankey-legend i.hatch {
+  background: repeating-linear-gradient(45deg,
+    var(--red) 0 2px, transparent 2px 5px);
+  outline: 1px solid var(--red); outline-offset: -1px;
+}
+.sankey-note { font-size: 11.5px; color: var(--text-faint); margin: 0;
+  line-height: 1.65; }
+.sankey-note b { color: var(--text-dim); }
