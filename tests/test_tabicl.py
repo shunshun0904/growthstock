@@ -132,6 +132,52 @@ class TestAverageSeeds(unittest.TestCase):
         self.assertEqual(sorted(out.oof["fold"].unique().tolist()), [1, 2])
 
 
+class TestMemoryTracking(unittest.TestCase):
+    """
+    2026-09-14 に本走がランナーごとメモリ不足で落ちた（exit 143）。
+    原因は2つとも「測れていなかった」こと。ここで両方を押さえる。
+    """
+
+    def test_peak_resets_and_tracks(self):
+        # 最高水位はプロセスを通した高水位線なので、リセットできないと
+        # 先に読んだデータフレームの 5.4GB に TabICL の確保ぶんが埋もれる
+        if not T.reset_peak_rss():
+            self.skipTest("この環境では最高水位をリセットできない")
+        base = T.peak_rss_gb()
+        x = np.ones((1 << 26,), dtype=np.float64)   # 512MB。実際に書き込む
+        grown = T.peak_rss_gb()
+        del x
+        self.assertGreater(grown, base + 0.3, "確保したぶんが水位に出ていない")
+        T.reset_peak_rss()
+        self.assertLess(T.peak_rss_gb(), grown - 0.3, "リセットが効いていない")
+
+    def test_limit_raises_instead_of_killing_the_runner(self):
+        # 上限が無いとホストがランナーごと落とし、`if: always()` を付けた
+        # 後片付けまで飛ばされてそこまでの計算が消える
+        import multiprocessing as mp
+
+        def child(q):
+            import sys as _s
+            _s.path.insert(0, os.path.join(ROOT, "research"))
+            import numpy as _np
+            import tabicl_model as _T
+            q.put(("limited", _T.limit_memory(1.0)))
+            try:
+                _np.ones((1 << 29,), dtype=_np.float64)   # 4GB
+                q.put(("result", "allocated"))
+            except MemoryError:
+                q.put(("result", "MemoryError"))
+
+        q = mp.Queue()
+        p = mp.Process(target=child, args=(q,))
+        p.start()
+        p.join(60)
+        got = dict(q.get(timeout=5) for _ in range(2))
+        if not got.get("limited"):
+            self.skipTest("この環境では上限を掛けられない")
+        self.assertEqual(got.get("result"), "MemoryError")
+
+
 class TestEstimateTotal(unittest.TestCase):
     def setUp(self):
         rng = np.random.default_rng(0)

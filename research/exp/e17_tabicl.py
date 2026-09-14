@@ -287,7 +287,10 @@ def main(argv=None) -> int:
                     help="比較する既存モデル。空にすると TabICL だけ")
     ap.add_argument("--probe", action="store_true",
                     help="所要時間の実測だけして終わる")
-    ap.add_argument("--probe-sizes", default="1000,3000")
+    ap.add_argument("--probe-sizes", default="2000,6000,12000")
+    ap.add_argument("--mem-limit-gb", type=float, default=0.0,
+                    help="使えるメモリの上限。超えたら MemoryError を上げて "
+                         "窓の途中で止める。0 で無効")
     ap.add_argument("--no-report", action="store_true")
     ap.add_argument("--placeholder", action="store_true",
                     help="データ無しで設計だけ docs/MODEL_TABICL.md に書く")
@@ -309,55 +312,66 @@ def main(argv=None) -> int:
         print(f"書き出し: {REPORT}")
         return 0
 
+    if args.mem_limit_gb > 0:
+        ok = T.limit_memory(args.mem_limit_gb)
+        print(f"メモリ上限 {args.mem_limit_gb}GB "
+              f"{'を掛けた' if ok else 'は掛けられなかった'}")
+
     cols = F.columns(args.features)
     df = lab.frame()
     print(f"データセット {len(df):,}行 / 特徴量 {len(cols)}列 "
           f"/ ラベル確定 {int(df['label'].notna().sum()):,}行")
     print(f"チェックポイント {T.ckpt_version()} "
           f"(TABICL_CKPT={os.environ.get('TABICL_CKPT') or '未設定（HF から取得）'})")
+    print(f"いまのメモリ {T.rss_gb():.2f}GB")
     print()
 
     if args.probe:
-        print("=== 所要時間の実測 ===")
+        print("=== 所要時間とメモリの実測（本走と同じ条件）===")
+        print(f"  アンサンブル{args.n_estimators} / 同時{args.batch_size} / "
+              "検証は本番の窓をそのまま使う")
         sizes = [int(s) for s in args.probe_sizes.split(",") if s.strip()]
-        p = T.probe(df, cols, sizes=sizes, n_estimators=2,
+        p = T.probe(df, cols, sizes=sizes, n_estimators=args.n_estimators,
                     batch_size=args.batch_size)
-        print()
-        if "seconds_per_context_row" in p:
-            print(f"  文脈1行あたり {p['seconds_per_context_row'] * 1000:.2f}ミリ秒 "
-                  f"/ 固定費 {p['fixed_seconds']:.1f}秒"
-                  f"（検証{p['n_test_probe']}行・アンサンブル{p['n_estimators']}"
-                  f"・同時{p['batch_size']}）")
-            grew = abs(p["points"][1]["peak_rss_gb"]
-                       - p["points"][0]["peak_rss_gb"]) > 0.05
-            print(f"  最大メモリ {p['points'][-1]['peak_rss_gb']:.2f}GB"
-                  f"（CI ランナーは16GB）")
-            if grew:
-                print(f"  全訓練行（{p['n_train_full']:,}行）まで上げたときの"
-                      f"見積もり {p['peak_rss_gb_at_full']:.1f}GB")
-            else:
-                # 2点で動かないのは、TabICL の確保ぶんが lab.frame() の
-                # データフレーム（株価バー全期間＋データセット）に埋もれて
-                # いるため。外挿しても意味が無いので下限として読む
-                print("  probe の2点で最大メモリが動いていない。TabICL の"
-                      "確保ぶんが")
-                print("  データフレームに埋もれている。上の値は下限であって"
-                      "見積もりではない")
-            print()
-            for e in (2, 4, 8):
-                for mc in (0, 4000, 8000, 16000):
-                    est = T.estimate_total(df, p, max_context=mc,
-                                           n_estimators=e, n_seeds=1)
-                    if est:
-                        print(f"    アンサンブル{e} / 文脈上限"
-                              f"{'全行' if mc == 0 else f'{mc:,}':>7} "
-                              f"-> 全窓 {est['hours']:.1f}時間")
-            print()
-            print("  注: どちらも文脈の行数に線形と仮定した外挿。注意機構が")
-            print("      二乗で効くぶんがあれば過小評価になる。余裕を見ること")
         os.makedirs(lab.DATA_DIR, exist_ok=True)
         with open(os.path.join(lab.DATA_DIR, "e17_probe.json"), "w") as fh:
             json.dump(p, fh, ensure_ascii=False, indent=2)
+        print()
+        if p.get("failed_at"):
+            print(f"  文脈{p['failed_at']:,}行でメモリ不足。"
+                  "本走はこれより小さい上限で回すこと")
+        if "seconds_per_context_row" not in p:
+            print("  2点そろわなかったので外挿できない")
+            return 1
+        print(f"  文脈1行あたり {p['seconds_per_context_row'] * 1000:.2f}ミリ秒 "
+              f"/ 固定費 {p['fixed_seconds']:.1f}秒")
+        print(f"  文脈1行あたり {p['gb_per_context_row'] * 1e6:.1f}KB "
+              f"/ データ読み込みぶん {p['baseline_rss_gb']:.2f}GB")
+        print(f"  全訓練行（{p['n_train_full']:,}行）まで上げたときの"
+              f"最大メモリ見積もり {p['peak_rss_gb_at_full']:.1f}GB"
+              "（CI ランナーは16GB）")
+        bend = [(n, p[k]) for n, k in (("時間", "curvature_seconds"),
+                                       ("メモリ", "curvature_gb")) if k in p]
+        if bend:
+            print("  傾きの伸び "
+                  + " / ".join(f"{n} {v:.2f}倍" for n, v in bend)
+                  + "（1.0 なら線形。大きいほど外挿は過小評価）")
+        print()
+        for mc in (0, 4000, 8000, 12000, 16000):
+            est = T.estimate_total(df, p, max_context=mc,
+                                   n_estimators=args.n_estimators, n_seeds=1)
+            if est:
+                n_ctx = max(f["n_context"] for f in est["per_fold"])
+                gb = (p["baseline_rss_gb"]
+                      + p["gb_per_context_row"] * n_ctx
+                      + (p["points"][0]["tabicl_gb"]
+                         - p["gb_per_context_row"] * p["points"][0]["n_context"]))
+                print(f"    文脈上限{'全行' if mc == 0 else f'{mc:,}':>7}"
+                      f"（最大の窓 {n_ctx:,}行）-> 1種 {est['hours']:.1f}時間 "
+                      f"/ 最大メモリ {gb:.1f}GB")
+        print()
+        print("  注: 文脈の行数に線形と仮定した外挿。上の「傾きの伸び」が")
+        print("      1.0 より大きければ、実際はこれより掛かる")
         return 0
 
     results: Dict[str, lab.Result] = {}

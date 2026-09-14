@@ -294,12 +294,26 @@ def walk_forward(df: pd.DataFrame, cols: Sequence[str], *,
             break
 
         ctx = cap_context(tr, max_context)
+        import gc
+        gc.collect()
+        reset_peak_rss()
         t0 = time.time()
-        clf = build(seed, n_estimators=n_estimators, batch_size=batch_size)
-        clf.fit(to_frame(ctx, cols), ctx["label"].to_numpy(dtype=int))
-        score = np.asarray(clf.predict_proba(to_frame(te, cols)),
-                           dtype=float)[:, 1]
+        try:
+            clf = build(seed, n_estimators=n_estimators, batch_size=batch_size)
+            clf.fit(to_frame(ctx, cols), ctx["label"].to_numpy(dtype=int))
+            score = np.asarray(clf.predict_proba(to_frame(te, cols)),
+                               dtype=float)[:, 1]
+        except (MemoryError, RuntimeError) as e:
+            # ここで止めて、そこまでの窓を返す。メモリ上限を掛けてあれば
+            # ランナーごと落ちずに済み、保存済みの窓は次の実行で活きる
+            stopped = f.index
+            log(f"  窓{f.index} メモリ不足で打ち切り "
+                f"({type(e).__name__}: {str(e)[:120]})")
+            log(f"          文脈{len(ctx):,} / 検証{len(te):,} / "
+                f"最大 {peak_rss_gb():.2f}GB")
+            break
         dt = time.time() - t0
+        peak = peak_rss_gb()
 
         keep = ["Code", "Date"] + [c for c in lab.OUT_COLS if c in te.columns]
         part = te[keep].copy()
@@ -309,7 +323,10 @@ def walk_forward(df: pd.DataFrame, cols: Sequence[str], *,
         parts.append(part)
         timings.append(FoldTiming(f.index, len(ctx), len(te), dt))
         log(f"  窓{f.index} {f.test_start.date()}〜{f.test_end.date()}: "
-            f"文脈{len(ctx):,} / 検証{len(te):,} / {dt:.0f}秒")
+            f"文脈{len(ctx):,} / 検証{len(te):,} / {dt:.0f}秒 / "
+            f"最大 {peak:.2f}GB")
+        del clf
+        gc.collect()
 
     if not parts:
         raise SystemExit("out-of-fold を1窓も作れませんでした")
@@ -361,19 +378,97 @@ def average_seeds(results: Sequence[lab.Result], name: str = "tabicl") -> lab.Re
 # 所要時間の実測
 # --------------------------------------------------------------------------- #
 
+def _vm_gb(key: str) -> float:
+    """/proc/self/status から VmRSS / VmHWM を GB で読む。"""
+    try:
+        with open("/proc/self/status", encoding="ascii") as fh:
+            for line in fh:
+                if line.startswith(key):
+                    return int(line.split()[1]) / 1024 / 1024
+    except OSError:
+        pass
+    return float("nan")
+
+
+def reset_peak_rss() -> bool:
+    """
+    メモリの最高水位（VmHWM）を現在値まで下げる。
+
+    なぜ要るか
+    ---------
+    最高水位はプロセスを通した高水位線なので、先に lab.frame() が
+    株価バー全期間を読んで 5.4GB まで上げてしまうと、そのあと TabICL が
+    何GB 使ったのかが埋もれて見えない。実際、それで「文脈を増やしても
+    メモリが増えない」という誤った読みをして本走をメモリ不足で落とした。
+
+    Linux は /proc/self/clear_refs に 5 を書くと最高水位をリセットする。
+    使えない環境（他OS・権限なし）では False を返すので、
+    呼び出し側は「リセットできなかった」として読む。
+    """
+    try:
+        with open("/proc/self/clear_refs", "w", encoding="ascii") as fh:
+            fh.write("5\n")
+        return True
+    except OSError:
+        return False
+
+
 def peak_rss_gb() -> float:
-    """このプロセスがこれまでに使ったメモリの最大値（GB）。"""
+    """最後のリセット以降でこのプロセスが使ったメモリの最大値（GB）。"""
+    return _vm_gb("VmHWM:")
+
+
+def rss_gb() -> float:
+    """いま使っているメモリ（GB）。"""
+    return _vm_gb("VmRSS:")
+
+
+def limit_memory(gb: float) -> bool:
+    """
+    使えるメモリに上限を掛ける。
+
+    なぜ要るか
+    ---------
+    上限が無いと、確保しすぎたときに**ランナーごと**落ちる。実測では
+    exit 143（SIGTERM）でジョブが死に、`if: always()` を付けたはずの
+    「途中結果を Release に戻す」まで飛ばされ、18分ぶんの計算が消えた。
+
+    上限を掛けておけば、超えた時点で Python 側に MemoryError が上がる。
+    そこまでに終わった窓は保存済みなので、次の実行が続きから走れる。
+
+    RLIMIT_AS は仮想アドレス空間の上限で、torch は実体より広く確保する
+    ことがある。低く取りすぎると動くはずのものが落ちるので、
+    既定は無効（0）にして、実行側が明示したときだけ掛ける。
+    """
+    if gb <= 0:
+        return False
     import resource
-    # Linux の ru_maxrss は KB
-    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024 / 1024
+
+    # torch を先に読み込んでから掛ける。torch は起動時に実体より広い
+    # アドレス空間を確保するので、読み込む前に上限を掛けると
+    # 「本来なら動くのに import で落ちる」ことがある
+    try:
+        import torch  # noqa: F401
+    except ImportError:
+        pass
+    n = int(gb * 1024 ** 3)
+    try:
+        soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+        resource.setrlimit(resource.RLIMIT_AS,
+                           (n, hard if hard != resource.RLIM_INFINITY
+                            else resource.RLIM_INFINITY))
+        return True
+    except (ValueError, OSError):
+        return False
 
 
 def probe(df: pd.DataFrame, cols: Sequence[str], *,
-          sizes: Sequence[int] = (1000, 3000),
-          n_estimators: int = 2, batch_size: int = DEFAULT_BATCH_SIZE,
+          sizes: Sequence[int] = (2000, 6000, 12000),
+          n_estimators: int = DEFAULT_N_ESTIMATORS,
+          batch_size: int = DEFAULT_BATCH_SIZE,
           seed: int = lab.SEED, log=print) -> Dict:
     """
-    最後の窓で、文脈の行数を変えて fit+predict の時間を実測する。
+    最後の窓で、文脈の行数を変えて fit+predict の時間とメモリを実測する。
 
     なぜ先に測るか
     -------------
@@ -381,53 +476,100 @@ def probe(df: pd.DataFrame, cols: Sequence[str], *,
     CPU で何倍掛かるかは公表されていない。全10窓を回してから
     「6時間で終わらなかった」と分かるのは、CI の実行1回を捨てることになる。
 
-    2点で測って外挿する。文脈の行数に対して線形と仮定した見積もりなので、
-    注意（attention）が行数に二乗で効く部分があれば**過小評価になる**。
-    そのことは呼び出し側で明示して使う。
+    本走と同じ条件で測る（2026-09-14 の失敗を受けて）
+    --------------------------------------------
+    最初はアンサンブル2・同時2・検証500行で測り、本走はアンサンブル8・
+    検証1,400行で回した。測った条件と回す条件が違えば見積もりは当たらない。
+    実際 18分でランナーがメモリ不足に落ち、しかも最高水位が
+    lab.frame() の 5.4GB に埋もれてメモリの増加が見えていなかった。
+
+    いまは (1) 本走と同じ n_estimators / batch_size を使い、
+    (2) 検証側も本番の窓をそのまま使い、(3) 1点ごとに最高水位を
+    リセットしてから測る。
+
+    1点ずつ出力する。途中でメモリ不足に落ちても、
+    「どの行数までは通ったか」が残る。
     """
     folds = lab.folds(df)
     d = pd.to_datetime(df["Date"])
     labeled = df["label"].notna()
     f = folds[-1]
     tr = df[(d <= f.train_end) & labeled]
+    # 検証側は本番の窓をそのまま使う。ここを小さくすると、予測側の
+    # メモリと時間を過小に見積もることになる（前回それで落ちた）
     te = df[(d >= f.test_start) & (d <= f.test_end) & labeled]
-    # 検証側も切る。予測時間は検証行数にも効くので、全部通すと
-    # 「文脈を変えた効果」に検証側の時間が定数で乗って傾きが読めない
-    te_probe = te.iloc[:500]
 
+    resettable = reset_peak_rss()
     out = {"n_train_full": int(len(tr)), "n_test_full": int(len(te)),
-           "n_test_probe": int(len(te_probe)), "n_estimators": n_estimators,
-           "batch_size": batch_size, "points": []}
+           "n_test_probe": int(len(te)), "n_estimators": n_estimators,
+           "batch_size": batch_size, "peak_resettable": resettable,
+           "baseline_rss_gb": rss_gb(), "points": []}
+    if not resettable:
+        log("  [warn] 最高水位をリセットできない。メモリの実測は "
+            f"データ読み込みぶん（{out['baseline_rss_gb']:.2f}GB）を含む")
+
     for n in sizes:
         ctx = cap_context(tr, n)
+        import gc
+        gc.collect()
+        reset_peak_rss()
+        before = rss_gb()
         t0 = time.time()
-        clf = build(seed, n_estimators=n_estimators, batch_size=batch_size)
-        clf.fit(to_frame(ctx, cols), ctx["label"].to_numpy(dtype=int))
-        clf.predict_proba(to_frame(te_probe, cols))
+        try:
+            clf = build(seed, n_estimators=n_estimators, batch_size=batch_size)
+            clf.fit(to_frame(ctx, cols), ctx["label"].to_numpy(dtype=int))
+            clf.predict_proba(to_frame(te, cols))
+        except (MemoryError, RuntimeError) as e:
+            log(f"  文脈{len(ctx):,}行 : メモリ不足で失敗 ({type(e).__name__})")
+            out["failed_at"] = int(len(ctx))
+            break
         dt = time.time() - t0
-        # メモリは文脈の行数に比例して増える。全行に上げたときに
-        # CI ランナー（16GB）に収まるかは、ここの実測から見積もる
-        rss = peak_rss_gb()
+        peak = peak_rss_gb()
         out["points"].append({"n_context": int(len(ctx)), "seconds": dt,
-                              "peak_rss_gb": rss})
-        log(f"  文脈{len(ctx):,}行 / 検証{len(te_probe):,}行 / "
+                              "peak_rss_gb": peak,
+                              "tabicl_gb": max(0.0, peak - before)})
+        log(f"  文脈{len(ctx):,}行 / 検証{len(te):,}行 / "
             f"アンサンブル{n_estimators} / 同時{batch_size} : "
-            f"{dt:.1f}秒 / 最大メモリ {rss:.2f}GB")
+            f"{dt:.1f}秒 / 最大 {peak:.2f}GB "
+            f"(TabICL ぶん {max(0.0, peak - before):.2f}GB)")
+        del clf
+        gc.collect()
 
     pts = out["points"]
     if len(pts) >= 2:
-        # 単純な2点直線。切片は「文脈に依らない固定費」（重みの読み込み・
-        # 検証側の処理）に相当する
-        (x0, y0), (x1, y1) = ((p["n_context"], p["seconds"]) for p in pts[:2])
+        # 最初と最後の2点で直線を引く。切片は「文脈に依らない固定費」
+        # （重みの読み込み・検証側の処理）に相当する
+        (x0, y0), (x1, y1) = ((p["n_context"], p["seconds"])
+                              for p in (pts[0], pts[-1]))
         slope = (y1 - y0) / max(1, (x1 - x0))
         out["seconds_per_context_row"] = slope
         out["fixed_seconds"] = y0 - slope * x0
-        # メモリも2点の直線で外挿する。全行に上げたときの見積もりを出して
-        # おかないと、6時間走らせた末に OOM で落ちるのがいちばん高くつく
-        m0, m1 = (p["peak_rss_gb"] for p in pts[:2])
+        m0, m1 = (p["tabicl_gb"] for p in (pts[0], pts[-1]))
         gb_slope = (m1 - m0) / max(1, (x1 - x0))
         out["gb_per_context_row"] = gb_slope
-        out["peak_rss_gb_at_full"] = m1 + gb_slope * (out["n_train_full"] - x1)
+        out["tabicl_gb_at_full"] = m1 + gb_slope * (out["n_train_full"] - x1)
+        out["peak_rss_gb_at_full"] = (out["baseline_rss_gb"]
+                                      + out["tabicl_gb_at_full"])
+        # 3点以上あれば、線形の仮定が妥当かを見る。最後の区間の傾きが
+        # 最初の区間より大きければ、外挿は過小評価になっている
+        if len(pts) >= 3:
+            def seg(a, b, k):
+                return (pts[b][k] - pts[a][k]) / max(
+                    1, pts[b]["n_context"] - pts[a]["n_context"])
+
+            def ratio(k, floor):
+                # 最初の区間の傾きがほぼ0だと比は意味を持たない
+                # （0で割った大きな数が出るだけ）。測れないときは出さない
+                base = seg(0, 1, k)
+                if base < floor:
+                    return None
+                return seg(len(pts) - 2, len(pts) - 1, k) / base
+
+            for key, k, floor in (("curvature_seconds", "seconds", 1e-4),
+                                  ("curvature_gb", "tabicl_gb", 1e-8)):
+                v = ratio(k, floor)
+                if v is not None:
+                    out[key] = v
     return out
 
 

@@ -73,6 +73,14 @@ defaults:
   run:
     shell: bash
 
+env:
+  # Python の標準出力をバッファさせない。
+  #
+  # 2026-09-14 の本走はランナーごとメモリ不足で落ちたが、tee に流した
+  # 18分ぶんの出力がバッファに残ったまま消え、どの窓で落ちたのかも
+  # 分からなかった。1行ずつ出しておけば、落ちてもそこまでが残る。
+  PYTHONUNBUFFERED: '1'
+
 jobs:
   experiment:
     runs-on: ubuntu-latest
@@ -169,7 +177,14 @@ jobs:
         run: |
           { echo '### TabICLv2 の所要時間（実測と外挿）'; echo '```'; } \
             >> "$GITHUB_STEP_SUMMARY"
+          # 本走と同じ n_estimators / batch_size で測る。前回は
+          # アンサンブル2・検証500行で測った見積もりのまま
+          # アンサンブル8・検証1,400行を回して落ちた
+          # 上限を掛けておくと、確保しすぎた点で MemoryError が上がり、
+          # ランナーごと落ちずに「どの行数までは通ったか」が残る
           python3 research/exp/e17_tabicl.py --probe \
+            --mem-limit-gb 13 \
+            --n-estimators "${{ steps.plan.outputs.n_estimators }}" \
             --batch-size "${{ steps.plan.outputs.batch_size }}" 2>&1 | tee probe.log
           tail -30 probe.log >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
@@ -186,8 +201,15 @@ jobs:
           # （全文脈で約8分）。6時間のジョブ上限に対して 5時間 + 8分 + 後片付け
           # なら余裕がある
           BUDGET_SECONDS: '18000'
+          # ランナーは16GB。上限を掛けずに確保しすぎると、ホストが
+          # ランナーごと落とす（exit 143）。そうなると `if: always()` を
+          # 付けた「途中結果を Release に戻す」まで飛ばされ、
+          # そこまでの計算が丸ごと消える。13GB で Python 側に
+          # MemoryError を上げさせ、保存済みの窓を残して止める
+          MEM_LIMIT_GB: '13'
         run: |
           python3 research/exp/e17_tabicl.py \
+            --mem-limit-gb "$MEM_LIMIT_GB" \
             --max-context "${{ steps.plan.outputs.max_context }}" \
             --n-estimators "${{ steps.plan.outputs.n_estimators }}" \
             --batch-size "${{ steps.plan.outputs.batch_size }}" \
