@@ -163,6 +163,20 @@ def build(seed: int = lab.SEED, *, n_estimators: int = DEFAULT_N_ESTIMATORS,
     """
     from tabicl import TabICLClassifier
 
+    extra = {}
+    # 列方向の埋め込みをどこに置くか。既定（auto）は TabICL が空きメモリを
+    # 見て決めるが、こちらが RLIMIT_AS で上限を掛けていることは見えないので、
+    # 機械の 16GB を基準に「まだ載る」と判断してしまう。
+    # disk を明示すればメモリマップに逃がせる。遅くなる代わりに
+    # 文脈を絞らずに済む。既定は触らない（TABICL_OFFLOAD が無ければ auto）
+    off = os.environ.get("TABICL_OFFLOAD")
+    if off:
+        extra["offload_mode"] = off
+        if off == "disk":
+            extra["disk_offload_dir"] = (os.environ.get("TABICL_OFFLOAD_DIR")
+                                         or os.path.join(lab.DATA_DIR, "offload"))
+            os.makedirs(extra["disk_offload_dir"], exist_ok=True)
+
     return TabICLClassifier(
         n_estimators=n_estimators,
         batch_size=max(1, min(batch_size, n_estimators)),
@@ -172,6 +186,7 @@ def build(seed: int = lab.SEED, *, n_estimators: int = DEFAULT_N_ESTIMATORS,
         model_path=ckpt_path(),
         checkpoint_version=ckpt_version(),
         verbose=verbose,
+        **extra,
     )
 
 
