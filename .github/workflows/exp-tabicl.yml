@@ -1,0 +1,227 @@
+name: Experiment TabICLv2
+
+# TabICLv2（表形式の事前学習済み Transformer）を既存5モデルと同じ
+# ウォークフォワードで測る。実験17（research/exp/e17_tabicl.py）。
+#
+# なぜ CI で回すか
+# ---------------
+# TabICL の重みは Hugging Face（jingang/TabICL）にしか無く、pip では入らない。
+# 調査に使っている環境から huggingface.co へ出られないため、
+# 外に出られる GitHub Actions で回す。生データ（data-raw Release）と
+# 重みの両方に届くのはここだけ。
+#
+# 所要時間が事前に読めない
+# ----------------------
+# TabICL は GPU 前提の設計（H100 で 50,000行×100列を10秒未満）で、
+# CPU で何倍掛かるかは公表されていない。そのため
+#
+#   1. 毎回まず probe（文脈の行数を変えて実測）を回して見積もりを出す
+#   2. 本走は予算（--budget-seconds）を切って回し、窓ごとに書き出す
+#   3. 予算切れで止まったら、もう一度走らせると残りの窓から続く
+#
+# 続きを走らせるために、窓ごとの out-of-fold を data-raw Release に
+# 置いて持ち回す（ジョブをまたいでディスクは残らないため）。
+on:
+  # workflow_dispatch は既定ブランチにファイルが無いと呼べないので、
+  # 調査用ブランチでは push でも起動できるようにしておく（probe.yml と同じ扱い）。
+  # research/** にすると関係ないファイルを触るたびに発火して CI 時間を食うため、
+  # この実験に関わるファイルだけに絞る。
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: '何をするか（probe=見積もりのみ / run=本走）'
+        type: choice
+        options: ['probe', 'run']
+        default: 'probe'
+      max_context:
+        description: '文脈に入れる訓練行の上限（0 で全行）'
+        default: '0'
+      n_estimators:
+        description: 'TabICL 内部のアンサンブル数'
+        default: '8'
+      batch_size:
+        description: '同時に流すアンサンブル数（メモリの上限を決める）'
+        default: '2'
+  push:
+    branches: ['claude/tabicl-v2-model-backtest-pden98']
+    paths:
+      - 'research/tabicl_model.py'
+      - 'research/exp/e17_tabicl.py'
+      - 'research/tabicl_request.txt'
+      - 'research/requirements-tabicl.txt'
+      - '.github/workflows/exp-tabicl.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: exp-tabicl
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  experiment:
+    runs-on: ubuntu-latest
+    # GitHub のジョブ上限は6時間。前処理（依存の導入・生データ取得・
+    # データセット作成）に30〜40分見て、TabICL 本体には下の
+    # BUDGET_SECONDS までしか使わせない。残り時間で必ず結果を書き出す
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 実行内容を決める
+        id: plan
+        run: |
+          # 手動実行なら入力を、push なら research/tabicl_request.txt の
+          # 1行目（コメントと空行を除く最初の行）を見る
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            mode="${{ inputs.mode }}"
+            max_context="${{ inputs.max_context }}"
+            n_estimators="${{ inputs.n_estimators }}"
+            batch_size="${{ inputs.batch_size }}"
+          else
+            line=$(grep -vE '^[[:space:]]*(#|$)' research/tabicl_request.txt \
+                   | head -1 | tr -d '\r')
+            mode=$(echo "$line" | awk '{print $1}')
+            max_context=$(echo "$line" | awk '{print ($2 == "") ? 0 : $2}')
+            n_estimators=$(echo "$line" | awk '{print ($3 == "") ? 8 : $3}')
+            batch_size=$(echo "$line" | awk '{print ($4 == "") ? 2 : $4}')
+          fi
+          case "$mode" in
+            probe|run) ;;
+            *) echo "mode=$mode なので何もしません"; mode="skip" ;;
+          esac
+          echo "mode=$mode"                   >> "$GITHUB_OUTPUT"
+          echo "max_context=$max_context"     >> "$GITHUB_OUTPUT"
+          echo "n_estimators=$n_estimators"   >> "$GITHUB_OUTPUT"
+          echo "batch_size=$batch_size"       >> "$GITHUB_OUTPUT"
+          echo "実行内容: mode=$mode / 文脈上限=$max_context"
+          echo "          アンサンブル=$n_estimators / 同時=$batch_size"
+
+      - uses: actions/setup-python@v5
+        if: steps.plan.outputs.mode != 'skip'
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: 依存を入れる
+        if: steps.plan.outputs.mode != 'skip'
+        run: |
+          pip install -r research/requirements-tabicl.txt
+          # tabicl は __version__ を公開していないので配布メタから読む
+          python3 -c "import torch, importlib.metadata as m; print('torch', torch.__version__, '/ tabicl', m.version('tabicl'))"
+
+      # 重みは 100MB 級で毎回落とすと遅い。キャッシュが効けば次回から無料。
+      # キーにチェックポイント名を入れて、版を変えたら取り直させる
+      - name: 重みのキャッシュ
+        if: steps.plan.outputs.mode != 'skip'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: tabicl-ckpt-v2-20260212
+
+      - name: 生データを取る（data-raw Release）
+        if: steps.plan.outputs.mode != 'skip'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p research/_data
+          gh release download data-raw --dir research/_data --clobber
+          # 前回の続きから走るための窓ごとの out-of-fold。無ければゼロから
+          if [ -f research/_data/tabicl_folds.tar.gz ]; then
+            mkdir -p research/_data/oof/tabicl
+            tar -xzf research/_data/tabicl_folds.tar.gz \
+                -C research/_data/oof/tabicl
+            echo "前回までの窓: $(ls research/_data/oof/tabicl | wc -l) ファイル"
+          else
+            echo "前回の窓なし（ゼロから）"
+          fi
+
+      # ラベル未確定の行は入れない（--keep-unlabeled を付けない）。
+      # 学習用と同じデータセットにする
+      - name: データセットを作る
+        if: steps.plan.outputs.mode != 'skip'
+        timeout-minutes: 40
+        run: python3 research/build_dataset.py 2>&1 | tail -20
+
+      # 本走の前に必ず見積もりを出す。6時間使い切ってから
+      # 「終わらなかった」と分かるのは実行1回ぶんの無駄になる
+      - name: 所要時間を実測する
+        if: steps.plan.outputs.mode != 'skip'
+        timeout-minutes: 60
+        run: |
+          { echo '### TabICLv2 の所要時間（実測と外挿）'; echo '```'; } \
+            >> "$GITHUB_STEP_SUMMARY"
+          python3 research/exp/e17_tabicl.py --probe \
+            --batch-size "${{ steps.plan.outputs.batch_size }}" 2>&1 | tee probe.log
+          tail -30 probe.log >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 本走
+        if: steps.plan.outputs.mode == 'run'
+        timeout-minutes: 270
+        env:
+          # ジョブ上限6時間のうち、前処理と後片付けに1時間半残す
+          BUDGET_SECONDS: '14400'
+        run: |
+          python3 research/exp/e17_tabicl.py \
+            --max-context "${{ steps.plan.outputs.max_context }}" \
+            --n-estimators "${{ steps.plan.outputs.n_estimators }}" \
+            --batch-size "${{ steps.plan.outputs.batch_size }}" \
+            --budget-seconds "$BUDGET_SECONDS" 2>&1 | tee e17.log
+
+      # 窓ごとの out-of-fold を Release に戻す。次の実行がここから続ける。
+      # 打ち切られていても（if: always()）必ず上げる。上げ損ねると
+      # そこまでの計算が丸ごと消える
+      - name: 途中結果を Release に戻す
+        if: always() && steps.plan.outputs.mode == 'run'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -d research/_data/oof/tabicl ] \
+             && [ -n "$(ls -A research/_data/oof/tabicl 2>/dev/null)" ]; then
+            # 中身は zstd 済みの parquet なので外側は gzip で十分。
+            # zstd の有無に依らず動くほうを取る
+            tar -czf research/_data/tabicl_folds.tar.gz \
+                -C research/_data/oof/tabicl .
+            gh release upload data-raw research/_data/tabicl_folds.tar.gz --clobber
+            echo "上げた窓: $(ls research/_data/oof/tabicl | wc -l) ファイル"
+          else
+            echo "上げるものなし"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.plan.outputs.mode != 'skip'
+        with:
+          name: e17-tabicl
+          path: |
+            probe.log
+            e17.log
+            docs/MODEL_TABICL.md
+            research/_data/e17_probe.json
+            research/_data/e17_tabicl.json
+          if-no-files-found: ignore
+
+      - name: 結果を要約に出す
+        if: always() && steps.plan.outputs.mode == 'run'
+        run: |
+          { echo '### 実験17 の結果'; echo '```'
+            if [ -f e17.log ]; then tail -60 e17.log; else echo "(実行せず)"; fi
+            echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: レポートをコミットする
+        if: steps.plan.outputs.mode == 'run'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A docs/MODEL_TABICL.md
+          if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
+          git commit -m "chore(research): TabICLv2 の検証結果を更新 ($(date -u '+%Y-%m-%d'))"
+          for i in 1 2 3 4; do
+            if git push; then exit 0; fi
+            sleep $((2 ** i)); git pull --rebase
+          done
+          exit 1

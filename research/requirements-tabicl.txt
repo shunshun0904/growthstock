@@ -1,0 +1,24 @@
+# TabICLv2 の検証（research/tabicl_model.py / research/exp/e17_tabicl.py）用。
+#
+# なぜ research/requirements.txt と分けるか
+# ---------------------------------------
+# torch は CPU 版でも数百MB あり、依存として numpy/scikit-learn の解決にも
+# 影響する。本番の週次学習（retrain-weekly.yml）と日次予測（predict.yml）は
+# TabICL を読まないので、そこにこの重さを持ち込む理由がない。
+# 検証が終わり、本番に入れると決めたときに初めて requirements.txt へ移す。
+#
+# チェックポイントは Hugging Face（jingang/TabICL）から落ちてくる。
+# pip では入らないので、実行環境が huggingface.co に到達できることが要る。
+# 到達できない環境では TABICL_CKPT に落としたファイルのパスを渡す。
+-r requirements.txt
+
+# 既定のチェックポイントは tabicl-classifier-v2-20260212.ckpt（TabICLv2）。
+# v1 / v1.1 も同じパッケージから選べるので、比較したくなったら
+# TABICL_CKPT_VERSION で切り替えられるようにしてある。
+tabicl==2.2.0
+
+# CPU 版を明示する。PyPI の linux 向け torch は CUDA 同梱で 2GB を超え、
+# GPU の無い CI ランナーでは落とすだけ無駄になる。
+# このインデックスに届かない環境では PyPI の既定版に落ちる（動作はする）。
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.9.1

@@ -36,6 +36,10 @@ jobs:
           python3 tests/test_dataset.py
           python3 tests/test_model.py
           python3 tests/test_data_store.py
+          # TabICLv2 の検証コード（実験17）。torch と Hugging Face の重みが
+          # 要らない部分だけを押さえる。入力の作り方・文脈の切り方・
+          # 種の平均が壊れると、出てくる数字が黙って別のものになる
+          python3 tests/test_tabicl.py
           # 台帳（スプレッドシート）は利用者の手入力と同居する。
           # 列が増えたときに既存セルがずれないことを回帰で押さえる
           python3 tests/test_sheets.py
