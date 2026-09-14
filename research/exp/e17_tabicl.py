@@ -328,9 +328,21 @@ def main(argv=None) -> int:
                   f"/ 固定費 {p['fixed_seconds']:.1f}秒"
                   f"（検証{p['n_test_probe']}行・アンサンブル{p['n_estimators']}"
                   f"・同時{p['batch_size']}）")
-            print(f"  全訓練行（{p['n_train_full']:,}行）まで上げたときの"
-                  f"最大メモリ見積もり {p['peak_rss_gb_at_full']:.1f}GB"
-                  "（CI ランナーは16GB）")
+            grew = abs(p["points"][1]["peak_rss_gb"]
+                       - p["points"][0]["peak_rss_gb"]) > 0.05
+            print(f"  最大メモリ {p['points'][-1]['peak_rss_gb']:.2f}GB"
+                  f"（CI ランナーは16GB）")
+            if grew:
+                print(f"  全訓練行（{p['n_train_full']:,}行）まで上げたときの"
+                      f"見積もり {p['peak_rss_gb_at_full']:.1f}GB")
+            else:
+                # 2点で動かないのは、TabICL の確保ぶんが lab.frame() の
+                # データフレーム（株価バー全期間＋データセット）に埋もれて
+                # いるため。外挿しても意味が無いので下限として読む
+                print("  probe の2点で最大メモリが動いていない。TabICL の"
+                      "確保ぶんが")
+                print("  データフレームに埋もれている。上の値は下限であって"
+                      "見積もりではない")
             print()
             for e in (2, 4, 8):
                 for mc in (0, 4000, 8000, 16000):
