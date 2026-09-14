@@ -238,30 +238,103 @@ def report(results: Dict[str, lab.Result], args, df, log=print) -> str:
     A("")
 
     # 判定。数字から機械的に導ける部分だけを書く
+    tm = tic.metrics
+    others = [n for n in names if n != "tabicl"]
+
+    def ja(n):
+        return T.JA if n == "tabicl" else M.JA.get(n, n)
+
+    def stderr(n):
+        m = results[n].metrics
+        return m["thr_fold_sd"] / np.sqrt(max(1, m["thr_folds"]))
+
+    if others:
+        A("### 差は誤差の範囲か")
+        A("")
+        A("自分で決めた足切りは「差 / 合成標準誤差 > 2 で採用可」"
+          "（`docs/MODEL_LINEUP.md` と同じ）。")
+        A("")
+        A("| 比較 | 差 | 合成SE | z | 判定 |")
+        A("| --- | ---: | ---: | ---: | --- |")
+        se_t = stderr("tabicl")
+        for n in sorted(others,
+                        key=lambda x: -results[x].metrics["thr_fold_mean"]):
+            d = tm["thr_fold_mean"] - results[n].metrics["thr_fold_mean"]
+            cse = float(np.hypot(se_t, stderr(n)))
+            z = d / cse if cse else float("nan")
+            A(f"| TabICLv2 − {ja(n)} | {d:+.2f}pt | {cse:.2f} | {z:+.2f} | "
+              f"{'採用可' if abs(z) > 2 else '要確認'} |")
+        A("")
+
+    # 並べる価値。各モデルが「他のどれかと最も似ている度合い」を出す。
+    # 単独の組を見ても冗長かどうかは決まらない（1つでも高い相手がいれば
+    # その分の情報は既に画面にある）ので、モデルごとの最大値で見る
+    rho_of = {}
+    for a, b, rho, jac in pairs:
+        rho_of.setdefault(a, []).append((abs(rho), b, rho, jac))
+        rho_of.setdefault(b, []).append((abs(rho), a, rho, jac))
+    A("### どのモデルがいちばん独立しているか")
+    A("")
+    A("組ごとの相関では決まらない。1つでも似た相手がいれば、"
+      "その分の情報は既に画面にあるため。モデルごとに"
+      "**最も似ている相手との相関**を出す。小さいほど独立している。")
+    A("")
+    A("| モデル | 最も似ている相手 | 相関 | 上位10%重複 |")
+    A("| --- | --- | ---: | ---: |")
+    for n in sorted(names, key=lambda x: max(v[0] for v in rho_of[x])):
+        _, other, rho, jac = max(rho_of[n])
+        mark = "**" if n == "tabicl" else ""
+        A(f"| {mark}{ja(n)}{mark} | {ja(other)} | {rho:.3f} | {jac * 100:.1f}% |")
+    A("")
+
     A("## 読み取り")
     A("")
-    tm = tic.metrics
-    se = tm["thr_fold_sd"] / np.sqrt(max(1, tm["thr_folds"]))
-    A(f"- TabICLv2 の窓平均は **{tm['thr_fold_mean']:+.2f}pt**"
-      f"（標準誤差 {se:.2f} / 勝ち窓 {tm['thr_folds_won']}/{tm['thr_folds']}）。")
-    others = [n for n in names if n != "tabicl"]
+    se = stderr("tabicl")
+    order = sorted(names, key=lambda n: -results[n].metrics["thr_fold_mean"])
+    rank = order.index("tabicl") + 1
+    A(f"- 運用指標では {len(names)}モデル中 **{rank}位**。窓平均 "
+      f"{tm['thr_fold_mean']:+.2f}pt（標準誤差 {se:.2f} / 勝ち窓 "
+      f"{tm['thr_folds_won']}/{tm['thr_folds']}）。"
+      "ただし上の z はどれも足切り（2）に届かない。"
+      "**既存のどのモデルとも差があるとは言えない**というのが正確な読み。")
     if others:
-        best = max(others, key=lambda n: results[n].metrics["thr_fold_mean"])
-        bm = results[best].metrics
-        A(f"- 既存モデルの最良は {M.JA.get(best, best)} の "
-          f"{bm['thr_fold_mean']:+.2f}pt。差は "
-          f"{tm['thr_fold_mean'] - bm['thr_fold_mean']:+.2f}pt。"
-          "実験11 のノイズ床（窓平均のレンジ 0.143pt）と比べて読むこと。")
-    tic_pairs = [(b, rho, jac) for a, b, rho, jac in pairs if a == "tabicl"] \
-        + [(a, rho, jac) for a, b, rho, jac in pairs if b == "tabicl"]
-    if tic_pairs:
-        # 絶対値で取る。強い負の相関は「順位が逆」なだけで、
-        # 情報としては同じものを見ていることになる
-        mx = max(tic_pairs, key=lambda t: abs(t[1]))
-        A(f"- 既存モデルと最も似ているのは {M.JA.get(mx[0], mx[0])}（相関 "
-          f"{mx[1]:.3f} / 上位10%重複 {mx[2] * 100:.1f}%）。"
-          "絶対値が 0.858（RF を外した基準）を超えていれば、"
-          "並べても情報は増えない。")
+        worst_sd = max(names, key=lambda n: results[n].metrics["thr_fold_sd"])
+        A(f"- 窓ごとのばらつきは大きめ（窓SD {tm['thr_fold_sd']:.2f}、"
+          f"最悪の窓 {tm['thr_worst']:+.2f}pt）。"
+          f"最も荒いのは {ja(worst_sd)}（窓SD "
+          f"{results[worst_sd].metrics['thr_fold_sd']:.2f}）。")
+    tic_pairs = rho_of.get("tabicl", [])
+    if tic_pairs and others:
+        mx = max(tic_pairs)
+        # 既存モデル同士でいちばん似ている組。TabICL の位置はこれと比べて読む
+        among = [(abs(rho), a, b, rho) for a, b, rho, _ in pairs
+                 if "tabicl" not in (a, b)]
+        top = max(among) if among else None
+        least = min(names, key=lambda n: max(v[0] for v in rho_of[n]))
+        head = ("**既存モデルとの相関がどれよりも低い。**"
+                if least == "tabicl" else "既存モデルとの相関は次のとおり。")
+        line = (f"- {head} 最も似ている相手でも {ja(mx[1])} の {mx[2]:.3f}"
+                f"（上位10%重複 {mx[3] * 100:.1f}%）で、"
+                "RF を外した基準 0.858 を下回る。")
+        if top:
+            line += (f" 既存モデル同士では {ja(top[1])} × {ja(top[2])} が "
+                     f"{top[3]:.3f} まで似ているので、"
+                     "TabICL はその塊の中に入る1本ではなく、"
+                     "別の見方として並ぶことになる。")
+        A(line)
+    sec = tm.get("_seconds") or 0.0
+    if sec:
+        n_seeds = len(str(args.tabicl_seeds).split(","))
+        per = sec / max(1, tm.get("_folds_total", 1) * n_seeds)
+        A(f"- 計算は重い。{sec / 60:.0f}分 / "
+          f"{tm.get('_folds_total', 0)}窓 × {n_seeds}種 = 1窓あたり{per / 60:.1f}分。"
+          "既存5モデルは合わせて数分で終わる。"
+          "**日次予測に入れるなら、毎日この文脈を通し直すことになる。**")
+    A("- TabICL は学習済みの重みを保存して読み直す形にできない。"
+      "`predict` のたびに訓練行そのものが要るので、"
+      f"保存するなら文脈（{args.max_context:,}行 × {len(F.columns(args.features))}列）"
+      "ごと持ち回すことになる。既存5モデルの joblib "
+      "（最大2.2MB）とは運用の形が違う。")
     if tm.get("_stopped_at") is not None:
         A(f"- **未完**: 予算切れで窓{tm['_stopped_at']} 以降を回していない。"
           "同じワークフローをもう一度走らせると残りの窓から続く。")
