@@ -239,22 +239,26 @@ def report(results: Dict[str, lab.Result], args, df, log=print) -> str:
     A("")
     tm = tic.metrics
     se = tm["thr_fold_sd"] / np.sqrt(max(1, tm["thr_folds"]))
-    best = max((n for n in names if n != "tabicl"),
-               key=lambda n: results[n].metrics["thr_fold_mean"])
-    bm = results[best].metrics
     A(f"- TabICLv2 の窓平均は **{tm['thr_fold_mean']:+.2f}pt**"
       f"（標準誤差 {se:.2f} / 勝ち窓 {tm['thr_folds_won']}/{tm['thr_folds']}）。")
-    A(f"- 既存5モデルの最良は {M.JA.get(best, best)} の "
-      f"{bm['thr_fold_mean']:+.2f}pt。差は "
-      f"{tm['thr_fold_mean'] - bm['thr_fold_mean']:+.2f}pt。"
-      "実験11 のノイズ床（窓平均のレンジ 0.143pt）と比べて読むこと。")
+    others = [n for n in names if n != "tabicl"]
+    if others:
+        best = max(others, key=lambda n: results[n].metrics["thr_fold_mean"])
+        bm = results[best].metrics
+        A(f"- 既存モデルの最良は {M.JA.get(best, best)} の "
+          f"{bm['thr_fold_mean']:+.2f}pt。差は "
+          f"{tm['thr_fold_mean'] - bm['thr_fold_mean']:+.2f}pt。"
+          "実験11 のノイズ床（窓平均のレンジ 0.143pt）と比べて読むこと。")
     tic_pairs = [(b, rho, jac) for a, b, rho, jac in pairs if a == "tabicl"] \
         + [(a, rho, jac) for a, b, rho, jac in pairs if b == "tabicl"]
     if tic_pairs:
-        mx = max(tic_pairs, key=lambda t: t[1])
-        A(f"- 既存モデルとの相関が最も高いのは {M.JA.get(mx[0], mx[0])} の "
-          f"{mx[1]:.3f}（上位10%重複 {mx[2] * 100:.1f}%）。"
-          "0.858（RF を外した基準）を超えていれば、並べても情報は増えない。")
+        # 絶対値で取る。強い負の相関は「順位が逆」なだけで、
+        # 情報としては同じものを見ていることになる
+        mx = max(tic_pairs, key=lambda t: abs(t[1]))
+        A(f"- 既存モデルと最も似ているのは {M.JA.get(mx[0], mx[0])}（相関 "
+          f"{mx[1]:.3f} / 上位10%重複 {mx[2] * 100:.1f}%）。"
+          "絶対値が 0.858（RF を外した基準）を超えていれば、"
+          "並べても情報は増えない。")
     if tm.get("_stopped_at") is not None:
         A(f"- **未完**: 予算切れで窓{tm['_stopped_at']} 以降を回していない。"
           "同じワークフローをもう一度走らせると残りの窓から続く。")
