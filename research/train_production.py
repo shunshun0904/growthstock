@@ -159,6 +159,40 @@ def score_bands(oof: pd.DataFrame, n_bands: int = N_BANDS) -> Dict:
             "n": int(len(oof))}
 
 
+def oof_metrics(oof: pd.DataFrame) -> Dict:
+    """
+    out-of-fold の分離力。毎週の記録として meta に残す。
+
+    **`tuning` の中の mean_pr_auc / mean_roc_auc とは別物**。あちらは
+    ハイパーパラメータ探索に使った層別 k 分割の値で、フォールドの訓練側に
+    将来のデータが入る（tuning.year_folds は時系列分割ではない）。
+    こちらは「その行より前のデータだけで学習したモデル」の採点なので、
+    必ず低く出る。実力の推定値として読めるのはこちら。
+
+    PR-AUC は下限が正例率そのものなので、正例率が動く週をまたいで
+    生値を並べても比較にならない。正例率で割った値も一緒に残す。
+    ROC-AUC と日内AUC は正例率に鈍いのでそのまま並べてよい。
+    """
+    from sklearn.metrics import average_precision_score, roc_auc_score
+
+    y = oof["label"].to_numpy(dtype=int)
+    s = oof["score"].to_numpy(dtype=float)
+    base = float(y.mean())
+    pr = float(average_precision_score(y, s))
+    return {
+        "n": int(len(oof)),
+        "positiveRate": round(base, 4),
+        "prAuc": round(pr, 4),
+        # 正例率で割った値。週をまたいで並べるならこちらを見る
+        "prAucOverBase": round(pr / base, 3) if base else None,
+        "rocAuc": round(float(roc_auc_score(y, s)), 4),
+        # 同じ日の候補どうしの順位付け。運用の決定にいちばん近い
+        "aucInDay": round(float(L.auc_in_day(oof)), 4),
+        "note": ("その行より前のデータだけで学習したモデルの採点。"
+                 "tuning の mean_pr_auc（層別k分割）とは別物で、必ず低く出る"),
+    }
+
+
 def calibration(oof: pd.DataFrame) -> Dict:
     """
     生スコア -> 実際の正例率 の対応を単調回帰で作る。
@@ -223,6 +257,10 @@ def main(argv=None) -> int:
 
     bands = score_bands(oof)
     calib = calibration(oof)
+    om = oof_metrics(oof)
+    print(f"[oof] PR-AUC {om['prAuc']:.4f}（正例率 {om['positiveRate']*100:.2f}% の "
+          f"{om['prAucOverBase']:.2f}倍） / ROC-AUC {om['rocAuc']:.4f} / "
+          f"日内AUC {om['aucInDay']:.4f}")
     print(f"\n[band] スコア帯ごとの実績（out-of-fold / 実収益は {OUTCOME_COL}: "
           f"{bands['outcome']['label']}）")
     print(f"    {'帯':>3}{'件数':>8}{'スコア下限':>12}{'正例率':>9}"
@@ -263,6 +301,8 @@ def main(argv=None) -> int:
         # 追加モデル（research/models.py）の meta と名前を揃えてある
         "nOof": int(len(oof)),
         "referenceHorizon": S.REF_HORIZON,
+        # out-of-fold の分離力。週ごとの推移を追えるように毎回残す
+        "oofMetrics": om,
         "calibration": calib,
         "scoreBands": bands,
         "tuning": tuning.load_params().get(args.params, {}).get("_cv", {}),

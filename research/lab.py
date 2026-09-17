@@ -594,6 +594,11 @@ def threshold_edge(oof: pd.DataFrame, pct: float = THR_PCT,
     }
 
 
+#: 本番の学習スクリプトからも呼ぶ。定義を2箇所に書くと必ずずれるので、
+#: private のままコピーせずにここで公開する。
+auc_in_day = _auc_in_day
+
+
 def metrics(oof: pd.DataFrame) -> Dict:
     from sklearn.metrics import average_precision_score, roc_auc_score
 
