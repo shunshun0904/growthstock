@@ -68,6 +68,17 @@ def main() -> int:
     os.makedirs(OOF_DIR, exist_ok=True)
 
     print(f"母集団 {len(df):,}件 / ETF等 {etf.sum():,}件 ({etf.mean()*100:.1f}%)")
+    if not etf.any():
+        # 2026-09-17 にこの実験の結果を受けて build_dataset.py の
+        # EXCLUDE_MKT_CODES で ETF を母集団から外した。既定のデータセットには
+        # もう ETF が入っていないので、A / A' / B が全部同じものになる。
+        # 黙って「差なし」と出すと、測っていないことに気づけない。
+        print()
+        print("[stop] データセットに ETF が1件も無い。A/A'/B が同じになるので測れない。")
+        print("       測り直すなら ETF を戻したデータセットを作ってから:")
+        print("         SWEEP_EXCLUDE_MKT_CODES=none \\")
+        print("           python3 research/build_dataset.py --out research/_data/dataset.parquet")
+        return 1
     print(f"目的変数 {lab.OUTCOME}（翌営業日の寄り買い・40営業日後の5日平均終値売り）")
     print(f"種 {SEEDS} の確率平均")
     print()

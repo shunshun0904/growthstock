@@ -1639,6 +1639,66 @@ class TestPopulationFlags(unittest.TestCase):
             self.assertNotIn(c, F.RAW_FOR_RANK, c)
 
 
+class TestExcludedMarkets(unittest.TestCase):
+    """
+    ETF・REIT（市場区分「その他」= mkt_code 109）を母集団から外す。
+
+    外す理由は research/exp/e17_etf.py の実測。ETF は母集団の 7.6% しか
+    無いのに上位10%の 31.0% を占める。日次ボラが株式の半分（0.97% 対
+    2.04%）で、ラベルが vol_20d 正規化の +1.2σ だからで、
+    ラベルは当たるが実際の値幅は薄い。
+
+    固定したいのは3つ。既定で ETF が消えること、市場区分が付かなかった
+    行を巻き添えにしないこと、空にすれば無効化できること。
+    """
+
+    def _samples(self):
+        return pd.DataFrame({
+            "Code": ["1301", "13080", "7203", "9999"],
+            # 13080 は ETF（その他）。9999 は master_hist に無く区分が付かない
+            "mkt_code": [111.0, 109.0, 111.0, float("nan")],
+        })
+
+    def test_etf_is_dropped_by_default(self):
+        import build_dataset as B
+        self.assertEqual(B.EXCLUDE_MKT_CODES, (109,))
+        out = B.drop_excluded_markets(self._samples())
+        self.assertNotIn("13080", set(out["Code"]))
+        self.assertIn("1301", set(out["Code"]))
+
+    def test_unknown_segment_is_kept(self):
+        """
+        区分が付かなかった行まで落とすと、master_hist が届かない環境で
+        母集団が丸ごと消える。isin が欠測を False にすることに頼っている
+        ので、挙動をここで固定しておく。
+        """
+        import build_dataset as B
+        out = B.drop_excluded_markets(self._samples())
+        self.assertIn("9999", set(out["Code"]))
+
+    def test_empty_setting_disables_the_filter(self):
+        import build_dataset as B
+        out = B.drop_excluded_markets(self._samples(), codes=())
+        self.assertEqual(len(out), 4)
+
+    def test_env_can_change_the_codes(self):
+        """SWEEP_EXCLUDE_MKT_CODES で掃引から差し替えられる。"""
+        import build_dataset as B
+        self.assertEqual(B._mkt_codes("109"), (109,))
+        self.assertEqual(B._mkt_codes("109, 105"), (109, 105))
+        self.assertEqual(B._mkt_codes("none"), ())
+        self.assertEqual(B._mkt_codes(""), ())
+
+    def test_float_column_matches_integer_codes(self):
+        """
+        mkt_code は encode_category が to_numeric で作るので float になる。
+        int のタプルと突き合わせて取りこぼさないことを固定する。
+        """
+        import build_dataset as B
+        s = pd.DataFrame({"mkt_code": [109.0, 109, 111.0]})
+        self.assertEqual(len(B.drop_excluded_markets(s)), 1)
+
+
 class TestSweepOverride(unittest.TestCase):
     """
     掃引が母集団の定義を差し替える口。既定の挙動を変えないことが要件。

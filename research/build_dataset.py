@@ -388,6 +388,40 @@ MIN_TRADING_VALUE = _sweep_override("MIN_TRADING_VALUE", 0.1, float)
 #: 残存件数と正例率を出す閾値の候補（億円）。None は「絞らない」
 LIQUIDITY_LADDER = (None, 0.05, 0.1, 0.3, 0.5, 1.0, 3.0)
 
+
+def _mkt_codes(raw: str) -> tuple:
+    """「109,105」のような文字列を市場区分コードの組にする。空/none で無効。"""
+    if raw.strip().lower() in ("", "none", "off", "-"):
+        return ()
+    return tuple(int(x) for x in raw.replace(" ", "").split(",") if x)
+
+
+# 母集団から外す市場区分コード（時点別 mkt_code）。空タプルなら外さない。
+#
+# 109 =「その他」。J-Quants の市場区分でここに入るのは ETF / ETN / REIT /
+# インフラファンドで、事業会社の株式は1件も入らない（実測: 546銘柄すべて
+# 33業種が「その他」）。
+#
+# 外す根拠は research/exp/e17_etf.py の実測（3シード・ret_o1_40・
+# しきい値はウォークフォワード）:
+#
+#   条件                            窓平均    SE   勝ち窓  最悪の窓  取引数
+#   A  学習=全部 / 評価=全部（従来） +0.80pt  0.32   7/9   -0.73pt  2,000
+#   A' 学習=全部 / 評価=株式        +1.17pt  0.26   9/9   +0.17pt  1,856
+#   B  学習=株式 / 評価=株式        +1.28pt  0.33   9/9   +0.22pt  1,898
+#
+# A'-B = +0.11pt (z=0.27) で、学習から外すかどうかは差が無い。効くのは
+# 「候補から外す」ほう（A-A' = +0.37pt, z=0.90）。z<2 なのでノイズ床は
+# 越えていないが、最悪の窓が負から正に変わる点は一貫している。
+#
+# ETF が上位に溜まる理由は分散の小ささにある。母集団の 7.6% しか無いのに
+# 上位10%の 31.0% を占め（4.1倍）、正例率は 32.0%（株式 19.9%）。
+# ラベルは vol_20d で正規化した +1.2σ なので、日次ボラ 0.97%（株式 2.04%）の
+# ETF は同じ σ に届く実際の値幅が半分で済む。ラベルは当たるが、
+# 中央値 +2.79% / 平均 +2.38% と上値も薄い（株式は中央 +2.24% / 平均 +3.58%）。
+# 値幅を取りにいく運用とは噛み合わないので母集団から外す。
+EXCLUDE_MKT_CODES = _sweep_override("EXCLUDE_MKT_CODES", (109,), _mkt_codes)
+
 # 時価総額の帯（億円）。フラグ列 cap_band の境界。
 #
 # 端は固定値にする。分位点で切ると全期間の分布を見ることになり、
@@ -1078,6 +1112,32 @@ def encode_category(s: pd.Series, name: str = "") -> pd.Series:
           + ", ".join(f"{i}={x}" for i, x in enumerate(vals)))
     code = {x: i for i, x in enumerate(vals)}
     return s.map(code).astype("float64")
+
+
+def drop_excluded_markets(samples: pd.DataFrame,
+                          codes: tuple = None) -> pd.DataFrame:
+    """
+    市場区分で母集団から外す。既定は ETF・REIT 等（EXCLUDE_MKT_CODES）。
+
+    mkt_code は master_hist を結合してからでないと分からないので、
+    ほかの除外条件とは別の場所から呼ぶことになる。
+    理由と実測は EXCLUDE_MKT_CODES のコメントに書いた。
+    """
+    codes = EXCLUDE_MKT_CODES if codes is None else tuple(codes)
+    if not codes:
+        print("[filter] 市場区分による除外はしない（EXCLUDE_MKT_CODES が空）")
+        return samples
+    before = len(samples)
+    # isin は欠測を False にするので、市場区分が付かなかった行は残る。
+    # master_hist が無い環境で母集団ごと消えるのを避けるため。
+    out = samples[~samples["mkt_code"].isin(codes)]
+    n_unknown = int(out["mkt_code"].isna().sum())
+    names = ", ".join(str(c) for c in codes)
+    print(f"[filter] ETF・REIT等(mkt_code in {{{names}}})を除外: "
+          f"{before:,} -> {len(out):,}")
+    if n_unknown:
+        print(f"[filter] 市場区分が付かなかった {n_unknown:,}件は残した")
+    return out
 
 
 def _lag_available(df: pd.DataFrame, col: str, n: int,
@@ -1979,6 +2039,11 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
         if f"{c}_code" not in samples.columns:
             samples[f"{c}_code"] = np.nan
 
+    # --- ETF・REIT を母集団から外す --- #
+    # 市場区分は master_hist を結合してからでないと分からないので、
+    # ほかの除外条件（上の「除外条件」ブロック）とは離れてここに置く。
+    samples = drop_excluded_markets(samples)
+
     # --- 市場環境（地合い） --- #
     print("[merge] 市場環境の特徴量を結合")
     env = market_environment(bars, topix)
@@ -2102,6 +2167,7 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
         "nUnlabeled": int(out["label"].isna().sum()),
         "cooldown": BREAKOUT_COOLDOWN,
         "minTradingValue": MIN_TRADING_VALUE,
+        "excludeMktCodes": list(EXCLUDE_MKT_CODES),
     }
     meta_path = os.path.splitext(out_path)[0] + "_meta.json"
     with open(meta_path, "w", encoding="utf-8") as fh:
