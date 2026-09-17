@@ -12,17 +12,21 @@ on:
   workflow_dispatch:
     inputs:
       start:
-        description: 'この時刻(JST)まで待ってから見始める。例 15:00'
+        description: 'この時刻(JST)まで待ってから見始める'
         required: false
-        default: '15:00'
+        # 大引けが 15:30 JST なので、それ以前に当日の終値が出ることはない。
+        # 16:00 より早く見ても「まだ無い」を確認するだけで意味が無い
+        default: '16:00'
       until:
-        description: 'この時刻(JST)まで待つ。例 21:00'
+        description: 'この時刻(JST)まで待つ'
         required: false
-        default: '21:00'
+        default: '20:30'
       interval:
         description: 'ポーリング間隔（秒）'
         required: false
-        default: '300'
+        # 30分。決めたいのは「締切19:30を締め直せるか」なので、
+        # 分単位の解像度は要らない。API を叩く回数も抑える
+        default: '1800'
       date:
         description: '対象日 (YYYY-MM-DD, JST)。既定は今日'
         required: false
