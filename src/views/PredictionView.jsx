@@ -352,6 +352,10 @@ function Detail({ c, models, onSend, sent }) {
 
 /* ------------------------------------------------------------------ 補助パネル */
 
+// 物差しを変える前に学習したモデルは end_median のまま。週次の再学習が
+// 一巡するまで両方を見る（一巡したら outcome_median だけでよい）。
+const bandOutcome = (r) => r?.outcome_median ?? r?.end_median;
+
 function BandTable({ bands }) {
   if (!bands?.bands?.length) return null;
   return (
@@ -376,8 +380,8 @@ function BandTable({ bands }) {
                 <td className="num">{fmtInt(r.n)}</td>
                 <td className="num">{fmt(r.score_lo, 4)}</td>
                 <td className="num">{fmt(r.positive_rate * 100, 1, '%')}</td>
-                <td className="num" style={{ color: r.outcome_median >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                  {fmtSigned(r.outcome_median, 2)}
+                <td className="num" style={{ color: bandOutcome(r) >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                  {fmtSigned(bandOutcome(r), 2)}
                 </td>
                 <td className="num">{fmt(r.win_rate * 100, 1, '%')}</td>
               </tr>
@@ -385,18 +389,29 @@ function BandTable({ bands }) {
             <tr className="tot">
               <td>全体</td><td className="num">{fmtInt(bands.n)}</td><td>{DASH}</td>
               <td className="num">{fmt(bands.base_positive_rate * 100, 1, '%')}</td>
-              <td className="num">{fmtSigned(bands.base_outcome_median, 2)}</td>
+              <td className="num">
+                {fmtSigned(bands.base_outcome_median ?? bands.base_end_median, 2)}
+              </td>
               <td className="num">{fmt(bands.base_win_rate * 100, 1, '%')}</td>
             </tr>
           </tbody>
         </table>
       </div>
       <p className="sub">
-        「実収益」は{bands.outcome?.label
-          || '翌営業日の寄りで買い、一定期間後の5日平均終値で売ったときの上昇率'}。
-        ブレイク当日の終値では買えない（候補が判明するのは終値が出た後）ので、
-        買いは翌営業日の寄りで測っています。正例・負例の判定条件とは無関係に
-        測った実測値です。
+        {bands.outcome?.label ? (
+          <>
+            「実収益」は{bands.outcome.label}。
+            ブレイク当日の終値では買えない（候補が判明するのは終値が出た後）ので、
+            買いは翌営業日の寄りで測っています。
+          </>
+        ) : (
+          <>
+            「実収益」は基準日の終値で買い、60営業日後の5日平均終値で売ったときの
+            上昇率。<b>これは物差しを変える前のモデルの数字</b>で、次の週次再学習から
+            「翌営業日の寄り買い・20営業日」に変わります。
+          </>
+        )}
+        いずれも正例・負例の判定条件とは無関係に測った実測値です。
       </p>
     </section>
   );

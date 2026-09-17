@@ -283,8 +283,14 @@ def main(argv=None) -> int:
             "calibProb": r(calibrated(sc, meta["calibration"]) * 100, 1),
             "bandPositiveRate": r(band["positive_rate"] * 100, 1),
             # 帯の実収益。翌営業日の寄り買い・lab.OUTCOME の営業日数で測った値。
-            # 何の数字かは scoreBands.outcome に入っている（画面で焼き込まない）
-            "bandOutcome": band.get("outcome_median"),
+            # 何の数字かは scoreBands.outcome に入っている（画面で焼き込まない）。
+            #
+            # end_median を見に行くのは、物差しを変える前に学習したモデルが
+            # Release に残っているあいだのため。日次予測はモデルを差し替えない
+            # ので、週次の再学習が走るまでは古い meta（当日終値買い・60営業日）
+            # のままになる。ここで拾わないと画面の列が数日ぶん空になる。
+            # 再学習が一巡したら消してよい。
+            "bandOutcome": band.get("outcome_median", band.get("end_median")),
             "bandWinRate": r((band["win_rate"] or 0) * 100, 1),
             # --- エントリー判断に使う素の値 --- #
             "close": r(s.get("close_raw"), 1),
