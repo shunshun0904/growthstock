@@ -2142,8 +2142,33 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
         print(f"  {name:<24} {rate*100:5.1f}%")
 
     # どの定義で作ったデータセットかを残す。あとから追跡できないと混乱するため。
-    meta = {
-        "labelConfig": {
+    #
+    # 目的変数は母集団で切り替わる。breakout なら attach_rise_label（RiseConfig）、
+    # month_end なら attach_labels（LabelConfig）。ここで常に LabelConfig を
+    # 書いていたので、breakout で作ったデータセットの meta に**使っていない定義**が
+    # 入っていた。追跡のために置いてある欄が、追跡を誤らせていた。
+    if POPULATION == "breakout":
+        label_cfg = {
+            "kind": "rise",
+            "population": POPULATION,
+            "high_window": HIGH_WINDOW,
+            "horizon": DEFAULT_RISE.horizon,
+            "vol_norm_k": DEFAULT_RISE.vol_norm_k,
+            # vol_norm_k が None のときだけ効く固定しきい値
+            "threshold": DEFAULT_RISE.threshold,
+            "keep_days": DEFAULT_RISE.keep_days,
+            "end_ratio": DEFAULT_RISE.end_ratio,
+            "end_window": DEFAULT_RISE.end_window,
+            "require_uptrend": DEFAULT_RISE.require_uptrend,
+            "trend_short": DEFAULT_RISE.trend_short,
+            "trend_long": DEFAULT_RISE.trend_long,
+            "name": DEFAULT_RISE.name,
+            "forward_needed": DEFAULT_RISE.horizon,
+        }
+    else:
+        label_cfg = {
+            "kind": "breakout_within_horizon",
+            "population": POPULATION,
             "high_window": DEFAULT_LABEL.high_window,
             "horizon": [DEFAULT_LABEL.horizon_start, DEFAULT_LABEL.horizon_end],
             "hold_days": DEFAULT_LABEL.hold_days,
@@ -2153,7 +2178,9 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
             "sustain_ratio": DEFAULT_LABEL.sustain_ratio,
             "name": DEFAULT_LABEL.name,
             "forward_needed": DEFAULT_LABEL.forward_needed,
-        },
+        }
+    meta = {
+        "labelConfig": label_cfg,
         "n": int(len(out)),
         "positiveRate": (None if out["label"].notna().sum() == 0
                          else round(float(out["label"].mean()), 4)),
@@ -2172,8 +2199,8 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     meta_path = os.path.splitext(out_path)[0] + "_meta.json"
     with open(meta_path, "w", encoding="utf-8") as fh:
         json.dump(meta, fh, ensure_ascii=False, indent=2)
-    print(f"[label] 定義: {DEFAULT_LABEL.name} "
-          f"(ラベル確定に将来 {DEFAULT_LABEL.forward_needed} 営業日)")
+    print(f"[label] 定義: {label_cfg['name']} "
+          f"(ラベル確定に将来 {label_cfg['forward_needed']} 営業日)")
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     out.to_parquet(out_path, index=False, compression="zstd")

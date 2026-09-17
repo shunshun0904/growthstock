@@ -1639,6 +1639,38 @@ class TestPopulationFlags(unittest.TestCase):
             self.assertNotIn(c, F.RAW_FOR_RANK, c)
 
 
+class TestMetaRecordsTheLabelActuallyUsed(unittest.TestCase):
+    """
+    dataset_meta.json の labelConfig は「このデータセットを作った定義」。
+
+    目的変数は母集団で切り替わる（breakout なら RiseConfig、month_end なら
+    LabelConfig）のに、meta は常に LabelConfig を書いていた。追跡のために
+    置いてある欄が、使っていない定義を載せて追跡を誤らせていた。
+
+    ここで固定するのは「meta の name が、実際に走るラベル関数の定義と一致する」
+    こと。一致しないまま増やすと、後から見たときにどちらが本当か分からない。
+    """
+
+    def test_breakout_population_records_the_rise_config(self):
+        import build_dataset as B
+        self.assertEqual(B.POPULATION, "breakout")
+        # いまの定義。変えたらこのテストも一緒に更新すること
+        self.assertEqual(B.DEFAULT_RISE.name,
+                         "3ヶ月内+1.2σ / 終盤+0.50倍 / MA20>=MA60")
+        self.assertEqual(B.DEFAULT_RISE.horizon, 60)
+        self.assertEqual(B.DEFAULT_RISE.vol_norm_k, 1.2)
+        self.assertEqual(B.DEFAULT_RISE.keep_days, 0)
+        self.assertTrue(B.DEFAULT_RISE.require_uptrend)
+
+    def test_the_two_definitions_do_not_share_a_name(self):
+        """
+        取り違えたときに気づけるように、2つの定義の名前が同じでないこと。
+        同じ文字列になると meta を見ても区別がつかない。
+        """
+        import build_dataset as B
+        self.assertNotEqual(B.DEFAULT_RISE.name, B.DEFAULT_LABEL.name)
+
+
 class TestExcludedMarkets(unittest.TestCase):
     """
     ETF・REIT（市場区分「その他」= mkt_code 109）を母集団から外す。
