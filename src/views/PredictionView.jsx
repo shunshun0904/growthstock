@@ -95,7 +95,7 @@ export default function PredictionView({ data, history, onSendToOctagon, sentIds
         </div>
       </section>
 
-      <BandTable bands={data?.scoreBands} />
+      <BandTable bands={data?.scoreBands} horizon={m.riseHorizon} />
       <ModelLineup models={data?.models} />
       <HistoryPanel history={history} horizon={m.riseHorizon} />
       <ModelCard model={m} notes={data?.notes} generatedAt={data?.generatedAt} />
@@ -352,7 +352,7 @@ function Detail({ c, models, onSend, sent }) {
 
 /* ------------------------------------------------------------------ 補助パネル */
 
-function BandTable({ bands }) {
+function BandTable({ bands, horizon }) {
   if (!bands?.bands?.length) return null;
   return (
     <section className="card">
@@ -392,8 +392,11 @@ function BandTable({ bands }) {
         </table>
       </div>
       <p className="sub">
-        「実収益」は参照ホライズン（60営業日後の5日平均終値）の上昇率。
-        ラベル定義に依存しないので、ラベルを変えても意味が変わりません。
+        「実収益」は基準日終値から
+        {horizon ? `${fmtInt(horizon)}営業日後` : '参照ホライズン'}の
+        5日平均終値までの上昇率。正例・負例の判定条件とは無関係に測った実測値なので、
+        しきい値や継続条件を変えても意味は変わりません（見る先の長さだけは
+        目的変数と同じです）。
       </p>
     </section>
   );

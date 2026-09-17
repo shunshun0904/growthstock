@@ -1087,12 +1087,16 @@ class TestDefaultLabel(unittest.TestCase):
 
     def test_default_rise_definition(self):
         from build_dataset import DEFAULT_RISE as R
-        self.assertEqual(R.horizon, 60)              # 3ヶ月
+        # 20営業日 ≒ 1ヶ月。60（約3ヶ月）から短くした。
+        # 実際に手仕舞うのが1ヶ月前後なのに基準点が3ヶ月先にあると、
+        # 「売ったあとに起きたこと」で正例・負例を決めることになる。
+        self.assertEqual(R.horizon, 20)
         # 到達しきい値は固定%ではなく銘柄自身の期間σの1.2倍。
         #
-        # 固定+20%は難易度が銘柄ごとに揃っていなかった。実測の60営業日σは
-        # 中央15.0% / p5 6.0% / p95 47.8% で、同じ+20%が静かな銘柄には3.3σ、
-        # 荒い銘柄には0.42σ。その結果モデルは「荒い銘柄を選ぶ係」になっており、
+        # 固定+20%は難易度が銘柄ごとに揃っていなかった。実測の期間σは
+        # 20営業日で中央8.7% / p5 3.4% / p95 27.6%、60営業日で
+        # 中央15.0% / p5 6.0% / p95 47.8%。どちらも8.0倍の開きがあり、
+        # 60営業日なら同じ+20%が静かな銘柄には3.3σ、荒い銘柄には0.42σ。その結果モデルは「荒い銘柄を選ぶ係」になっており、
         # 同じ期間に高ボラ順で機械的に買うと実収益 -21.15pt / 勝率25.9% だった。
         # σ基準にすると選ぶ銘柄が反転し、10窓のウォークフォワードで
         # 実収益の差が +5.02pt [+3.19,+5.96] と有意になった
@@ -1656,8 +1660,8 @@ class TestMetaRecordsTheLabelActuallyUsed(unittest.TestCase):
         self.assertEqual(B.POPULATION, "breakout")
         # いまの定義。変えたらこのテストも一緒に更新すること
         self.assertEqual(B.DEFAULT_RISE.name,
-                         "3ヶ月内+1.2σ / 終盤+0.50倍 / MA20>=MA60")
-        self.assertEqual(B.DEFAULT_RISE.horizon, 60)
+                         "1ヶ月内+1.2σ / 終盤+0.50倍 / MA20>=MA60")
+        self.assertEqual(B.DEFAULT_RISE.horizon, 20)
         self.assertEqual(B.DEFAULT_RISE.vol_norm_k, 1.2)
         self.assertEqual(B.DEFAULT_RISE.keep_days, 0)
         self.assertTrue(B.DEFAULT_RISE.require_uptrend)
@@ -1669,6 +1673,46 @@ class TestMetaRecordsTheLabelActuallyUsed(unittest.TestCase):
         """
         import build_dataset as B
         self.assertNotEqual(B.DEFAULT_RISE.name, B.DEFAULT_LABEL.name)
+
+
+class TestHorizonScalesEverything(unittest.TestCase):
+    """
+    目的変数のホライズンは3条件すべての基準点を動かす。
+
+    到達（t+1〜t+h の最大終値）・終盤（t+h の5日平均）・トレンド（t+h の
+    移動平均）が同じ h を見ている。片方だけ動くと「先60日以内に到達したが
+    水準は20日目で見る」のような、意味の取れないラベルになる。
+
+    しきい値は σ = vol_20d/100 × √h なので、h を縮めると必要上昇率も
+    自動で √(h/60) 倍になる。別途の調整が要らないことを固定する。
+    """
+
+    def test_threshold_scales_with_sqrt_horizon(self):
+        import build_dataset as B
+        h20 = B.RiseConfig(horizon=20)
+        h60 = B.RiseConfig(horizon=60)
+        n20, _ = B.rise_thresholds([2.0], h20)
+        n60, _ = B.rise_thresholds([2.0], h60)
+        self.assertAlmostEqual(n20[0] / n60[0], (20 / 60) ** 0.5, places=6)
+        # 日次ボラ2.0% なら 20営業日で +10.7%、60営業日で +18.6%
+        self.assertAlmostEqual(n20[0] * 100, 10.7, places=1)
+        self.assertAlmostEqual(n60[0] * 100, 18.6, places=1)
+
+    def test_end_level_keeps_the_same_ratio(self):
+        """終盤の必要水準は到達しきい値の 0.50 倍。h を変えても比は保つ。"""
+        import build_dataset as B
+        for h in (20, 60):
+            need, end = B.rise_thresholds([2.0], B.RiseConfig(horizon=h))
+            self.assertAlmostEqual(end[0] / need[0], 0.5, places=6)
+
+    def test_embargo_follows_the_horizon(self):
+        """
+        エンバーゴがホライズンに追随すること。ここが固定値のままだと、
+        ホライズンを縮めたときに訓練側へホールドアウトの情報が入る。
+        """
+        import build_dataset as B
+        import train_model as T
+        self.assertEqual(T.EMBARGO_DAYS, B.RISE_HORIZON)
 
 
 class TestExcludedMarkets(unittest.TestCase):

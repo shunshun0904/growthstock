@@ -110,7 +110,7 @@ def holdout_split(df: pd.DataFrame, holdout_months: int = HOLDOUT_MONTHS
     学習用とホールドアウトに分ける。境界にエンバーゴを入れる。
 
     エンバーゴぶん（ラベル確定に必要な将来日数）は捨てる。
-    訓練最終日のサンプルのラベルはその先60営業日の値動きで決まるので、
+    訓練最終日のサンプルのラベルはその先 EMBARGO_DAYS 営業日の値動きで決まるので、
     詰めるとホールドアウト期間の情報が訓練側に入る。
     """
     d = pd.to_datetime(df["Date"])
