@@ -282,7 +282,9 @@ def main(argv=None) -> int:
             "band": band["band"],
             "calibProb": r(calibrated(sc, meta["calibration"]) * 100, 1),
             "bandPositiveRate": r(band["positive_rate"] * 100, 1),
-            "bandEndMedian": band["end_median"],
+            # 帯の実収益。翌営業日の寄り買い・lab.OUTCOME の営業日数で測った値。
+            # 何の数字かは scoreBands.outcome に入っている（画面で焼き込まない）
+            "bandOutcome": band.get("outcome_median"),
             "bandWinRate": r((band["win_rate"] or 0) * 100, 1),
             # --- エントリー判断に使う素の値 --- #
             "close": r(s.get("close_raw"), 1),

@@ -1110,7 +1110,11 @@ class TestDefaultLabel(unittest.TestCase):
         self.assertAlmostEqual(R.end_ratio / R.threshold, 0.5)
         self.assertEqual(R.end_window, 5)
         self.assertTrue(R.require_uptrend)
-        self.assertEqual((R.trend_short, R.trend_long), (20, 60))
+        # 移動平均の長さは horizon に合わせる。長期側が判定期間そのもの、
+        # 短期側がその終盤。h=20 で MA20/MA60 のままにすると、MA60(t+20) の
+        # 大半がブレイク前の安い期間になり、条件がほぼ無効になる
+        # （実測で削るのが 5,671件中2件だった）。
+        self.assertEqual((R.trend_short, R.trend_long), (5, 20))
 
     def test_label_definition_columns_are_never_features(self):
         """
@@ -1660,7 +1664,7 @@ class TestMetaRecordsTheLabelActuallyUsed(unittest.TestCase):
         self.assertEqual(B.POPULATION, "breakout")
         # いまの定義。変えたらこのテストも一緒に更新すること
         self.assertEqual(B.DEFAULT_RISE.name,
-                         "1ヶ月内+1.2σ / 終盤+0.50倍 / MA20>=MA60")
+                         "1ヶ月内+1.2σ / 終盤+0.50倍 / MA5>=MA20")
         self.assertEqual(B.DEFAULT_RISE.horizon, 20)
         self.assertEqual(B.DEFAULT_RISE.vol_norm_k, 1.2)
         self.assertEqual(B.DEFAULT_RISE.keep_days, 0)
@@ -1704,6 +1708,16 @@ class TestHorizonScalesEverything(unittest.TestCase):
         for h in (20, 60):
             need, end = B.rise_thresholds([2.0], B.RiseConfig(horizon=h))
             self.assertAlmostEqual(end[0] / need[0], 0.5, places=6)
+
+    def test_trend_windows_follow_the_horizon(self):
+        """
+        長期側の移動平均は判定期間そのもの、短期側はその終盤にする。
+        ここが horizon から外れると条件が黙って無効になる（h=20 のとき
+        MA20>=MA60 は 5,671件から2件しか削らなかった）。
+        """
+        import build_dataset as B
+        self.assertEqual(B.TREND_LONG, B.RISE_HORIZON)
+        self.assertLess(B.TREND_SHORT, B.TREND_LONG)
 
     def test_embargo_follows_the_horizon(self):
         """

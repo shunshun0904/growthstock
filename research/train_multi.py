@@ -61,9 +61,10 @@ import features as F  # noqa: E402
 import models as M  # noqa: E402
 import sweep_design as S  # noqa: E402
 import tuning_multi as TM  # noqa: E402
+import lab as L  # noqa: E402
 from train_production import (  # noqa: E402
     DATA_DIR, MODEL_DIR, OOF_MIN_TRAIN_MONTHS, OOF_STEP_MONTHS,
-    OOF_TEST_MONTHS, calibration, score_bands,
+    OOF_TEST_MONTHS, OUTCOME_COL, calibration, score_bands,
 )
 
 
@@ -92,7 +93,8 @@ def oof_scores(algo: str, ds: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
             continue
         m = M.fit(algo, tr[cols].to_numpy(dtype=float),
                   tr["label"].to_numpy(dtype=int), cols)
-        part = te[["Code", "Date", "label", "ref_end", "ref_rise"]].copy()
+        part = te[["Code", "Date", "label", "ref_end", "ref_rise",
+                   OUTCOME_COL]].copy()
         part["score"] = M.predict(m, te[cols].to_numpy(dtype=float))
         parts.append(part)
     if not parts:
@@ -173,6 +175,7 @@ def main(argv=None) -> int:
     bars = pd.concat([pd.read_parquet(p) for p in paths], ignore_index=True)
     ds = ds.merge(S.reference_outcome(S.Panels(bars).get(B.HIGH_WINDOW)),
                   on=["Code", "Date"], how="left")
+    ds = ds.merge(L.realized_returns(bars), on=["Code", "Date"], how="left")
     del bars
 
     tuned = set(TM.load())
@@ -199,7 +202,7 @@ def main(argv=None) -> int:
         print(f"[{algo}] {r['secs']}秒 / {r['size_mb']}MB / "
               f"out-of-fold {r['n_oof']:,}件 / 最上位帯の正例率 "
               f"{(b.get('positive_rate') or 0)*100:.1f}% / "
-              f"実収益 {b.get('end_median')}%")
+              f"実収益 {b.get('outcome_median')}%")
         print()
 
     print("=" * 72)

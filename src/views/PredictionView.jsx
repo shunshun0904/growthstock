@@ -95,7 +95,7 @@ export default function PredictionView({ data, history, onSendToOctagon, sentIds
         </div>
       </section>
 
-      <BandTable bands={data?.scoreBands} horizon={m.riseHorizon} />
+      <BandTable bands={data?.scoreBands} />
       <ModelLineup models={data?.models} />
       <HistoryPanel history={history} horizon={m.riseHorizon} />
       <ModelCard model={m} notes={data?.notes} generatedAt={data?.generatedAt} />
@@ -131,8 +131,8 @@ function Row({ c, models, open, onToggle, onSend, sent }) {
         </span>
         <span className="pred-cell">
           <span className="lab">帯の実収益</span>
-          <span className="num" style={{ color: (c.bandEndMedian ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
-            {fmtSigned(c.bandEndMedian, 2)}
+          <span className="num" style={{ color: (c.bandOutcome ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
+            {fmtSigned(c.bandOutcome, 2)}
           </span>
         </span>
         <span className="pred-cell">
@@ -352,7 +352,7 @@ function Detail({ c, models, onSend, sent }) {
 
 /* ------------------------------------------------------------------ 補助パネル */
 
-function BandTable({ bands, horizon }) {
+function BandTable({ bands }) {
   if (!bands?.bands?.length) return null;
   return (
     <section className="card">
@@ -376,8 +376,8 @@ function BandTable({ bands, horizon }) {
                 <td className="num">{fmtInt(r.n)}</td>
                 <td className="num">{fmt(r.score_lo, 4)}</td>
                 <td className="num">{fmt(r.positive_rate * 100, 1, '%')}</td>
-                <td className="num" style={{ color: r.end_median >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                  {fmtSigned(r.end_median, 2)}
+                <td className="num" style={{ color: r.outcome_median >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                  {fmtSigned(r.outcome_median, 2)}
                 </td>
                 <td className="num">{fmt(r.win_rate * 100, 1, '%')}</td>
               </tr>
@@ -385,18 +385,18 @@ function BandTable({ bands, horizon }) {
             <tr className="tot">
               <td>全体</td><td className="num">{fmtInt(bands.n)}</td><td>{DASH}</td>
               <td className="num">{fmt(bands.base_positive_rate * 100, 1, '%')}</td>
-              <td className="num">{fmtSigned(bands.base_end_median, 2)}</td>
+              <td className="num">{fmtSigned(bands.base_outcome_median, 2)}</td>
               <td className="num">{fmt(bands.base_win_rate * 100, 1, '%')}</td>
             </tr>
           </tbody>
         </table>
       </div>
       <p className="sub">
-        「実収益」は基準日終値から
-        {horizon ? `${fmtInt(horizon)}営業日後` : '参照ホライズン'}の
-        5日平均終値までの上昇率。正例・負例の判定条件とは無関係に測った実測値なので、
-        しきい値や継続条件を変えても意味は変わりません（見る先の長さだけは
-        目的変数と同じです）。
+        「実収益」は{bands.outcome?.label
+          || '翌営業日の寄りで買い、一定期間後の5日平均終値で売ったときの上昇率'}。
+        ブレイク当日の終値では買えない（候補が判明するのは終値が出た後）ので、
+        買いは翌営業日の寄りで測っています。正例・負例の判定条件とは無関係に
+        測った実測値です。
       </p>
     </section>
   );
