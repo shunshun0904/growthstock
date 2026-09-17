@@ -2,7 +2,7 @@ name: Predict Breakouts
 
 # その日の新規ブレイクを採点して、ダッシュボードが読む JSON を書く（日次）。
 #
-# 生データの取り込み（Update Data Store, 平日21:30 JST）が終わってから走らせる。
+# 生データの取り込み（Update Data Store, 平日16:05 JST 起動）が終わってから走らせる。
 # 固定時刻で待つのではなく workflow_run で繋ぐ。取得が遅れた日に
 # 古いデータで予測してしまうのを防ぐため。
 on:

@@ -324,6 +324,135 @@ class TestFieldMatching(unittest.TestCase):
                           "FIN_COLS は None（全項目保持）であるべき")
 
 
+class TestWaitForBars(unittest.TestCase):
+    """
+    research/wait_for_bars.py。取り込みの前に当日データを待つ。
+
+    起動時刻を 21:30 JST から 16:05 JST へ前倒ししたので、定刻どおりに
+    起動した日は「まだ当日データが無い」状態で走る。待てば済む話を
+    失敗にしないことが、この部品の要件そのもの。
+
+    **どの経路でも 0 で返ること**をここで固定する。ここが非ゼロを返すと、
+    祝日や鍵の不備でパイプライン全体がその日だけ止まる。古いデータで
+    予測する事故は後段の check_freshness.py が見ている。
+    """
+
+    def setUp(self):
+        import wait_for_bars as W
+        self.W = W
+        self._client = W.JQuantsClient
+        self._resolve = W.resolve_api_key
+        self._sleep = W.time.sleep
+        self.slept = []
+        W.resolve_api_key = lambda: "dummy-key"
+
+        def fake_sleep(sec):
+            # 本当には眠らない。ただし無限ループを「遅いテスト」ではなく
+            # 「失敗」として出す。締切の判定を壊すと実測で数時間回り続ける
+            self.slept.append(sec)
+            if len(self.slept) > 100:
+                raise AssertionError("待ちが終わらない（締切の判定が壊れている）")
+
+        W.time.sleep = fake_sleep
+
+    def tearDown(self):
+        self.W.JQuantsClient = self._client
+        self.W.resolve_api_key = self._resolve
+        self.W.time.sleep = self._sleep
+
+    def _client_returning(self, pages):
+        """呼ばれるたびに pages を順に返す偽クライアント。"""
+        seq = list(pages)
+        calls = []
+
+        class Fake:
+            def __init__(self, *a, **k):
+                pass
+
+            def get_paginated(self, path, params):
+                calls.append((path, params))
+                return seq.pop(0) if seq else []
+
+        self.W.JQuantsClient = Fake
+        return calls
+
+    def test_weekend_does_not_wait(self):
+        # 2026-09-19 は土曜。API を1度も叩かないこと
+        calls = self._client_returning([])
+        self.assertEqual(self.W.main(["--date", "2026-09-19"]), 0)
+        self.assertEqual(calls, [])
+
+    def test_missing_key_does_not_wait(self):
+        def boom():
+            from jquants_data_fetcher import AuthError
+            raise AuthError("鍵がありません")
+        self.W.resolve_api_key = boom
+        calls = self._client_returning([])
+        self.assertEqual(self.W.main(["--date", "2026-09-18"]), 0)
+        self.assertEqual(calls, [])
+
+    def test_returns_as_soon_as_rows_appear(self):
+        calls = self._client_returning([[], [], [{"Code": "13010"}]])
+        rc = self.W.main(["--date", "2026-09-18", "--deadline", "23:59",
+                          "--interval", "1"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(calls[0][0], "/equities/bars/daily")
+        self.assertEqual(calls[0][1], {"date": "2026-09-18"})
+
+    def test_past_deadline_gives_up_without_failing(self):
+        """
+        祝日は当日データが永遠に出ない。締切を過ぎたら 0 で抜けること。
+        ここで非ゼロを返すと、祝日のたびに取り込みが落ちる。
+        """
+        calls = self._client_returning([[], [], []])
+        # 過去の営業日の 00:00 を締切にする = 既に締切を過ぎているので
+        # 1回だけ見て諦める。「今日の00:00」にすると実行時刻によっては
+        # まだ締切前で、実測で何時間も回り続ける
+        rc = self.W.main(["--date", "2020-01-06", "--deadline", "00:00",
+                          "--interval", "1"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(self.slept, [])
+
+    def test_query_error_is_not_fatal(self):
+        """問い合わせが失敗しても落ちない（次の回に再試行する）。"""
+        from jquants_data_fetcher import JQuantsError
+
+        class Flaky:
+            def __init__(self, *a, **k):
+                self.n = 0
+
+            def get_paginated(self, path, params):
+                self.n += 1
+                if self.n == 1:
+                    raise JQuantsError("503")
+                return [{"Code": "13010"}]
+
+        self.W.JQuantsClient = Flaky
+        rc = self.W.main(["--date", "2026-09-18", "--deadline", "23:59",
+                          "--interval", "1"])
+        self.assertEqual(rc, 0)
+
+    def test_never_sleeps_past_the_deadline(self):
+        """
+        締切をまたいで眠ると締切の意味が無くなる。間隔60分・締切まで5分の
+        ときに60分眠ると、締切から55分過ぎて目を覚ます。
+        """
+        import datetime as _dt
+        base = _dt.datetime(2026, 9, 18, 16, 5, tzinfo=self.W.JST)
+        # 締切まで5分しか無い -> 間隔(3600秒)ではなく残り(300秒)で眠る
+        self.assertEqual(
+            self.W.nap_seconds(base, base + _dt.timedelta(minutes=5), 3600),
+            300.0)
+        # 締切まで十分ある -> 間隔どおり
+        self.assertEqual(
+            self.W.nap_seconds(base, base + _dt.timedelta(hours=3), 300), 300)
+        # 締切を過ぎている -> 0秒にはせず最低1秒（忙しいループにしない）
+        self.assertEqual(
+            self.W.nap_seconds(base, base - _dt.timedelta(minutes=1), 300), 1.0)
+
+
 class TestWatchlistAndExtraCodes(unittest.TestCase):
     """
     ウォッチリストは空にしてあり、日次の予測が「その日の上位」を足す。

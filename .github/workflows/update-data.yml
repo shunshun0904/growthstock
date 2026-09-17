@@ -23,8 +23,21 @@ on:
         required: false
         default: ''
   schedule:
-    # 平日 21:30 JST (= 12:30 UTC)。日次データが出そろった後に差分を取り込む
-    - cron: '30 12 * * 1-5'
+    # 平日 16:05 JST (= 07:05 UTC)。大引け(15:30 JST)の直後に置く。
+    #
+    # 以前は 21:30 JST だった。前倒しした理由は J-Quants ではなく
+    # GitHub 側にある。スケジュール起動の実績（2026-09-11〜16）:
+    #
+    #   予定 12:30 UTC -> 実際 16:38 / 18:07 / 17:10 / 17:10 UTC
+    #   遅れ            +4h08m / +5h37m / +4h40m / +4h40m
+    #
+    # 4時間を切ったことが一度も無い。つまり cron を早く置いた時間だけ
+    # 実際の公開も早くなる。21:30 起動では画面の更新が翌日2時台になっていた。
+    #
+    # 定刻どおりに起動してしまった日のために、取り込みの前に
+    # research/wait_for_bars.py で当日データが出るまで待つ。
+    # :00 / :30 は世界中の cron が集中して遅延が大きくなるので :05 に置く。
+    - cron: '5 7 * * 1-5'
   # workflow_dispatch はデフォルトブランチにファイルが無いと呼べない。
   # 調査用ブランチからは、このファイルを更新して起動する。
   # 1行目に --reset に渡す種別を書く（空なら通常の差分取得）
@@ -98,6 +111,15 @@ jobs:
             gh release delete-asset "$RELEASE_TAG" "$n" --yes || \
               echo "  (Release 側には無し)"
           done
+
+      # 定刻に起動した日は、まだ当日の四本値が出ていないことがある。
+      # 待てば済む話なので待つ。締切を過ぎても止めずに先へ進む（祝日は
+      # そもそも当日データが無い）。手動起動や過去日の取り直しでは待たない。
+      - name: Wait for today's bars
+        if: github.event_name == 'schedule'
+        env:
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+        run: python3 research/wait_for_bars.py --deadline 19:30 --interval 300
 
       - name: Fetch missing days
         env:
