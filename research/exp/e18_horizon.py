@@ -14,10 +14,15 @@
   旧   h=60 / MA20>=MA60   これまでの本番
   中間 h=20 / MA20>=MA60   ホライズンだけ縮めた状態（トレンド条件が事実上無効）
   新   h=20 / MA5>=MA20    ホライズンに合わせて移動平均も縮めた状態
+  無   h=20 / 条件なし      トレンド条件を明示的に外した状態
 
 「中間」を置くのは、新旧の差が「ホライズンを縮めたこと」と
 「トレンド条件を直したこと」のどちらから来ているかを分けるため。
 2つ同時に変えて良くなっても、どちらが効いたのか分からない。
+
+「無」を後から足したのは、3条件の結果で「中間」がいちばん良かったため。
+「中間」は MA20>=MA60 が h=20 では削るのが2件しかなく、実質トレンド条件なし
+のはず——だが「はず」で結論を出さない。同じかどうかを測る。
 
 物差し
 -----
@@ -66,7 +71,7 @@ SEEDS = (42, 7, 123)
 OUTCOMES = ("ret_o1_20", "ret_o1_40")
 OOF_DIR = os.path.join(lab.DATA_DIR, "oof")
 
-#: 比較する3条件。(名前, RiseConfig)
+#: 比較する条件。(名前, RiseConfig)
 ARMS = [
     ("旧   h=60 / MA20>=MA60", B.RiseConfig(horizon=60, trend_short=20,
                                             trend_long=60)),
@@ -74,11 +79,14 @@ ARMS = [
                                             trend_long=60)),
     ("新   h=20 / MA5>=MA20", B.RiseConfig(horizon=20, trend_short=5,
                                            trend_long=20)),
+    # 「中間」は MA20>=MA60 が h=20 では事実上無効（削るのが2件）なので、
+    # 実質「トレンド条件なし」と同じはず。同じかどうかは推測せずに測る。
+    ("無   h=20 / 条件なし", B.RiseConfig(horizon=20, require_uptrend=False)),
 ]
 
 
 def label_columns(df: pd.DataFrame) -> pd.DataFrame:
-    """3条件ぶんのラベルを作って df に横付けする。"""
+    """各条件ぶんのラベルを作って df に横付けする。"""
     import glob
 
     paths = sorted(glob.glob(os.path.join(lab.DATA_DIR, "bars_*.parquet")))
@@ -111,13 +119,13 @@ def main() -> int:
     os.makedirs(OOF_DIR, exist_ok=True)
 
     print(f"母集団 {len(df):,}件")
-    print("ラベルを3条件ぶん作り直す")
+    print(f"ラベルを{len(ARMS)}条件ぶん作り直す")
     df = label_columns(df)
 
     ycols = [f"y{i}" for i in range(len(ARMS))]
     both = df[ycols].notna().all(axis=1)
     df = df[both].reset_index(drop=True)
-    print(f"\n3条件すべてでラベルが確定している行 {len(df):,}件に絞って比較する")
+    print(f"\n全条件でラベルが確定している行 {len(df):,}件に絞って比較する")
     print(f"期間 {df['Date'].min().date()} 〜 {df['Date'].max().date()}")
     for i, (name, _) in enumerate(ARMS):
         print(f"  {name}: 正例率 {df[f'y{i}'].mean()*100:.2f}%")
@@ -155,6 +163,8 @@ def main() -> int:
         print("  --- 差の検定（足切り z>2）---")
         pairs = [(0, 1, "ホライズンを縮めた効果（60 -> 20、トレンド条件は据え置き）"),
                  (1, 2, "トレンド条件を直した効果（MA20>=MA60 -> MA5>=MA20）"),
+                 (1, 3, "「中間」は本当にトレンド条件なしと同じか"),
+                 (3, 2, "トレンド条件なし -> MA5>=MA20 を足す効果"),
                  (0, 2, "合計（旧 -> 新）")]
         names = [n for n, _ in ARMS]
         for a, b, note in pairs:
