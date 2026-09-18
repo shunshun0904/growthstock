@@ -22,6 +22,14 @@ on:
         description: '取り直す種別（スペース区切り。例: fins）。取得する列を増やしたとき用'
         required: false
         default: ''
+      forget:
+        description: '取得記録だけを消す種別（スペース区切り。例: margin）。公表前に叩いて0件のまま取得済みになった日を取り直す'
+        required: false
+        default: ''
+      forget_from:
+        description: 'forget の開始日 (YYYY-MM-DD)。省略すると全期間'
+        required: false
+        default: ''
   schedule:
     # 平日 16:05 JST (= 07:05 UTC)。大引け(15:30 JST)の直後に置く。
     #
@@ -35,7 +43,7 @@ on:
     # 実際の公開も早くなる。21:30 起動では画面の更新が翌日2時台になっていた。
     #
     # 定刻どおりに起動してしまった日のために、取り込みの前に
-    # research/wait_for_bars.py で当日データが出るまで待つ。
+    # research/wait_for_data.py で当日データが出るまで待つ。
     # :00 / :30 は世界中の cron が集中して遅延が大きくなるので :05 に置く。
     - cron: '5 7 * * 1-5'
   # workflow_dispatch はデフォルトブランチにファイルが無いと呼べない。
@@ -112,14 +120,23 @@ jobs:
               echo "  (Release 側には無し)"
           done
 
-      # 定刻に起動した日は、まだ当日の四本値が出ていないことがある。
+      # 定刻に起動した日は、まだ当日のデータが出ていないことがある。
       # 待てば済む話なので待つ。締切を過ぎても止めずに先へ進む（祝日は
       # そもそも当日データが無い）。手動起動や過去日の取り直しでは待たない。
-      - name: Wait for today's bars
+      #
+      # 四本値だけでは足りない。実測（2026-09-18）で四本値 16:00 に対して
+      # 業種別指数・TOPIX は 16:30 で、これらは merge_asof(backward) で
+      # 結合するため、欠けると欠測ではなく**前日の値**が入る。
+      # 決算開示は 18:00 で、ここでは待たない（翌営業日の取り込みで入る）。
+      # 締切 18:00 は実測 16:30 に対して1時間半の余裕。観測は1日ぶんしか
+      # 無いので、狭くしすぎない。
+      - name: Wait for today's data
         if: github.event_name == 'schedule'
         env:
           JQUANTS_API: ${{ secrets.JQUANTS_API }}
-        run: python3 research/wait_for_bars.py --deadline 19:30 --interval 300
+        run: |
+          python3 research/wait_for_data.py \
+            --feeds bars,indices,topix --deadline 18:00 --interval 300
 
       - name: Fetch missing days
         env:
@@ -144,7 +161,23 @@ jobs:
           done
           [ -n "$REQ" ] && RESET="--reset $REQ"
           echo "reset 対象: ${REQ:-なし}"
-          python3 research/jq_bulk.py --incremental $RESET \
+          # --forget は取得記録だけを外す（parquet は消さない）。
+          # 公表前に叩いて0件のまま取得済みになった日を取り直すとき用
+          FORGET=""
+          FGT="${{ inputs.forget }}"
+          for k in $FGT; do
+            case "$k" in
+              bars|fins|margin|topix|indices|master_hist) ;;
+              *) echo "未知の種別: $k"; exit 1 ;;
+            esac
+          done
+          if [ -n "$FGT" ]; then
+            FORGET="--forget $FGT"
+            FF="${{ inputs.forget_from }}"
+            [ -n "$FF" ] && FORGET="$FORGET --forget-from $FF"
+          fi
+          echo "forget 対象: ${FGT:-なし}"
+          python3 research/jq_bulk.py --incremental $RESET $FORGET \
             --from "$FROM" --to "$TO" 2>&1 | tee fetch.log
 
       - name: Upload to release

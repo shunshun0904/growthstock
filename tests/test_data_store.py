@@ -210,5 +210,160 @@ class TestKindDispatch(unittest.TestCase):
         self.assertNotIn("master", data_store.KINDS)
 
 
+class TestConfirmedDays(unittest.TestCase):
+    """
+    公表前に叩いた日を「取得済み」にしないこと。
+
+    missing_days は「候補 − 記録」なので、一度記録した日は二度と候補に
+    入らない。取り込みを 16:05 JST に前倒ししたことで、指数(16:30)や
+    財務(18:00)を公表前に叩く日ができた。そこで0件を取得済みにすると、
+    **その日のデータは永久に失われる**。実際に信用残がそうなっていた
+    （記録は 2026-09-07 まであるのに実データは 2026-08-28 が最後）。
+
+    かといって「0件なら記録しない」にすると、開示が本当に0件の日を
+    毎回叩き続けることになる。だから公表ラグで線を引く。
+    """
+
+    def test_rows_present_is_always_recorded(self):
+        today = dt.date(2026, 9, 18)
+        got = days("2026-09-18")
+        out = data_store.confirmed_days("bars", days("2026-09-18"), got, today)
+        self.assertEqual(out, days("2026-09-18"))
+
+    def test_today_with_no_rows_is_held_back(self):
+        today = dt.date(2026, 9, 18)
+        out = data_store.confirmed_days("indices", days("2026-09-18"), [], today)
+        self.assertEqual(out, [])
+
+    def test_past_day_with_no_rows_is_recorded(self):
+        """
+        公表ラグを過ぎても0件なら、本当に0件（祝日・開示なし）。
+        ここで記録しないと、その日を永久に叩き続けることになる。
+        """
+        today = dt.date(2026, 9, 18)
+        out = data_store.confirmed_days("fins", days("2026-09-17"), [], today)
+        self.assertEqual(out, days("2026-09-17"))
+
+    def test_margin_keeps_retrying_for_a_week(self):
+        """信用残は週次で、金曜ぶんが翌週に出る。当日だけの猶予では足りない。"""
+        today = dt.date(2026, 9, 18)          # 金
+        # 同じ週の金曜と、10日以上前の金曜
+        out = data_store.confirmed_days(
+            "margin", days("2026-09-18", "2026-09-04"), [], today)
+        self.assertEqual(out, days("2026-09-04"))
+
+    def test_unknown_kind_falls_back_to_today_only(self):
+        today = dt.date(2026, 9, 18)
+        self.assertEqual(
+            data_store.confirmed_days("nazo", days("2026-09-18"), [], today), [])
+        self.assertEqual(
+            data_store.confirmed_days("nazo", days("2026-09-17"), [], today),
+            days("2026-09-17"))
+
+    def test_order_is_preserved(self):
+        today = dt.date(2026, 9, 18)
+        req = days("2026-09-14", "2026-09-15", "2026-09-16", "2026-09-18")
+        out = data_store.confirmed_days("bars", req, days("2026-09-15"), today)
+        self.assertEqual(out, days("2026-09-14", "2026-09-15", "2026-09-16"))
+
+
+class TestForgetDays(unittest.TestCase):
+    """
+    取得記録だけを外して取り直せること（parquet は消さない）。
+
+    公表前に叩いて0件のまま取得済みになった日を戻すための操作。
+    reset_kind は保存データごと消すので、取り直しが途中で落ちると
+    穴が開く。こちらは取れなければ現状維持で済む。
+    """
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def _manifest(self):
+        m = data_store.load_manifest(self.dir)
+        data_store.mark_fetched(m, "margin", days(
+            "2026-08-28", "2026-09-04", "2026-09-11", "2026-09-14"))
+        return m
+
+    def test_forgets_only_from_the_given_date(self):
+        m = self._manifest()
+        dropped = data_store.forget_days(m, "margin",
+                                         since=dt.date(2026, 9, 1))
+        self.assertEqual(dropped,
+                         ["2026-09-04", "2026-09-11", "2026-09-14"])
+        self.assertEqual(m["margin"]["fetched_days"], ["2026-08-28"])
+
+    def test_forgets_everything_without_a_date(self):
+        m = self._manifest()
+        dropped = data_store.forget_days(m, "margin")
+        self.assertEqual(len(dropped), 4)
+        self.assertEqual(m["margin"]["fetched_days"], [])
+
+    def test_forgotten_days_come_back_as_candidates(self):
+        """外した日が missing_days に戻ること。これが目的そのもの。"""
+        m = self._manifest()
+        cand = days("2026-08-28", "2026-09-04", "2026-09-11")
+        self.assertEqual(data_store.missing_days(m, "margin", cand), [])
+        data_store.forget_days(m, "margin", since=dt.date(2026, 9, 1))
+        self.assertEqual(data_store.missing_days(m, "margin", cand),
+                         days("2026-09-04", "2026-09-11"))
+
+    def test_does_not_touch_saved_files(self):
+        df = pd.DataFrame({"Date": ["2026-08-28"], "Code": ["13010"],
+                           "LongVol": [1.0], "ShrtVol": [2.0]})
+        data_store.merge_into_years(self.dir, "margin", df, "Date")
+        before = sorted(os.listdir(self.dir))
+        m = self._manifest()
+        data_store.forget_days(m, "margin")
+        self.assertEqual(sorted(os.listdir(self.dir)), before)
+
+
+class TestRecordFetched(unittest.TestCase):
+    """
+    jq_bulk 側の配線。取得した DataFrame から「行が取れた日」を拾って
+    data_store.confirmed_days に渡すところ。
+    """
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(ROOT, "research"))
+        import jq_bulk
+        self.jq = jq_bulk
+
+    def test_holds_back_todays_empty_fetch(self):
+        m = {"indices": {"fetched_days": []}}
+        empty = pd.DataFrame(columns=["Date", "Code", "C"])
+        self.jq._record_fetched(m, "indices", days("2026-09-17", "2026-09-18"),
+                                empty, "Date", today=dt.date(2026, 9, 18))
+        self.assertEqual(m["indices"]["fetched_days"], ["2026-09-17"])
+
+    def test_records_today_when_rows_came_back(self):
+        m = {"indices": {"fetched_days": []}}
+        df = pd.DataFrame({"Date": ["2026-09-18"], "Code": ["0040"], "C": [1.0]})
+        self.jq._record_fetched(m, "indices", days("2026-09-18"), df, "Date",
+                                today=dt.date(2026, 9, 18))
+        self.assertEqual(m["indices"]["fetched_days"], ["2026-09-18"])
+
+    def test_empty_frame_without_the_date_column_does_not_crash(self):
+        """
+        FIN_COLS / MASTER_COLS は None なので、0件のときの DataFrame には
+        列が1つも無い。ここで落ちると取り込み全体が止まる。
+        """
+        m = {"fins": {"fetched_days": []}}
+        self.jq._record_fetched(m, "fins", days("2026-09-18"),
+                                pd.DataFrame(), "DiscDate",
+                                today=dt.date(2026, 9, 18))
+        self.assertEqual(m["fins"]["fetched_days"], [])
+
+    def test_fins_uses_the_disclosure_date_column(self):
+        m = {"fins": {"fetched_days": []}}
+        df = pd.DataFrame({"DiscDate": ["2026-09-18"], "Code": ["13010"]})
+        self.jq._record_fetched(m, "fins", days("2026-09-18"), df, "DiscDate",
+                                today=dt.date(2026, 9, 18))
+        self.assertEqual(m["fins"]["fetched_days"], ["2026-09-18"])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

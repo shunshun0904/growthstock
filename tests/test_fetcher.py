@@ -324,21 +324,22 @@ class TestFieldMatching(unittest.TestCase):
                           "FIN_COLS は None（全項目保持）であるべき")
 
 
-class TestWaitForBars(unittest.TestCase):
+class TestWaitForData(unittest.TestCase):
     """
-    research/wait_for_bars.py。取り込みの前に当日データを待つ。
+    research/wait_for_data.py。取り込みの前に当日データを待つ。
 
     起動時刻を 21:30 JST から 16:05 JST へ前倒ししたので、定刻どおりに
     起動した日は「まだ当日データが無い」状態で走る。待てば済む話を
     失敗にしないことが、この部品の要件そのもの。
 
-    **どの経路でも 0 で返ること**をここで固定する。ここが非ゼロを返すと、
-    祝日や鍵の不備でパイプライン全体がその日だけ止まる。古いデータで
-    予測する事故は後段の check_freshness.py が見ている。
+    **当日データの有無に関わる経路は、どれも 0 で返ること**をここで固定する。
+    ここが非ゼロを返すと、祝日や鍵の不備でパイプライン全体がその日だけ
+    止まる。古いデータで予測する事故は後段の check_freshness.py が見ている。
+    （引数の書き間違いだけは別扱いで、非ゼロで落とす。）
     """
 
     def setUp(self):
-        import wait_for_bars as W
+        import wait_for_data as W
         self.W = W
         self._client = W.JQuantsClient
         self._resolve = W.resolve_api_key
@@ -376,6 +377,23 @@ class TestWaitForBars(unittest.TestCase):
         self.W.JQuantsClient = Fake
         return calls
 
+    def _client_by_path(self, table):
+        """パスごとに返す行を決める偽クライアント。table: パス -> 行の列。"""
+        seqs = {k: list(v) for k, v in table.items()}
+        calls = []
+
+        class Fake:
+            def __init__(self, *a, **k):
+                pass
+
+            def get_paginated(self, path, params):
+                calls.append((path, params))
+                q = seqs.get(path, [])
+                return q.pop(0) if q else []
+
+        self.W.JQuantsClient = Fake
+        return calls
+
     def test_weekend_does_not_wait(self):
         # 2026-09-19 は土曜。API を1度も叩かないこと
         calls = self._client_returning([])
@@ -392,13 +410,62 @@ class TestWaitForBars(unittest.TestCase):
         self.assertEqual(calls, [])
 
     def test_returns_as_soon_as_rows_appear(self):
-        calls = self._client_returning([[], [], [{"Code": "13010"}]])
-        rc = self.W.main(["--date", "2026-09-18", "--deadline", "23:59",
-                          "--interval", "1"])
+        bar = {"Code": "13010", "C": 1000}
+        calls = self._client_returning([[], [], [bar]])
+        rc = self.W.main(["--date", "2026-09-18", "--feeds", "bars",
+                          "--deadline", "23:59", "--interval", "1"])
         self.assertEqual(rc, 0)
         self.assertEqual(len(calls), 3)
         self.assertEqual(calls[0][0], "/equities/bars/daily")
         self.assertEqual(calls[0][1], {"date": "2026-09-18"})
+
+    def test_waits_for_every_feed_not_just_bars(self):
+        """
+        四本値だけ待って走ると、指数・TOPIX が0件のまま取り込むことになる。
+        build_dataset は merge_asof(backward) で結合するので、
+        欠測ではなく**前日の値**が黙って入る。だから全部揃うまで待つ。
+        """
+        bar = {"Code": "13010", "C": 1000}
+        calls = self._client_by_path({
+            "/equities/bars/daily": [[bar]],              # 1回目で揃う
+            "/indices/bars/daily": [[], [{"Code": "0040"}]],
+            "/indices/bars/daily/topix": [[], [], [{"C": 2800}]],
+        })
+        rc = self.W.main(["--date", "2026-09-18", "--deadline", "23:59",
+                          "--interval", "1"])
+        self.assertEqual(rc, 0)
+        # 揃った対象は二度と叩かない
+        paths = [c[0] for c in calls]
+        self.assertEqual(paths.count("/equities/bars/daily"), 1)
+        self.assertEqual(paths.count("/indices/bars/daily"), 2)
+        self.assertEqual(paths.count("/indices/bars/daily/topix"), 3)
+        # TOPIX だけ期間指定で引く（実測に使った叩き方と同じ）
+        tp = [c for c in calls if c[0] == "/indices/bars/daily/topix"][0]
+        self.assertEqual(tp[1], {"from": "2026-09-18", "to": "2026-09-18"})
+
+    def test_bars_needs_a_close_not_just_a_row(self):
+        """
+        前場ぶんだけ入って終値が空、という出方をされたら「まだ」と見る。
+        行数だけ見ていると、欠測を揃ったと誤読して取り込む。
+        """
+        calls = self._client_returning([
+            [{"Code": "13010", "C": None}],   # 行はあるが終値が無い
+            [{"Code": "13010", "C": 1000}],
+        ])
+        rc = self.W.main(["--date", "2026-09-18", "--feeds", "bars",
+                          "--deadline", "23:59", "--interval", "1"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(calls), 2)
+
+    def test_unknown_feed_is_an_error(self):
+        """
+        対象名の書き間違いは当日データの有無と関係がない。
+        ここを 0 で素通りさせると、待っているつもりで待たなくなる。
+        """
+        calls = self._client_returning([])
+        self.assertEqual(self.W.main(["--date", "2026-09-18",
+                                      "--feeds", "bars,barz"]), 2)
+        self.assertEqual(calls, [])
 
     def test_past_deadline_gives_up_without_failing(self):
         """
@@ -409,8 +476,8 @@ class TestWaitForBars(unittest.TestCase):
         # 過去の営業日の 00:00 を締切にする = 既に締切を過ぎているので
         # 1回だけ見て諦める。「今日の00:00」にすると実行時刻によっては
         # まだ締切前で、実測で何時間も回り続ける
-        rc = self.W.main(["--date", "2020-01-06", "--deadline", "00:00",
-                          "--interval", "1"])
+        rc = self.W.main(["--date", "2020-01-06", "--feeds", "bars",
+                          "--deadline", "00:00", "--interval", "1"])
         self.assertEqual(rc, 0)
         self.assertEqual(len(calls), 1)
         self.assertEqual(self.slept, [])
@@ -427,11 +494,11 @@ class TestWaitForBars(unittest.TestCase):
                 self.n += 1
                 if self.n == 1:
                     raise JQuantsError("503")
-                return [{"Code": "13010"}]
+                return [{"Code": "13010", "C": 1000}]
 
         self.W.JQuantsClient = Flaky
-        rc = self.W.main(["--date", "2026-09-18", "--deadline", "23:59",
-                          "--interval", "1"])
+        rc = self.W.main(["--date", "2026-09-18", "--feeds", "bars",
+                          "--deadline", "23:59", "--interval", "1"])
         self.assertEqual(rc, 0)
 
     def test_never_sleeps_past_the_deadline(self):

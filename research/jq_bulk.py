@@ -336,6 +336,14 @@ def main(argv: Optional[List[str]] = None) -> int:
                     help="指定した種別の保存済みデータと取得記録を消してから取得する。"
                          "取得する列を増やしたときに使う（既存 parquet には新しい列が"
                          "入っていないが、manifest 上は取得済みなので取り直されない）")
+    ap.add_argument("--forget", nargs="*", default=[],
+                    choices=["bars", "fins", "margin", "topix", "indices",
+                             "master_hist"],
+                    help="指定した種別の**取得記録だけ**を消す（parquet は消さない）。"
+                         "公表前に叩いて0件のまま取得済みになった日を取り直すとき用。"
+                         "--forget-from で範囲を絞れる")
+    ap.add_argument("--forget-from", default=None, metavar="YYYY-MM-DD",
+                    help="--forget で記録を消す範囲の開始日。省略すると全期間")
     args = ap.parse_args(argv)
 
     start = dt.date.fromisoformat(args.date_from)
@@ -381,6 +389,42 @@ def main(argv: Optional[List[str]] = None) -> int:
     return 0
 
 
+JST = dt.timezone(dt.timedelta(hours=9))
+
+
+def _today_jst() -> dt.date:
+    """公表ラグの判定に使う「今日」。Actions のランナーは UTC なので明示する。"""
+    return dt.datetime.now(JST).date()
+
+
+def _record_fetched(manifest: dict, name: str, todo: List[dt.date],
+                    df: pd.DataFrame, date_col: str,
+                    today: Optional[dt.date] = None) -> None:
+    """
+    取得済みの記録を付ける。ただし**公表前だったかもしれない日は外す**。
+
+    記録は「叩きに行ったか」で付ける設計（開示0件の日を毎回叩き直さない
+    ため）。それだけだと、公表前に叩いた日を取得済みにしてしまい、
+    その日のデータは二度と取りに行かなくなる。取り込みを 16:05 JST に
+    前倒ししたので、指数(16:30)・財務(18:00)が毎日これに当たる。
+
+    外した日は次回の候補に戻るだけなので、遅れて入るが失われない。
+    判定そのものは data_store.confirmed_days が持つ（公表ラグの表も）。
+    """
+    today = today or _today_jst()
+    got = set()
+    if len(df) and date_col in df.columns:
+        got = set(pd.to_datetime(df[date_col], errors="coerce").dropna().dt.date)
+    ok = data_store.confirmed_days(name, todo, got, today)
+    data_store.mark_fetched(manifest, name, ok)
+    held = [d for d in todo if d not in set(ok)]
+    if held:
+        shown = ", ".join(d.isoformat() for d in held[:5])
+        more = f" ほか{len(held)-5}日" if len(held) > 5 else ""
+        print(f"[{name}] 0件で、まだ公表前かもしれない{len(held)}日は"
+              f"取得済みにしない（次回また取りに行く）: {shown}{more}")
+
+
 def _run_incremental(client: JQuantsClient, days: List[dt.date],
                      start: dt.date, end: dt.date, args) -> int:
     """
@@ -388,6 +432,10 @@ def _run_incremental(client: JQuantsClient, days: List[dt.date],
 
     「その日を取得しに行ったか」で判定する（行数ではない）。
     財務のようにその日の開示が0件でも取得済みとして扱わないと、毎回叩き直してしまう。
+
+    ただし**公表前に叩いた日は例外**。0件が返った日のうち公表ラグの中に
+    あるものは記録せず、次回の候補に戻す（_record_fetched）。
+    そうしないと、まだ出ていないだけの日を「取得済み」にして永久に失う。
     """
     manifest = data_store.load_manifest(args.out_dir)
 
@@ -398,6 +446,18 @@ def _run_incremental(client: JQuantsClient, days: List[dt.date],
         for r in removed:
             print(f"         {r}")
     if args.reset:
+        data_store.save_manifest(args.out_dir, manifest)
+
+    # --forget は記録だけを外す。保存済みの parquet はそのまま残るので、
+    # 取り直せなければ現状維持で済む（reset のように穴が開かない）
+    since = (dt.date.fromisoformat(args.forget_from)
+             if args.forget_from else None)
+    for kind in args.forget:
+        dropped = data_store.forget_days(manifest, kind, since=since)
+        rng = f"{dropped[0]} 〜 {dropped[-1]}" if dropped else "なし"
+        print(f"[forget] {kind}: 取得記録 {len(dropped)}日を外す（{rng}）"
+              f" -> この差分取得で取り直す。parquet は消していない")
+    if args.forget:
         data_store.save_manifest(args.out_dir, manifest)
 
     print("\n[manifest] 取得済み:")
@@ -416,7 +476,7 @@ def _run_incremental(client: JQuantsClient, days: List[dt.date],
                 mh = fetch_master_history(client, todo)
                 written = data_store.merge_into_years(args.out_dir, "master_hist",
                                                       mh, "Date")
-                data_store.mark_fetched(manifest, "master_hist", todo)
+                _record_fetched(manifest, "master_hist", todo, mh, "Date")
                 total_new += len(mh)
                 print(f"[master_hist] {len(mh):,}行を追加 / 更新ファイル "
                       f"{len(written)}件 ({time.time()-t0:.0f}秒)")
@@ -469,7 +529,7 @@ def _run_incremental(client: JQuantsClient, days: List[dt.date],
 
         date_col = "DiscDate" if name == "fins" else "Date"
         written = data_store.merge_into_years(args.out_dir, name, df, date_col)
-        data_store.mark_fetched(manifest, name, todo)
+        _record_fetched(manifest, name, todo, df, date_col)
         total_new += len(df)
         print(f"[{name}] {len(df):,}行を追加 / 更新ファイル {len(written)}件 "
               f"({time.time()-t0:.0f}秒)")
@@ -484,7 +544,7 @@ def _run_incremental(client: JQuantsClient, days: List[dt.date],
             print(f"\n[topix] 未取得 {len(todo_tp)}日 -> {todo_tp[0]} 〜 {todo_tp[-1]}")
             df = fetch_topix(client, todo_tp[0], todo_tp[-1])
             written = data_store.merge_into_years(args.out_dir, "topix", df, "Date")
-            data_store.mark_fetched(manifest, "topix", todo_tp)
+            _record_fetched(manifest, "topix", todo_tp, df, "Date")
             print(f"[topix] {len(df):,}行を追加 / 更新ファイル {len(written)}件")
         else:
             print("\n[topix] 取得済み。スキップします")
@@ -498,7 +558,7 @@ def _run_incremental(client: JQuantsClient, days: List[dt.date],
             print(f"\n[indices] 未取得 {len(todo_ix)}日 -> {todo_ix[0]} 〜 {todo_ix[-1]}")
             df = fetch_indices(client, todo_ix)
             written = data_store.merge_into_years(args.out_dir, "indices", df, "Date")
-            data_store.mark_fetched(manifest, "indices", todo_ix)
+            _record_fetched(manifest, "indices", todo_ix, df, "Date")
             print(f"[indices] {len(df):,}行を追加 / 更新ファイル {len(written)}件")
         else:
             print("\n[indices] 取得済み。スキップします")
