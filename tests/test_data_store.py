@@ -267,6 +267,107 @@ class TestConfirmedDays(unittest.TestCase):
         self.assertEqual(out, days("2026-09-14", "2026-09-15", "2026-09-16"))
 
 
+class TestMarginCandidates(unittest.TestCase):
+    """
+    信用残は週次公表で、残高は**その週の最終営業日**時点のもの。
+
+    以前は「金曜を全部足し、金曜が無い週はその週の適当な日」を候補に
+    していた。この「適当な日」が週の先頭（月曜）になるため、金曜が祝日の
+    週は月曜を叩いて0件のまま取得済みになり、木曜ぶんが永久に失われた。
+    保存データを数えると10年ぶんで23週がこれで空いていた。
+    """
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(ROOT, "research"))
+        import jq_bulk
+        self.jq = jq_bulk
+
+    def test_normal_week_picks_friday(self):
+        wk = days("2026-09-14", "2026-09-15", "2026-09-16", "2026-09-17",
+                  "2026-09-18")
+        self.assertEqual(self.jq.margin_candidates(wk), days("2026-09-18"))
+
+    def test_holiday_friday_picks_thursday_not_monday(self):
+        """2026-03-20 は春分の日。週の最終営業日は木曜 03-19。"""
+        wk = days("2026-03-16", "2026-03-17", "2026-03-18", "2026-03-19")
+        self.assertEqual(self.jq.margin_candidates(wk), days("2026-03-19"))
+
+    def test_one_day_per_week(self):
+        wk = days("2026-09-07", "2026-09-08", "2026-09-11",
+                  "2026-09-14", "2026-09-18")
+        self.assertEqual(self.jq.margin_candidates(wk),
+                         days("2026-09-11", "2026-09-18"))
+
+    def test_year_boundary_uses_iso_week(self):
+        """2025-12-29〜2026-01-02 は ISO では同じ週（2026年第1週）。"""
+        wk = days("2025-12-29", "2025-12-30", "2026-01-05", "2026-01-06")
+        self.assertEqual(self.jq.margin_candidates(wk),
+                         days("2025-12-30", "2026-01-06"))
+
+    def test_empty(self):
+        self.assertEqual(self.jq.margin_candidates([]), [])
+
+
+class TestFailedDaysAreNotRecorded(unittest.TestCase):
+    """
+    問い合わせ自体が失敗した日を「取得済み」にしないこと。
+
+    _fetch_by_day は失敗した日を読み飛ばすが、記録は todo 全部に付いて
+    いた。一過性の 503 で1日ぶんが永久に失われる（記録した日は
+    missing_days の候補から消える）。
+    """
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(ROOT, "research"))
+        import jq_bulk
+        self.jq = jq_bulk
+
+    def test_failed_day_is_held_back(self):
+        m = {"bars": {"fetched_days": []}}
+        df = pd.DataFrame({"Date": ["2026-09-16"], "Code": ["13010"]})
+        self.jq._record_fetched(
+            m, "bars", days("2026-09-16", "2026-09-17"), df, "Date",
+            today=dt.date(2026, 9, 18), failed=days("2026-09-17"))
+        self.assertEqual(m["bars"]["fetched_days"], ["2026-09-16"])
+
+    def test_fetch_by_day_reports_which_days_failed(self):
+        from jquants_data_fetcher import JQuantsError
+
+        class Flaky:
+            def get_paginated(self, path, params):
+                if params["date"] == "2026-09-17":
+                    raise JQuantsError("503")
+                return [{"Date": params["date"], "Code": "13010"}]
+
+        df = self.jq._fetch_by_day(Flaky(), "/x",
+                                   days("2026-09-16", "2026-09-17"),
+                                   ["Date", "Code"], "bars")
+        self.assertEqual(len(df), 1)
+        self.assertEqual(self.jq.LAST_FAILED_DAYS, days("2026-09-17"))
+
+    def test_failures_are_cleared_between_calls(self):
+        """前回の失敗が残ると、無関係な日まで記録されなくなる。"""
+        from jquants_data_fetcher import JQuantsError
+
+        class Once:
+            def __init__(self):
+                self.first = True
+
+            def get_paginated(self, path, params):
+                if self.first:
+                    self.first = False
+                    raise JQuantsError("503")
+                return [{"Date": params["date"], "Code": "13010"}]
+
+        c = Once()
+        self.jq._fetch_by_day(c, "/x", days("2026-09-16"), ["Date", "Code"],
+                              "bars")
+        self.assertEqual(self.jq.LAST_FAILED_DAYS, days("2026-09-16"))
+        self.jq._fetch_by_day(c, "/x", days("2026-09-17"), ["Date", "Code"],
+                              "bars")
+        self.assertEqual(self.jq.LAST_FAILED_DAYS, [])
+
+
 class TestForgetDays(unittest.TestCase):
     """
     取得記録だけを外して取り直せること（parquet は消さない）。
@@ -331,6 +432,9 @@ class TestRecordFetched(unittest.TestCase):
         sys.path.insert(0, os.path.join(ROOT, "research"))
         import jq_bulk
         self.jq = jq_bulk
+        # 失敗した日はモジュール変数で持ち回している。前のテストの残りが
+        # 効いてしまわないように消す（本番では _fetch_by_day が毎回消す）
+        jq_bulk.LAST_FAILED_DAYS = []
 
     def test_holds_back_todays_empty_fetch(self):
         m = {"indices": {"fetched_days": []}}

@@ -100,6 +100,15 @@ def trading_days(client: JQuantsClient, start: dt.date, end: dt.date) -> List[dt
 # 日次ループでの一括取得
 # --------------------------------------------------------------------------- #
 
+#: 直前の _fetch_by_day で**問い合わせ自体が失敗した日**。
+#:
+#: 失敗した日を「取得済み」として記録すると、その日は二度と取りに行かない
+#: （missing_days は「候補 − 記録」なので候補から消える）。一過性の 503 で
+#: 1日ぶんが永久に失われることになるので、記録から外すために持ち回す。
+#: 呼ぶたびに入れ替わるので、_fetch_by_day の直後に読むこと。
+LAST_FAILED_DAYS: List[dt.date] = []
+
+
 def _fetch_by_day(
     client: JQuantsClient,
     path: str,
@@ -109,17 +118,20 @@ def _fetch_by_day(
     progress_every: int = 50,
 ) -> pd.DataFrame:
     """日付を1日ずつ指定して全銘柄ぶんを集める。"""
+    global LAST_FAILED_DAYS
     frames: List[pd.DataFrame] = []
     days = list(days)
     total = len(days)
     t0 = time.time()
     failed: List[str] = []
+    LAST_FAILED_DAYS = []
 
     for i, d in enumerate(days, 1):
         try:
             rows = client.get_paginated(path, {"date": d.isoformat()})
         except JQuantsError as exc:
             failed.append(f"{d}: {str(exc)[:120]}")
+            LAST_FAILED_DAYS.append(d)
             continue
         if not rows:
             continue
@@ -160,20 +172,34 @@ def fetch_fins(client: JQuantsClient, days: List[dt.date]) -> pd.DataFrame:
     return _numify(df, num)
 
 
+def margin_candidates(days: List[dt.date]) -> List[dt.date]:
+    """
+    信用残を叩く日。週次公表なので、週に1日だけ試す。
+
+    残高は**その週の最終営業日**時点のもの。ふつうは金曜だが、金曜が
+    休場なら木曜（以前）になる。
+
+    以前は「金曜を全部足し、金曜が無い週だけその週の適当な日を足す」と
+    していた。この「適当な日」が週の**先頭**（多くは月曜）になるため、
+    金曜が祝日の週は月曜を叩いて0件のまま取得済みにしていた。
+    保存データを数えると、10年ぶんで23週がこれで空いていた
+    （2026-03-19、2020-03-19 など。いずれも金曜が祝日の週）。
+    """
+    last: dict = {}
+    for d in days:
+        k = (d.isocalendar().year, d.isocalendar().week)
+        if k not in last or d > last[k]:
+            last[k] = d
+    return sorted(last.values())
+
+
 def fetch_margin(client: JQuantsClient, days: List[dt.date]) -> pd.DataFrame:
     """
     信用取引週末残高。週次データなので毎営業日叩く必要はない。
     公表は週1回なので、各週の全営業日を試すのではなく週次で間引く。
     """
-    weekly = sorted({d for d in days if d.weekday() == 4})  # 金曜だけ試す
-    # 金曜が休場の週を拾えないので、その週の他の日も候補に入れる
-    covered = {(d.isocalendar().year, d.isocalendar().week) for d in weekly}
-    for d in days:
-        key = (d.isocalendar().year, d.isocalendar().week)
-        if key not in covered:
-            weekly.append(d)
-            covered.add(key)
-    df = _fetch_by_day(client, "/markets/margin-interest", sorted(weekly), MARGIN_COLS, "margin")
+    df = _fetch_by_day(client, "/markets/margin-interest",
+                       margin_candidates(days), MARGIN_COLS, "margin")
     return _numify(df, ["LongVol", "ShrtVol"])
 
 
@@ -399,7 +425,8 @@ def _today_jst() -> dt.date:
 
 def _record_fetched(manifest: dict, name: str, todo: List[dt.date],
                     df: pd.DataFrame, date_col: str,
-                    today: Optional[dt.date] = None) -> None:
+                    today: Optional[dt.date] = None,
+                    failed: Optional[List[dt.date]] = None) -> None:
     """
     取得済みの記録を付ける。ただし**公表前だったかもしれない日は外す**。
 
@@ -408,20 +435,30 @@ def _record_fetched(manifest: dict, name: str, todo: List[dt.date],
     その日のデータは二度と取りに行かなくなる。取り込みを 16:05 JST に
     前倒ししたので、指数(16:30)・財務(18:00)が毎日これに当たる。
 
+    問い合わせ自体が失敗した日も外す。一過性の 503 で1日ぶんを永久に
+    失わないため。既定で LAST_FAILED_DAYS（直前の _fetch_by_day の結果）を
+    見る。渡し忘れたときに「余計に取り直す」側へ倒れるようにしてあり、
+    逆（黙って失う側）にはしていない。_fetch_by_day を通さない経路
+    （topix / indices）は failed=[] を明示すること。
+
     外した日は次回の候補に戻るだけなので、遅れて入るが失われない。
     判定そのものは data_store.confirmed_days が持つ（公表ラグの表も）。
     """
     today = today or _today_jst()
+    bad = set(LAST_FAILED_DAYS if failed is None else failed)
     got = set()
     if len(df) and date_col in df.columns:
         got = set(pd.to_datetime(df[date_col], errors="coerce").dropna().dt.date)
-    ok = data_store.confirmed_days(name, todo, got, today)
+    ok = [d for d in data_store.confirmed_days(name, todo, got, today)
+          if d not in bad]
     data_store.mark_fetched(manifest, name, ok)
     held = [d for d in todo if d not in set(ok)]
     if held:
         shown = ", ".join(d.isoformat() for d in held[:5])
         more = f" ほか{len(held)-5}日" if len(held) > 5 else ""
-        print(f"[{name}] 0件で、まだ公表前かもしれない{len(held)}日は"
+        why = ("問い合わせに失敗したか、0件でまだ公表前かもしれない"
+               if bad else "0件で、まだ公表前かもしれない")
+        print(f"[{name}] {why}{len(held)}日は"
               f"取得済みにしない（次回また取りに行く）: {shown}{more}")
 
 
@@ -493,14 +530,9 @@ def _run_incremental(client: JQuantsClient, days: List[dt.date],
             # 2,425日ぶん・約38分を毎回無駄にしていた。
             continue
         if name == "margin":
-            # 信用残は週次公表。週に1日だけ候補にする
-            cand = sorted({d for d in days if d.weekday() == 4})
-            covered = {(d.isocalendar().year, d.isocalendar().week) for d in cand}
-            for d in days:
-                key = (d.isocalendar().year, d.isocalendar().week)
-                if key not in covered:
-                    cand.append(d); covered.add(key)
-            cand = sorted(cand)
+            # 信用残は週次公表。週の最終営業日だけを候補にする
+            # （fetch_margin と同じ関数を呼ぶ。二重に持つとずれる）
+            cand = margin_candidates(days)
         else:
             cand = days
 
@@ -544,7 +576,11 @@ def _run_incremental(client: JQuantsClient, days: List[dt.date],
             print(f"\n[topix] 未取得 {len(todo_tp)}日 -> {todo_tp[0]} 〜 {todo_tp[-1]}")
             df = fetch_topix(client, todo_tp[0], todo_tp[-1])
             written = data_store.merge_into_years(args.out_dir, "topix", df, "Date")
-            _record_fetched(manifest, "topix", todo_tp, df, "Date")
+            # TOPIX は期間指定の1リクエスト。失敗すれば例外で落ちるので
+            # 「黙って失敗した日」は無い。直前の _fetch_by_day の記録が
+            # 残っているだけなので、明示的に空を渡す
+            _record_fetched(manifest, "topix", todo_tp, df, "Date",
+                            failed=[])
             print(f"[topix] {len(df):,}行を追加 / 更新ファイル {len(written)}件")
         else:
             print("\n[topix] 取得済み。スキップします")
@@ -558,7 +594,9 @@ def _run_incremental(client: JQuantsClient, days: List[dt.date],
             print(f"\n[indices] 未取得 {len(todo_ix)}日 -> {todo_ix[0]} 〜 {todo_ix[-1]}")
             df = fetch_indices(client, todo_ix)
             written = data_store.merge_into_years(args.out_dir, "indices", df, "Date")
-            _record_fetched(manifest, "indices", todo_ix, df, "Date")
+            # 指数も同じ（fetch_indices_* は例外を握りつぶさない）
+            _record_fetched(manifest, "indices", todo_ix, df, "Date",
+                            failed=[])
             print(f"[indices] {len(df):,}行を追加 / 更新ファイル {len(written)}件")
         else:
             print("\n[indices] 取得済み。スキップします")
