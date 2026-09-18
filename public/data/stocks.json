@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-18T12:15:41.619750+00:00",
+  "generatedAt": "2026-09-18T12:41:32.101841+00:00",
   "source": "J-Quants API V2 (https://jpx-jquants.com/)",
   "apiVersion": "v2",
   "stocks": [
@@ -2437,817 +2437,6 @@
       "origin": "jquants"
     },
     {
-      "code": "3075",
-      "jqCode": "30750",
-      "name": "銚子丸",
-      "nameEn": "Choushimaru Co.,Ltd.",
-      "sector": "小売業",
-      "market": "スタンダード",
-      "scale": "-",
-      "note": "ブレイク予測の当日上位",
-      "asOf": "2026-09-18",
-      "metrics": {
-        "date": "2026-09-18",
-        "price": 1729.0,
-        "high52w": 1819.0,
-        "highRatio": 95.05222649807587,
-        "tradingValue": 2.344524,
-        "turnoverValue": 2.379942,
-        "volumeTrend": 1544.4191343963553,
-        "volume": 135600.0,
-        "ma20Volume": 8780.0,
-        "epsGrowth": 94.995187680462,
-        "salesGrowth": 10.823570554292708,
-        "roe": 13.765093304061471,
-        "opMargin": 7.522852672321502,
-        "progressRate": 65.41978387364921,
-        "quarter": 1,
-        "sharesOutstanding": 12522237.0,
-        "fiscalPeriod": "1Q",
-        "disclosedDate": "2026-07-13",
-        "opMarginBasis": "TTM (直近4四半期)",
-        "roeBasis": "TTM純利益 / 自己資本 で算出",
-        "creditRatio": null,
-        "marginLong": 19400.0,
-        "marginShort": 0.0,
-        "marginDate": "2026-09-11",
-        "marketCap": 216.50947773,
-        "label": "現在",
-        "asOf": "2026-09-18"
-      },
-      "snapshots": {
-        "now": {
-          "date": "2026-09-18",
-          "price": 1729.0,
-          "high52w": 1819.0,
-          "highRatio": 95.05222649807587,
-          "tradingValue": 2.344524,
-          "turnoverValue": 2.379942,
-          "volumeTrend": 1544.4191343963553,
-          "volume": 135600.0,
-          "ma20Volume": 8780.0,
-          "epsGrowth": 94.995187680462,
-          "salesGrowth": 10.823570554292708,
-          "roe": 13.765093304061471,
-          "opMargin": 7.522852672321502,
-          "progressRate": 65.41978387364921,
-          "quarter": 1,
-          "sharesOutstanding": 12522237.0,
-          "fiscalPeriod": "1Q",
-          "disclosedDate": "2026-07-13",
-          "opMarginBasis": "TTM (直近4四半期)",
-          "roeBasis": "TTM純利益 / 自己資本 で算出",
-          "creditRatio": null,
-          "marginLong": 19400.0,
-          "marginShort": 0.0,
-          "marginDate": "2026-09-11",
-          "marketCap": 216.50947773,
-          "label": "現在",
-          "asOf": "2026-09-18"
-        },
-        "m3": {
-          "date": "2026-06-19",
-          "price": 1615.0,
-          "high52w": 1691.0,
-          "highRatio": 95.50561797752809,
-          "tradingValue": 0.027455,
-          "turnoverValue": 0.027462,
-          "volumeTrend": 44.15584415584416,
-          "volume": 1700.0,
-          "ma20Volume": 3850.0,
-          "epsGrowth": null,
-          "salesGrowth": null,
-          "roe": 0.121,
-          "opMargin": 6.654835847382431,
-          "progressRate": null,
-          "quarter": 4,
-          "sharesOutstanding": 12520787.0,
-          "fiscalPeriod": "FY",
-          "disclosedDate": "2026-04-13",
-          "opMarginBasis": "TTM (直近4四半期)",
-          "roeBasis": "J-Quants 提供値 (ROE)",
-          "creditRatio": null,
-          "marginLong": 35700.0,
-          "marginShort": 0.0,
-          "marginDate": "2026-06-19",
-          "marketCap": 202.21071005,
-          "label": "3ヶ月前",
-          "asOf": "2026-06-19"
-        },
-        "m6": {
-          "date": "2026-03-19",
-          "price": 1597.0,
-          "high52w": 1691.0,
-          "highRatio": 94.44115907746895,
-          "tradingValue": 0.091029,
-          "turnoverValue": 0.091151,
-          "volumeTrend": 36.66773882277259,
-          "volume": 5700.0,
-          "ma20Volume": 15545.0,
-          "epsGrowth": -120.43209876543206,
-          "salesGrowth": -3.0340667139815474,
-          "roe": null,
-          "opMargin": 5.38056206088993,
-          "progressRate": 63.59861591695501,
-          "quarter": 3,
-          "sharesOutstanding": 12503437.0,
-          "fiscalPeriod": "3Q",
-          "disclosedDate": "2026-01-13",
-          "opMarginBasis": "当期累計 (3Q)",
-          "roeBasis": null,
-          "creditRatio": null,
-          "marginLong": 32100.0,
-          "marginShort": 0.0,
-          "marginDate": "2026-03-19",
-          "marketCap": 199.67988889,
-          "label": "6ヶ月前",
-          "asOf": "2026-03-19"
-        }
-      },
-      "milestones": [
-        {
-          "date": "2025-10-10",
-          "type": "earnings",
-          "title": "2Q 決算発表",
-          "detail": "（単一四半期換算）売上 59億円 / 営業利益 5億円"
-        },
-        {
-          "date": "2026-01-05",
-          "type": "volume_spike",
-          "title": "出来高急増（大口買い痕跡）",
-          "detail": "出来高 14,900株 = 20日平均の 2.3倍・陽線"
-        },
-        {
-          "date": "2026-01-13",
-          "type": "earnings",
-          "title": "3Q 決算発表",
-          "detail": "（単一四半期換算）売上 55億円 / 営業利益 -1億円"
-        },
-        {
-          "date": "2026-01-14",
-          "type": "breakout",
-          "title": "52週高値を更新",
-          "detail": "終値 1,646円 が過去52週の最高値 1,628円 を上抜け"
-        },
-        {
-          "date": "2026-01-14",
-          "type": "volume_spike",
-          "title": "出来高急増（大口買い痕跡）",
-          "detail": "出来高 45,900株 = 20日平均の 5.5倍・陽線"
-        },
-        {
-          "date": "2026-02-19",
-          "type": "breakout",
-          "title": "52週高値を更新",
-          "detail": "終値 1,670円 が過去52週の最高値 1,667円 を上抜け"
-        },
-        {
-          "date": "2026-02-25",
-          "type": "volume_spike",
-          "title": "出来高急増（大口買い痕跡）",
-          "detail": "出来高 37,400株 = 20日平均の 3.7倍・陽線"
-        },
-        {
-          "date": "2026-04-13",
-          "type": "earnings",
-          "title": "FY 決算発表",
-          "detail": "（単一四半期換算）売上 66億円 / 営業利益 7億円"
-        },
-        {
-          "date": "2026-04-27",
-          "type": "volume_spike",
-          "title": "出来高急増（大口買い痕跡）",
-          "detail": "出来高 10,900株 = 20日平均の 2.0倍・陽線"
-        },
-        {
-          "date": "2026-06-29",
-          "type": "volume_spike",
-          "title": "出来高急増（大口買い痕跡）",
-          "detail": "出来高 8,200株 = 20日平均の 2.4倍・陽線"
-        },
-        {
-          "date": "2026-07-13",
-          "type": "earnings",
-          "title": "1Q 決算発表",
-          "detail": "（単一四半期換算）売上 63億円 / 営業利益 8億円"
-        },
-        {
-          "date": "2026-07-13",
-          "type": "volume_spike",
-          "title": "出来高急増（大口買い痕跡）",
-          "detail": "出来高 10,000株 = 20日平均の 2.4倍・陽線"
-        },
-        {
-          "date": "2026-07-14",
-          "type": "breakout",
-          "title": "52週高値を更新",
-          "detail": "終値 1,696円 が過去52週の最高値 1,691円 を上抜け"
-        },
-        {
-          "date": "2026-07-28",
-          "type": "volume_spike",
-          "title": "出来高急増（大口買い痕跡）",
-          "detail": "出来高 16,100株 = 20日平均の 2.0倍・陽線"
-        },
-        {
-          "date": "2026-08-27",
-          "type": "volume_spike",
-          "title": "出来高急増（大口買い痕跡）",
-          "detail": "出来高 23,000株 = 20日平均の 3.0倍・陽線"
-        }
-      ],
-      "quarters": [
-        {
-          "fiscalYearStart": "2023-05-16",
-          "quarter": 4,
-          "period": "FY",
-          "disclosedDate": "2024-06-27",
-          "periodEnd": "2024-05-15",
-          "qNetSales": 5552000000.0,
-          "qOperatingProfit": 280000000.0,
-          "qOrdinaryProfit": 290000000.0,
-          "qProfit": 279000000.0,
-          "qEps": 20.33,
-          "cumNetSales": 21360000000.0,
-          "cumOperatingProfit": 1709000000.0,
-          "cumOrdinaryProfit": 1735000000.0,
-          "cumProfit": 1073000000.0,
-          "cumEps": 78.33,
-          "forecastNetSales": null,
-          "forecastOperatingProfit": null,
-          "forecastOrdinaryProfit": null,
-          "forecastProfit": null,
-          "forecastEps": null,
-          "equity": 9309000000.0,
-          "totalAssets": 12842000000.0,
-          "sharesIssued": 14518000.0,
-          "treasuryShares": 794413.0,
-          "reportedRoe": 0.122
-        },
-        {
-          "fiscalYearStart": "2024-05-16",
-          "quarter": 1,
-          "period": "1Q",
-          "disclosedDate": "2024-09-27",
-          "periodEnd": "2024-08-15",
-          "qNetSales": 5576000000.0,
-          "qOperatingProfit": 488000000.0,
-          "qOrdinaryProfit": 490000000.0,
-          "qProfit": 177000000.0,
-          "qEps": 12.95,
-          "cumNetSales": 5576000000.0,
-          "cumOperatingProfit": 488000000.0,
-          "cumOrdinaryProfit": 490000000.0,
-          "cumProfit": 177000000.0,
-          "cumEps": 12.95,
-          "forecastNetSales": 17738000000.0,
-          "forecastOperatingProfit": 1057000000.0,
-          "forecastOrdinaryProfit": 1065000000.0,
-          "forecastProfit": 520000000.0,
-          "forecastEps": 37.97,
-          "equity": 9326000000.0,
-          "totalAssets": 13241000000.0,
-          "sharesIssued": 14518000.0,
-          "treasuryShares": 792513.0,
-          "reportedRoe": null
-        },
-        {
-          "fiscalYearStart": "2024-05-16",
-          "quarter": 2,
-          "period": "2Q",
-          "disclosedDate": "2024-12-27",
-          "periodEnd": "2024-11-15",
-          "qNetSales": 5113000000.0,
-          "qOperatingProfit": 130000000.0,
-          "qOrdinaryProfit": 138000000.0,
-          "qProfit": 84000000.0,
-          "qEps": 6.100000000000001,
-          "cumNetSales": 10689000000.0,
-          "cumOperatingProfit": 618000000.0,
-          "cumOrdinaryProfit": 628000000.0,
-          "cumProfit": 261000000.0,
-          "cumEps": 19.05,
-          "forecastNetSales": 17738000000.0,
-          "forecastOperatingProfit": 1057000000.0,
-          "forecastOrdinaryProfit": 1065000000.0,
-          "forecastProfit": 520000000.0,
-          "forecastEps": 37.97,
-          "equity": 9429000000.0,
-          "totalAssets": 12643000000.0,
-          "sharesIssued": 14518000.0,
-          "treasuryShares": 782063.0,
-          "reportedRoe": null
-        },
-        {
-          "fiscalYearStart": "2024-05-16",
-          "quarter": 4,
-          "period": "FY",
-          "disclosedDate": "2025-04-24",
-          "periodEnd": "2025-02-28",
-          "qNetSales": null,
-          "qOperatingProfit": null,
-          "qOrdinaryProfit": null,
-          "qProfit": null,
-          "qEps": null,
-          "cumNetSales": 17388000000.0,
-          "cumOperatingProfit": 1052000000.0,
-          "cumOrdinaryProfit": 1070000000.0,
-          "cumProfit": 582000000.0,
-          "cumEps": 42.82,
-          "forecastNetSales": null,
-          "forecastOperatingProfit": null,
-          "forecastOrdinaryProfit": null,
-          "forecastProfit": null,
-          "forecastEps": null,
-          "equity": 7870000000.0,
-          "totalAssets": 10798000000.0,
-          "sharesIssued": 14518000.0,
-          "treasuryShares": 2031463.0,
-          "reportedRoe": 0.068
-        },
-        {
-          "fiscalYearStart": "2025-03-01",
-          "quarter": 1,
-          "period": "1Q",
-          "disclosedDate": "2025-07-11",
-          "periodEnd": "2025-05-31",
-          "qNetSales": 5719000000.0,
-          "qOperatingProfit": 535000000.0,
-          "qOrdinaryProfit": 542000000.0,
-          "qProfit": 259000000.0,
-          "qEps": 20.78,
-          "cumNetSales": 5719000000.0,
-          "cumOperatingProfit": 535000000.0,
-          "cumOrdinaryProfit": 542000000.0,
-          "cumProfit": 259000000.0,
-          "cumEps": 20.78,
-          "forecastNetSales": 24263000000.0,
-          "forecastOperatingProfit": 1445000000.0,
-          "forecastOrdinaryProfit": 1461000000.0,
-          "forecastProfit": 911000000.0,
-          "forecastEps": 73.03,
-          "equity": 7983000000.0,
-          "totalAssets": 11032000000.0,
-          "sharesIssued": 14518000.0,
-          "treasuryShares": 2030013.0,
-          "reportedRoe": null
-        },
-        {
-          "fiscalYearStart": "2025-03-01",
-          "quarter": 2,
-          "period": "2Q",
-          "disclosedDate": "2025-10-10",
-          "periodEnd": "2025-08-31",
-          "qNetSales": 5896000000.0,
-          "qOperatingProfit": 451000000.0,
-          "qOrdinaryProfit": 459000000.0,
-          "qProfit": 289000000.0,
-          "qEps": 23.089999999999996,
-          "cumNetSales": 11615000000.0,
-          "cumOperatingProfit": 986000000.0,
-          "cumOrdinaryProfit": 1001000000.0,
-          "cumProfit": 548000000.0,
-          "cumEps": 43.87,
-          "forecastNetSales": 24263000000.0,
-          "forecastOperatingProfit": 1445000000.0,
-          "forecastOrdinaryProfit": 1461000000.0,
-          "forecastProfit": 911000000.0,
-          "forecastEps": 73.03,
-          "equity": 8291000000.0,
-          "totalAssets": 11717000000.0,
-          "sharesIssued": 14518000.0,
-          "treasuryShares": 2018113.0,
-          "reportedRoe": null
-        },
-        {
-          "fiscalYearStart": "2025-03-01",
-          "quarter": 3,
-          "period": "3Q",
-          "disclosedDate": "2026-01-13",
-          "periodEnd": "2025-11-30",
-          "qNetSales": 5465000000.0,
-          "qOperatingProfit": -67000000.0,
-          "qOrdinaryProfit": -56000000.0,
-          "qProfit": -42000000.0,
-          "qEps": -3.309999999999995,
-          "cumNetSales": 17080000000.0,
-          "cumOperatingProfit": 919000000.0,
-          "cumOrdinaryProfit": 945000000.0,
-          "cumProfit": 506000000.0,
-          "cumEps": 40.56,
-          "forecastNetSales": 24263000000.0,
-          "forecastOperatingProfit": 1445000000.0,
-          "forecastOrdinaryProfit": 1461000000.0,
-          "forecastProfit": 911000000.0,
-          "forecastEps": 73.03,
-          "equity": 8256000000.0,
-          "totalAssets": 11742000000.0,
-          "sharesIssued": 14518000.0,
-          "treasuryShares": 2014563.0,
-          "reportedRoe": null
-        },
-        {
-          "fiscalYearStart": "2025-03-01",
-          "quarter": 4,
-          "period": "FY",
-          "disclosedDate": "2026-04-13",
-          "periodEnd": "2026-02-28",
-          "qNetSales": 6587000000.0,
-          "qOperatingProfit": 656000000.0,
-          "qOrdinaryProfit": 651000000.0,
-          "qProfit": 500000000.0,
-          "qEps": 40.00999999999999,
-          "cumNetSales": 23667000000.0,
-          "cumOperatingProfit": 1575000000.0,
-          "cumOrdinaryProfit": 1596000000.0,
-          "cumProfit": 1006000000.0,
-          "cumEps": 80.57,
-          "forecastNetSales": null,
-          "forecastOperatingProfit": null,
-          "forecastOrdinaryProfit": null,
-          "forecastProfit": null,
-          "forecastEps": null,
-          "equity": 8774000000.0,
-          "totalAssets": 12160000000.0,
-          "sharesIssued": 14518000.0,
-          "treasuryShares": 1997213.0,
-          "reportedRoe": 0.121
-        },
-        {
-          "fiscalYearStart": "2026-03-01",
-          "quarter": 1,
-          "period": "1Q",
-          "disclosedDate": "2026-07-13",
-          "periodEnd": "2026-05-31",
-          "qNetSales": 6338000000.0,
-          "qOperatingProfit": 787000000.0,
-          "qOrdinaryProfit": 796000000.0,
-          "qProfit": 507000000.0,
-          "qEps": 40.52,
-          "cumNetSales": 6338000000.0,
-          "cumOperatingProfit": 787000000.0,
-          "cumOrdinaryProfit": 796000000.0,
-          "cumProfit": 507000000.0,
-          "cumEps": 40.52,
-          "forecastNetSales": 24122000000.0,
-          "forecastOperatingProfit": 1203000000.0,
-          "forecastOrdinaryProfit": 1226000000.0,
-          "forecastProfit": 785000000.0,
-          "forecastEps": 62.83,
-          "equity": 9110000000.0,
-          "totalAssets": 12918000000.0,
-          "sharesIssued": 14518000.0,
-          "treasuryShares": 1995763.0,
-          "reportedRoe": null
-        }
-      ],
-      "history": [
-        {
-          "date": "2025-09-18",
-          "close": 1578.0
-        },
-        {
-          "date": "2025-09-24",
-          "close": 1589.0
-        },
-        {
-          "date": "2025-09-29",
-          "close": 1594.0
-        },
-        {
-          "date": "2025-10-02",
-          "close": 1568.0
-        },
-        {
-          "date": "2025-10-07",
-          "close": 1565.0
-        },
-        {
-          "date": "2025-10-10",
-          "close": 1560.0
-        },
-        {
-          "date": "2025-10-16",
-          "close": 1534.0
-        },
-        {
-          "date": "2025-10-21",
-          "close": 1531.0
-        },
-        {
-          "date": "2025-10-24",
-          "close": 1520.0
-        },
-        {
-          "date": "2025-10-29",
-          "close": 1514.0
-        },
-        {
-          "date": "2025-11-04",
-          "close": 1518.0
-        },
-        {
-          "date": "2025-11-07",
-          "close": 1517.0
-        },
-        {
-          "date": "2025-11-12",
-          "close": 1527.0
-        },
-        {
-          "date": "2025-11-17",
-          "close": 1511.0
-        },
-        {
-          "date": "2025-11-20",
-          "close": 1515.0
-        },
-        {
-          "date": "2025-11-26",
-          "close": 1517.0
-        },
-        {
-          "date": "2025-12-01",
-          "close": 1530.0
-        },
-        {
-          "date": "2025-12-04",
-          "close": 1523.0
-        },
-        {
-          "date": "2025-12-09",
-          "close": 1543.0
-        },
-        {
-          "date": "2025-12-12",
-          "close": 1548.0
-        },
-        {
-          "date": "2025-12-17",
-          "close": 1549.0
-        },
-        {
-          "date": "2025-12-22",
-          "close": 1554.0
-        },
-        {
-          "date": "2025-12-25",
-          "close": 1544.0
-        },
-        {
-          "date": "2025-12-30",
-          "close": 1578.0
-        },
-        {
-          "date": "2026-01-07",
-          "close": 1589.0
-        },
-        {
-          "date": "2026-01-13",
-          "close": 1606.0
-        },
-        {
-          "date": "2026-01-16",
-          "close": 1650.0
-        },
-        {
-          "date": "2026-01-21",
-          "close": 1647.0
-        },
-        {
-          "date": "2026-01-26",
-          "close": 1650.0
-        },
-        {
-          "date": "2026-01-29",
-          "close": 1636.0
-        },
-        {
-          "date": "2026-02-03",
-          "close": 1631.0
-        },
-        {
-          "date": "2026-02-06",
-          "close": 1658.0
-        },
-        {
-          "date": "2026-02-12",
-          "close": 1659.0
-        },
-        {
-          "date": "2026-02-17",
-          "close": 1661.0
-        },
-        {
-          "date": "2026-02-20",
-          "close": 1672.0
-        },
-        {
-          "date": "2026-02-26",
-          "close": 1608.0
-        },
-        {
-          "date": "2026-03-03",
-          "close": 1571.0
-        },
-        {
-          "date": "2026-03-06",
-          "close": 1611.0
-        },
-        {
-          "date": "2026-03-11",
-          "close": 1618.0
-        },
-        {
-          "date": "2026-03-16",
-          "close": 1597.0
-        },
-        {
-          "date": "2026-03-19",
-          "close": 1597.0
-        },
-        {
-          "date": "2026-03-25",
-          "close": 1590.0
-        },
-        {
-          "date": "2026-03-30",
-          "close": 1584.0
-        },
-        {
-          "date": "2026-04-02",
-          "close": 1580.0
-        },
-        {
-          "date": "2026-04-07",
-          "close": 1595.0
-        },
-        {
-          "date": "2026-04-10",
-          "close": 1605.0
-        },
-        {
-          "date": "2026-04-15",
-          "close": 1595.0
-        },
-        {
-          "date": "2026-04-20",
-          "close": 1605.0
-        },
-        {
-          "date": "2026-04-23",
-          "close": 1597.0
-        },
-        {
-          "date": "2026-04-28",
-          "close": 1616.0
-        },
-        {
-          "date": "2026-05-07",
-          "close": 1611.0
-        },
-        {
-          "date": "2026-05-12",
-          "close": 1610.0
-        },
-        {
-          "date": "2026-05-15",
-          "close": 1604.0
-        },
-        {
-          "date": "2026-05-20",
-          "close": 1594.0
-        },
-        {
-          "date": "2026-05-25",
-          "close": 1596.0
-        },
-        {
-          "date": "2026-05-28",
-          "close": 1597.0
-        },
-        {
-          "date": "2026-06-02",
-          "close": 1603.0
-        },
-        {
-          "date": "2026-06-05",
-          "close": 1600.0
-        },
-        {
-          "date": "2026-06-10",
-          "close": 1606.0
-        },
-        {
-          "date": "2026-06-15",
-          "close": 1608.0
-        },
-        {
-          "date": "2026-06-18",
-          "close": 1615.0
-        },
-        {
-          "date": "2026-06-23",
-          "close": 1620.0
-        },
-        {
-          "date": "2026-06-26",
-          "close": 1633.0
-        },
-        {
-          "date": "2026-07-01",
-          "close": 1652.0
-        },
-        {
-          "date": "2026-07-06",
-          "close": 1652.0
-        },
-        {
-          "date": "2026-07-09",
-          "close": 1650.0
-        },
-        {
-          "date": "2026-07-14",
-          "close": 1696.0
-        },
-        {
-          "date": "2026-07-17",
-          "close": 1693.0
-        },
-        {
-          "date": "2026-07-23",
-          "close": 1703.0
-        },
-        {
-          "date": "2026-07-28",
-          "close": 1747.0
-        },
-        {
-          "date": "2026-07-31",
-          "close": 1722.0
-        },
-        {
-          "date": "2026-08-05",
-          "close": 1711.0
-        },
-        {
-          "date": "2026-08-10",
-          "close": 1707.0
-        },
-        {
-          "date": "2026-08-14",
-          "close": 1703.0
-        },
-        {
-          "date": "2026-08-19",
-          "close": 1692.0
-        },
-        {
-          "date": "2026-08-24",
-          "close": 1706.0
-        },
-        {
-          "date": "2026-08-27",
-          "close": 1721.0
-        },
-        {
-          "date": "2026-09-01",
-          "close": 1650.0
-        },
-        {
-          "date": "2026-09-04",
-          "close": 1639.0
-        },
-        {
-          "date": "2026-09-09",
-          "close": 1649.0
-        },
-        {
-          "date": "2026-09-14",
-          "close": 1652.0
-        },
-        {
-          "date": "2026-09-17",
-          "close": 1660.0
-        }
-      ],
-      "sources": {
-        "price": "jquants",
-        "high52w": "jquants",
-        "highRatio": "jquants",
-        "tradingValue": "jquants",
-        "volumeTrend": "jquants",
-        "epsGrowth": "jquants",
-        "salesGrowth": "jquants",
-        "roe": "jquants",
-        "opMargin": "jquants",
-        "progressRate": "jquants",
-        "creditRatio": "unavailable",
-        "marketCap": "jquants"
-      },
-      "origin": "jquants"
-    },
-    {
       "code": "6742",
       "jqCode": "67420",
       "name": "京三製作所",
@@ -4078,6 +3267,817 @@
         "opMargin": "jquants",
         "progressRate": "jquants",
         "creditRatio": "jquants",
+        "marketCap": "jquants"
+      },
+      "origin": "jquants"
+    },
+    {
+      "code": "3075",
+      "jqCode": "30750",
+      "name": "銚子丸",
+      "nameEn": "Choushimaru Co.,Ltd.",
+      "sector": "小売業",
+      "market": "スタンダード",
+      "scale": "-",
+      "note": "ブレイク予測の当日上位",
+      "asOf": "2026-09-18",
+      "metrics": {
+        "date": "2026-09-18",
+        "price": 1729.0,
+        "high52w": 1819.0,
+        "highRatio": 95.05222649807587,
+        "tradingValue": 2.344524,
+        "turnoverValue": 2.379942,
+        "volumeTrend": 1544.4191343963553,
+        "volume": 135600.0,
+        "ma20Volume": 8780.0,
+        "epsGrowth": 94.995187680462,
+        "salesGrowth": 10.823570554292708,
+        "roe": 13.765093304061471,
+        "opMargin": 7.522852672321502,
+        "progressRate": 65.41978387364921,
+        "quarter": 1,
+        "sharesOutstanding": 12522237.0,
+        "fiscalPeriod": "1Q",
+        "disclosedDate": "2026-07-13",
+        "opMarginBasis": "TTM (直近4四半期)",
+        "roeBasis": "TTM純利益 / 自己資本 で算出",
+        "creditRatio": null,
+        "marginLong": 19400.0,
+        "marginShort": 0.0,
+        "marginDate": "2026-09-11",
+        "marketCap": 216.50947773,
+        "label": "現在",
+        "asOf": "2026-09-18"
+      },
+      "snapshots": {
+        "now": {
+          "date": "2026-09-18",
+          "price": 1729.0,
+          "high52w": 1819.0,
+          "highRatio": 95.05222649807587,
+          "tradingValue": 2.344524,
+          "turnoverValue": 2.379942,
+          "volumeTrend": 1544.4191343963553,
+          "volume": 135600.0,
+          "ma20Volume": 8780.0,
+          "epsGrowth": 94.995187680462,
+          "salesGrowth": 10.823570554292708,
+          "roe": 13.765093304061471,
+          "opMargin": 7.522852672321502,
+          "progressRate": 65.41978387364921,
+          "quarter": 1,
+          "sharesOutstanding": 12522237.0,
+          "fiscalPeriod": "1Q",
+          "disclosedDate": "2026-07-13",
+          "opMarginBasis": "TTM (直近4四半期)",
+          "roeBasis": "TTM純利益 / 自己資本 で算出",
+          "creditRatio": null,
+          "marginLong": 19400.0,
+          "marginShort": 0.0,
+          "marginDate": "2026-09-11",
+          "marketCap": 216.50947773,
+          "label": "現在",
+          "asOf": "2026-09-18"
+        },
+        "m3": {
+          "date": "2026-06-19",
+          "price": 1615.0,
+          "high52w": 1691.0,
+          "highRatio": 95.50561797752809,
+          "tradingValue": 0.027455,
+          "turnoverValue": 0.027462,
+          "volumeTrend": 44.15584415584416,
+          "volume": 1700.0,
+          "ma20Volume": 3850.0,
+          "epsGrowth": null,
+          "salesGrowth": null,
+          "roe": 0.121,
+          "opMargin": 6.654835847382431,
+          "progressRate": null,
+          "quarter": 4,
+          "sharesOutstanding": 12520787.0,
+          "fiscalPeriod": "FY",
+          "disclosedDate": "2026-04-13",
+          "opMarginBasis": "TTM (直近4四半期)",
+          "roeBasis": "J-Quants 提供値 (ROE)",
+          "creditRatio": null,
+          "marginLong": 35700.0,
+          "marginShort": 0.0,
+          "marginDate": "2026-06-19",
+          "marketCap": 202.21071005,
+          "label": "3ヶ月前",
+          "asOf": "2026-06-19"
+        },
+        "m6": {
+          "date": "2026-03-19",
+          "price": 1597.0,
+          "high52w": 1691.0,
+          "highRatio": 94.44115907746895,
+          "tradingValue": 0.091029,
+          "turnoverValue": 0.091151,
+          "volumeTrend": 36.66773882277259,
+          "volume": 5700.0,
+          "ma20Volume": 15545.0,
+          "epsGrowth": -120.43209876543206,
+          "salesGrowth": -3.0340667139815474,
+          "roe": null,
+          "opMargin": 5.38056206088993,
+          "progressRate": 63.59861591695501,
+          "quarter": 3,
+          "sharesOutstanding": 12503437.0,
+          "fiscalPeriod": "3Q",
+          "disclosedDate": "2026-01-13",
+          "opMarginBasis": "当期累計 (3Q)",
+          "roeBasis": null,
+          "creditRatio": null,
+          "marginLong": 32100.0,
+          "marginShort": 0.0,
+          "marginDate": "2026-03-19",
+          "marketCap": 199.67988889,
+          "label": "6ヶ月前",
+          "asOf": "2026-03-19"
+        }
+      },
+      "milestones": [
+        {
+          "date": "2025-10-10",
+          "type": "earnings",
+          "title": "2Q 決算発表",
+          "detail": "（単一四半期換算）売上 59億円 / 営業利益 5億円"
+        },
+        {
+          "date": "2026-01-05",
+          "type": "volume_spike",
+          "title": "出来高急増（大口買い痕跡）",
+          "detail": "出来高 14,900株 = 20日平均の 2.3倍・陽線"
+        },
+        {
+          "date": "2026-01-13",
+          "type": "earnings",
+          "title": "3Q 決算発表",
+          "detail": "（単一四半期換算）売上 55億円 / 営業利益 -1億円"
+        },
+        {
+          "date": "2026-01-14",
+          "type": "breakout",
+          "title": "52週高値を更新",
+          "detail": "終値 1,646円 が過去52週の最高値 1,628円 を上抜け"
+        },
+        {
+          "date": "2026-01-14",
+          "type": "volume_spike",
+          "title": "出来高急増（大口買い痕跡）",
+          "detail": "出来高 45,900株 = 20日平均の 5.5倍・陽線"
+        },
+        {
+          "date": "2026-02-19",
+          "type": "breakout",
+          "title": "52週高値を更新",
+          "detail": "終値 1,670円 が過去52週の最高値 1,667円 を上抜け"
+        },
+        {
+          "date": "2026-02-25",
+          "type": "volume_spike",
+          "title": "出来高急増（大口買い痕跡）",
+          "detail": "出来高 37,400株 = 20日平均の 3.7倍・陽線"
+        },
+        {
+          "date": "2026-04-13",
+          "type": "earnings",
+          "title": "FY 決算発表",
+          "detail": "（単一四半期換算）売上 66億円 / 営業利益 7億円"
+        },
+        {
+          "date": "2026-04-27",
+          "type": "volume_spike",
+          "title": "出来高急増（大口買い痕跡）",
+          "detail": "出来高 10,900株 = 20日平均の 2.0倍・陽線"
+        },
+        {
+          "date": "2026-06-29",
+          "type": "volume_spike",
+          "title": "出来高急増（大口買い痕跡）",
+          "detail": "出来高 8,200株 = 20日平均の 2.4倍・陽線"
+        },
+        {
+          "date": "2026-07-13",
+          "type": "earnings",
+          "title": "1Q 決算発表",
+          "detail": "（単一四半期換算）売上 63億円 / 営業利益 8億円"
+        },
+        {
+          "date": "2026-07-13",
+          "type": "volume_spike",
+          "title": "出来高急増（大口買い痕跡）",
+          "detail": "出来高 10,000株 = 20日平均の 2.4倍・陽線"
+        },
+        {
+          "date": "2026-07-14",
+          "type": "breakout",
+          "title": "52週高値を更新",
+          "detail": "終値 1,696円 が過去52週の最高値 1,691円 を上抜け"
+        },
+        {
+          "date": "2026-07-28",
+          "type": "volume_spike",
+          "title": "出来高急増（大口買い痕跡）",
+          "detail": "出来高 16,100株 = 20日平均の 2.0倍・陽線"
+        },
+        {
+          "date": "2026-08-27",
+          "type": "volume_spike",
+          "title": "出来高急増（大口買い痕跡）",
+          "detail": "出来高 23,000株 = 20日平均の 3.0倍・陽線"
+        }
+      ],
+      "quarters": [
+        {
+          "fiscalYearStart": "2023-05-16",
+          "quarter": 4,
+          "period": "FY",
+          "disclosedDate": "2024-06-27",
+          "periodEnd": "2024-05-15",
+          "qNetSales": 5552000000.0,
+          "qOperatingProfit": 280000000.0,
+          "qOrdinaryProfit": 290000000.0,
+          "qProfit": 279000000.0,
+          "qEps": 20.33,
+          "cumNetSales": 21360000000.0,
+          "cumOperatingProfit": 1709000000.0,
+          "cumOrdinaryProfit": 1735000000.0,
+          "cumProfit": 1073000000.0,
+          "cumEps": 78.33,
+          "forecastNetSales": null,
+          "forecastOperatingProfit": null,
+          "forecastOrdinaryProfit": null,
+          "forecastProfit": null,
+          "forecastEps": null,
+          "equity": 9309000000.0,
+          "totalAssets": 12842000000.0,
+          "sharesIssued": 14518000.0,
+          "treasuryShares": 794413.0,
+          "reportedRoe": 0.122
+        },
+        {
+          "fiscalYearStart": "2024-05-16",
+          "quarter": 1,
+          "period": "1Q",
+          "disclosedDate": "2024-09-27",
+          "periodEnd": "2024-08-15",
+          "qNetSales": 5576000000.0,
+          "qOperatingProfit": 488000000.0,
+          "qOrdinaryProfit": 490000000.0,
+          "qProfit": 177000000.0,
+          "qEps": 12.95,
+          "cumNetSales": 5576000000.0,
+          "cumOperatingProfit": 488000000.0,
+          "cumOrdinaryProfit": 490000000.0,
+          "cumProfit": 177000000.0,
+          "cumEps": 12.95,
+          "forecastNetSales": 17738000000.0,
+          "forecastOperatingProfit": 1057000000.0,
+          "forecastOrdinaryProfit": 1065000000.0,
+          "forecastProfit": 520000000.0,
+          "forecastEps": 37.97,
+          "equity": 9326000000.0,
+          "totalAssets": 13241000000.0,
+          "sharesIssued": 14518000.0,
+          "treasuryShares": 792513.0,
+          "reportedRoe": null
+        },
+        {
+          "fiscalYearStart": "2024-05-16",
+          "quarter": 2,
+          "period": "2Q",
+          "disclosedDate": "2024-12-27",
+          "periodEnd": "2024-11-15",
+          "qNetSales": 5113000000.0,
+          "qOperatingProfit": 130000000.0,
+          "qOrdinaryProfit": 138000000.0,
+          "qProfit": 84000000.0,
+          "qEps": 6.100000000000001,
+          "cumNetSales": 10689000000.0,
+          "cumOperatingProfit": 618000000.0,
+          "cumOrdinaryProfit": 628000000.0,
+          "cumProfit": 261000000.0,
+          "cumEps": 19.05,
+          "forecastNetSales": 17738000000.0,
+          "forecastOperatingProfit": 1057000000.0,
+          "forecastOrdinaryProfit": 1065000000.0,
+          "forecastProfit": 520000000.0,
+          "forecastEps": 37.97,
+          "equity": 9429000000.0,
+          "totalAssets": 12643000000.0,
+          "sharesIssued": 14518000.0,
+          "treasuryShares": 782063.0,
+          "reportedRoe": null
+        },
+        {
+          "fiscalYearStart": "2024-05-16",
+          "quarter": 4,
+          "period": "FY",
+          "disclosedDate": "2025-04-24",
+          "periodEnd": "2025-02-28",
+          "qNetSales": null,
+          "qOperatingProfit": null,
+          "qOrdinaryProfit": null,
+          "qProfit": null,
+          "qEps": null,
+          "cumNetSales": 17388000000.0,
+          "cumOperatingProfit": 1052000000.0,
+          "cumOrdinaryProfit": 1070000000.0,
+          "cumProfit": 582000000.0,
+          "cumEps": 42.82,
+          "forecastNetSales": null,
+          "forecastOperatingProfit": null,
+          "forecastOrdinaryProfit": null,
+          "forecastProfit": null,
+          "forecastEps": null,
+          "equity": 7870000000.0,
+          "totalAssets": 10798000000.0,
+          "sharesIssued": 14518000.0,
+          "treasuryShares": 2031463.0,
+          "reportedRoe": 0.068
+        },
+        {
+          "fiscalYearStart": "2025-03-01",
+          "quarter": 1,
+          "period": "1Q",
+          "disclosedDate": "2025-07-11",
+          "periodEnd": "2025-05-31",
+          "qNetSales": 5719000000.0,
+          "qOperatingProfit": 535000000.0,
+          "qOrdinaryProfit": 542000000.0,
+          "qProfit": 259000000.0,
+          "qEps": 20.78,
+          "cumNetSales": 5719000000.0,
+          "cumOperatingProfit": 535000000.0,
+          "cumOrdinaryProfit": 542000000.0,
+          "cumProfit": 259000000.0,
+          "cumEps": 20.78,
+          "forecastNetSales": 24263000000.0,
+          "forecastOperatingProfit": 1445000000.0,
+          "forecastOrdinaryProfit": 1461000000.0,
+          "forecastProfit": 911000000.0,
+          "forecastEps": 73.03,
+          "equity": 7983000000.0,
+          "totalAssets": 11032000000.0,
+          "sharesIssued": 14518000.0,
+          "treasuryShares": 2030013.0,
+          "reportedRoe": null
+        },
+        {
+          "fiscalYearStart": "2025-03-01",
+          "quarter": 2,
+          "period": "2Q",
+          "disclosedDate": "2025-10-10",
+          "periodEnd": "2025-08-31",
+          "qNetSales": 5896000000.0,
+          "qOperatingProfit": 451000000.0,
+          "qOrdinaryProfit": 459000000.0,
+          "qProfit": 289000000.0,
+          "qEps": 23.089999999999996,
+          "cumNetSales": 11615000000.0,
+          "cumOperatingProfit": 986000000.0,
+          "cumOrdinaryProfit": 1001000000.0,
+          "cumProfit": 548000000.0,
+          "cumEps": 43.87,
+          "forecastNetSales": 24263000000.0,
+          "forecastOperatingProfit": 1445000000.0,
+          "forecastOrdinaryProfit": 1461000000.0,
+          "forecastProfit": 911000000.0,
+          "forecastEps": 73.03,
+          "equity": 8291000000.0,
+          "totalAssets": 11717000000.0,
+          "sharesIssued": 14518000.0,
+          "treasuryShares": 2018113.0,
+          "reportedRoe": null
+        },
+        {
+          "fiscalYearStart": "2025-03-01",
+          "quarter": 3,
+          "period": "3Q",
+          "disclosedDate": "2026-01-13",
+          "periodEnd": "2025-11-30",
+          "qNetSales": 5465000000.0,
+          "qOperatingProfit": -67000000.0,
+          "qOrdinaryProfit": -56000000.0,
+          "qProfit": -42000000.0,
+          "qEps": -3.309999999999995,
+          "cumNetSales": 17080000000.0,
+          "cumOperatingProfit": 919000000.0,
+          "cumOrdinaryProfit": 945000000.0,
+          "cumProfit": 506000000.0,
+          "cumEps": 40.56,
+          "forecastNetSales": 24263000000.0,
+          "forecastOperatingProfit": 1445000000.0,
+          "forecastOrdinaryProfit": 1461000000.0,
+          "forecastProfit": 911000000.0,
+          "forecastEps": 73.03,
+          "equity": 8256000000.0,
+          "totalAssets": 11742000000.0,
+          "sharesIssued": 14518000.0,
+          "treasuryShares": 2014563.0,
+          "reportedRoe": null
+        },
+        {
+          "fiscalYearStart": "2025-03-01",
+          "quarter": 4,
+          "period": "FY",
+          "disclosedDate": "2026-04-13",
+          "periodEnd": "2026-02-28",
+          "qNetSales": 6587000000.0,
+          "qOperatingProfit": 656000000.0,
+          "qOrdinaryProfit": 651000000.0,
+          "qProfit": 500000000.0,
+          "qEps": 40.00999999999999,
+          "cumNetSales": 23667000000.0,
+          "cumOperatingProfit": 1575000000.0,
+          "cumOrdinaryProfit": 1596000000.0,
+          "cumProfit": 1006000000.0,
+          "cumEps": 80.57,
+          "forecastNetSales": null,
+          "forecastOperatingProfit": null,
+          "forecastOrdinaryProfit": null,
+          "forecastProfit": null,
+          "forecastEps": null,
+          "equity": 8774000000.0,
+          "totalAssets": 12160000000.0,
+          "sharesIssued": 14518000.0,
+          "treasuryShares": 1997213.0,
+          "reportedRoe": 0.121
+        },
+        {
+          "fiscalYearStart": "2026-03-01",
+          "quarter": 1,
+          "period": "1Q",
+          "disclosedDate": "2026-07-13",
+          "periodEnd": "2026-05-31",
+          "qNetSales": 6338000000.0,
+          "qOperatingProfit": 787000000.0,
+          "qOrdinaryProfit": 796000000.0,
+          "qProfit": 507000000.0,
+          "qEps": 40.52,
+          "cumNetSales": 6338000000.0,
+          "cumOperatingProfit": 787000000.0,
+          "cumOrdinaryProfit": 796000000.0,
+          "cumProfit": 507000000.0,
+          "cumEps": 40.52,
+          "forecastNetSales": 24122000000.0,
+          "forecastOperatingProfit": 1203000000.0,
+          "forecastOrdinaryProfit": 1226000000.0,
+          "forecastProfit": 785000000.0,
+          "forecastEps": 62.83,
+          "equity": 9110000000.0,
+          "totalAssets": 12918000000.0,
+          "sharesIssued": 14518000.0,
+          "treasuryShares": 1995763.0,
+          "reportedRoe": null
+        }
+      ],
+      "history": [
+        {
+          "date": "2025-09-18",
+          "close": 1578.0
+        },
+        {
+          "date": "2025-09-24",
+          "close": 1589.0
+        },
+        {
+          "date": "2025-09-29",
+          "close": 1594.0
+        },
+        {
+          "date": "2025-10-02",
+          "close": 1568.0
+        },
+        {
+          "date": "2025-10-07",
+          "close": 1565.0
+        },
+        {
+          "date": "2025-10-10",
+          "close": 1560.0
+        },
+        {
+          "date": "2025-10-16",
+          "close": 1534.0
+        },
+        {
+          "date": "2025-10-21",
+          "close": 1531.0
+        },
+        {
+          "date": "2025-10-24",
+          "close": 1520.0
+        },
+        {
+          "date": "2025-10-29",
+          "close": 1514.0
+        },
+        {
+          "date": "2025-11-04",
+          "close": 1518.0
+        },
+        {
+          "date": "2025-11-07",
+          "close": 1517.0
+        },
+        {
+          "date": "2025-11-12",
+          "close": 1527.0
+        },
+        {
+          "date": "2025-11-17",
+          "close": 1511.0
+        },
+        {
+          "date": "2025-11-20",
+          "close": 1515.0
+        },
+        {
+          "date": "2025-11-26",
+          "close": 1517.0
+        },
+        {
+          "date": "2025-12-01",
+          "close": 1530.0
+        },
+        {
+          "date": "2025-12-04",
+          "close": 1523.0
+        },
+        {
+          "date": "2025-12-09",
+          "close": 1543.0
+        },
+        {
+          "date": "2025-12-12",
+          "close": 1548.0
+        },
+        {
+          "date": "2025-12-17",
+          "close": 1549.0
+        },
+        {
+          "date": "2025-12-22",
+          "close": 1554.0
+        },
+        {
+          "date": "2025-12-25",
+          "close": 1544.0
+        },
+        {
+          "date": "2025-12-30",
+          "close": 1578.0
+        },
+        {
+          "date": "2026-01-07",
+          "close": 1589.0
+        },
+        {
+          "date": "2026-01-13",
+          "close": 1606.0
+        },
+        {
+          "date": "2026-01-16",
+          "close": 1650.0
+        },
+        {
+          "date": "2026-01-21",
+          "close": 1647.0
+        },
+        {
+          "date": "2026-01-26",
+          "close": 1650.0
+        },
+        {
+          "date": "2026-01-29",
+          "close": 1636.0
+        },
+        {
+          "date": "2026-02-03",
+          "close": 1631.0
+        },
+        {
+          "date": "2026-02-06",
+          "close": 1658.0
+        },
+        {
+          "date": "2026-02-12",
+          "close": 1659.0
+        },
+        {
+          "date": "2026-02-17",
+          "close": 1661.0
+        },
+        {
+          "date": "2026-02-20",
+          "close": 1672.0
+        },
+        {
+          "date": "2026-02-26",
+          "close": 1608.0
+        },
+        {
+          "date": "2026-03-03",
+          "close": 1571.0
+        },
+        {
+          "date": "2026-03-06",
+          "close": 1611.0
+        },
+        {
+          "date": "2026-03-11",
+          "close": 1618.0
+        },
+        {
+          "date": "2026-03-16",
+          "close": 1597.0
+        },
+        {
+          "date": "2026-03-19",
+          "close": 1597.0
+        },
+        {
+          "date": "2026-03-25",
+          "close": 1590.0
+        },
+        {
+          "date": "2026-03-30",
+          "close": 1584.0
+        },
+        {
+          "date": "2026-04-02",
+          "close": 1580.0
+        },
+        {
+          "date": "2026-04-07",
+          "close": 1595.0
+        },
+        {
+          "date": "2026-04-10",
+          "close": 1605.0
+        },
+        {
+          "date": "2026-04-15",
+          "close": 1595.0
+        },
+        {
+          "date": "2026-04-20",
+          "close": 1605.0
+        },
+        {
+          "date": "2026-04-23",
+          "close": 1597.0
+        },
+        {
+          "date": "2026-04-28",
+          "close": 1616.0
+        },
+        {
+          "date": "2026-05-07",
+          "close": 1611.0
+        },
+        {
+          "date": "2026-05-12",
+          "close": 1610.0
+        },
+        {
+          "date": "2026-05-15",
+          "close": 1604.0
+        },
+        {
+          "date": "2026-05-20",
+          "close": 1594.0
+        },
+        {
+          "date": "2026-05-25",
+          "close": 1596.0
+        },
+        {
+          "date": "2026-05-28",
+          "close": 1597.0
+        },
+        {
+          "date": "2026-06-02",
+          "close": 1603.0
+        },
+        {
+          "date": "2026-06-05",
+          "close": 1600.0
+        },
+        {
+          "date": "2026-06-10",
+          "close": 1606.0
+        },
+        {
+          "date": "2026-06-15",
+          "close": 1608.0
+        },
+        {
+          "date": "2026-06-18",
+          "close": 1615.0
+        },
+        {
+          "date": "2026-06-23",
+          "close": 1620.0
+        },
+        {
+          "date": "2026-06-26",
+          "close": 1633.0
+        },
+        {
+          "date": "2026-07-01",
+          "close": 1652.0
+        },
+        {
+          "date": "2026-07-06",
+          "close": 1652.0
+        },
+        {
+          "date": "2026-07-09",
+          "close": 1650.0
+        },
+        {
+          "date": "2026-07-14",
+          "close": 1696.0
+        },
+        {
+          "date": "2026-07-17",
+          "close": 1693.0
+        },
+        {
+          "date": "2026-07-23",
+          "close": 1703.0
+        },
+        {
+          "date": "2026-07-28",
+          "close": 1747.0
+        },
+        {
+          "date": "2026-07-31",
+          "close": 1722.0
+        },
+        {
+          "date": "2026-08-05",
+          "close": 1711.0
+        },
+        {
+          "date": "2026-08-10",
+          "close": 1707.0
+        },
+        {
+          "date": "2026-08-14",
+          "close": 1703.0
+        },
+        {
+          "date": "2026-08-19",
+          "close": 1692.0
+        },
+        {
+          "date": "2026-08-24",
+          "close": 1706.0
+        },
+        {
+          "date": "2026-08-27",
+          "close": 1721.0
+        },
+        {
+          "date": "2026-09-01",
+          "close": 1650.0
+        },
+        {
+          "date": "2026-09-04",
+          "close": 1639.0
+        },
+        {
+          "date": "2026-09-09",
+          "close": 1649.0
+        },
+        {
+          "date": "2026-09-14",
+          "close": 1652.0
+        },
+        {
+          "date": "2026-09-17",
+          "close": 1660.0
+        }
+      ],
+      "sources": {
+        "price": "jquants",
+        "high52w": "jquants",
+        "highRatio": "jquants",
+        "tradingValue": "jquants",
+        "volumeTrend": "jquants",
+        "epsGrowth": "jquants",
+        "salesGrowth": "jquants",
+        "roe": "jquants",
+        "opMargin": "jquants",
+        "progressRate": "jquants",
+        "creditRatio": "unavailable",
         "marketCap": "jquants"
       },
       "origin": "jquants"
