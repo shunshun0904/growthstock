@@ -55,6 +55,21 @@ jobs:
           gh release download data-raw --dir research/_data --clobber
           ls -lh research/_data | head -5
 
+      # 休場日に走ってもやることが無い。ここで見分けて、以降を飛ばす。
+      #
+      # 鮮度チェックは遅れを平日で数える（祝日カレンダーを持ち込まない）
+      # ので、連休では「正常な休場」と「取り込み障害」が同じ赤い×になる。
+      # 毎回の連休で赤が出ると、本物の障害を見逃す訓練になってしまう。
+      #
+      # 営業日かどうかは**推測しない**。カレンダーを引いている取り込み側が
+      # manifest に書き残した事実を読むだけ。しかも「直近の営業日ぶんの
+      # データが揃っている」ことまで確かめてから飛ばすので、取り込みが
+      # 壊れていれば休場日でも飛ばさず、次の鮮度チェックで落ちる。
+      # 判断できないときは必ず「進む」側へ倒れる（exit 0 固定）。
+      - name: Trading-day gate
+        id: gate
+        run: python3 research/trading_day_gate.py
+
       # 取り込みが失敗した日に、黙って昨日と同じ候補を出さないための関門。
       # 日次予測は取得を行わない（Update Data Store が唯一の書き手）ので、
       # 古ければここで止める。
@@ -62,6 +77,7 @@ jobs:
       # コミットすると、差分圧縮が効かず年138MB リポジトリが膨らむため。
       # まだ Release に上がっていない移行期は、git 側の版をそのまま使う。
       - name: Download model (release)
+        if: steps.gate.outputs.run != 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -97,16 +113,19 @@ jobs:
           fi
 
       - name: Check freshness
+        if: steps.gate.outputs.run != 'false'
         run: python3 research/check_freshness.py --max-age 1
 
       # 予測したい行（今日のブレイク）はラベルがまだ確定していないので、
       # --keep-unlabeled を付けて残す。学習には絶対に使わないデータセット
       - name: Build prediction dataset
+        if: steps.gate.outputs.run != 'false'
         run: |
           python3 research/build_dataset.py --keep-unlabeled \
             --out research/_data/dataset_predict.parquet 2>&1 | tail -25
 
       - name: Score today's candidates
+        if: steps.gate.outputs.run != 'false'
         run: python3 research/predict_daily.py 2>&1 | tee predict.log
 
       # その日の上位銘柄を、既存の取得スクリプトに通して stocks.json を作る。
@@ -116,6 +135,7 @@ jobs:
       # タイムマシーン（過去比較）が使えない。スナップショットと株価履歴は
       # この取得スクリプトだけが作れる。
       - name: Fetch details for today's picks
+        if: steps.gate.outputs.run != 'false'
         env:
           JQUANTS_API: ${{ secrets.JQUANTS_API }}
         run: |
@@ -136,6 +156,7 @@ jobs:
       # 反映されないところだった。画面が主で台帳が従なので、従の失敗で主を
       # 落とさない。失敗そのものは実行結果に赤で残り、下の Summary にも出る。
       - name: Append to spreadsheet
+        if: steps.gate.outputs.run != 'false'
         continue-on-error: true
         id: sheets
         env:
@@ -150,6 +171,7 @@ jobs:
           python3 research/export_sheets.py 2>&1 | tail -10
 
       - name: Commit predictions
+        if: steps.gate.outputs.run != 'false'
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -167,6 +189,11 @@ jobs:
         if: always()
         run: |
           { echo '## ブレイク予測'
+            if [ "${{ steps.gate.outputs.run }}" = "false" ]; then
+              echo "> 🛌 **本日は非営業日のため予測を行いませんでした。**"
+              echo "> ${{ steps.gate.outputs.reason }}"
+              echo '> 画面は前営業日の内容のままです。'
+            fi
             if [ "${{ steps.sheets.outcome }}" = "failure" ]; then
               echo '> ⚠ **スプレッドシートへの追記に失敗しました。**'
               echo '> 画面は更新済みですが、台帳にはこの日の行が入っていません。'

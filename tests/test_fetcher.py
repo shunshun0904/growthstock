@@ -377,6 +377,22 @@ class TestWaitForData(unittest.TestCase):
         self.W.JQuantsClient = Fake
         return calls
 
+    @staticmethod
+    def _future_weekday():
+        """
+        実時刻より必ず未来の平日を返す。
+
+        締切は「その日の HH:MM」で作られるので、固定日を書くと日が経った
+        ときに締切が過去になり、ポーリングせず1巡で諦めるようになる
+        （実際に 2026-09-18 固定で書いていて、日付が変わって落ちた）。
+        """
+        import datetime as _dt
+        d = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=9))).date() \
+            + _dt.timedelta(days=7)
+        while d.weekday() >= 5:
+            d += _dt.timedelta(days=1)
+        return d.isoformat()
+
     def _client_by_path(self, table):
         """パスごとに返す行を決める偽クライアント。table: パス -> 行の列。"""
         seqs = {k: list(v) for k, v in table.items()}
@@ -410,14 +426,15 @@ class TestWaitForData(unittest.TestCase):
         self.assertEqual(calls, [])
 
     def test_returns_as_soon_as_rows_appear(self):
+        day = self._future_weekday()
         bar = {"Code": "13010", "C": 1000}
         calls = self._client_returning([[], [], [bar]])
-        rc = self.W.main(["--date", "2026-09-18", "--feeds", "bars",
+        rc = self.W.main(["--date", day, "--feeds", "bars",
                           "--deadline", "23:59", "--interval", "1"])
         self.assertEqual(rc, 0)
         self.assertEqual(len(calls), 3)
         self.assertEqual(calls[0][0], "/equities/bars/daily")
-        self.assertEqual(calls[0][1], {"date": "2026-09-18"})
+        self.assertEqual(calls[0][1], {"date": day})
 
     def test_waits_for_every_feed_not_just_bars(self):
         """
@@ -425,13 +442,14 @@ class TestWaitForData(unittest.TestCase):
         build_dataset は merge_asof(backward) で結合するので、
         欠測ではなく**前日の値**が黙って入る。だから全部揃うまで待つ。
         """
+        day = self._future_weekday()
         bar = {"Code": "13010", "C": 1000}
         calls = self._client_by_path({
             "/equities/bars/daily": [[bar]],              # 1回目で揃う
             "/indices/bars/daily": [[], [{"Code": "0040"}]],
             "/indices/bars/daily/topix": [[], [], [{"C": 2800}]],
         })
-        rc = self.W.main(["--date", "2026-09-18", "--deadline", "23:59",
+        rc = self.W.main(["--date", day, "--deadline", "23:59",
                           "--interval", "1"])
         self.assertEqual(rc, 0)
         # 揃った対象は二度と叩かない
@@ -441,7 +459,7 @@ class TestWaitForData(unittest.TestCase):
         self.assertEqual(paths.count("/indices/bars/daily/topix"), 3)
         # TOPIX だけ期間指定で引く（実測に使った叩き方と同じ）
         tp = [c for c in calls if c[0] == "/indices/bars/daily/topix"][0]
-        self.assertEqual(tp[1], {"from": "2026-09-18", "to": "2026-09-18"})
+        self.assertEqual(tp[1], {"from": day, "to": day})
 
     def test_bars_needs_a_close_not_just_a_row(self):
         """
@@ -452,7 +470,7 @@ class TestWaitForData(unittest.TestCase):
             [{"Code": "13010", "C": None}],   # 行はあるが終値が無い
             [{"Code": "13010", "C": 1000}],
         ])
-        rc = self.W.main(["--date", "2026-09-18", "--feeds", "bars",
+        rc = self.W.main(["--date", self._future_weekday(), "--feeds", "bars",
                           "--deadline", "23:59", "--interval", "1"])
         self.assertEqual(rc, 0)
         self.assertEqual(len(calls), 2)
@@ -487,19 +505,26 @@ class TestWaitForData(unittest.TestCase):
         from jquants_data_fetcher import JQuantsError
 
         class Flaky:
+            seen: list = []
+
             def __init__(self, *a, **k):
                 self.n = 0
 
             def get_paginated(self, path, params):
                 self.n += 1
+                Flaky.seen.append(path)
                 if self.n == 1:
                     raise JQuantsError("503")
                 return [{"Code": "13010", "C": 1000}]
 
+        seen = []
+        Flaky.seen = seen
         self.W.JQuantsClient = Flaky
-        rc = self.W.main(["--date", "2026-09-18", "--feeds", "bars",
+        rc = self.W.main(["--date", self._future_weekday(), "--feeds", "bars",
                           "--deadline", "23:59", "--interval", "1"])
         self.assertEqual(rc, 0)
+        # 1回目は失敗、2回目で揃う。1巡で諦めていないこと
+        self.assertEqual(len(seen), 2)
 
     def test_never_sleeps_past_the_deadline(self):
         """

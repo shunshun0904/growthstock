@@ -469,5 +469,141 @@ class TestRecordFetched(unittest.TestCase):
         self.assertEqual(m["fins"]["fetched_days"], ["2026-09-18"])
 
 
+class TestCalendarNote(unittest.TestCase):
+    """
+    取り込みが「今日は営業日か」を manifest に書き残すところ。
+
+    営業日カレンダーを引いているのは取り込みだけなので、ここが唯一の
+    情報源になる。予測側が自分で祝日を判断しないための信号。
+    """
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(ROOT, "research"))
+        import jq_bulk
+        self.jq = jq_bulk
+        self.days = days("2026-09-16", "2026-09-17", "2026-09-18")
+
+    def test_trading_day(self):
+        c = self.jq.calendar_note(self.days, dt.date(2026, 9, 18),
+                                  today=dt.date(2026, 9, 18))
+        self.assertIs(c["isTradingDay"], True)
+        self.assertEqual(c["lastTradingDay"], "2026-09-18")
+
+    def test_holiday(self):
+        """2026-09-21 は敬老の日。カレンダーに入らないので非営業日。"""
+        c = self.jq.calendar_note(self.days, dt.date(2026, 9, 21),
+                                  today=dt.date(2026, 9, 21))
+        self.assertIs(c["isTradingDay"], False)
+        self.assertEqual(c["lastTradingDay"], "2026-09-18")
+
+    def test_past_range_cannot_judge_today(self):
+        """
+        過去日を指定して取り直した場合、days に今日は入らない。
+        「入っていない＝非営業日」と読むと誤判定になるので None にする。
+        """
+        c = self.jq.calendar_note(self.days, dt.date(2026, 9, 18),
+                                  today=dt.date(2026, 9, 21))
+        self.assertIsNone(c["isTradingDay"])
+
+    def test_no_days(self):
+        c = self.jq.calendar_note([], dt.date(2026, 9, 21),
+                                  today=dt.date(2026, 9, 21))
+        self.assertIsNone(c["isTradingDay"])
+        self.assertIsNone(c["lastTradingDay"])
+
+
+class TestTradingDayGate(unittest.TestCase):
+    """
+    非営業日に日次予測を飛ばす判定。
+
+    **飛ばす側に倒してはいけない。** 取り込みが壊れている日を「休場だから」
+    と飛ばすと、気づかないまま画面が止まる。judge は3条件すべてが
+    揃ったときだけ False（飛ばす）を返し、それ以外は必ず True を返す。
+    """
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(ROOT, "research"))
+        import trading_day_gate
+        self.g = trading_day_gate
+        self.now = dt.datetime(2026, 9, 21, 12, 0, tzinfo=dt.timezone.utc)
+
+    def _manifest(self, **over):
+        cal = {"asOfJst": "2026-09-21", "requestedTo": "2026-09-21",
+               "isTradingDay": False, "lastTradingDay": "2026-09-18"}
+        cal.update(over.pop("calendar", {}))
+        m = {"calendar": cal,
+             "updatedAt": "2026-09-21T11:30:00+00:00"}
+        m.update(over)
+        return m
+
+    def test_holiday_with_complete_data_is_skipped(self):
+        run, why = self.g.decide(self._manifest(), dt.date(2026, 9, 18),
+                                 self.now)
+        self.assertFalse(run, why)
+
+    def test_trading_day_runs(self):
+        m = self._manifest(calendar={"isTradingDay": True})
+        run, _ = self.g.decide(m, dt.date(2026, 9, 21), self.now)
+        self.assertTrue(run)
+
+    def test_unknown_runs(self):
+        m = self._manifest(calendar={"isTradingDay": None})
+        run, _ = self.g.decide(m, dt.date(2026, 9, 18), self.now)
+        self.assertTrue(run)
+
+    def test_old_manifest_without_calendar_runs(self):
+        run, _ = self.g.decide({"updatedAt": "2026-09-21T11:30:00+00:00"},
+                               dt.date(2026, 9, 18), self.now)
+        self.assertTrue(run)
+
+    def test_stale_manifest_runs(self):
+        """
+        取り込みが今日走っていないなら、その calendar は昨日以前の判断。
+        休場日でも飛ばさず、鮮度チェックに任せる。
+        """
+        m = self._manifest(updatedAt="2026-09-19T11:30:00+00:00")
+        run, why = self.g.decide(m, dt.date(2026, 9, 18), self.now)
+        self.assertTrue(run)
+        self.assertIn("古い", why)
+
+    def test_data_behind_last_trading_day_runs(self):
+        """
+        ここが肝。休場日でも、保存データが直近の営業日に届いていなければ
+        取り込みが壊れている。飛ばさずに鮮度チェックで落とす。
+        """
+        run, why = self.g.decide(self._manifest(), dt.date(2026, 9, 11),
+                                 self.now)
+        self.assertTrue(run)
+        self.assertIn("取り込みを疑う", why)
+
+    def test_missing_last_trading_day_runs(self):
+        m = self._manifest(calendar={"lastTradingDay": None})
+        run, _ = self.g.decide(m, dt.date(2026, 9, 18), self.now)
+        self.assertTrue(run)
+
+    def test_no_bars_runs(self):
+        run, _ = self.g.decide(self._manifest(), None, self.now)
+        self.assertTrue(run)
+
+    def test_broken_updated_at_runs(self):
+        m = self._manifest(updatedAt="いつか")
+        run, _ = self.g.decide(m, dt.date(2026, 9, 18), self.now)
+        self.assertTrue(run)
+
+    def test_main_always_returns_zero(self):
+        """
+        判定できない事情が何であれ exit 0。ここが新しい失敗の入口に
+        なってはいけない（止めるのは鮮度チェックの仕事）。
+        """
+        empty = tempfile.mkdtemp()
+        try:
+            self.assertEqual(self.g.main(["--data-dir", empty]), 0)
+            with open(os.path.join(empty, "manifest.json"), "w") as fh:
+                fh.write("これは JSON ではない")
+            self.assertEqual(self.g.main(["--data-dir", empty]), 0)
+        finally:
+            shutil.rmtree(empty, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

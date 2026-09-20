@@ -462,6 +462,41 @@ def _record_fetched(manifest: dict, name: str, todo: List[dt.date],
               f"取得済みにしない（次回また取りに行く）: {shown}{more}")
 
 
+def calendar_note(days: List[dt.date], end: dt.date,
+                  today: Optional[dt.date] = None) -> dict:
+    """
+    取得時点の営業日カレンダーを manifest に残すための1行。
+
+    なぜ要るか
+    --------
+    日次予測は「新しいデータが無い」を2通りに取り違えうる。
+
+      (a) 今日は非営業日なので、そもそも新しいデータが無い（正常）
+      (b) 取り込みが壊れていて新しいデータが入っていない（異常）
+
+    鮮度チェック（check_freshness.py）は平日で数えるので、この2つを
+    区別できない。連休は (a) なのに (b) として落ちる。
+
+    営業日カレンダーを引いているのは取り込みのここだけなので、ここで
+    事実として書き残し、下流（research/trading_day_gate.py）に渡す。
+    予測側にカレンダーを持ち込むのではなく、既に知っている側から渡す形に
+    してある。予測側が自分で「祝日だから」と言い訳できる余地を作らない。
+
+    「今日が営業日か」は、要求した期間の終わりが今日以降のときしか
+    分からない（過去日を指定して取り直した場合、days に今日は入らない）。
+    分からないときは None を入れる。下流は None を「判断材料なし」として
+    扱い、通常どおり鮮度チェックへ進む。
+    """
+    today = today or _today_jst()
+    known = bool(days) and end >= today
+    return {
+        "asOfJst": today.isoformat(),
+        "requestedTo": end.isoformat(),
+        "isTradingDay": (today in set(days)) if known else None,
+        "lastTradingDay": days[-1].isoformat() if days else None,
+    }
+
+
 def _run_incremental(client: JQuantsClient, days: List[dt.date],
                      start: dt.date, end: dt.date, args) -> int:
     """
@@ -614,6 +649,18 @@ def _run_incremental(client: JQuantsClient, days: List[dt.date],
             manifest["master"] = {"as_of": days[-1].isoformat(), "count": int(len(df))}
         except JQuantsError as exc:
             print(f"[master] 取得できませんでした: {exc}", file=sys.stderr)
+
+    # 営業日カレンダーを事実として書き残す（理由は calendar_note）
+    cal = calendar_note(days, end)
+    manifest["calendar"] = cal
+    if cal["isTradingDay"] is False:
+        print(f"\n[calendar] {cal['asOfJst']} は非営業日。"
+              f"直近の営業日は {cal['lastTradingDay']}")
+    elif cal["isTradingDay"] is True:
+        print(f"\n[calendar] {cal['asOfJst']} は営業日")
+    else:
+        print(f"\n[calendar] {cal['asOfJst']} が営業日かは判断しない"
+              f"（要求の終わりが {cal['requestedTo']}）")
 
     data_store.save_manifest(args.out_dir, manifest)
     print("\n[manifest] 更新後:")
