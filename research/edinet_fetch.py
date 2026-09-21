@@ -21,8 +21,10 @@ EDINET DB (edinetdb.jp) から有価証券報告書ベースの年次財務を�
 ようにする。429 が返ったら記録せずに止める（翌日また取る）。
 
 取る順番は research/edinet_targets.txt（母集団に多く出る銘柄が先）。
-一度 200 で取れた会社は取り直さない。404（データ無し）も記録して二度と
-叩かない。それ以外の失敗は記録して次回また試す。
+200 で取れた会社と 404（データ無し）の会社は記録し、REFRESH_AFTER_DAYS
+（60日）が過ぎるまで叩かない。過ぎたら、未取得の会社を全部片づけた後に
+古い順に取り直す（有報は年1回増える。新規上場の 404 もいずれデータが付く）。
+それ以外の失敗は記録して次回また試す。
 
 保存
 ----
@@ -67,6 +69,9 @@ MONTHLY_BUDGET = 850
 DAILY_RESERVE = 10
 #: 対応表を取り直す間隔
 MAPPING_MAX_AGE_DAYS = 30
+#: 取得済み（200）・データ無し（404）の会社を取り直す間隔。有報は年1回なので、
+#: 全社を一巡（約3,800社 ÷ 85社/日 ≈ 45日）してから古い順に更新する
+REFRESH_AFTER_DAYS = 60
 PAGE_SIZE = 200
 YEARS = 30
 KEY_COLS = ["edinet_code", "fiscal_year", "doc_id"]
@@ -111,15 +116,49 @@ def read_targets(path: str) -> List[str]:
     return out
 
 
-def header_remaining(p: Probe) -> Optional[int]:
-    """直前の応答の x-ratelimit-remaining。無ければ None。"""
+def header_remaining(p: Probe, name: str = "x-ratelimit-remaining") -> Optional[int]:
+    """直前の応答の利用枠ヘッダ（既定は日次の残数）。無ければ None。"""
     for k, v in p.last_headers.items():
-        if k.lower() == "x-ratelimit-remaining":
+        if k.lower() == name:
             try:
                 return int(v)
             except ValueError:
                 return None
     return None
+
+
+def _age_days(rec: dict, now: dt.datetime) -> Optional[float]:
+    try:
+        at = dt.datetime.fromisoformat(rec["at"])
+    except (KeyError, TypeError, ValueError):
+        return None
+    if at.tzinfo is None:
+        at = at.replace(tzinfo=dt.timezone.utc)
+    return (now - at).total_seconds() / 86400.0
+
+
+def fetch_order(targets: List[str], code_to_edinet: Dict[str, str], comp: dict,
+                now: dt.datetime) -> List[str]:
+    """
+    この実行で問い合わせる順。
+      1. まだ取れていない会社（未取得・前回失敗）を取得順リストの順に
+      2. 取得済み・データ無しのうち REFRESH_AFTER_DAYS を過ぎた会社を古い順に
+    対応表に無い会社は含めない。
+    """
+    fresh: List[str] = []
+    stale: List[tuple] = []
+    for jq in targets:
+        e = code_to_edinet.get(jq)
+        if not e:
+            continue
+        rec = comp.get(e) or {}
+        if rec.get("status") not in ("ok", "no_data"):
+            fresh.append(jq)
+            continue
+        age = _age_days(rec, now)
+        if age is None or age >= REFRESH_AFTER_DAYS:
+            stale.append((-(age if age is not None else 1e9), jq))
+    return fresh + [jq for _, jq in sorted(stale)]
 
 
 def clamp_budget(p: Probe, reserve: int) -> None:
@@ -228,18 +267,14 @@ def fetch_financials(p: Probe, data_dir: str, m: dict, mapping: pd.DataFrame,
     existing_path = os.path.join(data_dir, FIN)
     existing = pd.read_parquet(existing_path) if os.path.exists(existing_path) else None
     frames: List[pd.DataFrame] = []
-    done = unmapped = new_rows = 0
+    done = new_rows = 0
+    unmapped = sum(1 for jq in targets if not code_to_edinet.get(jq))
     comp = m["companies"]
-    for jq in targets:
+    for jq in fetch_order(targets, code_to_edinet, comp, now):
         if done >= n:
             break
-        e = code_to_edinet.get(jq)
-        if not e:
-            unmapped += 1
-            continue
+        e = code_to_edinet[jq]
         rec = comp.get(e) or {}
-        if rec.get("status") in ("ok", "no_data"):
-            continue
         rem = header_remaining(p)
         if rem is not None and rem <= reserve:
             p.say(f"  [stop] 日次の残数 {rem} が予備 {reserve} 以下。ここで止める")
@@ -344,7 +379,8 @@ def main(argv=None) -> int:
     p.say(f"[state] 取得済み {n_ok:,}社 / データ無し {n_nd:,}社 / 失敗（再試行）{n_er:,}社 "
           f"/ 残り {sum(1 for t in targets if t not in {v.get('jq') for v in comp.values()}):,}社")
     p.say(f"[quota] この実行 {p.used} / 今月 {spent + p.used} / 予算 {args.monthly_budget}"
-          f"（日次の残数 {header_remaining(p)}）")
+          f"（応答ヘッダ: 日次の残数 {header_remaining(p)} / "
+          f"月次の残数 {header_remaining(p, 'x-ratelimit-monthly-remaining')}）")
     return 0
 
 

@@ -58,6 +58,8 @@ from train_production import (  # noqa: E402
     OOF_MIN_TRAIN_MONTHS, OOF_STEP_MONTHS, OOF_TEST_MONTHS)
 
 ITEMS = ["Sales", "OP", "NP", "EPS"]
+#: 何期前まで持つか（1 = 前期, 2 = 2年前, 3 = 3年前）
+LAGS = (1, 2, 3)
 OUTCOME = "ret_o1_20"
 TOP_PCT = 90
 #: 最新の通期がこれより古ければ「開示が止まっている」とみなして捨てる
@@ -90,30 +92,31 @@ def annual_panel(data_dir: str) -> pd.DataFrame:
           .drop_duplicates(["Code", "fy_end"], keep="first")
           .sort_values(["Code", "fy_end"]).reset_index(drop=True))
     g = f.groupby("Code")
-    for k in (1, 2):
+    for k in LAGS:
         for c in ITEMS:
             f[f"{c}_y{k}"] = g[c].shift(k)
         f[f"fy_end_y{k}"] = g["fy_end"].shift(k)
-    gap1 = (f["fy_end"] - f["fy_end_y1"]).dt.days
-    gap2 = (f["fy_end"] - f["fy_end_y2"]).dt.days
-    ok1 = gap1.between(300, 430)
-    ok2 = gap2.between(600, 860)
-    for c in ITEMS:
-        f.loc[~ok1, f"{c}_y1"] = np.nan
-        f.loc[~ok2, f"{c}_y2"] = np.nan
+    # 年度末の間隔が k 年 ± 約2か月のときだけ連続とみなす（決算期変更をまたがない）
+    for k in LAGS:
+        gap = (f["fy_end"] - f[f"fy_end_y{k}"]).dt.days
+        ok = gap.between(365 * k - 65, 365 * k + 65)
+        for c in ITEMS:
+            f.loc[~ok, f"{c}_y{k}"] = np.nan
     keep = ["Code", "DiscDate", "fy_end"] + ITEMS + \
-        [f"{c}_y{k}" for c in ITEMS for k in (1, 2)]
+        [f"{c}_y{k}" for c in ITEMS for k in LAGS]
     return f[keep]
 
 
 def features(df: pd.DataFrame) -> Dict[str, pd.Series]:
     out: Dict[str, pd.Series] = {}
     for c in ITEMS:
-        y0, y1, y2 = df[c], df[f"{c}_y1"], df[f"{c}_y2"]
-        yoy1, yoy2 = sym(y0, y1), sym(y1, y2)
+        y0, y1, y2, y3 = df[c], df[f"{c}_y1"], df[f"{c}_y2"], df[f"{c}_y3"]
+        yoy1, yoy2, yoy3 = sym(y0, y1), sym(y1, y2), sym(y2, y3)
         out[f"{c}_yoy1"] = yoy1                       # 直近の前年比
         out[f"{c}_yoy2"] = yoy2                       # 1期前の前年比
+        out[f"{c}_yoy3"] = yoy3                       # 2期前の前年比
         out[f"{c}_2y"] = sym(y0, y2)                  # 2年での変化
+        out[f"{c}_3y"] = sym(y0, y3)                  # 3年での変化
         out[f"{c}_accel"] = yoy1 - yoy2               # 加速
         peak = pd.concat([y1, y2], axis=1).max(axis=1)
         out[f"{c}_recovery"] = sym(y0, peak)          # 過去2期の高いほうを超えたか
@@ -121,6 +124,14 @@ def features(df: pd.DataFrame) -> Dict[str, pd.Series]:
         both = y0.notna() & y1.notna() & y2.notna()
         out[f"{c}_vshape"] = ((y1 < y2) & (y0 > y1)).astype(float).where(both)
         out[f"{c}_3y_high"] = ((y0 > y1) & (y0 > y2)).astype(float).where(both)
+        # 3年前まで見た版（悪化 → 立て直し が2期以上かかる経路を拾う）
+        peak3 = pd.concat([y1, y2, y3], axis=1).max(axis=1)
+        prior3 = pd.concat([y2, y3], axis=1).max(axis=1)
+        all4 = both & y3.notna()
+        out[f"{c}_recovery3"] = sym(y0, peak3).where(all4)   # 過去3期の最高を超えたか
+        out[f"{c}_dip3"] = sym(y1, prior3).clip(upper=0.0).where(all4)  # 前期が過去の山からどれだけ落ちたか
+        out[f"{c}_vshape3"] = ((y1 < prior3) & (y0 > y1)).astype(float).where(all4)
+        out[f"{c}_4y_high"] = (y0 > peak3).astype(float).where(all4)
         if c != "Sales":
             out[f"{c}_turn"] = ((y1 <= 0) & (y0 > 0)).astype(float).where(y0.notna() & y1.notna())
     m0 = (df["OP"] / df["Sales"]).where(df["Sales"] > 0)
@@ -185,8 +196,8 @@ def main() -> int:
     panel = annual_panel(lab.DATA_DIR)
     print(f"年次パネル {len(panel):,}行（Code×年度）/ 銘柄 {panel['Code'].nunique():,} / "
           f"年度末 {panel['fy_end'].min().date()} 〜 {panel['fy_end'].max().date()}")
-    for k in (1, 2):
-        print(f"  前{k}期が連続で取れている行: "
+    for k in LAGS:
+        print(f"  {k}期前が連続で取れている行: "
               f"{panel[f'Sales_y{k}'].notna().mean()*100:.1f}%")
 
     # 各サンプルに「Date 以前に開示された最新の通期」を付ける
@@ -195,11 +206,12 @@ def main() -> int:
     m = pd.merge_asof(frame, panel, left_on="Date", right_on="DiscDate", by="Code",
                       direction="backward", allow_exact_matches=True)
     stale = (m["Date"] - m["DiscDate"]).dt.days > STALE_DAYS
-    for c in [c for c in m.columns if c in ITEMS or c.endswith(("_y1", "_y2"))]:
+    for c in [c for c in m.columns if c in ITEMS or c.endswith(("_y1", "_y2", "_y3"))]:
         m.loc[stale | m["DiscDate"].isna(), c] = np.nan
     print(f"通期が付いた行 {m['Sales'].notna().mean()*100:.1f}% / "
           f"前期まで {m['Sales_y1'].notna().mean()*100:.1f}% / "
-          f"前々期まで {m['Sales_y2'].notna().mean()*100:.1f}%")
+          f"2年前まで {m['Sales_y2'].notna().mean()*100:.1f}% / "
+          f"3年前まで {m['Sales_y3'].notna().mean()*100:.1f}%")
 
     feats = features(m)
     for k, v in feats.items():

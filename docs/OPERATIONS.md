@@ -13,6 +13,7 @@
 | モデル本体（追加4つ） | `<algo>_model.joblib` / `<algo>_oof.parquet` | **GitHub Release（`data-raw`）** | 日曜の朝 | 同上。合計2.7MB。meta.json だけ git に残す |
 | モデルの素性 | `research/model/meta.json`（9KB） | git | 日曜の朝 | 過去のモデルが「どういうものだったか」を追えるようにする |
 | 生データ | 日次バー・財務・信用残ほか | GitHub Release（`data-raw`） | 平日16:05 起動 | 全期間の取得に2.5時間かかるため、差分だけ取って書き戻す |
+| 有報の年次財務 | `edinet_fin.parquet` / `edinet_companies.parquet` / `edinet_manifest.json` | GitHub Release（`data-raw`） | 毎日 10:05 起動 | EDINET DB は 100/日・900/月の枠しか無いので、毎日 85社ずつ差分で貯める（`docs/DATA_EDINETDB.md`）。**まだ研究用で、本番の特徴量には入っていない** |
 
 ## 動く順番
 
@@ -28,6 +29,9 @@
                                      → スプレッドシートへ追記
                                      → コミット → Pages 再デプロイ
 
+毎日 10:05 JST  Fetch EDINET DB      EDINET DB から年次財務を 85社ぶん取って
+                                     Release へ（1社1リクエスト。月 850 で止まる）
+
 日曜 09:05 JST  Retrain Weekly       J-Quants から差分取得（日曜は取り込みが
                                      走らないので自分で取りに行く）
                                      → 鮮度チェック（2営業日より古ければ停止）
@@ -42,6 +46,7 @@
 |---|---|---|---|
 | Update Data Store | 平日 16:05 JST | 平日 20:06〜21:42 JST | 数分（実測1分35秒） |
 | Retrain Weekly | 日曜 09:05 JST | **日曜 13:06〜14:42 JST** | 日曜 16:00〜19:45 JST |
+| Fetch EDINET DB | 毎日 10:05 JST | 毎日 14:06〜15:42 JST（見込み） | 1〜2分（初回実測 1分10秒） |
 
 学習は探索込みで3〜5時間かかる。**日曜の朝9時に見て「まだ始まっていない」のは
 異常ではない** —— 実際に動き出すのは昼過ぎになる。

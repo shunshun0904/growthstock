@@ -205,5 +205,53 @@ class TestQuota(Base):
         self.assertIn("updatedAt", m2)
 
 
+class TestFetchOrder(unittest.TestCase):
+    def setUp(self):
+        self.map = {"10000": "E1", "20000": "E2", "30000": "E3", "40000": "E4"}
+
+    def test_unfetched_first_then_oldest_refresh(self):
+        old = (NOW - dt.timedelta(days=100)).isoformat()
+        older = (NOW - dt.timedelta(days=200)).isoformat()
+        fresh = (NOW - dt.timedelta(days=10)).isoformat()
+        comp = {"E1": {"status": "ok", "at": old},
+                "E2": {"status": "no_data", "at": older},
+                "E3": {"status": "error", "at": fresh},
+                "E4": {"status": "ok", "at": fresh}}
+        order = E.fetch_order(["10000", "20000", "30000", "40000", "99990"], self.map, comp, NOW)
+        # 失敗は先、次に古い順（E2 200日 → E1 100日）。10日前の E4 と対応表に無い 99990 は含まない
+        self.assertEqual(order, ["30000", "20000", "10000"])
+
+    def test_never_fetched_keeps_target_order(self):
+        order = E.fetch_order(["40000", "10000", "20000"], self.map, {}, NOW)
+        self.assertEqual(order, ["40000", "10000", "20000"])
+
+    def test_missing_at_counts_as_stale(self):
+        comp = {"E1": {"status": "ok"}}
+        self.assertEqual(E.fetch_order(["10000"], self.map, comp, NOW), ["10000"])
+
+    def test_refresh_appends_new_year_rows(self):
+        d = tempfile.mkdtemp()
+        try:
+            mapping = pd.DataFrame({"edinet_code": ["E1"], "code": ["10000"]})
+            m = E.load_manifest(d)
+            hdr = {"x-ratelimit-remaining": "50"}
+            first = FakeProbe({"/companies/E1/financials": [(200, fin_rows("E1", 2), hdr)]})
+            E.fetch_financials(first, d, m, mapping, ["10000"], 5, NOW, 10)
+            self.assertEqual(m["companies"]["E1"]["status"], "ok")
+            # 61日後、1年分増えた応答で取り直す
+            later = NOW + dt.timedelta(days=61)
+            rows = fin_rows("E1", 2)
+            rows.insert(0, {"fiscal_year": 2026, "doc_id": "SE1new", "revenue": 300.0,
+                            "submit_date": "2026-06-25 12:00", "is_restated_eps": False})
+            second = FakeProbe({"/companies/E1/financials": [(200, rows, hdr)]})
+            done, new_rows, _ = E.fetch_financials(second, d, m, mapping, ["10000"], 5, later, 10)
+            self.assertEqual(done, 1)
+            fin = pd.read_parquet(os.path.join(d, E.FIN))
+            self.assertEqual(len(fin), 3)                       # 重複せず 1年分だけ増える
+            self.assertEqual(int(m["companies"]["E1"]["last_fy"]), 2026)
+        finally:
+            shutil.rmtree(d)
+
+
 if __name__ == "__main__":
     unittest.main()
