@@ -25,6 +25,7 @@ from build_dataset import (  # noqa: E402
     price_panel, quarterize_panel, market_environment, MACRO_ETFS,
     cap_band, fund_complete_flag, CAP_BAND_EDGES, FUND_REQUIREMENT_SETS,
     SECTOR_INDEX, S33_TO_INDEX, attach_sector_index, sector_index_returns,
+    disclosure_timing, TIMING_CLIP_ANY, TIMING_CLIP_FY,
 )
 
 
@@ -2145,6 +2146,57 @@ class TestVolNormalisedLabel(unittest.TestCase):
         want = (out["future_rise"] >= 0.02).where(out["future_max_close"].notna())
         pd.testing.assert_series_equal(out["label"].astype("float64"),
                                        want.astype("float64"), check_names=False)
+
+
+class TestDisclosureTiming(unittest.TestCase):
+    """開示からの日数。先読みしない・予想修正だけの開示は数えない・順序を保つ。"""
+
+    def setUp(self):
+        self.fins = pd.DataFrame({
+            "Code": ["00010"] * 4 + ["00020"],
+            "DiscDate": ["2020-05-10", "2020-08-10", "2020-09-01", "2020-11-10", "2020-06-01"],
+            "CurPerType": ["FY", "1Q", "1Q", "2Q", "FY"],
+            "Sales": [100.0, 30.0, np.nan, 60.0, 50.0],
+            "NP": [10.0, 3.0, np.nan, 6.0, 5.0],   # 09-01 は予想修正だけ（実績なし）
+        })
+
+    def _days(self, dates, code="00010"):
+        samples = pd.DataFrame({"Code": [code] * len(dates), "Date": dates, "x": range(len(dates))})
+        return disclosure_timing(samples, self.fins)
+
+    def test_counts_from_latest_actual_disclosure(self):
+        out = self._days(["2020-08-10", "2020-08-15", "2020-09-05", "2020-11-10"])
+        self.assertEqual(out["days_since_disc"].tolist(), [0.0, 5.0, 26.0, 0.0])
+        self.assertEqual(out["days_since_fy"].tolist(), [92.0, 97.0, 118.0, 184.0])
+
+    def test_no_lookahead_and_nan_before_first(self):
+        out = self._days(["2020-05-01", "2020-05-09", "2020-05-10"])
+        self.assertTrue(np.isnan(out["days_since_disc"].iloc[0]))
+        self.assertTrue(np.isnan(out["days_since_disc"].iloc[1]))
+        self.assertEqual(out["days_since_disc"].iloc[2], 0.0)
+
+    def test_clipped_when_disclosure_is_stale(self):
+        out = self._days(["2023-01-01"])
+        self.assertEqual(out["days_since_disc"].iloc[0], TIMING_CLIP_ANY)
+        self.assertEqual(out["days_since_fy"].iloc[0], TIMING_CLIP_FY)
+
+    def test_order_is_preserved_and_codes_do_not_mix(self):
+        samples = pd.DataFrame({
+            "Code": ["00020", "00010", "00030"],
+            "Date": ["2020-09-05", "2020-09-05", "2020-09-05"],
+            "x": [1, 2, 3],
+        })
+        out = disclosure_timing(samples, self.fins)
+        self.assertEqual(out["x"].tolist(), [1, 2, 3])
+        self.assertEqual(out["days_since_disc"].tolist()[:2], [96.0, 26.0])
+        self.assertTrue(np.isnan(out["days_since_disc"].iloc[2]))     # 開示の無い銘柄
+
+    def test_timing_is_in_all_preset(self):
+        import features as F
+        cols = F.columns("all")
+        self.assertIn("days_since_disc", cols)
+        self.assertIn("days_since_fy", cols)
+        self.assertNotIn("days_since_disc_r", F.columns("rank_all"))   # 順位版は作らない
 
 
 if __name__ == "__main__":

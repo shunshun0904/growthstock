@@ -1198,6 +1198,48 @@ def _lag_available(df: pd.DataFrame, col: str, n: int,
     return out
 
 
+#: 開示からの日数の上限。これより古い開示は「止まっている」として同じ値にする
+TIMING_CLIP_ANY = 400
+TIMING_CLIP_FY = 800
+
+
+def disclosure_timing(samples: pd.DataFrame, fins: pd.DataFrame) -> pd.DataFrame:
+    """
+    直近の決算開示からの日数（days_since_disc）と、直近の通期開示からの日数
+    （days_since_fy）を各行に付ける。実験24〜26 と同じ定義（docs/FEATURE_IDEAS_EDINET.md）。
+
+    - 実績値（Sales か NP）のある開示だけを数える。予想修正だけの開示は除く
+    - 当日の開示は 0 日（allow_exact_matches=True）。財務の結合と同じ作法で、
+      決算短信は 18:00 過ぎに J-Quants に載り、予測はその後に走る
+      （docs/OPERATIONS.md の実測）
+    - 開示が1つも無い行は NaN。上限より古い開示は上限の値
+    - 行の順序は元のまま返す
+    """
+    disc = fins.loc[fins[["Sales", "NP"]].notna().any(axis=1),
+                    ["Code", "DiscDate", "CurPerType"]].copy()
+    disc["DiscDate"] = pd.to_datetime(disc["DiscDate"])
+    disc = disc.dropna(subset=["DiscDate"])
+    left = samples[["Code", "Date"]].copy()
+    left["_i"] = np.arange(len(left))
+    left["Date"] = pd.to_datetime(left["Date"])
+    left = left.sort_values("Date")
+    any_ = (disc[["Code", "DiscDate"]].sort_values("DiscDate")
+            .rename(columns={"DiscDate": "AnyDisc"}))
+    fy = (disc.loc[disc["CurPerType"] == "FY", ["Code", "DiscDate"]]
+          .sort_values("DiscDate").rename(columns={"DiscDate": "FyDisc"}))
+    m = pd.merge_asof(left, any_, left_on="Date", right_on="AnyDisc", by="Code",
+                      direction="backward", allow_exact_matches=True)
+    m = pd.merge_asof(m, fy, left_on="Date", right_on="FyDisc", by="Code",
+                      direction="backward", allow_exact_matches=True)
+    m = m.sort_values("_i")
+    out = samples.copy()
+    out["days_since_disc"] = ((m["Date"] - m["AnyDisc"]).dt.days.astype(float)
+                              .clip(upper=TIMING_CLIP_ANY).to_numpy())
+    out["days_since_fy"] = ((m["Date"] - m["FyDisc"]).dt.days.astype(float)
+                            .clip(upper=TIMING_CLIP_FY).to_numpy())
+    return out
+
+
 def quarterize_panel(fins: pd.DataFrame) -> pd.DataFrame:
     """
     累計ベースの決算を単一四半期に差分展開し、前年同期比を付ける。
@@ -1940,6 +1982,11 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     fin_cols = [c for c in q.columns if c not in ("Code", "DiscDate")]
     samples.loc[stale, fin_cols] = np.nan
     print(f"[merge] 決算が1年以上古いサンプル: {int(stale.sum()):,}件を欠測扱い")
+
+    # --- 開示からの日数（実験24〜26 で採用。docs/MODEL_ADOPTION_RULES.md §6） --- #
+    samples = disclosure_timing(samples, fins)
+    print(f"[merge] 開示からの日数: 中央値 {samples['days_since_disc'].median():.0f}日 / "
+          f"欠測 {samples['days_since_disc'].isna().mean()*100:.1f}%")
 
     # --- 時価総額 --- #
     # 時価総額は未調整終値 × 開示時点の株数。

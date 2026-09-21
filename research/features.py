@@ -145,6 +145,13 @@ GROUPS: Dict[str, List[str]] = {
                "gold_ret_20", "gold_ret_120",
                "growth250_ret_20", "growth250_ret_120",
                "risk_off_20"],
+    # --- 開示のタイミング ---
+    # 直近の決算開示からの日数。開示直後（0〜5日）と次の開示の直前
+    # （80〜100日）のブレイクが良く、その間（20〜60日）が悪い（実験23）。
+    # 本番に足すと PR-AUC 0.257 → 0.275、窓の切り方を変えても再現
+    # （実験24・26、docs/MODEL_ADOPTION_RULES.md §6 の改訂版の規則で採用）。
+    # 実験10 では平均だけで見て「効かない」としていたもの。
+    "timing": ["days_since_disc", "days_since_fy"],
 }
 
 #: 横断面正規化（同じ日付内でのパーセンタイル順位）を作る対象の列。
@@ -182,7 +189,7 @@ ALL_GROUPS: List[str] = [
     "fund_level", "fund_lag", "fund_trend", "fund_streak", "price", "breakout",
     "volume", "liquidity", "supply", "progress", "valuation", "dividend",
     "cashflow", "efficiency", "guidance", "sector", "turnaround", "scale",
-    "sector_index", "market",
+    "sector_index", "market", "timing",
 ]
 
 #: 実験用のプリセット。グループ名の並びで指定する。
