@@ -294,15 +294,24 @@ EDINET 側では「有価証券報告書の提出からの日数」が同じ性�
 | `ghg_scope*` / `gender_pay_gap_*` / `female_manager_ratio` | 開示が2023年度以降で、学習データの大半で欠測 |
 | `per` / `bps` / `roe_official` / `equity_ratio_official` | J-Quants から日次で作れるものの年次版。劣化版になる |
 
-## 測り方と判定
+## 測り方と判定（探索込み・5モデル）
 
-1. 取得が 2,000行ぶん（400〜600社、1〜2週間）揃ったら
-   `python3 research/exp/e22_edinet_screen.py --group <core|detail|capital|people|ratio|ratio_chg|mcap>`
-   で1本ずつ検定（実験20 と同じ。|z|>2 と正の窓の本数）
-2. 通った次元だけを、実験21 の腕 B（年次の変化率 20列）+ 実験24 で決まる
-   タイミング特徴量の上に足して A/B（同じ行・同じパラメータ・種3つ）。
-   採否は `ret_o1_20` の窓平均で z>2
-3. 通っても、本番に入れるには `build_dataset.py` 側で EDINET を読む経路が要る
+`research/exp/e28_edinet_tuned.py`（実験27 と同じ手順を EDINET に当てる）
+
+1. 取得の進み具合は `--dry` で見る（EDINET の y0 が付いた行数と年別）。
+   窓ごとの判定には 2,000行（400〜600社、1〜2週間）が目安
+2. 足す列は**検定の結果では選ばない**（同じ窓で選ぶと楽観になる）。
+   `--set core`（売上・営業利益・純利益・EPS の軌道 40列）、
+   `core+mcap`（+ 時価総額との組み合わせ 7列、既定）、`all`（475列）を
+   先に決めて回す。実験22 の検定は候補の読み物として残す
+3. 行は `--rows covered`（EDINET の y0 が付いた行だけ、両腕とも同じ行）を
+   先に。充足が8割を超えたら `--rows all` も見る
+4. 腕はモデルごとに A（本番 153列 / 本番のパラメータ）、B1（+EDINET / 同じ
+   パラメータ）、B2（+EDINET / 5分割50試行で探索し直し）。LightGBM の B2 は
+   探索の種を3つ引く。XGBoost / CatBoost / MLP は1引き、ロジスティック回帰は
+   探索なし（A と B1）
+5. 採否は `docs/MODEL_ADOPTION_RULES.md` §3（B1 で判定）と §5（B2 の扱い）
+6. 通っても、本番に入れるには `build_dataset.py` 側で EDINET を読む経路が要る
    （まだ無い。研究用モジュールのみ）
 
 ## 注意
