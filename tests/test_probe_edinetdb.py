@@ -77,6 +77,17 @@ class TestShapeHelpers(unittest.TestCase):
         self.assertEqual(sec, "79740")
         self.assertTrue(any(w.startswith("edinet_code=") for w in where))
 
+    def test_sec_code_accepts_alphanumeric_and_jquants_forms(self):
+        """
+        実測: 一覧は 154A（英字入り4桁）、ランキングは 77770（J-Quants 形式の5桁）
+        と表記が揺れる。どちらも拾えること。fiscal_year=2024 は名前で除外される。
+        """
+        for v in ("154A", "7974", "79740", "154A0", "77770"):
+            _, sec, _ = P.find_codes({"sec_code": v})
+            self.assertEqual(sec, v, v)
+        _, sec, _ = P.find_codes({"fiscal_year": "2024"})
+        self.assertIsNone(sec)
+
     def test_find_codes_when_absent(self):
         edinet, sec, where = P.find_codes({"fiscal_year": "2024", "name": "x"})
         self.assertIsNone(edinet)

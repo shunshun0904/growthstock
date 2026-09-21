@@ -58,7 +58,10 @@ DATE_LIKE = re.compile(r"date|filed|submit|period|fiscal|year|updated|created|"
                        r"doc|report", re.I)
 EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
 EDINET_CODE = re.compile(r"^E\d{5}$")
-SEC_CODE = re.compile(r"^\d{4,5}$")
+#: 証券コード。4桁（英字入りも可: 154A）と、末尾に 0 を足した J-Quants 形式（77770 / 154A0）
+SEC_CODE = re.compile(r"^[0-9][0-9A-Z]{3}0?$")
+#: 有利子負債・のれんの有無を見るための項目名。任天堂には無いので別の会社で確かめる
+DEBT_LIKE = re.compile(r"debt|borrow|bond|loan|goodwill|lease", re.I)
 
 
 class Redactor:
@@ -221,24 +224,8 @@ def describe_key(key: Optional[str]) -> str:
     return f"設定あり（長さ {len(v)} 文字 / {shape}）"
 
 
-def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="EDINET DB API の形を実測する")
-    ap.add_argument("--max-requests", type=int, default=30,
-                    help="この実行で使ってよいリクエスト数の上限（フリープランは 100/日）")
-    ap.add_argument("--edinet-code", default=SAMPLE_EDINET_CODE,
-                    help=f"財務を引く EDINET コード。既定 {SAMPLE_EDINET_CODE}（公式サンプル）")
-    ap.add_argument("--years", type=int, default=5, help="financials の years")
-    ap.add_argument("--deep-years", type=int, default=30,
-                    help="遡及の上限を見るために大きく指定する years")
-    args = ap.parse_args(argv)
-
-    key = os.environ.get("EDINET_API_KEY", "").strip() or None
-    p = Probe(key, args.max_requests)
-    p.say(f"鍵: {describe_key(key)} / リクエスト上限 {args.max_requests}")
-    if not key:
-        p.say("[stop] EDINET_API_KEY が無い。Secrets に登録してから実行する")
-        return 1
-
+def basic(p: "Probe", args) -> Optional[int]:
+    """初回の発見用。返り値が None 以外なら main はそれで終了する。"""
     # ---- 0. 鍵不要の疎通 ----
     p.say("\n=== 0. /status（鍵不要）===")
     st, body = p.get("/status", auth=False)
@@ -266,8 +253,6 @@ def main(argv=None) -> int:
         if rows:
             edinet, sec, where = find_codes(rows[0])
             p.say(f"  1行目から拾えたコード: EDINET={edinet} 証券={sec}  ({', '.join(where) or '該当なし'})")
-            p.say("  ※ J-Quants と結合するには証券コードが要る。ここで拾えなければ"
-                  " EDINET コードリスト（金融庁）で別途対応付ける")
             first_code = edinet
     else:
         p.show_json(body, 600)
@@ -278,16 +263,11 @@ def main(argv=None) -> int:
     st, body = p.get(f"/companies/{args.edinet_code}/financials", {"years": args.years})
     if st == 200:
         rows = as_rows(body)
-        if isinstance(body, dict):
-            meta = {k: v for k, v in body.items() if not isinstance(v, (list, dict))}
-            if meta:
-                p.say(f"  トップレベルの付随情報: {json.dumps(meta, ensure_ascii=False)}")
         date_like = p.describe_rows(rows, "財務（1行=1期）")
         if date_like:
             p.say("  日付/期間らしい項目の値（行ごと）:")
             for i, r in enumerate(rows):
                 p.say(f"    行{i}: " + ", ".join(f"{k}={r.get(k)}" for k in date_like))
-        p.say("  ★ ここに「提出日」に当たる項目があるかが、特徴量に使えるかの分かれ目")
     else:
         p.show_json(body, 800)
     p.show_headers()
@@ -299,7 +279,6 @@ def main(argv=None) -> int:
         rows = as_rows(body)
         p.say(f"  返った期数: {len(rows)}")
         if rows:
-            # 期を表す値をそれらしい項目から拾う（名前は決め打ちしない）
             k0 = next((k for k in rows[0] if DATE_LIKE.search(k)), None)
             if k0:
                 vals = [str(r.get(k0)) for r in rows]
@@ -317,7 +296,7 @@ def main(argv=None) -> int:
         else:
             p.show_json(body, 400)
 
-    # ---- 5. ランキング / スクリーナー（一括で何が取れるかの手がかり）----
+    # ---- 5. ランキング / スクリーナー ----
     p.say("\n=== 5. /rankings/roe?limit=3 ===")
     st, body = p.get("/rankings/roe", {"limit": 3})
     if st == 200:
@@ -335,9 +314,135 @@ def main(argv=None) -> int:
     else:
         p.show_json(body, 600)
     p.show_headers()
+    return None
+
+
+def extra(p: "Probe", args) -> None:
+    """
+    2回目以降の追加確認（初回の結果を受けて）。
+
+    - 有利子負債・のれんの項目があるか。初回の任天堂はどちらもほぼ無く、
+      「項目が無い」のか「値が無いので省かれた」のか区別できなかった。
+      借入とのれんのある大企業で見る。会社はランキングから拾い、
+      EDINET コードを推測しない
+    - 一括取得の可否。1社1リクエストでは全社の履歴に4か月かかる（月900）。
+      screener の短縮引数（roe_gte=10 の形は 400 の文言で判明）と
+      companies のページサイズを見る
+    """
+    codes: List[str] = [c for c in (args.codes or "").split(",") if c.strip()]
+    if args.from_ranking:
+        p.say(f"\n=== A. /rankings/{args.from_ranking}?limit={args.top}（会社を拾う）===")
+        st, body = p.get(f"/rankings/{args.from_ranking}", {"limit": args.top})
+        if st == 200:
+            rows = as_rows(body)
+            for r in rows:
+                edinet, sec, _ = find_codes(r)
+                p.say(f"  {edinet} 証券={sec} {r.get('name') or r.get('name_ja')}")
+                if edinet:
+                    codes.append(edinet)
+        else:
+            p.show_json(body, 400)
+
+    union: Dict[str, int] = {}
+    per_company: Dict[str, set] = {}
+    for c in codes:
+        p.say(f"\n=== B. /companies/{c}/financials?years=1 ===")
+        st, body = p.get(f"/companies/{c}/financials", {"years": 1})
+        if st != 200:
+            p.show_json(body, 300)
+            continue
+        rows = as_rows(body)
+        keys = set()
+        for r in rows:
+            keys |= set(r.keys())
+        per_company[c] = keys
+        for k in keys:
+            union[k] = union.get(k, 0) + 1
+        hits = sorted(k for k in keys if DEBT_LIKE.search(k))
+        p.say(f"  項目数 {len(keys)} / 有利子負債・のれんらしい項目: "
+              f"{', '.join(hits) if hits else 'なし'}")
+        if hits and rows:
+            for k in hits:
+                p.say(f"    {k} = {rows[0].get(k)}")
+    if per_company:
+        base = set.intersection(*per_company.values())
+        p.say(f"\n  全社に共通する項目 {len(base)} / 和集合 {len(union)}")
+        only_some = sorted(k for k, n in union.items() if n < len(per_company))
+        if only_some:
+            p.say("  一部の会社にしか無い項目（値が無いと省かれる可能性）:")
+            for k in only_some:
+                p.say(f"    {k}  ({union[k]}/{len(per_company)}社)")
+
+    if args.bulk_check:
+        p.say("\n=== C. /companies?per_page=200（ページサイズの上限と総数）===")
+        st, body = p.get("/companies", {"per_page": 200})
+        if st == 200:
+            rows = as_rows(body)
+            p.say(f"  返った行数: {len(rows)}")
+            if isinstance(body, dict):
+                meta = {k: v for k, v in body.items() if not isinstance(v, (list, dict))}
+                p.say(f"  付随情報: {json.dumps(meta, ensure_ascii=False)}")
+                for k, v in body.items():
+                    if isinstance(v, dict) and k != "data":
+                        p.say(f"  {k}: {json.dumps(v, ensure_ascii=False)[:300]}")
+        else:
+            p.show_json(body, 400)
+        p.show_headers()
+
+        p.say("\n=== D. /screener?revenue_gte=0（一括で何が返るか）===")
+        st, body = p.get("/screener", {"revenue_gte": 0})
+        if st == 200:
+            rows = as_rows(body)
+            p.say(f"  返った行数: {len(rows)}")
+            if isinstance(body, dict):
+                meta = {k: v for k, v in body.items() if not isinstance(v, (list, dict))}
+                p.say(f"  付随情報: {json.dumps(meta, ensure_ascii=False)}")
+                for k, v in body.items():
+                    if isinstance(v, dict) and k != "data":
+                        p.say(f"  {k}: {json.dumps(v, ensure_ascii=False)[:300]}")
+            if rows:
+                p.describe_rows(rows[:3], "スクリーナー（先頭3行）")
+        else:
+            p.show_json(body, 600)
+        p.show_headers()
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description="EDINET DB API の形を実測する")
+    ap.add_argument("--max-requests", type=int, default=30,
+                    help="この実行で使ってよいリクエスト数の上限（フリープランは 100/日・900/月）")
+    ap.add_argument("--edinet-code", default=SAMPLE_EDINET_CODE,
+                    help=f"財務を引く EDINET コード。既定 {SAMPLE_EDINET_CODE}（公式サンプル）")
+    ap.add_argument("--years", type=int, default=5, help="financials の years")
+    ap.add_argument("--deep-years", type=int, default=30,
+                    help="遡及の上限を見るために大きく指定する years")
+    ap.add_argument("--skip-basic", action="store_true",
+                    help="初回の発見用ステップ（7リクエスト）を飛ばす")
+    ap.add_argument("--codes", default="",
+                    help="追加で financials の項目を見る EDINET コード（カンマ区切り）")
+    ap.add_argument("--from-ranking", default="",
+                    help="このランキング（例 market-cap）の上位から会社を拾って項目を見る")
+    ap.add_argument("--top", type=int, default=3, help="--from-ranking で拾う件数")
+    ap.add_argument("--bulk-check", action="store_true",
+                    help="一括取得の可否（companies のページサイズ / screener の短縮引数）を見る")
+    args = ap.parse_args(argv)
+
+    key = os.environ.get("EDINET_API_KEY", "").strip() or None
+    p = Probe(key, args.max_requests)
+    p.say(f"鍵: {describe_key(key)} / リクエスト上限 {args.max_requests}")
+    if not key:
+        p.say("[stop] EDINET_API_KEY が無い。Secrets に登録してから実行する")
+        return 1
+
+    if not args.skip_basic:
+        rc = basic(p, args)
+        if rc is not None:
+            return rc
+    if args.codes or args.from_ranking or args.bulk_check:
+        extra(p, args)
 
     p.say(f"\n[done] この実行で使ったリクエスト: {p.used} / 上限 {args.max_requests}"
-          f"（フリープランは 100/日）")
+          f"（フリープランは 100/日・900/月）")
     return 0
 
 
