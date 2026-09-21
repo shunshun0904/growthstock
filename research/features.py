@@ -148,9 +148,10 @@ GROUPS: Dict[str, List[str]] = {
     # --- 開示のタイミング ---
     # 直近の決算開示からの日数。開示直後（0〜5日）と次の開示の直前
     # （80〜100日）のブレイクが良く、その間（20〜60日）が悪い（実験23）。
-    # 本番に足すと PR-AUC 0.257 → 0.275、窓の切り方を変えても再現
-    # （実験24・26、docs/MODEL_ADOPTION_RULES.md §6 の改訂版の規則で採用）。
-    # 実験10 では平均だけで見て「効かない」としていたもの。
+    # 本番に足すと PR-AUC 0.257 → 0.275 と分離力は上がるが、探索込みで
+    # 測ると上位10% の実収益は上がらず、最悪の窓が悪化する（実験27・27b、
+    # docs/MODEL_DISCLOSURE_TIMING.md）。列は build_dataset が作るが、
+    # `all` には入れていない（ALL_GROUPS に無い）。
     "timing": ["days_since_disc", "days_since_fy"],
 }
 
@@ -189,7 +190,7 @@ ALL_GROUPS: List[str] = [
     "fund_level", "fund_lag", "fund_trend", "fund_streak", "price", "breakout",
     "volume", "liquidity", "supply", "progress", "valuation", "dividend",
     "cashflow", "efficiency", "guidance", "sector", "turnaround", "scale",
-    "sector_index", "market", "timing",
+    "sector_index", "market",
 ]
 
 #: 実験用のプリセット。グループ名の並びで指定する。
@@ -238,6 +239,9 @@ PRESETS: Dict[str, List[str]] = {
     # 単独で効かなくても、他の列と組み合わせて効く可能性は残る。
     # それを測れるのはこの差だけ。
     "all_no_sector_index": [g for g in ALL_GROUPS if g != "sector_index"],
+    # all + 開示のタイミング。本番には入れていない（実験27・27b）が、列を
+    # データセットに残して A/B をやり直せるようにするための研究用プリセット
+    "all_timing": ALL_GROUPS + ["timing"],
 
     # --- 決算を「変化」だけで組むセット --- #
     # 絶対水準（ROE 何%、営業利益率 何%）ではなく、

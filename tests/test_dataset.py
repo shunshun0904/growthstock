@@ -2191,12 +2191,17 @@ class TestDisclosureTiming(unittest.TestCase):
         self.assertEqual(out["days_since_disc"].tolist()[:2], [96.0, 26.0])
         self.assertTrue(np.isnan(out["days_since_disc"].iloc[2]))     # 開示の無い銘柄
 
-    def test_timing_is_in_all_preset(self):
+    def test_timing_group_exists_but_is_not_in_all(self):
+        """
+        列は build_dataset が作り、グループも定義するが、本番の `all` には
+        入れない（実験27・27b: 分離力は上がるが実収益は上がらず最悪の窓が
+        悪化。docs/MODEL_DISCLOSURE_TIMING.md）。
+        """
         import features as F
-        cols = F.columns("all")
-        self.assertIn("days_since_disc", cols)
-        self.assertIn("days_since_fy", cols)
-        self.assertNotIn("days_since_disc_r", F.columns("rank_all"))   # 順位版は作らない
+        self.assertEqual(F.GROUPS["timing"], ["days_since_disc", "days_since_fy"])
+        self.assertNotIn("days_since_disc", F.columns("all"))
+        self.assertNotIn("timing", F.ALL_GROUPS)
+        self.assertIn("days_since_disc", F.all_columns())          # データセットには残す
 
 
 if __name__ == "__main__":
