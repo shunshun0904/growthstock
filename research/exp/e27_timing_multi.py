@@ -8,7 +8,10 @@
 （週次で5分割の探索をやり直す）まで含めて、4モデル（LightGBM / XGBoost /
 CatBoost / MLP。ロジスティック回帰は除く）で測る。
 
-腕（モデルごとに3つ）
+ロジスティック回帰は探索を持たない（本番も multi_params.json の探索済みを
+使うだけ）ので、A と B1 だけで評価する。
+
+腕（モデルごとに3つ。ロジスティック回帰は A と B1）
   A   151列 / 本番のパラメータ（lgbm_params.json の all、multi_params.json）。
       いずれも 151列で 5分割・50試行で探索済みのもの
   B1  153列 / A と同じパラメータ            —— 特徴量だけの効果
@@ -52,7 +55,8 @@ from e25_auc_noise import OUTCOMES, average, metrics  # noqa: E402
 from train_production import (  # noqa: E402
     OOF_MIN_TRAIN_MONTHS, OOF_STEP_MONTHS, OOF_TEST_MONTHS)
 
-MODELS = ("lgbm", "xgb", "cat", "mlp")
+MODELS = ("lgbm", "xgb", "cat", "mlp", "logit")
+NO_TUNE = ("logit",)
 SEEDS3 = (42, 7, 123)
 N_TRIALS = 50
 N_SPLITS = 5
@@ -217,16 +221,17 @@ def main(argv=None) -> int:
     for algo in algos:
         log(f"=== {algo} ===")
         pa = prod_params(algo)
-        pb2 = tune_b2(algo, sub, full)
+        pb2 = None if algo in NO_TUNE else tune_b2(algo, sub, full)
         runs = {
             "A  151列/本番のパラメータ": oof_arm(algo, "A", df, base, pa["params"]),
             "B1 153列/同じパラメータ": oof_arm(algo, "B1", df, full, pa["params"]),
-            "B2 153列/探索し直し": oof_arm(algo, "B2", df, full, pb2["params"]),
         }
-        ms = {k: metrics(o) for k, o in runs.items()}
         cvs = {"A  151列/本番のパラメータ": pa["_cv"].get("mean_pr_auc"),
-               "B1 153列/同じパラメータ": None,
-               "B2 153列/探索し直し": pb2["_cv"].get("mean_pr_auc")}
+               "B1 153列/同じパラメータ": None}
+        if pb2 is not None:
+            runs["B2 153列/探索し直し"] = oof_arm(algo, "B2", df, full, pb2["params"])
+            cvs["B2 153列/探索し直し"] = pb2["_cv"].get("mean_pr_auc")
+        ms = {k: metrics(o) for k, o in runs.items()}
         print(f"  {'腕':<26}{'CV PR-AUC':>10}{'OOF PR-AUC':>11}{'リフト':>7}{'ROC':>8}{'日内':>8}"
               f"{'窓平均20':>10}{'勝ち':>7}{'最悪':>9}{'窓平均40':>10}{'勝ち':>7}{'最悪':>9}")
         for k, m in ms.items():
@@ -239,8 +244,8 @@ def main(argv=None) -> int:
                   f"{m['ret_o1_40_worst']:>+8.2f}pt")
         names = list(runs)
         summary[algo] = {"metrics": {k: {kk: float(vv) for kk, vv in m.items()} for k, m in ms.items()},
-                         "cv": cvs, "b2_params": pb2["params"], "judge": {}}
-        for b in (1, 2):
+                         "cv": cvs, "b2_params": pb2["params"] if pb2 else None, "judge": {}}
+        for b in range(1, len(names)):
             v = judge(ms[names[0]], ms[names[b]], runs[names[0]], runs[names[b]])
             summary[algo]["judge"][names[b][:2].strip()] = v
             r20, r40 = v["ret_o1_20"], v["ret_o1_40"]
@@ -250,8 +255,8 @@ def main(argv=None) -> int:
                   f"窓平均40 {r40['diff_all']:+.2f}pt {'○' if v['r40_ok'] else '×'} / "
                   f"最悪 {r20['worst_a']:+.2f}→{r20['worst_b']:+.2f}pt {'○' if v['worst_ok'] else '×'} "
                   f"→ {'満たす' if v['pass'] else '満たさない'}  (B>A の窓 {r20['b_gt_a']})")
-        with open(os.path.join(OOF_DIR, "e27_summary.json"), "w", encoding="utf-8") as fh:
-            json.dump(summary, fh, ensure_ascii=False, indent=1, default=float)
+        with open(os.path.join(OOF_DIR, f"e27_summary_{algo}.json"), "w", encoding="utf-8") as fh:
+            json.dump(summary[algo], fh, ensure_ascii=False, indent=1, default=float)
     log(f"記録: {OOF_DIR}/e27_*")
     return 0
 
