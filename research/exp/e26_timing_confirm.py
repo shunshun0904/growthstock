@@ -88,6 +88,20 @@ def arm(df, cols, params, tag, folds, reuse_prefix=None):
     return average(oofs)
 
 
+MIN_ROWS_PER_FOLD = 100
+
+
+def usable(o: pd.DataFrame, outcome: str) -> pd.DataFrame:
+    """
+    物差しが実現している行が MIN_ROWS_PER_FOLD 未満の窓は落とす。
+    3か月ずらすと末尾に3週間の窓ができ、ret_o1_40 が全行 NaN になって
+    平均が NaN になる。両腕に同じ規則で当てる（行の有無で決め、スコアは見ない）。
+    """
+    cnt = o.groupby("fold")[outcome].apply(lambda s: pd.to_numeric(s, errors="coerce").notna().sum())
+    keep = cnt[cnt >= MIN_ROWS_PER_FOLD].index
+    return o[o["fold"].isin(keep)]
+
+
 def judge(ma: dict, mb: dict, ea: dict, eb: dict, auc_range: float) -> dict:
     """§3 の 1〜4。ea/eb は edge() の結果（物差しごと）。"""
     res = {}
@@ -95,10 +109,11 @@ def judge(ma: dict, mb: dict, ea: dict, eb: dict, auc_range: float) -> dict:
         a, b = ea[oc], eb[oc]
         diff = b["thr_fold_mean"] - a["thr_fold_mean"]
         se = float(np.sqrt(a["se"] ** 2 + b["se"] ** 2))
-        res[oc] = {"all_won": b["thr_folds_won"] == b["thr_folds"],
-                   "worst_ge0": b["thr_worst"] >= 0,
-                   "z": diff / se if se > 0 else float("nan"),
-                   "mean_ok": (diff / se if se > 0 else 0) > -1,
+        z = diff / se if se > 0 else float("nan")
+        res[oc] = {"all_won": b["thr_folds_won"] == b["thr_folds"] and b["thr_folds"] > 0,
+                   "worst_ge0": bool(b["thr_worst"] >= 0),
+                   "z": z,
+                   "mean_ok": bool(np.isfinite(z) and z > -1),
                    "diff_pt": diff, "won": f"{b['thr_folds_won']}/{b['thr_folds']}",
                    "worst": b["thr_worst"]}
     res["pr_auc_gain"] = mb["pr_auc"] - ma["pr_auc"]
@@ -130,8 +145,12 @@ def main() -> int:
         oa = arm(df, base, params, f"A_{tag}", folds, reuse_prefix="e25_A" if shift == 0 else None)
         ob = arm(df, base + TIMING, params, f"B_{tag}", folds)
         ma, mb = metrics(oa), metrics(ob)
-        ea = {oc: edge(oa, oc) for oc in OUTCOMES}
-        eb = {oc: edge(ob, oc) for oc in OUTCOMES}
+        ea = {oc: edge(usable(oa, oc), oc) for oc in OUTCOMES}
+        eb = {oc: edge(usable(ob, oc), oc) for oc in OUTCOMES}
+        for oc in OUTCOMES:
+            dropped = sorted(set(oa["fold"]) - set(usable(oa, oc)["fold"]))
+            if dropped:
+                print(f"  （{oc} が {MIN_ROWS_PER_FOLD}行未満の窓 {dropped} は両腕で除外）")
         print(f"  {'腕':<24}{'PR-AUC':>8}{'ROC':>8}{'日内':>8}"
               f"{'窓平均20':>10}{'勝ち':>7}{'最悪':>9}{'窓平均40':>10}{'勝ち':>7}{'最悪':>9}")
         for label, m, e in (("A 本番", ma, ea), ("B +開示からの日数", mb, eb)):
