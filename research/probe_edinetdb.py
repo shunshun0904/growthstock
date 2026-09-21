@@ -61,7 +61,7 @@ EDINET_CODE = re.compile(r"^E\d{5}$")
 #: 証券コード。4桁（英字入りも可: 154A）と、末尾に 0 を足した J-Quants 形式（77770 / 154A0）
 SEC_CODE = re.compile(r"^[0-9][0-9A-Z]{3}0?$")
 #: 有利子負債・のれんの有無を見るための項目名。任天堂には無いので別の会社で確かめる
-DEBT_LIKE = re.compile(r"debt|borrow|bond|loan|goodwill|lease", re.I)
+DEBT_LIKE = re.compile(r"debt|ibd|borrow|bond|loan|goodwill|lease|commercial_paper|impairment", re.I)
 
 
 class Redactor:
@@ -372,6 +372,12 @@ def extra(p: "Probe", args) -> None:
             p.say("  一部の会社にしか無い項目（値が無いと省かれる可能性）:")
             for k in only_some:
                 p.say(f"    {k}  ({union[k]}/{len(per_company)}社)")
+        # 全項目名を記録に残す。会社ごとに項目の有無が違うので、
+        # 実在する項目の一覧は「見た会社の和集合」でしか分からない
+        names = sorted(union)
+        p.say(f"  和集合の全項目（{len(names)}）:")
+        for i in range(0, len(names), 6):
+            p.say("    " + ", ".join(names[i:i + 6]))
 
     if args.bulk_check:
         p.say("\n=== C. /companies?per_page=200（ページサイズの上限と総数）===")

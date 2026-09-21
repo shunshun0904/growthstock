@@ -95,6 +95,19 @@ class TestShapeHelpers(unittest.TestCase):
         self.assertEqual(where, [])
 
 
+class TestDebtLike(unittest.TestCase):
+    def test_matches_the_names_seen_in_practice(self):
+        """
+        2回目の probe で実際に返ってきた項目名。ibd_* を初回は拾えていなかった。
+        """
+        for k in ("ibd_current", "ibd_noncurrent", "goodwill", "bonds_payable",
+                  "short_term_bonds_payable", "commercial_papers",
+                  "lease_liabilities_cl", "impairment_loss"):
+            self.assertTrue(P.DEBT_LIKE.search(k), k)
+        for k in ("revenue", "inventories", "capex", "net_income"):
+            self.assertFalse(P.DEBT_LIKE.search(k), k)
+
+
 class TestDescribeRows(unittest.TestCase):
     def _capture(self, fn):
         buf = io.StringIO()

@@ -5,7 +5,7 @@
 （edinetdb.com/developers）は作業環境から到達できない（egress ブロック）ので、
 ドキュメントではなく応答から書き起こしている。
 
-- 実施日: 2026-09-21（run 35584440027、7リクエスト）
+- 実施日: 2026-09-21。1回目 run 35584440027（7リクエスト）、2回目 run 35588022689（6リクエスト）
 - 認証: `X-API-Key` ヘッダ。鍵は Secrets の `EDINET_API_KEY`
 - ベース: `https://edinetdb.jp/v1`
 
@@ -25,7 +25,9 @@ J-Quants スタンダードでは BS/PL/CF の明細（販管費・研究開発�
 | どこまで遡れるか | 任天堂で **2012〜2026 の15期**。学習データ（2018年〜）を覆う |
 | 証券コード | `sec_code` がある。**表記が揺れる**（一覧 `154A` / ランキング `77770`）。結合時に J-Quants 形式（末尾 0 の5桁）へ正規化する。既存の `jquants_data_fetcher.normalize_code`（4桁→末尾 `0`、5桁はそのまま）がそのまま使える |
 | 更新頻度 | **年1回（有価証券報告書）**。`financials` は1行＝1事業年度 |
-| 網羅性 | 新規上場は無い（一覧1社目 E39493 GAIA は `404 No financial data`） |
+| 網羅性 | 上場 3,983 社のうち財務データがあるのは **3,770 社**（screener の `total`）。新規上場は無い（一覧1社目 E39493 GAIA は `404 No financial data`） |
+| 有利子負債・のれん | **ある。** `ibd_current` / `ibd_noncurrent`、`bonds_payable`、`short_term_bonds_payable`、`commercial_papers`、`lease_liabilities_cl` / `_ncl`、`goodwill`、`impairment_loss` |
+| 項目の有無 | **値が無い項目は応答から省かれる。** 会計基準（`accounting_standard` = JP / IFRS）や業態（銀行）で入る項目が違う。欠測を前提に設計する |
 | 利用枠 | **日 100 / 月 900**（応答ヘッダ `x-ratelimit-limit: 100`, `x-ratelimit-monthly-limit: 900`）。月の上限が実質の制約 |
 
 ## 叩いたエンドポイントと応答
@@ -39,12 +41,18 @@ J-Quants スタンダードでは BS/PL/CF の明細（販管費・研究開発�
 | `GET /companies/E39493/financials?years=2` | 404 | `{"error":{"code":"not_found","message":"No financial data for E39493"}}` |
 | `GET /rankings/roe?limit=3` | 200 | 10項目: `edinet_code`, `fiscal_year`, `industry`（日本語）, `name`, `name_en`, `name_ja`, `rank`, `sec_code`, `unit`, `value` |
 | `GET /screener` | 400 | `No screening conditions provided. Use 'conditions' JSON or shorthand params like 'roe_gte=10'` |
+| `GET /rankings/market-cap?limit=3` | 200 | E02144 トヨタ（`72030`）、E03606 三菱UFJ（`83060`）、E02778 ソフトバンクG（`99840`）。ランキングの `sec_code` は5桁 |
+| `GET /companies/E02144/financials?years=1` | 200 | 103項目（IFRS。`ordinary_income` / `extraordinary_*` 無し） |
+| `GET /companies/E03606/financials?years=1` | 200 | 100項目（銀行。`cost_of_sales` / `inventories` / `operating_income` 無し。`bonds_payable` 15.79兆円、`goodwill` 5,115億円） |
+| `GET /companies/E02778/financials?years=1` | 200 | 100項目（`goodwill` 7.31兆円、`lease_liabilities_cl` / `_ncl`） |
+| `GET /companies?per_page=200` | 200 | 200行。`meta.pagination = {page:1, per_page:200, total:3983, total_pages:20}`、`data_as_of: 2026-09-21` |
+| `GET /screener?revenue_gte=0` | 200 | 1オブジェクト: `companies`（100件）, `conditions`, `showing: 100`, `sort_by: revenue`, `sort_order: desc`, **`total: 3770`** |
 
 ## `financials` の128項目（任天堂 E02367、5期）
 
-充足は「5期のうち値が入っていた期数」。**任天堂に無いもの（有利子負債・のれん）が
-「項目として存在しない」のか「値が無いので省かれた」のかは、この1社では
-分からない。**
+充足は「5期のうち値が入っていた期数」。**任天堂に無いもの（有利子負債・のれん）は
+2回目の probe で「値が無いので省かれた」と確定した**（下記「会社によって
+項目が違う」）。
 
 ### 時点・出典
 
@@ -131,10 +139,42 @@ J-Quants スタンダードでは BS/PL/CF の明細（販管費・研究開発�
   （404.669、`split_adjustment_factor` = 10。任天堂は2022年10月に1:10分割）。
   株価と突き合わせるなら `adjusted_*` を使う。
 
+## 会社によって項目が違う（2回目の probe）
+
+時価総額上位3社（トヨタ・三菱UFJ・ソフトバンクG）の最新期を任天堂と
+突き合わせた。**3社に共通する項目 82 / 和集合 121。任天堂の128とも違う。**
+
+値が無い項目は応答から省かれる。つまり「項目の一覧」は見た会社の和集合で
+しか分からず、**どの会社にも必ずある項目は 82 より少ない**。
+
+| 省かれる理由 | 例 |
+|---|---|
+| 会計基準（IFRS） | トヨタに `ordinary_income` / `extraordinary_income` / `extraordinary_loss` が無い（IFRS に経常利益・特別損益は無い） |
+| 業態（銀行） | 三菱UFJに `cost_of_sales` / `gross_profit` / `inventories` / `operating_income` / `trade_*` が無い |
+| その会社に無い | 任天堂に `ibd_*` / `goodwill` が無い（実際に借入ものれんも無い） |
+| 開示が始まった年 | `ghg_scope1/2/3`（1社）、`gender_pay_gap_*`（2社）、`temp_employees`（2社） |
+
+3社で見つかった、任天堂には無かった項目: `ibd_current`, `ibd_noncurrent`,
+`bonds_payable`, `short_term_bonds_payable`, `commercial_papers`,
+`lease_liabilities_cl`, `lease_liabilities_ncl`, `goodwill`, `impairment_loss`,
+`ghg_scope1`, `ghg_scope2`, `ghg_scope3`, `temp_employees`。
+
+特徴量にするときは、**無い＝NaN として扱い、会計基準をまたいで定義できる
+項目で組む**（`operating_income` は JP/IFRS 両方にあるが `ordinary_income` は
+JP だけ、など）。`accounting_standard` 自体も列として持たせる。
+
+## 一括取得の経路
+
+| 目的 | 経路 | コスト |
+|---|---|---:|
+| 証券コード ↔ EDINET コード ↔ 業種の対応表（3,983社） | `GET /companies?per_page=200` を 20 ページ | **20 リクエスト** |
+| 最新期の横断面（3,770社） | `GET /screener?revenue_gte=0` が 100社/回。ページ送りの引数は未確認 | 38 リクエスト前後（未確認） |
+| **各社の履歴（学習に要る）** | `GET /companies/{code}/financials?years=30` | **1社 1 リクエスト** |
+
 ## 使うときの制約
 
-**1社＝1リクエスト**（`years=30` で全期が返る）。約3,850社の履歴を揃えるには
-月900の枠で **約4.3か月**。検証には全社は要らないので、母集団に多く出る
+**1社＝1リクエスト**（`years=30` で全期が返る）。財務データのある 3,770 社の
+履歴を揃えるには月900の枠で **約4.2か月**。検証には全社は要らないので、母集団に多く出る
 数百社を先に取れば1か月以内に A/B 実験ができる（`docs/MODEL_TUNING_NOISE.md`
 の流儀で、同じ行に特徴量を足す/足さないを比べる）。
 
@@ -144,10 +184,19 @@ capex/減価償却・棚卸資産回転・販管費率）として効くかど�
 決算特徴量はこれまでウォークフォワードで 0勝9敗（`docs/MODEL_FUNDAMENTAL_COVERAGE.md`）
 なので、事前確率は高くない。判定は実収益の窓平均で z>2。
 
-## 未確認（次の probe で見る）
+## 利用枠の数え方（観測）
 
-- 有利子負債・のれんの項目名（借入とのれんのある大企業で確かめる）
-- 訂正報告書で明細が上書きされるか（`doc_id` が訂正報告書のものに変わるか）
-- 一括取得の経路（`/screener` の短縮引数、`/companies` のページサイズ）。
-  11エンドポイントのうち、ここで叩いたのは5つ
-- 半期報告書のデータが別エンドポイントにあるか
+応答ヘッダの `x-ratelimit-remaining`（日次）は叩くたびに正確に減った
+（1回目 100→94、2回目 94→88）。一方 `x-ratelimit-monthly-remaining` は
+13回叩いても **899 のまま**だった。遅延更新か、別の数え方か分からない。
+**900/月は実在するものとして計画する**（楽観して枠を使い切ると日次の取り込みに
+影響する）。
+
+## まだ未確認
+
+- 訂正報告書で明細が上書きされるか（`doc_id` が訂正報告書のものに変わるか）。
+  `is_restated_eps/bps` のフラグはある。訂正のあった会社で1〜2リクエスト叩けば分かる
+- 半期報告書のデータが別エンドポイントにあるか。`financials` は年次のみ。
+  11エンドポイントのうち叩いたのは `status` / `companies` / `financials` /
+  `rankings` / `screener` の5つ
+- `screener` のページ送りの引数
