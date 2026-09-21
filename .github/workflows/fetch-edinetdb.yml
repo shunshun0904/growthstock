@@ -1,0 +1,91 @@
+name: Fetch EDINET DB
+
+# EDINET DB (edinetdb.jp) から有価証券報告書ベースの年次財務を差分で取り込み、
+# 他の生データと同じく Release（data-raw）に置く。
+#
+# 1社1リクエストで、フリープランは 100/日・900/月。毎日 85社ずつ取ると
+# 母集団の約3,700社で4か月ほどかかる。母集団に多く出る銘柄から順に取る
+# （research/edinet_targets.txt）ので、検証は揃った範囲から始められる。
+#
+# 鍵は Secrets の EDINET_API_KEY。ログには出さない（スクリプト側で伏せる）。
+# 取り込み（Update Data Store）と同じ concurrency グループにして、
+# Release への書き戻しが重ならないようにする。
+on:
+  schedule:
+    # 毎日 10:05 JST (= 01:05 UTC)。日次の取り込み（07:05 UTC）や
+    # 週次学習（日曜 00:05 UTC）と時間帯をずらしてある。実際の起動は
+    # +4〜5.6時間遅れる（docs/OPERATIONS.md）
+    - cron: '5 1 * * *'
+  workflow_dispatch:
+    inputs:
+      fetch:
+        description: 'この実行で財務を取る社数の上限'
+        required: false
+        default: '85'
+      mapping:
+        description: '対応表を取り直すか（auto: 無いか30日より古いとき）'
+        required: false
+        type: choice
+        options: ['auto', 'yes', 'no']
+        default: 'auto'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-data-store
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: data-raw
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r research/requirements.txt
+
+      - name: Download stored EDINET data
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p research/_data
+          gh release download "$RELEASE_TAG" --dir research/_data --clobber \
+            --pattern 'edinet_*' || echo "保存済みの EDINET データなし（初回）"
+          ls -lh research/_data/edinet_* 2>/dev/null || true
+
+      - name: Fetch
+        env:
+          EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
+        run: |
+          python3 -u research/edinet_fetch.py \
+            --mapping "${{ inputs.mapping || 'auto' }}" \
+            --fetch "${{ inputs.fetch || '85' }}" 2>&1 | tee edinet.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Upload to release
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          files=(research/_data/edinet_*.parquet research/_data/edinet_manifest.json)
+          if [ ${#files[@]} -eq 0 ]; then echo "アップロードなし"; exit 0; fi
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
+          echo "${#files[@]} ファイルをアップロードしました"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo '## EDINET DB の取り込み'
+            echo '```'
+            grep -E '^\[|^  \[' edinet.log 2>/dev/null || tail -20 edinet.log 2>/dev/null || echo '(出力なし)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
