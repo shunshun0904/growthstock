@@ -103,9 +103,8 @@ class TestPanel(unittest.TestCase):
                         shares_issued=[1000, 10000], float_shares=[400, 4000],
                         treasury_shares_count=[50, 500])
         p = EF.annual_panel(pd.DataFrame(rows)).set_index("fiscal_year")
-        self.assertAlmostEqual(p.loc[2023, "float_r"], 0.4)
-        self.assertAlmostEqual(p.loc[2023, "float_r_y1"], 0.4)
         self.assertAlmostEqual(p.loc[2023, "tsy_r"], 0.05)
+        self.assertAlmostEqual(p.loc[2023, "tsy_r_y1"], 0.05)
 
     def test_avail_date_is_next_day(self):
         fin = pd.DataFrame(fin_rows("10000", [2023], [100], submit=["2023-06-25 15:16"]))
@@ -156,11 +155,29 @@ class TestFeatures(unittest.TestCase):
         self.assertEqual(len(cols), len(set(cols)))
         self.assertEqual(len(EF.columns("core")), 40)
         self.assertEqual(len(EF.columns("ratio")), len(EF.RATIOS))
+        self.assertEqual(len(EF.columns("mcap")), len(EF.MCAP))
         for c in cols:
             self.assertTrue(c.startswith("ed_"))
-            self.assertIn(c, self.feats.columns)
+            if c not in EF.columns("mcap"):
+                self.assertIn(c, self.feats.columns)      # mcap は attach のときに作る
         with self.assertRaises(KeyError):
             EF.columns("nope")
+
+    def test_split_adjusted_share_change(self):
+        # 1:2 分割（factor 2 → 1）で株数が倍になっても、調整後の変化は 0
+        rows = fin_rows("10000", [2022, 2023], [100, 100],
+                        shares_issued=[1000, 2000], split_adjustment_factor=[2.0, 1.0])
+        p = EF.annual_panel(pd.DataFrame(rows)).set_index("fiscal_year")
+        self.assertAlmostEqual(p.loc[2023, "shares_adj"], p.loc[2023, "shares_adj_y1"])
+        f = EF.feature_frame(EF.annual_panel(pd.DataFrame(rows))).set_index("fiscal_year")
+        self.assertAlmostEqual(f.loc[2023, "ed_shares_adj_yoy1"], 0.0)
+
+    def test_extraordinary_defaults_to_zero_only_for_jp(self):
+        rows = fin_rows("10000", [2023], [100], std="JP") + fin_rows("20000", [2023], [100], std="IFRS")
+        rows[0]["extraordinary_loss"] = 30.0
+        p = EF.annual_panel(pd.DataFrame(rows)).set_index("jq_code")
+        self.assertEqual(p.loc["10000", "extraordinary_net"], -30.0)   # 特別利益は無い = 0
+        self.assertTrue(np.isnan(p.loc["20000", "extraordinary_net"]))  # IFRS には概念が無い
 
 
 class TestAttach(unittest.TestCase):
@@ -184,6 +201,20 @@ class TestAttach(unittest.TestCase):
         self.assertEqual(out["x"].tolist(), [1, 2, 3, 4, 5])               # 行の順序は元のまま
         self.assertAlmostEqual(out["ed_revenue_yoy1"].iloc[1],
                                EF.sym(pd.Series([120.0]), pd.Series([110.0]))[0])
+
+    def test_market_cap_features(self):
+        frame = pd.DataFrame({"Code": ["10000"], "Date": ["2023-09-01"], "market_cap": [10.0]})  # 10億円
+        fin = pd.DataFrame(fin_rows("10000", [2023], [100], submit=["2023-06-25 12:00"],
+                                    cf_operating=[300.0], capex=[100.0], cash=[500.0],
+                                    cash_dividends_paid=[50.0], retained_earnings=[400.0]))
+        out = EF.attach(frame, EF.feature_frame(EF.annual_panel(fin)))
+        self.assertAlmostEqual(out["ed_fcf_yield"].iloc[0], 200.0 / 1e9)
+        self.assertAlmostEqual(out["ed_netcash_mcap"].iloc[0], 500.0 / 1e9)    # 借入なし
+        self.assertAlmostEqual(out["ed_div_yield"].iloc[0], 50.0 / 1e9)
+        self.assertTrue(np.isnan(out["ed_buyback_yield"].iloc[0]))            # 前期が無い
+        frame2 = pd.DataFrame({"Code": ["10000"], "Date": ["2023-09-01"]})
+        out2 = EF.attach(frame2, EF.feature_frame(EF.annual_panel(fin)))
+        self.assertTrue(np.isnan(out2["ed_fcf_yield"].iloc[0]))               # 時価総額が無ければ NaN
 
     def test_stale_filing_is_blanked(self):
         frame = pd.DataFrame({"Code": ["20000", "20000"], "Date": ["2023-06-01", "2023-09-01"]})
