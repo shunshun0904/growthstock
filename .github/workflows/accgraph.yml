@@ -52,9 +52,10 @@ defaults:
 jobs:
   baseline:
     runs-on: ubuntu-latest
-    # 日次バーは1,000万行規模。pivot とラベル付けに時間がかかる。
-    # 学習は LightGBM の多クラス × フォールド数なのでその後ろに乗る
-    timeout-minutes: 120
+    # 実測（2026-09-13、ノード18・特徴量セット3本）で全体39分、うち評価が37分。
+    # EDINET の明細でノードが29に増え、順位版のセットも足したので
+    # 次元数はおよそ2倍。評価だけで80分前後を見込む。ここは最後の砦
+    timeout-minutes: 330
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

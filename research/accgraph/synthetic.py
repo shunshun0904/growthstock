@@ -228,6 +228,58 @@ def make_master_hist(codes: List[str], days: pd.DatetimeIndex) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def make_edinet(codes: List[str], start_year: int, n_years: int,
+                seed: int = 17, skip_last: int = 2) -> pd.DataFrame:
+    """
+    EDINET DB の年次財務（有価証券報告書）の形をした合成データ。
+
+    実データと同じ癖を持たせる:
+      - 1行 = 1事業年度。提出は期末から約3か月後
+      - 一部の会社は財務データが無い（skip_last 社ぶんを丸ごと落とす）
+      - 無借金の会社では有利子負債の項目が省かれる（欠測と0は区別できない）
+      - 訂正報告書が1件あり、最初の提出より後の日付で同じ年度を出す
+    """
+    rows = []
+    for i, code in enumerate(codes[:len(codes) - skip_last]):
+        revenue = float(10_000 * (i + 3)) * 1e6
+        for y in range(start_year, start_year + n_years):
+            fy_end = dt.date(y + 1, 3, 31)
+            submit = _next_weekday(fy_end + dt.timedelta(days=90))
+            revenue *= 1.0 + 0.01 * (i % 5)
+            cos = revenue * 0.62
+            sga = revenue * 0.28
+            op = revenue - cos - sga
+            rows.append({
+                "jq_code": code, "fiscal_year": y,
+                "submit_date": f"{submit.isoformat()} 15:30",
+                "doc_id": f"S{y}{i:04d}",
+                "accounting_standard": "JP", "basis": "consolidated",
+                "revenue": revenue,
+                "cost_of_sales": cos, "sga": sga,
+                "rnd_expenses": revenue * 0.04 if i % 3 else np.nan,
+                "operating_income": op,
+                "profit_before_tax": op * 1.05,
+                "depreciation": revenue * 0.05,
+                "capex": revenue * 0.06,
+                "inventories": revenue * 0.14,
+                "trade_receivables": revenue * 0.18,
+                "trade_payables": revenue * 0.11,
+                # 無借金の会社は項目ごと省かれる
+                **({"ibd_current": revenue * 0.05,
+                    "ibd_noncurrent": revenue * 0.10} if i % 2 == 0 else {}),
+            })
+    df = pd.DataFrame(rows)
+
+    # 訂正報告書: 最初の会社の2年目を、1年後に出し直す
+    if len(df) > 2:
+        fix = df[(df["jq_code"] == codes[0])].iloc[1].copy()
+        d = dt.date.fromisoformat(str(fix["submit_date"])[:10])
+        fix["submit_date"] = f"{(d + dt.timedelta(days=365)).isoformat()} 10:00"
+        fix["profit_before_tax"] = float(fix["profit_before_tax"]) * 1.4
+        df = pd.concat([df, pd.DataFrame([fix])], ignore_index=True)
+    return df
+
+
 def write_all(data_dir: str, n_codes: int = 12, start_year: int = 2017,
               n_years: int = 7) -> Dict[str, int]:
     """合成データ一式を parquet として書き出す（年別、jq_bulk と同じ形）。"""
@@ -240,8 +292,13 @@ def write_all(data_dir: str, n_codes: int = 12, start_year: int = 2017,
     indices = make_indices(days)
     topix = make_topix_series(indices)
     master_hist = make_master_hist(codes, days)
+    edinet = make_edinet(codes, start_year, n_years)
 
-    counts = {}
+    # EDINET は年別に割らない（1ファイルで持つ。実データと同じ形）
+    edinet.to_parquet(os.path.join(data_dir, "edinet_fin.parquet"),
+                      index=False, compression="zstd")
+
+    counts = {"edinet_fin": len(edinet)}
     for prefix, df, date_col in [
         ("fins", fins, "DiscDate"), ("bars", bars, "Date"),
         ("indices", indices, "Date"), ("topix", topix, "Date"),

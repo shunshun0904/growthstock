@@ -60,7 +60,8 @@ class NodeSpec:
     kind: str
     #: "disclosed"（API が返す値） / "derived"（他の開示値の差で決まる値）
     source: str
-    #: J-Quants /fins/summary の項目名。derived のときは None
+    #: 元データの項目名。derived のときは None。
+    #: どのテーブルの項目かは source_table が決める
     field: Optional[str]
     #: derived の計算式。(加算する field, 減算する field) の組
     derive: Optional[Tuple[Tuple[str, ...], Tuple[str, ...]]]
@@ -71,8 +72,11 @@ class NodeSpec:
     #: 継続項目らしさ。1.0 = 継続、0.0 = 一過性が混ざる
     #: （/fins/summary では特別損益を分離できないため、混在を 0.5 で表す）
     recurring: float
+    #: 値の出所。"fins" = J-Quants /fins/summary（四半期）、
+    #: "edinet" = EDINET DB の有価証券報告書（年1回）
+    source_table: str = "fins"
     #: 階層的標準化。level1 = 共通概念、level2 = 業種別概念、level3 = 企業開示科目
-    level1: str
+    level1: str = ""
     level2: Optional[str] = None
     level3: Optional[str] = None
     note: str = ""
@@ -84,6 +88,33 @@ CUMULATIVE_FIELDS = ("Sales", "OP", "OdP", "NP", "CFO", "CFI", "CFF")
 
 #: 期末残高としてそのまま使う項目。
 STOCK_FIELDS = ("TA", "Eq", "ShEq", "CashEq")
+
+# --------------------------------------------------------------------------- #
+# EDINET DB（有価証券報告書）の項目
+# --------------------------------------------------------------------------- #
+#
+# J-Quants の /fins/details は本契約では 403 で、減価償却費・運転資本・
+# 売上原価といった明細が取れない（docs/DATA_FIELDS.md）。EDINET DB は
+# それを持っている（docs/DATA_EDINETDB.md の実測）。
+#
+# ただし **年1回（有価証券報告書）** しか出ない。四半期のグラフに
+# そのまま混ぜると、四半期ごとに動く値と年1回しか動かない値が
+# 同じ顔で並ぶことになる。そこで
+#
+#   - 年次のフローは4で割って「1四半期あたり」に直す（span = 4）
+#   - 「その値が何年前の書類か」を age_years としてノード特徴量に持たせる
+#
+# ことで、粒度の違いをモデルから見える形にする。
+
+#: EDINET の期間フロー（1事業年度ぶんの金額）。
+EDINET_FLOW_FIELDS = ("cost_of_sales", "sga", "rnd_expenses",
+                      "profit_before_tax", "depreciation", "capex")
+#: EDINET の期末残高。
+EDINET_STOCK_FIELDS = ("inventories", "trade_receivables", "trade_payables",
+                       "ibd_current", "ibd_noncurrent")
+
+#: 年次フローを1四半期あたりに直すときの割り算。
+ANNUAL_TO_QUARTER = 4.0
 
 
 NODES: List[NodeSpec] = [
@@ -208,6 +239,107 @@ NODES: List[NodeSpec] = [
     ),
 ]
 
+# --------------------------------------------------------------------------- #
+# EDINET DB から足すノード（年1回更新）
+# --------------------------------------------------------------------------- #
+#
+# 要件にあった「税引前利益 → 減価償却費 → 運転資本 → 営業CF」という
+# 粒度は、ここで初めて組める。ただし年1回なので、四半期のノードとは
+# 更新頻度が違う。source_table と age_years でそれが分かるようにしてある。
+
+NODES += [
+    # ----- PL の明細 ----------------------------------------------------- #
+    NodeSpec(
+        id="cost_of_sales", name_ja="売上原価", statement="PL", kind="flow",
+        source="disclosed", field="cost_of_sales", derive=None,
+        scale_by=SCALE_SALES, forecast_field=None, recurring=1.0,
+        source_table="edinet",
+        level1="OPERATING_COST", level2="COST_OF_SALES", level3="cost_of_sales",
+        note="J-Quants では販管費と合算でしか取れない部分を分ける",
+    ),
+    NodeSpec(
+        id="sga", name_ja="販売費及び一般管理費", statement="PL", kind="flow",
+        source="disclosed", field="sga", derive=None,
+        scale_by=SCALE_SALES, forecast_field=None, recurring=1.0,
+        source_table="edinet",
+        level1="OPERATING_COST", level2="SGA", level3="sga",
+    ),
+    NodeSpec(
+        id="rnd", name_ja="研究開発費", statement="PL", kind="flow",
+        source="disclosed", field="rnd_expenses", derive=None,
+        scale_by=SCALE_SALES, forecast_field=None, recurring=1.0,
+        source_table="edinet",
+        level1="OPERATING_COST", level2="RND", level3="rnd_expenses",
+        note="販管費の内数。業種によっては開示が無い",
+    ),
+    NodeSpec(
+        id="pretax_profit", name_ja="税引前利益", statement="PL", kind="flow",
+        source="disclosed", field="profit_before_tax", derive=None,
+        scale_by=SCALE_SALES, forecast_field=None, recurring=1.0,
+        source_table="edinet",
+        level1="PROFIT_PRETAX", level3="profit_before_tax",
+        note="営業CFの本来の起点。J-Quants には無い",
+    ),
+
+    # ----- CF の明細 ----------------------------------------------------- #
+    NodeSpec(
+        id="depreciation", name_ja="減価償却費", statement="CF", kind="flow",
+        source="disclosed", field="depreciation", derive=None,
+        scale_by=SCALE_SALES, forecast_field=None, recurring=1.0,
+        source_table="edinet",
+        level1="DEPRECIATION", level3="depreciation",
+        note="非現金費用として営業CFに足し戻される",
+    ),
+    NodeSpec(
+        id="capex", name_ja="設備投資", statement="CF", kind="flow",
+        source="disclosed", field="capex", derive=None,
+        scale_by=SCALE_SALES, forecast_field=None, recurring=0.8,
+        source_table="edinet",
+        level1="CAPEX", level3="capex",
+    ),
+
+    # ----- BS の明細 ----------------------------------------------------- #
+    NodeSpec(
+        id="inventories", name_ja="棚卸資産", statement="BS", kind="stock",
+        source="disclosed", field="inventories", derive=None,
+        scale_by=SCALE_ASSETS, forecast_field=None, recurring=1.0,
+        source_table="edinet",
+        level1="INVENTORIES", level3="inventories",
+    ),
+    NodeSpec(
+        id="trade_receivables", name_ja="売上債権", statement="BS", kind="stock",
+        source="disclosed", field="trade_receivables", derive=None,
+        scale_by=SCALE_ASSETS, forecast_field=None, recurring=1.0,
+        source_table="edinet",
+        level1="TRADE_RECEIVABLES", level3="trade_receivables",
+    ),
+    NodeSpec(
+        id="trade_payables", name_ja="仕入債務", statement="BS", kind="stock",
+        source="disclosed", field="trade_payables", derive=None,
+        scale_by=SCALE_ASSETS, forecast_field=None, recurring=1.0,
+        source_table="edinet",
+        level1="TRADE_PAYABLES", level3="trade_payables",
+    ),
+    NodeSpec(
+        id="working_capital", name_ja="運転資本", statement="BS", kind="stock",
+        source="derived", field=None,
+        derive=(("inventories", "trade_receivables"), ("trade_payables",)),
+        scale_by=SCALE_ASSETS, forecast_field=None, recurring=1.0,
+        source_table="edinet",
+        level1="WORKING_CAPITAL",
+        note="棚卸資産 + 売上債権 − 仕入債務。増減が営業CFを削る",
+    ),
+    NodeSpec(
+        id="interest_bearing_debt", name_ja="有利子負債", statement="BS",
+        kind="stock", source="derived", field=None,
+        derive=(("ibd_current", "ibd_noncurrent"), ()),
+        scale_by=SCALE_ASSETS, forecast_field=None, recurring=1.0,
+        source_table="edinet",
+        level1="INTEREST_BEARING_DEBT",
+        note="無借金の会社では項目ごと省かれる。欠測と0は区別できない",
+    ),
+]
+
 NODE_IDS: List[str] = [n.id for n in NODES]
 NODE_INDEX: Dict[str, int] = {n.id: i for i, n in enumerate(NODES)}
 N_NODES = len(NODES)
@@ -270,6 +402,41 @@ EDGES: List[EdgeSpec] = [
     EdgeSpec("cff", "liabilities", "link", "財務CFが負債・資本を動かす"),
 ]
 
+# --------------------------------------------------------------------------- #
+# EDINET DB の明細が入って初めて引けるエッジ
+# --------------------------------------------------------------------------- #
+#
+# 要件にあった「税引前利益 → 減価償却費 → 運転資本 → 営業CF」の鎖が
+# ここで繋がる。粗いノード（売上原価＋販管費）は残したまま、その内訳として
+# 細かいノードをぶら下げる形にしてある。EDINET が取れていない会社では
+# 細かい側が欠測になるだけで、粗い側のグラフはそのまま成立する。
+
+EDGES += [
+    # --- 粗いノードの内訳 --- #
+    EdgeSpec("cost_of_sales", "cogs_sga", "composition", "J-Quantsでは合算でしか取れない"),
+    EdgeSpec("sga", "cogs_sga", "composition", ""),
+    EdgeSpec("rnd", "sga", "composition", "販管費の内数"),
+
+    # --- PL から CF への、本来の橋渡し --- #
+    EdgeSpec("ordinary_profit", "pretax_profit", "flow", ""),
+    EdgeSpec("pretax_profit", "net_income", "flow", "税金を引くと当期純利益"),
+    EdgeSpec("pretax_profit", "cfo", "flow", "営業CFの本来の起点"),
+    EdgeSpec("depreciation", "cfo", "flow", "非現金費用として足し戻す"),
+    EdgeSpec("working_capital", "cfo", "flow", "運転資本が増えると営業CFは減る"),
+
+    # --- 運転資本の内訳 --- #
+    EdgeSpec("inventories", "working_capital", "composition", ""),
+    EdgeSpec("trade_receivables", "working_capital", "composition", ""),
+    EdgeSpec("trade_payables", "working_capital", "composition", "差し引く側"),
+
+    # --- 投資と貸借 --- #
+    EdgeSpec("capex", "cfi", "flow", "投資CFの主要な中身"),
+    EdgeSpec("inventories", "total_assets", "composition", ""),
+    EdgeSpec("trade_receivables", "total_assets", "composition", ""),
+    EdgeSpec("trade_payables", "liabilities", "composition", ""),
+    EdgeSpec("interest_bearing_debt", "liabilities", "composition", ""),
+]
+
 N_EDGES = len(EDGES)
 
 
@@ -294,7 +461,8 @@ NODE_FEATURES: List[str] = [
     "slope4",        # 直近4期の scaled の傾き（1期あたり）
     "vol4",          # 直近4期の scaled の標準偏差
     "sign",          # 符号 (-1 / 0 / +1)
-    "span",          # その金額が何四半期ぶんか（CFは2になることが多い）
+    "span",          # その金額が何四半期ぶんか（年次のものは4）
+    "age_years",     # その値が何年前の書類か（四半期のものは0）（CFは2になることが多い）
     "fcst_gap",      # 通期会社予想に対する進捗の乖離
     "fcst_avail",    # 上を計算できたか
     "is_missing",    # 1 = この期のこのノードは欠測
@@ -306,6 +474,7 @@ NODE_CONSTANTS: List[str] = [
     "stmt_pl", "stmt_bs", "stmt_cf",
     "is_stock",      # 1 = 期末残高、0 = 期間フロー
     "recurring",     # 継続項目らしさ
+    "is_annual",     # 1 = 年1回しか更新されない（EDINET 由来）
 ]
 
 #: サンプルごと・四半期ごとに変わるエッジ特徴量。
@@ -333,6 +502,7 @@ def node_constants() -> List[List[float]]:
             1.0 if n.statement == "CF" else 0.0,
             1.0 if n.kind == "stock" else 0.0,
             float(n.recurring),
+            1.0 if n.source_table == "edinet" else 0.0,
         ])
     return out
 
@@ -378,9 +548,12 @@ def validate() -> None:
         used = [n.field] if n.field else []
         if n.derive:
             used = list(n.derive[0]) + list(n.derive[1])
+        assert n.source_table in ("fins", "edinet"), n.id
+        known_fields = (CUMULATIVE_FIELDS + STOCK_FIELDS if n.source_table == "fins"
+                        else EDINET_FLOW_FIELDS + EDINET_STOCK_FIELDS)
         for f in used:
-            assert f in CUMULATIVE_FIELDS or f in STOCK_FIELDS, \
-                f"{n.id}: {f} が累計/ストックのどちらにも分類されていない"
+            assert f in known_fields, \
+                f"{n.id}: {f} が {n.source_table} の累計/ストックのどちらにも分類されていない"
 
     # 孤立ノードを作らない。どこにも繋がっていないノードは、
     # GNN にとって「ただの数値」でありグラフにする意味が無い。

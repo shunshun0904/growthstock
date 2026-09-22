@@ -319,7 +319,7 @@ def build_asof_matrices(anchor_df: pd.DataFrame, versions: pd.DataFrame,
       s_<FIELD>    … 期末残高（そのまま）
       cum_<FIELD>  … 累計（進捗率の計算に使う）
       f_<FIELD>   … 通期の会社予想
-      quarter, per_end_days, available
+      quarter, per_end_days, disc_date_days, available
     """
     long = asof_lags(anchor_df, versions, periods, n_lags=n_lags)
     n = len(anchor_df)
@@ -335,9 +335,19 @@ def build_asof_matrices(anchor_df: pd.DataFrame, versions: pd.DataFrame,
     per_end_days = np.where(pe.isna().to_numpy().reshape(n, n_lags),
                             np.nan, per_end_days)
 
+    # その四半期が実際に開示された日。EDINET の as-of に使う。
+    # アンカーの日付ではなく各ラグの開示日を基準にしないと、
+    # 過去の期のグラフに、その時点ではまだ出ていない有報が混ざる
+    sd = pd.to_datetime(long["src_disc_date"])
+    disc_date_days = (sd.astype("int64").to_numpy() / 86_400_000_000_000.0
+                      ).reshape(n, n_lags)
+    disc_date_days = np.where(sd.isna().to_numpy().reshape(n, n_lags),
+                              np.nan, disc_date_days)
+
     out: Dict[str, np.ndarray] = {
         "quarter": quarter,
         "per_end_days": per_end_days,
+        "disc_date_days": disc_date_days,
         # その期の値がアンカー時点で1つでも見えていたか
         "available": (~long["src_disc_date"].isna().to_numpy()).reshape(n, n_lags),
     }

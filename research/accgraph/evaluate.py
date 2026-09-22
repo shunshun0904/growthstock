@@ -37,7 +37,12 @@ from accgraph import backtest, baselines, build, labels as L, leakage, splits  #
 OUT_MD = os.path.join(ROOT, "docs", "ACCGRAPH_BASELINE.md")
 OUT_JSON = os.path.join(RESEARCH, "_data", "accgraph", "baseline_results.json")
 
-FEATURE_SETS = ("latest", "nodes", "seq")
+#: 比較する特徴量セット。`_rank` は同じ発表日の中で順位に直したもので、
+#: 規模と地合いを抜いても情報が残るかを見るために並べる
+FEATURE_SETS = ("latest", "seq", "latest_rank", "seq_rank")
+#: 既定から外してあるが --feature-sets で指定できるもの。
+#: nodes（エッジ特徴量を外したセット）は一度測って寄与が小さかった
+EXTRA_FEATURE_SETS = ("nodes", "nodes_rank")
 MODEL_ORDER = ("majority", "logit", "lgbm", "mlp")
 CLASSES = np.array([0, 1, 2])
 
@@ -252,6 +257,10 @@ def to_markdown(res: Dict) -> str:
         "- `latest` は当該四半期のグラフだけ、`seq` は過去8四半期ぶん、"
         "`nodes` はエッジ特徴量を外したもの。"
         "`seq` が `latest` を上回らなければ、系列を持つ意味が無い。",
+        "- `_rank` 付きは、同じ発表日の中で各特徴量を順位に直したもの。"
+        "その日の地合いと企業規模の絶対水準が消えるので、"
+        "会計構造そのものに情報があるかを分離して測れる。"
+        "順位版が素の版とほぼ同じなら、拾っていたのは規模ではない。",
         "- t値は同じエントリー日のトレードをクラスタした値。"
         "日をまたいで独立とみなすと過大評価になる。",
         "- 効率的市場仮説の下では、この種の予測が安定して当たるとは想定しない。"

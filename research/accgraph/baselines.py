@@ -39,10 +39,57 @@ def context_features(meta: pd.DataFrame, period_mask: np.ndarray
     return np.concatenate([onehot, seq_len, log_tv], axis=1), names
 
 
+def rank_within_date(X: np.ndarray, dates: pd.Series) -> np.ndarray:
+    """
+    同じ発表日の中で各列を順位（0〜1）に直す。
+
+    ## なぜ要るのか
+
+    実データで測ると、単変量の情報係数の上位が軒並み `log_size`（金額の
+    対数＝企業規模）だった。AUC 0.55 の正体が規模効果なら、会計フローを
+    グラフにした意味はそこには無い。
+
+    同じ日に決算を出した銘柄どうしで順位に直すと、
+
+      - その日の地合い（市場全体の動き）が全銘柄に共通なので消える
+      - 規模の絶対水準が消え、「その日の中で相対的に大きいか」だけが残る
+
+    ので、会計構造そのものに情報があるかを分離して測れる。
+
+    同順位は平均を取らず、安定ソートの並び順で割り振る（2回の argsort）。
+    単調変換なので順位相関やAUCは変わらず、日付ごとの行数が小さいので
+    総当たりのランク付けより桁違いに速い。
+    """
+    d = pd.to_datetime(dates).to_numpy()
+    order = np.argsort(d, kind="stable")
+    ds = d[order]
+    # 日付の切れ目
+    bounds = np.flatnonzero(np.r_[True, ds[1:] != ds[:-1], True])
+    out = np.empty_like(X, dtype=np.float64)
+    for a, b in zip(bounds[:-1], bounds[1:]):
+        idx = order[a:b]
+        n = len(idx)
+        if n == 1:
+            out[idx] = 0.5
+            continue
+        blk = X[idx]
+        r = blk.argsort(axis=0, kind="stable").argsort(axis=0, kind="stable")
+        out[idx] = r / (n - 1)
+    return out
+
+
 def flatten(node_feat: np.ndarray, edge_feat: np.ndarray,
             period_mask: np.ndarray, meta: pd.DataFrame,
             kind: str = "seq") -> Tuple[np.ndarray, List[str]]:
-    """グラフ系列を1本のベクトルに潰す。"""
+    """
+    グラフ系列を1本のベクトルに潰す。
+
+    末尾が `_rank` のセットは、同じ発表日の中で順位に直したもの。
+    規模と地合いを抜いても情報が残るかを測るために使う。
+    """
+    rank = kind.endswith("_rank")
+    if rank:
+        kind = kind[: -len("_rank")]
     if kind not in ("latest", "seq", "nodes"):
         raise ValueError(f"未知の特徴量セット: {kind}")
 
@@ -72,6 +119,9 @@ def flatten(node_feat: np.ndarray, edge_feat: np.ndarray,
 
     X = np.concatenate([p.astype(np.float64) for p in parts], axis=1)
     assert X.shape[1] == len(names), (X.shape, len(names))
+    if rank:
+        X = rank_within_date(X, meta["entry_date"])
+        names = [f"rank({n})" for n in names]
     return X, names
 
 

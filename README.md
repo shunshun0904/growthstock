@@ -256,14 +256,46 @@ python3 scripts/jquants_data_fetcher.py                # watchlist 全件
 
 | エンドポイント | 実測 | 影響 |
 | --- | :-: | --- |
-| `/fins/summary` | OK | PL・BS の集計値と CF 3区分が取れる |
+| `/fins/summary` | OK | PL・BS の集計値と CF 3区分が取れる（四半期） |
 | `/fins/details` | **HTTP 403** | 減価償却費・運転資本・売上原価などの**内訳は取れない** |
+| EDINET DB `financials` | OK | 上の内訳が取れる。ただし**年1回**（有価証券報告書） |
 
 `CFO` / `CFI` / `CFF` の開示率は 1Q 9.9% / 2Q 76.0% / 3Q 8.2% / 通期 88.8%
 （`docs/DATA_FIELDS.md` の実測）。つまり大半の企業は CF を**半期でしか出しません**。
 そのため 1Q・3Q の CF ノードは欠測のままマスクし、2Q・通期は「半期ぶんを
 1四半期あたりに直した値」として持ちます。詳細は
 [`docs/ACCOUNTING_GRAPH.md`](docs/ACCOUNTING_GRAPH.md)。
+
+### EDINET DB の明細ノード（29ノード / 37エッジ）
+
+J-Quants だけでは組めなかった「税引前利益 → 減価償却費 → 運転資本 → 営業CF」の鎖は、
+EDINET DB の有価証券報告書から明細ノードを下位層として足すことで繋がります。
+
+| 足したノード | 元の項目 |
+| --- | --- |
+| 売上原価 / 販管費 / 研究開発費 | `cost_of_sales` / `sga` / `rnd_expenses` |
+| 税引前利益 | `profit_before_tax` |
+| 減価償却費 / 設備投資 | `depreciation` / `capex` |
+| 棚卸資産 / 売上債権 / 仕入債務 / 運転資本 | `inventories` / `trade_receivables` / `trade_payables` |
+| 有利子負債 | `ibd_current` + `ibd_noncurrent` |
+
+**年1回しか出ない**ので、四半期のグラフに混ぜるときは次の約束を置いています。
+
+1. 年次のフローは4で割って1四半期あたりに直す（`span` = 4）
+2. その値が何年前の書類かを `age_years` としてノード特徴量に持たせる
+3. 基準日から400日より古い書類しか無ければ、明細は全部欠測にする
+
+各四半期の**開示日を基準に** as-of で引くので、過去の期のグラフに
+その時点ではまだ出ていない有報が混ざることはありません。
+EDINET が取れていない会社では明細ノードが欠測になるだけで、
+J-Quants だけの粗いグラフはそのまま成立します。
+
+### 規模効果を抜いて測る
+
+実データで測ると、単変量の情報係数の上位が軒並み `log_size`（企業規模）でした。
+そこで **同じ発表日の中で各特徴量を順位に直したセット**（`latest_rank` / `seq_rank`）
+を並べて比較します。その日の地合いと規模の絶対水準が消えるので、
+会計構造そのものに情報があるかを分離して測れます。
 
 ### 使い方
 
@@ -334,6 +366,7 @@ Accuracy 55% を大きく超える行が出たら、まずリークを疑って�
 │   ├── backtest.py               # 取引コスト控除後の損益
 │   ├── evaluate.py               # 評価の入口 (CLI)
 │   ├── leakage.py                # リーク検査
+│   ├── edinet.py                 # EDINET DB の明細を as-of で結合
 │   ├── eda.py                    # EDA の集計 (JSON)
 │   ├── eda_report.py             # EDA の組版 (単体HTML)
 │   ├── synthetic.py              # テスト用の決定的な合成データ

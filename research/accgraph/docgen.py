@@ -31,8 +31,9 @@ KIND_JA = {"flow": "フロー", "composition": "内訳", "link": "計算書を�
 
 def _node_table() -> List[str]:
     lines = [
-        "| ノード | 名称 | 計算書 | 種別 | 出所 | 元の項目 / 計算式 | 正規化の分母 | 共通概念 |",
-        "| --- | --- | :-: | :-: | :-: | --- | :-: | --- |",
+        "| ノード | 名称 | 計算書 | 更新 | 種別 | 出所 | 元の項目 / 計算式 "
+        "| 正規化の分母 | 共通概念 |",
+        "| --- | --- | :-: | :-: | :-: | :-: | --- | :-: | --- |",
     ]
     for n in schema.NODES:
         if n.source == "disclosed":
@@ -46,8 +47,9 @@ def _node_table() -> List[str]:
         scale = "売上高" if n.scale_by == schema.SCALE_SALES else "総資産"
         kind = "期末残高" if n.kind == "stock" else "期間フロー"
         src = "開示値" if n.source == "disclosed" else "計算値"
-        lines.append(f"| `{n.id}` | {n.name_ja} | {n.statement} | {kind} | {src} "
-                     f"| {origin} | {scale} | `{n.level1}` |")
+        cadence = "年1回" if n.source_table == "edinet" else "四半期"
+        lines.append(f"| `{n.id}` | {n.name_ja} | {n.statement} | {cadence} "
+                     f"| {kind} | {src} | {origin} | {scale} | `{n.level1}` |")
     return lines
 
 
@@ -93,19 +95,36 @@ def render() -> str:
         "| `/fins/summary` | OK（111項目） | PL・BS の集計値と CF 3区分が取れる |",
         "| `/fins/details` | **HTTP 403** | 減価償却費・運転資本・売上原価などの内訳が取れない |",
         "| `/fins/fs_details` | **HTTP 403** | 同上 |",
+        "| EDINET DB `/companies/{code}/financials` | OK（128項目） "
+        "| 上の内訳が取れる。ただし**年1回**（有価証券報告書） |",
         "",
-        "実測は `docs/DATA_FIELDS.md`（`research/probe_fins_fields.py` の出力）。",
+        "実測は `docs/DATA_FIELDS.md`（`research/probe_fins_fields.py` の出力）と",
+        "`docs/DATA_EDINETDB.md`（`research/probe_edinetdb.py` の出力）。",
         "",
-        "このため、要件にあった「税引前利益 → 減価償却費 → 運転資本 → 営業CF」という",
-        "粒度のグラフは**この契約では作れない**。取れない項目を推定で埋めるのではなく、",
+        "四半期のグラフは J-Quants の集計値だけで組む。取れない項目を推定で埋めず、",
         "",
         "1. 開示された集計値をノードにする（出所 = 開示値）",
         "2. 集計値どうしの差で必ず決まる残余をノードにする（出所 = 計算値）",
         "3. どちらであるかをノード特徴量 `is_disclosed` として持たせる",
         "",
         "という形にした。2 は推定ではなく恒等式なので、値そのものに不確かさは入らない。",
-        "粒度が粗いだけである。`/fins/details` が使えるようになれば、",
-        "同じスキーマの下位層としてノードを足せる。",
+        "",
+        "そのうえで、EDINET DB の有価証券報告書から**明細ノードを下位層として足す**。",
+        "要件にあった「税引前利益 → 減価償却費 → 運転資本 → 営業CF」の鎖は、",
+        "ここで初めて繋がる。粗いノード（売上原価＋販管費）は残したまま、",
+        "その内訳として細かいノード（売上原価 / 販管費 / 研究開発費）をぶら下げる形なので、",
+        "EDINET が取れていない会社では細かい側が欠測になるだけで、",
+        "粗い側のグラフはそのまま成立する。",
+        "",
+        "### 年1回のものを四半期のグラフに混ぜるときの約束",
+        "",
+        "  1. 年次のフローは4で割って「1四半期あたり」に直す（`span` = 4）",
+        "  2. 「その値が何年前の書類か」を `age_years` としてノード特徴量に持たせる",
+        "  3. 基準日から400日より古い書類しか無ければ、明細は全部欠測にする",
+        "",
+        "粒度の違いをモデルから見える形にするのが目的で、隠して均すのが目的ではない。",
+        "各四半期の開示日を基準に as-of で引くので、過去の期のグラフに",
+        "その時点ではまだ出ていない有報が混ざることはない。",
         "",
         "## 2. キャッシュフローは半期でしか開示されない",
         "",
@@ -191,7 +210,8 @@ def render() -> str:
         "| `slope4` | 直近4期の `scaled` の傾き（1四半期あたり） |",
         "| `vol4` | 直近4期の `scaled` の標準偏差 |",
         "| `sign` | 符号 |",
-        "| `span` | その金額が何四半期ぶんか |",
+        "| `span` | その金額が何四半期ぶんか（年次のものは4） |",
+        "| `age_years` | その値が何年前の書類か（四半期のものは0） |",
         "| `fcst_gap` | 通期会社予想に対する進捗の乖離（累計÷予想 − 経過四半期÷4） |",
         "| `fcst_avail` | 上を計算できたか |",
         "| `is_missing` | その期のそのノードが欠測か |",
@@ -213,7 +233,8 @@ def render() -> str:
         "",
         "### 定数（サンプルによらない）",
         "",
-        "ノード: " + " / ".join(f"`{c}`" for c in schema.NODE_CONSTANTS),
+        "ノード: " + " / ".join(f"`{c}`" for c in schema.NODE_CONSTANTS)
+        + "（`is_annual` = 1 が EDINET 由来）",
         "",
         "エッジ: " + " / ".join(f"`{c}`" for c in schema.EDGE_CONSTANTS),
         "",

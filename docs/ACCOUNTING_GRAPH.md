@@ -13,19 +13,35 @@
 | `/fins/summary` | OK（111項目） | PL・BS の集計値と CF 3区分が取れる |
 | `/fins/details` | **HTTP 403** | 減価償却費・運転資本・売上原価などの内訳が取れない |
 | `/fins/fs_details` | **HTTP 403** | 同上 |
+| EDINET DB `/companies/{code}/financials` | OK（128項目） | 上の内訳が取れる。ただし**年1回**（有価証券報告書） |
 
-実測は `docs/DATA_FIELDS.md`（`research/probe_fins_fields.py` の出力）。
+実測は `docs/DATA_FIELDS.md`（`research/probe_fins_fields.py` の出力）と
+`docs/DATA_EDINETDB.md`（`research/probe_edinetdb.py` の出力）。
 
-このため、要件にあった「税引前利益 → 減価償却費 → 運転資本 → 営業CF」という
-粒度のグラフは**この契約では作れない**。取れない項目を推定で埋めるのではなく、
+四半期のグラフは J-Quants の集計値だけで組む。取れない項目を推定で埋めず、
 
 1. 開示された集計値をノードにする（出所 = 開示値）
 2. 集計値どうしの差で必ず決まる残余をノードにする（出所 = 計算値）
 3. どちらであるかをノード特徴量 `is_disclosed` として持たせる
 
 という形にした。2 は推定ではなく恒等式なので、値そのものに不確かさは入らない。
-粒度が粗いだけである。`/fins/details` が使えるようになれば、
-同じスキーマの下位層としてノードを足せる。
+
+そのうえで、EDINET DB の有価証券報告書から**明細ノードを下位層として足す**。
+要件にあった「税引前利益 → 減価償却費 → 運転資本 → 営業CF」の鎖は、
+ここで初めて繋がる。粗いノード（売上原価＋販管費）は残したまま、
+その内訳として細かいノード（売上原価 / 販管費 / 研究開発費）をぶら下げる形なので、
+EDINET が取れていない会社では細かい側が欠測になるだけで、
+粗い側のグラフはそのまま成立する。
+
+### 年1回のものを四半期のグラフに混ぜるときの約束
+
+  1. 年次のフローは4で割って「1四半期あたり」に直す（`span` = 4）
+  2. 「その値が何年前の書類か」を `age_years` としてノード特徴量に持たせる
+  3. 基準日から400日より古い書類しか無ければ、明細は全部欠測にする
+
+粒度の違いをモデルから見える形にするのが目的で、隠して均すのが目的ではない。
+各四半期の開示日を基準に as-of で引くので、過去の期のグラフに
+その時点ではまだ出ていない有報が混ざることはない。
 
 ## 2. キャッシュフローは半期でしか開示されない
 
@@ -55,28 +71,39 @@
 
 ## 3. ノード
 
-18ノード（開示値 11 / 計算値 7）。
+29ノード（開示値 20 / 計算値 9）。
 
-| ノード | 名称 | 計算書 | 種別 | 出所 | 元の項目 / 計算式 | 正規化の分母 | 共通概念 |
-| --- | --- | :-: | :-: | :-: | --- | :-: | --- |
-| `sales` | 売上高 | PL | 期間フロー | 開示値 | `Sales` | 売上高 | `REVENUE` |
-| `cogs_sga` | 売上原価＋販管費 | PL | 期間フロー | 計算値 | `Sales` − `OP` | 売上高 | `OPERATING_COST` |
-| `op` | 営業利益 | PL | 期間フロー | 開示値 | `OP` | 売上高 | `PROFIT_OPERATING` |
-| `non_op_net` | 営業外損益（純額） | PL | 期間フロー | 計算値 | `OdP` − `OP` | 売上高 | `NON_OPERATING_NET` |
-| `ordinary_profit` | 経常利益 | PL | 期間フロー | 開示値 | `OdP` | 売上高 | `PROFIT_ORDINARY` |
-| `special_tax_net` | 特別損益＋税金等（純額） | PL | 期間フロー | 計算値 | `NP` − `OdP` | 売上高 | `SPECIAL_AND_TAX_NET` |
-| `net_income` | 当期純利益 | PL | 期間フロー | 開示値 | `NP` | 売上高 | `PROFIT_NET` |
-| `total_assets` | 総資産 | BS | 期末残高 | 開示値 | `TA` | 総資産 | `ASSETS_TOTAL` |
-| `liabilities` | 負債 | BS | 期末残高 | 計算値 | `TA` − `Eq` | 総資産 | `LIABILITIES_TOTAL` |
-| `equity` | 純資産 | BS | 期末残高 | 開示値 | `Eq` | 総資産 | `EQUITY_TOTAL` |
-| `minority_etc` | 非支配株主持分等 | BS | 期末残高 | 計算値 | `Eq` − `ShEq` | 総資産 | `MINORITY_INTEREST` |
-| `shareholders_equity` | 自己資本 | BS | 期末残高 | 開示値 | `ShEq` | 総資産 | `EQUITY_SHAREHOLDERS` |
-| `cash` | 現金及び現金同等物 | BS | 期末残高 | 開示値 | `CashEq` | 総資産 | `CASH` |
-| `cfo` | 営業CF | CF | 期間フロー | 開示値 | `CFO` | 売上高 | `CF_OPERATING` |
-| `cfi` | 投資CF | CF | 期間フロー | 開示値 | `CFI` | 売上高 | `CF_INVESTING` |
-| `cff` | 財務CF | CF | 期間フロー | 開示値 | `CFF` | 売上高 | `CF_FINANCING` |
-| `fcf` | フリーCF | CF | 期間フロー | 計算値 | `CFO` + `CFI` | 売上高 | `CF_FREE` |
-| `net_cash_chg` | 現金増減額 | CF | 期間フロー | 計算値 | `CFO` + `CFI` + `CFF` | 売上高 | `CF_NET_CHANGE` |
+| ノード | 名称 | 計算書 | 更新 | 種別 | 出所 | 元の項目 / 計算式 | 正規化の分母 | 共通概念 |
+| --- | --- | :-: | :-: | :-: | :-: | --- | :-: | --- |
+| `sales` | 売上高 | PL | 四半期 | 期間フロー | 開示値 | `Sales` | 売上高 | `REVENUE` |
+| `cogs_sga` | 売上原価＋販管費 | PL | 四半期 | 期間フロー | 計算値 | `Sales` − `OP` | 売上高 | `OPERATING_COST` |
+| `op` | 営業利益 | PL | 四半期 | 期間フロー | 開示値 | `OP` | 売上高 | `PROFIT_OPERATING` |
+| `non_op_net` | 営業外損益（純額） | PL | 四半期 | 期間フロー | 計算値 | `OdP` − `OP` | 売上高 | `NON_OPERATING_NET` |
+| `ordinary_profit` | 経常利益 | PL | 四半期 | 期間フロー | 開示値 | `OdP` | 売上高 | `PROFIT_ORDINARY` |
+| `special_tax_net` | 特別損益＋税金等（純額） | PL | 四半期 | 期間フロー | 計算値 | `NP` − `OdP` | 売上高 | `SPECIAL_AND_TAX_NET` |
+| `net_income` | 当期純利益 | PL | 四半期 | 期間フロー | 開示値 | `NP` | 売上高 | `PROFIT_NET` |
+| `total_assets` | 総資産 | BS | 四半期 | 期末残高 | 開示値 | `TA` | 総資産 | `ASSETS_TOTAL` |
+| `liabilities` | 負債 | BS | 四半期 | 期末残高 | 計算値 | `TA` − `Eq` | 総資産 | `LIABILITIES_TOTAL` |
+| `equity` | 純資産 | BS | 四半期 | 期末残高 | 開示値 | `Eq` | 総資産 | `EQUITY_TOTAL` |
+| `minority_etc` | 非支配株主持分等 | BS | 四半期 | 期末残高 | 計算値 | `Eq` − `ShEq` | 総資産 | `MINORITY_INTEREST` |
+| `shareholders_equity` | 自己資本 | BS | 四半期 | 期末残高 | 開示値 | `ShEq` | 総資産 | `EQUITY_SHAREHOLDERS` |
+| `cash` | 現金及び現金同等物 | BS | 四半期 | 期末残高 | 開示値 | `CashEq` | 総資産 | `CASH` |
+| `cfo` | 営業CF | CF | 四半期 | 期間フロー | 開示値 | `CFO` | 売上高 | `CF_OPERATING` |
+| `cfi` | 投資CF | CF | 四半期 | 期間フロー | 開示値 | `CFI` | 売上高 | `CF_INVESTING` |
+| `cff` | 財務CF | CF | 四半期 | 期間フロー | 開示値 | `CFF` | 売上高 | `CF_FINANCING` |
+| `fcf` | フリーCF | CF | 四半期 | 期間フロー | 計算値 | `CFO` + `CFI` | 売上高 | `CF_FREE` |
+| `net_cash_chg` | 現金増減額 | CF | 四半期 | 期間フロー | 計算値 | `CFO` + `CFI` + `CFF` | 売上高 | `CF_NET_CHANGE` |
+| `cost_of_sales` | 売上原価 | PL | 年1回 | 期間フロー | 開示値 | `cost_of_sales` | 売上高 | `OPERATING_COST` |
+| `sga` | 販売費及び一般管理費 | PL | 年1回 | 期間フロー | 開示値 | `sga` | 売上高 | `OPERATING_COST` |
+| `rnd` | 研究開発費 | PL | 年1回 | 期間フロー | 開示値 | `rnd_expenses` | 売上高 | `OPERATING_COST` |
+| `pretax_profit` | 税引前利益 | PL | 年1回 | 期間フロー | 開示値 | `profit_before_tax` | 売上高 | `PROFIT_PRETAX` |
+| `depreciation` | 減価償却費 | CF | 年1回 | 期間フロー | 開示値 | `depreciation` | 売上高 | `DEPRECIATION` |
+| `capex` | 設備投資 | CF | 年1回 | 期間フロー | 開示値 | `capex` | 売上高 | `CAPEX` |
+| `inventories` | 棚卸資産 | BS | 年1回 | 期末残高 | 開示値 | `inventories` | 総資産 | `INVENTORIES` |
+| `trade_receivables` | 売上債権 | BS | 年1回 | 期末残高 | 開示値 | `trade_receivables` | 総資産 | `TRADE_RECEIVABLES` |
+| `trade_payables` | 仕入債務 | BS | 年1回 | 期末残高 | 開示値 | `trade_payables` | 総資産 | `TRADE_PAYABLES` |
+| `working_capital` | 運転資本 | BS | 年1回 | 期末残高 | 計算値 | `inventories` + `trade_receivables` − `trade_payables` | 総資産 | `WORKING_CAPITAL` |
+| `interest_bearing_debt` | 有利子負債 | BS | 年1回 | 期末残高 | 計算値 | `ibd_current` + `ibd_noncurrent` | 総資産 | `INTEREST_BEARING_DEBT` |
 
 ### 階層的標準化
 
@@ -89,7 +116,7 @@ level3 は J-Quants が正規化した項目名になり、level2（業種別概
 
 ## 4. エッジ
 
-21エッジ。種別は
+37エッジ。種別は
 **フロー**（金額が移動・変換される）、
 **内訳**（部分と全体）、
 **計算書をまたぐ対応**（金額が一致するとは限らない）の3つ。
@@ -117,6 +144,22 @@ level3 は J-Quants が正規化した項目名になり、level2（業種別概
 | `total_assets` (総資産) | `sales` (売上高) | 計算書をまたぐ対応 | 総資産回転（資産が売上を生む） |
 | `cfi` (投資CF) | `total_assets` (総資産) | 計算書をまたぐ対応 | 投資支出が資産を増やす |
 | `cff` (財務CF) | `liabilities` (負債) | 計算書をまたぐ対応 | 財務CFが負債・資本を動かす |
+| `cost_of_sales` (売上原価) | `cogs_sga` (売上原価＋販管費) | 内訳 | J-Quantsでは合算でしか取れない |
+| `sga` (販売費及び一般管理費) | `cogs_sga` (売上原価＋販管費) | 内訳 | — |
+| `rnd` (研究開発費) | `sga` (販売費及び一般管理費) | 内訳 | 販管費の内数 |
+| `ordinary_profit` (経常利益) | `pretax_profit` (税引前利益) | フロー | — |
+| `pretax_profit` (税引前利益) | `net_income` (当期純利益) | フロー | 税金を引くと当期純利益 |
+| `pretax_profit` (税引前利益) | `cfo` (営業CF) | フロー | 営業CFの本来の起点 |
+| `depreciation` (減価償却費) | `cfo` (営業CF) | フロー | 非現金費用として足し戻す |
+| `working_capital` (運転資本) | `cfo` (営業CF) | フロー | 運転資本が増えると営業CFは減る |
+| `inventories` (棚卸資産) | `working_capital` (運転資本) | 内訳 | — |
+| `trade_receivables` (売上債権) | `working_capital` (運転資本) | 内訳 | — |
+| `trade_payables` (仕入債務) | `working_capital` (運転資本) | 内訳 | 差し引く側 |
+| `capex` (設備投資) | `cfi` (投資CF) | フロー | 投資CFの主要な中身 |
+| `inventories` (棚卸資産) | `total_assets` (総資産) | 内訳 | — |
+| `trade_receivables` (売上債権) | `total_assets` (総資産) | 内訳 | — |
+| `trade_payables` (仕入債務) | `liabilities` (負債) | 内訳 | — |
+| `interest_bearing_debt` (有利子負債) | `liabilities` (負債) | 内訳 | — |
 
 本来 PL と CF を繋ぐのは「税引前利益 → 営業CF」だが、
 `/fins/summary` に税引前利益が無いため当期純利益を起点にしている。
@@ -137,6 +180,10 @@ graph LR
     ordinary_profit["経常利益"]
     special_tax_net["特別損益＋税金等（純額）"]
     net_income["当期純利益"]
+    cost_of_sales["売上原価"]
+    sga["販売費及び一般管理費"]
+    rnd["研究開発費"]
+    pretax_profit["税引前利益"]
   end
   subgraph BS[貸借対照表]
     total_assets["総資産"]
@@ -145,6 +192,11 @@ graph LR
     minority_etc["非支配株主持分等"]
     shareholders_equity["自己資本"]
     cash["現金及び現金同等物"]
+    inventories["棚卸資産"]
+    trade_receivables["売上債権"]
+    trade_payables["仕入債務"]
+    working_capital["運転資本"]
+    interest_bearing_debt["有利子負債"]
   end
   subgraph CF[キャッシュフロー計算書]
     cfo["営業CF"]
@@ -152,6 +204,8 @@ graph LR
     cff["財務CF"]
     fcf["フリーCF"]
     net_cash_chg["現金増減額"]
+    depreciation["減価償却費"]
+    capex["設備投資"]
   end
   sales --> cogs_sga
   sales --> op
@@ -174,6 +228,22 @@ graph LR
   total_assets ==> sales
   cfi ==> total_assets
   cff ==> liabilities
+  cost_of_sales -.-> cogs_sga
+  sga -.-> cogs_sga
+  rnd -.-> sga
+  ordinary_profit --> pretax_profit
+  pretax_profit --> net_income
+  pretax_profit --> cfo
+  depreciation --> cfo
+  working_capital --> cfo
+  inventories -.-> working_capital
+  trade_receivables -.-> working_capital
+  trade_payables -.-> working_capital
+  capex --> cfi
+  inventories -.-> total_assets
+  trade_receivables -.-> total_assets
+  trade_payables -.-> liabilities
+  interest_bearing_debt -.-> liabilities
 ```
 
 ## 6. 特徴量
@@ -191,7 +261,8 @@ graph LR
 | `slope4` | 直近4期の `scaled` の傾き（1四半期あたり） |
 | `vol4` | 直近4期の `scaled` の標準偏差 |
 | `sign` | 符号 |
-| `span` | その金額が何四半期ぶんか |
+| `span` | その金額が何四半期ぶんか（年次のものは4） |
+| `age_years` | その値が何年前の書類か（四半期のものは0） |
 | `fcst_gap` | 通期会社予想に対する進捗の乖離（累計÷予想 − 経過四半期÷4） |
 | `fcst_avail` | 上を計算できたか |
 | `is_missing` | その期のそのノードが欠測か |
@@ -213,7 +284,7 @@ graph LR
 
 ### 定数（サンプルによらない）
 
-ノード: `is_disclosed` / `stmt_pl` / `stmt_bs` / `stmt_cf` / `is_stock` / `recurring`
+ノード: `is_disclosed` / `stmt_pl` / `stmt_bs` / `stmt_cf` / `is_stock` / `recurring` / `is_annual`（`is_annual` = 1 が EDINET 由来）
 
 エッジ: `kind_flow` / `kind_composition` / `kind_link`
 
@@ -249,8 +320,8 @@ research/_data/accgraph/
   schema.json         ノード・エッジ・定数・ラベル定義
 ```
 
-`node_feat` は `[n, 8, 18, 13]`、
-`edge_feat` は `[n, 8, 21, 3]`。
+`node_feat` は `[n, 8, 29, 14]`、
+`edge_feat` は `[n, 8, 37, 3]`。
 スキーマが全サンプルで同一なので、グラフ構造はサンプルごとに持たず
 `edge_index` 1本で足りる。PyTorch Geometric にはそのまま渡せる。
 

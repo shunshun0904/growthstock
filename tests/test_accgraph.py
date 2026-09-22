@@ -24,8 +24,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "research"))
 
 from accgraph import (  # noqa: E402
-    backtest, baselines, build, eda, eda_report, labels as L, leakage, panel,
-    schema, splits, synthetic,
+    backtest, baselines, build, eda, eda_report, edinet, labels as L, leakage,
+    panel, schema, splits, synthetic,
 )
 
 
@@ -101,8 +101,11 @@ class TestSchema(unittest.TestCase):
                 continue
             plus, minus = n.derive
             self.assertTrue(plus, f"{n.id}: 加算項が空")
+            known = (schema.CUMULATIVE_FIELDS + schema.STOCK_FIELDS
+                     if n.source_table == "fins"
+                     else schema.EDINET_FLOW_FIELDS + schema.EDINET_STOCK_FIELDS)
             for f in list(plus) + list(minus):
-                self.assertIn(f, schema.CUMULATIVE_FIELDS + schema.STOCK_FIELDS)
+                self.assertIn(f, known, f"{n.id} ({n.source_table})")
 
 
 class TestPointInTime(unittest.TestCase):
@@ -458,11 +461,182 @@ class TestEndToEnd(unittest.TestCase):
         periods = panel.period_slots(versions)
         anchors = panel.anchors(versions, periods)
         mats = panel.build_asof_matrices(anchors, versions, periods)
+        # EDINET を結合していないので、明細ノードは欠測になる。
+        # J-Quants だけで決まる恒等式を確かめる
         amount = build.node_amounts(mats)
         got = amount[:, :, schema.NODE_INDEX["liabilities"]]
         want = mats["s_TA"] - mats["s_Eq"]
         ok = ~np.isnan(want)
         np.testing.assert_allclose(got[ok], want[ok])
+
+
+class TestEdinet(unittest.TestCase):
+    """EDINET の明細を四半期グラフに混ぜるところ。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="accgraph_ed_")
+        cls.raw = os.path.join(cls.tmp, "raw")
+        cls.out = os.path.join(cls.tmp, "out")
+        synthetic.write_all(cls.raw, n_codes=8, start_year=2018, n_years=5)
+        cls.meta = build.build(data_dir=cls.raw, out_dir=cls.out)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_correction_does_not_leak_backwards(self):
+        """
+        訂正報告書が、訂正前の時点のグラフに混ざらないこと。
+        年次パネルは各年度の最初の提出だけを採る。
+        """
+        fin = edinet.load(self.raw)
+        panel_ = edinet.annual_panel(fin)
+        dup = panel_.duplicated(["Code", "fiscal_year"]).sum()
+        self.assertEqual(int(dup), 0, "同じ年度が2行ある（訂正を落とせていない）")
+        # 合成データは2年目を1年後に訂正し、税引前利益を1.4倍にしてある。
+        # 採られているのは訂正前の値
+        raw = fin.sort_values("submit_date")
+        first = raw.drop_duplicates(["jq_code", "fiscal_year"], keep="first")
+        merged = panel_.merge(first, left_on=["Code", "fiscal_year"],
+                              right_on=["jq_code", "fiscal_year"])
+        np.testing.assert_allclose(
+            merged["profit_before_tax_x"].to_numpy(),
+            merged["profit_before_tax_y"].to_numpy())
+
+    def test_available_the_day_after_submission(self):
+        """提出日の翌日から使えること。当日に使うと場中の提出で先読みになる。"""
+        fin = edinet.load(self.raw)
+        p = edinet.annual_panel(fin)
+        gap = (pd.to_datetime(p["avail_date"])
+               - pd.to_datetime(fin.sort_values("submit_date")
+                                .drop_duplicates(["jq_code", "fiscal_year"],
+                                                 keep="first")["submit_date"]
+                                ).dt.normalize().reset_index(drop=True))
+        self.assertTrue((gap.dt.days == 1).all())
+
+    def test_annual_flow_is_divided_into_quarters(self):
+        """
+        年次のフローは1四半期あたりに直され、span に4が入ること。
+        直さないと、四半期の売上高と年次の減価償却費を同じ土俵で比べてしまう。
+        """
+        meta, nf, ef, pm = build.load(self.out, liquid_only=False)
+        sp = schema.NODE_FEATURES.index("span")
+        mi = schema.NODE_FEATURES.index("is_missing")
+        for nid in ("depreciation", "capex", "cost_of_sales"):
+            j = schema.NODE_INDEX[nid]
+            have = nf[:, 0, j, mi] == 0
+            self.assertTrue(have.any(), f"{nid} が1件も引けていない")
+            self.assertTrue((nf[have, 0, j, sp] == 4.0).all(), nid)
+        # 期末残高は割らない
+        j = schema.NODE_INDEX["inventories"]
+        have = nf[:, 0, j, mi] == 0
+        self.assertTrue((nf[have, 0, j, sp] == 1.0).all())
+
+    def test_age_is_zero_for_quarterly_nodes(self):
+        """四半期のノードは当期そのものなので、何年前かは0。"""
+        meta, nf, ef, pm = build.load(self.out, liquid_only=False)
+        ag = schema.NODE_FEATURES.index("age_years")
+        mi = schema.NODE_FEATURES.index("is_missing")
+        j = schema.NODE_INDEX["sales"]
+        have = nf[:, 0, j, mi] == 0
+        self.assertTrue((nf[have, 0, j, ag] == 0.0).all())
+        # EDINET のノードは0〜1年ぶん古い（年1回の開示なので）
+        j = schema.NODE_INDEX["pretax_profit"]
+        have = nf[:, 0, j, mi] == 0
+        age = nf[have, 0, j, ag]
+        self.assertTrue(have.any())
+        self.assertTrue(((age >= 0) & (age <= edinet.STALE_DAYS / 365.25)).all(),
+                        f"age_years が範囲外: {age.min()}〜{age.max()}")
+
+    def test_missing_edinet_leaves_the_coarse_graph_intact(self):
+        """
+        EDINET が無い会社でも、J-Quants だけの粗いグラフは成立すること。
+        明細が取れない会社を丸ごと落とすと、母集団が偏る。
+        """
+        meta, nf, ef, pm = build.load(self.out, liquid_only=False)
+        mi = schema.NODE_FEATURES.index("is_missing")
+        j_ed = schema.NODE_INDEX["pretax_profit"]
+        j_jq = schema.NODE_INDEX["sales"]
+        no_edinet = nf[:, 0, j_ed, mi] == 1
+        self.assertTrue(no_edinet.any(), "EDINET が欠測のサンプルが無い")
+        self.assertTrue((nf[no_edinet, 0, j_jq, mi] == 0).all(),
+                        "EDINET が無いだけで売上高まで欠測になっている")
+
+    def test_working_capital_is_the_identity(self):
+        """運転資本 = 棚卸資産 + 売上債権 − 仕入債務 が実際にその値になること。"""
+        meta, nf, ef, pm = build.load(self.out, liquid_only=False)
+        sc = schema.NODE_FEATURES.index("to_assets")
+        mi = schema.NODE_FEATURES.index("is_missing")
+        idx = {k: schema.NODE_INDEX[k] for k in
+               ("working_capital", "inventories", "trade_receivables",
+                "trade_payables")}
+        ok = np.all([nf[:, 0, j, mi] == 0 for j in idx.values()], axis=0)
+        self.assertTrue(ok.any())
+        want = (nf[ok, 0, idx["inventories"], sc]
+                + nf[ok, 0, idx["trade_receivables"], sc]
+                - nf[ok, 0, idx["trade_payables"], sc])
+        np.testing.assert_allclose(nf[ok, 0, idx["working_capital"], sc], want,
+                                   rtol=1e-5, atol=1e-6)
+
+
+    def test_chunking_does_not_change_the_result(self):
+        """
+        メモリのためにアンカーを分けて計算しても、結果が変わらないこと。
+        14万件を一度に回すと中間配列が7GBを超えてランナーが落ちるので
+        分けているが、分け方で値が変わってはいけない。
+        """
+        fins = build.load_parts("fins", self.raw)
+        v = panel.prepare_versions(fins)
+        pe = panel.period_slots(v)
+        a = panel.anchors(v, pe)
+        m = panel.build_asof_matrices(a, v, pe)
+        m.update(edinet.asof_matrices(
+            a, m["disc_date_days"],
+            edinet.annual_panel(edinet.load(self.raw))))
+        whole = build.features_in_chunks(m, panel.SEQ_LEN, chunk_rows=10 ** 9)
+        split = build.features_in_chunks(m, panel.SEQ_LEN, chunk_rows=37)
+        for w, p_ in zip(whole, split):
+            np.testing.assert_array_equal(w, p_)
+
+
+class TestRankWithinDate(unittest.TestCase):
+
+    def test_ranks_are_computed_inside_each_date(self):
+        X = np.array([[1.0], [3.0], [2.0], [10.0], [20.0]])
+        d = pd.Series(pd.to_datetime(
+            ["2020-01-01"] * 3 + ["2020-01-02"] * 2))
+        r = baselines.rank_within_date(X, d)
+        # 1日目: 1 < 2 < 3 -> 0, 0.5, 1
+        np.testing.assert_allclose(r[:3, 0], [0.0, 1.0, 0.5])
+        # 2日目: 別の日なので桁の大きさは効かない
+        np.testing.assert_allclose(r[3:, 0], [0.0, 1.0])
+
+    def test_single_row_date_is_neutral(self):
+        X = np.array([[5.0], [7.0]])
+        d = pd.Series(pd.to_datetime(["2020-01-01", "2020-01-02"]))
+        r = baselines.rank_within_date(X, d)
+        np.testing.assert_allclose(r[:, 0], [0.5, 0.5])
+
+    def test_rank_sets_have_the_same_width(self):
+        n = 40
+        nf = np.random.default_rng(0).normal(
+            size=(n, panel.SEQ_LEN, schema.N_NODES, len(schema.NODE_FEATURES)))
+        ef = np.zeros((n, panel.SEQ_LEN, schema.N_EDGES,
+                       len(schema.EDGE_FEATURES)))
+        pm = np.ones((n, panel.SEQ_LEN), dtype=bool)
+        meta = pd.DataFrame({
+            "quarter": np.tile([1, 2, 3, 4], n // 4),
+            "turnover_ma20": np.linspace(1, 50, n),
+            "entry_date": pd.to_datetime(
+                np.repeat(pd.date_range("2020-01-01", periods=n // 4), 4)),
+        })
+        a, na = baselines.flatten(nf, ef, pm, meta, kind="seq")
+        b, nb = baselines.flatten(nf, ef, pm, meta, kind="seq_rank")
+        self.assertEqual(a.shape, b.shape)
+        self.assertEqual(len(na), len(nb))
+        self.assertTrue(all(x.startswith("rank(") for x in nb))
+        self.assertTrue(((b >= 0) & (b <= 1)).all())
 
 
 class TestEda(unittest.TestCase):
