@@ -138,17 +138,37 @@ def label_stats(df: pd.DataFrame) -> Dict:
 
     # 継続の軸。到達したのに正例にならなかった分がどれだけあるかを見る。
     # 「一瞬の上昇」を外せているかは、ここの内訳で確かめる。
+    #
+    # **しきい値は行ごとに違う。** 本番のラベルはボラ正規化（銘柄自身の
+    # 期間σの 1.2倍）なので、cfg.threshold（固定20%）で測ってはいけない。
+    # 実際に 2026-09-22 の EDA でそれをやっており、到達 2,293件に対して
+    # 正例 3,865件という**到達より正例が多い**壊れた数字が出ていた
+    # （実際のしきい値の中央値は 10.95%。80.3% の行で 20% より緩い）。
+    # build_dataset.rise_thresholds が式の正本なので、そこから引き直す。
     import build_dataset as B
     cfg = B.DEFAULT_RISE
     if "future_rise" in df.columns:
-        reached = pd.to_numeric(df["future_rise"], errors="coerce") >= cfg.threshold
+        if cfg.normalised and "vol_20d" in df.columns:
+            need, _ = B.rise_thresholds(df["vol_20d"], cfg)
+            need.index = df.index
+            basis = "銘柄ごと（vol_20d から引き直し）"
+        else:
+            need = pd.Series(float(cfg.threshold), index=df.index)
+            basis = f"固定 {cfg.threshold * 100:.0f}%"
+        reached = pd.to_numeric(df["future_rise"], errors="coerce") >= need
         out["continuation"] = {
             "definition": cfg.name,
+            "threshold_basis": basis,
+            "threshold_pct": {
+                k: round(float(need.quantile(q) * 100), 2)
+                for k, q in (("p25", .25), ("median", .5), ("p75", .75))},
             "reached": int(reached.sum()),
             "reached_rate": round(float(reached.mean() * 100), 2),
             "positive": int(y.sum()),
             # 到達したのに継続条件で落ちた件数
             "reached_but_dropped": int((reached & (y == 0)).sum()),
+            # 整合の確認。到達していないのに正例は 0 でなければならない
+            "positive_without_reach": int(((~reached) & (y == 1)).sum()),
         }
         for col, key in (("keep_days_cnt", "keep_days"),
                          ("end_level", "end_level"),
