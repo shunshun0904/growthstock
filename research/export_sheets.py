@@ -121,7 +121,7 @@ def rows_from_predictions(pred: Dict) -> List[Dict]:
             "スコア": c["score"], "帯": c["band"],
             "較正確率%": c.get("calibProb"),
             "帯の正例率%": c.get("bandPositiveRate"),
-            "帯の実収益%": c.get("bandEndMedian"),
+            "帯の実収益%": c.get("bandOutcome"),
             "帯の勝率%": c.get("bandWinRate"),
             "必要上昇率%": c.get("needPct"),
             "予測時株価": c.get("close"),

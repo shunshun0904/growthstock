@@ -324,6 +324,227 @@ class TestFieldMatching(unittest.TestCase):
                           "FIN_COLS は None（全項目保持）であるべき")
 
 
+class TestWaitForData(unittest.TestCase):
+    """
+    research/wait_for_data.py。取り込みの前に当日データを待つ。
+
+    起動時刻を 21:30 JST から 16:05 JST へ前倒ししたので、定刻どおりに
+    起動した日は「まだ当日データが無い」状態で走る。待てば済む話を
+    失敗にしないことが、この部品の要件そのもの。
+
+    **当日データの有無に関わる経路は、どれも 0 で返ること**をここで固定する。
+    ここが非ゼロを返すと、祝日や鍵の不備でパイプライン全体がその日だけ
+    止まる。古いデータで予測する事故は後段の check_freshness.py が見ている。
+    （引数の書き間違いだけは別扱いで、非ゼロで落とす。）
+    """
+
+    def setUp(self):
+        import wait_for_data as W
+        self.W = W
+        self._client = W.JQuantsClient
+        self._resolve = W.resolve_api_key
+        self._sleep = W.time.sleep
+        self.slept = []
+        W.resolve_api_key = lambda: "dummy-key"
+
+        def fake_sleep(sec):
+            # 本当には眠らない。ただし無限ループを「遅いテスト」ではなく
+            # 「失敗」として出す。締切の判定を壊すと実測で数時間回り続ける
+            self.slept.append(sec)
+            if len(self.slept) > 100:
+                raise AssertionError("待ちが終わらない（締切の判定が壊れている）")
+
+        W.time.sleep = fake_sleep
+
+    def tearDown(self):
+        self.W.JQuantsClient = self._client
+        self.W.resolve_api_key = self._resolve
+        self.W.time.sleep = self._sleep
+
+    def _client_returning(self, pages):
+        """呼ばれるたびに pages を順に返す偽クライアント。"""
+        seq = list(pages)
+        calls = []
+
+        class Fake:
+            def __init__(self, *a, **k):
+                pass
+
+            def get_paginated(self, path, params):
+                calls.append((path, params))
+                return seq.pop(0) if seq else []
+
+        self.W.JQuantsClient = Fake
+        return calls
+
+    @staticmethod
+    def _future_weekday():
+        """
+        実時刻より必ず未来の平日を返す。
+
+        締切は「その日の HH:MM」で作られるので、固定日を書くと日が経った
+        ときに締切が過去になり、ポーリングせず1巡で諦めるようになる
+        （実際に 2026-09-18 固定で書いていて、日付が変わって落ちた）。
+        """
+        import datetime as _dt
+        d = _dt.datetime.now(_dt.timezone(_dt.timedelta(hours=9))).date() \
+            + _dt.timedelta(days=7)
+        while d.weekday() >= 5:
+            d += _dt.timedelta(days=1)
+        return d.isoformat()
+
+    def _client_by_path(self, table):
+        """パスごとに返す行を決める偽クライアント。table: パス -> 行の列。"""
+        seqs = {k: list(v) for k, v in table.items()}
+        calls = []
+
+        class Fake:
+            def __init__(self, *a, **k):
+                pass
+
+            def get_paginated(self, path, params):
+                calls.append((path, params))
+                q = seqs.get(path, [])
+                return q.pop(0) if q else []
+
+        self.W.JQuantsClient = Fake
+        return calls
+
+    def test_weekend_does_not_wait(self):
+        # 2026-09-19 は土曜。API を1度も叩かないこと
+        calls = self._client_returning([])
+        self.assertEqual(self.W.main(["--date", "2026-09-19"]), 0)
+        self.assertEqual(calls, [])
+
+    def test_missing_key_does_not_wait(self):
+        def boom():
+            from jquants_data_fetcher import AuthError
+            raise AuthError("鍵がありません")
+        self.W.resolve_api_key = boom
+        calls = self._client_returning([])
+        self.assertEqual(self.W.main(["--date", "2026-09-18"]), 0)
+        self.assertEqual(calls, [])
+
+    def test_returns_as_soon_as_rows_appear(self):
+        day = self._future_weekday()
+        bar = {"Code": "13010", "C": 1000}
+        calls = self._client_returning([[], [], [bar]])
+        rc = self.W.main(["--date", day, "--feeds", "bars",
+                          "--deadline", "23:59", "--interval", "1"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(calls), 3)
+        self.assertEqual(calls[0][0], "/equities/bars/daily")
+        self.assertEqual(calls[0][1], {"date": day})
+
+    def test_waits_for_every_feed_not_just_bars(self):
+        """
+        四本値だけ待って走ると、指数・TOPIX が0件のまま取り込むことになる。
+        build_dataset は merge_asof(backward) で結合するので、
+        欠測ではなく**前日の値**が黙って入る。だから全部揃うまで待つ。
+        """
+        day = self._future_weekday()
+        bar = {"Code": "13010", "C": 1000}
+        calls = self._client_by_path({
+            "/equities/bars/daily": [[bar]],              # 1回目で揃う
+            "/indices/bars/daily": [[], [{"Code": "0040"}]],
+            "/indices/bars/daily/topix": [[], [], [{"C": 2800}]],
+        })
+        rc = self.W.main(["--date", day, "--deadline", "23:59",
+                          "--interval", "1"])
+        self.assertEqual(rc, 0)
+        # 揃った対象は二度と叩かない
+        paths = [c[0] for c in calls]
+        self.assertEqual(paths.count("/equities/bars/daily"), 1)
+        self.assertEqual(paths.count("/indices/bars/daily"), 2)
+        self.assertEqual(paths.count("/indices/bars/daily/topix"), 3)
+        # TOPIX だけ期間指定で引く（実測に使った叩き方と同じ）
+        tp = [c for c in calls if c[0] == "/indices/bars/daily/topix"][0]
+        self.assertEqual(tp[1], {"from": day, "to": day})
+
+    def test_bars_needs_a_close_not_just_a_row(self):
+        """
+        前場ぶんだけ入って終値が空、という出方をされたら「まだ」と見る。
+        行数だけ見ていると、欠測を揃ったと誤読して取り込む。
+        """
+        calls = self._client_returning([
+            [{"Code": "13010", "C": None}],   # 行はあるが終値が無い
+            [{"Code": "13010", "C": 1000}],
+        ])
+        rc = self.W.main(["--date", self._future_weekday(), "--feeds", "bars",
+                          "--deadline", "23:59", "--interval", "1"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(calls), 2)
+
+    def test_unknown_feed_is_an_error(self):
+        """
+        対象名の書き間違いは当日データの有無と関係がない。
+        ここを 0 で素通りさせると、待っているつもりで待たなくなる。
+        """
+        calls = self._client_returning([])
+        self.assertEqual(self.W.main(["--date", "2026-09-18",
+                                      "--feeds", "bars,barz"]), 2)
+        self.assertEqual(calls, [])
+
+    def test_past_deadline_gives_up_without_failing(self):
+        """
+        祝日は当日データが永遠に出ない。締切を過ぎたら 0 で抜けること。
+        ここで非ゼロを返すと、祝日のたびに取り込みが落ちる。
+        """
+        calls = self._client_returning([[], [], []])
+        # 過去の営業日の 00:00 を締切にする = 既に締切を過ぎているので
+        # 1回だけ見て諦める。「今日の00:00」にすると実行時刻によっては
+        # まだ締切前で、実測で何時間も回り続ける
+        rc = self.W.main(["--date", "2020-01-06", "--feeds", "bars",
+                          "--deadline", "00:00", "--interval", "1"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(self.slept, [])
+
+    def test_query_error_is_not_fatal(self):
+        """問い合わせが失敗しても落ちない（次の回に再試行する）。"""
+        from jquants_data_fetcher import JQuantsError
+
+        class Flaky:
+            seen: list = []
+
+            def __init__(self, *a, **k):
+                self.n = 0
+
+            def get_paginated(self, path, params):
+                self.n += 1
+                Flaky.seen.append(path)
+                if self.n == 1:
+                    raise JQuantsError("503")
+                return [{"Code": "13010", "C": 1000}]
+
+        seen = []
+        Flaky.seen = seen
+        self.W.JQuantsClient = Flaky
+        rc = self.W.main(["--date", self._future_weekday(), "--feeds", "bars",
+                          "--deadline", "23:59", "--interval", "1"])
+        self.assertEqual(rc, 0)
+        # 1回目は失敗、2回目で揃う。1巡で諦めていないこと
+        self.assertEqual(len(seen), 2)
+
+    def test_never_sleeps_past_the_deadline(self):
+        """
+        締切をまたいで眠ると締切の意味が無くなる。間隔60分・締切まで5分の
+        ときに60分眠ると、締切から55分過ぎて目を覚ます。
+        """
+        import datetime as _dt
+        base = _dt.datetime(2026, 9, 18, 16, 5, tzinfo=self.W.JST)
+        # 締切まで5分しか無い -> 間隔(3600秒)ではなく残り(300秒)で眠る
+        self.assertEqual(
+            self.W.nap_seconds(base, base + _dt.timedelta(minutes=5), 3600),
+            300.0)
+        # 締切まで十分ある -> 間隔どおり
+        self.assertEqual(
+            self.W.nap_seconds(base, base + _dt.timedelta(hours=3), 300), 300)
+        # 締切を過ぎている -> 0秒にはせず最低1秒（忙しいループにしない）
+        self.assertEqual(
+            self.W.nap_seconds(base, base - _dt.timedelta(minutes=1), 300), 1.0)
+
+
 class TestWatchlistAndExtraCodes(unittest.TestCase):
     """
     ウォッチリストは空にしてあり、日次の予測が「その日の上位」を足す。

@@ -1,0 +1,78 @@
+name: Probe EDINET DB
+
+# EDINET DB (edinetdb.jp) の API が実際に何を返すかを実測する。
+#
+# J-Quants スタンダードでは取れない BS/PL/CF の明細（販管費・研究開発費・
+# 有利子負債・のれん・設備投資）を EDINET DB が埋められるかを見る。
+# 特徴量に使えるかは時点整合性（提出日が付くか / 訂正で上書きされないか /
+# どこまで遡れるか）で決まるので、まず返ってくる項目名と型を並べる。
+#
+# 開発者ページは作業環境（Claude Code）から到達できないため、ここから叩く。
+# 公開情報で形が確定しているエンドポイントだけを、決め打ちせずに読む。
+#
+# フリープランは 100 リクエスト/日。1回の実行で使う上限を入力で固定する。
+# 鍵は Secrets の EDINET_API_KEY。ログには出さない（probe 側で伏せる）。
+on:
+  workflow_dispatch:
+    inputs:
+      max_requests:
+        description: 'この実行で使ってよいリクエスト数（フリープランは 100/日）'
+        required: false
+        default: '30'
+      edinet_code:
+        description: '財務を引く EDINET コード。既定は公式サンプルの任天堂'
+        required: false
+        default: 'E02367'
+      years:
+        description: 'financials の years'
+        required: false
+        default: '5'
+      extra_args:
+        description: '追加の引数（例: --skip-basic --from-ranking market-cap --top 3 --bulk-check）'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: probe-edinetdb
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # 標準ライブラリだけで動く。pip install は要らない
+      - name: Probe
+        env:
+          EDINET_API_KEY: ${{ secrets.EDINET_API_KEY }}
+        run: |
+          # 追加引数は空白区切りで配列にしてから渡す（そのまま埋め込まない）
+          read -ra EXTRA <<< "${{ inputs.extra_args }}"
+          python3 -u research/probe_edinetdb.py \
+            --max-requests "${{ inputs.max_requests }}" \
+            --edinet-code "${{ inputs.edinet_code }}" \
+            --years "${{ inputs.years }}" "${EXTRA[@]}" 2>&1 | tee probe.log
+          exit "${PIPESTATUS[0]}"
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo '## EDINET DB API の実測'
+            echo
+            echo '```'
+            cat probe.log 2>/dev/null || echo '(出力なし)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: probe-edinetdb
+          path: probe.log
+          retention-days: 14

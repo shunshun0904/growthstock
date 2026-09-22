@@ -127,6 +127,10 @@ def label_stats(df: pd.DataFrame) -> Dict:
     if "future_rise" in df.columns:
         fr = pd.to_numeric(df["future_rise"], errors="coerce") * 100
         out["future_rise_hist"] = histogram(fr)
+        # future_rise が何営業日ぶんの上昇かは目的変数の horizon で決まる。
+        # 表の見出しに焼き込むと、horizon を変えたときに嘘になる
+        import build_dataset as _B
+        out["future_rise_horizon"] = _B.DEFAULT_RISE.horizon
         out["future_rise_pct"] = {
             k: round(float(fr.quantile(q)), 2)
             for k, q in (("p10", .1), ("p25", .25), ("median", .5),

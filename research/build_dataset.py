@@ -27,6 +27,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import features  # noqa: E402
+import extra_features  # noqa: E402
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_data")
 
@@ -153,14 +154,27 @@ BREAKOUT_COOLDOWN = _sweep_override("BREAKOUT_COOLDOWN", 20, int)
 # --- 目的変数（母集団が breakout のとき）--- #
 # 更新日の終値から、先 RISE_HORIZON 営業日以内に RISE_THRESHOLD 以上上昇したか。
 # 終値ベースで測る（高値ベースだと「一瞬触れただけ」を正例にしてしまう）。
-RISE_HORIZON = 60        # 営業日。約3ヶ月
+# 20営業日 ≒ 1ヶ月。60（約3ヶ月）から短くした。
+#
+# 理由は運用側にある。実際に手仕舞うのが1ヶ月前後なのに、ラベルの基準点が
+# 3ヶ月先にあると「売ったあとに起きたこと」で正例・負例を決めることになる。
+# 売買の回転を上げたいなら、ラベルの見る先も持ち期間に合わせる必要がある。
+#
+# しきい値は k×σ で σ = vol_20d/100 × √horizon なので、期間を縮めると
+# 必要な上昇率も自動で √(20/60) = 0.577 倍になる（別途調整は要らない）。
+# 終盤条件（END_RATIO）とトレンド条件も同じ t+horizon 時点を見るので、
+# この1行で3条件すべての基準点が t+60 から t+20 に移る。
+RISE_HORIZON = 20        # 営業日。約1ヶ月
 RISE_THRESHOLD = 0.20    # +20%。VOL_NORM_K が None のときだけ効く
 
 # --- 到達しきい値を銘柄自身のボラティリティで測る --- #
 #
-# 固定の +20% は銘柄ごとの難易度がまったく揃っていない。実測の60営業日σは
-#   中央 15.0% / p5 6.0% / p95 47.8%   （8倍の開き）
-# なので、同じ +20% が静かな銘柄には 3.3σ、荒い銘柄には 0.42σ にあたる。
+# 固定の +20% は銘柄ごとの難易度がまったく揃っていない。実測の期間σは
+#   20営業日 中央  8.7% / p5 3.4% / p95 27.6%   （8.0倍の開き）
+#   60営業日 中央 15.0% / p5 6.0% / p95 47.8%   （8.0倍の開き）
+# なので、同じ +20% が静かな銘柄と荒い銘柄で何倍も難易度が違う
+# （60営業日なら静かな銘柄に 3.3σ、荒い銘柄に 0.42σ）。
+# 期間を縮めても開きは 8 倍のまま変わらないので、正規化の必要性も変わらない。
 # 正例になりやすさが定義の時点で銘柄ごとに何倍も違っていた。
 #
 # その結果、モデルは「上がる銘柄を当てる係」ではなく
@@ -194,10 +208,25 @@ VOL_NORM_K: Optional[float] = 1.2
 # 差の714件はチャートで見ると「+20%に届いたあと10〜20日で失速した」群で、
 # 買えないほど悪いわけではない。まずは推定を安定させることを優先する。
 KEEP_DAYS = 0            # 維持日数の条件。0 なら課さない
-END_RATIO = 0.10         # 60営業日後もまだ +10%以上（ボラ正規化時は比例させる）
+END_RATIO = 0.10         # t+horizon 後もまだ +10%以上（ボラ正規化時は比例させる）
 END_WINDOW = 5           # 終盤の水準は5営業日平均で見る（1日の綾を拾わない）
-TREND_SHORT = 20         # 短期移動平均（営業日）
-TREND_LONG = 60          # 長期移動平均（営業日）
+
+# トレンド条件の移動平均。**RISE_HORIZON に合わせて選ぶ必要がある**。
+#
+# 長期側は「判定期間そのもの」、短期側はその終盤だけを見る長さにする。
+# こうすると条件の意味は「窓の終わりにかけてまだ上にいるか」になる。
+#
+#   h=60 のとき MA20/MA60 … MA20 は [t+41, t+60]（終盤1/3）、MA60 は [t+1, t+60]
+#   h=20 のとき MA5/MA20  … MA5  は [t+16, t+20]（終盤1/4）、MA20 は [t+1, t+20]
+#
+# h を 20 にしたとき MA20/MA60 のままにしていたら、条件がほぼ無効になっていた。
+# MA60(t+20) は [t-39, t+20] の平均で、大半がブレイク**前**の安い期間になる。
+# 基準日は78週高値の更新日なので、MA20(t+20)（すべてブレイク後）がそれを
+# 下回るには相当な下落が要る。実測で 5,671件から削るのが**2件（0.04%）**
+# だけだった（h=60 では473件削っていた）。条件として機能していないのに
+# 名前だけ残る状態だったので、長さを h に合わせた。
+TREND_SHORT = 5          # 短期移動平均（営業日）= 判定期間の終盤
+TREND_LONG = 20          # 長期移動平均（営業日）= 判定期間そのもの（= RISE_HORIZON）
 REQUIRE_UPTREND = True
 
 # 窓の中で実際に値がある割合の下限。
@@ -387,6 +416,40 @@ MAX_RHIGH_AT_T = 95.0   # 基準日ですでに高値圏の銘柄は対象外
 MIN_TRADING_VALUE = _sweep_override("MIN_TRADING_VALUE", 0.1, float)
 #: 残存件数と正例率を出す閾値の候補（億円）。None は「絞らない」
 LIQUIDITY_LADDER = (None, 0.05, 0.1, 0.3, 0.5, 1.0, 3.0)
+
+
+def _mkt_codes(raw: str) -> tuple:
+    """「109,105」のような文字列を市場区分コードの組にする。空/none で無効。"""
+    if raw.strip().lower() in ("", "none", "off", "-"):
+        return ()
+    return tuple(int(x) for x in raw.replace(" ", "").split(",") if x)
+
+
+# 母集団から外す市場区分コード（時点別 mkt_code）。空タプルなら外さない。
+#
+# 109 =「その他」。J-Quants の市場区分でここに入るのは ETF / ETN / REIT /
+# インフラファンドで、事業会社の株式は1件も入らない（実測: 546銘柄すべて
+# 33業種が「その他」）。
+#
+# 外す根拠は research/exp/e17_etf.py の実測（3シード・ret_o1_40・
+# しきい値はウォークフォワード）:
+#
+#   条件                            窓平均    SE   勝ち窓  最悪の窓  取引数
+#   A  学習=全部 / 評価=全部（従来） +0.80pt  0.32   7/9   -0.73pt  2,000
+#   A' 学習=全部 / 評価=株式        +1.17pt  0.26   9/9   +0.17pt  1,856
+#   B  学習=株式 / 評価=株式        +1.28pt  0.33   9/9   +0.22pt  1,898
+#
+# A'-B = +0.11pt (z=0.27) で、学習から外すかどうかは差が無い。効くのは
+# 「候補から外す」ほう（A-A' = +0.37pt, z=0.90）。z<2 なのでノイズ床は
+# 越えていないが、最悪の窓が負から正に変わる点は一貫している。
+#
+# ETF が上位に溜まる理由は分散の小ささにある。母集団の 7.6% しか無いのに
+# 上位10%の 31.0% を占め（4.1倍）、正例率は 32.0%（株式 19.9%）。
+# ラベルは vol_20d で正規化した +1.2σ なので、日次ボラ 0.97%（株式 2.04%）の
+# ETF は同じ σ に届く実際の値幅が半分で済む。ラベルは当たるが、
+# 中央値 +2.79% / 平均 +2.38% と上値も薄い（株式は中央 +2.24% / 平均 +3.58%）。
+# 値幅を取りにいく運用とは噛み合わないので母集団から外す。
+EXCLUDE_MKT_CODES = _sweep_override("EXCLUDE_MKT_CODES", (109,), _mkt_codes)
 
 # 時価総額の帯（億円）。フラグ列 cap_band の境界。
 #
@@ -1080,6 +1143,32 @@ def encode_category(s: pd.Series, name: str = "") -> pd.Series:
     return s.map(code).astype("float64")
 
 
+def drop_excluded_markets(samples: pd.DataFrame,
+                          codes: tuple = None) -> pd.DataFrame:
+    """
+    市場区分で母集団から外す。既定は ETF・REIT 等（EXCLUDE_MKT_CODES）。
+
+    mkt_code は master_hist を結合してからでないと分からないので、
+    ほかの除外条件とは別の場所から呼ぶことになる。
+    理由と実測は EXCLUDE_MKT_CODES のコメントに書いた。
+    """
+    codes = EXCLUDE_MKT_CODES if codes is None else tuple(codes)
+    if not codes:
+        print("[filter] 市場区分による除外はしない（EXCLUDE_MKT_CODES が空）")
+        return samples
+    before = len(samples)
+    # isin は欠測を False にするので、市場区分が付かなかった行は残る。
+    # master_hist が無い環境で母集団ごと消えるのを避けるため。
+    out = samples[~samples["mkt_code"].isin(codes)]
+    n_unknown = int(out["mkt_code"].isna().sum())
+    names = ", ".join(str(c) for c in codes)
+    print(f"[filter] ETF・REIT等(mkt_code in {{{names}}})を除外: "
+          f"{before:,} -> {len(out):,}")
+    if n_unknown:
+        print(f"[filter] 市場区分が付かなかった {n_unknown:,}件は残した")
+    return out
+
+
 def _lag_available(df: pd.DataFrame, col: str, n: int,
                    max_gap_days: int = 800) -> pd.Series:
     """
@@ -1107,6 +1196,165 @@ def _lag_available(df: pd.DataFrame, col: str, n: int,
     prev_date = g["DiscDate"].shift(n)
     gap = (sub["DiscDate"] - prev_date).dt.days
     out.loc[valid] = prev_val.where(gap <= max_gap_days)
+    return out
+
+
+#: 開示からの日数の上限。これより古い開示は「止まっている」として同じ値にする
+TIMING_CLIP_ANY = 400
+TIMING_CLIP_FY = 800
+
+
+#: 予想修正からの日数の上限。これより古ければ「無い」と同じ扱いにする
+REV_CLIP = 400
+#: 予想修正の件数を数える窓（暦日）
+REV_WINDOWS = (60, 250)
+
+
+def forecast_revisions(samples: pd.DataFrame, fins: pd.DataFrame) -> pd.DataFrame:
+    """
+    業績予想・配当予想の**修正イベント**を各行に付ける。
+
+    なぜ要るか
+    --------
+    `/fins/summary` の DocType には決算短信以外が混ざっている（全期間）:
+
+      EarnForecastRevision          24,293  業績予想の修正
+      DividendForecastRevision       4,174  配当予想の修正
+      REITEarnForecastRevision          612
+      REITDividendForecastRevision       38
+
+    取り込みには入っていたが、特徴量としては一度も使っていなかった。
+    追加の取得はいらない。
+
+    既存の `guidance_revision`（FOP の前回開示比＝修正の**幅**）とは別物で、
+    こちらは修正**イベントの発生とタイミング**を見る。`days_since_disc` は
+    実績（Sales か NP）のある開示だけを数えているので、修正だけの開示は
+    そもそも勘定に入っていない。
+
+    時点整合
+    ------
+    開示日（DiscDate）で merge_asof の backward。当日の開示は 0 日
+    （決算短信は 18:00 過ぎに載り、予測はその後に走る。docs/OPERATIONS.md）。
+
+    向きの出し方
+    ----------
+    修正行の FOP を、同じ事業年度（CurFYSt）の**直前の開示**の FOP と比べる。
+    上方修正なら正、下方修正なら負。前の予想が無ければ欠測（0 にしない）。
+    """
+    # 列構成は取り込みの状況で変えない。features.all_columns() が要求する
+    # 列が欠けると build_dataset ごと落ちる（SystemExit）
+    want = features.GROUPS.get("revision", [])
+    out = pd.DataFrame(np.nan, index=samples.index, columns=want, dtype=float)
+    if "DocType" not in fins.columns:
+        return out
+    f = fins.copy()
+    f["DiscDate"] = pd.to_datetime(f["DiscDate"], errors="coerce")
+    f = f.dropna(subset=["DiscDate", "Code"]).sort_values(["Code", "DiscDate"])
+    dt_ = f["DocType"].astype(str)
+    is_earn = dt_.str.contains("EarnForecastRevision", na=False)
+    is_div = dt_.str.contains("DividendForecastRevision", na=False)
+
+    # 向き: 同じ事業年度で、直前の開示の予想と比べる
+    if {"FOP", "CurFYSt"} <= set(f.columns):
+        fop = pd.to_numeric(f["FOP"], errors="coerce")
+        prev = fop.groupby([f["Code"], f["CurFYSt"]], sort=False).shift(1)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            f["_rev_pct"] = np.where(prev > 0, fop / prev * 100.0 - 100.0, np.nan)
+    else:
+        f["_rev_pct"] = np.nan
+
+    left = samples[["Code", "Date"]].copy()
+    left["Date"] = pd.to_datetime(left["Date"])
+    left["_i"] = np.arange(len(left))
+    left = left.sort_values("Date")
+
+    for flag, prefix in ((is_earn, "rev"), (is_div, "divrev")):
+        ev = f.loc[flag, ["Code", "DiscDate", "_rev_pct"]].sort_values("DiscDate")
+        if not len(ev):
+            continue
+        ev = ev.rename(columns={"DiscDate": f"_{prefix}_d",
+                                "_rev_pct": f"_{prefix}_pct"})
+        m = pd.merge_asof(left, ev, left_on="Date", right_on=f"_{prefix}_d",
+                          by="Code", direction="backward", allow_exact_matches=True)
+        m = m.sort_values("_i")
+        days = (m["Date"] - m[f"_{prefix}_d"]).dt.days
+        out[f"days_since_{prefix}"] = np.clip(days.to_numpy(), 0, REV_CLIP)  # noqa: E501
+        if prefix == "rev":
+            out["rev_pct"] = m[f"_{prefix}_pct"].to_numpy()
+            # 向きだけを取り出す。幅が極端でも 1 / 0 に潰れる
+            out["rev_up"] = np.where(np.isfinite(out["rev_pct"]),
+                                     (out["rev_pct"] > 0).astype(float), np.nan)
+
+    # 件数。上方・下方を分けて数える（回数そのものが材料になる）
+    ev = f.loc[is_earn, ["Code", "DiscDate", "_rev_pct"]].copy()
+    if len(ev):
+        for w in REV_WINDOWS:
+            out[f"rev_n_{w}"] = _events_in_window(samples, ev, "DiscDate", w)
+        up = ev[ev["_rev_pct"] > 0]
+        dn = ev[ev["_rev_pct"] < 0]
+        if len(up):
+            out["rev_up_n_250"] = _events_in_window(samples, up, "DiscDate", 250)
+        if len(dn):
+            out["rev_dn_n_250"] = _events_in_window(samples, dn, "DiscDate", 250)
+    return out[want]
+
+
+def _events_in_window(samples: pd.DataFrame, events: pd.DataFrame,
+                      date_col: str, days: int) -> np.ndarray:
+    """(Code, Date) ごとに、過去 days 暦日に起きた events の件数。"""
+    left = samples[["Code", "Date"]].copy()
+    left["Date"] = pd.to_datetime(left["Date"])
+    left["_i"] = np.arange(len(left))
+    ev = events[["Code", date_col]].copy()
+    ev[date_col] = pd.to_datetime(ev[date_col], errors="coerce")
+    ev = ev.dropna(subset=[date_col]).sort_values(date_col)
+    ev["_c"] = ev.groupby("Code", sort=False).cumcount() + 1
+    hi = pd.merge_asof(left.sort_values("Date"), ev, left_on="Date",
+                       right_on=date_col, by="Code", direction="backward",
+                       allow_exact_matches=True).sort_values("_i")["_c"].to_numpy()
+    lo_left = left.assign(_lo=left["Date"] - pd.Timedelta(days=days))
+    lo = pd.merge_asof(lo_left.sort_values("_lo"), ev, left_on="_lo",
+                       right_on=date_col, by="Code", direction="backward",
+                       allow_exact_matches=True).sort_values("_i")["_c"].to_numpy()
+    hi = np.where(np.isfinite(hi), hi, 0.0)
+    lo = np.where(np.isfinite(lo), lo, 0.0)
+    return hi - lo
+
+
+def disclosure_timing(samples: pd.DataFrame, fins: pd.DataFrame) -> pd.DataFrame:
+    """
+    直近の決算開示からの日数（days_since_disc）と、直近の通期開示からの日数
+    （days_since_fy）を各行に付ける。実験24〜26 と同じ定義（docs/FEATURE_IDEAS_EDINET.md）。
+
+    - 実績値（Sales か NP）のある開示だけを数える。予想修正だけの開示は除く
+    - 当日の開示は 0 日（allow_exact_matches=True）。財務の結合と同じ作法で、
+      決算短信は 18:00 過ぎに J-Quants に載り、予測はその後に走る
+      （docs/OPERATIONS.md の実測）
+    - 開示が1つも無い行は NaN。上限より古い開示は上限の値
+    - 行の順序は元のまま返す
+    """
+    disc = fins.loc[fins[["Sales", "NP"]].notna().any(axis=1),
+                    ["Code", "DiscDate", "CurPerType"]].copy()
+    disc["DiscDate"] = pd.to_datetime(disc["DiscDate"])
+    disc = disc.dropna(subset=["DiscDate"])
+    left = samples[["Code", "Date"]].copy()
+    left["_i"] = np.arange(len(left))
+    left["Date"] = pd.to_datetime(left["Date"])
+    left = left.sort_values("Date")
+    any_ = (disc[["Code", "DiscDate"]].sort_values("DiscDate")
+            .rename(columns={"DiscDate": "AnyDisc"}))
+    fy = (disc.loc[disc["CurPerType"] == "FY", ["Code", "DiscDate"]]
+          .sort_values("DiscDate").rename(columns={"DiscDate": "FyDisc"}))
+    m = pd.merge_asof(left, any_, left_on="Date", right_on="AnyDisc", by="Code",
+                      direction="backward", allow_exact_matches=True)
+    m = pd.merge_asof(m, fy, left_on="Date", right_on="FyDisc", by="Code",
+                      direction="backward", allow_exact_matches=True)
+    m = m.sort_values("_i")
+    out = samples.copy()
+    out["days_since_disc"] = ((m["Date"] - m["AnyDisc"]).dt.days.astype(float)
+                              .clip(upper=TIMING_CLIP_ANY).to_numpy())
+    out["days_since_fy"] = ((m["Date"] - m["FyDisc"]).dt.days.astype(float)
+                            .clip(upper=TIMING_CLIP_FY).to_numpy())
     return out
 
 
@@ -1320,15 +1568,55 @@ def quarterize_panel(fins: pd.DataFrame) -> pd.DataFrame:
         -100.0, 1000.0, "payout_ratio")
 
     # --- 会社予想（今期の伸び見通し）--- #
-    # 予想営業利益 / 前期実績営業利益。1を超えれば増益見通し
+    # 予想営業利益 / 直前に終わった事業年度の実績。1を超えれば増益見通し。
+    #
+    # **通期決算では FOP が空で、翌期予想は NxFOP に入る。** 実測:
+    #
+    #   FOP   の充足  1Q 91.5% / 2Q 93.2% / 3Q 92.2% / FY  0.0%
+    #   NxFOP の充足  1Q  0.0% /                       FY 87.8%
+    #
+    # そのため guidance_op_growth は通期行で必ず欠測になり、全体の充足が
+    # 50% 止まりだった。この指標は両側スクリーニングで**下位10%が
+    # z = -3.68（11窓中10窓で悪い）**と、測った中でいちばん強い
+    # （docs/DATA_FIELDS.md / 実験37）。穴を塞ぐ価値がある。
+    #
+    # 通期の NxFOP と、その次の1Q の FOP は **92.7% が完全一致**（13,185組を
+    # 実測）。同じ事業年度の予想を指しているので、繋いでよい。
+    #
+    # **分母も変える。** FOP は「進行中の事業年度」の予想で、その1年前は
+    # shift(4) した4期和。NxFOP は「次の事業年度」の予想なので、比べる相手は
+    # いま締めた事業年度＝shift しない4期和。ここを揃えないと、通期行だけ
+    # 2年ぶんの伸びを見ることになる。
     prev_op_ttm = g_code["q_op"].transform(
         lambda s: s.shift(4).rolling(4, min_periods=4).sum())
+    cur_op_ttm = g_code["q_op"].transform(
+        lambda s: s.rolling(4, min_periods=4).sum())
+    is_fy = df["CurPerType"].eq("FY").to_numpy() if "CurPerType" in df.columns \
+        else np.zeros(len(df), dtype=bool)
+    has_nx = "NxFOP" in df.columns
+    fop_eff = np.where(is_fy & has_nx, col("NxFOP"), col("FOP"))
+    den = np.where(is_fy & has_nx, cur_op_ttm, prev_op_ttm)
+    # どちらの予想を使ったかを残す。後から充足の出どころを追えるように
+    df["guidance_basis"] = np.where(
+        ~np.isfinite(fop_eff), "none",
+        np.where(is_fy & has_nx, "NxFOP", "FOP"))
     df["guidance_op_growth"] = clip_divergent(
-        pd.Series(np.where(prev_op_ttm > 0,
-                           col("FOP") / prev_op_ttm * 100.0 - 100.0, np.nan),
+        pd.Series(np.where(den > 0, fop_eff / den * 100.0 - 100.0, np.nan),
                   index=df.index), -100.0, 1000.0, "guidance_op_growth")
+    n_nx = int((df["guidance_basis"] == "NxFOP").sum())
+    print(f"[guidance] 予想の出どころ: FOP "
+          f"{int((df['guidance_basis'] == 'FOP').sum()):,}行 / "
+          f"NxFOP {n_nx:,}行（通期の翌期予想）/ "
+          f"無し {int((df['guidance_basis'] == 'none').sum()):,}行")
+    print(f"[guidance] guidance_op_growth の充足 "
+          f"{df['guidance_op_growth'].notna().mean()*100:.1f}%")
     # 予想の修正: 同じ会計年度で前回開示の予想と比べて何%動いたか。
-    # 上方修正は「プラスアルファの好材料」そのもの
+    # 上方修正は「プラスアルファの好材料」そのもの。
+    #
+    # **ここは NxFOP で埋めない。** 通期行の NxFOP は「次の事業年度」の
+    # 最初の予想で、同じ CurFYSt の中の前回（3Q）の予想とは別の年度を
+    # 指している。埋めると、年度をまたいだ差を「修正」として出してしまう。
+    # 新しい年度の最初の予想に「修正」は定義できないので、欠測が正しい。
     prev_fop = df.groupby(["Code", "CurFYSt"], sort=False)["FOP"].shift(1) \
         if "FOP" in df.columns else pd.Series(np.nan, index=df.index)
     df["guidance_revision"] = clip_divergent(
@@ -1808,7 +2096,7 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     # --- 除外条件 --- #
     before = len(samples)
     if KEEP_UNLABELED:
-        # 予測用。今日のブレイクはラベルが確定していない（先60営業日ぶんの
+        # 予測用。今日のブレイクはラベルが確定していない（先 RISE_HORIZON 営業日ぶんの
         # 値動きがまだ無い）ので、落とすと予測したい行が消える。
         n_un = int(samples["label"].isna().sum())
         print(f"[filter] ラベル未確定を残す（予測用）: {n_un:,}件が未確定のまま")
@@ -1852,6 +2140,23 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     fin_cols = [c for c in q.columns if c not in ("Code", "DiscDate")]
     samples.loc[stale, fin_cols] = np.nan
     print(f"[merge] 決算が1年以上古いサンプル: {int(stale.sum()):,}件を欠測扱い")
+
+    # --- 開示からの日数（実験24〜26 で採用。docs/MODEL_ADOPTION_RULES.md §6） --- #
+    samples = disclosure_timing(samples, fins)
+    print(f"[merge] 開示からの日数: 中央値 {samples['days_since_disc'].median():.0f}日 / "
+          f"欠測 {samples['days_since_disc'].isna().mean()*100:.1f}%")
+
+    # --- 予想の修正イベント（DocType。取り込み済みで未使用だった） --- #
+    rev = forecast_revisions(samples, fins)
+    if rev.shape[1]:
+        dup = [c for c in rev.columns if c in samples.columns]
+        if dup:
+            print(f"[rev] 既存と同名の列は捨てる: {dup}")
+            rev = rev.drop(columns=dup)
+        samples = pd.concat([samples, rev], axis=1)
+        cov = ", ".join(f"{c} {samples[c].notna().mean()*100:.0f}%"
+                        for c in rev.columns)
+        print(f"[rev] 予想修正 {rev.shape[1]}列を追加: {cov}")
 
     # --- 時価総額 --- #
     # 時価総額は未調整終値 × 開示時点の株数。
@@ -1916,6 +2221,20 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
             print(f"[filter] {name} > {cap:g} を欠測に: {n:,}件"
                   f"（分母が丸め誤差レベル。逆数側は残している）")
 
+    # --- 2026-09-22 に足した8本から作る特徴量 --- #
+    #
+    # 取り込みが届いていない種別は列が空になるだけで、ここは落ちない。
+    # 時価総額・株価・per・ROE_q0 を使うので、バリュエーションの後に置く。
+    extra = extra_features.attach(samples, DATA_DIR)
+    if extra.shape[1]:
+        dup = [c for c in extra.columns if c in samples.columns]
+        if dup:
+            # 同名の列を黙って上書きしない。気づけない形で値が変わる
+            print(f"[extra] 既存と同名の列は捨てる: {dup}")
+            extra = extra.drop(columns=dup)
+        samples = pd.concat([samples, extra], axis=1)
+        print(f"[extra] {extra.shape[1]}列を追加")
+
     # --- 時価総額の帯で絞る（設定されている場合のみ）--- #
     # 基準日時点で判定する。将来の時価総額は使わない。
     if MIN_MARKET_CAP is not None or MAX_MARKET_CAP is not None:
@@ -1978,6 +2297,11 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     for c in ("s33", "s17", "mkt", "scalecat"):
         if f"{c}_code" not in samples.columns:
             samples[f"{c}_code"] = np.nan
+
+    # --- ETF・REIT を母集団から外す --- #
+    # 市場区分は master_hist を結合してからでないと分からないので、
+    # ほかの除外条件（上の「除外条件」ブロック）とは離れてここに置く。
+    samples = drop_excluded_markets(samples)
 
     # --- 市場環境（地合い） --- #
     print("[merge] 市場環境の特徴量を結合")
@@ -2077,8 +2401,33 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
         print(f"  {name:<24} {rate*100:5.1f}%")
 
     # どの定義で作ったデータセットかを残す。あとから追跡できないと混乱するため。
-    meta = {
-        "labelConfig": {
+    #
+    # 目的変数は母集団で切り替わる。breakout なら attach_rise_label（RiseConfig）、
+    # month_end なら attach_labels（LabelConfig）。ここで常に LabelConfig を
+    # 書いていたので、breakout で作ったデータセットの meta に**使っていない定義**が
+    # 入っていた。追跡のために置いてある欄が、追跡を誤らせていた。
+    if POPULATION == "breakout":
+        label_cfg = {
+            "kind": "rise",
+            "population": POPULATION,
+            "high_window": HIGH_WINDOW,
+            "horizon": DEFAULT_RISE.horizon,
+            "vol_norm_k": DEFAULT_RISE.vol_norm_k,
+            # vol_norm_k が None のときだけ効く固定しきい値
+            "threshold": DEFAULT_RISE.threshold,
+            "keep_days": DEFAULT_RISE.keep_days,
+            "end_ratio": DEFAULT_RISE.end_ratio,
+            "end_window": DEFAULT_RISE.end_window,
+            "require_uptrend": DEFAULT_RISE.require_uptrend,
+            "trend_short": DEFAULT_RISE.trend_short,
+            "trend_long": DEFAULT_RISE.trend_long,
+            "name": DEFAULT_RISE.name,
+            "forward_needed": DEFAULT_RISE.horizon,
+        }
+    else:
+        label_cfg = {
+            "kind": "breakout_within_horizon",
+            "population": POPULATION,
             "high_window": DEFAULT_LABEL.high_window,
             "horizon": [DEFAULT_LABEL.horizon_start, DEFAULT_LABEL.horizon_end],
             "hold_days": DEFAULT_LABEL.hold_days,
@@ -2088,7 +2437,9 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
             "sustain_ratio": DEFAULT_LABEL.sustain_ratio,
             "name": DEFAULT_LABEL.name,
             "forward_needed": DEFAULT_LABEL.forward_needed,
-        },
+        }
+    meta = {
+        "labelConfig": label_cfg,
         "n": int(len(out)),
         "positiveRate": (None if out["label"].notna().sum() == 0
                          else round(float(out["label"].mean()), 4)),
@@ -2102,12 +2453,13 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
         "nUnlabeled": int(out["label"].isna().sum()),
         "cooldown": BREAKOUT_COOLDOWN,
         "minTradingValue": MIN_TRADING_VALUE,
+        "excludeMktCodes": list(EXCLUDE_MKT_CODES),
     }
     meta_path = os.path.splitext(out_path)[0] + "_meta.json"
     with open(meta_path, "w", encoding="utf-8") as fh:
         json.dump(meta, fh, ensure_ascii=False, indent=2)
-    print(f"[label] 定義: {DEFAULT_LABEL.name} "
-          f"(ラベル確定に将来 {DEFAULT_LABEL.forward_needed} 営業日)")
+    print(f"[label] 定義: {label_cfg['name']} "
+          f"(ラベル確定に将来 {label_cfg['forward_needed']} 営業日)")
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     out.to_parquet(out_path, index=False, compression="zstd")

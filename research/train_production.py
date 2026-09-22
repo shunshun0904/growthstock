@@ -44,6 +44,9 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_dataset as B  # noqa: E402
 import features as F  # noqa: E402
+# 実収益の物差しは lab と同じものを使う。別々に定義すると、実験で測っている
+# ものと画面に出す数字が食い違う（lab.OUTCOME が唯一の定義）
+import lab as L  # noqa: E402
 import sweep_design as S  # noqa: E402
 import train_model as T  # noqa: E402
 import tuning  # noqa: E402
@@ -92,7 +95,8 @@ def oof_scores(ds: pd.DataFrame, cols: List[str], params: Dict) -> pd.DataFrame:
         gbm = lgb.LGBMClassifier(**params,
                                  scale_pos_weight=tuning.scale_pos_weight(ytr))
         gbm.fit(tr[cols].to_numpy(dtype=float), ytr)
-        part = te[["Code", "Date", "label", "ref_end", "ref_rise"]].copy()
+        part = te[["Code", "Date", "label", "ref_end", "ref_rise",
+                   OUTCOME_COL]].copy()
         part["score"] = gbm.predict_proba(te[cols].to_numpy(dtype=float))[:, 1]
         parts.append(part)
         print(f"  窓{f.index} {f.test_start}〜{f.test_end}: {len(te):,}件を採点")
@@ -101,36 +105,92 @@ def oof_scores(ds: pd.DataFrame, cols: List[str], params: Dict) -> pd.DataFrame:
     return pd.concat(parts, ignore_index=True)
 
 
+#: スコア帯の「実収益」に使う列。評価の物差し（lab.OUTCOME）と同じものを使う。
+#: 別々にすると、最適化している対象と画面に出す数字が食い違う。
+OUTCOME_COL = L.OUTCOME
+
+
+def outcome_note() -> Dict:
+    """画面とスプレッドシートに「この数字は何か」を渡す。文言を焼き込まない。"""
+    h = int(OUTCOME_COL.rsplit("_", 1)[1])
+    return {
+        "name": OUTCOME_COL,
+        "horizon": h,
+        "entry": "翌営業日の寄り",
+        "exit": f"{h}営業日後の5日平均終値",
+        "label": f"翌営業日の寄りで買い、{h}営業日後の5日平均終値で売ったときの上昇率",
+    }
+
+
 def score_bands(oof: pd.DataFrame, n_bands: int = N_BANDS) -> Dict:
     """
     スコア帯ごとに「実際にどうだったか」を数える。
 
-    ラベル側（正例率）と実収益側（60営業日後の上昇率）の両方を出す。
+    ラベル側（正例率）と実収益側（OUTCOME_COL）の両方を出す。
     画面ではこの表を引いて「このスコアなら過去はこうだった」と表示する。
+
+    実収益は**翌営業日の寄り買い**で測る。ブレイク当日の終値では買えない
+    （候補が判明するのは終値が出た後）。当日終値を基準にすると、低スコアの
+    候補ほど翌朝に大きくギャップアップするぶんを無償のハンデとして与えて
+    しまい、モデルの優位を過小評価する。
     """
     q = pd.qcut(oof["score"], n_bands, labels=False, duplicates="drop")
     rows = []
     for b in sorted(pd.unique(q.dropna())):
         g = oof[q == b]
-        end = pd.to_numeric(g["ref_end"], errors="coerce").dropna()
+        end = pd.to_numeric(g[OUTCOME_COL], errors="coerce").dropna()
         rows.append({
             "band": int(b),
             "score_lo": round(float(g["score"].min()), 6),
             "score_hi": round(float(g["score"].max()), 6),
             "n": int(len(g)),
             "positive_rate": round(float(g["label"].mean()), 4),
-            "end_median": (round(float(end.median()) * 100, 2) if len(end) else None),
-            "end_mean": (round(float(end.mean()) * 100, 2) if len(end) else None),
+            "outcome_median": (round(float(end.median()) * 100, 2) if len(end) else None),
+            "outcome_mean": (round(float(end.mean()) * 100, 2) if len(end) else None),
             "win_rate": (round(float((end > 0).mean()), 4) if len(end) else None),
             "n_outcome": int(len(end)),
         })
+    base = pd.to_numeric(oof[OUTCOME_COL], errors="coerce")
     return {"n_bands": len(rows), "bands": rows,
+            "outcome": outcome_note(),
             "base_positive_rate": round(float(oof["label"].mean()), 4),
-            "base_end_median": round(float(
-                pd.to_numeric(oof["ref_end"], errors="coerce").median()) * 100, 2),
-            "base_win_rate": round(float(
-                (pd.to_numeric(oof["ref_end"], errors="coerce") > 0).mean()), 4),
+            "base_outcome_median": round(float(base.median()) * 100, 2),
+            "base_win_rate": round(float((base > 0).mean()), 4),
             "n": int(len(oof))}
+
+
+def oof_metrics(oof: pd.DataFrame) -> Dict:
+    """
+    out-of-fold の分離力。毎週の記録として meta に残す。
+
+    **`tuning` の中の mean_pr_auc / mean_roc_auc とは別物**。あちらは
+    ハイパーパラメータ探索に使った層別 k 分割の値で、フォールドの訓練側に
+    将来のデータが入る（tuning.year_folds は時系列分割ではない）。
+    こちらは「その行より前のデータだけで学習したモデル」の採点なので、
+    必ず低く出る。実力の推定値として読めるのはこちら。
+
+    PR-AUC は下限が正例率そのものなので、正例率が動く週をまたいで
+    生値を並べても比較にならない。正例率で割った値も一緒に残す。
+    ROC-AUC と日内AUC は正例率に鈍いのでそのまま並べてよい。
+    """
+    from sklearn.metrics import average_precision_score, roc_auc_score
+
+    y = oof["label"].to_numpy(dtype=int)
+    s = oof["score"].to_numpy(dtype=float)
+    base = float(y.mean())
+    pr = float(average_precision_score(y, s))
+    return {
+        "n": int(len(oof)),
+        "positiveRate": round(base, 4),
+        "prAuc": round(pr, 4),
+        # 正例率で割った値。週をまたいで並べるならこちらを見る
+        "prAucOverBase": round(pr / base, 3) if base else None,
+        "rocAuc": round(float(roc_auc_score(y, s)), 4),
+        # 同じ日の候補どうしの順位付け。運用の決定にいちばん近い
+        "aucInDay": round(float(L.auc_in_day(oof)), 4),
+        "note": ("その行より前のデータだけで学習したモデルの採点。"
+                 "tuning の mean_pr_auc（層別k分割）とは別物で、必ず低く出る"),
+    }
 
 
 def calibration(oof: pd.DataFrame) -> Dict:
@@ -180,13 +240,16 @@ def main(argv=None) -> int:
           f"パラメータ {args.params}（木{params['n_estimators']}本 "
           f"/ lr {params['learning_rate']:.4f} / 葉 {params['num_leaves']}）")
 
-    # 実収益（ラベル非依存の物差し）。スコア帯統計に使う
+    # 実収益。スコア帯統計に使う。
+    #   ref_end       … 当日終値買い・REF_HORIZON(60)営業日。掃引との比較用の固定物差し
+    #   OUTCOME_COL   … 翌営業日の寄り買い・lab.OUTCOME の営業日数。画面に出すのはこちら
     paths = sorted(glob.glob(os.path.join(args.data_dir, "bars_*.parquet")))
     if not paths:
         raise SystemExit("bars_*.parquet がありません")
     bars = pd.concat([pd.read_parquet(p) for p in paths], ignore_index=True)
     ds = ds.merge(S.reference_outcome(S.Panels(bars).get(B.HIGH_WINDOW)),
                   on=["Code", "Date"], how="left")
+    ds = ds.merge(L.realized_returns(bars), on=["Code", "Date"], how="left")
 
     print("\n[oof] スコアの読み方を作るため out-of-fold を計算")
     oof = oof_scores(ds, cols, params)
@@ -194,16 +257,21 @@ def main(argv=None) -> int:
 
     bands = score_bands(oof)
     calib = calibration(oof)
-    print("\n[band] スコア帯ごとの実績（out-of-fold）")
+    om = oof_metrics(oof)
+    print(f"[oof] PR-AUC {om['prAuc']:.4f}（正例率 {om['positiveRate']*100:.2f}% の "
+          f"{om['prAucOverBase']:.2f}倍） / ROC-AUC {om['rocAuc']:.4f} / "
+          f"日内AUC {om['aucInDay']:.4f}")
+    print(f"\n[band] スコア帯ごとの実績（out-of-fold / 実収益は {OUTCOME_COL}: "
+          f"{bands['outcome']['label']}）")
     print(f"    {'帯':>3}{'件数':>8}{'スコア下限':>12}{'正例率':>9}"
           f"{'実収益の中央値':>14}{'勝率':>8}")
     for r in bands["bands"]:
         print(f"    {r['band']:>3}{r['n']:>8,}{r['score_lo']:>12.4f}"
-              f"{r['positive_rate']*100:>8.1f}%{r['end_median']:>+13.2f}%"
+              f"{r['positive_rate']*100:>8.1f}%{r['outcome_median']:>+13.2f}%"
               f"{r['win_rate']*100:>7.1f}%")
     print(f"    {'全体':>3}{bands['n']:>8,}{'':>12}"
           f"{bands['base_positive_rate']*100:>8.1f}%"
-          f"{bands['base_end_median']:>+13.2f}%{bands['base_win_rate']*100:>7.1f}%")
+          f"{bands['base_outcome_median']:>+13.2f}%{bands['base_win_rate']*100:>7.1f}%")
 
     print("\n[fit] 全期間で最終モデルを学習")
     y = ds["label"].to_numpy(dtype=int)
@@ -233,6 +301,8 @@ def main(argv=None) -> int:
         # 追加モデル（research/models.py）の meta と名前を揃えてある
         "nOof": int(len(oof)),
         "referenceHorizon": S.REF_HORIZON,
+        # out-of-fold の分離力。週ごとの推移を追えるように毎回残す
+        "oofMetrics": om,
         "calibration": calib,
         "scoreBands": bands,
         "tuning": tuning.load_params().get(args.params, {}).get("_cv", {}),

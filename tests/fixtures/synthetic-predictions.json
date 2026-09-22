@@ -21,7 +21,6 @@
    "band": 8,
    "calibProb": 25.1,
    "bandPositiveRate": 24.8,
-   "bandEndMedian": 1.54,
    "bandWinRate": 55.8,
    "close": 2655.0,
    "marketCap": 762.27,
@@ -164,7 +163,8 @@
     }
    },
    "agree90": 0,
-   "nModels": 5
+   "nModels": 5,
+   "bandOutcome": 1.54
   },
   {
    "code": "1699",
@@ -182,7 +182,6 @@
    "band": 8,
    "calibProb": 25.1,
    "bandPositiveRate": 24.8,
-   "bandEndMedian": 1.54,
    "bandWinRate": 55.8,
    "close": 698.1,
    "marketCap": null,
@@ -325,7 +324,8 @@
     }
    },
    "agree90": 0,
-   "nModels": 5
+   "nModels": 5,
+   "bandOutcome": 1.54
   },
   {
    "code": "1671",
@@ -343,7 +343,6 @@
    "band": 8,
    "calibProb": 25.1,
    "bandPositiveRate": 24.8,
-   "bandEndMedian": 1.54,
    "bandWinRate": 55.8,
    "close": 6085.0,
    "marketCap": null,
@@ -486,7 +485,8 @@
     }
    },
    "agree90": 0,
-   "nModels": 5
+   "nModels": 5,
+   "bandOutcome": 1.54
   },
   {
    "code": "9434",
@@ -504,7 +504,6 @@
    "band": 8,
    "calibProb": 25.1,
    "bandPositiveRate": 24.8,
-   "bandEndMedian": 1.54,
    "bandWinRate": 55.8,
    "close": 246.9,
    "marketCap": 118133.75,
@@ -647,7 +646,8 @@
     }
    },
    "agree90": 2,
-   "nModels": 5
+   "nModels": 5,
+   "bandOutcome": 1.54
   },
   {
    "code": "9082",
@@ -665,7 +665,6 @@
    "band": 0,
    "calibProb": 10.2,
    "bandPositiveRate": 11.2,
-   "bandEndMedian": -0.9,
    "bandWinRate": 46.7,
    "close": 2466.0,
    "marketCap": 109.79,
@@ -808,7 +807,8 @@
     }
    },
    "agree90": 4,
-   "nModels": 5
+   "nModels": 5,
+   "bandOutcome": -0.9
   }
  ],
  "model": {
@@ -869,10 +869,10 @@
     "score_hi": 0.163092,
     "n": 1644,
     "positive_rate": 0.1125,
-    "end_median": -0.9,
-    "end_mean": 1.71,
     "win_rate": 0.4665,
-    "n_outcome": 1644
+    "n_outcome": 1644,
+    "outcome_median": -0.9,
+    "outcome_mean": 1.71
    },
    {
     "band": 1,
@@ -880,10 +880,10 @@
     "score_hi": 0.209151,
     "n": 1643,
     "positive_rate": 0.1814,
-    "end_median": 1.11,
-    "end_mean": 4.5,
     "win_rate": 0.5295,
-    "n_outcome": 1643
+    "n_outcome": 1643,
+    "outcome_median": 1.11,
+    "outcome_mean": 4.5
    },
    {
     "band": 2,
@@ -891,10 +891,10 @@
     "score_hi": 0.24485,
     "n": 1643,
     "positive_rate": 0.2094,
-    "end_median": 0.55,
-    "end_mean": 4.12,
     "win_rate": 0.5149,
-    "n_outcome": 1643
+    "n_outcome": 1643,
+    "outcome_median": 0.55,
+    "outcome_mean": 4.12
    },
    {
     "band": 3,
@@ -902,10 +902,10 @@
     "score_hi": 0.278275,
     "n": 1643,
     "positive_rate": 0.2027,
-    "end_median": 0.26,
-    "end_mean": 3.34,
     "win_rate": 0.51,
-    "n_outcome": 1643
+    "n_outcome": 1643,
+    "outcome_median": 0.26,
+    "outcome_mean": 3.34
    },
    {
     "band": 4,
@@ -913,10 +913,10 @@
     "score_hi": 0.313335,
     "n": 1643,
     "positive_rate": 0.2215,
-    "end_median": 0.46,
-    "end_mean": 3.61,
     "win_rate": 0.5125,
-    "n_outcome": 1643
+    "n_outcome": 1643,
+    "outcome_median": 0.46,
+    "outcome_mean": 3.61
    },
    {
     "band": 5,
@@ -924,10 +924,10 @@
     "score_hi": 0.350996,
     "n": 1643,
     "positive_rate": 0.2264,
-    "end_median": 0.44,
-    "end_mean": 2.87,
     "win_rate": 0.5173,
-    "n_outcome": 1643
+    "n_outcome": 1643,
+    "outcome_median": 0.44,
+    "outcome_mean": 2.87
    },
    {
     "band": 6,
@@ -935,10 +935,10 @@
     "score_hi": 0.392719,
     "n": 1643,
     "positive_rate": 0.2276,
-    "end_median": 0.59,
-    "end_mean": 3.03,
     "win_rate": 0.5228,
-    "n_outcome": 1643
+    "n_outcome": 1643,
+    "outcome_median": 0.59,
+    "outcome_mean": 3.03
    },
    {
     "band": 7,
@@ -946,10 +946,10 @@
     "score_hi": 0.447498,
     "n": 1643,
     "positive_rate": 0.2514,
-    "end_median": 1.53,
-    "end_mean": 3.12,
     "win_rate": 0.5508,
-    "n_outcome": 1643
+    "n_outcome": 1643,
+    "outcome_median": 1.53,
+    "outcome_mean": 3.12
    },
    {
     "band": 8,
@@ -957,10 +957,10 @@
     "score_hi": 0.525626,
     "n": 1643,
     "positive_rate": 0.2483,
-    "end_median": 1.54,
-    "end_mean": 3.02,
     "win_rate": 0.5581,
-    "n_outcome": 1643
+    "n_outcome": 1643,
+    "outcome_median": 1.54,
+    "outcome_mean": 3.02
    },
    {
     "band": 9,
@@ -968,16 +968,23 @@
     "score_hi": 0.83429,
     "n": 1643,
     "positive_rate": 0.3682,
-    "end_median": 3.56,
-    "end_mean": 4.8,
     "win_rate": 0.636,
-    "n_outcome": 1643
+    "n_outcome": 1643,
+    "outcome_median": 3.56,
+    "outcome_mean": 4.8
    }
   ],
   "base_positive_rate": 0.2249,
-  "base_end_median": 1.01,
   "base_win_rate": 0.5319,
-  "n": 16431
+  "n": 16431,
+  "base_outcome_median": 1.01,
+  "outcome": {
+   "name": "ret_o1_20",
+   "horizon": 20,
+   "entry": "翌営業日の寄り",
+   "exit": "20営業日後の5日平均終値",
+   "label": "翌営業日の寄りで買い、20営業日後の5日平均終値で売ったときの上昇率"
+  }
  },
  "calibration": {
   "x": [
@@ -1102,7 +1109,15 @@
    "note": "勾配ブースティング（葉単位で成長）。本番の基準モデル",
    "trainedAt": "2026-09-06T12:31:00+00:00",
    "nOof": 16431,
-   "scoreBands": {},
+   "scoreBands": {
+    "outcome": {
+     "name": "ret_o1_20",
+     "horizon": 20,
+     "entry": "翌営業日の寄り",
+     "exit": "20営業日後の5日平均終値",
+     "label": "翌営業日の寄りで買い、20営業日後の5日平均終値で売ったときの上昇率"
+    }
+   },
    "cv": {
     "mean_pr_auc": 0.4029,
     "mean_roc_auc": 0.7,
@@ -1116,7 +1131,15 @@
    "note": "勾配ブースティング（深さ単位で成長）。木の形が違う",
    "trainedAt": "2026-09-06T12:31:00+00:00",
    "nOof": 16431,
-   "scoreBands": {},
+   "scoreBands": {
+    "outcome": {
+     "name": "ret_o1_20",
+     "horizon": 20,
+     "entry": "翌営業日の寄り",
+     "exit": "20営業日後の5日平均終値",
+     "label": "翌営業日の寄りで買い、20営業日後の5日平均終値で売ったときの上昇率"
+    }
+   },
    "cv": {
     "mean_pr_auc": 0.3979,
     "mean_roc_auc": 0.7,
@@ -1130,7 +1153,15 @@
    "note": "勾配ブースティング（欠損と正則化の扱いが違う）",
    "trainedAt": "2026-09-06T12:31:00+00:00",
    "nOof": 16431,
-   "scoreBands": {},
+   "scoreBands": {
+    "outcome": {
+     "name": "ret_o1_20",
+     "horizon": 20,
+     "entry": "翌営業日の寄り",
+     "exit": "20営業日後の5日平均終値",
+     "label": "翌営業日の寄りで買い、20営業日後の5日平均終値で売ったときの上昇率"
+    }
+   },
    "cv": {
     "mean_pr_auc": 0.3831,
     "mean_roc_auc": 0.7,
@@ -1144,7 +1175,15 @@
    "note": "線形モデル。特徴量の足し算で判断するので、木とは外す銘柄が違う",
    "trainedAt": "2026-09-06T12:31:00+00:00",
    "nOof": 16431,
-   "scoreBands": {},
+   "scoreBands": {
+    "outcome": {
+     "name": "ret_o1_20",
+     "horizon": 20,
+     "entry": "翌営業日の寄り",
+     "exit": "20営業日後の5日平均終値",
+     "label": "翌営業日の寄りで買い、20営業日後の5日平均終値で売ったときの上昇率"
+    }
+   },
    "cv": {
     "mean_pr_auc": 0.2897,
     "mean_roc_auc": 0.7,
@@ -1158,7 +1197,15 @@
    "note": "ニューラルネット。滑らかな交互作用を見る。木とも線形とも違う",
    "trainedAt": "2026-09-06T12:31:00+00:00",
    "nOof": 16431,
-   "scoreBands": {},
+   "scoreBands": {
+    "outcome": {
+     "name": "ret_o1_20",
+     "horizon": 20,
+     "entry": "翌営業日の寄り",
+     "exit": "20営業日後の5日平均終値",
+     "label": "翌営業日の寄りで買い、20営業日後の5日平均終値で売ったときの上昇率"
+    }
+   },
    "cv": {
     "mean_pr_auc": 0.3044,
     "mean_roc_auc": 0.7,

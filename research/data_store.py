@@ -19,7 +19,7 @@ import datetime as dt
 import glob
 import json
 import os
-from typing import Dict, Iterable, List, Set
+from typing import Dict, Iterable, List, Optional, Set
 
 MANIFEST_NAME = "manifest.json"
 
@@ -38,6 +38,7 @@ def load_manifest(data_dir: str) -> Dict[str, Dict]:
 
     「その日を取得しに行ったか」を記録する（行数ではなく）。
     財務のようにその日に開示が0件でも「取得済み」であり、再取得の必要はないため。
+    公表前に叩いてしまった日だけは例外扱いにする（confirmed_days）。
     """
     p = manifest_path(data_dir)
     if not os.path.exists(p):
@@ -77,6 +78,79 @@ def mark_fetched(manifest: Dict[str, Dict], kind: str, days: Iterable[dt.date]) 
     cur = set(manifest.setdefault(kind, {"fetched_days": []})["fetched_days"])
     cur.update(d.isoformat() for d in days)
     manifest[kind]["fetched_days"] = sorted(cur)
+
+
+#: 「その日ぶんがまだ公表されていないかもしれない」とみなす日数。
+#: 当日を1日目と数えるので、1 は「当日だけ」の意味。
+#:
+#: 取得済みの記録は**行数ではなく「叩きに行ったか」**で付けている
+#: （開示0件の日を毎回叩き直さないため）。だが公表前に叩いた日まで
+#: それで記録すると、**その日のデータは二度と取りに行かない**。
+#: missing_days は「候補 − 記録」なので、一度記録した日は候補から消える。
+#:
+#: 取り込みを 21:30 JST から 16:05 JST に前倒ししたことで、これが
+#: 実害になった。実測（research/probe_update_time.py, 2026-09-18）:
+#:
+#:   bars / master_hist  16:00 までに出ている（初回ポーリング時点で既にあり）
+#:   indices / topix     16:30
+#:   fins                18:00
+#:   margin              週次。金曜ぶんが翌週に出る（20:30 までには出ない）
+#:
+#: margin だけ長いのは、これが既に起きていたため。Release の保存データを
+#: 確認すると、記録は 2026-09-14 まであるのに実データは 2026-08-28 が
+#: 最後だった（2026-09-18 時点）。公表前に叩いた週が取得済みとして
+#: 記録され、そのまま失われている。戻すには --forget を使う。
+PUBLISH_LAG_DAYS = {
+    "bars": 1,
+    "indices": 1,
+    "topix": 1,
+    "fins": 1,
+    "master_hist": 1,
+    "margin": 10,   # 営業日3日ぶんの公表ラグ＋連休ぶんの余裕
+}
+DEFAULT_PUBLISH_LAG_DAYS = 1
+
+
+def confirmed_days(kind: str, requested: Iterable[dt.date],
+                   got: Iterable[dt.date], today: dt.date) -> List[dt.date]:
+    """
+    叩きに行った日のうち、**取得済みとして記録してよい日**だけを返す。
+
+    行が取れた日は当然よい。取れなかった日は「本当に0件」か
+    「まだ公表されていない」かを区別できないので、公表ラグの中に
+    入っている日は記録しない（次回また取りに行く）。
+
+    公表ラグを過ぎても0件なら、それは本当に0件（祝日・開示なし）なので
+    記録する。ここで記録しないと、その日を永久に叩き続けることになる。
+    """
+    lag = PUBLISH_LAG_DAYS.get(kind, DEFAULT_PUBLISH_LAG_DAYS)
+    have = {d for d in got}
+    return [d for d in requested
+            if d in have or (today - d).days >= lag]
+
+
+def forget_days(manifest: Dict[str, Dict], kind: str,
+                since: Optional[dt.date] = None) -> List[str]:
+    """
+    取得記録だけを外す。**保存済みの parquet は消さない。**
+
+    `reset_kind` は保存データごと消して全期間を取り直す。公表前に叩いて
+    しまった数日を取り直したいだけのときには重すぎるうえ、取り直しの
+    途中で落ちると保存データが欠けたまま残る。
+
+    こちらは記録を外すだけなので、次の差分取得が同じ日を取りに行き、
+    `merge_into_years` が既存ファイルに上書きマージする。取れなければ
+    現状のまま何も変わらない。外した日のリストを返す。
+    """
+    cur = sorted(fetched_days(manifest, kind))
+    keep, dropped = [], []
+    for d in cur:
+        if since is None or dt.date.fromisoformat(d) >= since:
+            dropped.append(d)
+        else:
+            keep.append(d)
+    manifest.setdefault(kind, {})["fetched_days"] = keep
+    return dropped
 
 
 def summarize(manifest: Dict[str, Dict]) -> str:

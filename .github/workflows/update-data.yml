@@ -22,15 +22,47 @@ on:
         description: '取り直す種別（スペース区切り。例: fins）。取得する列を増やしたとき用'
         required: false
         default: ''
+      forget:
+        description: '取得記録だけを消す種別（スペース区切り。例: margin）。公表前に叩いて0件のまま取得済みになった日を取り直す'
+        required: false
+        default: ''
+      forget_from:
+        description: 'forget の開始日 (YYYY-MM-DD)。省略すると全期間'
+        required: false
+        default: ''
   schedule:
-    # 平日 21:30 JST (= 12:30 UTC)。日次データが出そろった後に差分を取り込む
-    - cron: '30 12 * * 1-5'
+    # 平日 16:05 JST (= 07:05 UTC)。大引け(15:30 JST)の直後に置く。
+    #
+    # 以前は 21:30 JST だった。前倒しした理由は J-Quants ではなく
+    # GitHub 側にある。スケジュール起動の実績（2026-09-11〜16）:
+    #
+    #   予定 12:30 UTC -> 実際 16:38 / 18:07 / 17:10 / 17:10 UTC
+    #   遅れ            +4h08m / +5h37m / +4h40m / +4h40m
+    #
+    # 4時間を切ったことが一度も無い。つまり cron を早く置いた時間だけ
+    # 実際の公開も早くなる。21:30 起動では画面の更新が翌日2時台になっていた。
+    #
+    # 定刻どおりに起動してしまった日のために、取り込みの前に
+    # research/wait_for_data.py で当日データが出るまで待つ。
+    # :00 / :30 は世界中の cron が集中して遅延が大きくなるので :05 に置く。
+    - cron: '5 7 * * 1-5'
   # workflow_dispatch はデフォルトブランチにファイルが無いと呼べない。
   # 調査用ブランチからは、このファイルを更新して起動する。
   # 1行目に --reset に渡す種別を書く（空なら通常の差分取得）
   push:
     branches: ['claude/breakout-model']
     paths: ['research/refetch_request.txt']
+
+# すべての run を pipefail 付きの bash にする。
+#
+# 既定の shell は `bash -e` で pipefail が無い。`python3 ... | tee x.log` は
+# パイプの最後（tee）の終了コードで判定されるため、**python が落ちても
+# ステップは成功**になる。実測（2026-09-22、run 35713049207）で、
+# marginalert の parquet 書き出しが ArrowInvalid で落ちたのに job は
+# success になり、後続の earndate / investor が走らないまま終わっていた。
+defaults:
+  run:
+    shell: bash
 
 permissions:
   contents: write
@@ -99,6 +131,24 @@ jobs:
               echo "  (Release 側には無し)"
           done
 
+      # 定刻に起動した日は、まだ当日のデータが出ていないことがある。
+      # 待てば済む話なので待つ。締切を過ぎても止めずに先へ進む（祝日は
+      # そもそも当日データが無い）。手動起動や過去日の取り直しでは待たない。
+      #
+      # 四本値だけでは足りない。実測（2026-09-18）で四本値 16:00 に対して
+      # 業種別指数・TOPIX は 16:30 で、これらは merge_asof(backward) で
+      # 結合するため、欠けると欠測ではなく**前日の値**が入る。
+      # 決算開示は 18:00 で、ここでは待たない（翌営業日の取り込みで入る）。
+      # 締切 18:00 は実測 16:30 に対して1時間半の余裕。観測は1日ぶんしか
+      # 無いので、狭くしすぎない。
+      - name: Wait for today's data
+        if: github.event_name == 'schedule'
+        env:
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+        run: |
+          python3 research/wait_for_data.py \
+            --feeds bars,indices,topix --deadline 18:00 --interval 300
+
       - name: Fetch missing days
         env:
           JQUANTS_API: ${{ secrets.JQUANTS_API }}
@@ -113,16 +163,40 @@ jobs:
           if [ -z "$REQ" ] && [ -f research/refetch_request.txt ]; then
             REQ=$(grep -v '^#' research/refetch_request.txt | head -1 | tr -d '\r')
           fi
-          # 想定外の値を --reset に渡さない
+          # 想定外の値を --reset に渡さない。
+          #
+          # **種別の一覧を YAML に書き写さない。** 以前はここに
+          # bars|fins|margin|topix|indices|master と直書きしており、
+          # jq_bulk.py に種別を足したときに片方だけ古くなって
+          # 「未知の種別: earndate」で落ちた（run 35714197217）。
+          # 正本は jq_bulk.py の1か所だけにする。
+          KINDS=$(python3 -c "import sys;sys.path.insert(0,'research');sys.path.insert(0,'scripts');import jq_bulk as J;print(' '.join(['bars','fins','margin','topix','indices','master','master_hist']+list(J.DAILY_KINDS)+list(J.BULK_KINDS)))")
+          echo "扱える種別: $KINDS"
           for k in $REQ; do
-            case "$k" in
-              bars|fins|margin|topix|indices|master) ;;
-              *) echo "未知の種別: $k"; exit 1 ;;
+            case " $KINDS " in
+              *" $k "*) ;;
+              *) echo "未知の種別: $k（扱えるのは $KINDS）"; exit 1 ;;
             esac
           done
           [ -n "$REQ" ] && RESET="--reset $REQ"
           echo "reset 対象: ${REQ:-なし}"
-          python3 research/jq_bulk.py --incremental $RESET \
+          # --forget は取得記録だけを外す（parquet は消さない）。
+          # 公表前に叩いて0件のまま取得済みになった日を取り直すとき用
+          FORGET=""
+          FGT="${{ inputs.forget }}"
+          for k in $FGT; do
+            case " $KINDS " in
+              *" $k "*) ;;
+              *) echo "未知の種別: $k（扱えるのは $KINDS）"; exit 1 ;;
+            esac
+          done
+          if [ -n "$FGT" ]; then
+            FORGET="--forget $FGT"
+            FF="${{ inputs.forget_from }}"
+            [ -n "$FF" ] && FORGET="$FORGET --forget-from $FF"
+          fi
+          echo "forget 対象: ${FGT:-なし}"
+          python3 research/jq_bulk.py --incremental $RESET $FORGET \
             --from "$FROM" --to "$TO" 2>&1 | tee fetch.log
 
       - name: Upload to release

@@ -486,16 +486,23 @@ def quarterize(statements: Sequence[dict]) -> List[dict]:
                 # 単一四半期値
                 "qNetSales": diff("Sales"),
                 "qOperatingProfit": diff("OP"),
+                # 経常利益。損益の流れを「売上 → 営業 → 経常 → 純利益」と
+                # 段階で見るために要る（画面の決算サンキー図）。
+                # 売上原価・販管費は J-Quants の決算短信サマリーに無いので、
+                # 営業費用は「売上高 − 営業利益」の一本にまとめるしかない
+                "qOrdinaryProfit": diff("OdP"),
                 "qProfit": diff("NP"),
                 "qEps": diff("EPS"),
                 # 累計値 (進捗率算出に使用)
                 "cumNetSales": fnum(r.get("Sales")),
                 "cumOperatingProfit": fnum(r.get("OP")),
+                "cumOrdinaryProfit": fnum(r.get("OdP")),
                 "cumProfit": fnum(r.get("NP")),
                 "cumEps": fnum(r.get("EPS")),
                 # 会社予想 (通期)
                 "forecastNetSales": fnum(r.get("FSales")),
                 "forecastOperatingProfit": fnum(r.get("FOP")),
+                "forecastOrdinaryProfit": fnum(r.get("FOdP")),
                 "forecastProfit": fnum(r.get("FNP")),
                 "forecastEps": fnum(r.get("FEPS")),
                 # 財政状態

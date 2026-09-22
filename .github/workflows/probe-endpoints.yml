@@ -1,0 +1,84 @@
+name: Probe Endpoints
+
+# J-Quants のエンドポイント一覧を**取りに行ってから**全部叩いて可否を測る。
+#
+# Claude の作業環境からは公式ドキュメント（jpx-jquants.com / jpx.gitbook.io）に
+# 到達できない（egress ブロック）。ランナーからは到達できるので、
+# 一覧の取得ごとこちらでやる。思いついた名前を並べて「無い」と結論するのを
+# やめるための仕組み。
+#
+# 手動起動のみ。API を100本近く叩くので、定期実行はしない。
+on:
+  workflow_dispatch:
+    inputs:
+      no_doc:
+        description: '一覧の取得を飛ばす（手書き候補だけ叩く）'
+        type: boolean
+        default: false
+      limit:
+        description: '叩く本数の上限'
+        default: '200'
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # 鍵はスクリプト内の Redactor で消してから印字される。
+      # リポジトリは公開で Actions のログも公開なので、ここを緩めない。
+      - name: Probe
+        env:
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+          # 公式クライアントのソースを辿るのに使う。api.github.com の
+          # 未認証は 60回/時 で足りない。スクリプト側で github.com 系にしか
+          # 送らないようにしてある
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 research/probe_endpoints.py \
+            ${{ inputs.no_doc == true && '--no-doc' || '' }} \
+            --limit "${{ inputs.limit || 200 }}" 2>&1 | tee probe_endpoints.log
+
+      - name: Commit
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A docs/DATA_FIELDS.md research/probe_endpoints.json
+          if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
+          git commit -m "chore(research): エンドポイント一覧の実測結果を更新"
+          for i in 1 2 3 4; do
+            if git push; then exit 0; fi
+            sleep $((2 ** i)); git pull --rebase
+          done
+          exit 1
+
+      - name: Summary
+        if: always()
+        run: |
+          { echo '## エンドポイントの疎通'
+            echo '```'
+            tail -120 probe_endpoints.log 2>/dev/null || echo '(実行せず)'
+            echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: probe-endpoints
+          path: |
+            research/probe_endpoints.json
+            research/_probe_docs/
+            probe_endpoints.log
+          if-no-files-found: warn

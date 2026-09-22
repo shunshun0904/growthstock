@@ -210,5 +210,400 @@ class TestKindDispatch(unittest.TestCase):
         self.assertNotIn("master", data_store.KINDS)
 
 
+class TestConfirmedDays(unittest.TestCase):
+    """
+    公表前に叩いた日を「取得済み」にしないこと。
+
+    missing_days は「候補 − 記録」なので、一度記録した日は二度と候補に
+    入らない。取り込みを 16:05 JST に前倒ししたことで、指数(16:30)や
+    財務(18:00)を公表前に叩く日ができた。そこで0件を取得済みにすると、
+    **その日のデータは永久に失われる**。実際に信用残がそうなっていた
+    （記録は 2026-09-07 まであるのに実データは 2026-08-28 が最後）。
+
+    かといって「0件なら記録しない」にすると、開示が本当に0件の日を
+    毎回叩き続けることになる。だから公表ラグで線を引く。
+    """
+
+    def test_rows_present_is_always_recorded(self):
+        today = dt.date(2026, 9, 18)
+        got = days("2026-09-18")
+        out = data_store.confirmed_days("bars", days("2026-09-18"), got, today)
+        self.assertEqual(out, days("2026-09-18"))
+
+    def test_today_with_no_rows_is_held_back(self):
+        today = dt.date(2026, 9, 18)
+        out = data_store.confirmed_days("indices", days("2026-09-18"), [], today)
+        self.assertEqual(out, [])
+
+    def test_past_day_with_no_rows_is_recorded(self):
+        """
+        公表ラグを過ぎても0件なら、本当に0件（祝日・開示なし）。
+        ここで記録しないと、その日を永久に叩き続けることになる。
+        """
+        today = dt.date(2026, 9, 18)
+        out = data_store.confirmed_days("fins", days("2026-09-17"), [], today)
+        self.assertEqual(out, days("2026-09-17"))
+
+    def test_margin_keeps_retrying_for_a_week(self):
+        """信用残は週次で、金曜ぶんが翌週に出る。当日だけの猶予では足りない。"""
+        today = dt.date(2026, 9, 18)          # 金
+        # 同じ週の金曜と、10日以上前の金曜
+        out = data_store.confirmed_days(
+            "margin", days("2026-09-18", "2026-09-04"), [], today)
+        self.assertEqual(out, days("2026-09-04"))
+
+    def test_unknown_kind_falls_back_to_today_only(self):
+        today = dt.date(2026, 9, 18)
+        self.assertEqual(
+            data_store.confirmed_days("nazo", days("2026-09-18"), [], today), [])
+        self.assertEqual(
+            data_store.confirmed_days("nazo", days("2026-09-17"), [], today),
+            days("2026-09-17"))
+
+    def test_order_is_preserved(self):
+        today = dt.date(2026, 9, 18)
+        req = days("2026-09-14", "2026-09-15", "2026-09-16", "2026-09-18")
+        out = data_store.confirmed_days("bars", req, days("2026-09-15"), today)
+        self.assertEqual(out, days("2026-09-14", "2026-09-15", "2026-09-16"))
+
+
+class TestMarginCandidates(unittest.TestCase):
+    """
+    信用残は週次公表で、残高は**その週の最終営業日**時点のもの。
+
+    以前は「金曜を全部足し、金曜が無い週はその週の適当な日」を候補に
+    していた。この「適当な日」が週の先頭（月曜）になるため、金曜が祝日の
+    週は月曜を叩いて0件のまま取得済みになり、木曜ぶんが永久に失われた。
+    保存データを数えると10年ぶんで23週がこれで空いていた。
+    """
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(ROOT, "research"))
+        import jq_bulk
+        self.jq = jq_bulk
+
+    def test_normal_week_picks_friday(self):
+        wk = days("2026-09-14", "2026-09-15", "2026-09-16", "2026-09-17",
+                  "2026-09-18")
+        self.assertEqual(self.jq.margin_candidates(wk), days("2026-09-18"))
+
+    def test_holiday_friday_picks_thursday_not_monday(self):
+        """2026-03-20 は春分の日。週の最終営業日は木曜 03-19。"""
+        wk = days("2026-03-16", "2026-03-17", "2026-03-18", "2026-03-19")
+        self.assertEqual(self.jq.margin_candidates(wk), days("2026-03-19"))
+
+    def test_one_day_per_week(self):
+        wk = days("2026-09-07", "2026-09-08", "2026-09-11",
+                  "2026-09-14", "2026-09-18")
+        self.assertEqual(self.jq.margin_candidates(wk),
+                         days("2026-09-11", "2026-09-18"))
+
+    def test_year_boundary_uses_iso_week(self):
+        """2025-12-29〜2026-01-02 は ISO では同じ週（2026年第1週）。"""
+        wk = days("2025-12-29", "2025-12-30", "2026-01-05", "2026-01-06")
+        self.assertEqual(self.jq.margin_candidates(wk),
+                         days("2025-12-30", "2026-01-06"))
+
+    def test_empty(self):
+        self.assertEqual(self.jq.margin_candidates([]), [])
+
+
+class TestFailedDaysAreNotRecorded(unittest.TestCase):
+    """
+    問い合わせ自体が失敗した日を「取得済み」にしないこと。
+
+    _fetch_by_day は失敗した日を読み飛ばすが、記録は todo 全部に付いて
+    いた。一過性の 503 で1日ぶんが永久に失われる（記録した日は
+    missing_days の候補から消える）。
+    """
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(ROOT, "research"))
+        import jq_bulk
+        self.jq = jq_bulk
+
+    def test_failed_day_is_held_back(self):
+        m = {"bars": {"fetched_days": []}}
+        df = pd.DataFrame({"Date": ["2026-09-16"], "Code": ["13010"]})
+        self.jq._record_fetched(
+            m, "bars", days("2026-09-16", "2026-09-17"), df, "Date",
+            today=dt.date(2026, 9, 18), failed=days("2026-09-17"))
+        self.assertEqual(m["bars"]["fetched_days"], ["2026-09-16"])
+
+    def test_fetch_by_day_reports_which_days_failed(self):
+        from jquants_data_fetcher import JQuantsError
+
+        class Flaky:
+            def get_paginated(self, path, params):
+                if params["date"] == "2026-09-17":
+                    raise JQuantsError("503")
+                return [{"Date": params["date"], "Code": "13010"}]
+
+        df = self.jq._fetch_by_day(Flaky(), "/x",
+                                   days("2026-09-16", "2026-09-17"),
+                                   ["Date", "Code"], "bars")
+        self.assertEqual(len(df), 1)
+        self.assertEqual(self.jq.LAST_FAILED_DAYS, days("2026-09-17"))
+
+    def test_failures_are_cleared_between_calls(self):
+        """前回の失敗が残ると、無関係な日まで記録されなくなる。"""
+        from jquants_data_fetcher import JQuantsError
+
+        class Once:
+            def __init__(self):
+                self.first = True
+
+            def get_paginated(self, path, params):
+                if self.first:
+                    self.first = False
+                    raise JQuantsError("503")
+                return [{"Date": params["date"], "Code": "13010"}]
+
+        c = Once()
+        self.jq._fetch_by_day(c, "/x", days("2026-09-16"), ["Date", "Code"],
+                              "bars")
+        self.assertEqual(self.jq.LAST_FAILED_DAYS, days("2026-09-16"))
+        self.jq._fetch_by_day(c, "/x", days("2026-09-17"), ["Date", "Code"],
+                              "bars")
+        self.assertEqual(self.jq.LAST_FAILED_DAYS, [])
+
+
+class TestForgetDays(unittest.TestCase):
+    """
+    取得記録だけを外して取り直せること（parquet は消さない）。
+
+    公表前に叩いて0件のまま取得済みになった日を戻すための操作。
+    reset_kind は保存データごと消すので、取り直しが途中で落ちると
+    穴が開く。こちらは取れなければ現状維持で済む。
+    """
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def _manifest(self):
+        m = data_store.load_manifest(self.dir)
+        data_store.mark_fetched(m, "margin", days(
+            "2026-08-28", "2026-09-04", "2026-09-11", "2026-09-14"))
+        return m
+
+    def test_forgets_only_from_the_given_date(self):
+        m = self._manifest()
+        dropped = data_store.forget_days(m, "margin",
+                                         since=dt.date(2026, 9, 1))
+        self.assertEqual(dropped,
+                         ["2026-09-04", "2026-09-11", "2026-09-14"])
+        self.assertEqual(m["margin"]["fetched_days"], ["2026-08-28"])
+
+    def test_forgets_everything_without_a_date(self):
+        m = self._manifest()
+        dropped = data_store.forget_days(m, "margin")
+        self.assertEqual(len(dropped), 4)
+        self.assertEqual(m["margin"]["fetched_days"], [])
+
+    def test_forgotten_days_come_back_as_candidates(self):
+        """外した日が missing_days に戻ること。これが目的そのもの。"""
+        m = self._manifest()
+        cand = days("2026-08-28", "2026-09-04", "2026-09-11")
+        self.assertEqual(data_store.missing_days(m, "margin", cand), [])
+        data_store.forget_days(m, "margin", since=dt.date(2026, 9, 1))
+        self.assertEqual(data_store.missing_days(m, "margin", cand),
+                         days("2026-09-04", "2026-09-11"))
+
+    def test_does_not_touch_saved_files(self):
+        df = pd.DataFrame({"Date": ["2026-08-28"], "Code": ["13010"],
+                           "LongVol": [1.0], "ShrtVol": [2.0]})
+        data_store.merge_into_years(self.dir, "margin", df, "Date")
+        before = sorted(os.listdir(self.dir))
+        m = self._manifest()
+        data_store.forget_days(m, "margin")
+        self.assertEqual(sorted(os.listdir(self.dir)), before)
+
+
+class TestRecordFetched(unittest.TestCase):
+    """
+    jq_bulk 側の配線。取得した DataFrame から「行が取れた日」を拾って
+    data_store.confirmed_days に渡すところ。
+    """
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(ROOT, "research"))
+        import jq_bulk
+        self.jq = jq_bulk
+        # 失敗した日はモジュール変数で持ち回している。前のテストの残りが
+        # 効いてしまわないように消す（本番では _fetch_by_day が毎回消す）
+        jq_bulk.LAST_FAILED_DAYS = []
+
+    def test_holds_back_todays_empty_fetch(self):
+        m = {"indices": {"fetched_days": []}}
+        empty = pd.DataFrame(columns=["Date", "Code", "C"])
+        self.jq._record_fetched(m, "indices", days("2026-09-17", "2026-09-18"),
+                                empty, "Date", today=dt.date(2026, 9, 18))
+        self.assertEqual(m["indices"]["fetched_days"], ["2026-09-17"])
+
+    def test_records_today_when_rows_came_back(self):
+        m = {"indices": {"fetched_days": []}}
+        df = pd.DataFrame({"Date": ["2026-09-18"], "Code": ["0040"], "C": [1.0]})
+        self.jq._record_fetched(m, "indices", days("2026-09-18"), df, "Date",
+                                today=dt.date(2026, 9, 18))
+        self.assertEqual(m["indices"]["fetched_days"], ["2026-09-18"])
+
+    def test_empty_frame_without_the_date_column_does_not_crash(self):
+        """
+        FIN_COLS / MASTER_COLS は None なので、0件のときの DataFrame には
+        列が1つも無い。ここで落ちると取り込み全体が止まる。
+        """
+        m = {"fins": {"fetched_days": []}}
+        self.jq._record_fetched(m, "fins", days("2026-09-18"),
+                                pd.DataFrame(), "DiscDate",
+                                today=dt.date(2026, 9, 18))
+        self.assertEqual(m["fins"]["fetched_days"], [])
+
+    def test_fins_uses_the_disclosure_date_column(self):
+        m = {"fins": {"fetched_days": []}}
+        df = pd.DataFrame({"DiscDate": ["2026-09-18"], "Code": ["13010"]})
+        self.jq._record_fetched(m, "fins", days("2026-09-18"), df, "DiscDate",
+                                today=dt.date(2026, 9, 18))
+        self.assertEqual(m["fins"]["fetched_days"], ["2026-09-18"])
+
+
+class TestCalendarNote(unittest.TestCase):
+    """
+    取り込みが「今日は営業日か」を manifest に書き残すところ。
+
+    営業日カレンダーを引いているのは取り込みだけなので、ここが唯一の
+    情報源になる。予測側が自分で祝日を判断しないための信号。
+    """
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(ROOT, "research"))
+        import jq_bulk
+        self.jq = jq_bulk
+        self.days = days("2026-09-16", "2026-09-17", "2026-09-18")
+
+    def test_trading_day(self):
+        c = self.jq.calendar_note(self.days, dt.date(2026, 9, 18),
+                                  today=dt.date(2026, 9, 18))
+        self.assertIs(c["isTradingDay"], True)
+        self.assertEqual(c["lastTradingDay"], "2026-09-18")
+
+    def test_holiday(self):
+        """2026-09-21 は敬老の日。カレンダーに入らないので非営業日。"""
+        c = self.jq.calendar_note(self.days, dt.date(2026, 9, 21),
+                                  today=dt.date(2026, 9, 21))
+        self.assertIs(c["isTradingDay"], False)
+        self.assertEqual(c["lastTradingDay"], "2026-09-18")
+
+    def test_past_range_cannot_judge_today(self):
+        """
+        過去日を指定して取り直した場合、days に今日は入らない。
+        「入っていない＝非営業日」と読むと誤判定になるので None にする。
+        """
+        c = self.jq.calendar_note(self.days, dt.date(2026, 9, 18),
+                                  today=dt.date(2026, 9, 21))
+        self.assertIsNone(c["isTradingDay"])
+
+    def test_no_days(self):
+        c = self.jq.calendar_note([], dt.date(2026, 9, 21),
+                                  today=dt.date(2026, 9, 21))
+        self.assertIsNone(c["isTradingDay"])
+        self.assertIsNone(c["lastTradingDay"])
+
+
+class TestTradingDayGate(unittest.TestCase):
+    """
+    非営業日に日次予測を飛ばす判定。
+
+    **飛ばす側に倒してはいけない。** 取り込みが壊れている日を「休場だから」
+    と飛ばすと、気づかないまま画面が止まる。judge は3条件すべてが
+    揃ったときだけ False（飛ばす）を返し、それ以外は必ず True を返す。
+    """
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(ROOT, "research"))
+        import trading_day_gate
+        self.g = trading_day_gate
+        self.now = dt.datetime(2026, 9, 21, 12, 0, tzinfo=dt.timezone.utc)
+
+    def _manifest(self, **over):
+        cal = {"asOfJst": "2026-09-21", "requestedTo": "2026-09-21",
+               "isTradingDay": False, "lastTradingDay": "2026-09-18"}
+        cal.update(over.pop("calendar", {}))
+        m = {"calendar": cal,
+             "updatedAt": "2026-09-21T11:30:00+00:00"}
+        m.update(over)
+        return m
+
+    def test_holiday_with_complete_data_is_skipped(self):
+        run, why = self.g.decide(self._manifest(), dt.date(2026, 9, 18),
+                                 self.now)
+        self.assertFalse(run, why)
+
+    def test_trading_day_runs(self):
+        m = self._manifest(calendar={"isTradingDay": True})
+        run, _ = self.g.decide(m, dt.date(2026, 9, 21), self.now)
+        self.assertTrue(run)
+
+    def test_unknown_runs(self):
+        m = self._manifest(calendar={"isTradingDay": None})
+        run, _ = self.g.decide(m, dt.date(2026, 9, 18), self.now)
+        self.assertTrue(run)
+
+    def test_old_manifest_without_calendar_runs(self):
+        run, _ = self.g.decide({"updatedAt": "2026-09-21T11:30:00+00:00"},
+                               dt.date(2026, 9, 18), self.now)
+        self.assertTrue(run)
+
+    def test_stale_manifest_runs(self):
+        """
+        取り込みが今日走っていないなら、その calendar は昨日以前の判断。
+        休場日でも飛ばさず、鮮度チェックに任せる。
+        """
+        m = self._manifest(updatedAt="2026-09-19T11:30:00+00:00")
+        run, why = self.g.decide(m, dt.date(2026, 9, 18), self.now)
+        self.assertTrue(run)
+        self.assertIn("古い", why)
+
+    def test_data_behind_last_trading_day_runs(self):
+        """
+        ここが肝。休場日でも、保存データが直近の営業日に届いていなければ
+        取り込みが壊れている。飛ばさずに鮮度チェックで落とす。
+        """
+        run, why = self.g.decide(self._manifest(), dt.date(2026, 9, 11),
+                                 self.now)
+        self.assertTrue(run)
+        self.assertIn("取り込みを疑う", why)
+
+    def test_missing_last_trading_day_runs(self):
+        m = self._manifest(calendar={"lastTradingDay": None})
+        run, _ = self.g.decide(m, dt.date(2026, 9, 18), self.now)
+        self.assertTrue(run)
+
+    def test_no_bars_runs(self):
+        run, _ = self.g.decide(self._manifest(), None, self.now)
+        self.assertTrue(run)
+
+    def test_broken_updated_at_runs(self):
+        m = self._manifest(updatedAt="いつか")
+        run, _ = self.g.decide(m, dt.date(2026, 9, 18), self.now)
+        self.assertTrue(run)
+
+    def test_main_always_returns_zero(self):
+        """
+        判定できない事情が何であれ exit 0。ここが新しい失敗の入口に
+        なってはいけない（止めるのは鮮度チェックの仕事）。
+        """
+        empty = tempfile.mkdtemp()
+        try:
+            self.assertEqual(self.g.main(["--data-dir", empty]), 0)
+            with open(os.path.join(empty, "manifest.json"), "w") as fh:
+                fh.write("これは JSON ではない")
+            self.assertEqual(self.g.main(["--data-dir", empty]), 0)
+        finally:
+            shutil.rmtree(empty, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -124,8 +124,12 @@ def build(d: Dict, cmp_: Optional[Dict]) -> str:
                  f'継続の条件で外れた。定義: <code>{e(cont.get("definition",""))}</code></p>')
     fr = lab.get("future_rise_pct")
     if fr:
+        # 何営業日ぶんかは目的変数の horizon で決まる。見出しに焼き込まない
+        fh = lab.get("future_rise_horizon")
+        head = (f"将来リターン（{fh}営業日以内の最大上昇）" if fh
+                else "将来リターン（ホライズン内の最大上昇）")
         body += ('<div class="scroll" style="margin-top:22px"><table><thead>'
-                 '<tr><th>将来リターン（60営業日以内の最大上昇）</th>'
+                 f'<tr><th>{e(head)}</th>'
                  + "".join(f"<th>{e(k)}</th>" for k in fr) + "</tr></thead><tbody><tr>"
                  "<td>全サンプル</td>"
                  + "".join(f'<td class="v">{v:+.2f}%</td>' for v in fr.values())

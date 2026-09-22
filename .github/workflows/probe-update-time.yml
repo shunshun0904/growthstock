@@ -1,0 +1,80 @@
+name: Probe Update Time
+
+# J-Quants が「その日のデータ」を何時に出すかを実測する。
+#
+# 取り込み（Update Data Store）を平日21:30 JST に置いていたが、その時刻に
+# 根拠が無かった。公式ドキュメントはこの実行環境から読めないので、叩いて測る。
+#
+# 2026-09-18 に実測済み（結果は docs/OPERATIONS.md）。それを受けて取り込みは
+# 平日16:05 JST に前倒しし、四本値・指数・TOPIX が出るまで待つようにした。
+# このワークフローは、決算期や連休明けに公表が遅れないかを測り直すために残す。
+#
+# 1回の実行の中でポーリングするので、Actions のスケジュール遅延に
+# 影響されない。遅れるのは開始時刻だけで、観測時刻は実測のまま残る。
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: 'この時刻(JST)まで待ってから見始める'
+        required: false
+        # 大引けが 15:30 JST なので、それ以前に当日の終値が出ることはない。
+        # 16:00 より早く見ても「まだ無い」を確認するだけで意味が無い
+        default: '16:00'
+      until:
+        description: 'この時刻(JST)まで待つ'
+        required: false
+        default: '20:30'
+      interval:
+        description: 'ポーリング間隔（秒）'
+        required: false
+        # 30分。決めたいのは「締切19:30を締め直せるか」なので、
+        # 分単位の解像度は要らない。API を叩く回数も抑える
+        default: '1800'
+      date:
+        description: '対象日 (YYYY-MM-DD, JST)。既定は今日'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: probe-update-time
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    # GitHub の上限は360分。ポーリングで使い切る前提なので目一杯に取る
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Probe
+        env:
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+        run: |
+          python3 research/probe_update_time.py \
+            ${{ inputs.start && format('--start {0}', inputs.start) || '' }} \
+            --until "${{ inputs.until }}" \
+            --interval "${{ inputs.interval }}" \
+            ${{ inputs.date && format('--date {0}', inputs.date) || '' }} \
+            --log "$RUNNER_TEMP/observations.csv" 2>&1 | tee probe.log
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo '## J-Quants の当日データが出た時刻（実測）'
+            echo
+            echo '```'
+            sed -n '/=== 最初に行が返った時刻/,$p' probe.log || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: probe-update-time
+          path: probe.log
+          retention-days: 14

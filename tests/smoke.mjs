@@ -91,6 +91,17 @@ check(predBody.includes('決定木系') && predBody.includes('木以外'),
 check(predBody.includes('並べているモデル'), 'モデル一覧パネルが表示される');
 check(predBody.includes('ニューラルネット') && predBody.includes('ロジスティック回帰'),
   '5モデルの日本語名が出る');
+// 今日の戦略パネル（docs/PLAYBOOK.md の手順）。
+// 合成データは候補5件・低い百分位なので「見送り」になるのが正しい
+const strat = await page.textContent('.strat');
+check(strat.includes('今日の戦略'), '戦略パネルが表示される');
+check(strat.includes('見送り'), `発火5件の日は見送りと出る`);
+check((await page.locator('.strat-pick').count()) === 0,
+      '見送りの日は買う銘柄を出さない');
+check(strat.includes('発火数'), '発火数が表示される');
+check(!strat.includes('NaN') && !strat.includes('undefined'),
+      '戦略パネルに NaN / undefined が出ていない');
+
 check(!predBody.includes('NaN'), '予測タブに NaN が出ていない');
 check(!predBody.includes('undefined'), '予測タブに undefined が出ていない');
 
@@ -136,6 +147,62 @@ const naCount = await page.locator('.axis-table .na').count();
 check(naCount >= 3, `欠測軸が「—」で表示される (${naCount}箇所)`);
 
 await page.screenshot({ path: path.join(SHOTS, 'screenshot-compare.png'), fullPage: false });
+
+console.log('\n== 直近決算サンキー ==');
+await page.locator('.sankey').scrollIntoViewIfNeeded();
+await page.waitForSelector('.sankey svg', { timeout: 10000 });
+
+// 同じ列（同じ x）のノードが重ならないこと。
+// 費用と流入が同じ列に来る銘柄で実際に重なった回帰
+const overlaps = await page.evaluate(() => {
+  const byCol = new Map();
+  for (const r of document.querySelectorAll('.sankey svg rect')) {
+    const x = +r.getAttribute('x');
+    if (!Number.isFinite(x)) continue;          // 斜線パターンの中の rect
+    const y = +r.getAttribute('y');
+    const h = +r.getAttribute('height');
+    if (!byCol.has(x)) byCol.set(x, []);
+    byCol.get(x).push([y, y + h]);
+  }
+  let bad = 0;
+  for (const spans of byCol.values()) {
+    spans.sort((a, b) => a[0] - b[0]);
+    for (let i = 1; i < spans.length; i++) {
+      if (spans[i][0] < spans[i - 1][1] - 0.5) bad++;
+    }
+  }
+  return bad;
+});
+check(overlaps === 0, `同じ列のノードが重ならない (重なり ${overlaps}件)`);
+
+const sk = await page.textContent('.sankey');
+check(sk.includes('売上高') && sk.includes('営業利益'), '段階利益のラベルが出る');
+check(sk.includes('営業費用'), '営業費用（原価＋販管費）が1本にまとまる');
+check(!sk.includes('等等'), 'ラベルの取り違えが無い');
+check(!sk.includes('NaN') && !sk.includes('undefined'),
+  'サンキーに NaN / undefined が出ていない');
+check(sk.includes('決算短信の サマリーに無い') || sk.includes('サマリーに無い'),
+  '原価・販管費が無いことを画面で断っている');
+
+// モードの切り替え
+await page.locator('.sankey-modes .btn', { hasText: '会社予想' }).click();
+await page.waitForTimeout(250);
+check((await page.textContent('.sankey')).includes('売上高'), '会社予想へ切り替わる');
+await page.locator('.sankey-modes .btn', { hasText: '単四半期' }).click();
+await page.waitForTimeout(250);
+
+// 最終赤字の銘柄（テスト銘柄C）
+await page.locator('.stock-card').nth(2).locator('button').first().click();
+await page.waitForTimeout(350);
+const skC = await page.textContent('.sankey');
+check(skC.includes('△'), '赤字は会計慣行の △ で示す（色だけに頼らない）');
+check(skC.includes('赤字'), '凡例と注記で赤字だと分かる');
+const hatched = await page.locator('.sankey svg rect[fill="url(#sk-loss)"]').count();
+check(hatched >= 1, `赤字の帯に斜線が入る (${hatched}箇所)`);
+await page.locator('.sankey').scrollIntoViewIfNeeded();
+await page.screenshot({ path: path.join(SHOTS, 'screenshot-sankey.png') });
+await page.locator('.stock-card').first().locator('button').first().click();
+await page.waitForTimeout(250);
 
 console.log('\n== タイムマシーン View ==');
 await page.getByRole('tab', { name: 'タイムマシーン' }).click();

@@ -2,6 +2,8 @@ import React, { useMemo, useState } from 'react';
 import { fmt, fmtInt, fmtSigned, fmtOku, fmtDate, fmtDateTime, DASH } from '../lib/format.js';
 import { bandColor, bandLabel, pctColor, modelRows, MODEL_SHORT, MODEL_FAMILY,
   FAMILY_JA, marketTone, candidateToStock } from '../lib/predictions.js';
+import { STRATEGY, BOOST, strategySignal, exitPlan, nearMisses,
+         MODEL_JA, fundContrib } from '../lib/strategy.js';
 
 /**
  * ブレイク予測タブ。
@@ -28,10 +30,16 @@ export default function PredictionView({ data, history, onSendToOctagon, sentIds
     [data, day]
   );
   const tone = useMemo(() => marketTone(rows), [rows]);
+  const signal = useMemo(() => strategySignal(rows), [rows]);
+  const near = useMemo(() => nearMisses(rows), [rows]);
   const m = data?.model || {};
 
   return (
     <div className="pred">
+      <StrategyPanel signal={signal} near={near} day={day}
+                     onSend={(c) => onSendToOctagon(candidateToStock(c))}
+                     sentIds={sentIds} />
+
       <section className="card">
         <div className="card-head">
           <h2>ブレイク予測</h2>
@@ -103,6 +111,204 @@ export default function PredictionView({ data, history, onSendToOctagon, sentIds
   );
 }
 
+/* ------------------------------------------------------ 今日の戦略シグナル */
+
+/**
+ * docs/PLAYBOOK.md の手順を、その日のデータでそのまま実行して見せる。
+ *
+ * 判断の材料（発火数・3モデルの百分位）は下の一覧にも出ているが、
+ * 「今日は買うのか、買うなら何を、いくらで手仕舞うのか」を1か所で
+ * 言い切る場所が要る。迷いどころを毎日つくらないための画面。
+ */
+function StrategyPanel({ signal, near, day, onSend, sentIds }) {
+  const { nBreak, verdict, picks, passed, buyable } = signal;
+  return (
+    <section className="card strat">
+      <div className="card-head">
+        <h2>今日の戦略</h2>
+        <span className="sub">
+          3モデルが揃って上位10%と見た銘柄を{STRATEGY.topK}件まで。
+          翌営業日の寄りで買い、+{STRATEGY.takeProfit}% か
+          {STRATEGY.holdDays}営業日で降りる（同時保有は{STRATEGY.maxSlots}銘柄まで、
+          発火{STRATEGY.skipBreaks}件未満の日は見送り）
+        </span>
+      </div>
+
+      <div className="strat-head">
+        <span className={`badge ${verdict.tone} strat-verdict`}>{verdict.label}</span>
+        <div className="strat-facts">
+          <div>
+            <span className="lab">発火数</span>
+            <strong className="num">{nBreak}</strong>
+            <span className="sub">
+              件（{STRATEGY.strongBreaks}件以上が本命 /
+              {STRATEGY.skipBreaks - 1}件以下は見送り）
+            </span>
+          </div>
+          <div>
+            <span className="lab">3モデルが揃って上位10%</span>
+            <strong className="num">{passed.length}</strong>
+            <span className="sub">件 / {nBreak}件</span>
+          </div>
+        </div>
+        <p className="sub strat-note">{verdict.note}</p>
+      </div>
+
+      {picks.length > 0 ? (
+        <>
+          <div className="strat-picks">
+            {picks.map((c, i) => (
+              <PickCard key={c.jqCode} c={c} n={i + 1}
+                        onSend={() => onSend(c)}
+                        sent={sentIds?.has(`pred:${c.jqCode}`)} />
+            ))}
+          </div>
+          <ol className="strat-steps">
+            <li><b>翌営業日の寄り</b>で成行。終値では買えない（候補が分かるのが終値後）</li>
+            <li>買えたら <b>+{STRATEGY.takeProfit}% の指値</b>を置く（到達は約1割、
+                届くときの中央値は11〜12営業日）</li>
+            <li>届かなければ <b>{STRATEGY.holdDays}営業日</b>で手仕舞い</li>
+            <li><b>枠は{STRATEGY.maxSlots}つまで</b>。埋まっていたら見送る。
+                保有中の銘柄は、ここに良い候補が出ても<b>切らない</b>
+                （実測で乗り換え37回のうち24回は切らないほうが良かった）</li>
+          </ol>
+        </>
+      ) : (
+        <div className="empty strat-empty">
+          {nBreak === 0 ? 'この日は新規の高値更新がありません。'
+            : passed.length === 0
+              ? '3モデルが揃って上位10%と見た銘柄はありません。買いません。'
+              : `発火が ${nBreak} 件しかありません。基準を満たした銘柄はありますが、`
+                + 'この日は見送ります。'}
+        </div>
+      )}
+
+      {!buyable && passed.length > 0 && (
+        <div className="strat-held">
+          <span className="lab">参考（基準は満たしたが見送る）</span>
+          {passed.slice(0, 3).map((c) => (
+            <span key={c.jqCode} className="strat-chip">
+              {c.name || c.code}
+              <em className="num">{fmt(c.minPct, 0)}</em>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {near.length > 0 && <NearMiss near={near} />}
+
+      <p className="strat-src sub">
+        実測（2021-11〜2026-08 の out-of-fold、基準を満たした757件）:
+        発火20件以上は +3.27%・勝率63%、8〜19件は +1.0〜2.2%・勝率54〜55%、
+        7件以下は −0.11%・−10%割れ14.1%。7件以下と8件以上の差だけは
+        z≈2.6 で実在する。20件という線は結果を見てから選んだもので、
+        そこで切ると枠が6割遊び、2022年は1年まるごと0件になる
+        （docs/PLAYBOOK.md）。
+      </p>
+    </section>
+  );
+}
+
+/**
+ * 惜しい候補（3モデルの最小が85〜90）。**買わない**ことの根拠を添えて出す。
+ *
+ * 毎日「あと3pt なのに」と迷い直さないための欄。実測では、1つのモデルだけが
+ * 5pt以上低い形は空き枠（0%）と変わらない（実験36 / docs/PLAYBOOK.md）。
+ */
+function NearMiss({ near }) {
+  return (
+    <div className="strat-near">
+      <span className="lab">
+        惜しい候補（最小 {STRATEGY.nearLo}〜{STRATEGY.agreePct}）— 買わない
+      </span>
+      <div className="strat-near-list">
+        {near.map((c) => (
+          <div key={c.jqCode} className="strat-near-row">
+            <span className="strat-near-name">{c.name || c.code}</span>
+            <span className="num strat-near-pct">最小 {fmt(c.minPct, 1)}</span>
+            <span className="sub">
+              {c.weak
+                ? `${MODEL_JA[c.laggard] || c.laggard} だけ `
+                  + `${fmt(c.spread, 1)}pt 低い形。実測 +0.30%・勝率49%・`
+                  + '−10%割れ 12.6%（270件）で、枠を遊ばせるのと変わらない'
+                : `3モデルがほぼ揃っている（幅 ${fmt(c.spread, 1)}pt）。`
+                  + 'この形は実測 +2.70%（118件）と基準通過組に近いが、'
+                  + '事後に見つけた区分けなので基準は動かしていない'}
+              <FundNote c={c} />
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 決算がスコアを押しているか引いているか。
+ *
+ * 「決算は悪くないのに」と思ったときに見る欄。決算は153列中118列（77%）を
+ * 占めるので、スコアは既に決算を読んだ結果になっている。
+ */
+function FundNote({ c }) {
+  const f = fundContrib(c);
+  if (f === null) return null;
+  return (
+    <>
+      {' '}
+      <span className={f < 0 ? 'strat-fund-down' : 'strat-fund-up'}>
+        {/* 寄与は対数オッズ。% ではないので単位は付けない */}
+        決算の寄与 {fmtSigned(f, 2, '')}
+        {f < 0 ? '（決算が引いている）' : '（決算が押している）'}
+      </span>
+    </>
+  );
+}
+
+function PickCard({ c, n, onSend, sent }) {
+  const plan = exitPlan(c.close);
+  return (
+    <div className="strat-pick">
+      <div className="strat-pick-head">
+        <span className="strat-pick-n num">{n}</span>
+        <span className="pred-id">
+          <strong>{c.name || c.code}</strong>
+          <span className="sub num">{c.code}</span>
+          {c.sector && <span className="sub">{c.sector}</span>}
+        </span>
+        <button className="btn btn-primary" onClick={onSend} disabled={sent}>
+          {sent ? '送信済み' : '8軸で見る'}
+        </button>
+      </div>
+      <div className="strat-pick-body">
+        <div className="strat-metric">
+          <span className="lab">3モデルの最小</span>
+          <strong className="num" style={{ color: pctColor(c.minPct) }}>
+            {fmt(c.minPct, 0)}
+          </strong>
+          <span className="sub">百分位</span>
+        </div>
+        {BOOST.map((a) => (
+          <div key={a} className="strat-metric">
+            <span className="lab">{MODEL_SHORT[a]}</span>
+            <span className="num">{fmt(c.byModel?.[a]?.pctHistorical, 0)}</span>
+          </div>
+        ))}
+        <div className="strat-metric">
+          <span className="lab">終値</span>
+          <span className="num">{fmtInt(c.close)}</span>
+        </div>
+        {plan && (
+          <div className="strat-metric">
+            <span className="lab">+{plan.takeProfit}% の目安</span>
+            <span className="num">{fmtInt(plan.target)}</span>
+            <span className="sub">終値基準。実際は寄り値から</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ 候補1件 */
 
 function Row({ c, models, open, onToggle, onSend, sent }) {
@@ -131,8 +337,8 @@ function Row({ c, models, open, onToggle, onSend, sent }) {
         </span>
         <span className="pred-cell">
           <span className="lab">帯の実収益</span>
-          <span className="num" style={{ color: (c.bandEndMedian ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
-            {fmtSigned(c.bandEndMedian, 2)}
+          <span className="num" style={{ color: (c.bandOutcome ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>
+            {fmtSigned(c.bandOutcome, 2)}
           </span>
         </span>
         <span className="pred-cell">
@@ -352,6 +558,10 @@ function Detail({ c, models, onSend, sent }) {
 
 /* ------------------------------------------------------------------ 補助パネル */
 
+// 物差しを変える前に学習したモデルは end_median のまま。週次の再学習が
+// 一巡するまで両方を見る（一巡したら outcome_median だけでよい）。
+const bandOutcome = (r) => r?.outcome_median ?? r?.end_median;
+
 function BandTable({ bands }) {
   if (!bands?.bands?.length) return null;
   return (
@@ -376,8 +586,8 @@ function BandTable({ bands }) {
                 <td className="num">{fmtInt(r.n)}</td>
                 <td className="num">{fmt(r.score_lo, 4)}</td>
                 <td className="num">{fmt(r.positive_rate * 100, 1, '%')}</td>
-                <td className="num" style={{ color: r.end_median >= 0 ? 'var(--green)' : 'var(--red)' }}>
-                  {fmtSigned(r.end_median, 2)}
+                <td className="num" style={{ color: bandOutcome(r) >= 0 ? 'var(--green)' : 'var(--red)' }}>
+                  {fmtSigned(bandOutcome(r), 2)}
                 </td>
                 <td className="num">{fmt(r.win_rate * 100, 1, '%')}</td>
               </tr>
@@ -385,15 +595,29 @@ function BandTable({ bands }) {
             <tr className="tot">
               <td>全体</td><td className="num">{fmtInt(bands.n)}</td><td>{DASH}</td>
               <td className="num">{fmt(bands.base_positive_rate * 100, 1, '%')}</td>
-              <td className="num">{fmtSigned(bands.base_end_median, 2)}</td>
+              <td className="num">
+                {fmtSigned(bands.base_outcome_median ?? bands.base_end_median, 2)}
+              </td>
               <td className="num">{fmt(bands.base_win_rate * 100, 1, '%')}</td>
             </tr>
           </tbody>
         </table>
       </div>
       <p className="sub">
-        「実収益」は参照ホライズン（60営業日後の5日平均終値）の上昇率。
-        ラベル定義に依存しないので、ラベルを変えても意味が変わりません。
+        {bands.outcome?.label ? (
+          <>
+            「実収益」は{bands.outcome.label}。
+            ブレイク当日の終値では買えない（候補が判明するのは終値が出た後）ので、
+            買いは翌営業日の寄りで測っています。
+          </>
+        ) : (
+          <>
+            「実収益」は基準日の終値で買い、60営業日後の5日平均終値で売ったときの
+            上昇率。<b>これは物差しを変える前のモデルの数字</b>で、次の週次再学習から
+            「翌営業日の寄り買い・20営業日」に変わります。
+          </>
+        )}
+        いずれも正例・負例の判定条件とは無関係に測った実測値です。
       </p>
     </section>
   );

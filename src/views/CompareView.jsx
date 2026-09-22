@@ -1,4 +1,5 @@
 import React from 'react';
+import EarningsSankey from '../components/EarningsSankey.jsx';
 import RadarPanel from '../components/RadarPanel.jsx';
 import AxisTable from '../components/AxisTable.jsx';
 import StockCard from '../components/StockCard.jsx';
@@ -80,6 +81,7 @@ function DetailPanel({ row }) {
   const zone = ZONE_META[result.zone];
 
   return (
+    <div className="stack" style={{ gap: 'var(--s4)' }}>
     <div className="grid-2">
       <div className="card">
         <div className="card-head">
@@ -143,6 +145,20 @@ function DetailPanel({ row }) {
           </dl>
         </div>
       </div>
+    </div>
+
+    {/* 決算の損益の流れ。8軸は「どのくらい良いか」を点数にしたものなので、
+        その点数がどこから来ているのかを、元の金額の流れで確かめられるようにする。
+        幅が要るので grid-2 の外に全幅で置く */}
+    <div className="card">
+      <div className="card-head">
+        <h2>直近決算の流れ</h2>
+        <span className="sub">
+          売上高がどこへ出ていき、いくら残ったか（{stock.code} {stock.name}）
+        </span>
+      </div>
+      <EarningsSankey quarters={stock.quarters} />
+    </div>
     </div>
   );
 }

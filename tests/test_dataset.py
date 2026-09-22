@@ -25,6 +25,7 @@ from build_dataset import (  # noqa: E402
     price_panel, quarterize_panel, market_environment, MACRO_ETFS,
     cap_band, fund_complete_flag, CAP_BAND_EDGES, FUND_REQUIREMENT_SETS,
     SECTOR_INDEX, S33_TO_INDEX, attach_sector_index, sector_index_returns,
+    disclosure_timing, TIMING_CLIP_ANY, TIMING_CLIP_FY,
 )
 
 
@@ -1087,12 +1088,16 @@ class TestDefaultLabel(unittest.TestCase):
 
     def test_default_rise_definition(self):
         from build_dataset import DEFAULT_RISE as R
-        self.assertEqual(R.horizon, 60)              # 3ヶ月
+        # 20営業日 ≒ 1ヶ月。60（約3ヶ月）から短くした。
+        # 実際に手仕舞うのが1ヶ月前後なのに基準点が3ヶ月先にあると、
+        # 「売ったあとに起きたこと」で正例・負例を決めることになる。
+        self.assertEqual(R.horizon, 20)
         # 到達しきい値は固定%ではなく銘柄自身の期間σの1.2倍。
         #
-        # 固定+20%は難易度が銘柄ごとに揃っていなかった。実測の60営業日σは
-        # 中央15.0% / p5 6.0% / p95 47.8% で、同じ+20%が静かな銘柄には3.3σ、
-        # 荒い銘柄には0.42σ。その結果モデルは「荒い銘柄を選ぶ係」になっており、
+        # 固定+20%は難易度が銘柄ごとに揃っていなかった。実測の期間σは
+        # 20営業日で中央8.7% / p5 3.4% / p95 27.6%、60営業日で
+        # 中央15.0% / p5 6.0% / p95 47.8%。どちらも8.0倍の開きがあり、
+        # 60営業日なら同じ+20%が静かな銘柄には3.3σ、荒い銘柄には0.42σ。その結果モデルは「荒い銘柄を選ぶ係」になっており、
         # 同じ期間に高ボラ順で機械的に買うと実収益 -21.15pt / 勝率25.9% だった。
         # σ基準にすると選ぶ銘柄が反転し、10窓のウォークフォワードで
         # 実収益の差が +5.02pt [+3.19,+5.96] と有意になった
@@ -1106,7 +1111,11 @@ class TestDefaultLabel(unittest.TestCase):
         self.assertAlmostEqual(R.end_ratio / R.threshold, 0.5)
         self.assertEqual(R.end_window, 5)
         self.assertTrue(R.require_uptrend)
-        self.assertEqual((R.trend_short, R.trend_long), (20, 60))
+        # 移動平均の長さは horizon に合わせる。長期側が判定期間そのもの、
+        # 短期側がその終盤。h=20 で MA20/MA60 のままにすると、MA60(t+20) の
+        # 大半がブレイク前の安い期間になり、条件がほぼ無効になる
+        # （実測で削るのが 5,671件中2件だった）。
+        self.assertEqual((R.trend_short, R.trend_long), (5, 20))
 
     def test_label_definition_columns_are_never_features(self):
         """
@@ -1639,6 +1648,148 @@ class TestPopulationFlags(unittest.TestCase):
             self.assertNotIn(c, F.RAW_FOR_RANK, c)
 
 
+class TestMetaRecordsTheLabelActuallyUsed(unittest.TestCase):
+    """
+    dataset_meta.json の labelConfig は「このデータセットを作った定義」。
+
+    目的変数は母集団で切り替わる（breakout なら RiseConfig、month_end なら
+    LabelConfig）のに、meta は常に LabelConfig を書いていた。追跡のために
+    置いてある欄が、使っていない定義を載せて追跡を誤らせていた。
+
+    ここで固定するのは「meta の name が、実際に走るラベル関数の定義と一致する」
+    こと。一致しないまま増やすと、後から見たときにどちらが本当か分からない。
+    """
+
+    def test_breakout_population_records_the_rise_config(self):
+        import build_dataset as B
+        self.assertEqual(B.POPULATION, "breakout")
+        # いまの定義。変えたらこのテストも一緒に更新すること
+        self.assertEqual(B.DEFAULT_RISE.name,
+                         "1ヶ月内+1.2σ / 終盤+0.50倍 / MA5>=MA20")
+        self.assertEqual(B.DEFAULT_RISE.horizon, 20)
+        self.assertEqual(B.DEFAULT_RISE.vol_norm_k, 1.2)
+        self.assertEqual(B.DEFAULT_RISE.keep_days, 0)
+        self.assertTrue(B.DEFAULT_RISE.require_uptrend)
+
+    def test_the_two_definitions_do_not_share_a_name(self):
+        """
+        取り違えたときに気づけるように、2つの定義の名前が同じでないこと。
+        同じ文字列になると meta を見ても区別がつかない。
+        """
+        import build_dataset as B
+        self.assertNotEqual(B.DEFAULT_RISE.name, B.DEFAULT_LABEL.name)
+
+
+class TestHorizonScalesEverything(unittest.TestCase):
+    """
+    目的変数のホライズンは3条件すべての基準点を動かす。
+
+    到達（t+1〜t+h の最大終値）・終盤（t+h の5日平均）・トレンド（t+h の
+    移動平均）が同じ h を見ている。片方だけ動くと「先60日以内に到達したが
+    水準は20日目で見る」のような、意味の取れないラベルになる。
+
+    しきい値は σ = vol_20d/100 × √h なので、h を縮めると必要上昇率も
+    自動で √(h/60) 倍になる。別途の調整が要らないことを固定する。
+    """
+
+    def test_threshold_scales_with_sqrt_horizon(self):
+        import build_dataset as B
+        h20 = B.RiseConfig(horizon=20)
+        h60 = B.RiseConfig(horizon=60)
+        n20, _ = B.rise_thresholds([2.0], h20)
+        n60, _ = B.rise_thresholds([2.0], h60)
+        self.assertAlmostEqual(n20[0] / n60[0], (20 / 60) ** 0.5, places=6)
+        # 日次ボラ2.0% なら 20営業日で +10.7%、60営業日で +18.6%
+        self.assertAlmostEqual(n20[0] * 100, 10.7, places=1)
+        self.assertAlmostEqual(n60[0] * 100, 18.6, places=1)
+
+    def test_end_level_keeps_the_same_ratio(self):
+        """終盤の必要水準は到達しきい値の 0.50 倍。h を変えても比は保つ。"""
+        import build_dataset as B
+        for h in (20, 60):
+            need, end = B.rise_thresholds([2.0], B.RiseConfig(horizon=h))
+            self.assertAlmostEqual(end[0] / need[0], 0.5, places=6)
+
+    def test_trend_windows_follow_the_horizon(self):
+        """
+        長期側の移動平均は判定期間そのもの、短期側はその終盤にする。
+        ここが horizon から外れると条件が黙って無効になる（h=20 のとき
+        MA20>=MA60 は 5,671件から2件しか削らなかった）。
+        """
+        import build_dataset as B
+        self.assertEqual(B.TREND_LONG, B.RISE_HORIZON)
+        self.assertLess(B.TREND_SHORT, B.TREND_LONG)
+
+    def test_embargo_follows_the_horizon(self):
+        """
+        エンバーゴがホライズンに追随すること。ここが固定値のままだと、
+        ホライズンを縮めたときに訓練側へホールドアウトの情報が入る。
+        """
+        import build_dataset as B
+        import train_model as T
+        self.assertEqual(T.EMBARGO_DAYS, B.RISE_HORIZON)
+
+
+class TestExcludedMarkets(unittest.TestCase):
+    """
+    ETF・REIT（市場区分「その他」= mkt_code 109）を母集団から外す。
+
+    外す理由は research/exp/e17_etf.py の実測。ETF は母集団の 7.6% しか
+    無いのに上位10%の 31.0% を占める。日次ボラが株式の半分（0.97% 対
+    2.04%）で、ラベルが vol_20d 正規化の +1.2σ だからで、
+    ラベルは当たるが実際の値幅は薄い。
+
+    固定したいのは3つ。既定で ETF が消えること、市場区分が付かなかった
+    行を巻き添えにしないこと、空にすれば無効化できること。
+    """
+
+    def _samples(self):
+        return pd.DataFrame({
+            "Code": ["1301", "13080", "7203", "9999"],
+            # 13080 は ETF（その他）。9999 は master_hist に無く区分が付かない
+            "mkt_code": [111.0, 109.0, 111.0, float("nan")],
+        })
+
+    def test_etf_is_dropped_by_default(self):
+        import build_dataset as B
+        self.assertEqual(B.EXCLUDE_MKT_CODES, (109,))
+        out = B.drop_excluded_markets(self._samples())
+        self.assertNotIn("13080", set(out["Code"]))
+        self.assertIn("1301", set(out["Code"]))
+
+    def test_unknown_segment_is_kept(self):
+        """
+        区分が付かなかった行まで落とすと、master_hist が届かない環境で
+        母集団が丸ごと消える。isin が欠測を False にすることに頼っている
+        ので、挙動をここで固定しておく。
+        """
+        import build_dataset as B
+        out = B.drop_excluded_markets(self._samples())
+        self.assertIn("9999", set(out["Code"]))
+
+    def test_empty_setting_disables_the_filter(self):
+        import build_dataset as B
+        out = B.drop_excluded_markets(self._samples(), codes=())
+        self.assertEqual(len(out), 4)
+
+    def test_env_can_change_the_codes(self):
+        """SWEEP_EXCLUDE_MKT_CODES で掃引から差し替えられる。"""
+        import build_dataset as B
+        self.assertEqual(B._mkt_codes("109"), (109,))
+        self.assertEqual(B._mkt_codes("109, 105"), (109, 105))
+        self.assertEqual(B._mkt_codes("none"), ())
+        self.assertEqual(B._mkt_codes(""), ())
+
+    def test_float_column_matches_integer_codes(self):
+        """
+        mkt_code は encode_category が to_numeric で作るので float になる。
+        int のタプルと突き合わせて取りこぼさないことを固定する。
+        """
+        import build_dataset as B
+        s = pd.DataFrame({"mkt_code": [109.0, 109, 111.0]})
+        self.assertEqual(len(B.drop_excluded_markets(s)), 1)
+
+
 class TestSweepOverride(unittest.TestCase):
     """
     掃引が母集団の定義を差し替える口。既定の挙動を変えないことが要件。
@@ -1995,6 +2146,60 @@ class TestVolNormalisedLabel(unittest.TestCase):
         want = (out["future_rise"] >= 0.02).where(out["future_max_close"].notna())
         pd.testing.assert_series_equal(out["label"].astype("float64"),
                                        want.astype("float64"), check_names=False)
+
+
+class TestDisclosureTiming(unittest.TestCase):
+    """開示からの日数。先読みしない・予想修正だけの開示は数えない・順序を保つ。"""
+
+    def setUp(self):
+        self.fins = pd.DataFrame({
+            "Code": ["00010"] * 4 + ["00020"],
+            "DiscDate": ["2020-05-10", "2020-08-10", "2020-09-01", "2020-11-10", "2020-06-01"],
+            "CurPerType": ["FY", "1Q", "1Q", "2Q", "FY"],
+            "Sales": [100.0, 30.0, np.nan, 60.0, 50.0],
+            "NP": [10.0, 3.0, np.nan, 6.0, 5.0],   # 09-01 は予想修正だけ（実績なし）
+        })
+
+    def _days(self, dates, code="00010"):
+        samples = pd.DataFrame({"Code": [code] * len(dates), "Date": dates, "x": range(len(dates))})
+        return disclosure_timing(samples, self.fins)
+
+    def test_counts_from_latest_actual_disclosure(self):
+        out = self._days(["2020-08-10", "2020-08-15", "2020-09-05", "2020-11-10"])
+        self.assertEqual(out["days_since_disc"].tolist(), [0.0, 5.0, 26.0, 0.0])
+        self.assertEqual(out["days_since_fy"].tolist(), [92.0, 97.0, 118.0, 184.0])
+
+    def test_no_lookahead_and_nan_before_first(self):
+        out = self._days(["2020-05-01", "2020-05-09", "2020-05-10"])
+        self.assertTrue(np.isnan(out["days_since_disc"].iloc[0]))
+        self.assertTrue(np.isnan(out["days_since_disc"].iloc[1]))
+        self.assertEqual(out["days_since_disc"].iloc[2], 0.0)
+
+    def test_clipped_when_disclosure_is_stale(self):
+        out = self._days(["2023-01-01"])
+        self.assertEqual(out["days_since_disc"].iloc[0], TIMING_CLIP_ANY)
+        self.assertEqual(out["days_since_fy"].iloc[0], TIMING_CLIP_FY)
+
+    def test_order_is_preserved_and_codes_do_not_mix(self):
+        samples = pd.DataFrame({
+            "Code": ["00020", "00010", "00030"],
+            "Date": ["2020-09-05", "2020-09-05", "2020-09-05"],
+            "x": [1, 2, 3],
+        })
+        out = disclosure_timing(samples, self.fins)
+        self.assertEqual(out["x"].tolist(), [1, 2, 3])
+        self.assertEqual(out["days_since_disc"].tolist()[:2], [96.0, 26.0])
+        self.assertTrue(np.isnan(out["days_since_disc"].iloc[2]))     # 開示の無い銘柄
+
+    def test_timing_is_in_all_preset(self):
+        """本番の `all` に入れる（docs/MODEL_ADOPTION_RULES.md §7）。順位版は作らない。"""
+        import features as F
+        self.assertEqual(F.GROUPS["timing"], ["days_since_disc", "days_since_fy"])
+        self.assertIn("days_since_disc", F.columns("all"))
+        self.assertIn("days_since_fy", F.columns("all"))
+        self.assertNotIn("days_since_disc_r", F.columns("rank_all"))
+        self.assertNotIn("days_since_disc", F.columns("all_no_timing"))
+        self.assertEqual(len(F.columns("all")) - len(F.columns("all_no_timing")), 2)
 
 
 if __name__ == "__main__":
