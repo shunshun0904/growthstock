@@ -187,6 +187,37 @@ def main() -> int:
               f"{int((~a & b).sum()):>10,}{int((a & b).sum()):>8,}"
               f"{int((~a & ~b).sum()):>12,}")
 
+    # 充足率の差をそのまま「API の勝ち」と読むと間違える。
+    #
+    # 自前の per は eps_ttm>0 のときだけ作る（赤字の会社の PER は
+    # 意味を持たないため NaN にしている）。API が同じ行に負の PER を
+    # 返しているなら、それは「拾えている」のではなく
+    # **使えない値が埋まっているだけ**で、充足率は見かけ上だけ上がる。
+    # 運用者の判定基準は「欠損率や値の正当性」なので、差の中身を出す。
+    print(f"\n=== 6. API にだけ値がある行の中身（充足率の差の正体）===")
+    print(f"  {'対':<22}{'件数':>8}{'負':>8}{'極端':>8}{'中央値':>12}"
+          f"{'まともな増分':>14}")
+    LIMITS = {"PER": 200.0, "PBR": 50.0, "ROE": 200.0}   # これを超えたら極端
+    for api, (own, ja) in PAIRS.items():
+        if api not in d.columns or own not in d.columns:
+            continue
+        x = pd.to_numeric(d[api], errors="coerce")
+        y = pd.to_numeric(d[own], errors="coerce")
+        only = x[x.notna() & y.isna()]
+        only = only[np.isfinite(only)]
+        if not only.size:
+            print(f"  {f'{api} / {own}':<22}{0:>8}   （差なし）")
+            continue
+        lim = LIMITS.get(api, np.inf)
+        neg = (only < 0)
+        ext = (only.abs() > lim)
+        good = only[~neg & ~ext]
+        print(f"  {f'{api} / {own}':<22}{only.size:>8,}"
+              f"{neg.mean()*100:>7.0f}%{ext.mean()*100:>7.0f}%"
+              f"{only.median():>12.4g}{good.size/max(len(d),1)*100:>13.1f}pt")
+    print("  ※ 「まともな増分」= 負でも極端でもない行が、母集団全体に対して")
+    print("     何ポイント充足率を押し上げるか。ここが薄いなら充足率の差は見かけ")
+
     d.to_parquet(os.path.join(OOF_DIR, "e38_merged.parquet"), index=False)
     log(f"記録: {OOF_DIR}/e38_*")
     return 0

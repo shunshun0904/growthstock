@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
 """
-実験39: 足した8本（44列）を全部入れたとき、3モデルの探索込みバックテストは
+実験39: 足した列を全部入れたとき、3モデルの探索込みバックテストは
 どう動くか。
+
+足した中身は 52列 / 8つの塊。
+  #47〜#50 の新しいエンドポイント7本（44列）
+    fwd 6 / holders_lvs 6 / holders_major 7 / holders_cross 8 /
+    margin_alert 4 / earn_ahead 1 / flow 12
+  #45 の予想修正イベント（8列。fins から作るので新しい取得は無い）
+    revision 8
 
 運用者の指示（2026-09-22）
   「47から50は1個ずつ検証というより、すべて実装後に、3モデルの5cv
@@ -10,16 +17,16 @@
 
 腕（モデルごとに3つ）
   A   153列 / 本番のパラメータ（いまの本番そのもの）
-  B1  197列 / A と同じパラメータ             —— 特徴量だけの効果
-  B2  197列 / 197列で探索し直したパラメータ  —— 本番が実際にやること
+  B1  205列 / A と同じパラメータ             —— 特徴量だけの効果
+  B2  205列 / 205列で探索し直したパラメータ  —— 本番が実際にやること
       （year_cap_date・5分割・50試行・探索の種 0。実験27 と同じ作法）
 
 モデルは LightGBM / XGBoost / CatBoost の3つ。運用の選定基準
 （3モデルすべてが上位10%）がこの3つなので、ここを測れば足りる。
 
 内訳の切り分け
-  all_fwd / all_holders / all_flow / all_earn を LightGBM だけで回し、
-  197列の差がどの塊から来ているかを見る。全部入りで差が出ても、
+  all_fwd / all_holders / all_flow / all_earn / all_revision を
+  LightGBM だけで回し、205列の差がどの塊から来ているかを見る。全部入りで差が出ても、
   中身が1つの塊だけなら、そこだけ採る判断ができる。
 
 判定は docs/MODEL_ADOPTION_RULES.md §7（分離力＝PR-AUC）。
@@ -60,7 +67,7 @@ OOF_DIR = E27.OOF_DIR
 STUDY_DB = os.path.join(OOF_DIR, "e39_optuna.db")
 
 #: 内訳の切り分け。LightGBM だけで回す
-SPLITS = ["all_fwd", "all_holders", "all_flow", "all_earn"]
+SPLITS = ["all_fwd", "all_holders", "all_flow", "all_earn", "all_revision"]
 
 
 def log(msg: str) -> None:
@@ -68,7 +75,7 @@ def log(msg: str) -> None:
 
 
 def tune_for(algo: str, sub: pd.DataFrame, cols: list, tag: str) -> dict:
-    """197列で探索し直す。結果は残して、2回目以降は読むだけにする。"""
+    """205列で探索し直す。結果は残して、2回目以降は読むだけにする。"""
     path = os.path.join(OOF_DIR, f"e39_params_{algo}_{tag}.json")
     if os.path.exists(path):
         with open(path, encoding="utf-8") as fh:
@@ -96,7 +103,17 @@ def tune_for(algo: str, sub: pd.DataFrame, cols: list, tag: str) -> dict:
 
 def oof_arm(algo: str, tag: str, df: pd.DataFrame, cols: list,
             params: dict) -> pd.DataFrame:
-    """種3つの確率平均。途中まででも保存しておき、再開できるようにする。"""
+    """種3つの確率平均。途中まででも保存しておき、再開できるようにする。
+
+    params は素のハイパーパラメータでも、探索の記録
+    （{"params": {...}, "_cv": {...}}）でも受ける。**ここで1回だけ
+    ほどく。** 呼び出し側でほどく作りにしていたら実際に忘れて、
+    LightGBM に `params` という名前の dict をそのまま渡し
+    `TypeError: Unknown type of parameter:params, got:dict` で落ちた。
+    学習器のパラメータに `params` という名前は無いので、この判定で曖昧さは無い。
+    """
+    if isinstance(params, dict) and isinstance(params.get("params"), dict):
+        params = params["params"]
     oofs = []
     for s in SEEDS3:
         p = os.path.join(OOF_DIR, f"e39_{algo}_{tag}_s{s}.parquet")
@@ -158,8 +175,8 @@ def main() -> int:
     log(f"  探索は 〜{train_end.date()} の {len(sub):,}件 / "
         f"{N_TRIALS}試行 × {N_SPLITS}分割 / 種 {SEEDS3}")
     rows, oofs_by_arm = [], {}
-    print(f"\n=== 3モデル × 3腕（A=153列 / B1=197列・同じパラメータ / "
-          f"B2=197列・探索し直し）===")
+    print(f"\n=== 3モデル × 3腕（A={len(cols_a)}列 / B1={len(cols_b)}列・同じパラメータ / "
+          f"B2={len(cols_b)}列・探索し直し）===")
     print(HEAD)
     for algo in MODELS:
         pa = E27.prod_params(algo)

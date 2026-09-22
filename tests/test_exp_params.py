@@ -1,0 +1,96 @@
+#!/usr/bin/env python3
+"""
+実験スクリプトが学習器に渡すパラメータの形を守っているかの単体テスト。
+
+実害があった（2026-09-22、実験39 の空回し）:
+  探索の記録は {"params": {...}, "_cv": {...}} という入れ子で持つ。
+  これを**ほどかずに** LightGBM へ渡すと
+    TypeError: Unknown type of parameter:params, got:dict
+  で落ちる。実験27 は呼び出し側でほどいていたが、実験39 は忘れていた。
+  3モデル×3腕の長い実行の途中で落ちるため、事前に押さえる価値がある。
+
+  python3 tests/test_exp_params.py
+"""
+import os
+import sys
+import unittest
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "research"))
+sys.path.insert(0, os.path.join(ROOT, "research", "exp"))
+
+import pandas as pd  # noqa: E402
+
+import e19_freshdata as E19  # noqa: E402
+import e27_timing_multi as E27  # noqa: E402
+import e39_extra_multi as E39  # noqa: E402
+
+
+class 探索の記録をほどく(unittest.TestCase):
+    """oof_arm は入れ子でも素でも受け、学習器には素だけを渡す。"""
+
+    def setUp(self):
+        self.seen = []
+        self._oof_for = E19.oof_for
+        self._oof_multi = E27.oof_multi
+        self._seeds = E39.SEEDS3
+        self._dir = E39.OOF_DIR
+        # 学習はせず、渡されたパラメータだけ控える
+        E19.oof_for = lambda df, cols, params: (
+            self.seen.append(params) or pd.DataFrame({"p": [0.5]}))
+        E27.oof_multi = lambda algo, df, cols, params, seed: (
+            self.seen.append(params) or pd.DataFrame({"p": [0.5]}))
+        E39.SEEDS3 = (42,)
+        # 保存先を触らせない
+        E39.OOF_DIR = os.path.join(ROOT, "tests", "fixtures", "_nowhere")
+
+    def tearDown(self):
+        E19.oof_for = self._oof_for
+        E27.oof_multi = self._oof_multi
+        E39.SEEDS3 = self._seeds
+        E39.OOF_DIR = self._dir
+
+    def run_arm(self, algo, params):
+        self.seen.clear()
+        try:
+            E39.oof_arm(algo, "t", pd.DataFrame({"x": [1]}), ["x"], params)
+        except OSError:
+            pass          # 保存先が無いのは想定内。渡された値だけ見る
+        self.assertTrue(self.seen, "学習器が呼ばれていない")
+        return self.seen[0]
+
+    def test_入れ子はほどかれる(self):
+        for algo in ("lgbm", "xgb", "cat"):
+            got = self.run_arm(algo, {"params": {"num_leaves": 31}, "_cv": {}})
+            self.assertEqual(got, {"num_leaves": 31}, algo)
+
+    def test_素はそのまま通る(self):
+        for algo in ("lgbm", "xgb", "cat"):
+            got = self.run_arm(algo, {"num_leaves": 31})
+            self.assertEqual(got, {"num_leaves": 31}, algo)
+
+    def test_学習器に渡す辞書に入れ子は残らない(self):
+        for algo in ("lgbm", "xgb", "cat"):
+            got = self.run_arm(algo, {"params": {"a": 1}, "_cv": {"b": 2}})
+            self.assertNotIn("params", got, algo)
+            self.assertNotIn("_cv", got, algo)
+
+
+class 本番パラメータの形(unittest.TestCase):
+    """prod_params は入れ子で返す。実験側はそれを前提にしてよい。"""
+
+    def test_3モデルとも入れ子で返る(self):
+        for algo in ("lgbm", "xgb", "cat"):
+            rec = E27.prod_params(algo)
+            self.assertIsInstance(rec, dict, algo)
+            self.assertIsInstance(rec.get("params"), dict, algo)
+            self.assertTrue(rec["params"], f"{algo}: パラメータが空")
+
+    def test_下線で始まる鍵は学習器へ渡らない(self):
+        for algo in ("lgbm", "xgb", "cat"):
+            for k in E27.prod_params(algo)["params"]:
+                self.assertFalse(k.startswith("_"), f"{algo}: {k}")
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
