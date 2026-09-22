@@ -316,6 +316,31 @@ python3 research/accgraph/evaluate.py --edinet-only \
   --feature-sets latest_jq latest seq_jq seq
 ```
 
+### 明細ありの群で信号が消えた原因を切り分ける
+
+明細ありの群だけで学習・評価すると、J-Quants のノードだけのベースラインでも
+AUC が 0.50 前後に落ちました。原因の候補は「訓練件数が足りない」か
+「この群がそもそも予測しにくい」かの2つです。
+
+`diagnose.py` は **全体で学習し、群に分けて評価** します。学習データを全体に
+戻せば件数の問題は消えるので、それでも明細ありの群だけ落ちるなら群の性質です。
+流動性（20日平均売買代金）を明細ありの群に揃えた対照群も並べ、
+区間は発表日単位のブートストラップで出します。判定基準は実行前に固定してあります。
+
+| 判定 | 条件 |
+| --- | --- |
+| 件数の問題 | 明細ありの群の AUC の95%区間が 0.5 を上回り、対照群との差の95%区間が 0 をまたぐ |
+| 群の性質 | 明細ありの群の AUC の95%区間が 0.5 をまたぎ、対照群との差の95%区間が負に収まる |
+| 判定できない | それ以外 |
+
+出力は [`docs/ACCGRAPH_DIAGNOSE.md`](docs/ACCGRAPH_DIAGNOSE.md)。
+ワークフローはこの切り分けと EDINET 比較を本体評価（約140分）より先に回し、
+結果を先にコミットします（手動実行で `stage: fast` を選ぶと本体評価を飛ばします）。
+
+```bash
+python3 research/accgraph/diagnose.py
+```
+
 ### 規模効果を抜いて測る
 
 実データで測ると、単変量の情報係数の上位が軒並み `log_size`（企業規模）でした。
@@ -334,6 +359,7 @@ python3 research/accgraph/build.py       # データセットを作る (要 rese
 python3 research/accgraph/eda.py         # EDA の集計 -> _data/accgraph/eda.json
 python3 research/accgraph/eda_report.py  # 集計を組版 -> docs/accgraph_eda.html
 python3 research/accgraph/evaluate.py    # ベースラインを比較して docs に書き出す
+python3 research/accgraph/diagnose.py    # 明細ありの群の原因切り分け -> docs
 python3 tests/test_accgraph.py           # 単体テスト
 ```
 
@@ -391,6 +417,7 @@ Accuracy 55% を大きく超える行が出たら、まずリークを疑って�
 │   ├── baselines.py              # ロジスティック回帰 / LightGBM / MLP
 │   ├── backtest.py               # 取引コスト控除後の損益
 │   ├── evaluate.py               # 評価の入口 (CLI)
+│   ├── diagnose.py               # 明細ありの群で信号が消えた原因の切り分け
 │   ├── leakage.py                # リーク検査
 │   ├── edinet.py                 # EDINET DB の明細を as-of で結合
 │   ├── eda.py                    # EDA の集計 (JSON)

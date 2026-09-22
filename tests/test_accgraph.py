@@ -25,8 +25,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "research"))
 
 from accgraph import (  # noqa: E402
-    backtest, baselines, build, eda, eda_report, edinet, labels as L, leakage,
-    panel, schema, splits, synthetic,
+    backtest, baselines, build, diagnose, eda, eda_report, edinet, labels as L,
+    leakage, panel, schema, splits, synthetic,
 )
 
 
@@ -772,6 +772,76 @@ class TestEda(unittest.TestCase):
                 "ic": {}, "structure": {}}
         html = eda_report.build(thin)
         self.assertIn("<title>", html)
+
+
+class TestDiagnose(unittest.TestCase):
+    """
+    「件数の問題」と「群の性質」を、答えの分かっているデータで判定できること。
+    判定基準は結果を見る前に決めたものなので、ここで固定しておく。
+    """
+
+    @staticmethod
+    def _probs(y: np.ndarray, signal: float, rng) -> np.ndarray:
+        """正解クラスに signal だけ確率を寄せた3クラス確率。0 なら当て推量。"""
+        p = rng.dirichlet([1.0, 1.0, 1.0], size=len(y))
+        p[np.arange(len(y)), y] += signal
+        return p / p.sum(axis=1, keepdims=True)
+
+    def _fixture(self, sig_edinet: float, sig_matched: float, n_days=300, per_day=12):
+        rng = np.random.default_rng(3)
+        dates = pd.Series(np.repeat(pd.date_range("2020-01-01", periods=n_days), per_day))
+        n = len(dates)
+        y = rng.integers(0, 3, n)
+        edinet = np.zeros(n, dtype=bool)
+        edinet[::3] = True                      # 1/3 が明細あり
+        matched = ~edinet
+        p = np.where(edinet[:, None], self._probs(y, sig_edinet, rng),
+                     self._probs(y, sig_matched, rng))
+        groups = {"all": np.ones(n, dtype=bool), "edinet": edinet,
+                  "non_edinet": ~edinet, "matched": matched}
+        pairs = [("edinet", "matched"), ("edinet", "non_edinet"),
+                 ("matched", "non_edinet")]
+        return diagnose.bootstrap_groups(y, p, dates, groups, pairs,
+                                         n_boot=150, seed=0)
+
+    def test_sample_size_problem(self):
+        """両群とも同じだけ予測できる -> 件数の問題。"""
+        res = self._fixture(sig_edinet=0.35, sig_matched=0.35)
+        v, _ = diagnose.verdict(res)
+        self.assertEqual(v, "件数の問題", res["auc"])
+
+    def test_group_is_harder(self):
+        """明細ありの群だけ当て推量 -> 群の性質。"""
+        res = self._fixture(sig_edinet=0.0, sig_matched=0.35)
+        v, _ = diagnose.verdict(res)
+        self.assertEqual(v, "群の性質", res["auc"])
+
+    def test_inconclusive_with_too_few_days(self):
+        """件数が少なすぎれば、どちらとも言わない。"""
+        res = self._fixture(sig_edinet=0.02, sig_matched=0.05, n_days=15, per_day=4)
+        v, _ = diagnose.verdict(res)
+        self.assertEqual(v, "判定できない")
+
+    def test_bootstrap_resamples_whole_days(self):
+        """
+        引き直しは発表日単位。同じ日の行はいつも一緒に選ばれる。
+        行単位で引くと、地合いを共有する行を独立とみなして区間が狭く出すぎる。
+        """
+        dates = pd.Series(pd.to_datetime(["2020-01-01"] * 3 + ["2020-01-02"] * 2))
+        uniq, blocks = diagnose._date_blocks(dates)
+        self.assertEqual(len(uniq), 2)
+        self.assertEqual(sorted(len(b) for b in blocks), [2, 3])
+
+    def test_matched_band_uses_the_edinet_distribution(self):
+        """揃えた群は、明細ありの群の売買代金の10〜90%点に収まる。"""
+        tv = np.r_[np.linspace(10, 100, 50), np.linspace(1, 200, 200)]
+        edinet = np.r_[np.ones(50, bool), np.zeros(200, bool)]
+        base = np.ones(250, dtype=bool)
+        m, band = diagnose.matched_mask(tv, edinet, base)
+        self.assertFalse((m & edinet).any(), "明細ありの行が対照に混ざった")
+        self.assertTrue(((tv[m] >= band[0] - 1e-9) & (tv[m] <= band[1] + 1e-9)).all())
+        self.assertGreater(band[0], 10.0)
+        self.assertLess(band[1], 100.0)
 
 
 class TestGeneratedDoc(unittest.TestCase):

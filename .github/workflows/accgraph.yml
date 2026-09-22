@@ -29,9 +29,14 @@ on:
         type: string
         default: '30'
       commit:
-        description: '結果を docs/ACCGRAPH_BASELINE.md にコミットする'
+        description: '結果を docs/ にコミットする'
         type: boolean
         default: true
+      stage:
+        description: 'fast = 本体評価（約140分）を飛ばし、EDINET の比較と原因の切り分けだけ回す'
+        type: choice
+        options: ['all', 'fast']
+        default: 'all'
   push:
     branches: ['claude/accounting-graph-gnn-prediction-27z98y']
     paths:
@@ -91,14 +96,6 @@ jobs:
           python3 research/accgraph/eda.py 2>&1 | tee eda.log
           python3 research/accgraph/eda_report.py
 
-      - name: Evaluate baselines
-        run: |
-          python3 research/accgraph/evaluate.py \
-            --benchmark "${{ inputs.benchmark || 'topix' }}" \
-            --horizon "${{ inputs.horizon || '20' }}" \
-            --cost-bps "${{ inputs.cost_bps || '30' }}" \
-            2>&1 | tee evaluate.log
-
       # EDINET の明細が揃ったサンプルだけで、明細ノードを出し入れして比べる。
       # 全体で測ると9割以上の欠測に薄まって効果が見えない。母集団を変えずに
       # ノードだけ出し入れするので、明細の効果だけが取り出せる。
@@ -115,6 +112,42 @@ jobs:
             --out-md docs/ACCGRAPH_EDINET.md \
             --out-json research/_data/accgraph/edinet_results.json \
             2>&1 | tee evaluate_edinet.log
+
+      # 明細ありの群で信号が消えた原因を切り分ける。全体で学習し、
+      # 群に分けて評価する（research/accgraph/diagnose.py）
+      - name: Diagnose the EDINET subset
+        run: |
+          python3 research/accgraph/diagnose.py \
+            --benchmark "${{ inputs.benchmark || 'topix' }}" \
+            --horizon "${{ inputs.horizon || '20' }}" \
+            2>&1 | tee diagnose.log
+
+      # 速いものの結果を、本体評価（約140分）の前にコミットしておく。
+      # 本体評価の途中で次の push が来るとこの run は取り消されるが、
+      # ここまでの結果は残る。GITHUB_TOKEN での push は新しい run を起こさない
+      - name: Commit fast results
+        if: github.event_name != 'workflow_dispatch' || inputs.commit
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A docs/ACCGRAPH_EDINET.md docs/ACCGRAPH_DIAGNOSE.md \
+                     docs/accgraph_eda.html
+          if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
+          git commit -m "chore(accgraph): EDA・EDINET 比較・切り分けを更新 ($(date -u '+%Y-%m-%d %H:%M UTC'))"
+          for i in 1 2 3 4; do
+            if git push; then exit 0; fi
+            sleep $((2 ** i)); git pull --rebase
+          done
+          exit 1
+
+      - name: Evaluate baselines
+        if: inputs.stage != 'fast'
+        run: |
+          python3 research/accgraph/evaluate.py \
+            --benchmark "${{ inputs.benchmark || 'topix' }}" \
+            --horizon "${{ inputs.horizon || '20' }}" \
+            --cost-bps "${{ inputs.cost_bps || '30' }}" \
+            2>&1 | tee evaluate.log
 
       - name: Summary
         if: always()
@@ -133,6 +166,12 @@ jobs:
               cat docs/ACCGRAPH_EDINET.md
             else
               echo "(実行せず)"
+            fi
+            echo '## 原因の切り分け'
+            if [ -f docs/ACCGRAPH_DIAGNOSE.md ]; then
+              cat docs/ACCGRAPH_DIAGNOSE.md
+            else
+              echo "(実行せず)"
             fi; } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
@@ -142,16 +181,19 @@ jobs:
           path: |
             docs/ACCGRAPH_BASELINE.md
             docs/ACCGRAPH_EDINET.md
+            docs/ACCGRAPH_DIAGNOSE.md
             docs/accgraph_eda.html
             research/_data/accgraph/meta.parquet
             research/_data/accgraph/schema.json
             research/_data/accgraph/eda.json
             research/_data/accgraph/baseline_results.json
             research/_data/accgraph/edinet_results.json
+            research/_data/accgraph/diagnose.json
             build.log
             eda.log
             evaluate.log
             evaluate_edinet.log
+            diagnose.log
           retention-days: 30
           if-no-files-found: warn
 
@@ -164,10 +206,9 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A docs/ACCGRAPH_BASELINE.md docs/ACCGRAPH_EDINET.md \
-                     docs/accgraph_eda.html
+          git add -A docs/ACCGRAPH_BASELINE.md
           if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
-          git commit -m "chore(accgraph): EDA とベースライン比較を更新 ($(date -u '+%Y-%m-%d %H:%M UTC'))"
+          git commit -m "chore(accgraph): ベースライン比較を更新 ($(date -u '+%Y-%m-%d %H:%M UTC'))"
           for i in 1 2 3 4; do
             if git push; then exit 0; fi
             sleep $((2 ** i)); git pull --rebase
