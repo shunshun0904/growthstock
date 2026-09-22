@@ -251,19 +251,23 @@ Claude の作業環境からは公式ドキュメントに到達できない（e
 
 #### 一覧の取得元
 
-| 取得元 | HTTP | 拾えたパス |
-|---|---:|---:|
-| `https://api.jquants.com/v2/openapi.json` | 403 | 0 |
-| `https://api.jquants.com/v2/swagger.json` | 403 | 0 |
-| `https://api.jquants.com/openapi.json` | 403 | 0 |
-| `https://jpx-jquants.com/` | 403 | 0 |
-| `https://jpx.gitbook.io/j-quants-ja` | 200 | 0 |
-| `https://jpx.gitbook.io/j-quants-ja/api-reference` | 200 | 0 |
-| `https://jpx.gitbook.io/j-quants-en/api-reference` | 200 | 0 |
-| `https://jpx.gitbook.io/sitemap.xml` | 200 | 0 |
-| `https://jpx.gitbook.io/j-quants-ja/sitemap.xml` | 200 | 0 |
+| 取得元 | HTTP | 本文 | 拾えたパス |
+|---|---:|---:|---:|
+| `https://raw.githubusercontent.com/J-Quants/jquants-api-client-python/main/jquantsapi/client.py` | 404 | 0B | 0 |
+| `https://raw.githubusercontent.com/J-Quants/jquants-api-client-python/master/jquantsapi/client.py` | 404 | 0B | 0 |
+| `https://raw.githubusercontent.com/J-Quants/jquants-api-client-python/main/jquantsapi/constants.py` | 200 | 15,041B | 0 |
+| `https://raw.githubusercontent.com/J-Quants/jquants-api-client-R/main/R/api.R` | 404 | 0B | 0 |
+| `https://api.github.com/repos/J-Quants/jquants-api-client-python/git/trees/main?recursive=1` | 200 | 10,497B | 7 |
+| `https://api.github.com/orgs/J-Quants/repos?per_page=100` | 200 | 54,575B | 0 |
+| `https://jpx.gitbook.io/j-quants-ja/llms.txt` | 200 | 11,154B | 0 |
+| `https://jpx.gitbook.io/j-quants-ja/llms-full.txt` | 200 | 11,154B | 0 |
+| `https://jpx-jquants.com/llms.txt` | 403 | 0B | 0 |
+| `https://api.jquants.com/v2/openapi.json` | 403 | 0B | 0 |
+| `https://api.jquants.com/v1/openapi.json` | 403 | 0B | 0 |
+| `https://jpx-jquants.com/` | 403 | 0B | 0 |
+| `https://jpx.gitbook.io/j-quants-ja/api-reference` | 200 | 11,154B | 0 |
 
-叩いたパス **18本**（OK 4 / 契約不足 3 / 存在しない 11 / 引数不足 0）
+叩いたパス **25本**（OK 4 / v1でOK 0 / 契約不足 3 / 存在しない 18 / 引数不足 0）
 
 #### 使える（OK）
 
@@ -284,5 +288,5 @@ Claude の作業環境からは公式ドキュメントに到達できない（e
 
 #### そのパスには何も無い
 
-`/equities/ownership`、`/equities/shareholders`、`/fins/announcement`、`/fins/consensus`、`/fins/disclosure`、`/fins/forecast`、`/indices/prices`、`/indices/topix`、`/markets/ownership`、`/markets/short-selling`、`/markets/trades-spec`
+`/bulk`、`/derivatives`、`/edinet`、`/equities`、`/equities/ownership`、`/equities/shareholders`、`/fins`、`/fins/announcement`、`/fins/consensus`、`/fins/disclosure`、`/fins/forecast`、`/indices`、`/indices/prices`、`/indices/topix`、`/markets`、`/markets/ownership`、`/markets/short-selling`、`/markets/trades-spec`
 

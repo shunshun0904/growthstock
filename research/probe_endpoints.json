@@ -1,6 +1,68 @@
 {
-  "discovered": [],
+  "discovered": [
+    "/bulk",
+    "/derivatives",
+    "/edinet",
+    "/equities",
+    "/fins",
+    "/indices",
+    "/markets"
+  ],
   "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/J-Quants/jquants-api-client-python/main/jquantsapi/client.py",
+      "status": 404,
+      "found": 0,
+      "bytes": 0
+    },
+    {
+      "url": "https://raw.githubusercontent.com/J-Quants/jquants-api-client-python/master/jquantsapi/client.py",
+      "status": 404,
+      "found": 0,
+      "bytes": 0
+    },
+    {
+      "url": "https://raw.githubusercontent.com/J-Quants/jquants-api-client-python/main/jquantsapi/constants.py",
+      "status": 200,
+      "found": 0,
+      "bytes": 15041
+    },
+    {
+      "url": "https://raw.githubusercontent.com/J-Quants/jquants-api-client-R/main/R/api.R",
+      "status": 404,
+      "found": 0,
+      "bytes": 0
+    },
+    {
+      "url": "https://api.github.com/repos/J-Quants/jquants-api-client-python/git/trees/main?recursive=1",
+      "status": 200,
+      "found": 7,
+      "bytes": 10497
+    },
+    {
+      "url": "https://api.github.com/orgs/J-Quants/repos?per_page=100",
+      "status": 200,
+      "found": 0,
+      "bytes": 54575
+    },
+    {
+      "url": "https://jpx.gitbook.io/j-quants-ja/llms.txt",
+      "status": 200,
+      "found": 0,
+      "bytes": 11154
+    },
+    {
+      "url": "https://jpx.gitbook.io/j-quants-ja/llms-full.txt",
+      "status": 200,
+      "found": 0,
+      "bytes": 11154
+    },
+    {
+      "url": "https://jpx-jquants.com/llms.txt",
+      "status": 403,
+      "found": 0,
+      "bytes": 0
+    },
     {
       "url": "https://api.jquants.com/v2/openapi.json",
       "status": 403,
@@ -8,13 +70,7 @@
       "bytes": 0
     },
     {
-      "url": "https://api.jquants.com/v2/swagger.json",
-      "status": 403,
-      "found": 0,
-      "bytes": 0
-    },
-    {
-      "url": "https://api.jquants.com/openapi.json",
+      "url": "https://api.jquants.com/v1/openapi.json",
       "status": 403,
       "found": 0,
       "bytes": 0
@@ -26,37 +82,41 @@
       "bytes": 0
     },
     {
-      "url": "https://jpx.gitbook.io/j-quants-ja",
-      "status": 200,
-      "found": 0,
-      "bytes": 11154
-    },
-    {
       "url": "https://jpx.gitbook.io/j-quants-ja/api-reference",
-      "status": 200,
-      "found": 0,
-      "bytes": 11154
-    },
-    {
-      "url": "https://jpx.gitbook.io/j-quants-en/api-reference",
-      "status": 200,
-      "found": 0,
-      "bytes": 11154
-    },
-    {
-      "url": "https://jpx.gitbook.io/sitemap.xml",
-      "status": 200,
-      "found": 0,
-      "bytes": 11154
-    },
-    {
-      "url": "https://jpx.gitbook.io/j-quants-ja/sitemap.xml",
       "status": 200,
       "found": 0,
       "bytes": 11154
     }
   ],
   "results": [
+    {
+      "path": "/bulk",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
+      "path": "/derivatives",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
+      "path": "/edinet",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
+      "path": "/equities",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
     {
       "path": "/equities/bars/daily",
       "kind": "OK",
@@ -117,6 +177,13 @@
     },
     {
       "path": "/equities/shareholders",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
+      "path": "/fins",
       "kind": "NOT_FOUND",
       "shape": "なし",
       "status": 403,
@@ -215,6 +282,13 @@
       ]
     },
     {
+      "path": "/indices",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
       "path": "/indices/prices",
       "kind": "NOT_FOUND",
       "shape": "なし",
@@ -223,6 +297,13 @@
     },
     {
       "path": "/indices/topix",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
+      "path": "/markets",
       "kind": "NOT_FOUND",
       "shape": "なし",
       "status": 403,
