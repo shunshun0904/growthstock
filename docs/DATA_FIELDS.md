@@ -243,3 +243,46 @@
 この指標は両側スクリーニングで**下位10%が z = −3.68（11窓中10窓で悪い）**と
 測った中で最も強かったので、穴を塞ぐ価値がある。
 
+### エンドポイント一覧を取りに行ってから叩いた結果（2026-09-22）
+
+Claude の作業環境からは公式ドキュメントに到達できない（egress ブロック）ので、
+**GitHub Actions のランナーで一覧の取得ごとやる**（`research/probe_endpoints.py` / `Probe Endpoints`）。
+思いついた名前を並べるのではなく、取ってきた一覧を全部叩いている。
+
+#### 一覧の取得元
+
+| 取得元 | HTTP | 拾えたパス |
+|---|---:|---:|
+| `https://api.jquants.com/v2/openapi.json` | 403 | 0 |
+| `https://api.jquants.com/v2/swagger.json` | 403 | 0 |
+| `https://api.jquants.com/openapi.json` | 403 | 0 |
+| `https://jpx-jquants.com/` | 403 | 0 |
+| `https://jpx.gitbook.io/j-quants-ja` | 200 | 0 |
+| `https://jpx.gitbook.io/j-quants-ja/api-reference` | 200 | 0 |
+| `https://jpx.gitbook.io/j-quants-en/api-reference` | 200 | 0 |
+| `https://jpx.gitbook.io/sitemap.xml` | 200 | 0 |
+| `https://jpx.gitbook.io/j-quants-ja/sitemap.xml` | 200 | 0 |
+
+叩いたパス **18本**（OK 4 / 契約不足 3 / 存在しない 11 / 引数不足 0）
+
+#### 使える（OK）
+
+| パス | 引数 | 件数 | 主な項目 |
+|---|---|---:|---|
+| `/equities/bars/daily` | date | 4359 | `AdjC`, `AdjFactor`, `AdjH`, `AdjL`, `AdjO`, `AdjVo`, `C`, `Code` |
+| `/equities/master` | なし | 4450 | `CoName`, `CoNameEn`, `Code`, `Date`, `Mkt`, `MktNm`, `Mrgn`, `MrgnNm` |
+| `/fins/summary` | date | 612 | `AvgSh`, `BPS`, `CFF`, `CFI`, `CFO`, `CashEq`, `ChgAcEst`, `ChgByASRev` |
+| `/markets/margin-interest` | date | 0 |  |
+
+#### 在るが契約が足りない（プレミアムで開く）
+
+| パス | メッセージ |
+|---|---|
+| `/fins/details` | This API is not available on your subscription.  If you want more data, please check other plans:https://jpx-j |
+| `/fins/dividend` | This API is not available on your subscription.  If you want more data, please check other plans:https://jpx-j |
+| `/markets/breakdown` | This API is not available on your subscription.  If you want more data, please check other plans:https://jpx-j |
+
+#### そのパスには何も無い
+
+`/equities/ownership`、`/equities/shareholders`、`/fins/announcement`、`/fins/consensus`、`/fins/disclosure`、`/fins/forecast`、`/indices/prices`、`/indices/topix`、`/markets/ownership`、`/markets/short-selling`、`/markets/trades-spec`
+

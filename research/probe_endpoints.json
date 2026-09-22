@@ -1,0 +1,269 @@
+{
+  "discovered": [],
+  "sources": [
+    {
+      "url": "https://api.jquants.com/v2/openapi.json",
+      "status": 403,
+      "found": 0,
+      "bytes": 0
+    },
+    {
+      "url": "https://api.jquants.com/v2/swagger.json",
+      "status": 403,
+      "found": 0,
+      "bytes": 0
+    },
+    {
+      "url": "https://api.jquants.com/openapi.json",
+      "status": 403,
+      "found": 0,
+      "bytes": 0
+    },
+    {
+      "url": "https://jpx-jquants.com/",
+      "status": 403,
+      "found": 0,
+      "bytes": 0
+    },
+    {
+      "url": "https://jpx.gitbook.io/j-quants-ja",
+      "status": 200,
+      "found": 0,
+      "bytes": 11154
+    },
+    {
+      "url": "https://jpx.gitbook.io/j-quants-ja/api-reference",
+      "status": 200,
+      "found": 0,
+      "bytes": 11154
+    },
+    {
+      "url": "https://jpx.gitbook.io/j-quants-en/api-reference",
+      "status": 200,
+      "found": 0,
+      "bytes": 11154
+    },
+    {
+      "url": "https://jpx.gitbook.io/sitemap.xml",
+      "status": 200,
+      "found": 0,
+      "bytes": 11154
+    },
+    {
+      "url": "https://jpx.gitbook.io/j-quants-ja/sitemap.xml",
+      "status": 200,
+      "found": 0,
+      "bytes": 11154
+    }
+  ],
+  "results": [
+    {
+      "path": "/equities/bars/daily",
+      "kind": "OK",
+      "shape": "date",
+      "status": 200,
+      "msg": "This API requires at least 1 parameter as follows; 'date','code'.",
+      "rows": 4359,
+      "keys": [
+        "AdjC",
+        "AdjFactor",
+        "AdjH",
+        "AdjL",
+        "AdjO",
+        "AdjVo",
+        "C",
+        "Code",
+        "Date",
+        "ExRT",
+        "H",
+        "L",
+        "LL",
+        "MktCap",
+        "O",
+        "UL",
+        "Va",
+        "Vo"
+      ]
+    },
+    {
+      "path": "/equities/master",
+      "kind": "OK",
+      "shape": "なし",
+      "status": 200,
+      "rows": 4450,
+      "keys": [
+        "CoName",
+        "CoNameEn",
+        "Code",
+        "Date",
+        "Mkt",
+        "MktNm",
+        "Mrgn",
+        "MrgnNm",
+        "ProdCat",
+        "S17",
+        "S17Nm",
+        "S33",
+        "S33Nm",
+        "ScaleCat"
+      ]
+    },
+    {
+      "path": "/equities/ownership",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
+      "path": "/equities/shareholders",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
+      "path": "/fins/announcement",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
+      "path": "/fins/consensus",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
+      "path": "/fins/details",
+      "kind": "PLAN",
+      "shape": "なし",
+      "status": 403,
+      "msg": "This API is not available on your subscription.  If you want more data, please check other plans:https://jpx-jquants.com/#dataset"
+    },
+    {
+      "path": "/fins/disclosure",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
+      "path": "/fins/dividend",
+      "kind": "PLAN",
+      "shape": "なし",
+      "status": 403,
+      "msg": "This API is not available on your subscription.  If you want more data, please check other plans:https://jpx-jquants.com/#dataset"
+    },
+    {
+      "path": "/fins/forecast",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
+      "path": "/fins/summary",
+      "kind": "OK",
+      "shape": "date",
+      "status": 200,
+      "msg": "This API requires at least 1 parameter as follows; 'date','code'.",
+      "rows": 612,
+      "keys": [
+        "AvgSh",
+        "BPS",
+        "CFF",
+        "CFI",
+        "CFO",
+        "CashEq",
+        "ChgAcEst",
+        "ChgByASRev",
+        "ChgNoASRev",
+        "Code",
+        "CurFYEn",
+        "CurFYSt",
+        "CurPerEn",
+        "CurPerSt",
+        "CurPerType",
+        "DEPS",
+        "DiscDate",
+        "DiscNo",
+        "DiscTime",
+        "Div1Q",
+        "Div2Q",
+        "Div3Q",
+        "DivAnn",
+        "DivFY",
+        "DivTotalAnn",
+        "DivUnit",
+        "DocType",
+        "EPS",
+        "Eq",
+        "EqAR",
+        "FDiv1Q",
+        "FDiv2Q",
+        "FDiv3Q",
+        "FDivAnn",
+        "FDivFY",
+        "FDivTotalAnn",
+        "FDivUnit",
+        "FEPS",
+        "FEPS2Q",
+        "FNCEPS"
+      ]
+    },
+    {
+      "path": "/indices/prices",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
+      "path": "/indices/topix",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
+      "path": "/markets/breakdown",
+      "kind": "PLAN",
+      "shape": "なし",
+      "status": 403,
+      "msg": "This API is not available on your subscription.  If you want more data, please check other plans:https://jpx-jquants.com/#dataset"
+    },
+    {
+      "path": "/markets/margin-interest",
+      "kind": "OK",
+      "shape": "date",
+      "status": 200,
+      "msg": "This API requires at least 1 parameter as follows; 'date','code'.",
+      "rows": 0,
+      "keys": []
+    },
+    {
+      "path": "/markets/ownership",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
+      "path": "/markets/short-selling",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
+      "path": "/markets/trades-spec",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    }
+  ]
+}
