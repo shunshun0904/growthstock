@@ -99,6 +99,23 @@ jobs:
             --cost-bps "${{ inputs.cost_bps || '30' }}" \
             2>&1 | tee evaluate.log
 
+      # EDINET の明細が揃ったサンプルだけで、明細ノードを出し入れして比べる。
+      # 全体で測ると9割以上の欠測に薄まって効果が見えない。母集団を変えずに
+      # ノードだけ出し入れするので、明細の効果だけが取り出せる。
+      # サンプルが全体の1割弱なので、こちらは数分で終わる
+      - name: Evaluate on the EDINET subset
+        run: |
+          python3 research/accgraph/evaluate.py \
+            --edinet-only \
+            --feature-sets latest_jq latest seq_jq seq \
+            --min-test-rows 100 \
+            --benchmark "${{ inputs.benchmark || 'topix' }}" \
+            --horizon "${{ inputs.horizon || '20' }}" \
+            --cost-bps "${{ inputs.cost_bps || '30' }}" \
+            --out-md docs/ACCGRAPH_EDINET.md \
+            --out-json research/_data/accgraph/edinet_results.json \
+            2>&1 | tee evaluate_edinet.log
+
       - name: Summary
         if: always()
         run: |
@@ -110,6 +127,12 @@ jobs:
               cat docs/ACCGRAPH_BASELINE.md
             else
               echo "(実行せず)"
+            fi
+            echo '## EDINET 明細ありの群での比較'
+            if [ -f docs/ACCGRAPH_EDINET.md ]; then
+              cat docs/ACCGRAPH_EDINET.md
+            else
+              echo "(実行せず)"
             fi; } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
@@ -118,14 +141,17 @@ jobs:
           name: accgraph
           path: |
             docs/ACCGRAPH_BASELINE.md
+            docs/ACCGRAPH_EDINET.md
             docs/accgraph_eda.html
             research/_data/accgraph/meta.parquet
             research/_data/accgraph/schema.json
             research/_data/accgraph/eda.json
             research/_data/accgraph/baseline_results.json
+            research/_data/accgraph/edinet_results.json
             build.log
             eda.log
             evaluate.log
+            evaluate_edinet.log
           retention-days: 30
           if-no-files-found: warn
 
@@ -138,7 +164,8 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A docs/ACCGRAPH_BASELINE.md docs/accgraph_eda.html
+          git add -A docs/ACCGRAPH_BASELINE.md docs/ACCGRAPH_EDINET.md \
+                     docs/accgraph_eda.html
           if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
           git commit -m "chore(accgraph): EDA とベースライン比較を更新 ($(date -u '+%Y-%m-%d %H:%M UTC'))"
           for i in 1 2 3 4; do

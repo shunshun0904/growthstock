@@ -12,6 +12,7 @@ research/accgraph/ の単体テスト。
 """
 import json
 import os
+import re
 import shutil
 import sys
 import tempfile
@@ -579,6 +580,61 @@ class TestEdinet(unittest.TestCase):
         np.testing.assert_allclose(nf[ok, 0, idx["working_capital"], sc], want,
                                    rtol=1e-5, atol=1e-6)
 
+
+    def test_covered_flag_matches_the_core_nodes(self):
+        """
+        has_edinet は「要件の鎖を引けるか」で決まること。
+        研究開発費や有利子負債は業種・財務状況で項目ごと省かれるので、
+        それらの欠測で群から落としてはいけない。
+        """
+        meta, nf, ef, pm = build.load(self.out, liquid_only=False)
+        self.assertIn("has_edinet", meta.columns)
+        got = meta["has_edinet"].to_numpy().astype(bool)
+        mi = schema.NODE_FEATURES.index("is_missing")
+        want = np.ones(len(nf), dtype=bool)
+        for nid in build.EDINET_CORE_NODES:
+            want &= nf[:, 0, schema.NODE_INDEX[nid], mi] == 0
+        np.testing.assert_array_equal(got, want)
+        self.assertTrue(got.any() and (~got).any(),
+                        "揃った群と揃わない群の両方が必要")
+        # 研究開発費が欠測でも群に残る（合成データは3社に1社が欠測）
+        j = schema.NODE_INDEX["rnd"]
+        no_rnd = nf[:, 0, j, mi] == 1
+        self.assertTrue((got & no_rnd).any(),
+                        "研究開発費が無いだけで群から落ちている")
+
+    def test_jq_only_drops_every_edinet_column(self):
+        """
+        `_jq` は EDINET 由来のノードとエッジを完全に外すこと。
+        1本でも残ると、明細ありと無しの比較が成立しない。
+        """
+        meta, nf, ef, pm = build.load(self.out, liquid_only=False)
+        ed_ids = {n.id for n in schema.NODES if n.source_table == "edinet"}
+        full, names_full = baselines.flatten(nf, ef, pm, meta, kind="latest")
+        jq, names_jq = baselines.flatten(nf, ef, pm, meta, kind="latest_jq")
+        self.assertLess(jq.shape[1], full.shape[1])
+
+        # 列名から「どのノード・エッジの列か」を正確に取り出す。
+        # 部分一致で見ると cogs_sga が sga に当たって誤検出する
+        def ids_in(name: str):
+            m = re.fullmatch(r"n\[\d+\](.+)\.[a-z0-9_]+", name)
+            if m:
+                return {m.group(1)}
+            m = re.fullmatch(r"e\[\d+\](.+)->(.+)\.[a-z0-9_]+", name)
+            if m:
+                return {m.group(1), m.group(2)}
+            return set()
+
+        for name in names_jq:
+            leaked = ids_in(name) & ed_ids
+            self.assertFalse(leaked, f"{name} に {leaked} が残っている")
+        # 素の版には入っている
+        self.assertTrue(any("pretax_profit" in ids_in(n) for n in names_full))
+        self.assertTrue(any("depreciation" in ids_in(n) for n in names_full))
+        # 行数と文脈列は変わらない
+        self.assertEqual(len(jq), len(full))
+        for c in ("quarter_1", "seq_len", "log_turnover"):
+            self.assertIn(c, names_jq)
 
     def test_chunking_does_not_change_the_result(self):
         """

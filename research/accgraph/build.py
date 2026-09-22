@@ -377,6 +377,12 @@ def build(data_dir: str = DATA_DIR, out_dir: str = OUT_DIR,
     nf, ef = features_in_chunks(mats, seq_len)
     period_mask = (mats["available"] & ~np.isnan(mats["per_end_days"]))[:, :seq_len]
 
+    meta["has_edinet"] = edinet_covered(nf)
+    n_ed = int(meta["has_edinet"].sum())
+    print(f"[build] EDINET の明細が揃ったサンプル {n_ed:,}件 "
+          f"({n_ed / max(len(meta), 1) * 100:.1f}%) / "
+          f"{meta.loc[meta['has_edinet'], 'Code'].nunique():,}社")
+
     report_node_coverage(nf, period_mask, meta)
     print(f"[build] node_feat {nf.shape} / edge_feat {ef.shape} "
           f"(float32 で {(nf.nbytes + ef.nbytes) / 1e6:.0f}MB)")
@@ -450,6 +456,25 @@ def features_in_chunks(mats: Dict[str, np.ndarray], seq_len: int,
         if n > chunk_rows:
             print(f"[build] 特徴量 {stop:,}/{n:,}件")
     return nf, ef
+
+
+#: 「EDINET の明細が揃っている」と判定するのに必要なノード。
+#:
+#: 全部そろっていることは求めない。研究開発費は業種によって開示が無く、
+#: 有利子負債は無借金の会社で項目ごと省かれる（欠測と0が区別できない）。
+#: 要件の鎖「税引前利益 → 減価償却費 → 運転資本 → 営業CF」を引ける
+#: ことだけを条件にする。
+EDINET_CORE_NODES = ("pretax_profit", "depreciation", "working_capital",
+                     "cost_of_sales")
+
+
+def edinet_covered(node_feat: np.ndarray) -> np.ndarray:
+    """当該四半期で EDINET の中核ノードがすべて埋まっているサンプル。"""
+    mi = schema.NODE_FEATURES.index("is_missing")
+    ok = np.ones(len(node_feat), dtype=bool)
+    for nid in EDINET_CORE_NODES:
+        ok &= node_feat[:, 0, schema.NODE_INDEX[nid], mi] == 0
+    return ok
 
 
 def report_node_coverage(node_feat: np.ndarray, period_mask: np.ndarray,

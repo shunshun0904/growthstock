@@ -90,7 +90,7 @@ def evaluate(meta: pd.DataFrame, node_feat: np.ndarray, edge_feat: np.ndarray,
              cost_bps: float = backtest.DEFAULT_COST_BPS,
              min_train_months: int = 48, test_months: int = 12,
              step_months: int = 12, min_test_rows: int = 200,
-             seed: int = 0) -> Dict:
+             universe: str = "全銘柄（流動性1億円以上）", seed: int = 0) -> Dict:
     y_col = f"y_{benchmark}_{horizon}d"
     excess_col = f"excess_{benchmark}_{horizon}d"
     if y_col not in meta.columns:
@@ -162,6 +162,7 @@ def evaluate(meta: pd.DataFrame, node_feat: np.ndarray, edge_feat: np.ndarray,
 
     return {
         "benchmark": benchmark, "horizon": horizon, "cost_bps": cost_bps,
+        "universe": universe,
         "n_samples": int(len(meta)),
         "period": [str(pd.to_datetime(meta["entry_date"]).min().date()),
                    str(pd.to_datetime(meta["entry_date"]).max().date())],
@@ -185,6 +186,7 @@ def to_markdown(res: Dict) -> str:
         f"- ベンチマーク: {'TOPIX' if b == 'topix' else '業種指数'}控除",
         f"- 保有期間: {res['horizon']}営業日（発表翌営業日の始値でエントリー）",
         f"- 取引コスト: 往復 {res['cost_bps']:.0f}bp",
+        f"- 母集団: {res.get('universe', '—')}",
         f"- サンプル: {res['n_samples']:,}件 "
         f"({res['period'][0]} 〜 {res['period'][1]})",
         "- クラス比: "
@@ -257,6 +259,10 @@ def to_markdown(res: Dict) -> str:
         "- `latest` は当該四半期のグラフだけ、`seq` は過去8四半期ぶん、"
         "`nodes` はエッジ特徴量を外したもの。"
         "`seq` が `latest` を上回らなければ、系列を持つ意味が無い。",
+        "- `_jq` 付きは J-Quants のノードだけに絞ったもの。"
+        "同じ母集団で `_jq` と素の版を比べると、"
+        "**EDINET の明細を足した効果だけ**が取り出せる。"
+        "母集団ごと変えて比べると、明細の効果と母集団の違いが混ざる。",
         "- `_rank` 付きは、同じ発表日の中で各特徴量を順位に直したもの。"
         "その日の地合いと企業規模の絶対水準が消えるので、"
         "会計構造そのものに情報があるかを分離して測れる。"
@@ -286,12 +292,28 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--feature-sets", nargs="*", default=list(FEATURE_SETS))
     ap.add_argument("--all-stocks", action="store_true",
                     help="流動性フィルタを外す")
+    ap.add_argument("--edinet-only", action="store_true",
+                    help="EDINET の明細が揃ったサンプルだけで評価する。"
+                         "全体で測ると93%の欠測に薄まって効果が見えないため、"
+                         "揃った群の中で明細ノードを出し入れして比べる")
     ap.add_argument("--out-md", default=OUT_MD)
     ap.add_argument("--out-json", default=OUT_JSON)
     args = ap.parse_args(argv)
 
     meta, nf, ef, pm = build.load(args.data_dir, liquid_only=not args.all_stocks)
-    print(f"[eval] 読み込み {len(meta):,}件")
+    universe = "全銘柄" if args.all_stocks else "流動性1億円以上"
+    if args.edinet_only:
+        if "has_edinet" not in meta.columns:
+            raise SystemExit(
+                "has_edinet がありません。build.py を回し直してください")
+        keep = meta["has_edinet"].to_numpy().astype(bool)
+        if not keep.any():
+            raise SystemExit("EDINET の明細が揃ったサンプルが1件もありません")
+        meta = meta[keep].reset_index(drop=True)
+        nf, ef, pm = nf[keep], ef[keep], pm[keep]
+        universe += " かつ EDINET明細あり"
+    print(f"[eval] 読み込み {len(meta):,}件 / {meta['Code'].nunique():,}社 "
+          f"（{universe}）")
 
     leakage.run_all(meta, node_feat=nf, period_mask=pm)
 
@@ -301,7 +323,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                    models=tuple(args.models), cost_bps=args.cost_bps,
                    min_train_months=args.min_train_months,
                    test_months=args.test_months, step_months=args.step_months,
-                   min_test_rows=args.min_test_rows)
+                   min_test_rows=args.min_test_rows, universe=universe)
 
     os.makedirs(os.path.dirname(args.out_json), exist_ok=True)
     with open(args.out_json, "w", encoding="utf-8") as fh:

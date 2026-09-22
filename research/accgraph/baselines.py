@@ -90,23 +90,37 @@ def flatten(node_feat: np.ndarray, edge_feat: np.ndarray,
     rank = kind.endswith("_rank")
     if rank:
         kind = kind[: -len("_rank")]
+    # `_jq` は J-Quants のノードだけに絞る。同じ母集団で「EDINET の明細を
+    # 足した効果」だけを取り出すために要る。母集団ごと変えて比べると、
+    # 明細の効果と母集団の違いが混ざって分離できない
+    jq_only = kind.endswith("_jq")
+    if jq_only:
+        kind = kind[: -len("_jq")]
     if kind not in ("latest", "seq", "nodes"):
         raise ValueError(f"未知の特徴量セット: {kind}")
 
+    node_idx = [j for j, n in enumerate(schema.NODES)
+                if not (jq_only and n.source_table == "edinet")]
+    edge_idx = [i for i, e in enumerate(schema.EDGES)
+                if not (jq_only and (schema.NODES[schema.NODE_INDEX[e.src]].source_table
+                                     == "edinet"
+                                     or schema.NODES[schema.NODE_INDEX[e.dst]].source_table
+                                     == "edinet"))]
+
     t_slice = slice(0, 1) if kind == "latest" else slice(None)
-    nf = node_feat[:, t_slice]
+    nf = node_feat[:, t_slice][:, :, node_idx]
     parts = [nf.reshape(len(nf), -1)]
     names = [f"n[{t}]{schema.NODE_IDS[j]}.{f}"
              for t in range(nf.shape[1])
-             for j in range(nf.shape[2])
+             for j in node_idx
              for f in schema.NODE_FEATURES]
 
     if kind != "nodes":
-        ef = edge_feat[:, t_slice]
+        ef = edge_feat[:, t_slice][:, :, edge_idx]
         parts.append(ef.reshape(len(ef), -1))
         names += [f"e[{t}]{schema.EDGES[j].src}->{schema.EDGES[j].dst}.{f}"
                   for t in range(ef.shape[1])
-                  for j in range(ef.shape[2])
+                  for j in edge_idx
                   for f in schema.EDGE_FEATURES]
 
     # 各四半期が存在したかどうかも情報。0埋めと「値が0」を区別させる
