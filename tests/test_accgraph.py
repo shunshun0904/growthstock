@@ -822,6 +822,19 @@ class TestDiagnose(unittest.TestCase):
         v, _ = diagnose.verdict(res)
         self.assertEqual(v, "判定できない")
 
+    def test_mixed_case_is_not_reported_as_too_few(self):
+        """
+        0.5 は上回るが揃えた群より有意に低い（実測の lgbm がこの形）。
+        判定は事前の基準どおり「判定できない」のまま、理由を「件数が足りない」と
+        書かない。区間が広いのではなく、基準が想定していない混合の形だから。
+        """
+        res = {"auc": {"edinet": {"ci": (0.502, 0.541)}},
+               "diff": {"edinet-matched": {"ci": (-0.053, -0.011)}}}
+        v, why = diagnose.verdict(res)
+        self.assertEqual(v, "判定できない")
+        self.assertIn("両方", why)
+        self.assertNotIn("件数が足りない", why)
+
     def test_bootstrap_resamples_whole_days(self):
         """
         引き直しは発表日単位。同じ日の行はいつも一緒に選ばれる。
