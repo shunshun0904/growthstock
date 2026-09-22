@@ -163,11 +163,19 @@ jobs:
           if [ -z "$REQ" ] && [ -f research/refetch_request.txt ]; then
             REQ=$(grep -v '^#' research/refetch_request.txt | head -1 | tr -d '\r')
           fi
-          # 想定外の値を --reset に渡さない
+          # 想定外の値を --reset に渡さない。
+          #
+          # **種別の一覧を YAML に書き写さない。** 以前はここに
+          # bars|fins|margin|topix|indices|master と直書きしており、
+          # jq_bulk.py に種別を足したときに片方だけ古くなって
+          # 「未知の種別: earndate」で落ちた（run 35714197217）。
+          # 正本は jq_bulk.py の1か所だけにする。
+          KINDS=$(python3 -c "import sys;sys.path.insert(0,'research');sys.path.insert(0,'scripts');import jq_bulk as J;print(' '.join(['bars','fins','margin','topix','indices','master','master_hist']+list(J.DAILY_KINDS)+list(J.BULK_KINDS)))")
+          echo "扱える種別: $KINDS"
           for k in $REQ; do
-            case "$k" in
-              bars|fins|margin|topix|indices|master) ;;
-              *) echo "未知の種別: $k"; exit 1 ;;
+            case " $KINDS " in
+              *" $k "*) ;;
+              *) echo "未知の種別: $k（扱えるのは $KINDS）"; exit 1 ;;
             esac
           done
           [ -n "$REQ" ] && RESET="--reset $REQ"
@@ -177,9 +185,9 @@ jobs:
           FORGET=""
           FGT="${{ inputs.forget }}"
           for k in $FGT; do
-            case "$k" in
-              bars|fins|margin|topix|indices|master_hist) ;;
-              *) echo "未知の種別: $k"; exit 1 ;;
+            case " $KINDS " in
+              *" $k "*) ;;
+              *) echo "未知の種別: $k（扱えるのは $KINDS）"; exit 1 ;;
             esac
           done
           if [ -n "$FGT" ]; then
