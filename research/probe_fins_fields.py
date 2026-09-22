@@ -64,6 +64,25 @@ CANDIDATE_ENDPOINTS = [
     ("/markets/trades-spec", {}),
     ("/indices/topix", {"from": "2024-05-01", "to": "2024-05-15"}),
     ("/indices/prices", {"date": "2024-05-15"}),
+    # --- 2026-09-22 追加 --------------------------------------------------
+    # 運用者の問い「適時開示の本文・アナリスト予想・株主構成は
+    # スタンダードで補えないか」を、推測ではなく応答で確かめるための候補。
+    # **名前は当てずっぽうを含む。** NG は「その名前では無い」以上の意味を
+    # 持たない（エンドポイントが存在しない証明にはならない）。
+    # 開示（予定・本文）
+    ("/fins/announcement", {}),
+    ("/fins/announcements", {}),
+    ("/fins/disclosure", {"date": "2024-05-15"}),
+    ("/disclosure/timely", {"date": "2024-05-15"}),
+    # アナリスト予想・レーティング
+    ("/fins/forecast", {"date": "2024-05-15"}),
+    ("/fins/consensus", {"date": "2024-05-15"}),
+    # 株主構成・所有者別
+    ("/equities/shareholders", {"code": "72030"}),
+    ("/equities/ownership", {"code": "72030"}),
+    ("/markets/ownership", {"date": "2024-05-15"}),
+    # 何が使えるかを API 自身に言わせる試み
+    ("/", {}),
 ]
 
 # 探している概念 -> 項目名に現れそうな断片（実測した名前と突き合わせるだけ）
@@ -92,7 +111,9 @@ def probe_endpoints(client):
             rec["keys"] = sorted(batch[0].keys()) if batch else []
         except JQuantsError as exc:
             rec["ok"] = False
-            rec["error"] = str(exc)[:200]
+            # 400 まで残す。200 だと「存在しない」系の案内文が切れて、
+            # 使えるエンドポイントの手がかりを落とす
+            rec["error"] = str(exc)[:400]
         out.append(rec)
         print(f"  {path:<32} {'OK' if rec.get('ok') else 'NG'} "
               f"{rec.get('rows', '')} {rec.get('error', '')}")
