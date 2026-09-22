@@ -54,7 +54,10 @@ PAIRS = {
 #: valuation_2025）で FwdEPS/BPS の中央値 0.0791 が API の FwdROE と
 #: 一致することを確かめた。自前の ROE_q0 は %。揃えずに比べると
 #: 「100倍ずれている」としか出ず、どちらが正確かの判定にならない。
-SCALE = {"ROE": 100.0, "FwdROE": 100.0}
+#: **MktCap は百万円**。実測で API MktCap ÷ 自前 market_cap(億円) の
+#: 中央値がちょうど 100.00 になり、揃えたあとの誤差中央値は 0.001%。
+#: 円に直してから自前（億円 × 1e8）と比べる。
+SCALE = {"ROE": 100.0, "FwdROE": 100.0, "MktCap": 1e6}
 #: 自前に対応が無い列（新規情報）
 NEW_COLS = ["FwdEPS", "FwdPER", "FwdROE", "MktCap"]
 
@@ -160,7 +163,8 @@ def main() -> int:
         x = pd.to_numeric(d[a], errors="coerce")
         y = pd.to_numeric(d[b], errors="coerce")
         if a == "MktCap":
-            y = y * 1e8                      # 億円 -> 円
+            y = y * 1e8                      # 自前は億円。円に直す
+            # x は SCALE で既に百万円 -> 円 に直してある
         m = np.isfinite(x) & np.isfinite(y) & (y != 0)
         if m.sum() < 20:
             print(f"  {ja:<28}{int(m.sum()):>8}   （少なすぎる）")
