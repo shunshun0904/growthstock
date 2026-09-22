@@ -38,7 +38,17 @@ HOLD = 20
 TARGETS = (5.0, 10.0, 15.0, 20.0)
 
 
-def forward_paths(hold: int = HOLD) -> pd.DataFrame:
+def forward_paths(hold: int = HOLD, cache: str = "") -> pd.DataFrame:
+    cache = cache or os.path.join(OOF_DIR, f"e32_paths_{hold}.parquet")
+    if os.path.exists(cache):
+        log(f"  値動きの表の保存済みを読む（{cache}）")
+        return pd.read_parquet(cache)
+    out = _forward_paths(hold)
+    out.to_parquet(cache, index=False)
+    return out
+
+
+def _forward_paths(hold: int = HOLD) -> pd.DataFrame:
     """
     (Code, Date) ごとに entry と、t+1〜t+hold の値動きを付ける。
       entry     翌営業日の始値
@@ -203,19 +213,58 @@ def main() -> int:
               f" 中央値 {dd.median():.0f}営業日 / 25-75% {dd.quantile(.25):.0f}〜{dd.quantile(.75):.0f} / "
               f"5営業日以内 {(dd <= 5).mean()*100:.0f}% / 10営業日以内 {(dd <= 10).mean()*100:.0f}%")
 
-    print("\n=== 到達した銘柄を持ち切っていたら（早売りの損得）===")
-    print(f"  {'条件':<26}{'+10%到達':>9}{'利確 +10%':>10}{'持ち切りなら':>12}{'差':>8}")
-    for name, sub in (("3モデル 90以上（全日）", d[d[RULE]]),
-                      ("  発火20件以上", d[d[RULE] & (d["n_break"] >= 20)]),
-                      ("母集団", d)):
-        hit = sub[sub["hit10"]]
-        if len(hit) < 10:
-            continue
-        print(f"  {name:<26}{len(hit):>8}件{10.0:>+9.2f}%{hit['r'].mean():>+11.2f}%"
-              f"{10.0-hit['r'].mean():>+7.2f}pt")
+    def slices():
+        yield "母集団（全ブレイク）", d
+        yield "3モデル 90以上（全日・全件）", d[d[RULE]]
+        for m in (10, 20, 26):
+            yield f"  発火{m}件以上・全件", d[d[RULE] & (d["n_break"] >= m)]
+        for m, k in ((20, 1), (20, 2), (26, 1), (26, 2)):
+            sub = d[d[RULE] & (d["n_break"] >= m)].sort_values(
+                ["Date", "p_min"], ascending=[True, False])
+            sub = sub.assign(rank=sub.groupby("Date").cumcount() + 1)
+            yield f"  発火{m}件以上・上位{k}件", sub[sub["rank"] <= k]
 
-    keep = ["Code", "Date", "n_break", RULE, "r", "entry", "max_gain",
-            "hit5", "day5", "tp5", "hit10", "day10", "tp10"]
+    for p in TARGETS:
+        k = int(p)
+        print(f"\n=== +{k}% で利確したときの全体像 ===")
+        print(f"  {'条件':<26}{'件数':>6}{'到達':>7}{'日数(中央)':>10}"
+              f"{'利確の収益':>10}{'勝率':>6}{'SD':>7}{'下位10%':>8}{'保有日数':>8}{'1日':>8}"
+              f"{'持ち切り':>9}{'差':>8}{'未到達の収益':>12}")
+        for name, sub in slices():
+            st = stats(sub)
+            if not st:
+                print(f"  {name:<26} （件数不足）")
+                continue
+            print(f"  {name:<26}{st['n']:>6}{st[f'hit{k}']:>6.1f}%{st[f'day{k}']:>10.0f}"
+                  f"{st[f'tp{k}']:>+9.2f}%{st[f'tp{k}_win']:>5.0f}%{st[f'tp{k}_sd']:>7.2f}"
+                  f"{st[f'tp{k}_p10']:>+7.2f}%{st[f'tp{k}_day']:>7.1f}日{st[f'tp{k}_per_day']:>7.3f}%"
+                  f"{st['hold']:>+8.2f}%{st[f'tp{k}']-st['hold']:>+7.2f}{st[f'miss{k}']:>+11.2f}%")
+
+    print("\n=== 到達した銘柄を持ち切っていたら（早売りで諦める分）===")
+    print(f"  {'条件':<26}" + "".join(f"{'+'+str(int(p))+'%':>26}" for p in TARGETS))
+    print(f"  {'':<26}" + "".join(f"{'到達':>8}{'持ち切りなら':>10}{'差':>8}" for _ in TARGETS))
+    for name, sub in (("母集団", d), ("3モデル 90以上（全日）", d[d[RULE]]),
+                      ("  発火20件以上", d[d[RULE] & (d["n_break"] >= 20)])):
+        row = f"  {name:<26}"
+        for p in TARGETS:
+            k = int(p)
+            hit = sub[sub[f"hit{k}"]]
+            row += (f"{len(hit):>7}件{hit['r'].mean():>+9.2f}%{p-hit['r'].mean():>+7.2f}pt"
+                    if len(hit) >= 10 else f"{'（件数不足）':>26}")
+        print(row)
+
+    print("\n=== 年ごと（3モデル 90以上・発火20件以上）===")
+    g = d[d[RULE] & (d["n_break"] >= 20)].copy()
+    g["year"] = pd.to_datetime(g["Date"]).dt.year
+    print(f"  {'年':<6}{'件数':>6}{'持ち切り':>9}"
+          + "".join(f"{'+'+str(int(p))+'%到達':>9}{'収益':>9}" for p in TARGETS))
+    for y, gg in g.groupby("year"):
+        print(f"  {y:<6}{len(gg):>6}{gg['r'].mean():>+8.2f}%"
+              + "".join(f"{gg[f'hit{int(p)}'].mean()*100:>8.0f}%{gg[f'tp{int(p)}'].mean():>+8.2f}%"
+                        for p in TARGETS))
+
+    keep = (["Code", "Date", "n_break", RULE, "r", "entry", "max_gain"]
+            + [f"{c}{int(p)}" for p in TARGETS for c in ("hit", "day", "tp")])
     d[keep].to_csv(os.path.join(OOF_DIR, "e32_takeprofit.csv"), index=False)
     log(f"記録: {OOF_DIR}/e32_takeprofit.csv")
     return 0
