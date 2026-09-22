@@ -146,61 +146,6 @@
 | `NCROE` | 0.0% | 1Q: 0.0% / 2Q: 0.0% / 3Q: 0.0% / 4Q: 0.0% / FY: 0.0% |
 | `NxFDivUnit` | 0.0% | 1Q: 0.0% / 2Q: 0.0% / 3Q: 0.0% / 4Q: 0.0% / FY: 0.1% |
 
-## 売上原価・販管費が取れない理由（決着済み）
-
-決算サンキー図を「売上 → 原価 ＋ 粗利 → 販管費 → 営業利益」の形にできるか
-調べた結論。**契約プランの問題で、コードでは回避できない。**
-
-| | |
-| --- | --- |
-| 必要なエンドポイント | `/v2/fins/details`（財務諸表 BS/PL/CF） |
-| 実測結果 | HTTP 403 `This API is not available on your subscription plan` |
-| 現在の契約 | スタンダードプラン |
-| 必要な契約 | **プレミアムプラン**（財務諸表APIはプレミアム限定） |
-
-日付範囲の問題ではない。範囲外のときは 200 + 0件で返る
-（`/markets/margin-interest` がその例）。403 のこの文言はエンドポイント
-自体がプラン外という意味。日次バーは 2016-10-03 まで遡れており、
-遡及期間の制限にも当たっていない。
-
-### 無料の代替を検討した結果
-
-**EDINET API（金融庁）には制度上の穴がある。** 2024年4月1日以後に開始する
-四半期から四半期報告書が廃止され、1Q・3Q は取引所ルールの決算短信に
-一本化された。EDINET に出るのは半期報告書(2Q)と有価証券報告書(通期)だけ。
-
-つまり直近決算が 1Q・3Q の銘柄では、原価・販管費はそもそもどこにも
-提出されていない。有報は期末から約3ヶ月遅れる。
-
-IRページのスクレイピングは採らない。会社ごとに PDF/HTML の形式が違い、
-日次で自動実行すると静かに壊れ続ける。公表されていることと、機械可読で
-安定して取れることは別。
-
-### いまの実装
-
-`/fins/summary` から取れる段階利益で描く。原価と販管費は分けられないので
-「営業費用」1本にまとめ、画面にもその旨を明記してある
-（src/lib/earnings.js / src/components/EarningsSankey.jsx）。
-
-プレミアムに変更した場合は、`/fins/details` を1本足して営業費用を
-原価と販管費に割るだけで済む（取得経路も認証も既存のまま）。
-
-### スタンダードで追加できるもの（未実装）
-
-キャッシュフロー（`CFO` / `CFI` / `CFF` / `CashEq`）は取れている。
-ただし開示種別で偏る。
-
-| 種別 | CFO の充足率 |
-| --- | ---: |
-| 1Q | 12.3% |
-| 2Q | 75.0% |
-| 3Q | 12.1% |
-| FY | 70.5% |
-
-半期と通期でしか入らないので、直近決算が 1Q・3Q の銘柄では空になる。
-（参考: サンキーに使っている損益は 1Q/3Q でも Sales 99% / OP 96% /
-OdP 91% / NP 99% と十分に揃っている）
-
 ## エンドポイントの疎通（実測）
 
 叩いて確かめた結果。存在しない・権限が無いものは NG になる。
@@ -212,7 +157,7 @@ OdP 91% / NP 99% と十分に揃っている）
 | `/fins/statements` | NG | — | HTTP 403 https://api.jquants.com/v2/fins/statements?date=2024-05-15 : {"message": "The requested endpoint does not exist |
 | `/fins/dividend` | NG | — | HTTP 403 https://api.jquants.com/v2/fins/dividend?date=2024-05-15 : {"message": "This API is not available on your subsc |
 | `/fins/fs_details` | NG | — | HTTP 403 https://api.jquants.com/v2/fins/fs_details?date=2024-05-15 : {"message": "The requested endpoint does not exist |
-| `/equities/master` | OK | 4446 | 14項目 |
+| `/equities/master` | OK | 4450 | 14項目 |
 | `/equities/bars/daily` | OK | 4359 | 18項目 |
 | `/markets/margin-interest` | OK | 0 | 0項目 |
 | `/markets/short-selling` | NG | — | HTTP 403 https://api.jquants.com/v2/markets/short-selling?date=2024-05-15 : {"message": "The requested endpoint does not |
@@ -220,4 +165,14 @@ OdP 91% / NP 99% と十分に揃っている）
 | `/markets/trades-spec` | NG | — | HTTP 403 https://api.jquants.com/v2/markets/trades-spec : {"message": "The requested endpoint does not exist. Please che |
 | `/indices/topix` | NG | — | HTTP 403 https://api.jquants.com/v2/indices/topix?from=2024-05-01&to=2024-05-15 : {"message": "The requested endpoint do |
 | `/indices/prices` | NG | — | HTTP 403 https://api.jquants.com/v2/indices/prices?date=2024-05-15 : {"message": "The requested endpoint does not exist. |
+| `/fins/announcement` | NG | — | HTTP 403 https://api.jquants.com/v2/fins/announcement : {"message": "The requested endpoint does not exist. Please check |
+| `/fins/announcements` | NG | — | HTTP 403 https://api.jquants.com/v2/fins/announcements : {"message": "The requested endpoint does not exist. Please chec |
+| `/fins/disclosure` | NG | — | HTTP 403 https://api.jquants.com/v2/fins/disclosure?date=2024-05-15 : {"message": "The requested endpoint does not exist |
+| `/disclosure/timely` | NG | — | HTTP 403 https://api.jquants.com/v2/disclosure/timely?date=2024-05-15 : {"message": "The requested endpoint does not exi |
+| `/fins/forecast` | NG | — | HTTP 403 https://api.jquants.com/v2/fins/forecast?date=2024-05-15 : {"message": "The requested endpoint does not exist.  |
+| `/fins/consensus` | NG | — | HTTP 403 https://api.jquants.com/v2/fins/consensus?date=2024-05-15 : {"message": "The requested endpoint does not exist. |
+| `/equities/shareholders` | NG | — | HTTP 403 https://api.jquants.com/v2/equities/shareholders?code=72030 : {"message": "The requested endpoint does not exis |
+| `/equities/ownership` | NG | — | HTTP 403 https://api.jquants.com/v2/equities/ownership?code=72030 : {"message": "The requested endpoint does not exist.  |
+| `/markets/ownership` | NG | — | HTTP 403 https://api.jquants.com/v2/markets/ownership?date=2024-05-15 : {"message": "The requested endpoint does not exi |
+| `/` | NG | — | HTTP 403 https://api.jquants.com/v2/ : {"message": "The requested endpoint does not exist. Please check the URL, HTTP me |
 
