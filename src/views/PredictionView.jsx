@@ -2,7 +2,8 @@ import React, { useMemo, useState } from 'react';
 import { fmt, fmtInt, fmtSigned, fmtOku, fmtDate, fmtDateTime, DASH } from '../lib/format.js';
 import { bandColor, bandLabel, pctColor, modelRows, MODEL_SHORT, MODEL_FAMILY,
   FAMILY_JA, marketTone, candidateToStock } from '../lib/predictions.js';
-import { STRATEGY, BOOST, strategySignal, exitPlan } from '../lib/strategy.js';
+import { STRATEGY, BOOST, strategySignal, exitPlan, nearMisses,
+         MODEL_JA } from '../lib/strategy.js';
 
 /**
  * ブレイク予測タブ。
@@ -30,11 +31,12 @@ export default function PredictionView({ data, history, onSendToOctagon, sentIds
   );
   const tone = useMemo(() => marketTone(rows), [rows]);
   const signal = useMemo(() => strategySignal(rows), [rows]);
+  const near = useMemo(() => nearMisses(rows), [rows]);
   const m = data?.model || {};
 
   return (
     <div className="pred">
-      <StrategyPanel signal={signal} day={day}
+      <StrategyPanel signal={signal} near={near} day={day}
                      onSend={(c) => onSendToOctagon(candidateToStock(c))}
                      sentIds={sentIds} />
 
@@ -118,7 +120,7 @@ export default function PredictionView({ data, history, onSendToOctagon, sentIds
  * 「今日は買うのか、買うなら何を、いくらで手仕舞うのか」を1か所で
  * 言い切る場所が要る。迷いどころを毎日つくらないための画面。
  */
-function StrategyPanel({ signal, day, onSend, sentIds }) {
+function StrategyPanel({ signal, near, day, onSend, sentIds }) {
   const { nBreak, verdict, picks, passed, buyable } = signal;
   return (
     <section className="card strat">
@@ -193,6 +195,8 @@ function StrategyPanel({ signal, day, onSend, sentIds }) {
         </div>
       )}
 
+      {near.length > 0 && <NearMiss near={near} />}
+
       <p className="strat-src sub">
         実測（2021-11〜2026-08 の out-of-fold、基準を満たした757件）:
         発火20件以上は +3.27%・勝率63%、8〜19件は +1.0〜2.2%・勝率54〜55%、
@@ -202,6 +206,39 @@ function StrategyPanel({ signal, day, onSend, sentIds }) {
         （docs/PLAYBOOK.md）。
       </p>
     </section>
+  );
+}
+
+/**
+ * 惜しい候補（3モデルの最小が85〜90）。**買わない**ことの根拠を添えて出す。
+ *
+ * 毎日「あと3pt なのに」と迷い直さないための欄。実測では、1つのモデルだけが
+ * 5pt以上低い形は空き枠（0%）と変わらない（実験36 / docs/PLAYBOOK.md）。
+ */
+function NearMiss({ near }) {
+  return (
+    <div className="strat-near">
+      <span className="lab">
+        惜しい候補（最小 {STRATEGY.nearLo}〜{STRATEGY.agreePct}）— 買わない
+      </span>
+      <div className="strat-near-list">
+        {near.map((c) => (
+          <div key={c.jqCode} className="strat-near-row">
+            <span className="strat-near-name">{c.name || c.code}</span>
+            <span className="num strat-near-pct">最小 {fmt(c.minPct, 1)}</span>
+            <span className="sub">
+              {c.weak
+                ? `${MODEL_JA[c.laggard] || c.laggard} だけ `
+                  + `${fmt(c.spread, 1)}pt 低い形。実測 +0.30%・勝率49%・`
+                  + '−10%割れ 12.6%（270件）で、枠を遊ばせるのと変わらない'
+                : `3モデルがほぼ揃っている（幅 ${fmt(c.spread, 1)}pt）。`
+                  + 'この形は実測 +2.70%（118件）と基準通過組に近いが、'
+                  + '事後に見つけた区分けなので基準は動かしていない'}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 

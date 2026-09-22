@@ -30,6 +30,9 @@
 /** ブースティング3モデル。合議の対象はこの3つだけ（線形・MLP は入れない）。 */
 export const BOOST = ['lgbm', 'xgb', 'cat'];
 
+/** 画面に出す短い呼び名。正本は research/models.py。 */
+export const MODEL_JA = { lgbm: 'LightGBM', xgb: 'XGBoost', cat: 'CatBoost' };
+
 export const STRATEGY = {
   agreePct: 90,      // 3モデルすべてがこの百分位以上
   strongBreaks: 20,  // この件数以上の発火なら本命
@@ -38,6 +41,7 @@ export const STRATEGY = {
   takeProfit: 20,    // 利確の指値（%）
   holdDays: 20,      // 届かなければ何営業日で手仕舞いするか
   maxSlots: 3,       // 同時に持てる銘柄数。埋まっていたら見送る
+  nearLo: 85,        // 「惜しい候補」として画面に出す下限
 };
 
 /**
@@ -72,6 +76,53 @@ export function minPct(candidate) {
   if (!p) return null;
   const vals = BOOST.map((a) => p[a]);
   return vals.some((v) => v === null) ? null : Math.min(...vals);
+}
+
+/** 3モデルの百分位の幅（最大−最小）。1つでも欠けていれば null。 */
+export function pctSpread(candidate) {
+  const p = boostPcts(candidate);
+  if (!p) return null;
+  const vals = BOOST.map((a) => p[a]);
+  if (vals.some((v) => v === null)) return null;
+  return Math.max(...vals) - Math.min(...vals);
+}
+
+/** 3モデルのうち、いちばん低い評価を出しているモデル。 */
+export function laggard(candidate) {
+  const p = boostPcts(candidate);
+  if (!p) return null;
+  const vals = BOOST.map((a) => p[a]);
+  if (vals.some((v) => v === null)) return null;
+  return BOOST[vals.indexOf(Math.min(...vals))];
+}
+
+/**
+ * 基準に届かなかったが惜しい候補（3モデルの最小が 85〜90）。
+ *
+ * 画面に出すのは「なぜ買わないか」を毎日考え直さないため。実測（実験36、
+ * 発火8件以上の日・枠の制約なし）:
+ *
+ *   最小 85〜90 で 3モデルの幅 < 5   118件 +2.70% 勝率58% −10%割れ 5.1%
+ *   最小 85〜90 で 3モデルの幅 5〜10  270件 +0.30% 勝率49% −10%割れ 12.6%
+ *   （参考）最小 90以上               943件 +2.84% 勝率62% −10%割れ 5.1%
+ *
+ * つまり「1つのモデルだけが5〜10pt下」の形は、空き枠（0%）と変わらない。
+ * とくに最下位が LightGBM のときが弱い（104件 +0.39%）。
+ */
+export function nearMisses(rows, s = STRATEGY) {
+  const list = Array.isArray(rows) ? rows : [];
+  return list
+    .map((c) => ({ c, m: minPct(c), sp: pctSpread(c) }))
+    .filter((x) => x.m !== null && x.m >= s.nearLo && x.m < s.agreePct)
+    .sort((a, b) => b.m - a.m)
+    .map(({ c, m, sp }) => ({
+      ...c,
+      minPct: m,
+      spread: sp,
+      laggard: laggard(c),
+      // 幅が5以上なら「1つだけ下」の弱い形
+      weak: sp !== null && sp >= 5,
+    }));
 }
 
 /** 3モデルすべてが上位10%か。 */

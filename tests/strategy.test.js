@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   BOOST, STRATEGY, boostPcts, minPct, passesAgree, dayVerdict, strategySignal, exitPlan,
-  freeSlots,
+  freeSlots, pctSpread, laggard, nearMisses,
 } from '../src/lib/strategy.js';
 
 const cand = (code, pcts, score = 0.5) => ({
@@ -146,4 +146,36 @@ test('freeSlots: 保有数が分からなければ null（枠の話をしない�
   assert.equal(freeSlots(-1), null);
   // 玉の本数は整数。小数は入力の誤りなので黙って丸めない
   assert.equal(freeSlots(1.7), null);
+});
+
+test('pctSpread / laggard: 3モデルの幅と最下位モデル', () => {
+  // クニミネ工業 2026-09-18 の実際の値
+  const k = cand('5388', { lgbm: 86.5, xgb: 91.7, cat: 91.5 });
+  assert.equal(minPct(k), 86.5);
+  assert.equal(Math.round(pctSpread(k) * 10) / 10, 5.2);
+  assert.equal(laggard(k), 'lgbm');
+  // 欠けていれば null（欠けたまま判定しない）
+  const bad = cand('9999', { lgbm: 90, xgb: 90 });
+  assert.equal(pctSpread(bad), null);
+  assert.equal(laggard(bad), null);
+});
+
+test('nearMisses: 最小85〜90 だけを拾い、幅5以上は弱い形と印を付ける', () => {
+  const rows = [
+    cand('A', { lgbm: 95, xgb: 94, cat: 96 }),        // 基準通過。対象外
+    cand('B', { lgbm: 86.5, xgb: 91.7, cat: 91.5 }),  // 惜しい・幅5.2 → 弱い
+    cand('C', { lgbm: 88, xgb: 89, cat: 87 }),        // 惜しい・幅2 → 揃っている
+    cand('D', { lgbm: 70, xgb: 95, cat: 95 }),        // 85未満。対象外
+  ];
+  const n = nearMisses(rows);
+  assert.deepEqual(n.map((x) => x.code), ['C', 'B']);  // 最小の降順
+  assert.equal(n.find((x) => x.code === 'B').weak, true);
+  assert.equal(n.find((x) => x.code === 'C').weak, false);
+  assert.equal(n.find((x) => x.code === 'B').laggard, 'lgbm');
+});
+
+test('nearMisses: 境界（85ちょうどは入る / 90ちょうどは入らない）', () => {
+  assert.equal(nearMisses([cand('E', { lgbm: 85, xgb: 99, cat: 99 })]).length, 1);
+  assert.equal(nearMisses([cand('F', { lgbm: 90, xgb: 99, cat: 99 })]).length, 0);
+  assert.equal(nearMisses([cand('G', { lgbm: 84.9, xgb: 99, cat: 99 })]).length, 0);
 });

@@ -516,3 +516,27 @@ input[type='range']::-moz-range-thumb {
 @media (max-width: 720px) {
   .strat-head { grid-template-columns: 1fr; }
 }
+
+/* 惜しい候補（3モデルの最小が85〜90）。買わない根拠を添えて出す欄。 */
+.strat-near {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--amber);
+  border-radius: 8px;
+  background: var(--bg-sunken, rgba(0, 0, 0, .12));
+}
+.strat-near > .lab { display: block; margin-bottom: 6px; }
+.strat-near-list { display: flex; flex-direction: column; gap: 8px; }
+.strat-near-row {
+  display: grid;
+  grid-template-columns: minmax(7em, auto) auto 1fr;
+  gap: 4px 10px;
+  align-items: baseline;
+}
+.strat-near-name { font-weight: 600; }
+.strat-near-pct { color: var(--amber); font-variant-numeric: tabular-nums; }
+@media (max-width: 720px) {
+  .strat-near-row { grid-template-columns: 1fr auto; }
+  .strat-near-row > .sub { grid-column: 1 / -1; }
+}
