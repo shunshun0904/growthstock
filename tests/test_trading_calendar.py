@@ -306,3 +306,56 @@ class TestNewKinds(unittest.TestCase):
         base = {"bars", "fins", "margin", "topix", "indices", "master", "master_hist"}
         for kind in list(jq_bulk.DAILY_KINDS) + list(jq_bulk.BULK_KINDS):
             self.assertNotIn(kind, base, f"{kind} は既存の種別と同名")
+
+
+class TestSanitize(unittest.TestCase):
+    """
+    API の欠測記号と入れ子の列の扱い。どちらも実測で踏んだ。
+
+      '-' が数値列に混ざり parquet が書けない（marginalert.ShrtOutChg）
+      入れ子（大株主一覧 Hldrs、政策保有の Report）が文字列に潰れる
+    """
+
+    def test_欠測記号を数値列で落とす(self):
+        d = pd.DataFrame({"ShrtOutChg": [1.0, "-", 3.0]})
+        out = jq_bulk._sanitize(d)
+        self.assertEqual(str(out["ShrtOutChg"].dtype), "float64")
+        self.assertEqual(out["ShrtOutChg"].isna().sum(), 1)
+
+    def test_文字列の列は文字列のまま残す(self):
+        d = pd.DataFrame({"PubReason": ["規制", "-", "解除"]})
+        out = jq_bulk._sanitize(d)
+        self.assertEqual(out["PubReason"].iloc[0], "規制")
+        self.assertTrue(pd.isna(out["PubReason"].iloc[1]))
+        self.assertEqual(out["PubReason"].iloc[2], "解除")
+
+    def test_入れ子の列は触らない(self):
+        # 文字列に潰すと大株主一覧の構造が壊れる
+        d = pd.DataFrame({"Hldrs": [[{"Rank": 1}], [{"Rank": 2}], None]})
+        out = jq_bulk._sanitize(d)
+        self.assertIsInstance(out["Hldrs"].iloc[0], list)
+        self.assertIsInstance(out["Hldrs"].iloc[0][0], dict)
+
+    def test_辞書の列も触らない(self):
+        d = pd.DataFrame({"Report": [{"HldrName": "A"}, None]})
+        out = jq_bulk._sanitize(d)
+        self.assertIsInstance(out["Report"].iloc[0], dict)
+        self.assertTrue(pd.isna(out["Report"].iloc[1]))
+
+    def test_None_を欠測記号にしない(self):
+        # "None"/"null" を記号に入れると入れ子や本物の None を巻き込む
+        self.assertNotIn("None", jq_bulk.NULL_MARKERS)
+        self.assertNotIn("null", jq_bulk.NULL_MARKERS)
+
+
+class TestEarnDateColumn(unittest.TestCase):
+    """
+    決算発表予定日の日付列。**SchDate を使うと未来の情報で学習する。**
+
+    実測（2026-09-01〜18 を取得、1,275行）:
+      ?date=X は PubDate で絞っている（範囲内 PubDate 100% / SchDate 0%）
+      SchDate は公表から中央値 64日先
+    """
+
+    def test_公表日で記録する(self):
+        self.assertEqual(jq_bulk.DAILY_KINDS["earndate"][1], "PubDate")

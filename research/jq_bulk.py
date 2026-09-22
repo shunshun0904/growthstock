@@ -96,7 +96,11 @@ DAILY_KINDS = {
     "xhold":       ("/edinet/cross-shareholdings", "SubDate", "政策保有株"),
     "shortratio":  ("/markets/short-ratio", "Date", "業種別の空売り比率"),
     "marginalert": ("/markets/margin-alert", "PubDate", "信用取引の規制・残高警報"),
-    "earndate":    ("/fins/earnings-date", "SchDate", "決算発表予定日"),
+    # **SchDate ではなく PubDate。** 実測（2026-09-01〜18 を取得）で
+    # ?date=X は PubDate で絞っており、SchDate は中央値64日先を指していた
+    # （範囲内 PubDate 100% / SchDate 0%）。SchDate で記録すると
+    # 取得済みの管理がずれるうえ、**未来の情報で学習する**ことになる。
+    "earndate":    ("/fins/earnings-date", "PubDate", "決算発表予定日"),
 }
 
 #: 日付を指定せず一度に全部返る種別 -> (パス, 日付列, 表示名)
@@ -397,7 +401,10 @@ def fetch_indices(client: JQuantsClient, days: List[dt.date]) -> pd.DataFrame:
 #: API が「値なし」を表すのに使う文字。実測で marginalert の ShrtOutChg に
 #: '-' が混ざっており、数値と同じ列に入るため parquet の書き出しが落ちた
 #:   ArrowInvalid: Could not convert '-' with type str: tried to convert to double
-NULL_MARKERS = {"-", "－", "", "—", "ー", "N/A", "n/a", "null", "None"}
+#: "None" / "null" は入れない。本物の None は既に欠測として扱われており、
+#: 文字列として現れる保証も無い。入れると入れ子の列（list / dict）を
+#: 欠測と誤判定する（実測で xhold.Largest がそうなった）。
+NULL_MARKERS = {"-", "－", "—", "ー", "N/A", "n/a", ""}
 
 
 def _sanitize(df: pd.DataFrame, label: str = "") -> pd.DataFrame:
@@ -414,11 +421,20 @@ def _sanitize(df: pd.DataFrame, label: str = "") -> pd.DataFrame:
     for c in out.columns:
         if out[c].dtype != object:
             continue
-        col = out[c].where(~out[c].astype(str).str.strip().isin(NULL_MARKERS))
+        v = out[c]
+        # **入れ子（list / dict）の列は触らない。**
+        # 大株主一覧（Hldrs）や政策保有の明細（Report / Largest）がこれで、
+        # 文字列に潰すと構造が壊れる。parquet は入れ子のまま書ける。
+        sample = v.dropna()
+        if len(sample) and isinstance(sample.iloc[0], (list, dict, tuple)):
+            continue
+        # 欠測記号は**文字列のときだけ**見る。他の型を str 化して
+        # 判定すると、入れ子や None を巻き込む
+        mark = v.map(lambda x: isinstance(x, str) and x.strip() in NULL_MARKERS)
+        col = v.where(~mark)
         num = pd.to_numeric(col, errors="coerce")
         # 元が非NaNだったところが全部数値になったなら数値列とみなす
-        bad = col.notna() & num.isna()
-        if not bad.any():
+        if not (col.notna() & num.isna()).any():
             out[c] = num
         else:
             out[c] = col.astype("string")
