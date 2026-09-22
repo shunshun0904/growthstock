@@ -394,6 +394,37 @@ def fetch_indices(client: JQuantsClient, days: List[dt.date]) -> pd.DataFrame:
     return _numify(df, [c for c in ("O", "H", "L", "C") if c in df.columns])
 
 
+#: API が「値なし」を表すのに使う文字。実測で marginalert の ShrtOutChg に
+#: '-' が混ざっており、数値と同じ列に入るため parquet の書き出しが落ちた
+#:   ArrowInvalid: Could not convert '-' with type str: tried to convert to double
+NULL_MARKERS = {"-", "－", "", "—", "ー", "N/A", "n/a", "null", "None"}
+
+
+def _sanitize(df: pd.DataFrame, label: str = "") -> pd.DataFrame:
+    """
+    欠測記号を NaN にし、数値になる列は数値にする。
+
+    **列は落とさない。** 数値に直せない列は文字列のまま残す（型が混ざって
+    いると parquet が書けないので、そこだけ揃える）。白リストで列を絞って
+    取りこぼす事故を2回起こしているので、ここでも捨てない。
+    """
+    if not len(df):
+        return df
+    out = df.copy()
+    for c in out.columns:
+        if out[c].dtype != object:
+            continue
+        col = out[c].where(~out[c].astype(str).str.strip().isin(NULL_MARKERS))
+        num = pd.to_numeric(col, errors="coerce")
+        # 元が非NaNだったところが全部数値になったなら数値列とみなす
+        bad = col.notna() & num.isna()
+        if not bad.any():
+            out[c] = num
+        else:
+            out[c] = col.astype("string")
+    return out
+
+
 def _numify(df: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
     for c in cols:
         if c in df.columns:
@@ -660,7 +691,7 @@ def _run_incremental(client: JQuantsClient, days: List[dt.date],
             df = _numify(df, ["LongVol", "ShrtVol"])
         elif name in DAILY_KINDS:
             path_, _, _ = DAILY_KINDS[name]
-            df = _fetch_by_day(client, path_, todo, None, name)
+            df = _sanitize(_fetch_by_day(client, path_, todo, None, name), name)
         else:
             raise SystemExit(f"日付ループで扱えない種別です: {name}")
 
@@ -675,7 +706,18 @@ def _run_incremental(client: JQuantsClient, days: List[dt.date],
                       f"Date で記録する（応答の列: {sorted(df.columns)[:12]}）")
         else:
             date_col = "Date"
-        written = data_store.merge_into_years(args.out_dir, name, df, date_col)
+        try:
+            written = data_store.merge_into_years(args.out_dir, name, df, date_col)
+        except Exception as exc:                             # noqa: BLE001
+            # **新しい種別の失敗で、既存の取り込み全体を巻き込まない。**
+            # 取得記録も付けないので、次回また取りに行く。
+            # （実測: marginalert の '-' で parquet が書けず、後続の
+            #   earndate / investor が丸ごと走らなかった）
+            if name in DAILY_KINDS:
+                print(f"[warn] {name} を保存できませんでした（続行する）: "
+                      f"{type(exc).__name__}: {str(exc)[:200]}", file=sys.stderr)
+                continue
+            raise
         _record_fetched(manifest, name, todo, df, date_col)
         total_new += len(df)
         print(f"[{name}] {len(df):,}行を追加 / 更新ファイル {len(written)}件 "
@@ -726,7 +768,8 @@ def _run_incremental(client: JQuantsClient, days: List[dt.date],
         print(f"\n[{name}] {ja}を取得（毎回まるごと）")
         try:
             rows = client.get_paginated(path_, {})
-            df = pd.DataFrame.from_records(rows) if rows else pd.DataFrame()
+            df = _sanitize(pd.DataFrame.from_records(rows), name) if rows \
+                else pd.DataFrame()
             if not len(df):
                 print(f"[{name}] 0件。保存しない")
                 continue
