@@ -217,8 +217,10 @@ def main(argv=None) -> int:
     ap.add_argument("--out-dir", default=PUBLIC_DIR)
     ap.add_argument("--days", type=int, default=5,
                     help="直近何営業日ぶんを出すか（画面で日を切り替えられる）")
-    ap.add_argument("--top-codes", type=int, default=10,
-                    help="詳細（スナップショット・株価履歴）を取りに行く上位何銘柄か")
+    ap.add_argument("--top-codes", type=int, default=120,
+                    help="詳細（スナップショット・株価履歴）を取りに行く銘柄数の"
+                         "上限。画面に出ている候補を新しい日・上位から順に埋める。"
+                         "1銘柄あたり4リクエストなので、120で約480リクエスト")
     args = ap.parse_args(argv)
 
     booster, meta = load_model(args.model_dir)
@@ -406,19 +408,65 @@ def main(argv=None) -> int:
 
     update_history(args, rows, days)
 
-    # その日の上位コードを素のテキストで出す。
+    # 詳細を取りに行く銘柄コードを素のテキストで出す。
     # 取得スクリプト（scripts/jquants_data_fetcher.py --extra-codes）へ渡して、
     # スナップショットと株価履歴を作らせるため。これが無いと
     # タイムマシーン（過去比較）が予測候補で使えない。
-    latest = pd.Timestamp(days[-1]).date().isoformat()
-    top = sorted((x for x in rows if x["date"] == latest),
-                 key=lambda x: x["rankInDay"])[:args.top_codes]
+    #
+    # **画面に出ている候補を全部対象にする。**
+    #
+    # 以前は「最新日の上位10件」だけだった。しかし画面は --days（既定5）
+    # 営業日ぶんを切り替えられるので、実測（2026-09-18 時点）では
+    # 候補46件のうち取得済みは8件しかなく、**83%でタイムマシーンが
+    # 使えなかった**。利用者が選ぶのは上位10件とは限らない。
+    #
+    # 並びは「新しい日から、その日の上位から」。上限で切れるときに
+    # 落ちるのが、いちばん古くて順位の低いものになるようにする。
+    # 画面側は同じ銘柄コードなら厚いほう（スナップショット付き）を
+    # 残すので（src/lib/store.js mergeStocks）、取れていれば必ず使われる。
+    picked = detail_codes(rows, args.top_codes)
     codes_path = os.path.join(args.data_dir, "top_codes.txt")
     with open(codes_path, "w", encoding="utf-8") as fh:
-        fh.write(" ".join(x["code"] for x in top))
-    print(f"[done] {codes_path} （{len(top)}銘柄: "
-          f"{' '.join(x['code'] for x in top)}）")
+        fh.write(" ".join(picked))
+    n_all = len({x["code"] for x in rows})
+    cut = "" if len(picked) >= n_all else f"（上限 {args.top_codes} で打ち切り）"
+    print(f"[done] {codes_path} （画面の候補 {n_all}銘柄 / "
+          f"取りに行く {len(picked)}銘柄{cut}）")
     return 0
+
+
+def detail_codes(rows: List[Dict], limit: int) -> List[str]:
+    """
+    詳細（スナップショット・株価履歴）を取りに行く銘柄コードを選ぶ。
+
+    **画面に出ている候補を全部対象にする。**
+
+    以前は「最新日の上位10件」だけだった。画面は --days（既定5）営業日ぶんを
+    切り替えられるので、実測（2026-09-18 時点）では候補46件のうち取得済みは
+    8件しかなく、**83%でタイムマシーンが使えなかった**。利用者が選ぶのは
+    上位10件とは限らない。
+
+    並びは「新しい日から、その日の上位から」。上限で切れるときに落ちるのが、
+    いちばん古くて順位の低いものになるようにする。同じ銘柄が複数日に
+    出ていれば1回だけ数える。
+
+    画面側は同じ銘柄コードなら厚いほう（スナップショット付き）を残すので
+    （src/lib/store.js mergeStocks）、取れていれば必ず使われる。
+    """
+    if not rows:
+        return []
+    order = {d: i for i, d in enumerate(
+        sorted({x["date"] for x in rows}, reverse=True))}
+    picked: List[str] = []
+    seen = set()
+    for x in sorted(rows, key=lambda r: (order[r["date"]], r["rankInDay"])):
+        if x["code"] in seen:
+            continue
+        seen.add(x["code"])
+        picked.append(x["code"])
+        if limit and len(picked) >= limit:
+            break
+    return picked
 
 
 def update_history(args, rows: List[Dict], days) -> None:
