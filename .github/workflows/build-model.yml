@@ -8,6 +8,19 @@ on:
     branches: ['claude/breakout-model']
     paths: ['research/run_config.json']
 
+# すべての run を pipefail 付きの bash にする。
+#
+# 既定の shell は `bash -e` で pipefail が無い。`python3 ... | tee x.log` は
+# パイプの最後（tee）の終了コードで判定されるため、**python が落ちても
+# ステップは成功**になる。update-data.yml で実害が出た（2026-09-22、
+# run 35713049207: 取得が途中で落ちたのに job は success）。
+#
+# ここは**データセットを作る**ワークフローなので、黙って古いまま進むと
+# 気づかないまま古い特徴量で学習・評価することになる。
+defaults:
+  run:
+    shell: bash
+
 permissions:
   contents: write
 
