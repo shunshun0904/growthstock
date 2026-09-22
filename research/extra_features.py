@@ -502,13 +502,32 @@ BUILDERS = [
 ]
 
 
+def expected_columns() -> List[str]:
+    """
+    このモジュールが作るべき列の一覧。正本は features.GROUPS。
+
+    build_dataset は features.all_columns() の全列が揃っていることを
+    要求する（揃っていなければ SystemExit）。取り込みが届いていない種別を
+    「列ごと作らない」にすると、**データセットの構築そのものが落ちる**。
+    実際それで日次予測が止まる状態になった（2026-09-22）。
+    """
+    import features as _F
+    mine = ("fwd", "holders_lvs", "holders_major", "holders_cross",
+            "margin_alert", "earn_ahead", "flow")
+    return [c for g in mine for c in _F.GROUPS.get(g, ())]
+
+
 def attach(samples: pd.DataFrame, data_dir: str = DATA_DIR,
            verbose: bool = True) -> pd.DataFrame:
     """
-    8本ぶんの特徴量を付けた列だけを返す（samples と同じ並び）。
+    8本ぶんの特徴量を付けた列を返す（samples と同じ行数・同じ並び）。
 
-    1本が落ちても他は作る。**取り込みがまだ届いていない種別は空**になる
-    だけで、0 では埋めない。
+    1本が落ちても他は作る。**取り込みがまだ届いていない種別は全欠測の列**に
+    なる。0 では埋めない。
+
+    列ごと落とさないのは、データセットの列構成を取り込みの進み具合で
+    変えないため。欠測は「まだ分からない」であって、列が無いのとは違う。
+    木モデルは全欠測の列を無視するだけなので害は無い。
     """
     parts = []
     for name, fn in BUILDERS:
@@ -532,6 +551,16 @@ def attach(samples: pd.DataFrame, data_dir: str = DATA_DIR,
         if verbose:
             cov = part.notna().mean().mean() * 100
             print(f"[extra] {name:<12} {part.shape[1]:>3}列  平均充足 {cov:>5.1f}%")
-    if not parts:
-        return pd.DataFrame(index=samples.index)
-    return pd.concat(parts, axis=1)
+    out = (pd.concat(parts, axis=1) if parts
+           else pd.DataFrame(index=samples.index))
+    # 届いていない種別ぶんを全欠測で埋め、列構成を常に同じにする
+    want = expected_columns()
+    absent = [c for c in want if c not in out.columns]
+    if absent:
+        out = pd.concat(
+            [out, pd.DataFrame(np.nan, index=samples.index, columns=absent)],
+            axis=1)
+        if verbose:
+            print(f"[extra] 取り込み待ちの {len(absent)}列は全欠測で置く"
+                  f"（列を落とすとデータセットの構築が落ちる）")
+    return out[want]

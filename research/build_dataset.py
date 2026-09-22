@@ -1241,7 +1241,10 @@ def forecast_revisions(samples: pd.DataFrame, fins: pd.DataFrame) -> pd.DataFram
     修正行の FOP を、同じ事業年度（CurFYSt）の**直前の開示**の FOP と比べる。
     上方修正なら正、下方修正なら負。前の予想が無ければ欠測（0 にしない）。
     """
-    out = pd.DataFrame(index=samples.index)
+    # 列構成は取り込みの状況で変えない。features.all_columns() が要求する
+    # 列が欠けると build_dataset ごと落ちる（SystemExit）
+    want = features.GROUPS.get("revision", [])
+    out = pd.DataFrame(np.nan, index=samples.index, columns=want, dtype=float)
     if "DocType" not in fins.columns:
         return out
     f = fins.copy()
@@ -1275,7 +1278,7 @@ def forecast_revisions(samples: pd.DataFrame, fins: pd.DataFrame) -> pd.DataFram
                           by="Code", direction="backward", allow_exact_matches=True)
         m = m.sort_values("_i")
         days = (m["Date"] - m[f"_{prefix}_d"]).dt.days
-        out[f"days_since_{prefix}"] = np.clip(days.to_numpy(), 0, REV_CLIP)
+        out[f"days_since_{prefix}"] = np.clip(days.to_numpy(), 0, REV_CLIP)  # noqa: E501
         if prefix == "rev":
             out["rev_pct"] = m[f"_{prefix}_pct"].to_numpy()
             # 向きだけを取り出す。幅が極端でも 1 / 0 に潰れる
@@ -1293,7 +1296,7 @@ def forecast_revisions(samples: pd.DataFrame, fins: pd.DataFrame) -> pd.DataFram
             out["rev_up_n_250"] = _events_in_window(samples, up, "DiscDate", 250)
         if len(dn):
             out["rev_dn_n_250"] = _events_in_window(samples, dn, "DiscDate", 250)
-    return out
+    return out[want]
 
 
 def _events_in_window(samples: pd.DataFrame, events: pd.DataFrame,

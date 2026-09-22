@@ -140,14 +140,14 @@ class TestResilience(unittest.TestCase):
         out = EF.attach(s, self.dir, verbose=False)
         self.assertEqual(len(out), len(s))
 
-    def test_一部だけあっても他は空で返る(self):
+    def test_一部だけあっても他は全欠測で返る(self):
         pd.DataFrame({"Code": ["13010"], "Date": [D("2024-04-01")],
                       "FwdEPS": [50.0]}).to_parquet(
             os.path.join(self.dir, "valuation.parquet"), index=False)
         s = samples(["2024-04-01"])
         out = EF.attach(s, self.dir, verbose=False)
-        self.assertIn("jq_fwdeps", out.columns)
-        self.assertNotIn("lvs_ratio", out.columns)
+        self.assertFalse(out["jq_fwdeps"].isna().all())
+        self.assertTrue(out["lvs_ratio"].isna().all())
 
     def test_行の順序と数を変えない(self):
         pd.DataFrame({"Code": ["13010"], "SubDate": [D("2024-03-10")],
@@ -162,8 +162,33 @@ class TestResilience(unittest.TestCase):
 
     def test_欠測を0で埋めない(self):
         s = samples(["2024-04-01"])
-        out = EF.valuation(s, self.dir)
-        self.assertEqual(out.shape[1], 0)     # 列ごと無い（0 の列を作らない）
+        out = EF.attach(s, self.dir, verbose=False)
+        self.assertTrue(out["jq_fwdeps"].isna().all(), "0 で埋めている")
+
+    def test_取り込みが無くても列構成は変わらない(self):
+        # ここが崩れると build_dataset が SystemExit で落ち、日次予測が
+        # 止まる（features.all_columns() の全列を要求するため）。
+        # 2026-09-22 に実際に止まった
+        s = samples(["2024-04-01", "2024-04-02"])
+        out = EF.attach(s, self.dir, verbose=False)
+        self.assertEqual(list(out.columns), EF.expected_columns())
+        self.assertEqual(len(out), len(s))
+
+    def test_一部だけ届いていても列構成は変わらない(self):
+        pd.DataFrame({"Code": ["13010"], "Date": [D("2024-04-01")],
+                      "FwdEPS": [50.0]}).to_parquet(
+            os.path.join(self.dir, "valuation.parquet"), index=False)
+        out = EF.attach(samples(["2024-04-01"]), self.dir, verbose=False)
+        self.assertEqual(list(out.columns), EF.expected_columns())
+        self.assertFalse(out["jq_fwdeps"].isna().all())
+        self.assertTrue(out["lvs_ratio"].isna().all())
+
+    def test_期待する列は_features_pyが正本(self):
+        import features as _F
+        mine = ("fwd", "holders_lvs", "holders_major", "holders_cross",
+                "margin_alert", "earn_ahead", "flow")
+        want = [c for g in mine for c in _F.GROUPS[g]]
+        self.assertEqual(EF.expected_columns(), want)
 
 
 class TestGroups(unittest.TestCase):
@@ -257,10 +282,20 @@ class TestForecastRevisions(unittest.TestCase):
         self.assertTrue(np.isnan(out["rev_pct"].iloc[0]), "0 で埋めている")
         self.assertTrue(np.isnan(out["rev_up"].iloc[0]))
 
-    def test_DocType_が無ければ何も作らない(self):
+    def test_DocType_が無くても列構成は変わらない(self):
+        # 列ごと落とすと features.all_columns() の要求を満たせず
+        # build_dataset が SystemExit で落ちる。値は全欠測にする
         f = self.fins().drop(columns=["DocType"])
         out = self.B.forecast_revisions(samples(["2024-09-25"]), f)
-        self.assertEqual(out.shape[1], 0)
+        self.assertEqual(list(out.columns), F.GROUPS["revision"])
+        self.assertTrue(out.isna().all().all(), "0 で埋めている")
+
+    def test_配当修正が無くても列は出る(self):
+        f = self.fins()
+        f = f[f["DocType"] != "DividendForecastRevision"]
+        out = self.B.forecast_revisions(samples(["2024-09-25"]), f)
+        self.assertIn("days_since_divrev", out.columns)
+        self.assertTrue(out["days_since_divrev"].isna().all())
 
 
 class TestGuidanceGap(unittest.TestCase):
