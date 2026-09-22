@@ -49,6 +49,12 @@ PAIRS = {
     "PBR": ("pbr", "純資産倍率"),
     "ROE": ("ROE_q0", "自己資本利益率(%)"),
 }
+#: API 値に掛けて自前と単位を揃える係数。
+#: **API の ROE / FwdROE は小数**（0.0791 = 7.91%）。実測（2026-09-22、
+#: valuation_2025）で FwdEPS/BPS の中央値 0.0791 が API の FwdROE と
+#: 一致することを確かめた。自前の ROE_q0 は %。揃えずに比べると
+#: 「100倍ずれている」としか出ず、どちらが正確かの判定にならない。
+SCALE = {"ROE": 100.0, "FwdROE": 100.0}
 #: 自前に対応が無い列（新規情報）
 NEW_COLS = ["FwdEPS", "FwdPER", "FwdROE", "MktCap"]
 
@@ -61,6 +67,9 @@ def load_valuation(data_dir: str = None) -> pd.DataFrame:
     v = pd.concat([pd.read_parquet(p) for p in paths], ignore_index=True)
     v["Date"] = pd.to_datetime(v["Date"])
     v["Code"] = v["Code"].astype(str)
+    for c, k in SCALE.items():                   # 単位を自前に合わせる
+        if c in v.columns:
+            v[c] = pd.to_numeric(v[c], errors="coerce") * k
     return v
 
 

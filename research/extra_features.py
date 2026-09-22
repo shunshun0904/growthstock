@@ -129,6 +129,19 @@ def valuation(samples: pd.DataFrame, data_dir: str = DATA_DIR,
     out = pd.DataFrame(index=samples.index)
     for c in cols:
         out[f"jq_{c.lower()}"] = _num(m[c]).to_numpy()
+
+    # **API の ROE / FwdROE は小数**（0.0791 = 7.91%）。
+    # 実測（2026-09-22、valuation_2025）で FwdEPS/BPS の中央値 0.0791 が
+    # API の FwdROE 0.0791 と一致することを確かめた。自前の ROE_q0 は
+    # % 単位（中央値 5.71 = 5.71%）なので、ここで % に揃える。
+    #
+    # 揃えずに引き算していたため jq_roe_gap が実質 -ROE_q0 になり、
+    # ROE_q0 との相関が **-0.9999** という、ほぼ同じ列が2本ある状態に
+    # なっていた（実験40 の冗長検出が拾った）。
+    for c in ("jq_roe", "jq_fwdroe"):
+        if c in out.columns:
+            out[c] = out[c] * 100.0
+
     # 予想と実績の差。株価が織り込んでいる「これからの伸び」
     if "FwdEPS" in cols and "close_raw" in samples.columns:
         px = _num(samples["close_raw"]).to_numpy()
@@ -136,7 +149,8 @@ def valuation(samples: pd.DataFrame, data_dir: str = DATA_DIR,
             out["jq_fwd_earnings_yield"] = np.where(
                 px > 0, _num(m["FwdEPS"]).to_numpy() / px * 100.0, np.nan)
     if "FwdROE" in cols and "ROE_q0" in samples.columns:
-        out["jq_roe_gap"] = (_num(m["FwdROE"]).to_numpy()
+        # 上で % に揃えた out["jq_fwdroe"] を使う。m["FwdROE"] は小数のまま
+        out["jq_roe_gap"] = (out["jq_fwdroe"].to_numpy()
                              - _num(samples["ROE_q0"]).to_numpy())
     if "FwdPER" in cols and "per" in samples.columns:
         per = _num(samples["per"]).to_numpy()

@@ -86,9 +86,13 @@ class TestPointInTime(unittest.TestCase):
         self.assertEqual(out["alert_days"].iloc[1], 2)
 
     def test_予想指標は当日の値だけ使う(self):
+        # **FwdROE は小数で来る**（0.12 = 12%）。実データで FwdEPS/BPS と
+        # 一致することを確かめてある。ここを % で書いていたため、単位を
+        # 揃える修正（2026-09-22）でこのテストが落ちた。落ちたのは
+        # 作り物のほうが実データと違っていたからで、期待値 4.0 は変えない
         self._write("valuation", pd.DataFrame({
             "Code": ["13010", "13010"], "Date": [D("2024-04-01"), D("2024-04-02")],
-            "FwdEPS": [50.0, 60.0], "FwdPER": [20.0, 16.7], "FwdROE": [12.0, 13.0]}))
+            "FwdEPS": [50.0, 60.0], "FwdPER": [20.0, 16.7], "FwdROE": [0.12, 0.13]}))
         s = samples(["2024-04-01", "2024-04-02", "2024-04-03"])
         out = EF.valuation(s, self.dir)
         self.assertAlmostEqual(out["jq_fwdeps"].iloc[0], 50.0)
@@ -349,3 +353,64 @@ class 入れ子の列がparquetから戻る形(unittest.TestCase):
         self.assertEqual(EF._xh(rep, "ListedIss"), 12.0)
         self.assertEqual(EF._xh(str(rep), "ListedIss"), 12.0)
         self.assertEqual(EF._xh(np.array([rep], dtype=object), "ListedIss"), 12.0)
+
+
+class APIのROEは小数で来る(unittest.TestCase):
+    """API の ROE / FwdROE は 0.0791 = 7.91% の小数。自前の ROE_q0 は %。
+
+    実害があった（2026-09-22）: 揃えずに引き算していたため
+    jq_roe_gap が実質 -ROE_q0 になり、ROE_q0 との相関が -0.9999 という
+    「ほぼ同じ列が2本ある」状態になっていた。実験40 の冗長検出が拾った。
+    実データで FwdEPS/BPS の中央値 0.0791 が API の FwdROE と一致する
+    ことを確かめてある。
+    """
+
+    def frame(self, tmp):
+        v = pd.DataFrame({
+            "Code": ["1301", "1332"],
+            "Date": pd.to_datetime(["2026-01-05", "2026-01-05"]),
+            "FwdEPS": [100.0, 200.0],
+            "FwdPER": [10.0, 20.0],
+            "FwdROE": [0.08, 0.12],          # 小数（8% と 12%）
+        })
+        v.to_parquet(os.path.join(tmp, "valuation_2026.parquet"), index=False)
+        return pd.DataFrame({
+            "Code": ["1301", "1332"],
+            "Date": pd.to_datetime(["2026-01-05", "2026-01-05"]),
+            "close_raw": [1000.0, 2000.0],
+            "ROE_q0": [5.0, 5.0],            # %
+            "per": [12.0, 24.0],
+        })
+
+    def test_fwdroe_は_パーセントに直る(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            s = self.frame(tmp)
+            out = EF.valuation(s, tmp)
+            self.assertAlmostEqual(out["jq_fwdroe"].iloc[0], 8.0)
+            self.assertAlmostEqual(out["jq_fwdroe"].iloc[1], 12.0)
+        finally:
+            shutil.rmtree(tmp)
+
+    def test_roe_gap_は_パーセント同士の差(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            s = self.frame(tmp)
+            out = EF.valuation(s, tmp)
+            # 8% - 5% = 3pt / 12% - 5% = 7pt
+            self.assertAlmostEqual(out["jq_roe_gap"].iloc[0], 3.0)
+            self.assertAlmostEqual(out["jq_roe_gap"].iloc[1], 7.0)
+        finally:
+            shutil.rmtree(tmp)
+
+    def test_gap_が_ROE_q0_の符号反転になっていない(self):
+        """直す前はこれが通ってしまっていた（gap ≒ -ROE_q0）。"""
+        tmp = tempfile.mkdtemp()
+        try:
+            s = self.frame(tmp)
+            out = EF.valuation(s, tmp)
+            gap = out["jq_roe_gap"].to_numpy()
+            self.assertFalse(np.allclose(gap, -s["ROE_q0"].to_numpy(), atol=0.2),
+                             "gap が -ROE_q0 になっている（単位がずれている）")
+        finally:
+            shutil.rmtree(tmp)
