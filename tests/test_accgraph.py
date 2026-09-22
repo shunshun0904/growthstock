@@ -968,6 +968,11 @@ class TestIncrement(unittest.TestCase):
         self.assertEqual(inc.verdict((-0.01, 0.02), 0.05, 0.95)[0], "差が見えない")
         self.assertEqual(inc.verdict((0.01, 0.03))[0], "明細が効く")   # full は区間だけ
         self.assertEqual(inc.verdict((np.nan, np.nan))[0], "判定できない")
+        # 補正が毎回ゼロ近くに縮んだときは、狭い区間を「上積みの上限」と書かない
+        v, why = inc.verdict((-0.002, 0.002), 0.5, 0.5, shrunk_all=True)
+        self.assertEqual(v, "差が見えない")
+        self.assertIn("上限を示すものではない", why)
+        self.assertNotIn("程度まで", why)
         self.assertAlmostEqual(inc.permutation_p(0.5, [0.1] * 19), 0.05)
         self.assertAlmostEqual(inc.permutation_p(0.0, [0.1] * 19), 1.0)
 

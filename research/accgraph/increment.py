@@ -405,13 +405,19 @@ def permutation_p(observed: float, placebo: Sequence[float],
 
 
 def verdict(diff_ci: Sequence[float], p_greater: Optional[float] = None,
-            p_less: Optional[float] = None, alpha: float = 0.05
-            ) -> Tuple[str, str]:
+            p_less: Optional[float] = None, alpha: float = 0.05,
+            shrunk_all: bool = False) -> Tuple[str, str]:
     """
     事前に決めた基準で判定する。
 
     p_greater / p_less は偽の明細に対する片側 p 値。None なら区間だけで
     判定する（参考として並べる full 用）。
+
+    shrunk_all は、全フォールドで補正の強さが最大（補正がほぼゼロ）に
+    なったかどうか。このとき明細あり版と明細なし版はほぼ同じ予測なので、
+    差の区間は必ず狭い。それは「上積みはこの幅まで」という意味ではなく、
+    訓練データの中で明細が役立つ設定が見つからなかったという意味なので、
+    理由をそう書き分ける（判定そのものは変えない）。
     """
     lo, hi = diff_ci
     if not (np.isfinite(lo) and np.isfinite(hi)):
@@ -426,7 +432,12 @@ def verdict(diff_ci: Sequence[float], p_greater: Optional[float] = None,
             return "明細が害になる", "明細を入れた版の AUC が、入れない版を有意に下回る"
         return "差が見えない", (f"区間は0を下回るが、偽の明細でも同じくらいの差が出る"
                              f"（p = {p_less:.2f}）。補正の学習の揺れと区別できない")
-    return "差が見えない", (f"差の95%区間が0をまたぐ。上積みがあるとしても "
+    if shrunk_all:
+        return "差が見えない", ("全フォールドで補正をほぼゼロにする設定が選ばれた。"
+                             "訓練データの中の前向き検証で、明細が予測を良くする"
+                             "設定が見つからなかった。区間が狭いのは補正がほぼ"
+                             "ゼロだからで、上積みの上限を示すものではない")
+    return "差が見えない", (f"差の95%区間が0をまたぐ。この測り方での上積みは "
                          f"{hi:+.3f} 程度まで")
 
 
@@ -522,7 +533,10 @@ def run(data_dir: str = build.OUT_DIR, *, benchmark: str = "topix",
                 pg, pl = permutation_p(obs, plc, "greater"), permutation_p(obs, plc, "less")
             else:
                 plc, pg, pl = [], None, None
-            v_label, why = verdict(res["diff"]["edinet-base"]["ci"], pg, pl)
+            used = [f for f in ts["folds"] if f["used"]]
+            shrunk_all = bool(used) and all(f["lambda"] == max(LAMBDA_GRID) for f in used)
+            v_label, why = verdict(res["diff"]["edinet-base"]["ci"], pg, pl,
+                                   shrunk_all=shrunk_all)
             res.update(verdict=v_label, why=why, folds=ts["folds"],
                        n_test=int(ok.sum()),
                        codes=int(meta.loc[ok, "Code"].nunique()),
@@ -692,8 +706,10 @@ def to_markdown(d: Dict) -> str:
         "「明細あり」列と一致するはず。評価のテスト窓も、その窓の予測を出すモデルの"
         "訓練データも同じ。ずれていれば、2段目の件数不足で外したフォールドがある"
         "（上のフォールド表で分かる）か、どこかが食い違っている。",
-        "- 差が見えないときは、区間の上限を見る。上限が小さければ、少なくとも"
-        "それより大きな上積みは今の件数でも否定できている。",
+        "- 差が見えないときは、まずフォールド表の「選ばれた強さ」を見る。毎回最大なら"
+        "補正はほぼゼロで、明細あり版と明細なし版はほぼ同じ予測になる。そのときの"
+        "区間の狭さは上積みの上限ではなく、訓練データの中で明細が役立つ設定が"
+        "見つからなかったことを表す。件数が増えれば結果が変わりうる。",
         "- 明細ありの群は本流の母集団の順に取得しているので、大型・人気株に偏っている。"
         "ここでの結果は、この群についてのもの。",
         "",
