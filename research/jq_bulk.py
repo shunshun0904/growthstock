@@ -71,6 +71,40 @@ MARGIN_COLS = ["Date", "Code", "LongVol", "ShrtVol"]
 # しかも白リストが黙って落とすので気づけなかった。同じ事故を繰り返さない。
 MASTER_COLS = None
 
+# --------------------------------------------------------------------------- #
+# 2026-09-22 に足した種別
+#
+# エンドポイント一覧を辿って測った結果（docs/DATA_FIELDS.md）、スタンダードで
+# 使えるのに取り込んでいないものが10本あった。運用者の判断で、1本ずつ検証
+# するのではなく**全部入れてから3モデル×5分割で一括評価**する。
+#
+# 列は絞らない（None）。FIN_COLS / MASTER_COLS で白リストを書いて取りこぼした
+# 事故を2回起こしているので、同じことをしない。行数はどれも小さい。
+# --------------------------------------------------------------------------- #
+
+#: 日付を1日ずつ指定して取る種別 -> (パス, 日付列, 表示名)
+#:
+#: 日付列は「その行をいつ知りえたか」を表すものを選ぶ。EDINET は提出日
+#: （SubDate）、信用規制は公表日（PubDate）。ここを取り違えると、
+#: 未来の情報で学習することになる。
+DAILY_KINDS = {
+    "valuation":   ("/equities/valuation", "Date",
+                    "バリュエーション（BPS/EPS/FwdEPS/PER/PBR/ROE/FwdPER/FwdROE）"),
+    "lvshld":      ("/edinet/large-volume-shareholders", "SubDate",
+                    "大量保有報告書"),
+    "mjrshld":     ("/edinet/major-shareholders", "SubDate", "大株主"),
+    "xhold":       ("/edinet/cross-shareholdings", "SubDate", "政策保有株"),
+    "shortratio":  ("/markets/short-ratio", "Date", "業種別の空売り比率"),
+    "marginalert": ("/markets/margin-alert", "PubDate", "信用取引の規制・残高警報"),
+    "earndate":    ("/fins/earnings-date", "SchDate", "決算発表予定日"),
+}
+
+#: 日付を指定せず一度に全部返る種別 -> (パス, 日付列, 表示名)
+#: 投資部門別は週次で、全期間でも2,400行ほど。1リクエストで足りる
+BULK_KINDS = {
+    "investor": ("/equities/investor-types", "EnDate", "投資部門別売買"),
+}
+
 
 # --------------------------------------------------------------------------- #
 # 営業日
@@ -379,21 +413,25 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--pause", type=float, default=0.05,
                     help="リクエスト間隔(秒)。既定は控えめ（1日1リクエストのため）")
     ap.add_argument("--what", nargs="*",
-                    default=["bars", "fins", "margin", "topix", "indices",
-                             "master", "master_hist"],
-                    choices=["bars", "fins", "margin", "topix", "indices",
-                             "master", "master_hist"])
+                    default=(["bars", "fins", "margin", "topix", "indices",
+                              "master", "master_hist"]
+                             + list(DAILY_KINDS) + list(BULK_KINDS)),
+                    choices=(["bars", "fins", "margin", "topix", "indices",
+                              "master", "master_hist"]
+                             + list(DAILY_KINDS) + list(BULK_KINDS)))
     ap.add_argument("--incremental", action="store_true",
                     help="manifest を見て、まだ取得していない営業日だけを取得する")
     ap.add_argument("--reset", nargs="*", default=[],
-                    choices=["bars", "fins", "margin", "topix", "indices",
-                             "master", "master_hist"],
+                    choices=(["bars", "fins", "margin", "topix", "indices",
+                              "master", "master_hist"]
+                             + list(DAILY_KINDS) + list(BULK_KINDS)),
                     help="指定した種別の保存済みデータと取得記録を消してから取得する。"
                          "取得する列を増やしたときに使う（既存 parquet には新しい列が"
                          "入っていないが、manifest 上は取得済みなので取り直されない）")
     ap.add_argument("--forget", nargs="*", default=[],
-                    choices=["bars", "fins", "margin", "topix", "indices",
-                             "master_hist"],
+                    choices=(["bars", "fins", "margin", "topix", "indices",
+                              "master_hist"]
+                             + list(DAILY_KINDS) + list(BULK_KINDS)),
                     help="指定した種別の**取得記録だけ**を消す（parquet は消さない）。"
                          "公表前に叩いて0件のまま取得済みになった日を取り直すとき用。"
                          "--forget-from で範囲を絞れる")
@@ -566,8 +604,8 @@ def _run_incremental(client: JQuantsClient, days: List[dt.date],
 
     total_new = 0
     for name in args.what:
-        if name in ("topix", "indices"):
-            continue  # 期間・コード指定で一括取得するので後段でまとめて扱う
+        if name in ("topix", "indices") or name in BULK_KINDS:
+            continue  # 期間指定・引数なしで一括取得するので後段で扱う
         if name == "master_hist":
             # 月次スナップショット。日付ループの共通処理には乗せず個別に扱う
             todo = data_store.missing_days(manifest, "master_hist", days)
@@ -620,10 +658,23 @@ def _run_incremental(client: JQuantsClient, days: List[dt.date],
             df = _fetch_by_day(client, "/markets/margin-interest", todo,
                                MARGIN_COLS, "margin")
             df = _numify(df, ["LongVol", "ShrtVol"])
+        elif name in DAILY_KINDS:
+            path_, _, _ = DAILY_KINDS[name]
+            df = _fetch_by_day(client, path_, todo, None, name)
         else:
             raise SystemExit(f"日付ループで扱えない種別です: {name}")
 
-        date_col = "DiscDate" if name == "fins" else "Date"
+        if name == "fins":
+            date_col = "DiscDate"
+        elif name in DAILY_KINDS:
+            # 応答に無ければ Date に倒す。無い列で merge すると全部落ちる
+            want = DAILY_KINDS[name][1]
+            date_col = want if want in df.columns else "Date"
+            if want not in df.columns and len(df):
+                print(f"[warn] {name}: 期待した日付列 {want} が無い。"
+                      f"Date で記録する（応答の列: {sorted(df.columns)[:12]}）")
+        else:
+            date_col = "Date"
         written = data_store.merge_into_years(args.out_dir, name, df, date_col)
         _record_fetched(manifest, name, todo, df, date_col)
         total_new += len(df)
@@ -664,6 +715,33 @@ def _run_incremental(client: JQuantsClient, days: List[dt.date],
             print(f"[indices] {len(df):,}行を追加 / 更新ファイル {len(written)}件")
         else:
             print("\n[indices] 取得済み。スキップします")
+
+    # 引数なしで全期間が返る種別（いまは投資部門別売買だけ）。
+    # 週次で全期間でも2,400行ほどなので、差分にせず毎回まるごと取り直す。
+    # 差分にすると「どこまで取ったか」を持つ必要があり、1リクエストで済む
+    # ものにその仕組みを足す理由が無い。
+    for name, (path_, date_col, ja) in BULK_KINDS.items():
+        if name not in args.what:
+            continue
+        print(f"\n[{name}] {ja}を取得（毎回まるごと）")
+        try:
+            rows = client.get_paginated(path_, {})
+            df = pd.DataFrame.from_records(rows) if rows else pd.DataFrame()
+            if not len(df):
+                print(f"[{name}] 0件。保存しない")
+                continue
+            out = os.path.join(args.out_dir, f"{name}.parquet")
+            df.to_parquet(out, index=False, compression="zstd")
+            manifest[name] = {"rows": int(len(df)),
+                              "as_of": _today_jst().isoformat()}
+            rng = ""
+            if date_col in df.columns:
+                rng = f" / {df[date_col].min()} 〜 {df[date_col].max()}"
+            print(f"[{name}] {len(df):,}行 -> {os.path.basename(out)}{rng}")
+        except JQuantsError as exc:
+            # 1種別の失敗で取り込み全体を落とさない。次回また取りに行く
+            print(f"[warn] {name} を取得できませんでした（続行する）: "
+                  f"{str(exc)[:160]}", file=sys.stderr)
 
     # 銘柄マスタは1リクエストで全銘柄が返る（実測4.2秒）ので毎回取り直す。
     # 新規上場・社名変更・市場区分変更を取りこぼさないため、差分にしない。

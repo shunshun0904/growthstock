@@ -275,3 +275,34 @@ class TestLookahead(unittest.TestCase):
         days = jq_bulk.trading_days(c, D("2026-09-14"), D("2026-09-18"),
                                     "/存在しない/書けない場所")
         self.assertTrue(days)
+
+
+class TestNewKinds(unittest.TestCase):
+    """
+    2026-09-22 に足した種別が、引数の選択肢と日付列の対応で取りこぼされて
+    いないか。白リストの書き漏らしで列や種別が黙って落ちる事故を
+    2回起こしているので、固定しておく（FIN_COLS / MASTER_COLS）。
+    """
+
+    def test_足した種別が7本ある(self):
+        self.assertEqual(len(jq_bulk.DAILY_KINDS), 7)
+        self.assertEqual(len(jq_bulk.BULK_KINDS), 1)
+
+    def test_日付列はその行を知りえた日(self):
+        # EDINET は提出日、信用規制は公表日。ここを取り違えると未来を見る
+        self.assertEqual(jq_bulk.DAILY_KINDS["lvshld"][1], "SubDate")
+        self.assertEqual(jq_bulk.DAILY_KINDS["mjrshld"][1], "SubDate")
+        self.assertEqual(jq_bulk.DAILY_KINDS["xhold"][1], "SubDate")
+        self.assertEqual(jq_bulk.DAILY_KINDS["marginalert"][1], "PubDate")
+
+    def test_列を絞らない(self):
+        # None = 白リストを書かない。書き漏らすと黙って落ちる
+        for kind, (path, date_col, ja) in jq_bulk.DAILY_KINDS.items():
+            self.assertTrue(path.startswith("/"), kind)
+            self.assertTrue(date_col, kind)
+            self.assertTrue(ja, kind)
+
+    def test_種別名が既存とぶつからない(self):
+        base = {"bars", "fins", "margin", "topix", "indices", "master", "master_hist"}
+        for kind in list(jq_bulk.DAILY_KINDS) + list(jq_bulk.BULK_KINDS):
+            self.assertNotIn(kind, base, f"{kind} は既存の種別と同名")
