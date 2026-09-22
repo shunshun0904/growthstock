@@ -471,3 +471,48 @@ input[type='range']::-moz-range-thumb {
 .sankey-note { font-size: 11.5px; color: var(--text-faint); margin: 0;
   line-height: 1.65; }
 .sankey-note b { color: var(--text-dim); }
+
+/* ---------------------------------------------- 今日の戦略（PLAYBOOK） */
+.strat { border-color: color-mix(in srgb, var(--accent) 28%, var(--border)); }
+.strat-head {
+  display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; align-items: center;
+  padding: 12px 0 10px;
+}
+.strat-verdict { font-size: 13px; padding: 6px 12px; }
+.strat-facts { display: flex; flex-wrap: wrap; gap: 20px; }
+.strat-facts > div { display: flex; align-items: baseline; gap: 6px; }
+.strat-facts .num { font-size: 20px; font-weight: 600; }
+.strat-note { grid-column: 1 / -1; margin: 0; }
+.strat-picks { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+.strat-pick {
+  border: 1px solid var(--border); border-radius: 10px; padding: 12px;
+  background: var(--bg-raised);
+}
+.strat-pick-head { display: flex; align-items: center; gap: 10px; }
+.strat-pick-head .pred-id { flex: 1; display: flex; flex-direction: column; gap: 2px; }
+.strat-pick-n {
+  width: 26px; height: 26px; display: grid; place-items: center; flex: none;
+  border-radius: 50%; background: var(--accent); color: #fff; font-weight: 700; font-size: 13px;
+}
+.strat-pick-body {
+  display: flex; flex-wrap: wrap; gap: 6px 18px; margin-top: 10px;
+  padding-top: 10px; border-top: 1px solid var(--border);
+}
+.strat-metric { display: flex; align-items: baseline; gap: 5px; }
+.strat-metric .lab { font-size: 11px; color: var(--text-faint); }
+.strat-metric .num { font-size: 14px; font-weight: 600; }
+.strat-metric .sub { font-size: 10px; }
+.strat-steps { margin: 12px 0 0; padding-left: 20px; color: var(--text-dim); font-size: 12px; }
+.strat-steps li { margin: 3px 0; }
+.strat-empty { margin-top: 4px; }
+.strat-held { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.strat-chip {
+  display: inline-flex; align-items: baseline; gap: 6px; font-size: 12px;
+  border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px;
+  color: var(--text-dim);
+}
+.strat-chip em { font-style: normal; color: var(--text-faint); }
+.strat-src { margin: 12px 0 0; font-size: 11px; line-height: 1.6; }
+@media (max-width: 720px) {
+  .strat-head { grid-template-columns: 1fr; }
+}

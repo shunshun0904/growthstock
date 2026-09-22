@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { fmt, fmtInt, fmtSigned, fmtOku, fmtDate, fmtDateTime, DASH } from '../lib/format.js';
 import { bandColor, bandLabel, pctColor, modelRows, MODEL_SHORT, MODEL_FAMILY,
   FAMILY_JA, marketTone, candidateToStock } from '../lib/predictions.js';
+import { STRATEGY, BOOST, strategySignal, exitPlan } from '../lib/strategy.js';
 
 /**
  * ブレイク予測タブ。
@@ -28,10 +29,15 @@ export default function PredictionView({ data, history, onSendToOctagon, sentIds
     [data, day]
   );
   const tone = useMemo(() => marketTone(rows), [rows]);
+  const signal = useMemo(() => strategySignal(rows), [rows]);
   const m = data?.model || {};
 
   return (
     <div className="pred">
+      <StrategyPanel signal={signal} day={day}
+                     onSend={(c) => onSendToOctagon(candidateToStock(c))}
+                     sentIds={sentIds} />
+
       <section className="card">
         <div className="card-head">
           <h2>ブレイク予測</h2>
@@ -99,6 +105,138 @@ export default function PredictionView({ data, history, onSendToOctagon, sentIds
       <ModelLineup models={data?.models} />
       <HistoryPanel history={history} horizon={m.riseHorizon} />
       <ModelCard model={m} notes={data?.notes} generatedAt={data?.generatedAt} />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------ 今日の戦略シグナル */
+
+/**
+ * docs/PLAYBOOK.md の手順を、その日のデータでそのまま実行して見せる。
+ *
+ * 判断の材料（発火数・3モデルの百分位）は下の一覧にも出ているが、
+ * 「今日は買うのか、買うなら何を、いくらで手仕舞うのか」を1か所で
+ * 言い切る場所が要る。迷いどころを毎日つくらないための画面。
+ */
+function StrategyPanel({ signal, day, onSend, sentIds }) {
+  const { nBreak, verdict, picks, passed, buyable } = signal;
+  return (
+    <section className="card strat">
+      <div className="card-head">
+        <h2>今日の戦略</h2>
+        <span className="sub">
+          発火の多い日に、3モデルが揃って上位10%と見た銘柄を
+          {STRATEGY.topK}件まで。翌営業日の寄りで買い、+{STRATEGY.takeProfit}% か
+          {STRATEGY.holdDays}営業日で降りる
+        </span>
+      </div>
+
+      <div className="strat-head">
+        <span className={`badge ${verdict.tone} strat-verdict`}>{verdict.label}</span>
+        <div className="strat-facts">
+          <div>
+            <span className="lab">発火数</span>
+            <strong className="num">{nBreak}</strong>
+            <span className="sub">件（20件以上が本命 / 7件以下は見送り）</span>
+          </div>
+          <div>
+            <span className="lab">3モデルが揃って上位10%</span>
+            <strong className="num">{passed.length}</strong>
+            <span className="sub">件 / {nBreak}件</span>
+          </div>
+        </div>
+        <p className="sub strat-note">{verdict.note}</p>
+      </div>
+
+      {picks.length > 0 ? (
+        <>
+          <div className="strat-picks">
+            {picks.map((c, i) => (
+              <PickCard key={c.jqCode} c={c} n={i + 1}
+                        onSend={() => onSend(c)}
+                        sent={sentIds?.has(`pred:${c.jqCode}`)} />
+            ))}
+          </div>
+          <ol className="strat-steps">
+            <li><b>翌営業日の寄り</b>で成行。終値では買えない（候補が分かるのが終値後）</li>
+            <li>買えたら <b>+{STRATEGY.takeProfit}% の指値</b>を置く（到達は約1割、
+                届くときの中央値は11〜12営業日）</li>
+            <li>届かなければ <b>{STRATEGY.holdDays}営業日</b>で手仕舞い</li>
+          </ol>
+        </>
+      ) : (
+        <div className="empty strat-empty">
+          {nBreak === 0 ? 'この日は新規の高値更新がありません。'
+            : passed.length === 0
+              ? '3モデルが揃って上位10%と見た銘柄はありません。買いません。'
+              : `発火が ${nBreak} 件しかありません。基準を満たした銘柄はありますが、`
+                + 'この日は見送ります。'}
+        </div>
+      )}
+
+      {!buyable && passed.length > 0 && (
+        <div className="strat-held">
+          <span className="lab">参考（基準は満たしたが見送る）</span>
+          {passed.slice(0, 3).map((c) => (
+            <span key={c.jqCode} className="strat-chip">
+              {c.name || c.code}
+              <em className="num">{fmt(c.minPct, 0)}</em>
+            </span>
+          ))}
+        </div>
+      )}
+
+      <p className="strat-src sub">
+        実測（2021-11〜2026-08 の out-of-fold）: 発火20件以上の日の上位1件は
+        1取引 +3.2〜3.5%・勝率61〜65%・正例率39%（母集団は +0.8%・50%・18.7%）。
+        年に29日ほどしか該当しない。閾値は結果を見てから選んだもので、
+        1取引あたりの差は統計的に有意ではない（docs/PLAYBOOK.md）。
+      </p>
+    </section>
+  );
+}
+
+function PickCard({ c, n, onSend, sent }) {
+  const plan = exitPlan(c.close);
+  return (
+    <div className="strat-pick">
+      <div className="strat-pick-head">
+        <span className="strat-pick-n num">{n}</span>
+        <span className="pred-id">
+          <strong>{c.name || c.code}</strong>
+          <span className="sub num">{c.code}</span>
+          {c.sector && <span className="sub">{c.sector}</span>}
+        </span>
+        <button className="btn btn-primary" onClick={onSend} disabled={sent}>
+          {sent ? '送信済み' : '8軸で見る'}
+        </button>
+      </div>
+      <div className="strat-pick-body">
+        <div className="strat-metric">
+          <span className="lab">3モデルの最小</span>
+          <strong className="num" style={{ color: pctColor(c.minPct) }}>
+            {fmt(c.minPct, 0)}
+          </strong>
+          <span className="sub">百分位</span>
+        </div>
+        {BOOST.map((a) => (
+          <div key={a} className="strat-metric">
+            <span className="lab">{MODEL_SHORT[a]}</span>
+            <span className="num">{fmt(c.byModel?.[a]?.pctHistorical, 0)}</span>
+          </div>
+        ))}
+        <div className="strat-metric">
+          <span className="lab">終値</span>
+          <span className="num">{fmtInt(c.close)}</span>
+        </div>
+        {plan && (
+          <div className="strat-metric">
+            <span className="lab">+{plan.takeProfit}% の目安</span>
+            <span className="num">{fmtInt(plan.target)}</span>
+            <span className="sub">終値基準。実際は寄り値から</span>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

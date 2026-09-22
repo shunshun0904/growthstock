@@ -91,6 +91,17 @@ check(predBody.includes('決定木系') && predBody.includes('木以外'),
 check(predBody.includes('並べているモデル'), 'モデル一覧パネルが表示される');
 check(predBody.includes('ニューラルネット') && predBody.includes('ロジスティック回帰'),
   '5モデルの日本語名が出る');
+// 今日の戦略パネル（docs/PLAYBOOK.md の手順）。
+// 合成データは候補5件・低い百分位なので「見送り」になるのが正しい
+const strat = await page.textContent('.strat');
+check(strat.includes('今日の戦略'), '戦略パネルが表示される');
+check(strat.includes('見送り'), `発火5件の日は見送りと出る`);
+check((await page.locator('.strat-pick').count()) === 0,
+      '見送りの日は買う銘柄を出さない');
+check(strat.includes('発火数'), '発火数が表示される');
+check(!strat.includes('NaN') && !strat.includes('undefined'),
+      '戦略パネルに NaN / undefined が出ていない');
+
 check(!predBody.includes('NaN'), '予測タブに NaN が出ていない');
 check(!predBody.includes('undefined'), '予測タブに undefined が出ていない');
 
