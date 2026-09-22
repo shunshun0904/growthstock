@@ -154,6 +154,31 @@ GROUPS: Dict[str, List[str]] = {
     # 単一モデルの上位10% では窓平均が動かず最悪の窓が悪化するが、
     # 採否は分離力で決める（docs/MODEL_ADOPTION_RULES.md §7、運用者の判断）。
     "timing": ["days_since_disc", "days_since_fy"],
+    # --- 2026-09-22 に足した8本（research/extra_features.py）--- #
+    # 1本ずつ検証せず、全部入れてから3モデル×5分割で一括評価する。
+    # 取り込みが届いていない列は全欠測になるだけで、学習は落ちない。
+    #: 予想ベースの指標（/equities/valuation）。自前に対応が無い新しい情報
+    "fwd": ["jq_fwdeps", "jq_fwdper", "jq_fwdroe", "jq_fwd_earnings_yield",
+            "jq_roe_gap", "jq_per_gap"],
+    #: 大量保有報告書。前回比があるので「買い増した」がイベントで取れる
+    "holders_lvs": ["lvs_days", "lvs_ratio", "lvs_ratio_chg",
+                    "lvs_n_20", "lvs_n_60", "lvs_n_250"],
+    #: 大株主10名の集中度と主体の内訳（有報ベース、年1回）
+    "holders_major": ["mjr_days", "mjr_top1", "mjr_top10", "mjr_n", "mjr_conc",
+                      "mjr_trust", "mjr_indiv"],
+    #: 政策保有株。売却はガバナンス改善のシグナルとして読まれる
+    "holders_cross": ["xh_days", "xh_iss", "xh_bookval", "xh_dec_amt",
+                      "xh_inc_cost", "xh_net", "xh_bookval_r", "xh_net_r"],
+    #: 信用規制。規制がかかると値動きの性質が変わる
+    "margin_alert": ["alert_days", "alert_longoutratio", "alert_shrtoutratio",
+                     "alert_slratio"],
+    #: 次の決算まで何日か。days_since_disc の裏返し
+    "earn_ahead": ["days_to_earn"],
+    #: 市場全体の需給。地合い11列は指数のリターンだけなので別の軸になる
+    "flow": ["short_ratio", "short_ratio_20",
+             "inv_foreign", "inv_foreign_4w", "inv_trust", "inv_trust_4w",
+             "inv_indiv", "inv_indiv_4w", "inv_prop", "inv_prop_4w",
+             "inv_busco", "inv_busco_4w"],
 }
 
 #: 横断面正規化（同じ日付内でのパーセンタイル順位）を作る対象の列。
@@ -192,6 +217,14 @@ ALL_GROUPS: List[str] = [
     "volume", "liquidity", "supply", "progress", "valuation", "dividend",
     "cashflow", "efficiency", "guidance", "sector", "turnaround", "scale",
     "sector_index", "market", "timing",
+]
+
+#: 2026-09-22 に足したぶん。`all` には入れず、A/B の B 側だけで使う。
+#: 一括評価（3モデル×5分割チューニング＋OOF）で採否を決めてから
+#: ALL_GROUPS に入れる。docs/MODEL_ADOPTION_RULES.md の手順に合わせる。
+EXTRA_GROUPS: List[str] = [
+    "fwd", "holders_lvs", "holders_major", "holders_cross",
+    "margin_alert", "earn_ahead", "flow",
 ]
 
 #: 実験用のプリセット。グループ名の並びで指定する。
@@ -242,6 +275,16 @@ PRESETS: Dict[str, List[str]] = {
     "all_no_sector_index": [g for g in ALL_GROUPS if g != "sector_index"],
     # 開示のタイミングを抜いた全部。実験27・27b の腕 A（151列）を再現する
     "all_no_timing": [g for g in ALL_GROUPS if g != "timing"],
+
+    # --- 2026-09-22 に足した8本の一括評価用（実験39）--- #
+    # A = all（153列、いまの本番）/ B = all_plus（197列）
+    # 1本ずつではなく全部入れて、3モデル×5分割チューニング＋OOF で判定する
+    "all_plus": ALL_GROUPS + EXTRA_GROUPS,
+    # 内訳を見たいとき用。どの塊が効いたかを切り分ける
+    "all_fwd": ALL_GROUPS + ["fwd"],
+    "all_holders": ALL_GROUPS + ["holders_lvs", "holders_major", "holders_cross"],
+    "all_flow": ALL_GROUPS + ["flow", "margin_alert"],
+    "all_earn": ALL_GROUPS + ["earn_ahead"],
 
     # --- 決算を「変化」だけで組むセット --- #
     # 絶対水準（ROE 何%、営業利益率 何%）ではなく、

@@ -27,6 +27,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import features  # noqa: E402
+import extra_features  # noqa: E402
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_data")
 
@@ -2050,6 +2051,20 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
         if n:
             print(f"[filter] {name} > {cap:g} を欠測に: {n:,}件"
                   f"（分母が丸め誤差レベル。逆数側は残している）")
+
+    # --- 2026-09-22 に足した8本から作る特徴量 --- #
+    #
+    # 取り込みが届いていない種別は列が空になるだけで、ここは落ちない。
+    # 時価総額・株価・per・ROE_q0 を使うので、バリュエーションの後に置く。
+    extra = extra_features.attach(samples, DATA_DIR)
+    if extra.shape[1]:
+        dup = [c for c in extra.columns if c in samples.columns]
+        if dup:
+            # 同名の列を黙って上書きしない。気づけない形で値が変わる
+            print(f"[extra] 既存と同名の列は捨てる: {dup}")
+            extra = extra.drop(columns=dup)
+        samples = pd.concat([samples, extra], axis=1)
+        print(f"[extra] {extra.shape[1]}列を追加")
 
     # --- 時価総額の帯で絞る（設定されている場合のみ）--- #
     # 基準日時点で判定する。将来の時価総額は使わない。
