@@ -387,3 +387,43 @@ Claude の作業環境からは公式ドキュメントに到達できない（e
 
 `/bulk`、`/content/drive`、`/derivatives/futures`、`/derivatives/options`、`/equities/ownership`、`/equities/shareholders`、`/equities/trades`、`/examples`、`/fins/announcement`、`/fins/consensus`、`/fins/disclosure`、`/fins/forecast`、`/fins/fs_details`、`/fins/statements`、`/go/pkg/mod`、`/indices/prices`、`/indices/topix`、`/kaggle/input`、`/listed/info`、`/markets/ownership`、`/markets/short-selling`、`/markets/short_selling`、`/markets/short_selling_positions`、`/markets/trades-spec`、`/markets/trades_spec`、`/markets/trading_calendar`、`/markets/weekly_margin_interest`、`/prices/daily_quotes`、`/prices/prices_am`、`/token/auth_refresh`、`/token/auth_user`
 
+### 運用者の3つの問いへの答え（2026-09-22、4回目で確定）
+
+| 問い | 答え | エンドポイント |
+|---|---|---|
+| **株主構成** | **取れる** | `/edinet/major-shareholders`（大株主）、`/edinet/large-volume-shareholders`（大量保有報告書）、`/edinet/cross-shareholdings`（政策保有）、`/equities/investor-types`（投資部門別売買） |
+| **アナリスト予想** | **予想ベースの指標は取れる** | `/equities/valuation` の `FwdEPS` / `FwdPER` / `FwdROE`。ただし**コンセンサスかは未確認**（会社予想由来の可能性がある。中身を突き合わせて確かめること） |
+| **適時開示の本文** | **取れない** | `/fins/earnings-date`（発表**予定日**）と `/equities/earnings-calendar` はある。本文そのものは依然として無い |
+
+**前の節で「J-Quants に株主構成は無い」と書いたのは誤り。** `/edinet/` という
+グループが在り、大株主も大量保有報告書も入っていた。名前を当てずっぽうで
+叩いていたので見つけられなかっただけ。
+
+### 使えるのに使っていないもの（優先度つき）
+
+| 優先 | パス | 件数 | 中身 | なぜ効きそうか |
+|---|---|---:|---|---|
+| **1** | `/markets/calendar` | 4,118 | `Date` `HolDiv` | **営業日カレンダー。** 2026-09-22 に予測が落ちたのは、鮮度チェックが祝日を知らず連休を「取り込み障害」と誤判定したため。これを取り込めば根本的に直る |
+| **2** | `/equities/valuation` | 4,359/日 | `BPS` `EPS` **`FwdEPS`** `MktCap` `PBR` `PER` **`FwdPER`** `ROE` **`FwdROE`** | PER/PBR/ROE は今すべて自前計算。置き換えれば欠測が減る。`Fwd*` 3本は**まったく新しい情報** |
+| **3** | `/edinet/large-volume-shareholders` | 47/日 | `TotalShsRatio` **`TotalShsRatioLast`** `TotalShsHeld` `ChgRsn` `RptOblgDate` | 大量保有報告書。前回比があるので「**誰かが5%超を買い増した**」がイベントとして取れる。高値更新との関係は仮説として筋が良い |
+| **4** | `/equities/investor-types` | 2,377 | `Frgn*`（外国人）`InvTr*`（投信）`Ind*`（個人）`Prop*`（自己）`Bank*` `InsCo*` … 各 Buy/Sell/Bal/Tot | 投資部門別売買。地合い11列は指数のリターンだけなので、**主体別の需給**は新しい軸 |
+| 5 | `/markets/short-sale-report` | 22/銘柄 | `ShrtPosShares` `ShrtPosToSO` `FundName` `PrevRptRatio` | 空売り残高（ファンド名まで）。`credit_ratio` より直接的 |
+| 6 | `/markets/short-ratio` | 34 | `S33` `SellExShortVa` `ShrtWithResVa` `ShrtNoResVa` | 業種別の空売り比率 |
+| 7 | `/markets/margin-alert` | 194 | `TSEMrgnRegCls` `PubReason` `SLRatio` … | 信用規制。規制がかかった銘柄は値動きが変わる |
+| 8 | `/fins/earnings-date` | 21/日 | `SchDate`（予定）`PubDate`（実績） | **次の決算までの日数**が作れる。いまは `days_since_disc`（前回からの日数）だけ |
+| 9 | `/edinet/major-shareholders` | 68/日 | `Hldrs`（保有者）`FilerName` `PerSt`/`PerEn` | 大株主（有報ベース、年1回） |
+| 10 | `/indices/bars/daily/topix` | 2,441 | `O` `H` `L` `C` | TOPIX。いまは ETF から代用している |
+
+### 探し方の記録（同じ失敗を3回した）
+
+| 回 | やり方 | 結果 |
+|---|---|---|
+| 1 | エンドポイント名を思いついて並べる | 候補10本すべて「存在しない」。何の証明にもならず |
+| 2 | 公式ドキュメント（GitBook）から拾う | 全URLが同じ 11,154バイト。本文を JavaScript で描くので中身が無い |
+| 3 | 公式クライアントの**置き場所を決め打って**取りに行く | `client.py` は 404。ファイル一覧だけ取れて、最上位のグループ名7本 |
+| 4 | org → リポジトリ一覧 → ファイル一覧 → **ソース本体**と辿る | **46本発見、17本が OK** |
+
+1・3 はどちらも「名前や場所を当てる」やり方で、外れても外れたことが分からない。
+**当てずに辿る**形にして初めて出た。`research/probe_endpoints.py` はこの形で
+書いてある。再実行は `Probe Endpoints`（手動起動）。
+
