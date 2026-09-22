@@ -3,11 +3,18 @@
 実験スクリプトが学習器に渡すパラメータの形を守っているかの単体テスト。
 
 実害があった（2026-09-22、実験39 の空回し）:
-  探索の記録は {"params": {...}, "_cv": {...}} という入れ子で持つ。
-  これを**ほどかずに** LightGBM へ渡すと
-    TypeError: Unknown type of parameter:params, got:dict
-  で落ちる。実験27 は呼び出し側でほどいていたが、実験39 は忘れていた。
-  3モデル×3腕の長い実行の途中で落ちるため、事前に押さえる価値がある。
+  1. 探索の記録は {"params": {...}, "_cv": {...}} という入れ子で持つ。
+     これを**ほどかずに** LightGBM へ渡すと
+       TypeError: Unknown type of parameter:params, got:dict
+     で落ちる。実験27 は呼び出し側でほどいていたが、実験39 は忘れていた。
+  2. 表示側が metrics() の返す形を取り違えていた。実際は平らな辞書で
+     `auc` も `label_rate` も入れ子も無いのに、m['auc'] を読んで
+       KeyError: 'auc'
+     で落ちた。腕Aの1本目が終わった**直後**に落ちるので、学習を
+     やり直す羽目になる。
+
+  どちらも3モデル×3腕の長い実行の途中で落ちる類なので、
+  事前に押さえる価値がある。
 
   python3 tests/test_exp_params.py
 """
@@ -23,6 +30,7 @@ import pandas as pd  # noqa: E402
 
 import e19_freshdata as E19  # noqa: E402
 import e27_timing_multi as E27  # noqa: E402
+import e25_auc_noise as E25  # noqa: E402
 import e39_extra_multi as E39  # noqa: E402
 
 
@@ -74,6 +82,52 @@ class 探索の記録をほどく(unittest.TestCase):
             got = self.run_arm(algo, {"params": {"a": 1}, "_cv": {"b": 2}})
             self.assertNotIn("params", got, algo)
             self.assertNotIn("_cv", got, algo)
+
+
+class 表示が読む鍵(unittest.TestCase):
+    """metrics() が実際に返す鍵だけで、表の1行を組み立てられること。
+
+    metrics() は平らな辞書を返す
+      pr_auc / roc_auc / day_auc / lift
+      ret_o1_20_mean / _won / _n / _worst（ret_o1_40 も同じ形）
+    """
+
+    def oof(self, n=2000, seed=0):
+        import numpy as np
+        rng = np.random.default_rng(seed)
+        return pd.DataFrame({
+            "Code": [f"{1000 + i % 50}0" for i in range(n)],
+            "Date": (pd.to_datetime("2024-01-01")
+                     + pd.to_timedelta(rng.integers(0, 400, n), "D")),
+            "label": rng.integers(0, 2, n),
+            "ret_o1_20": rng.normal(0, 5, n),
+            "ret_o1_40": rng.normal(0, 7, n),
+            "score": rng.random(n),
+            "fold": rng.integers(0, 5, n),
+        })
+
+    def test_1行を組み立てられる(self):
+        m = E25.metrics(self.oof())
+        got = E39.line("腕", 205, m)                 # KeyError が出たら失敗
+        self.assertIn("205", got)
+        self.assertTrue(got.strip().startswith("腕"))
+
+    def test_metrics_は平らな辞書(self):
+        m = E25.metrics(self.oof())
+        for k, v in m.items():
+            self.assertNotIsInstance(v, dict, f"{k} が入れ子になっている")
+
+    def test_見出しと本体の幅がそろう(self):
+        m = E25.metrics(self.oof())
+        self.assertEqual(len(E39.HEAD), len(E39.line("x" * 26, 205, m)))
+
+    def test_CSV_に入れる列が_metrics_と同じ鍵(self):
+        """rows へ **m で流し込むので、入れ子が混ざると壊れる。"""
+        m = E25.metrics(self.oof())
+        row = {"algo": "lgbm", "arm": "A", "ncol": 205, "label_rate": 0.17, **m}
+        pd.DataFrame([row])                          # 例外が出たら失敗
+        self.assertIn("ret_o1_20_mean", row)
+        self.assertNotIn("ret_o1_20", row)
 
 
 class 本番パラメータの形(unittest.TestCase):

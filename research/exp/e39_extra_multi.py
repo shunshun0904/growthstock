@@ -56,7 +56,7 @@ import tuning_multi as TM  # noqa: E402
 import train_model as T  # noqa: E402
 import e19_freshdata as E19  # noqa: E402
 import e27_timing_multi as E27  # noqa: E402
-from e25_auc_noise import OUTCOMES, average, metrics  # noqa: E402
+from e25_auc_noise import average, metrics  # noqa: E402
 
 MODELS = ("lgbm", "xgb", "cat")
 SEEDS3 = E27.SEEDS3
@@ -132,17 +132,20 @@ def oof_arm(algo: str, tag: str, df: pd.DataFrame, cols: list,
     return average(oofs)
 
 
-HEAD = (f"  {'腕':<26}{'列':>5}{'PR-AUC':>9}{'AUC':>8}{'正例率':>8}"
-        f"{'窓平均超過':>11}{'SE':>6}{'勝窓':>7}{'最悪':>9}")
+# 列は e25_auc_noise.metrics() が実際に返す鍵に合わせる。
+# metrics() は平らな辞書を返し、`auc` も `label_rate` も入れ子も持たない
+#   pr_auc / roc_auc / day_auc / lift
+#   ret_o1_20_mean / _won / _n / _worst（ret_o1_40 も同じ形）
+HEAD = (f"  {'腕':<26}{'列':>5}{'PR-AUC':>9}{'リフト':>7}{'ROC':>8}{'日内':>8}"
+        f"{'窓平均超過':>12}{'勝窓':>7}{'最悪':>10}")
 
 
 def line(name: str, ncol: int, m: dict) -> str:
-    a = m.get("ret_o1_20", {})
-    return (f"  {name:<26}{ncol:>5}{m['pr_auc']:>9.4f}{m['auc']:>8.4f}"
-            f"{m['label_rate']*100:>7.1f}%{a.get('fold_mean', float('nan')):>+10.2f}pt"
-            f"{a.get('se', float('nan')):>6.2f}"
-            f"{a.get('won', 0):>4}/{a.get('n_folds', 0):<2}"
-            f"{a.get('worst', float('nan')):>+8.2f}pt")
+    return (f"  {name:<26}{ncol:>5}{m['pr_auc']:>9.4f}{m['lift']:>6.2f}x"
+            f"{m['roc_auc']:>8.4f}{m['day_auc']:>8.4f}"
+            f"{m['ret_o1_20_mean']:>+10.2f}pt"
+            f"{int(m['ret_o1_20_won']):>4}/{int(m['ret_o1_20_n']):<2}"
+            f"{m['ret_o1_20_worst']:>+8.2f}pt")
 
 
 def main() -> int:
@@ -191,10 +194,8 @@ def main() -> int:
             o = oof_arm(algo, tag, df, cols, par)
             m = metrics(o)
             oofs_by_arm.setdefault(tag, {})[algo] = o
-            rows.append({"algo": algo, "arm": tag, "ncol": len(cols), **{
-                k: v for k, v in m.items() if not isinstance(v, dict)},
-                **{f"{oc}_fold_mean": m.get(oc, {}).get("fold_mean")
-                   for oc in OUTCOMES}})
+            rows.append({"algo": algo, "arm": tag, "ncol": len(cols),
+                         "label_rate": float(o["label"].mean()), **m})
             print(line(f"{algo} {tag}", len(cols), m))
         print()
     pd.DataFrame(rows).to_csv(os.path.join(OOF_DIR, "e39_arms.csv"), index=False)
@@ -229,7 +230,7 @@ def main() -> int:
         o = oof_arm("lgbm", f"p_{preset}", df, cols, pa)
         m = metrics(o)
         rows.append({"algo": "lgbm", "arm": f"preset:{preset}", "ncol": len(cols),
-                     **{k: v for k, v in m.items() if not isinstance(v, dict)}})
+                     "label_rate": float(o["label"].mean()), **m})
         print(line(preset, len(cols), m))
     pd.DataFrame(rows).to_csv(os.path.join(OOF_DIR, "e39_arms.csv"), index=False)
     log(f"記録: {OOF_DIR}/e39_*")
