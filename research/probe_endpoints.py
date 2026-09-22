@@ -50,22 +50,43 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), "scripts"))
 
 API_BASE = "https://api.jquants.com/v2"
+#: v1 も生きている可能性がある。v2 で「無い」ものだけ v1 でも試す
+API_BASE_V1 = "https://api.jquants.com/v1"
+#: 取得した本文を残す先（artifact に上げて、次の周回で中身を確かめる）
+SAVE_DIR = os.path.join(HERE, "_probe_docs")
 UA = "growthstock-probe/1.0"
 TIMEOUT = 30
 PAUSE = 0.25
 
-#: 一覧が載っていそうな場所。到達できなければ黙って飛ばす
+#: 一覧が載っていそうな場所。到達できなければ黙って飛ばす。
+#:
+#: 1回目（2026-09-22）は GitBook の URL がどれも同じ 11,154 バイトを返した。
+#: 本文を JavaScript で描くので、生の HTML にエンドポイント名が無い。
+#: **公式のクライアントライブラリのソース**なら、URL が文字列として
+#: 直に書かれているので確実に拾える。そちらを主にする。
 DOC_SOURCES = [
+    # 公式クライアント（J-Quants 公式の GitHub org）。ここが本命
+    "https://raw.githubusercontent.com/J-Quants/jquants-api-client-python/main/jquantsapi/client.py",
+    "https://raw.githubusercontent.com/J-Quants/jquants-api-client-python/master/jquantsapi/client.py",
+    "https://raw.githubusercontent.com/J-Quants/jquants-api-client-python/main/jquantsapi/constants.py",
+    "https://raw.githubusercontent.com/J-Quants/jquants-api-client-R/main/R/api.R",
+    "https://api.github.com/repos/J-Quants/jquants-api-client-python/git/trees/main?recursive=1",
+    "https://api.github.com/orgs/J-Quants/repos?per_page=100",
+    # 近年のドキュメントサイトが機械可読用に置くもの
+    "https://jpx.gitbook.io/j-quants-ja/llms.txt",
+    "https://jpx.gitbook.io/j-quants-ja/llms-full.txt",
+    "https://jpx-jquants.com/llms.txt",
+    # 仕様ファイル
     "https://api.jquants.com/v2/openapi.json",
-    "https://api.jquants.com/v2/swagger.json",
-    "https://api.jquants.com/openapi.json",
+    "https://api.jquants.com/v1/openapi.json",
+    # 素の HTML（ブラウザ相当の UA で再挑戦する）
     "https://jpx-jquants.com/",
-    "https://jpx.gitbook.io/j-quants-ja",
     "https://jpx.gitbook.io/j-quants-ja/api-reference",
-    "https://jpx.gitbook.io/j-quants-en/api-reference",
-    "https://jpx.gitbook.io/sitemap.xml",
-    "https://jpx.gitbook.io/j-quants-ja/sitemap.xml",
 ]
+
+#: ブラウザ相当。bot として弾かれる先があるので、UA を変えて1回だけ試す
+BROWSER_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+              "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36")
 
 #: 手で思いついたぶん。発見できた一覧と合わせて叩く
 HAND = [
@@ -78,9 +99,17 @@ HAND = [
     "/indices/topix", "/indices/prices",
 ]
 
-#: パスらしき文字列。/v1/ /v2/ で始まるものと、api-reference 配下の見出し
+#: パスらしき文字列。3通りで拾う
+#:   PATH_RE  /v1/... /v2/... と書かれているもの
+#:   QUOTE_RE クライアントのソースで "/listed/info" のように引用符で括られたもの
+#:   REF_RE   ドキュメントの api-reference/xxx という見出し
 PATH_RE = re.compile(r"/v[12]/[a-z0-9][a-z0-9_\-/]{2,60}")
+QUOTE_RE = re.compile(r"""['"](/[a-z][a-z0-9_\-]{1,24}(?:/[a-z0-9][a-z0-9_\-]{1,24}){1,3})['"?]""")
 REF_RE = re.compile(r"api-reference/([a-z0-9][a-z0-9_\-/]{2,60})")
+
+#: 引用符から拾うと紛れ込む、API とは関係の無い接頭辞
+NOT_API = ("/usr", "/tmp", "/etc", "/home", "/var", "/opt", "/dev", "/proc",
+           "/data", "/docs", "/src", "/lib", "/bin", "/app")
 
 #: 叩くときに順に試すパラメータの形。400 が返ったら次を試す
 PARAM_SHAPES: List[Tuple[str, dict]] = [
@@ -107,9 +136,9 @@ class Redactor:
 
 
 def fetch(url: str, headers: Optional[dict] = None,
-          timeout: int = TIMEOUT) -> Tuple[int, str]:
+          timeout: int = TIMEOUT, ua: str = UA) -> Tuple[int, str]:
     """(HTTPステータス, 本文) を返す。落ちたら (0, 理由)。"""
-    req = urllib.request.Request(url, headers={"User-Agent": UA, **(headers or {})})
+    req = urllib.request.Request(url, headers={"User-Agent": ua, **(headers or {})})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as res:
             return res.status, res.read().decode("utf-8", "replace")
@@ -131,30 +160,50 @@ def discover(red: Redactor) -> Tuple[List[str], List[dict]]:
     """
     found: set[str] = set()
     log: List[dict] = []
+    os.makedirs(SAVE_DIR, exist_ok=True)
     for url in DOC_SOURCES:
         status, body = fetch(url)
+        if status in (401, 403, 406) or not body:
+            # bot として弾かれたのかもしれない。UA を変えて1回だけ
+            status, body = fetch(url, ua=BROWSER_UA)
         hits: set[str] = set()
         if status == 200 and body:
             hits |= {m.rstrip("/.") for m in PATH_RE.findall(body)}
+            hits |= {m.rstrip("/.") for m in QUOTE_RE.findall(body)}
+            hits |= {"/" + m.rstrip("/.") for m in REF_RE.findall(body)}
             # OpenAPI なら paths キーが正解
             if body.lstrip().startswith("{"):
                 try:
                     obj = json.loads(body)
                     if isinstance(obj.get("paths"), dict):
                         hits |= {k for k in obj["paths"] if k.startswith("/")}
+                    # GitHub の tree / repos 応答は path / full_name を持つ
+                    for t in (obj.get("tree") or []):
+                        if isinstance(t, dict) and str(t.get("path", "")).endswith(
+                                (".py", ".R", ".json", ".yaml", ".yml")):
+                            hits |= set()          # 一覧だけ残す（下の save で見る）
                 except json.JSONDecodeError:
                     pass
-            hits |= {"/" + m.rstrip("/.") for m in REF_RE.findall(body)}
+            # 次の周回で中身を確かめられるよう、取れたものは artifact に残す
+            name = re.sub(r"[^A-Za-z0-9._-]", "_", url)[-120:]
+            with open(os.path.join(SAVE_DIR, name), "w", encoding="utf-8") as fh:
+                fh.write(red(body))
         found |= hits
         log.append({"url": url, "status": status, "found": len(hits),
                     "bytes": len(body) if status == 200 else 0})
-        print(f"  {status:>3} {len(hits):>4}本  {red(url)}")
+        print(f"  {status:>3} {len(body) if status == 200 else 0:>8,}B "
+              f"{len(hits):>4}本  {red(url)}")
     # /v1/ /v2/ の前置きを外して、叩く形（/fins/summary）に揃える
     norm = set()
     for p in found:
         p = re.sub(r"^/v[12]", "", p)
-        if p.startswith("/") and 3 <= len(p) <= 64 and not p.endswith(("}", ".json")):
-            norm.add(p)
+        if not p.startswith("/") or not (3 <= len(p) <= 64):
+            continue
+        if p.endswith(("}", ".json", ".py", ".md", ".txt", ".yml", ".yaml")):
+            continue
+        if p.startswith(NOT_API):
+            continue
+        norm.add(p)
     return sorted(norm), log
 
 
@@ -194,6 +243,24 @@ def probe(paths: List[str], key: str, red: Redactor) -> List[dict]:
                 break
             # 400 系は「パラメータが足りない」= 在る。次の形を試す
             rec.update(kind="NEEDS_PARAMS", shape=shape, status=status, msg=msg)
+        # v2 に無いものは v1 でも試す（v1 が生きている可能性がある）
+        if rec.get("kind") == "NOT_FOUND":
+            for shape, params in PARAM_SHAPES[:2]:
+                url = API_BASE_V1 + path
+                if params:
+                    url += "?" + "&".join(f"{k}={v}" for k, v in params.items())
+                time.sleep(PAUSE)
+                status, body = fetch(url, headers)
+                try:
+                    msg = str(json.loads(body).get("message", ""))[:200]
+                except Exception:                            # noqa: BLE001
+                    msg = body[:200]
+                if status == 200:
+                    rec.update(kind="OK(v1)", shape=shape, status=status, msg="")
+                    break
+                if "not available on your subscription" in msg.lower():
+                    rec.update(kind="PLAN(v1)", shape=shape, status=status, msg=msg)
+                    break
         out.append(rec)
         print(f"  {rec.get('kind','?'):<13}{rec.get('status',''):>4} "
               f"{path:<40}{red(rec.get('msg',''))[:90]}")
@@ -210,11 +277,13 @@ def render(res: List[dict], log: List[dict], red: Redactor) -> str:
          "（`research/probe_endpoints.py` / `Probe Endpoints`）。",
          "思いついた名前を並べるのではなく、取ってきた一覧を全部叩いている。", "",
          "#### 一覧の取得元", "",
-         "| 取得元 | HTTP | 拾えたパス |", "|---|---:|---:|"]
+         "| 取得元 | HTTP | 本文 | 拾えたパス |", "|---|---:|---:|---:|"]
     for e in log:
-        L.append(f"| `{red(e['url'])}` | {e['status'] or '到達不可'} | {e['found']} |")
+        L.append(f"| `{red(e['url'])}` | {e['status'] or '到達不可'} | "
+                 f"{e['bytes']:,}B | {e['found']} |")
     L += ["", f"叩いたパス **{len(res)}本**"
-          f"（OK {len(rows('OK'))} / 契約不足 {len(rows('PLAN'))} / "
+          f"（OK {len(rows('OK'))} / v1でOK {len(rows('OK(v1)'))} / "
+          f"契約不足 {len(rows('PLAN')) + len(rows('PLAN(v1)'))} / "
           f"存在しない {len(rows('NOT_FOUND'))} / "
           f"引数不足 {len(rows('NEEDS_PARAMS'))}）", ""]
 
@@ -223,11 +292,16 @@ def render(res: List[dict], log: List[dict], red: Redactor) -> str:
         k = ", ".join(f"`{c}`" for c in r.get("keys", [])[:8])
         L.append(f"| `{r['path']}` | {r.get('shape')} | {r.get('rows',0)} | {k} |")
 
+    if rows("OK(v1)"):
+        L += ["", "#### v2 には無いが v1 では使える", "", "| パス | 引数 |", "|---|---|"]
+        for r in sorted(rows("OK(v1)"), key=lambda x: x["path"]):
+            L.append(f"| `{r['path']}` | {r.get('shape')} |")
+
     L += ["", "#### 在るが契約が足りない（プレミアムで開く）", "",
           "| パス | メッセージ |", "|---|---|"]
-    for r in sorted(rows("PLAN"), key=lambda x: x["path"]):
+    for r in sorted(rows("PLAN") + rows("PLAN(v1)"), key=lambda x: x["path"]):
         L.append(f"| `{r['path']}` | {red(r.get('msg',''))[:110]} |")
-    if not rows("PLAN"):
+    if not (rows("PLAN") or rows("PLAN(v1)")):
         L.append("| （該当なし） | |")
 
     if rows("NEEDS_PARAMS"):

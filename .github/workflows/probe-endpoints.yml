@@ -75,5 +75,6 @@ jobs:
           name: probe-endpoints
           path: |
             research/probe_endpoints.json
+            research/_probe_docs/
             probe_endpoints.log
           if-no-files-found: warn
