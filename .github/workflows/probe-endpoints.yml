@@ -17,7 +17,7 @@ on:
         default: false
       limit:
         description: '叩く本数の上限'
-        default: '120'
+        default: '200'
 
 permissions:
   contents: write
@@ -43,10 +43,14 @@ jobs:
       - name: Probe
         env:
           JQUANTS_API: ${{ secrets.JQUANTS_API }}
+          # 公式クライアントのソースを辿るのに使う。api.github.com の
+          # 未認証は 60回/時 で足りない。スクリプト側で github.com 系にしか
+          # 送らないようにしてある
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           python3 research/probe_endpoints.py \
             ${{ inputs.no_doc == true && '--no-doc' || '' }} \
-            --limit "${{ inputs.limit || 120 }}" 2>&1 | tee probe_endpoints.log
+            --limit "${{ inputs.limit || 200 }}" 2>&1 | tee probe_endpoints.log
 
       - name: Commit
         run: |

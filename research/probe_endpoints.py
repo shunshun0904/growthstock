@@ -88,6 +88,17 @@ DOC_SOURCES = [
 BROWSER_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36")
 
+#: 公式クライアントが置かれている GitHub の org
+GH_ORG = "J-Quants"
+GH_API = "https://api.github.com"
+GH_RAW = "https://raw.githubusercontent.com"
+#: 中身を読むファイルの拡張子。URL が文字列として書かれていそうなもの
+CODE_EXT = (".py", ".r", ".json", ".yaml", ".yml", ".md", ".ts", ".js", ".go",
+            ".java", ".cs", ".rb", ".ipynb")
+#: 取りに行くファイル数の上限。GitHub を叩きすぎない
+MAX_REPOS = 12
+MAX_FILES = 80
+
 #: 手で思いついたぶん。発見できた一覧と合わせて叩く
 HAND = [
     "/fins/summary", "/fins/details", "/fins/dividend", "/fins/announcement",
@@ -152,6 +163,70 @@ def fetch(url: str, headers: Optional[dict] = None,
         return 0, f"{type(exc).__name__}: {exc}"
 
 
+def gh(url: str, token: str) -> Tuple[int, str]:
+    """
+    GitHub を叩く。**トークンは github.com 系にしか送らない。**
+    他所へ送ると秘密が漏れる。
+    """
+    headers = {"Accept": "application/vnd.github+json"}
+    host_ok = url.startswith((GH_API + "/", GH_RAW + "/"))
+    if token and host_ok:
+        headers["Authorization"] = f"Bearer {token}"
+    return fetch(url, headers)
+
+
+def crawl_clients(red: Redactor, token: str) -> Tuple[set, List[dict]]:
+    """
+    公式クライアントの**中身**を読んでパスを拾う。
+
+    1回目・2回目は「client.py があるはず」と決め打って 404 になった。
+    置き場所を当てずに、org のリポジトリ一覧 -> 各リポジトリのファイル一覧 ->
+    ソース本体、と辿る。
+    """
+    found: set = set()
+    log: List[dict] = []
+    status, body = gh(f"{GH_API}/orgs/{GH_ORG}/repos?per_page=100", token)
+    repos: List[str] = []
+    if status == 200:
+        try:
+            repos = [r["name"] for r in json.loads(body) if isinstance(r, dict)][:MAX_REPOS]
+        except json.JSONDecodeError:
+            pass
+    print(f"  org のリポジトリ {len(repos)}個: {', '.join(repos[:12])}")
+    files: List[Tuple[str, str, str]] = []          # (repo, branch, path)
+    for repo in repos:
+        for branch in ("main", "master"):
+            st, bd = gh(f"{GH_API}/repos/{GH_ORG}/{repo}/git/trees/{branch}?recursive=1",
+                        token)
+            if st != 200:
+                continue
+            try:
+                tree = json.loads(bd).get("tree", [])
+            except json.JSONDecodeError:
+                break
+            for t in tree:
+                if (isinstance(t, dict) and t.get("type") == "blob"
+                        and str(t.get("path", "")).lower().endswith(CODE_EXT)
+                        and int(t.get("size") or 0) < 400_000):
+                    files.append((repo, branch, t["path"]))
+            break
+    files = files[:MAX_FILES]
+    print(f"  読むファイル {len(files)}本")
+    for repo, branch, path in files:
+        url = f"{GH_RAW}/{GH_ORG}/{repo}/{branch}/{path}"
+        st, bd = gh(url, token)
+        hits: set = set()
+        if st == 200 and bd:
+            hits |= {m.rstrip("/.") for m in PATH_RE.findall(bd)}
+            hits |= {m.rstrip("/.") for m in QUOTE_RE.findall(bd)}
+        if hits:
+            print(f"    {len(hits):>3}本  {repo}/{path}")
+        found |= hits
+        log.append({"url": f"{GH_ORG}/{repo}/{path}", "status": st,
+                    "found": len(hits), "bytes": len(bd) if st == 200 else 0})
+    return found, log
+
+
 def discover(red: Redactor) -> Tuple[List[str], List[dict]]:
     """
     公式ドキュメントからパスらしき文字列を拾う。
@@ -193,6 +268,17 @@ def discover(red: Redactor) -> Tuple[List[str], List[dict]]:
                     "bytes": len(body) if status == 200 else 0})
         print(f"  {status:>3} {len(body) if status == 200 else 0:>8,}B "
               f"{len(hits):>4}本  {red(url)}")
+    # 公式クライアントの中身まで辿る
+    token = os.environ.get("GITHUB_TOKEN", "")
+    print(f"\n  --- 公式クライアントのソースを読む"
+          f"（GITHUB_TOKEN {'あり' if token else 'なし'}）---")
+    try:
+        more, more_log = crawl_clients(red, token)
+        found |= more
+        log += more_log
+    except Exception as exc:                                 # noqa: BLE001
+        print(f"  [warn] 読み取りに失敗（続行する）: {type(exc).__name__}: {red(exc)[:120]}")
+
     # /v1/ /v2/ の前置きを外して、叩く形（/fins/summary）に揃える
     norm = set()
     for p in found:
@@ -204,6 +290,10 @@ def discover(red: Redactor) -> Tuple[List[str], List[dict]]:
         if p.startswith(NOT_API):
             continue
         norm.add(p)
+    # 「/fins」のような最上位のグループ名は、子（/fins/summary）が
+    # 見つかっているなら叩いても意味が無い。残すと表が濁る
+    norm = {p for p in norm
+            if p.count("/") > 1 or not any(q.startswith(p + "/") for q in norm)}
     return sorted(norm), log
 
 
