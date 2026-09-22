@@ -1,7 +1,8 @@
 # 運用手順（実測にもとづく現時点のベスト）2026-09-22
 
 ここまでの実験（`docs/MODEL_SELECTION_EDA.md` 実験29 / `docs/MODEL_DAY_REGIME.md`
-実験30・31 / `docs/MODEL_EXIT_RULES.md` 実験32 / 実験33〜37）から組んだ手順。
+実験30・31 / `docs/MODEL_EXIT_RULES.md` 実験32 / 実験33〜37 /
+`docs/MODEL_FEATURE_EDA.md` 実験40）から組んだ手順。
 **すべて out-of-fold（2021-11〜2026-08、14,966件）の実測で、将来の保証ではない。**
 
 ## 1行でいうと
