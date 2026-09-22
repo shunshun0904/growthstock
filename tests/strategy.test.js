@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   BOOST, STRATEGY, boostPcts, minPct, passesAgree, dayVerdict, strategySignal, exitPlan,
-  freeSlots, pctSpread, laggard, nearMisses,
+  freeSlots, pctSpread, laggard, nearMisses, fundContrib,
 } from '../src/lib/strategy.js';
 
 const cand = (code, pcts, score = 0.5) => ({
@@ -178,4 +178,15 @@ test('nearMisses: 境界（85ちょうどは入る / 90ちょうどは入らな�
   assert.equal(nearMisses([cand('E', { lgbm: 85, xgb: 99, cat: 99 })]).length, 1);
   assert.equal(nearMisses([cand('F', { lgbm: 90, xgb: 99, cat: 99 })]).length, 0);
   assert.equal(nearMisses([cand('G', { lgbm: 84.9, xgb: 99, cat: 99 })]).length, 0);
+});
+
+test('fundContrib: 決算の寄与（水準＋変化）を足す', () => {
+  const c = { contrib: { groups: { '決算（水準）': -0.0075, '決算（変化）': -0.1326,
+                                   '株価・ブレイク': 0.4497 } } };
+  assert.equal(Math.round(fundContrib(c) * 10000) / 10000, -0.1401);
+  // 寄与が無い古い JSON では null（0 と混ぜない）
+  assert.equal(fundContrib({}), null);
+  assert.equal(fundContrib({ contrib: { groups: {} } }), null);
+  // 片方しか無くても足せる
+  assert.equal(fundContrib({ contrib: { groups: { '決算（変化）': 0.25 } } }), 0.25);
 });

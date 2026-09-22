@@ -540,3 +540,5 @@ input[type='range']::-moz-range-thumb {
   .strat-near-row { grid-template-columns: 1fr auto; }
   .strat-near-row > .sub { grid-column: 1 / -1; }
 }
+.strat-fund-down { color: var(--red); }
+.strat-fund-up { color: var(--green); }

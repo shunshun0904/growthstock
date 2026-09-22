@@ -33,6 +33,22 @@ export const BOOST = ['lgbm', 'xgb', 'cat'];
 /** 画面に出す短い呼び名。正本は research/models.py。 */
 export const MODEL_JA = { lgbm: 'LightGBM', xgb: 'XGBoost', cat: 'CatBoost' };
 
+/**
+ * 決算の寄与（水準＋変化）。正本は research/feature_dict.py の MACRO。
+ *
+ * 決算は「モデルの外の材料」ではない。本番153列のうち118列（77%）が
+ * 決算由来なので、候補を見て別途決算を確かめるのは、モデルが既に読んだ
+ * ものを読み直すことになる。どちらに効いているかを画面に出す。
+ */
+export const FUND_GROUPS = ['決算（水準）', '決算（変化）'];
+
+export function fundContrib(candidate) {
+  const g = candidate?.contrib?.groups;
+  if (!g) return null;
+  const v = FUND_GROUPS.map((k) => g[k]).filter((x) => Number.isFinite(x));
+  return v.length ? v.reduce((a, b) => a + b, 0) : null;
+}
+
 export const STRATEGY = {
   agreePct: 90,      // 3モデルすべてがこの百分位以上
   strongBreaks: 20,  // この件数以上の発火なら本命

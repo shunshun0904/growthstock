@@ -3,7 +3,7 @@ import { fmt, fmtInt, fmtSigned, fmtOku, fmtDate, fmtDateTime, DASH } from '../l
 import { bandColor, bandLabel, pctColor, modelRows, MODEL_SHORT, MODEL_FAMILY,
   FAMILY_JA, marketTone, candidateToStock } from '../lib/predictions.js';
 import { STRATEGY, BOOST, strategySignal, exitPlan, nearMisses,
-         MODEL_JA } from '../lib/strategy.js';
+         MODEL_JA, fundContrib } from '../lib/strategy.js';
 
 /**
  * ブレイク予測タブ。
@@ -234,11 +234,33 @@ function NearMiss({ near }) {
                 : `3モデルがほぼ揃っている（幅 ${fmt(c.spread, 1)}pt）。`
                   + 'この形は実測 +2.70%（118件）と基準通過組に近いが、'
                   + '事後に見つけた区分けなので基準は動かしていない'}
+              <FundNote c={c} />
             </span>
           </div>
         ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * 決算がスコアを押しているか引いているか。
+ *
+ * 「決算は悪くないのに」と思ったときに見る欄。決算は153列中118列（77%）を
+ * 占めるので、スコアは既に決算を読んだ結果になっている。
+ */
+function FundNote({ c }) {
+  const f = fundContrib(c);
+  if (f === null) return null;
+  return (
+    <>
+      {' '}
+      <span className={f < 0 ? 'strat-fund-down' : 'strat-fund-up'}>
+        {/* 寄与は対数オッズ。% ではないので単位は付けない */}
+        決算の寄与 {fmtSigned(f, 2, '')}
+        {f < 0 ? '（決算が引いている）' : '（決算が押している）'}
+      </span>
+    </>
   );
 }
 
