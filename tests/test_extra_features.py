@@ -174,10 +174,16 @@ class TestGroups(unittest.TestCase):
             self.assertNotIn(g, F.ALL_GROUPS, f"{g} が all に入っている")
 
     def test_AB_のプリセットがある(self):
+        # 列数は直書きしない。グループを足すたびにテストを直すことになり、
+        # そのとき「なぜこの数か」を確かめずに数字だけ合わせてしまう。
+        # A を真に含むこと と 足した列がちょうど乗っていることを見る
         a, b = F.columns("all"), F.columns("all_plus")
-        self.assertEqual(len(a), 153)
-        self.assertEqual(len(b), 197)
-        self.assertTrue(set(a) < set(b), "B は A を含んでいない")
+        self.assertEqual(len(a), 153, "本番の列数が変わっている")
+        self.assertTrue(set(a) < set(b), "B は A を真に含んでいない")
+        extra = {c for g in F.EXTRA_GROUPS for c in F.GROUPS[g]}
+        self.assertEqual(set(b) - set(a), extra,
+                         "B と A の差が EXTRA_GROUPS と一致しない（重複か取りこぼし）")
+        self.assertEqual(len(b), len(a) + len(extra))
 
     def test_グループの列名が重複しない(self):
         seen = {}
@@ -189,3 +195,77 @@ class TestGroups(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestForecastRevisions(unittest.TestCase):
+    """
+    予想修正イベント（DocType）。追加の取得はいらない塊。
+
+    既存の guidance_revision が修正の「幅」なのに対し、こちらは
+    「発生とタイミング」。時点整合（開示日より前に見えない）を固定する。
+    """
+
+    def setUp(self):
+        import build_dataset as B
+        self.B = B
+
+    def fins(self):
+        return pd.DataFrame({
+            "Code": ["13010"] * 4,
+            "DiscDate": [D("2024-05-10"), D("2024-08-05"),
+                         D("2024-09-20"), D("2024-11-01")],
+            "DocType": ["FYFinancialStatements_Consolidated_JP",
+                        "1QFinancialStatements_Consolidated_JP",
+                        "EarnForecastRevision",
+                        "DividendForecastRevision"],
+            "CurFYSt": [D("2023-04-01")] + [D("2024-04-01")] * 3,
+            "FOP": [np.nan, 1000.0, 1200.0, np.nan],
+            "Sales": [5000.0, 1200.0, np.nan, np.nan],
+            "NP": [400.0, 90.0, np.nan, np.nan]})
+
+    def test_修正の前には見えない(self):
+        s = samples(["2024-09-19", "2024-09-20", "2024-09-30"])
+        out = self.B.forecast_revisions(s, self.fins())
+        self.assertTrue(np.isnan(out["days_since_rev"].iloc[0]), "修正前に見えている")
+        self.assertEqual(out["days_since_rev"].iloc[1], 0, "当日は0日")
+        self.assertEqual(out["days_since_rev"].iloc[2], 10)
+
+    def test_上方修正の向きが取れる(self):
+        s = samples(["2024-09-25"])
+        out = self.B.forecast_revisions(s, self.fins())
+        # 1Q の 1000 -> 修正の 1200 で +20%
+        self.assertAlmostEqual(out["rev_pct"].iloc[0], 20.0, places=6)
+        self.assertEqual(out["rev_up"].iloc[0], 1.0)
+
+    def test_配当の修正は別に数える(self):
+        s = samples(["2024-11-05"])
+        out = self.B.forecast_revisions(s, self.fins())
+        self.assertEqual(out["days_since_divrev"].iloc[0], 4)
+        # 業績の修正は 9/20 なので 46日前のまま（配当で上書きしない）
+        self.assertEqual(out["days_since_rev"].iloc[0], 46)
+
+    def test_件数を窓で数える(self):
+        s = samples(["2024-12-01"])
+        out = self.B.forecast_revisions(s, self.fins())
+        self.assertEqual(out["rev_n_250"].iloc[0], 1)
+        self.assertEqual(out["rev_up_n_250"].iloc[0], 1)
+
+    def test_前の予想が無ければ向きは欠測(self):
+        f = self.fins()
+        f.loc[1, "FOP"] = np.nan          # 1Q の予想を消す
+        out = self.B.forecast_revisions(samples(["2024-09-25"]), f)
+        self.assertTrue(np.isnan(out["rev_pct"].iloc[0]), "0 で埋めている")
+        self.assertTrue(np.isnan(out["rev_up"].iloc[0]))
+
+    def test_DocType_が無ければ何も作らない(self):
+        f = self.fins().drop(columns=["DocType"])
+        out = self.B.forecast_revisions(samples(["2024-09-25"]), f)
+        self.assertEqual(out.shape[1], 0)
+
+
+class TestGuidanceGap(unittest.TestCase):
+    """通期決算で会社予想が NxFOP に入る件（実測 FY 87.8% / 1Q 0.0%）。"""
+
+    def test_グループに入っている(self):
+        self.assertIn("revision", F.EXTRA_GROUPS)
+        self.assertIn("guidance_op_growth", F.GROUPS["guidance"])

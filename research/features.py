@@ -174,6 +174,11 @@ GROUPS: Dict[str, List[str]] = {
                      "alert_slratio"],
     #: 次の決算まで何日か。days_since_disc の裏返し
     "earn_ahead": ["days_to_earn"],
+    #: 業績・配当予想の**修正イベント**（DocType。追加の取得はいらない）。
+    #: guidance_revision は修正の「幅」、こちらは「発生とタイミング」
+    "revision": ["days_since_rev", "rev_pct", "rev_up",
+                 "rev_n_60", "rev_n_250", "rev_up_n_250", "rev_dn_n_250",
+                 "days_since_divrev"],
     #: 市場全体の需給。地合い11列は指数のリターンだけなので別の軸になる
     "flow": ["short_ratio", "short_ratio_20",
              "inv_foreign", "inv_foreign_4w", "inv_trust", "inv_trust_4w",
@@ -225,6 +230,8 @@ ALL_GROUPS: List[str] = [
 EXTRA_GROUPS: List[str] = [
     "fwd", "holders_lvs", "holders_major", "holders_cross",
     "margin_alert", "earn_ahead", "flow",
+    # 追加の取得がいらない唯一の塊。DocType は元から保存されていた
+    "revision",
 ]
 
 #: 実験用のプリセット。グループ名の並びで指定する。
@@ -285,6 +292,7 @@ PRESETS: Dict[str, List[str]] = {
     "all_holders": ALL_GROUPS + ["holders_lvs", "holders_major", "holders_cross"],
     "all_flow": ALL_GROUPS + ["flow", "margin_alert"],
     "all_earn": ALL_GROUPS + ["earn_ahead"],
+    "all_revision": ALL_GROUPS + ["revision"],
 
     # --- 決算を「変化」だけで組むセット --- #
     # 絶対水準（ROE 何%、営業利益率 何%）ではなく、

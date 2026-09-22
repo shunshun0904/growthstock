@@ -1204,6 +1204,120 @@ TIMING_CLIP_ANY = 400
 TIMING_CLIP_FY = 800
 
 
+#: 予想修正からの日数の上限。これより古ければ「無い」と同じ扱いにする
+REV_CLIP = 400
+#: 予想修正の件数を数える窓（暦日）
+REV_WINDOWS = (60, 250)
+
+
+def forecast_revisions(samples: pd.DataFrame, fins: pd.DataFrame) -> pd.DataFrame:
+    """
+    業績予想・配当予想の**修正イベント**を各行に付ける。
+
+    なぜ要るか
+    --------
+    `/fins/summary` の DocType には決算短信以外が混ざっている（全期間）:
+
+      EarnForecastRevision          24,293  業績予想の修正
+      DividendForecastRevision       4,174  配当予想の修正
+      REITEarnForecastRevision          612
+      REITDividendForecastRevision       38
+
+    取り込みには入っていたが、特徴量としては一度も使っていなかった。
+    追加の取得はいらない。
+
+    既存の `guidance_revision`（FOP の前回開示比＝修正の**幅**）とは別物で、
+    こちらは修正**イベントの発生とタイミング**を見る。`days_since_disc` は
+    実績（Sales か NP）のある開示だけを数えているので、修正だけの開示は
+    そもそも勘定に入っていない。
+
+    時点整合
+    ------
+    開示日（DiscDate）で merge_asof の backward。当日の開示は 0 日
+    （決算短信は 18:00 過ぎに載り、予測はその後に走る。docs/OPERATIONS.md）。
+
+    向きの出し方
+    ----------
+    修正行の FOP を、同じ事業年度（CurFYSt）の**直前の開示**の FOP と比べる。
+    上方修正なら正、下方修正なら負。前の予想が無ければ欠測（0 にしない）。
+    """
+    out = pd.DataFrame(index=samples.index)
+    if "DocType" not in fins.columns:
+        return out
+    f = fins.copy()
+    f["DiscDate"] = pd.to_datetime(f["DiscDate"], errors="coerce")
+    f = f.dropna(subset=["DiscDate", "Code"]).sort_values(["Code", "DiscDate"])
+    dt_ = f["DocType"].astype(str)
+    is_earn = dt_.str.contains("EarnForecastRevision", na=False)
+    is_div = dt_.str.contains("DividendForecastRevision", na=False)
+
+    # 向き: 同じ事業年度で、直前の開示の予想と比べる
+    if {"FOP", "CurFYSt"} <= set(f.columns):
+        fop = pd.to_numeric(f["FOP"], errors="coerce")
+        prev = fop.groupby([f["Code"], f["CurFYSt"]], sort=False).shift(1)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            f["_rev_pct"] = np.where(prev > 0, fop / prev * 100.0 - 100.0, np.nan)
+    else:
+        f["_rev_pct"] = np.nan
+
+    left = samples[["Code", "Date"]].copy()
+    left["Date"] = pd.to_datetime(left["Date"])
+    left["_i"] = np.arange(len(left))
+    left = left.sort_values("Date")
+
+    for flag, prefix in ((is_earn, "rev"), (is_div, "divrev")):
+        ev = f.loc[flag, ["Code", "DiscDate", "_rev_pct"]].sort_values("DiscDate")
+        if not len(ev):
+            continue
+        ev = ev.rename(columns={"DiscDate": f"_{prefix}_d",
+                                "_rev_pct": f"_{prefix}_pct"})
+        m = pd.merge_asof(left, ev, left_on="Date", right_on=f"_{prefix}_d",
+                          by="Code", direction="backward", allow_exact_matches=True)
+        m = m.sort_values("_i")
+        days = (m["Date"] - m[f"_{prefix}_d"]).dt.days
+        out[f"days_since_{prefix}"] = np.clip(days.to_numpy(), 0, REV_CLIP)
+        if prefix == "rev":
+            out["rev_pct"] = m[f"_{prefix}_pct"].to_numpy()
+            # 向きだけを取り出す。幅が極端でも 1 / 0 に潰れる
+            out["rev_up"] = np.where(np.isfinite(out["rev_pct"]),
+                                     (out["rev_pct"] > 0).astype(float), np.nan)
+
+    # 件数。上方・下方を分けて数える（回数そのものが材料になる）
+    ev = f.loc[is_earn, ["Code", "DiscDate", "_rev_pct"]].copy()
+    if len(ev):
+        for w in REV_WINDOWS:
+            out[f"rev_n_{w}"] = _events_in_window(samples, ev, "DiscDate", w)
+        up = ev[ev["_rev_pct"] > 0]
+        dn = ev[ev["_rev_pct"] < 0]
+        if len(up):
+            out["rev_up_n_250"] = _events_in_window(samples, up, "DiscDate", 250)
+        if len(dn):
+            out["rev_dn_n_250"] = _events_in_window(samples, dn, "DiscDate", 250)
+    return out
+
+
+def _events_in_window(samples: pd.DataFrame, events: pd.DataFrame,
+                      date_col: str, days: int) -> np.ndarray:
+    """(Code, Date) ごとに、過去 days 暦日に起きた events の件数。"""
+    left = samples[["Code", "Date"]].copy()
+    left["Date"] = pd.to_datetime(left["Date"])
+    left["_i"] = np.arange(len(left))
+    ev = events[["Code", date_col]].copy()
+    ev[date_col] = pd.to_datetime(ev[date_col], errors="coerce")
+    ev = ev.dropna(subset=[date_col]).sort_values(date_col)
+    ev["_c"] = ev.groupby("Code", sort=False).cumcount() + 1
+    hi = pd.merge_asof(left.sort_values("Date"), ev, left_on="Date",
+                       right_on=date_col, by="Code", direction="backward",
+                       allow_exact_matches=True).sort_values("_i")["_c"].to_numpy()
+    lo_left = left.assign(_lo=left["Date"] - pd.Timedelta(days=days))
+    lo = pd.merge_asof(lo_left.sort_values("_lo"), ev, left_on="_lo",
+                       right_on=date_col, by="Code", direction="backward",
+                       allow_exact_matches=True).sort_values("_i")["_c"].to_numpy()
+    hi = np.where(np.isfinite(hi), hi, 0.0)
+    lo = np.where(np.isfinite(lo), lo, 0.0)
+    return hi - lo
+
+
 def disclosure_timing(samples: pd.DataFrame, fins: pd.DataFrame) -> pd.DataFrame:
     """
     直近の決算開示からの日数（days_since_disc）と、直近の通期開示からの日数
@@ -1451,15 +1565,55 @@ def quarterize_panel(fins: pd.DataFrame) -> pd.DataFrame:
         -100.0, 1000.0, "payout_ratio")
 
     # --- 会社予想（今期の伸び見通し）--- #
-    # 予想営業利益 / 前期実績営業利益。1を超えれば増益見通し
+    # 予想営業利益 / 直前に終わった事業年度の実績。1を超えれば増益見通し。
+    #
+    # **通期決算では FOP が空で、翌期予想は NxFOP に入る。** 実測:
+    #
+    #   FOP   の充足  1Q 91.5% / 2Q 93.2% / 3Q 92.2% / FY  0.0%
+    #   NxFOP の充足  1Q  0.0% /                       FY 87.8%
+    #
+    # そのため guidance_op_growth は通期行で必ず欠測になり、全体の充足が
+    # 50% 止まりだった。この指標は両側スクリーニングで**下位10%が
+    # z = -3.68（11窓中10窓で悪い）**と、測った中でいちばん強い
+    # （docs/DATA_FIELDS.md / 実験37）。穴を塞ぐ価値がある。
+    #
+    # 通期の NxFOP と、その次の1Q の FOP は **92.7% が完全一致**（13,185組を
+    # 実測）。同じ事業年度の予想を指しているので、繋いでよい。
+    #
+    # **分母も変える。** FOP は「進行中の事業年度」の予想で、その1年前は
+    # shift(4) した4期和。NxFOP は「次の事業年度」の予想なので、比べる相手は
+    # いま締めた事業年度＝shift しない4期和。ここを揃えないと、通期行だけ
+    # 2年ぶんの伸びを見ることになる。
     prev_op_ttm = g_code["q_op"].transform(
         lambda s: s.shift(4).rolling(4, min_periods=4).sum())
+    cur_op_ttm = g_code["q_op"].transform(
+        lambda s: s.rolling(4, min_periods=4).sum())
+    is_fy = df["CurPerType"].eq("FY").to_numpy() if "CurPerType" in df.columns \
+        else np.zeros(len(df), dtype=bool)
+    has_nx = "NxFOP" in df.columns
+    fop_eff = np.where(is_fy & has_nx, col("NxFOP"), col("FOP"))
+    den = np.where(is_fy & has_nx, cur_op_ttm, prev_op_ttm)
+    # どちらの予想を使ったかを残す。後から充足の出どころを追えるように
+    df["guidance_basis"] = np.where(
+        ~np.isfinite(fop_eff), "none",
+        np.where(is_fy & has_nx, "NxFOP", "FOP"))
     df["guidance_op_growth"] = clip_divergent(
-        pd.Series(np.where(prev_op_ttm > 0,
-                           col("FOP") / prev_op_ttm * 100.0 - 100.0, np.nan),
+        pd.Series(np.where(den > 0, fop_eff / den * 100.0 - 100.0, np.nan),
                   index=df.index), -100.0, 1000.0, "guidance_op_growth")
+    n_nx = int((df["guidance_basis"] == "NxFOP").sum())
+    print(f"[guidance] 予想の出どころ: FOP "
+          f"{int((df['guidance_basis'] == 'FOP').sum()):,}行 / "
+          f"NxFOP {n_nx:,}行（通期の翌期予想）/ "
+          f"無し {int((df['guidance_basis'] == 'none').sum()):,}行")
+    print(f"[guidance] guidance_op_growth の充足 "
+          f"{df['guidance_op_growth'].notna().mean()*100:.1f}%")
     # 予想の修正: 同じ会計年度で前回開示の予想と比べて何%動いたか。
-    # 上方修正は「プラスアルファの好材料」そのもの
+    # 上方修正は「プラスアルファの好材料」そのもの。
+    #
+    # **ここは NxFOP で埋めない。** 通期行の NxFOP は「次の事業年度」の
+    # 最初の予想で、同じ CurFYSt の中の前回（3Q）の予想とは別の年度を
+    # 指している。埋めると、年度をまたいだ差を「修正」として出してしまう。
+    # 新しい年度の最初の予想に「修正」は定義できないので、欠測が正しい。
     prev_fop = df.groupby(["Code", "CurFYSt"], sort=False)["FOP"].shift(1) \
         if "FOP" in df.columns else pd.Series(np.nan, index=df.index)
     df["guidance_revision"] = clip_divergent(
@@ -1988,6 +2142,18 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     samples = disclosure_timing(samples, fins)
     print(f"[merge] 開示からの日数: 中央値 {samples['days_since_disc'].median():.0f}日 / "
           f"欠測 {samples['days_since_disc'].isna().mean()*100:.1f}%")
+
+    # --- 予想の修正イベント（DocType。取り込み済みで未使用だった） --- #
+    rev = forecast_revisions(samples, fins)
+    if rev.shape[1]:
+        dup = [c for c in rev.columns if c in samples.columns]
+        if dup:
+            print(f"[rev] 既存と同名の列は捨てる: {dup}")
+            rev = rev.drop(columns=dup)
+        samples = pd.concat([samples, rev], axis=1)
+        cov = ", ".join(f"{c} {samples[c].notna().mean()*100:.0f}%"
+                        for c in rev.columns)
+        print(f"[rev] 予想修正 {rev.shape[1]}列を追加: {cov}")
 
     # --- 時価総額 --- #
     # 時価総額は未調整終値 × 開示時点の株数。
