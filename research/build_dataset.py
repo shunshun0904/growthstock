@@ -703,6 +703,73 @@ def _by_code(df: pd.DataFrame, values: np.ndarray, fn,
     return out
 
 
+#: /equities/valuation から使う列。運用者の判断（2026-09-22、実験38）で
+#: **PER / PBR / ROE は API 側に寄せる**。両方は持たない。
+#:
+#: 根拠（実験38 の実測、突き合わせ 21,856行）
+#:   内部整合   PER × EPS = 終値 の誤差中央値 0.02%（1%以内 100%）
+#:              PBR × BPS = 終値 の誤差中央値 0.15%（1%以内  98%）
+#:   充足率     PER 82.0% -> 91.1%（まともな増分 +9.1pt）
+#:              ROE 92.6% -> 99.1%（まともな増分 +6.5pt）
+#:              PBR は 99.6% で横ばい
+#: ROE は「精度の差」ではなく**定義の差**（API は EPS/BPS の1株ベース、
+#: 自前は TTM純利益/自己資本）。運用者が API を選んだ。
+#:
+#: API の ROE は**小数**（0.0791 = 7.91%）なので100倍して % に直す。
+API_VALUATION_SCALE = {"PER": 1.0, "PBR": 1.0, "ROE": 100.0}
+
+
+def api_valuation(keys: pd.DataFrame, date_col: str = "Date",
+                  data_dir: str = DATA_DIR,
+                  asof: bool = False) -> pd.DataFrame:
+    """
+    (Code, date_col) に /equities/valuation の PER / PBR / ROE を合わせる。
+
+    asof=True なら merge_asof の backward で「その日までに出ている直近」を
+    取る（開示日が非営業日のことがあるため）。False なら同日の完全一致。
+
+    先読みにはならない。valuation はその日の終値から作られる当日の値で、
+    決算パネル側は DiscDate <= サンプル日 でしか結合されない。
+
+    戻り値の列は api_per / api_pbr / api_roe。無ければ全 NaN。
+    """
+    out = pd.DataFrame(index=keys.index,
+                       columns=["api_per", "api_pbr", "api_roe"], dtype=float)
+    paths = sorted(glob.glob(os.path.join(data_dir, "valuation_[0-9]*.parquet")))
+    if not paths:
+        return out
+    want = ["Code", "Date"] + list(API_VALUATION_SCALE)
+    v = pd.concat([pd.read_parquet(p) for p in paths], ignore_index=True)
+    v = v[[c for c in want if c in v.columns]].copy()
+    if not {"Code", "Date"} <= set(v.columns):
+        return out
+    v["Code"] = v["Code"].astype(str)
+    v["Date"] = pd.to_datetime(v["Date"], errors="coerce")
+    v = v.dropna(subset=["Code", "Date"])
+    for c, k in API_VALUATION_SCALE.items():
+        if c in v.columns:
+            v[c] = pd.to_numeric(v[c], errors="coerce") * k
+    v = v.rename(columns={c: f"api_{c.lower()}" for c in API_VALUATION_SCALE})
+
+    left = keys[["Code", date_col]].copy()
+    left["Code"] = left["Code"].astype(str)
+    left[date_col] = pd.to_datetime(left[date_col], errors="coerce")
+    left["_i"] = np.arange(len(left))
+    if asof:
+        m = pd.merge_asof(left.sort_values(date_col), v.sort_values("Date"),
+                          left_on=date_col, right_on="Date", by="Code",
+                          direction="backward", allow_exact_matches=True,
+                          tolerance=pd.Timedelta(days=10))
+        m = m.sort_values("_i")
+    else:
+        m = left.merge(v.rename(columns={"Date": date_col}),
+                       on=["Code", date_col], how="left")
+    for c in out.columns:
+        if c in m.columns:
+            out[c] = pd.to_numeric(m[c], errors="coerce").to_numpy()
+    return out
+
+
 def rise_thresholds(vol_20d, cfg: RiseConfig = DEFAULT_RISE):
     """
     cfg が課す (到達しきい値, 終盤の必要水準) を行ごとに返す。
@@ -1451,13 +1518,28 @@ def quarterize_panel(fins: pd.DataFrame) -> pd.DataFrame:
     g_code = df.groupby("Code", sort=False)
     ttm_np = g_code["q_np"].transform(lambda s: s.rolling(4, min_periods=4).sum())
     roe_ttm = np.where(df["Eq"] > 0, ttm_np / df["Eq"] * 100.0, np.nan)
+    # --- ROE の出どころを API に寄せる（運用者の判断・実験38）--- #
+    #
+    # **ここ1か所で差し替える。** ROE_q0/q1/q2/q3 も ROE_chg* も
+    # ROE_up_streak も、すべてこの列を四半期でずらして作る。
+    # ROE_q0 だけ API に替えると、q1 以降は財務諸表ベースのままになり、
+    # ROE_chg1 = q0 - q1 が**別の定義どうしの引き算**になってしまう。
+    # 出どころは1つに揃えること。
+    #
+    # API が無い行は、これまでどおり 提供値 -> TTM の順で埋める。
+    api_roe = api_valuation(df, "DiscDate", asof=True)["api_roe"]
+    api_roe.index = df.index
     df["roe_basis"] = np.where(
-        df["ROE"].notna(), "provided",
-        np.where(np.isfinite(roe_ttm), "ttm", "none"))
+        api_roe.notna(), "api",
+        np.where(df["ROE"].notna(), "provided",
+                 np.where(np.isfinite(roe_ttm), "ttm", "none")))
     # ROE/ROA は 100% 超が実在するので上限は広く取る。
-    # ただし自己資本が極小だと桁外れになる（実測で ROE -178,300%）
+    # ただし自己資本が極小だと桁外れになる（実測で ROE -178,300%）。
+    # API 側もクリップしていない（実測で最小 -8,671%）ので同じ扱いにする
     df["ROE"] = clip_divergent(
-        df["ROE"].where(df["ROE"].notna(), pd.Series(roe_ttm, index=df.index)),
+        api_roe.where(api_roe.notna(),
+                      df["ROE"].where(df["ROE"].notna(),
+                                      pd.Series(roe_ttm, index=df.index))),
         -500.0, 500.0, "ROE")
 
     # --- ROA / BPS / 自己資本比率 --- #
@@ -2200,10 +2282,28 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     # 配当利回り
     samples["div_yield"] = np.where(px > 0, samples["dps"] / px * 100.0, np.nan)
 
+    # --- PER / PBR の出どころを API に寄せる（運用者の判断・実験38）--- #
+    #
+    # 自前は「株価 ÷ eps_ttm」で、eps_ttm は4四半期そろったときだけ作る。
+    # そこで落ちる行が API では埋まる（実測 PER 82.0% -> 91.1%、
+    # うち負でも極端でもない**まともな増分が +9.1pt**）。
+    # API 値はクリップされていない（実測 PER 最大 18,920）ので、
+    # 自前と同じ上限を掛けてから使う。API が無い行は自前で埋める。
+    av = api_valuation(samples, "Date")
     per = np.where(samples["eps_ttm"] > 0, px / samples["eps_ttm"], np.nan)
     pbr = np.where(samples["BPS"] > 0, px / samples["BPS"], np.nan)
-    samples["per"] = np.where(np.isfinite(per) & (per <= PER_MAX), per, np.nan)
-    samples["pbr"] = np.where(np.isfinite(pbr) & (pbr <= PBR_MAX), pbr, np.nan)
+    for name, own, cap in (("per", per, PER_MAX), ("pbr", pbr, PBR_MAX)):
+        a = av[f"api_{name}"].to_numpy()
+        merged = np.where(np.isfinite(a) & (a > 0), a, own)
+        samples[name] = np.where(np.isfinite(merged) & (merged <= cap),
+                                 merged, np.nan)
+        samples[f"{name}_basis"] = np.where(
+            np.isfinite(a) & (a > 0), "api",
+            np.where(np.isfinite(own), "own", "none"))
+        n_api = int((np.isfinite(a) & (a > 0)).sum())
+        n_own = int(np.isfinite(own).sum())
+        print(f"[valuation] {name}: API {n_api:,}行 / 自前 {n_own:,}行 "
+              f"-> 採用 {int(samples[name].notna().sum()):,}行")
     # PEG = PER / EPS成長率(%)。成長に対して株価が割高か。
     # 成長率が0以下だと意味を持たない（負のPEGは「割安」ではない）ので欠測にする。
     # 成長率が極端に小さいと発散するため、PER と同じ考え方で上限を置く。
@@ -2215,8 +2315,11 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     if n_peg:
         print(f"[filter] peg > {PEG_MAX:g} を欠測に: {n_peg:,}件（成長率が極小）")
 
-    for name, arr, cap in (("per", per, PER_MAX), ("pbr", pbr, PBR_MAX)):
-        n = int((np.isfinite(arr) & (arr > cap)).sum())
+    for name, cap in (("per", PER_MAX), ("pbr", PBR_MAX)):
+        a = av[f"api_{name}"].to_numpy()
+        own = per if name == "per" else pbr
+        merged = np.where(np.isfinite(a) & (a > 0), a, own)
+        n = int((np.isfinite(merged) & (merged > cap)).sum())
         if n:
             print(f"[filter] {name} > {cap:g} を欠測に: {n:,}件"
                   f"（分母が丸め誤差レベル。逆数側は残している）")
@@ -2370,7 +2473,10 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     meta_cols = ["Code", "Date", "close", "close_raw", "high52w", "tv_ma20",
                  "market_cap", "label",
                  "future_rise", "keep_days_cnt", "end_level", "uptrend_end",
-                 "eps_ttm", "BPS", "roe_basis", "bps_basis"]
+                 "eps_ttm", "BPS", "roe_basis", "bps_basis",
+                 # PER / PBR / ROE を API に寄せた（実験38）。
+                 # どの行がどちらから来たかを追えるようにしておく
+                 "per_basis", "pbr_basis"]
     meta_cols = [c for c in meta_cols if c in samples.columns]
 
     # 未来から作った列が特徴量に混ざるとリークで結果が無意味になる。
