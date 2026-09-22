@@ -14,19 +14,34 @@
 として出る**。毎回の連休で赤を見ることになり、本物を見逃す訓練になる。
 
 そこで、営業日かどうかを**推測せずに受け取る**。営業日カレンダーを引いて
-いるのは取り込み（jq_bulk.py）だけなので、そこが manifest に事実として
-書き残す（`calendar` ブロック / jq_bulk.calendar_note）。ここはそれを読む
-だけで、自分でカレンダーを判断しない。
+いるのは取り込み（jq_bulk.py）だけなので、そこが残したものを読む。
+自分でカレンダーを判断しない。
 
-飛ばす条件（3つすべて）
---------------------
+読む先は2つあり、**カレンダーのほうを先に見る**。
+
+  1. `research/_data/calendar.parquet`
+     取り込みが `/markets/calendar` の応答をそのまま保存したもの。
+     取引所が公表した事実で、**いつ保存したかに依らない**
+  2. `manifest.json` の `calendar` ブロック（従来の経路）
+     取り込みが走った日の判定。1 が対象日を覆っていないときの控え
+
+1 を足した理由: 2 は「manifest が12時間以内」を条件にしていたため、
+連休2日目のように**その日の取り込みがまだ走っていない**と使えなかった。
+2026-09-22 はこれで落ちた（manifest が18時間前）。カレンダーは将来ぶんまで
+入っているので、取り込みが走っていなくても今日のことが分かる。
+
+飛ばす条件
+--------
+**カレンダー経路**（2つとも満たすこと）
+1. カレンダーが今日を覆っていて、かつ今日が **営業日ではない**
+2. 保存データの最終バー日が、カレンダー上の**直近の営業日に届いている**
+   **ここが肝**。取り込みが壊れていれば届いていないので、休場日であっても
+   飛ばさず、鮮度チェックで落とす。
+
+**manifest 経路**（カレンダーが今日を覆っていないときだけ。3つとも）
 1. `calendar.isTradingDay` が **明示的に False**
-   （None＝判断材料なし、キー無し＝古い manifest。どちらも飛ばさない）
 2. 保存データの最終バー日 == `calendar.lastTradingDay`
-   **ここが肝**。取り込みが壊れていれば保存データは直近の営業日に
-   届いていないので、休場日であっても飛ばさず、鮮度チェックで落とす。
 3. manifest が十分に新しい（既定12時間以内）
-   取り込みが今日走っていないなら、その calendar は昨日以前の判断。
 
 どれか1つでも欠ければ「通常どおり進む」。**飛ばす側に倒さない。**
 
@@ -50,9 +65,14 @@ import os
 import sys
 from typing import Optional, Tuple
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import trading_calendar  # noqa: E402
+
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_data")
-#: manifest がこれより古ければ「今日の判断ではない」とみなす
+#: manifest がこれより古ければ「今日の判断ではない」とみなす（manifest 経路だけ）
 STALE_HOURS = 12
+#: 「今日」は東京の日付で決める。ランナーは UTC なので明示する
+JST = dt.timezone(dt.timedelta(hours=9))
 
 
 def last_bar_date(data_dir: str) -> Optional[dt.date]:
@@ -67,15 +87,51 @@ def last_bar_date(data_dir: str) -> Optional[dt.date]:
     return pd.Timestamp(pd.to_datetime(d["Date"]).max()).date()
 
 
+def decide_by_calendar(cal, last_bar: Optional[dt.date], today: dt.date
+                       ) -> Optional[Tuple[bool, str]]:
+    """
+    保存済みカレンダーだけで判定する。判定できなければ None（次の経路へ）。
+
+    **保存した時刻は見ない。** カレンダーは将来ぶんまで入っているので、
+    今日の取り込みがまだ走っていなくても今日のことが分かる。従来の
+    manifest 経路が連休2日目で使えなかったのは、そこを時刻で縛ったため。
+    """
+    if cal is None or not cal:
+        return None
+    trading = cal.is_trading_day(today)
+    if trading is None:
+        return None                                   # 範囲外。分からない
+    if trading:
+        return True, f"{today} はカレンダー上の営業日"
+    ltd = cal.last_trading_day(today)
+    if ltd is None:
+        return None
+    if last_bar is None:
+        return True, "保存データの最終バー日が分からない"
+    if last_bar < ltd:
+        return True, (f"保存データの最終バー {last_bar} が"
+                      f"直近の営業日 {ltd} に届いていない（取り込みを疑う）")
+    return False, f"{today} はカレンダー上の非営業日で、直近の営業日 {ltd} まで揃っている"
+
+
 def decide(manifest: dict, last_bar: Optional[dt.date],
-           now: dt.datetime, stale_hours: int = STALE_HOURS
-           ) -> Tuple[bool, str]:
+           now: dt.datetime, stale_hours: int = STALE_HOURS,
+           cal=None, today: Optional[dt.date] = None) -> Tuple[bool, str]:
     """
     (予測を走らせるか, 理由) を返す。判断できなければ走らせる側に倒す。
+
+    カレンダー（cal）が今日を覆っていればそれで決める。覆っていなければ
+    manifest の判定に落ちる。
     """
-    cal = manifest.get("calendar")
-    if not isinstance(cal, dict):
-        return True, "manifest に営業日カレンダーが無い（古い取り込み）"
+    today = today or now.astimezone(JST).date()
+    by_cal = decide_by_calendar(cal, last_bar, today)
+    if by_cal is not None:
+        return by_cal
+
+    cal_note = manifest.get("calendar")
+    if not isinstance(cal_note, dict):
+        return True, "カレンダーが今日を覆っておらず、manifest にも記録が無い"
+    cal = cal_note
 
     if cal.get("isTradingDay") is not False:
         v = cal.get("isTradingDay")
@@ -125,7 +181,8 @@ def main(argv=None) -> int:
             with open(path, encoding="utf-8") as fh:
                 manifest = json.load(fh)
         run, why = decide(manifest, last_bar_date(args.data_dir),
-                          dt.datetime.now(dt.timezone.utc), args.stale_hours)
+                          dt.datetime.now(dt.timezone.utc), args.stale_hours,
+                          cal=trading_calendar.load(args.data_dir))
     except Exception as exc:                      # noqa: BLE001
         # 判断できない理由が何であれ、止めずに通常どおり進む。
         # ここを失敗にすると、連休対応のための部品が新しい障害になる

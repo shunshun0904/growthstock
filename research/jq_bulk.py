@@ -26,6 +26,7 @@ import pandas as pd
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import trading_calendar  # noqa: E402
 from jquants_data_fetcher import JQuantsClient, JQuantsError, resolve_api_key  # noqa: E402
 import data_store  # noqa: E402
 
@@ -36,6 +37,12 @@ EARLIEST_DATE = dt.date(2016, 10, 1)
 
 # 保持する列（全列を持つとサイズが数倍になるため、必要なものだけ）
 BAR_COLS = ["Date", "Code", "O", "H", "L", "C", "Vo", "Va", "AdjO", "AdjH", "AdjL", "AdjC", "AdjVo"]
+
+#: 営業日カレンダーを何日ぶん先まで取っておくか。
+#: 下流（鮮度チェック・営業日ゲート）は「今日」がカレンダーの範囲に
+#: 入っていないと使えない。取り込みが当日まだ走っていない時刻に予測が
+#: 動くことがあるので、余裕を持たせる。年末年始の休みより長く取る。
+CALENDAR_LOOKAHEAD_DAYS = 45
 # 決算は全項目を保持する（None = 絞らない）。
 #
 # 以前はホワイトリストで絞っており、書き漏らした項目が取得時点で捨てられていた。
@@ -69,13 +76,25 @@ MASTER_COLS = None
 # 営業日
 # --------------------------------------------------------------------------- #
 
-def trading_days(client: JQuantsClient, start: dt.date, end: dt.date) -> List[dt.date]:
+def trading_days(client: JQuantsClient, start: dt.date, end: dt.date,
+                 out_dir: Optional[str] = None) -> List[dt.date]:
     """
     /markets/calendar から実際の営業日だけを取り出す。
     土日祝を自前で判定すると祝日でリクエストを無駄撃ちするため、API に従う。
+
+    応答は **保存する**（research/_data/calendar.parquet）。下流の鮮度
+    チェックと営業日ゲートが、平日で数える代わりにこれを読む。
+    叩いているのに捨てていたせいで、2026-09-22 の連休で日次予測が落ちた。
+
+    取りに行く範囲は end より **CALENDAR_LOOKAHEAD_DAYS 日ぶん先**まで。
+    保存したカレンダーが「今日」を覆っていないと、下流は平日で数える側に
+    倒れる。取り込みが当日まだ走っていない時刻に予測が動くことがあるので、
+    先まで持っておく（取引所は先の予定まで公表している）。
+    日次ループに返すのは end までの営業日だけ。先の日を取りに行かせない。
     """
+    fetch_to = end + dt.timedelta(days=CALENDAR_LOOKAHEAD_DAYS)
     rows = client.get_paginated(
-        "/markets/calendar", {"from": start.isoformat(), "to": end.isoformat()}
+        "/markets/calendar", {"from": start.isoformat(), "to": fetch_to.isoformat()}
     )
     # V2 の列名は HolDiv（V1 は HolidayDivision）。実レスポンスで確認済み。
     # 値: "0" = 非営業日, "1" = 営業日, "2" = 東証半日立会
@@ -87,12 +106,22 @@ def trading_days(client: JQuantsClient, start: dt.date, end: dt.date) -> List[dt
         if not d:
             continue
         if div in ("1", "2"):
-            days.append(dt.date.fromisoformat(d))
+            day = dt.date.fromisoformat(d)
+            if day <= end:                     # 先の日は保存だけして、取りに行かない
+                days.append(day)
     if not days:
         raise JQuantsError(
             f"/markets/calendar が営業日を返しませんでした ({start}〜{end})。"
             f"応答例: {rows[:1]}"
         )
+    # 保存に失敗しても取得は続ける。ここが新しい障害の入口にならないように
+    try:
+        path = trading_calendar.save(rows, out_dir or DATA_DIR)
+        if path:
+            print(f"[calendar] {len(rows)}日ぶん（{fetch_to} まで）を保存 -> {path}")
+    except Exception as exc:                                 # noqa: BLE001
+        print(f"[warn] カレンダーを保存できませんでした（続行する）: "
+              f"{type(exc).__name__}: {str(exc)[:120]}", file=sys.stderr)
     return sorted(days)
 
 
@@ -382,7 +411,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     client = JQuantsClient(resolve_api_key(), pause=args.pause)
 
     print(f"[calendar] 営業日を取得 ({start} 〜 {end})")
-    days = trading_days(client, start, end)
+    days = trading_days(client, start, end, args.out_dir)
     print(f"[calendar] {len(days)}営業日")
 
     if args.incremental:
