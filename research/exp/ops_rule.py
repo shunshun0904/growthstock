@@ -20,13 +20,16 @@ OUTCOMES = ("ret_o1_20", "ret_o1_40")
 
 
 def consensus(oofs: Dict[str, pd.DataFrame], pct: float = 85.0,
-              min_rows: int = 100) -> dict:
+              min_rows: int = 100, models=BOOST) -> dict:
     """
     oofs: {algo: out-of-fold（Code, Date, fold, label, score, ret_o1_*）}。
-    3モデルとも同じ行・同じ窓であること（同じ df から作った out-of-fold）。
+    models のモデルすべてが pct パーセンタイル以上の行を選ぶ。
+    models=("lgbm",) なら LightGBM 単体（lab.threshold_edge と同じ選び方）。
+    モデル同士は同じ行・同じ窓であること（同じ df から作った out-of-fold）。
     """
-    base = oofs["lgbm"][["Code", "Date", "fold", "label"] + list(OUTCOMES)].copy()
-    for a in BOOST:
+    first = models[0]
+    base = oofs[first][["Code", "Date", "fold", "label"] + list(OUTCOMES)].copy()
+    for a in models:
         base = base.merge(oofs[a][["Code", "Date", "score"]].rename(columns={"score": f"s_{a}"}),
                           on=["Code", "Date"], how="inner")
     per_fold = {oc: {} for oc in OUTCOMES}
@@ -38,7 +41,7 @@ def consensus(oofs: Dict[str, pd.DataFrame], pct: float = 85.0,
             continue
         cur = base[base["fold"] == f]
         ok = np.ones(len(cur), dtype=bool)
-        for a in BOOST:
+        for a in models:
             ok &= (cur[f"s_{a}"] > np.percentile(prev[f"s_{a}"], pct)).to_numpy()
         sel = cur[ok]
         if len(sel) < 5:
