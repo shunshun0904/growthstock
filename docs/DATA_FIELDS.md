@@ -176,3 +176,70 @@
 | `/markets/ownership` | NG | — | HTTP 403 https://api.jquants.com/v2/markets/ownership?date=2024-05-15 : {"message": "The requested endpoint does not exi |
 | `/` | NG | — | HTTP 403 https://api.jquants.com/v2/ : {"message": "The requested endpoint does not exist. Please check the URL, HTTP me |
 
+
+### 2つの NG は意味が違う（2026-09-22）
+
+| メッセージ | 意味 |
+|---|---|
+| `This API is not available on your subscription plan` | **エンドポイントは在る。** 契約が足りないだけ。プレミアムで開く |
+| `The requested endpoint does not exist` | そのパスには何も無い。プランを上げても開かない |
+
+前者は `/fins/details`・`/fins/dividend`・`/markets/breakdown` の3本。
+つまり **BS/PL/CF明細・配当明細・売買内訳はプレミアムで取れる**。
+
+### 適時開示・アナリスト予想・株主構成は取れるか（2026-09-22）
+
+運用者の問いに答えるために候補10本を叩いた。**全部 NG、しかも全部が
+「does not exist」側**で、「プランを上げれば開く」側は1本も無かった。
+
+| 分野 | 叩いたパス | 結果 |
+|---|---|---|
+| 適時開示 | `/fins/announcement` `/fins/announcements` `/fins/disclosure` `/disclosure/timely` | 4本とも does not exist |
+| アナリスト予想 | `/fins/forecast` `/fins/consensus` | 2本とも does not exist |
+| 株主構成 | `/equities/shareholders` `/equities/ownership` `/markets/ownership` | 3本とも does not exist |
+| 一覧の取得 | `/`（API に自分で言わせる試み） | does not exist |
+
+**この結果は「機能が無い」証明ではない。** 名前は当てずっぽうで、正しい
+パス名を知らないまま叩いている。公式のエンドポイント一覧
+（jpx-jquants.com）はこの作業環境から到達できない（egress ブロック）。
+
+**正しいパス名が分かれば、この probe に足して1回で確かめられる。**
+
+### それでも適時開示は半分取れている
+
+`/fins/summary` の `DocType` に **33種類**ある（全期間 180,671行）。
+決算短信だけではない:
+
+| DocType | 件数 |
+|---|---:|
+| `EarnForecastRevision`（業績予想の修正） | 24,293 |
+| `DividendForecastRevision`（配当予想の修正） | 4,174 |
+| `REITEarnForecastRevision` | 612 |
+| `REITDividendForecastRevision` | 38 |
+
+本文は入らないが、**「いつ・どの銘柄が・業績予想を修正したか」は取れている**。
+`jq_bulk.py` の取得列に `DocType` が入っており保存済みで、
+**`build_dataset.py` では未使用**。追加のAPI呼び出しゼロで特徴量にできる。
+
+既存の `guidance_revision`（FOP の前回開示比）とは別物。あちらは修正の
+**幅**、こちらは修正**イベントの発生とタイミング**。
+`days_since_disc` も実績（Sales か NP が入る開示）だけを数えているので、
+修正イベントは勘定に入っていない。
+
+### FOP が通期決算で空になる（2026-09-22 に気づいた穴）
+
+`FOP`（会社予想営業利益）の充足を DocType 別に見ると:
+
+| DocType | 行数 | FOP 充足 |
+|---|---:|---:|
+| 1QFinancialStatements_Consolidated_JP | 2,768 | 91.5% |
+| 2QFinancialStatements_Consolidated_JP | 983 | 93.2% |
+| 3QFinancialStatements_Consolidated_JP | 2,490 | 92.2% |
+| **FYFinancialStatements_Consolidated_JP** | **2,918** | **0.0%** |
+| EarnForecastRevision | 1,246 | 71.3% |
+
+通期発表時の翌期予想は `FOP` ではなく別フィールド（`NxF*` 系）に入って
+いるとみられる。`guidance_op_growth` の充足が 50% 止まりなのはこれが理由。
+この指標は両側スクリーニングで**下位10%が z = −3.68（11窓中10窓で悪い）**と
+測った中で最も強かったので、穴を塞ぐ価値がある。
+
