@@ -718,6 +718,14 @@ def _by_code(df: pd.DataFrame, values: np.ndarray, fn,
 #: API の ROE は**小数**（0.0791 = 7.91%）なので100倍して % に直す。
 API_VALUATION_SCALE = {"PER": 1.0, "PBR": 1.0, "ROE": 100.0}
 
+#: どの指標を API に寄せるか。実験で出どころを A/B するために外から
+#: 差し替えられるようにしてある（本番はすべて True）。
+#: 実験40 の実測で、API の ROE に替えると ROE 一族の検出力が落ちた
+#: （ROE_accel の下位z が -2.51 -> +0.19 と符号ごと消えるなど）。
+#: 充足率は 92.6% -> 99.7% に上がるので、どちらを取るかはモデルでの
+#: 評価（docs/MODEL_ADOPTION_RULES.md §7）で決める。
+USE_API_VALUATION = {"per": True, "pbr": True, "roe": True}
+
 
 def api_valuation(keys: pd.DataFrame, date_col: str = "Date",
                   data_dir: str = DATA_DIR,
@@ -1527,7 +1535,10 @@ def quarterize_panel(fins: pd.DataFrame) -> pd.DataFrame:
     # 出どころは1つに揃えること。
     #
     # API が無い行は、これまでどおり 提供値 -> TTM の順で埋める。
-    api_roe = api_valuation(df, "DiscDate", asof=True)["api_roe"]
+    if USE_API_VALUATION.get("roe", True):
+        api_roe = api_valuation(df, "DiscDate", asof=True)["api_roe"]
+    else:
+        api_roe = pd.Series(np.nan, index=range(len(df)), dtype=float)
     api_roe.index = df.index
     df["roe_basis"] = np.where(
         api_roe.notna(), "api",
@@ -2293,7 +2304,8 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     per = np.where(samples["eps_ttm"] > 0, px / samples["eps_ttm"], np.nan)
     pbr = np.where(samples["BPS"] > 0, px / samples["BPS"], np.nan)
     for name, own, cap in (("per", per, PER_MAX), ("pbr", pbr, PBR_MAX)):
-        a = av[f"api_{name}"].to_numpy()
+        a = (av[f"api_{name}"].to_numpy() if USE_API_VALUATION.get(name, True)
+             else np.full(len(samples), np.nan))
         merged = np.where(np.isfinite(a) & (a > 0), a, own)
         samples[name] = np.where(np.isfinite(merged) & (merged <= cap),
                                  merged, np.nan)
@@ -2316,7 +2328,8 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
         print(f"[filter] peg > {PEG_MAX:g} を欠測に: {n_peg:,}件（成長率が極小）")
 
     for name, cap in (("per", PER_MAX), ("pbr", PBR_MAX)):
-        a = av[f"api_{name}"].to_numpy()
+        a = (av[f"api_{name}"].to_numpy() if USE_API_VALUATION.get(name, True)
+             else np.full(len(samples), np.nan))
         own = per if name == "per" else pbr
         merged = np.where(np.isfinite(a) & (a > 0), a, own)
         n = int((np.isfinite(merged) & (merged > cap)).sum())
