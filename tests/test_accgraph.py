@@ -857,6 +857,151 @@ class TestDiagnose(unittest.TestCase):
         self.assertLess(band[1], 100.0)
 
 
+class TestIncrement(unittest.TestCase):
+    """
+    2段構えで、明細の上積みを答えの分かっているデータで取り出せること。
+
+    1段目の予測を固定して補正だけを学ぶので、明細に情報があれば上積みが出て、
+    無ければ「効く」とは言わない。テスト窓のラベルは2段目に入らない。
+    """
+
+    V = np.array([-1.0, 0.0, 1.0])     # 下落 / 中立 / 上昇 の向き
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp(prefix="accgraph_inc_")
+        raw, cls.out = os.path.join(cls.tmp, "raw"), os.path.join(cls.tmp, "out")
+        synthetic.write_all(raw, n_codes=12, start_year=2017, n_years=7)
+        build.build(data_dir=raw, out_dir=cls.out)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def _softmax(self, a):
+        a = a - a.max(axis=1, keepdims=True)
+        e = np.exp(a)
+        return e / e.sum(axis=1, keepdims=True)
+
+    def _fixture(self, edinet_signal: float, n_days=300, per_day=8, seed=5):
+        """
+        ラベルは 1段目の信号 s と明細の信号 e の両方で決まる。
+        1段目の予測 p1 は s だけを知っている。明細の特徴量は e と雑音5列。
+        """
+        from accgraph import increment
+        rng = np.random.default_rng(seed)
+        dates = pd.Series(np.repeat(pd.bdate_range("2019-01-01", periods=n_days), per_day))
+        ready = dates + pd.Timedelta(days=28)
+        n = len(dates)
+        s, e = rng.normal(size=n), rng.normal(size=n)
+        logits = 0.8 * s[:, None] * self.V + edinet_signal * e[:, None] * self.V
+        y = np.array([rng.choice(3, p=p) for p in self._softmax(logits)])
+        p1 = self._softmax(0.8 * s[:, None] * self.V)
+        Z = np.column_stack([e, rng.normal(size=(n, 5))])
+        edinet = np.ones(n, dtype=bool)
+        d = pd.to_datetime(dates)
+        starts = [d.iloc[0] + pd.Timedelta(days=k) for k in (150, 250, 350)]
+        tr = [(ready < t).to_numpy() for t in starts]
+        te = [((d >= t) & (d < t + pd.Timedelta(days=100))).to_numpy() for t in starts]
+        return increment, y, edinet, p1, Z, dates, ready, tr, te
+
+    def _verdict(self, edinet_signal):
+        inc, y, ed, p1, Z, dates, ready, tr, te = self._fixture(edinet_signal)
+        ts = inc.two_stage(y, ed, p1, Z, dates, ready, tr, te, min_stage2_rows=100)
+        ok = np.isfinite(ts["preds"]["edinet"]).all(axis=1)
+        res = inc.bootstrap_models(y[ok], {k: p[ok] for k, p in ts["preds"].items()},
+                                   dates[ok], [("edinet", "base")], n_boot=200)
+        obs = res["diff"]["edinet-base"]["point"]
+        plc = inc.placebo_diffs(y, ed, p1, Z, dates, ready, tr, te, ok, n=19,
+                                min_stage2_rows=100)
+        return inc.verdict(res["diff"]["edinet-base"]["ci"],
+                           inc.permutation_p(obs, plc, "greater"),
+                           inc.permutation_p(obs, plc, "less")), obs, plc
+
+    def test_detects_a_real_increment(self):
+        (v, _), obs, plc = self._verdict(edinet_signal=0.8)
+        self.assertEqual(v, "明細が効く", (obs, max(plc)))
+
+    def test_noise_is_not_called_effective(self):
+        (v, _), obs, plc = self._verdict(edinet_signal=0.0)
+        self.assertEqual(v, "差が見えない", (obs, plc))
+
+    def test_test_labels_do_not_reach_stage2(self):
+        """テスト窓のラベルを入れ替えても、そのテスト窓の予測は1ビットも変わらない。"""
+        inc, y, ed, p1, Z, dates, ready, tr, te = self._fixture(0.8)
+        a = inc.two_stage(y, ed, p1, Z, dates, ready, tr, te, min_stage2_rows=100)
+        y2 = y.copy()
+        rng = np.random.default_rng(0)
+        k = len(te) - 1
+        y2[te[k]] = rng.permutation(y2[te[k]])
+        b = inc.two_stage(y2, ed, p1, Z, dates, ready, tr, te, min_stage2_rows=100)
+        for key in ("base", "edinet"):
+            np.testing.assert_array_equal(a["preds"][key][te[k]], b["preds"][key][te[k]])
+
+    def test_offset_only_keeps_stage1(self):
+        """明細を入れない2段目は、較正済みの1段目をほとんど動かさない。"""
+        from accgraph import increment as inc
+        rng = np.random.default_rng(1)
+        p = rng.dirichlet([2.0, 2.0, 2.0], size=4000)
+        y = np.array([rng.choice(3, p=q) for q in p])
+        f = inc.fit_offset_logit(np.zeros((len(y), 0)), y, np.log(p), lam=1.0)
+        self.assertLess(np.abs(f(np.zeros((len(y), 0)), np.log(p)) - p).max(), 0.05)
+
+    def test_strong_penalty_returns_to_stage1(self):
+        """補正を強く縮めると、明細を入れた版は入れない版と同じになる。"""
+        from accgraph import increment as inc
+        rng = np.random.default_rng(2)
+        n = 1000
+        p = rng.dirichlet([2.0, 2.0, 2.0], size=n)
+        y = rng.integers(0, 3, n)
+        Z = rng.normal(size=(n, 10))
+        f0 = inc.fit_offset_logit(np.zeros((n, 0)), y, np.log(p), lam=1.0)
+        f1 = inc.fit_offset_logit(Z, y, np.log(p), lam=1e6)
+        np.testing.assert_allclose(f1(Z, np.log(p)), f0(np.zeros((n, 0)), np.log(p)),
+                                   atol=1e-3)
+
+    def test_verdict_rules(self):
+        from accgraph import increment as inc
+        self.assertEqual(inc.verdict((0.01, 0.03), 0.05, 0.95)[0], "明細が効く")
+        self.assertEqual(inc.verdict((0.01, 0.03), 0.15, 0.85)[0], "差が見えない")
+        self.assertEqual(inc.verdict((-0.03, -0.01), 0.95, 0.05)[0], "明細が害になる")
+        self.assertEqual(inc.verdict((-0.01, 0.02), 0.05, 0.95)[0], "差が見えない")
+        self.assertEqual(inc.verdict((0.01, 0.03))[0], "明細が効く")   # full は区間だけ
+        self.assertEqual(inc.verdict((np.nan, np.nan))[0], "判定できない")
+        self.assertAlmostEqual(inc.permutation_p(0.5, [0.1] * 19), 0.05)
+        self.assertAlmostEqual(inc.permutation_p(0.0, [0.1] * 19), 1.0)
+
+    def test_full_block_is_latest_minus_jq(self):
+        """明細の特徴量（full）は、`latest` から `latest_jq` を引いた列そのもの。"""
+        from accgraph import increment as inc
+        meta, nf, ef, pm = build.load(self.out, liquid_only=False)
+        Xa, _ = baselines.flatten(nf, ef, pm, meta, kind="latest")
+        Xj, _ = baselines.flatten(nf, ef, pm, meta, kind="latest_jq")
+        Z, names = inc.edinet_block(nf, ef, compact=False)
+        self.assertEqual(Z.shape[1], Xa.shape[1] - Xj.shape[1])
+        edinet_ids = {n.id for n in schema.NODES if n.source_table == "edinet"}
+        for nm in names:
+            ends = re.split(r"->|\.", nm)[:-1]
+            self.assertTrue(any(x in edinet_ids for x in ends), nm)
+        Zc, cnames = inc.edinet_block(nf, ef, compact=True)
+        self.assertEqual(len(cnames), len(set(cnames)))
+        self.assertLess(Zc.shape[1], Z.shape[1])
+
+    def test_run_on_synthetic_build(self):
+        from accgraph import increment as inc
+        d = inc.run(self.out, min_train_months=36, stage1_min_train_months=12,
+                    min_test_rows=5, min_stage2_rows=20, n_boot=30, n_placebo=3)
+        self.assertEqual(set(d["results"]),
+                         {"logit/compact", "logit/full", "lgbm/compact", "lgbm/full"})
+        for r in d["results"].values():
+            self.assertIn(r["verdict"], {"明細が効く", "明細が害になる",
+                                         "差が見えない", "判定できない"})
+        self.assertIn("## 結果", inc.to_markdown(d))
+        # 評価のテスト窓に1段目の予測が付かない組み合わせは、走らせる前に止める
+        with self.assertRaises(SystemExit):
+            inc.run(self.out, min_train_months=36, stage1_min_train_months=18)
+
+
 class TestGeneratedDoc(unittest.TestCase):
 
     def test_doc_matches_the_schema(self):

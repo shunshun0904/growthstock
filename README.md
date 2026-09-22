@@ -341,6 +341,41 @@ AUC が 0.50 前後に落ちました。原因の候補は「訓練件数が足�
 python3 research/accgraph/diagnose.py
 ```
 
+### 明細の上積みを2段構えで測る
+
+切り分けの結果（2026-09-22）、件数の不足と群の性質の**両方**が効いていました。
+群だけで学習すると件数が足りず、全体に混ぜると明細は9割以上が欠測のまま学習されます。
+そこで `increment.py` は役割を分けます。
+
+| 段 | 学習に使う行 | 特徴量 | 学ぶもの |
+| --- | --- | --- | --- |
+| 1段目 | 全体（約5.7万件） | J-Quants のノードだけ（`latest_jq`） | 土台の予測 |
+| 2段目 | 明細ありの群だけ | 明細の特徴量 | 1段目の予測を固定したまま足す補正 |
+
+2段目は正則化を強めると補正がゼロに縮み、1段目の予測に戻ります。
+補正の強さは訓練行の中だけの前向き検証で選び、テスト窓は見ません。
+1段目は最初の2年から walk-forward で回し、2段目の訓練行にも
+「その行より前だけで学習したモデルの予測」を付けます。
+
+明細の効果は、同じ2段目で **明細を入れた版 − 入れない版** の AUC の差で測ります。
+入れない版（切片だけ）は群に合わせた較正し直しで、その効果と明細の効果を分けるための対照です。
+
+| 判定 | 条件（結果を見る前に固定） |
+| --- | --- |
+| 明細が効く | 差の95%区間が 0 を上回り、かつ偽の明細19回の差をすべて上回る |
+| 明細が害になる | 差の95%区間が 0 を下回り、かつ偽の明細19回の差をすべて下回る |
+| 差が見えない | それ以外 |
+
+偽の明細は、明細の特徴量を明細ありの行の間で入れ替えたものです。
+ブートストラップの区間はテスト行の引き直しだけで、補正の学習そのものの揺れを含みません。
+合成データ（明細に情報が無い）で区間だけだと「効く」と出た例があったので、これで補っています。
+
+出力は [`docs/ACCGRAPH_INCREMENT.md`](docs/ACCGRAPH_INCREMENT.md)。
+
+```bash
+python3 research/accgraph/increment.py
+```
+
 ### 規模効果を抜いて測る
 
 実データで測ると、単変量の情報係数の上位が軒並み `log_size`（企業規模）でした。
@@ -360,6 +395,7 @@ python3 research/accgraph/eda.py         # EDA の集計 -> _data/accgraph/eda.j
 python3 research/accgraph/eda_report.py  # 集計を組版 -> docs/accgraph_eda.html
 python3 research/accgraph/evaluate.py    # ベースラインを比較して docs に書き出す
 python3 research/accgraph/diagnose.py    # 明細ありの群の原因切り分け -> docs
+python3 research/accgraph/increment.py   # 明細の上積みを2段構えで測る -> docs
 python3 tests/test_accgraph.py           # 単体テスト
 ```
 
@@ -418,6 +454,7 @@ Accuracy 55% を大きく超える行が出たら、まずリークを疑って�
 │   ├── backtest.py               # 取引コスト控除後の損益
 │   ├── evaluate.py               # 評価の入口 (CLI)
 │   ├── diagnose.py               # 明細ありの群で信号が消えた原因の切り分け
+│   ├── increment.py              # 明細の上積みを2段構えで測る
 │   ├── leakage.py                # リーク検査
 │   ├── edinet.py                 # EDINET DB の明細を as-of で結合
 │   ├── eda.py                    # EDA の集計 (JSON)

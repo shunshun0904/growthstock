@@ -33,7 +33,7 @@ on:
         type: boolean
         default: true
       stage:
-        description: 'fast = 本体評価（約140分）を飛ばし、EDINET の比較と原因の切り分けだけ回す'
+        description: 'fast = 本体評価（約140分）を飛ばし、EDINET の比較・切り分け・上積みだけ回す'
         type: choice
         options: ['all', 'fast']
         default: 'all'
@@ -122,6 +122,16 @@ jobs:
             --horizon "${{ inputs.horizon || '20' }}" \
             2>&1 | tee diagnose.log
 
+      # 明細の上積みを2段構えで測る（research/accgraph/increment.py）。
+      # 1段目は J-Quants だけで全体から学習し、2段目は明細ありの群だけで
+      # 1段目の予測を固定したまま明細の補正を学習する
+      - name: Measure the EDINET increment (two-stage)
+        run: |
+          python3 research/accgraph/increment.py \
+            --benchmark "${{ inputs.benchmark || 'topix' }}" \
+            --horizon "${{ inputs.horizon || '20' }}" \
+            2>&1 | tee increment.log
+
       # 速いものの結果を、本体評価（約140分）の前にコミットしておく。
       # 本体評価の途中で次の push が来るとこの run は取り消されるが、
       # ここまでの結果は残る。GITHUB_TOKEN での push は新しい run を起こさない
@@ -131,9 +141,9 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A docs/ACCGRAPH_EDINET.md docs/ACCGRAPH_DIAGNOSE.md \
-                     docs/accgraph_eda.html
+                     docs/ACCGRAPH_INCREMENT.md docs/accgraph_eda.html
           if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
-          git commit -m "chore(accgraph): EDA・EDINET 比較・切り分けを更新 ($(date -u '+%Y-%m-%d %H:%M UTC'))"
+          git commit -m "chore(accgraph): EDA・EDINET 比較・切り分け・上積みを更新 ($(date -u '+%Y-%m-%d %H:%M UTC'))"
           for i in 1 2 3 4; do
             if git push; then exit 0; fi
             sleep $((2 ** i)); git pull --rebase
@@ -172,6 +182,12 @@ jobs:
               cat docs/ACCGRAPH_DIAGNOSE.md
             else
               echo "(実行せず)"
+            fi
+            echo '## 明細の上積み（2段構え）'
+            if [ -f docs/ACCGRAPH_INCREMENT.md ]; then
+              cat docs/ACCGRAPH_INCREMENT.md
+            else
+              echo "(実行せず)"
             fi; } >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
@@ -182,6 +198,7 @@ jobs:
             docs/ACCGRAPH_BASELINE.md
             docs/ACCGRAPH_EDINET.md
             docs/ACCGRAPH_DIAGNOSE.md
+            docs/ACCGRAPH_INCREMENT.md
             docs/accgraph_eda.html
             research/_data/accgraph/meta.parquet
             research/_data/accgraph/schema.json
@@ -189,11 +206,13 @@ jobs:
             research/_data/accgraph/baseline_results.json
             research/_data/accgraph/edinet_results.json
             research/_data/accgraph/diagnose.json
+            research/_data/accgraph/increment.json
             build.log
             eda.log
             evaluate.log
             evaluate_edinet.log
             diagnose.log
+            increment.log
           retention-days: 30
           if-no-files-found: warn
 
