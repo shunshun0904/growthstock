@@ -149,9 +149,23 @@ jobs:
           python3 research/wait_for_data.py \
             --feeds bars,indices,topix --deadline 18:00 --interval 300
 
+      # 種別を1つずつ取り、そのつど Release へ書き戻す。
+      #
+      # 以前は「全種別を取る」->「アップロード」の2段で、途中経過を一切
+      # 保存していなかった。取得したものは runner のディスクにあるだけで、
+      # timeout-minutes に当たると job ごとキャンセルされ、後続のステップは
+      # 走らない。つまり**それまでの取得が全部消える**。
+      # 実測（2026-09-22、run 35714524431）で、全期間バックフィルが
+      # 273分たっても終わらず、上限330分まで残り57分という状態になった。
+      #
+      # jq_bulk.py の種別間に依存は無い（days は --what と無関係に毎回
+      # /markets/calendar から作り、どの種別も他の種別の出力を読まない）。
+      # manifest も種別ごとの項目しか触らないので、1種別ずつ回して差分だけ
+      # 上げれば、上限に当たっても失うのは走っていた1種別ぶんだけになる。
       - name: Fetch missing days
         env:
           JQUANTS_API: ${{ secrets.JQUANTS_API }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TO="${{ inputs.to }}"
           [ -z "$TO" ] && TO=$(date -u +%Y-%m-%d)
@@ -196,10 +210,62 @@ jobs:
             [ -n "$FF" ] && FORGET="$FORGET --forget-from $FF"
           fi
           echo "forget 対象: ${FGT:-なし}"
-          python3 research/jq_bulk.py --incremental $RESET $FORGET \
-            --from "$FROM" --to "$TO" 2>&1 | tee fetch.log
 
+          # 前回の書き戻しから変わったファイルだけを上げる。
+          # bars_*.parquet だけで数百MBあるので、毎回まるごと上げない
+          MARK="$RUNNER_TEMP/upload_mark"
+          : > fetch.log
+          touch "$MARK"
+          push_back() {
+            local changed
+            changed=$(find research/_data -maxdepth 1 -newer "$MARK" \
+              \( -name '*.parquet' -o -name 'manifest.json' \) -print)
+            if [ -z "$changed" ]; then
+              echo "  （書き戻すファイルなし）"; return 0
+            fi
+            # shellcheck disable=SC2086
+            gh release upload "$RELEASE_TAG" $changed --clobber
+            echo "  書き戻した: $(echo "$changed" | wc -l)ファイル"
+            touch "$MARK"
+          }
+
+          # --reset / --forget は記録を消す操作なので、種別ごとの繰り返しに
+          # 入れてはいけない（前の周回で取ったものを次の周回で消してしまう）。
+          # 先に1回だけ流す。--what master は実測4秒で、毎回最新に
+          # 上書きする種別なので副作用が無い
+          if [ -n "$RESET$FORGET" ]; then
+            echo "::group::reset / forget を適用"
+            python3 research/jq_bulk.py --incremental $RESET $FORGET \
+              --from "$FROM" --to "$TO" --what master 2>&1 | tee -a fetch.log
+            push_back
+            echo "::endgroup::"
+          fi
+
+          FAILED=""
+          for k in $KINDS; do
+            echo "::group::$k"
+            if python3 research/jq_bulk.py --incremental \
+                 --what "$k" --from "$FROM" --to "$TO" 2>&1 | tee -a fetch.log
+            then
+              push_back
+            else
+              # 1種別の失敗で残りを止めない。取れたところまでは書き戻す。
+              # 記録は付いていないので、次回この種別だけ取り直される
+              echo "[warn] $k の取得に失敗しました（残りは続行する）"
+              FAILED="$FAILED $k"
+              push_back
+            fi
+            echo "::endgroup::"
+          done
+          if [ -n "$FAILED" ]; then
+            echo "取得に失敗した種別:$FAILED"
+            exit 1
+          fi
+
+      # 取得ステップが種別ごとに書き戻しているので、ここは取りこぼしの
+      # 受け皿。失敗して抜けたときも、取れたところまでは残す
       - name: Upload to release
+        if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -212,6 +278,7 @@ jobs:
           echo "${#files[@]} ファイルをアップロードしました"
 
       - name: Summary
+        if: always()
         run: |
           {
             echo "## 差分取得"
