@@ -125,9 +125,10 @@ function StrategyPanel({ signal, day, onSend, sentIds }) {
       <div className="card-head">
         <h2>今日の戦略</h2>
         <span className="sub">
-          発火の多い日に、3モデルが揃って上位10%と見た銘柄を
-          {STRATEGY.topK}件まで。翌営業日の寄りで買い、+{STRATEGY.takeProfit}% か
-          {STRATEGY.holdDays}営業日で降りる（同時保有は{STRATEGY.maxSlots}銘柄まで）
+          3モデルが揃って上位10%と見た銘柄を{STRATEGY.topK}件まで。
+          翌営業日の寄りで買い、+{STRATEGY.takeProfit}% か
+          {STRATEGY.holdDays}営業日で降りる（同時保有は{STRATEGY.maxSlots}銘柄まで、
+          発火{STRATEGY.skipBreaks}件未満の日は見送り）
         </span>
       </div>
 
@@ -137,7 +138,10 @@ function StrategyPanel({ signal, day, onSend, sentIds }) {
           <div>
             <span className="lab">発火数</span>
             <strong className="num">{nBreak}</strong>
-            <span className="sub">件（20件以上が本命 / 7件以下は見送り）</span>
+            <span className="sub">
+              件（{STRATEGY.strongBreaks}件以上が本命 /
+              {STRATEGY.skipBreaks - 1}件以下は見送り）
+            </span>
           </div>
           <div>
             <span className="lab">3モデルが揃って上位10%</span>
@@ -190,10 +194,12 @@ function StrategyPanel({ signal, day, onSend, sentIds }) {
       )}
 
       <p className="strat-src sub">
-        実測（2021-11〜2026-08 の out-of-fold）: 発火20件以上の日の上位1件は
-        1取引 +3.2〜3.5%・勝率61〜65%・正例率39%（母集団は +0.8%・50%・18.7%）。
-        年に29日ほどしか該当しない。閾値は結果を見てから選んだもので、
-        1取引あたりの差は統計的に有意ではない（docs/PLAYBOOK.md）。
+        実測（2021-11〜2026-08 の out-of-fold、基準を満たした757件）:
+        発火20件以上は +3.27%・勝率63%、8〜19件は +1.0〜2.2%・勝率54〜55%、
+        7件以下は −0.11%・−10%割れ14.1%。7件以下と8件以上の差だけは
+        z≈2.6 で実在する。20件という線は結果を見てから選んだもので、
+        そこで切ると枠が6割遊び、2022年は1年まるごと0件になる
+        （docs/PLAYBOOK.md）。
       </p>
     </section>
   );
