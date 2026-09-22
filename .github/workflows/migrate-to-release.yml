@@ -21,6 +21,17 @@ on:
         type: boolean
         default: true
 
+# すべての run を pipefail 付きの bash にする。
+#
+# 既定の shell は `bash -e` で pipefail が無い。`python3 ... | tee x.log` は
+# パイプの最後（tee）の終了コードで判定されるため、**python が落ちても
+# ステップは成功**になる。実測（2026-09-22、run 35713049207）で、
+# parquet 書き出しが ArrowInvalid で落ちたのに job は success になり、
+# 後続のステップが走らないまま終わっていた。
+defaults:
+  run:
+    shell: bash
+
 permissions:
   contents: write
   actions: read
