@@ -161,8 +161,7 @@ def main(argv=None) -> int:
         import ops_rule as OR
         from e25_auc_noise import average
         if all(a in summary for a in OR.BOOST):
-            print("\n=== 運用の規則: ブースティング3モデルすべてが過去窓の 85 パーセンタイル以上 ===")
-            print(OR.HEADER)
+            print("\n=== 運用の選定基準（lgbm 単体 95以上 / 3モデル 90以上）===")
 
             def load(algo, arm_tag):
                 files = [os.path.join(OOF_DIR, f"e27_{algo}_e28{tag}_{arm_tag}_s{s}.parquet")
@@ -177,7 +176,8 @@ def main(argv=None) -> int:
                 oofs = {a: load(a, t) for a, t in tags.items()}
                 if any(v is None for v in oofs.values()):
                     continue
-                print(OR.fmt(name, OR.consensus(oofs, 85)))
+                for rname, models, pct in OR.RULES:
+                    print(OR.fmt(f"{name} / {rname}", OR.consensus(oofs, pct, models=models)))
     except Exception as exc:  # noqa: BLE001
         print(f"  運用の規則の集計に失敗: {type(exc).__name__}: {exc}")
     log(f"記録: {OOF_DIR}/e28_*")
