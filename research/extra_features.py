@@ -226,7 +226,18 @@ def _count_in_window(samples: pd.DataFrame, events: pd.DataFrame,
 # --------------------------------------------------------------------------- #
 
 def _holders(cell) -> List[dict]:
-    """Hldrs は list of dict。文字列で来た版も読めるようにする。"""
+    """Hldrs は list of dict。
+
+    **parquet から読み戻すと numpy.ndarray で来る。** pyarrow の list 型は
+    ndarray に復元されるため、list/tuple だけを見ていると全部取りこぼす。
+    実測（2026-09-22、mjrshld 77,730行を取り込んだ直後）で mjr_* 7列が
+    **全欠測**になった。データは1行も欠けていないのに 0% だった。
+
+    文字列で保存された版も読めるようにしてある（取り込み経路によっては
+    入れ子が str 化されることがある）。
+    """
+    if isinstance(cell, np.ndarray):
+        cell = cell.tolist()
     if isinstance(cell, (list, tuple)):
         return [h for h in cell if isinstance(h, dict)]
     if isinstance(cell, str) and cell.strip().startswith("["):
@@ -304,6 +315,9 @@ def major_holders(samples: pd.DataFrame, data_dir: str = DATA_DIR) -> pd.DataFra
 # --------------------------------------------------------------------------- #
 
 def _xh(cell, key) -> float:
+    """Report は dict。_holders と同じ理由で、来うる形を広めに受ける。"""
+    if isinstance(cell, np.ndarray) and cell.size == 1:
+        cell = cell.item()
     if isinstance(cell, str) and cell.strip().startswith("{"):
         import ast as _ast
         try:

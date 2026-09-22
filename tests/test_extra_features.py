@@ -304,3 +304,48 @@ class TestGuidanceGap(unittest.TestCase):
     def test_グループに入っている(self):
         self.assertIn("revision", F.EXTRA_GROUPS)
         self.assertIn("guidance_op_growth", F.GROUPS["guidance"])
+
+
+class 入れ子の列がparquetから戻る形(unittest.TestCase):
+    """Hldrs / Report は経路によって来る形が変わる。全部受けること。
+
+    実害があった（2026-09-22）: mjrshld を 77,730行 取り込んだのに
+    mjr_* 7列が**全欠測**になった。pyarrow の list 型は読み戻すと
+    numpy.ndarray になるが、_holders が list/tuple しか見ていなかった。
+    データは1行も欠けていないのに 0% という、いちばん気づきにくい壊れ方。
+    """
+
+    def holders(self):
+        return [{"HldrName": "日本マスタートラスト信託銀行株式会社（信託口）",
+                 "ShsRatio": 0.10},
+                {"HldrName": "株式会社サンプル", "ShsRatio": 0.05},
+                {"HldrName": "山田太郎", "ShsRatio": 0.03}]
+
+    def test_ndarray_でも_list_でも同じ(self):
+        want = EF._holder_stats(self.holders())
+        got = EF._holder_stats(np.array(self.holders(), dtype=object))
+        self.assertTrue(want, "list で stats が空になっている")
+        self.assertEqual(want, got)
+
+    def test_文字列で来ても読める(self):
+        want = EF._holder_stats(self.holders())
+        got = EF._holder_stats(str(self.holders()))
+        self.assertEqual(want, got)
+
+    def test_中身が無ければ空(self):
+        for cell in (None, [], np.array([], dtype=object), "", "なにか"):
+            self.assertEqual(EF._holder_stats(cell), {}, repr(cell))
+
+    def test_信託と個人を分ける(self):
+        s = EF._holder_stats(np.array(self.holders(), dtype=object))
+        self.assertAlmostEqual(s["mjr_top1"], 10.0)
+        self.assertAlmostEqual(s["mjr_top10"], 18.0)
+        self.assertEqual(s["mjr_n"], 3.0)
+        self.assertAlmostEqual(s["mjr_trust"], 10.0)   # 信託銀行
+        self.assertAlmostEqual(s["mjr_indiv"], 3.0)    # 法人名に見えない先
+
+    def test_政策保有の_Report_も同じ(self):
+        rep = {"ListedIss": 12.0, "ListedBookVal": 1.0e9}
+        self.assertEqual(EF._xh(rep, "ListedIss"), 12.0)
+        self.assertEqual(EF._xh(str(rep), "ListedIss"), 12.0)
+        self.assertEqual(EF._xh(np.array([rep], dtype=object), "ListedIss"), 12.0)
