@@ -232,3 +232,77 @@ class TestAttach(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class 固有項目の比率(unittest.TestCase):
+    """2026-09-22 に足した EDINET DB 固有の7つ。
+
+    運用者の判断「edinet DB固有のデータがあるはずなので、代替のとか
+    以前に追加はします」。J-Quants には株主総利回りも役員報酬も
+    平均年齢も無いので、比較の対象ではなく単純な追加になる。
+    """
+
+    def fin(self):
+        """1社1年ぶんの最小限の有報。金額の単位は円。"""
+        return pd.DataFrame({
+            "jq_code": ["13010"], "edinet_code": ["E00001"],
+            "fiscal_year": [2025], "submit_date": [pd.Timestamp("2025-06-20")],
+            "accounting_standard": ["JP"], "basis": ["consolidated"],
+            "revenue": [1_000_000_000.0], "total_assets": [2_000_000_000.0],
+            "net_assets": [1_000_000_000.0], "net_income": [50_000_000.0],
+            "trade_receivables": [200_000_000.0],
+            "split_adjustment_factor": [1.0], "shares_issued": [1_000_000.0],
+            "num_employees": [100.0],
+            # ここから今回足したもの
+            "total_shareholder_return": [1.25],
+            "avg_age": [42.0], "avg_tenure_years": [15.0],
+            "net_defined_benefit_liability": [30_000_000.0],
+            "deferred_tax_assets": [16_000_000.0],
+            # 控除項目なので**負**で来る（実測 99.2%）
+            "allowance_for_doubtful_accounts": [-4_000_000.0],
+            "director_remuneration_total": [120_000_000.0],
+            "director_remuneration_headcount": [6.0],
+            "female_director_ratio": [0.25],
+        })
+
+    def panel(self):
+        return EF.annual_panel(self.fin())
+
+    def test_7列すべて作られる(self):
+        p = self.panel()
+        for c in EF.RATIOS_EXTRA:
+            self.assertIn(c, p.columns, c)
+            self.assertTrue(pd.notna(p[c].iloc[0]), f"{c} が欠測")
+
+    def test_割り算の相手が正しい(self):
+        p = self.panel().iloc[0]
+        self.assertAlmostEqual(p["dbo_r"], 30 / 2000)        # ÷ 総資産
+        self.assertAlmostEqual(p["dta_r"], 16 / 2000)        # ÷ 総資産
+        self.assertAlmostEqual(p["dir_pay_r"], 120 / 1000)   # ÷ 売上
+        self.assertAlmostEqual(p["dir_pay_head"], 20_000_000.0)  # 1人あたり
+
+    def test_貸倒引当金は絶対値で正になる(self):
+        """控除項目なので負で来る。そのまま割ると符号が逆になり、
+        「引当が厚いほど小さい値」という読み違いを生む。"""
+        p = self.panel().iloc[0]
+        self.assertGreater(p["bad_debt_r"], 0)
+        self.assertAlmostEqual(p["bad_debt_r"], 4 / 200)     # ÷ 売上債権
+
+    def test_比率はそのまま通る(self):
+        p = self.panel().iloc[0]
+        self.assertAlmostEqual(p["tsr"], 1.25)
+        self.assertAlmostEqual(p["fem_dir_r"], 0.25)
+
+    def test_平均年齢と勤続年数は水準として持つ(self):
+        p = self.panel().iloc[0]
+        for c in ("avg_age", "avg_tenure_years"):
+            self.assertIn(c, EF.PEOPLE, c)
+            self.assertAlmostEqual(p[c], 42.0 if c == "avg_age" else 15.0)
+
+    def test_充足率の低い列は入れていない(self):
+        """ghg_*（1.5〜4.9%）と gender_pay_gap_*（17.1%）。
+        いま入れても全欠測に近く、判定できない。"""
+        cols = set(EF.columns("all"))
+        for bad in ("ghg_scope1", "ghg_scope2", "ghg_scope3",
+                    "gender_pay_gap_regular", "gender_pay_gap_all"):
+            self.assertFalse(any(bad in c for c in cols), bad)

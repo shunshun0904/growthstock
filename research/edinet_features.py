@@ -76,8 +76,10 @@ CAPITAL = [
     "shares_adj", "treasury_adj", "outstanding_adj", "cash_dividends_paid",
     "cross_shareholding_total_book_value", "directors_shares_adj",
 ]
-#: 人的資本（有報の非財務情報）
-PEOPLE = ["num_employees", "temp_employees", "avg_annual_salary"]
+#: 人的資本（有報の非財務情報）。EDINET DB にしか無い。
+#: J-Quants は従業員数も平均年収も平均年齢も返さない
+PEOPLE = ["num_employees", "temp_employees", "avg_annual_salary",
+          "avg_age", "avg_tenure_years"]
 #: 水準を持つ項目。この軌道（前年比など）を特徴量にする
 LEVELS: List[str] = CORE + DETAIL + CAPITAL + PEOPLE
 
@@ -92,7 +94,22 @@ RATIOS_BALANCE = [
 ]
 RATIOS_CAPITAL = ["tsy_r", "cancel_r", "div_ni", "xhold_r", "dir_r"]
 RATIOS_PEOPLE = ["rev_per_emp", "temp_r", "salary_rev"]
-RATIOS: List[str] = RATIOS_QUALITY + RATIOS_BALANCE + RATIOS_CAPITAL + RATIOS_PEOPLE
+#: 2026-09-22 に足した固有項目（運用者の判断「edinet DB固有のデータが
+#: あるはずなので、代替のとか以前に追加はします」）。
+#: 充足率は取得済み817行での実測。
+#:   tsr            78.8%  株主総利回り。EDINET DB だけが持つ
+#:   dbo_r          69.4%  退職給付債務 ÷ 総資産
+#:   bad_debt_r     57.8%  貸倒引当金 ÷ 売上債権
+#:   dta_r          51.8%  繰延税金資産 ÷ 総資産
+#:   dir_pay_r      52.3%  役員報酬総額 ÷ 売上
+#:   dir_pay_head   51.3%  1人あたり役員報酬（円）
+#:   fem_dir_r      47.7%  女性役員比率
+#: ghg_*（1.5〜4.9%）と gender_pay_gap_*（17.1%）は充足率が低すぎるので
+#: 入れない。いま入れても全欠測に近く、判定できない
+RATIOS_EXTRA = ["tsr", "dbo_r", "bad_debt_r", "dta_r",
+                "dir_pay_r", "dir_pay_head", "fem_dir_r"]
+RATIOS: List[str] = (RATIOS_QUALITY + RATIOS_BALANCE + RATIOS_CAPITAL
+                     + RATIOS_PEOPLE + RATIOS_EXTRA)
 
 #: 時価総額と組み合わせる（attach のとき。frame の market_cap は億円）
 MCAP = ["fcf_yield", "netcash_mcap", "ev_ebitda", "xhold_mcap", "div_yield",
@@ -117,6 +134,11 @@ RAW_NUMERIC = [
     "ppe", "intangible_assets", "investment_securities", "short_term_securities",
     "retained_earnings", "interest_expenses", "extraordinary_income",
     "extraordinary_loss", "impairment_loss", "effective_tax_rate",
+    # 2026-09-22 に足した固有項目
+    "total_shareholder_return", "avg_age", "avg_tenure_years",
+    "net_defined_benefit_liability", "deferred_tax_assets",
+    "allowance_for_doubtful_accounts", "director_remuneration_total",
+    "director_remuneration_headcount", "female_director_ratio",
 ]
 GUARDS = ["accounting_standard", "basis"]
 
@@ -220,6 +242,26 @@ def annual_panel(fin: pd.DataFrame) -> pd.DataFrame:
     f["rev_per_emp"] = _ratio(rev, f["num_employees"])
     f["temp_r"] = _ratio(f["temp_employees"], f["num_employees"])
     f["salary_rev"] = ((f["avg_annual_salary"] * f["num_employees"]) / rev).where(rev > 0)
+    # --- 2026-09-22 に足した固有項目 --- #
+    # 株主総利回り。そのまま比率なので割らない
+    f["tsr"] = f["total_shareholder_return"]
+    # 金額は会社の大きさで決まってしまうので、必ず何かで割る。
+    # 貸倒引当金は総資産ではなく**売上債権**で割る。引当が厚いかは
+    # 債権の質の話であって、会社の規模の話ではない。
+    #
+    # **符号に注意。** 貸倒引当金は控除項目なので負で入っている
+    # （実測 472行のうち 99.2% が負、中央値 -6,600万円）。そのまま割ると
+    # 「引当が厚いほど小さい値」になって読み違える。絶対値にして
+    # 「厚いほど大きい」に揃える
+    f["dbo_r"] = _ratio(f["net_defined_benefit_liability"], ta)
+    f["dta_r"] = _ratio(f["deferred_tax_assets"], ta)
+    f["bad_debt_r"] = _ratio(f["allowance_for_doubtful_accounts"].abs(),
+                             f["trade_receivables"])
+    f["dir_pay_r"] = _ratio(f["director_remuneration_total"], rev)
+    # 1人あたり役員報酬は、割ったあとは規模に依存しない水準になる
+    f["dir_pay_head"] = _ratio(f["director_remuneration_total"],
+                               f["director_remuneration_headcount"])
+    f["fem_dir_r"] = f["female_director_ratio"]
     # 時価総額と組み合わせる元の値（attach で割る）
     f["_fcf"] = f["cf_operating"] - f["capex"]
     f["_netcash"] = f["cash"] + f["short_term_securities"].fillna(0.0) - f["debt"]
