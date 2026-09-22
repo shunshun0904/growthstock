@@ -1,12 +1,51 @@
 {
   "discovered": [
     "/bulk",
-    "/derivatives",
-    "/edinet",
-    "/equities",
-    "/fins",
-    "/indices",
-    "/markets"
+    "/content/drive",
+    "/derivatives/bars/daily/futures",
+    "/derivatives/bars/daily/options",
+    "/derivatives/futures",
+    "/derivatives/options",
+    "/edinet/cross-shareholdings",
+    "/edinet/large-volume-shareholders",
+    "/edinet/major-shareholders",
+    "/equities/bars/daily",
+    "/equities/bars/daily/am",
+    "/equities/bars/minute",
+    "/equities/earnings-calendar",
+    "/equities/investor-types",
+    "/equities/master",
+    "/equities/trades",
+    "/equities/valuation",
+    "/examples",
+    "/fins/announcement",
+    "/fins/details",
+    "/fins/dividend",
+    "/fins/earnings-date",
+    "/fins/fs_details",
+    "/fins/statements",
+    "/fins/summary",
+    "/go/pkg/mod",
+    "/indices/bars/daily",
+    "/indices/bars/daily/topix",
+    "/indices/topix",
+    "/kaggle/input",
+    "/listed/info",
+    "/markets/breakdown",
+    "/markets/calendar",
+    "/markets/margin-alert",
+    "/markets/margin-interest",
+    "/markets/short-ratio",
+    "/markets/short-sale-report",
+    "/markets/short_selling",
+    "/markets/short_selling_positions",
+    "/markets/trades_spec",
+    "/markets/trading_calendar",
+    "/markets/weekly_margin_interest",
+    "/prices/daily_quotes",
+    "/prices/prices_am",
+    "/token/auth_refresh",
+    "/token/auth_user"
   ],
   "sources": [
     {
@@ -86,6 +125,486 @@
       "status": 200,
       "found": 0,
       "bytes": 11154
+    },
+    {
+      "url": "J-Quants/JQuantsR/LICENSE.md",
+      "status": 200,
+      "found": 0,
+      "bytes": 1088
+    },
+    {
+      "url": "J-Quants/JQuantsR/R/authorize.R",
+      "status": 200,
+      "found": 2,
+      "bytes": 2978
+    },
+    {
+      "url": "J-Quants/JQuantsR/R/constants.R",
+      "status": 200,
+      "found": 0,
+      "bytes": 42
+    },
+    {
+      "url": "J-Quants/JQuantsR/R/fetch.R",
+      "status": 200,
+      "found": 2,
+      "bytes": 3024
+    },
+    {
+      "url": "J-Quants/JQuantsR/R/wrapper.R",
+      "status": 200,
+      "found": 17,
+      "bytes": 11940
+    },
+    {
+      "url": "J-Quants/JQuantsR/README.md",
+      "status": 200,
+      "found": 0,
+      "bytes": 3540
+    },
+    {
+      "url": "J-Quants/JQuantsR/tests/testthat.R",
+      "status": 200,
+      "found": 0,
+      "bytes": 74
+    },
+    {
+      "url": "J-Quants/JQuantsR/tests/testthat/test_all.R",
+      "status": 200,
+      "found": 0,
+      "bytes": 6740
+    },
+    {
+      "url": "J-Quants/jquants-api-client-python/.github/ISSUE_TEMPLATE/bug_report.yaml",
+      "status": 200,
+      "found": 0,
+      "bytes": 2704
+    },
+    {
+      "url": "J-Quants/jquants-api-client-python/.github/ISSUE_TEMPLATE/feature-request.yaml",
+      "status": 200,
+      "found": 0,
+      "bytes": 1550
+    },
+    {
+      "url": "J-Quants/jquants-api-client-python/.github/ISSUE_TEMPLATE/question.yaml",
+      "status": 200,
+      "found": 0,
+      "bytes": 1375
+    },
+    {
+      "url": "J-Quants/jquants-api-client-python/.github/PULL_REQUEST_TEMPLATE.md",
+      "status": 200,
+      "found": 0,
+      "bytes": 74
+    },
+    {
+      "url": "J-Quants/jquants-api-client-python/.github/workflows/build.yml",
+      "status": 200,
+      "found": 0,
+      "bytes": 2648
+    },
+    {
+      "url": "J-Quants/jquants-api-client-python/.github/workflows/publish.yml",
+      "status": 200,
+      "found": 0,
+      "bytes": 668
+    },
+    {
+      "url": "J-Quants/jquants-api-client-python/CONTRIBUTING.md",
+      "status": 200,
+      "found": 0,
+      "bytes": 1122
+    },
+    {
+      "url": "J-Quants/jquants-api-client-python/README.md",
+      "status": 200,
+      "found": 0,
+      "bytes": 5897
+    },
+    {
+      "url": "J-Quants/jquants-api-client-python/examples/20260119-007-jquants-api-v2-starter.ipynb",
+      "status": 200,
+      "found": 1,
+      "bytes": 11834
+    },
+    {
+      "url": "J-Quants/jquants-api-client-python/examples/README.md",
+      "status": 200,
+      "found": 0,
+      "bytes": 1479
+    },
+    {
+      "url": "J-Quants/jquants-api-client-python/jquantsapi/__init__.py",
+      "status": 200,
+      "found": 0,
+      "bytes": 172
+    },
+    {
+      "url": "J-Quants/jquants-api-client-python/jquantsapi/apis/__init__.py",
+      "status": 200,
+      "found": 0,
+      "bytes": 130
+    },
+    {
+      "url": "J-Quants/jquants-api-client-python/jquantsapi/apis/base.py",
+      "status": 200,
+      "found": 0,
+      "bytes": 866
+    },
+    {
+      "url": "J-Quants/jquants-api-client-python/jquantsapi/apis/v2/__init__.py",
+      "status": 200,
+      "found": 0,
+      "bytes": 21
+    },
+    {
+      "url": "J-Quants/jquants-api-client-python/jquantsapi/apis/v2/bulk.py",
+      "status": 200,
+      "found": 1,
+      "bytes": 3427
+    },
+    {
+      "url": "J-Quants/jquants-api-client-python/jquantsapi/apis/v2/derivatives.py",
+      "status": 200,
+      "found": 2,
+      "bytes": 3892
+    },
+    {
+      "url": "J-Quants/jquants-api-client-python/jquantsapi/apis/v2/edinet.py",
+      "status": 200,
+      "found": 3,
+      "bytes": 3704
+    },
+    {
+      "url": "J-Quants/jquants-api-client-python/jquantsapi/apis/v2/equities.py",
+      "status": 200,
+      "found": 7,
+      "bytes": 10195
+    },
+    {
+      "url": "J-Quants/jquants-api-client-python/jquantsapi/apis/v2/fins.py",
+      "status": 200,
+      "found": 2,
+      "bytes": 7072
+    },
+    {
+      "url": "J-Quants/jquants-api-client-python/jquantsapi/apis/v2/indices.py",
+      "status": 200,
+      "found": 2,
+      "bytes": 2496
+    },
+    {
+      "url": "J-Quants/jquants-api-client-python/jquantsapi/apis/v2/markets.py",
+      "status": 200,
+      "found": 6,
+      "bytes": 8548
+    },
+    {
+      "url": "J-Quants/jquants-api-client-python/jquantsapi/apis/v2/td.py",
+      "status": 200,
+      "found": 0,
+      "bytes": 4274
+    },
+    {
+      "url": "J-Quants/jquants-api-client-python/jquantsapi/client_v2.py",
+      "status": 200,
+      "found": 1,
+      "bytes": 58430
+    },
+    {
+      "url": "J-Quants/jquants-api-client-python/jquantsapi/constants.py",
+      "status": 200,
+      "found": 0,
+      "bytes": 15041
+    },
+    {
+      "url": "J-Quants/jquants-api-client-python/jquantsapi/enums.py",
+      "status": 200,
+      "found": 20,
+      "bytes": 1884
+    },
+    {
+      "url": "J-Quants/jquants-api-client-python/tests/__init__.py",
+      "status": 200,
+      "found": 0,
+      "bytes": 0
+    },
+    {
+      "url": "J-Quants/jquants-api-client-python/tests/test_client_v2.py",
+      "status": 200,
+      "found": 8,
+      "bytes": 44170
+    },
+    {
+      "url": "J-Quants/jquants-api-jvm/.circleci/config.yml",
+      "status": 200,
+      "found": 0,
+      "bytes": 376
+    },
+    {
+      "url": "J-Quants/jquants-api-jvm/BUILD.md",
+      "status": 200,
+      "found": 0,
+      "bytes": 738
+    },
+    {
+      "url": "J-Quants/jquants-api-jvm/CHANGELOG.md",
+      "status": 200,
+      "found": 0,
+      "bytes": 776
+    },
+    {
+      "url": "J-Quants/jquants-api-jvm/README.md",
+      "status": 200,
+      "found": 0,
+      "bytes": 11051
+    },
+    {
+      "url": "J-Quants/jquants-api-jvm/examples/JavaSample/src/main/java/info/hellonico/jquantsapi/JQuantsApiSample.java",
+      "status": 200,
+      "found": 0,
+      "bytes": 4429
+    },
+    {
+      "url": "J-Quants/jquants-api-jvm/examples/JavaSample/src/test/java/info/hellonico/jquantsapi/AppTest.java",
+      "status": 200,
+      "found": 0,
+      "bytes": 297
+    },
+    {
+      "url": "J-Quants/jquants-api-jvm/examples/charting-with-oz/CHANGELOG.md",
+      "status": 200,
+      "found": 0,
+      "bytes": 786
+    },
+    {
+      "url": "J-Quants/jquants-api-jvm/examples/charting-with-oz/README.md",
+      "status": 200,
+      "found": 0,
+      "bytes": 1447
+    },
+    {
+      "url": "J-Quants/jquants-api-jvm/examples/charting-with-oz/doc/intro.md",
+      "status": 200,
+      "found": 0,
+      "bytes": 124
+    },
+    {
+      "url": "J-Quants/jquants-api-jvm/examples/jupyter-clj/README.md",
+      "status": 200,
+      "found": 0,
+      "bytes": 555
+    },
+    {
+      "url": "J-Quants/jquants-api-jvm/examples/jupyter-clj/jupyter-jquants-jvm.ipynb",
+      "status": 200,
+      "found": 0,
+      "bytes": 25432
+    },
+    {
+      "url": "J-Quants/jquants-api-jvm/examples/someml/CHANGELOG.md",
+      "status": 200,
+      "found": 0,
+      "bytes": 766
+    },
+    {
+      "url": "J-Quants/jquants-api-jvm/examples/someml/README.md",
+      "status": 200,
+      "found": 0,
+      "bytes": 1923
+    },
+    {
+      "url": "J-Quants/jquants-api-jvm/examples/someml/doc/intro.md",
+      "status": 200,
+      "found": 0,
+      "bytes": 104
+    },
+    {
+      "url": "J-Quants/jquants-api-jvm/test/daily_86970_20201001.json",
+      "status": 200,
+      "found": 0,
+      "bytes": 28
+    },
+    {
+      "url": "J-Quants/jquants-api-jvm/test/daily_86970_20220118.json",
+      "status": 200,
+      "found": 0,
+      "bytes": 433
+    },
+    {
+      "url": "J-Quants/jquants-api-jvm/test/listed_info_86970.json",
+      "status": 200,
+      "found": 0,
+      "bytes": 288
+    },
+    {
+      "url": "J-Quants/jquants-api-jvm/test/listed_info_empty.json",
+      "status": 200,
+      "found": 0,
+      "bytes": 20
+    },
+    {
+      "url": "J-Quants/jquants-api-jvm/test/listed_sections.json",
+      "status": 200,
+      "found": 0,
+      "bytes": 2624
+    },
+    {
+      "url": "J-Quants/jquants-api-jvm/test/statements_6digitscode.json",
+      "status": 200,
+      "found": 0,
+      "bytes": 65
+    },
+    {
+      "url": "J-Quants/jquants-api-jvm/test/statements_86970_20220118.json",
+      "status": 200,
+      "found": 0,
+      "bytes": 2035
+    },
+    {
+      "url": "J-Quants/jquants-api-jvm/test/statements_empty.json",
+      "status": 200,
+      "found": 0,
+      "bytes": 24
+    },
+    {
+      "url": "J-Quants/jquants-api-go/.circleci/config.yml",
+      "status": 200,
+      "found": 1,
+      "bytes": 434
+    },
+    {
+      "url": "J-Quants/jquants-api-go/README.md",
+      "status": 200,
+      "found": 0,
+      "bytes": 570
+    },
+    {
+      "url": "J-Quants/jquants-api-go/example/jquants.go",
+      "status": 200,
+      "found": 0,
+      "bytes": 1005
+    },
+    {
+      "url": "J-Quants/jquants-api-go/example2/hello.go",
+      "status": 200,
+      "found": 0,
+      "bytes": 17
+    },
+    {
+      "url": "J-Quants/jquants-api-go/helper.go",
+      "status": 200,
+      "found": 0,
+      "bytes": 4816
+    },
+    {
+      "url": "J-Quants/jquants-api-go/helper_test.go",
+      "status": 200,
+      "found": 0,
+      "bytes": 814
+    },
+    {
+      "url": "J-Quants/jquants-api-go/vendor/olympos.io/encoding/edn/.travis.yml",
+      "status": 200,
+      "found": 0,
+      "bytes": 37
+    },
+    {
+      "url": "J-Quants/jquants-api-go/vendor/olympos.io/encoding/edn/README.md",
+      "status": 200,
+      "found": 0,
+      "bytes": 3307
+    },
+    {
+      "url": "J-Quants/jquants-api-go/vendor/olympos.io/encoding/edn/compact.go",
+      "status": 200,
+      "found": 0,
+      "bytes": 2066
+    },
+    {
+      "url": "J-Quants/jquants-api-go/vendor/olympos.io/encoding/edn/decode.go",
+      "status": 200,
+      "found": 0,
+      "bytes": 41608
+    },
+    {
+      "url": "J-Quants/jquants-api-go/vendor/olympos.io/encoding/edn/edn_tags.go",
+      "status": 200,
+      "found": 2,
+      "bytes": 4625
+    },
+    {
+      "url": "J-Quants/jquants-api-go/vendor/olympos.io/encoding/edn/encode.go",
+      "status": 200,
+      "found": 0,
+      "bytes": 35431
+    },
+    {
+      "url": "J-Quants/jquants-api-go/vendor/olympos.io/encoding/edn/extras.go",
+      "status": 200,
+      "found": 0,
+      "bytes": 3632
+    },
+    {
+      "url": "J-Quants/jquants-api-go/vendor/olympos.io/encoding/edn/fold.go",
+      "status": 200,
+      "found": 0,
+      "bytes": 3467
+    },
+    {
+      "url": "J-Quants/jquants-api-go/vendor/olympos.io/encoding/edn/lexer.go",
+      "status": 200,
+      "found": 0,
+      "bytes": 13463
+    },
+    {
+      "url": "J-Quants/jquants-api-go/vendor/olympos.io/encoding/edn/pprint.go",
+      "status": 200,
+      "found": 0,
+      "bytes": 6733
+    },
+    {
+      "url": "J-Quants/jquants-api-go/vendor/olympos.io/encoding/edn/tags.go",
+      "status": 200,
+      "found": 0,
+      "bytes": 1075
+    },
+    {
+      "url": "J-Quants/jquants-api-go/vendor/olympos.io/encoding/edn/types.go",
+      "status": 200,
+      "found": 0,
+      "bytes": 3223
+    },
+    {
+      "url": "J-Quants/JPXTokyoStockExchangePrediction/README.md",
+      "status": 200,
+      "found": 0,
+      "bytes": 3519
+    },
+    {
+      "url": "J-Quants/JPXTokyoStockExchangePrediction/winner-models/10th/ModelSummary.md",
+      "status": 200,
+      "found": 0,
+      "bytes": 1768
+    },
+    {
+      "url": "J-Quants/JPXTokyoStockExchangePrediction/winner-models/10th/notebooks/simulations/simulation_aggregation.ipynb",
+      "status": 200,
+      "found": 0,
+      "bytes": 362450
+    },
+    {
+      "url": "J-Quants/JPXTokyoStockExchangePrediction/winner-models/10th/notebooks/submission/submission-notebook.ipynb",
+      "status": 200,
+      "found": 1,
+      "bytes": 10953
+    },
+    {
+      "url": "J-Quants/JPXTokyoStockExchangePrediction/winner-models/10th/readme.md",
+      "status": 200,
+      "found": 0,
+      "bytes": 1310
     }
   ],
   "results": [
@@ -97,25 +616,63 @@
       "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
     },
     {
-      "path": "/derivatives",
+      "path": "/content/drive",
       "kind": "NOT_FOUND",
       "shape": "なし",
       "status": 403,
       "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
     },
     {
-      "path": "/edinet",
+      "path": "/derivatives/bars/daily/futures",
+      "kind": "PLAN",
+      "shape": "なし",
+      "status": 403,
+      "msg": "This API is not available on your subscription.  If you want more data, please check other plans:https://jpx-jquants.com/#dataset"
+    },
+    {
+      "path": "/derivatives/bars/daily/options",
+      "kind": "PLAN",
+      "shape": "なし",
+      "status": 403,
+      "msg": "This API is not available on your subscription.  If you want more data, please check other plans:https://jpx-jquants.com/#dataset"
+    },
+    {
+      "path": "/derivatives/futures",
       "kind": "NOT_FOUND",
       "shape": "なし",
       "status": 403,
       "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
     },
     {
-      "path": "/equities",
+      "path": "/derivatives/options",
       "kind": "NOT_FOUND",
       "shape": "なし",
       "status": 403,
       "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
+      "path": "/edinet/cross-shareholdings",
+      "kind": "OK",
+      "shape": "なし",
+      "status": 200,
+      "rows": 0,
+      "keys": []
+    },
+    {
+      "path": "/edinet/large-volume-shareholders",
+      "kind": "OK",
+      "shape": "なし",
+      "status": 200,
+      "rows": 0,
+      "keys": []
+    },
+    {
+      "path": "/edinet/major-shareholders",
+      "kind": "OK",
+      "shape": "なし",
+      "status": 200,
+      "rows": 0,
+      "keys": []
     },
     {
       "path": "/equities/bars/daily",
@@ -143,6 +700,85 @@
         "UL",
         "Va",
         "Vo"
+      ]
+    },
+    {
+      "path": "/equities/bars/daily/am",
+      "kind": "PLAN",
+      "shape": "なし",
+      "status": 403,
+      "msg": "This API is not available on your subscription.  If you want more data, please check other plans:https://jpx-jquants.com/#dataset"
+    },
+    {
+      "path": "/equities/bars/minute",
+      "kind": "PLAN",
+      "shape": "なし",
+      "status": 403,
+      "msg": "This API is not available on your subscription.  If you want more data, please check other plans:https://jpx-jquants.com/#dataset"
+    },
+    {
+      "path": "/equities/earnings-calendar",
+      "kind": "OK",
+      "shape": "なし",
+      "status": 200,
+      "rows": 1,
+      "keys": [
+        "CoName",
+        "Code",
+        "Date",
+        "FQ",
+        "FY",
+        "Section",
+        "SectorNm"
+      ]
+    },
+    {
+      "path": "/equities/investor-types",
+      "kind": "OK",
+      "shape": "なし",
+      "status": 200,
+      "rows": 2377,
+      "keys": [
+        "BankBal",
+        "BankBuy",
+        "BankSell",
+        "BankTot",
+        "BrkBal",
+        "BrkBuy",
+        "BrkSell",
+        "BrkTot",
+        "BusCoBal",
+        "BusCoBuy",
+        "BusCoSell",
+        "BusCoTot",
+        "EnDate",
+        "FrgnBal",
+        "FrgnBuy",
+        "FrgnSell",
+        "FrgnTot",
+        "IndBal",
+        "IndBuy",
+        "IndSell",
+        "IndTot",
+        "InsCoBal",
+        "InsCoBuy",
+        "InsCoSell",
+        "InsCoTot",
+        "InvTrBal",
+        "InvTrBuy",
+        "InvTrSell",
+        "InvTrTot",
+        "OthCoBal",
+        "OthCoBuy",
+        "OthCoSell",
+        "OthCoTot",
+        "OthFinBal",
+        "OthFinBuy",
+        "OthFinSell",
+        "OthFinTot",
+        "PropBal",
+        "PropBuy",
+        "PropSell"
       ]
     },
     {
@@ -183,7 +819,35 @@
       "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
     },
     {
-      "path": "/fins",
+      "path": "/equities/trades",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
+      "path": "/equities/valuation",
+      "kind": "OK",
+      "shape": "date",
+      "status": 200,
+      "msg": "This API requires at least 1 parameter as follows; 'date','code'.",
+      "rows": 4359,
+      "keys": [
+        "BPS",
+        "Code",
+        "Date",
+        "EPS",
+        "FwdEPS",
+        "FwdPER",
+        "FwdROE",
+        "MktCap",
+        "PBR",
+        "PER",
+        "ROE"
+      ]
+    },
+    {
+      "path": "/examples",
       "kind": "NOT_FOUND",
       "shape": "なし",
       "status": 403,
@@ -225,7 +889,38 @@
       "msg": "This API is not available on your subscription.  If you want more data, please check other plans:https://jpx-jquants.com/#dataset"
     },
     {
+      "path": "/fins/earnings-date",
+      "kind": "OK",
+      "shape": "date",
+      "status": 200,
+      "msg": "Specify exactly one of the following parameters: 'code', 'date', or 'scheduled_date'.",
+      "rows": 21,
+      "keys": [
+        "CoName",
+        "CoNameEn",
+        "Code",
+        "FQName",
+        "FYE",
+        "PubDate",
+        "SchDate"
+      ]
+    },
+    {
       "path": "/fins/forecast",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
+      "path": "/fins/fs_details",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
+      "path": "/fins/statements",
       "kind": "NOT_FOUND",
       "shape": "なし",
       "status": 403,
@@ -282,11 +977,41 @@
       ]
     },
     {
-      "path": "/indices",
+      "path": "/go/pkg/mod",
       "kind": "NOT_FOUND",
       "shape": "なし",
       "status": 403,
       "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
+      "path": "/indices/bars/daily",
+      "kind": "OK",
+      "shape": "date",
+      "status": 200,
+      "msg": "This API requires at least 1 parameter as follows; 'date','code'.",
+      "rows": 79,
+      "keys": [
+        "C",
+        "Code",
+        "Date",
+        "H",
+        "L",
+        "O"
+      ]
+    },
+    {
+      "path": "/indices/bars/daily/topix",
+      "kind": "OK",
+      "shape": "なし",
+      "status": 200,
+      "rows": 2441,
+      "keys": [
+        "C",
+        "Date",
+        "H",
+        "L",
+        "O"
+      ]
     },
     {
       "path": "/indices/prices",
@@ -303,7 +1028,14 @@
       "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
     },
     {
-      "path": "/markets",
+      "path": "/kaggle/input",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
+      "path": "/listed/info",
       "kind": "NOT_FOUND",
       "shape": "なし",
       "status": 403,
@@ -315,6 +1047,47 @@
       "shape": "なし",
       "status": 403,
       "msg": "This API is not available on your subscription.  If you want more data, please check other plans:https://jpx-jquants.com/#dataset"
+    },
+    {
+      "path": "/markets/calendar",
+      "kind": "OK",
+      "shape": "なし",
+      "status": 200,
+      "rows": 4118,
+      "keys": [
+        "Date",
+        "HolDiv"
+      ]
+    },
+    {
+      "path": "/markets/margin-alert",
+      "kind": "OK",
+      "shape": "date",
+      "status": 200,
+      "msg": "This API requires at least 1 parameter as follows; 'date','code'.",
+      "rows": 194,
+      "keys": [
+        "AppDate",
+        "Code",
+        "LongNegOut",
+        "LongNegOutChg",
+        "LongOut",
+        "LongOutChg",
+        "LongOutRatio",
+        "LongStdOut",
+        "LongStdOutChg",
+        "PubDate",
+        "PubReason",
+        "SLRatio",
+        "ShrtNegOut",
+        "ShrtNegOutChg",
+        "ShrtOut",
+        "ShrtOutChg",
+        "ShrtOutRatio",
+        "ShrtStdOut",
+        "ShrtStdOutChg",
+        "TSEMrgnRegCls"
+      ]
     },
     {
       "path": "/markets/margin-interest",
@@ -333,6 +1106,45 @@
       "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
     },
     {
+      "path": "/markets/short-ratio",
+      "kind": "OK",
+      "shape": "date",
+      "status": 200,
+      "msg": "This API requires at least 1 parameter as follows; 'date','s33'.",
+      "rows": 34,
+      "keys": [
+        "Date",
+        "S33",
+        "SellExShortVa",
+        "ShrtNoResVa",
+        "ShrtWithResVa"
+      ]
+    },
+    {
+      "path": "/markets/short-sale-report",
+      "kind": "OK",
+      "shape": "code",
+      "status": 200,
+      "msg": "This API requires at least 1 parameter as follows; 'code','disc_date','calc_date'.",
+      "rows": 22,
+      "keys": [
+        "CalcDate",
+        "Code",
+        "DICAddr",
+        "DICName",
+        "DiscDate",
+        "FundName",
+        "Notes",
+        "PrevRptDate",
+        "PrevRptRatio",
+        "SSAddr",
+        "SSName",
+        "ShrtPosShares",
+        "ShrtPosToSO",
+        "ShrtPosUnits"
+      ]
+    },
+    {
       "path": "/markets/short-selling",
       "kind": "NOT_FOUND",
       "shape": "なし",
@@ -340,7 +1152,70 @@
       "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
     },
     {
+      "path": "/markets/short_selling",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
+      "path": "/markets/short_selling_positions",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
       "path": "/markets/trades-spec",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
+      "path": "/markets/trades_spec",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
+      "path": "/markets/trading_calendar",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
+      "path": "/markets/weekly_margin_interest",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
+      "path": "/prices/daily_quotes",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
+      "path": "/prices/prices_am",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
+      "path": "/token/auth_refresh",
+      "kind": "NOT_FOUND",
+      "shape": "なし",
+      "status": 403,
+      "msg": "The requested endpoint does not exist. Please check the URL, HTTP method, and API version:https://jpx-jquants.com/spec/"
+    },
+    {
+      "path": "/token/auth_user",
       "kind": "NOT_FOUND",
       "shape": "なし",
       "status": 403,

@@ -266,27 +266,124 @@ Claude の作業環境からは公式ドキュメントに到達できない（e
 | `https://api.jquants.com/v1/openapi.json` | 403 | 0B | 0 |
 | `https://jpx-jquants.com/` | 403 | 0B | 0 |
 | `https://jpx.gitbook.io/j-quants-ja/api-reference` | 200 | 11,154B | 0 |
+| `J-Quants/JQuantsR/LICENSE.md` | 200 | 1,088B | 0 |
+| `J-Quants/JQuantsR/R/authorize.R` | 200 | 2,978B | 2 |
+| `J-Quants/JQuantsR/R/constants.R` | 200 | 42B | 0 |
+| `J-Quants/JQuantsR/R/fetch.R` | 200 | 3,024B | 2 |
+| `J-Quants/JQuantsR/R/wrapper.R` | 200 | 11,940B | 17 |
+| `J-Quants/JQuantsR/README.md` | 200 | 3,540B | 0 |
+| `J-Quants/JQuantsR/tests/testthat.R` | 200 | 74B | 0 |
+| `J-Quants/JQuantsR/tests/testthat/test_all.R` | 200 | 6,740B | 0 |
+| `J-Quants/jquants-api-client-python/.github/ISSUE_TEMPLATE/bug_report.yaml` | 200 | 2,704B | 0 |
+| `J-Quants/jquants-api-client-python/.github/ISSUE_TEMPLATE/feature-request.yaml` | 200 | 1,550B | 0 |
+| `J-Quants/jquants-api-client-python/.github/ISSUE_TEMPLATE/question.yaml` | 200 | 1,375B | 0 |
+| `J-Quants/jquants-api-client-python/.github/PULL_REQUEST_TEMPLATE.md` | 200 | 74B | 0 |
+| `J-Quants/jquants-api-client-python/.github/workflows/build.yml` | 200 | 2,648B | 0 |
+| `J-Quants/jquants-api-client-python/.github/workflows/publish.yml` | 200 | 668B | 0 |
+| `J-Quants/jquants-api-client-python/CONTRIBUTING.md` | 200 | 1,122B | 0 |
+| `J-Quants/jquants-api-client-python/README.md` | 200 | 5,897B | 0 |
+| `J-Quants/jquants-api-client-python/examples/20260119-007-jquants-api-v2-starter.ipynb` | 200 | 11,834B | 1 |
+| `J-Quants/jquants-api-client-python/examples/README.md` | 200 | 1,479B | 0 |
+| `J-Quants/jquants-api-client-python/jquantsapi/__init__.py` | 200 | 172B | 0 |
+| `J-Quants/jquants-api-client-python/jquantsapi/apis/__init__.py` | 200 | 130B | 0 |
+| `J-Quants/jquants-api-client-python/jquantsapi/apis/base.py` | 200 | 866B | 0 |
+| `J-Quants/jquants-api-client-python/jquantsapi/apis/v2/__init__.py` | 200 | 21B | 0 |
+| `J-Quants/jquants-api-client-python/jquantsapi/apis/v2/bulk.py` | 200 | 3,427B | 1 |
+| `J-Quants/jquants-api-client-python/jquantsapi/apis/v2/derivatives.py` | 200 | 3,892B | 2 |
+| `J-Quants/jquants-api-client-python/jquantsapi/apis/v2/edinet.py` | 200 | 3,704B | 3 |
+| `J-Quants/jquants-api-client-python/jquantsapi/apis/v2/equities.py` | 200 | 10,195B | 7 |
+| `J-Quants/jquants-api-client-python/jquantsapi/apis/v2/fins.py` | 200 | 7,072B | 2 |
+| `J-Quants/jquants-api-client-python/jquantsapi/apis/v2/indices.py` | 200 | 2,496B | 2 |
+| `J-Quants/jquants-api-client-python/jquantsapi/apis/v2/markets.py` | 200 | 8,548B | 6 |
+| `J-Quants/jquants-api-client-python/jquantsapi/apis/v2/td.py` | 200 | 4,274B | 0 |
+| `J-Quants/jquants-api-client-python/jquantsapi/client_v2.py` | 200 | 58,430B | 1 |
+| `J-Quants/jquants-api-client-python/jquantsapi/constants.py` | 200 | 15,041B | 0 |
+| `J-Quants/jquants-api-client-python/jquantsapi/enums.py` | 200 | 1,884B | 20 |
+| `J-Quants/jquants-api-client-python/tests/__init__.py` | 200 | 0B | 0 |
+| `J-Quants/jquants-api-client-python/tests/test_client_v2.py` | 200 | 44,170B | 8 |
+| `J-Quants/jquants-api-jvm/.circleci/config.yml` | 200 | 376B | 0 |
+| `J-Quants/jquants-api-jvm/BUILD.md` | 200 | 738B | 0 |
+| `J-Quants/jquants-api-jvm/CHANGELOG.md` | 200 | 776B | 0 |
+| `J-Quants/jquants-api-jvm/README.md` | 200 | 11,051B | 0 |
+| `J-Quants/jquants-api-jvm/examples/JavaSample/src/main/java/info/hellonico/jquantsapi/JQuantsApiSample.java` | 200 | 4,429B | 0 |
+| `J-Quants/jquants-api-jvm/examples/JavaSample/src/test/java/info/hellonico/jquantsapi/AppTest.java` | 200 | 297B | 0 |
+| `J-Quants/jquants-api-jvm/examples/charting-with-oz/CHANGELOG.md` | 200 | 786B | 0 |
+| `J-Quants/jquants-api-jvm/examples/charting-with-oz/README.md` | 200 | 1,447B | 0 |
+| `J-Quants/jquants-api-jvm/examples/charting-with-oz/doc/intro.md` | 200 | 124B | 0 |
+| `J-Quants/jquants-api-jvm/examples/jupyter-clj/README.md` | 200 | 555B | 0 |
+| `J-Quants/jquants-api-jvm/examples/jupyter-clj/jupyter-jquants-jvm.ipynb` | 200 | 25,432B | 0 |
+| `J-Quants/jquants-api-jvm/examples/someml/CHANGELOG.md` | 200 | 766B | 0 |
+| `J-Quants/jquants-api-jvm/examples/someml/README.md` | 200 | 1,923B | 0 |
+| `J-Quants/jquants-api-jvm/examples/someml/doc/intro.md` | 200 | 104B | 0 |
+| `J-Quants/jquants-api-jvm/test/daily_86970_20201001.json` | 200 | 28B | 0 |
+| `J-Quants/jquants-api-jvm/test/daily_86970_20220118.json` | 200 | 433B | 0 |
+| `J-Quants/jquants-api-jvm/test/listed_info_86970.json` | 200 | 288B | 0 |
+| `J-Quants/jquants-api-jvm/test/listed_info_empty.json` | 200 | 20B | 0 |
+| `J-Quants/jquants-api-jvm/test/listed_sections.json` | 200 | 2,624B | 0 |
+| `J-Quants/jquants-api-jvm/test/statements_6digitscode.json` | 200 | 65B | 0 |
+| `J-Quants/jquants-api-jvm/test/statements_86970_20220118.json` | 200 | 2,035B | 0 |
+| `J-Quants/jquants-api-jvm/test/statements_empty.json` | 200 | 24B | 0 |
+| `J-Quants/jquants-api-go/.circleci/config.yml` | 200 | 434B | 1 |
+| `J-Quants/jquants-api-go/README.md` | 200 | 570B | 0 |
+| `J-Quants/jquants-api-go/example/jquants.go` | 200 | 1,005B | 0 |
+| `J-Quants/jquants-api-go/example2/hello.go` | 200 | 17B | 0 |
+| `J-Quants/jquants-api-go/helper.go` | 200 | 4,816B | 0 |
+| `J-Quants/jquants-api-go/helper_test.go` | 200 | 814B | 0 |
+| `J-Quants/jquants-api-go/vendor/olympos.io/encoding/edn/.travis.yml` | 200 | 37B | 0 |
+| `J-Quants/jquants-api-go/vendor/olympos.io/encoding/edn/README.md` | 200 | 3,307B | 0 |
+| `J-Quants/jquants-api-go/vendor/olympos.io/encoding/edn/compact.go` | 200 | 2,066B | 0 |
+| `J-Quants/jquants-api-go/vendor/olympos.io/encoding/edn/decode.go` | 200 | 41,608B | 0 |
+| `J-Quants/jquants-api-go/vendor/olympos.io/encoding/edn/edn_tags.go` | 200 | 4,625B | 2 |
+| `J-Quants/jquants-api-go/vendor/olympos.io/encoding/edn/encode.go` | 200 | 35,431B | 0 |
+| `J-Quants/jquants-api-go/vendor/olympos.io/encoding/edn/extras.go` | 200 | 3,632B | 0 |
+| `J-Quants/jquants-api-go/vendor/olympos.io/encoding/edn/fold.go` | 200 | 3,467B | 0 |
+| `J-Quants/jquants-api-go/vendor/olympos.io/encoding/edn/lexer.go` | 200 | 13,463B | 0 |
+| `J-Quants/jquants-api-go/vendor/olympos.io/encoding/edn/pprint.go` | 200 | 6,733B | 0 |
+| `J-Quants/jquants-api-go/vendor/olympos.io/encoding/edn/tags.go` | 200 | 1,075B | 0 |
+| `J-Quants/jquants-api-go/vendor/olympos.io/encoding/edn/types.go` | 200 | 3,223B | 0 |
+| `J-Quants/JPXTokyoStockExchangePrediction/README.md` | 200 | 3,519B | 0 |
+| `J-Quants/JPXTokyoStockExchangePrediction/winner-models/10th/ModelSummary.md` | 200 | 1,768B | 0 |
+| `J-Quants/JPXTokyoStockExchangePrediction/winner-models/10th/notebooks/simulations/simulation_aggregation.ipynb` | 200 | 362,450B | 0 |
+| `J-Quants/JPXTokyoStockExchangePrediction/winner-models/10th/notebooks/submission/submission-notebook.ipynb` | 200 | 10,953B | 1 |
+| `J-Quants/JPXTokyoStockExchangePrediction/winner-models/10th/readme.md` | 200 | 1,310B | 0 |
 
-叩いたパス **25本**（OK 4 / v1でOK 0 / 契約不足 3 / 存在しない 18 / 引数不足 0）
+叩いたパス **55本**（OK 17 / v1でOK 0 / 契約不足 7 / 存在しない 31 / 引数不足 0）
 
 #### 使える（OK）
 
 | パス | 引数 | 件数 | 主な項目 |
 |---|---|---:|---|
+| `/edinet/cross-shareholdings` | なし | 0 |  |
+| `/edinet/large-volume-shareholders` | なし | 0 |  |
+| `/edinet/major-shareholders` | なし | 0 |  |
 | `/equities/bars/daily` | date | 4359 | `AdjC`, `AdjFactor`, `AdjH`, `AdjL`, `AdjO`, `AdjVo`, `C`, `Code` |
+| `/equities/earnings-calendar` | なし | 1 | `CoName`, `Code`, `Date`, `FQ`, `FY`, `Section`, `SectorNm` |
+| `/equities/investor-types` | なし | 2377 | `BankBal`, `BankBuy`, `BankSell`, `BankTot`, `BrkBal`, `BrkBuy`, `BrkSell`, `BrkTot` |
 | `/equities/master` | なし | 4450 | `CoName`, `CoNameEn`, `Code`, `Date`, `Mkt`, `MktNm`, `Mrgn`, `MrgnNm` |
+| `/equities/valuation` | date | 4359 | `BPS`, `Code`, `Date`, `EPS`, `FwdEPS`, `FwdPER`, `FwdROE`, `MktCap` |
+| `/fins/earnings-date` | date | 21 | `CoName`, `CoNameEn`, `Code`, `FQName`, `FYE`, `PubDate`, `SchDate` |
 | `/fins/summary` | date | 612 | `AvgSh`, `BPS`, `CFF`, `CFI`, `CFO`, `CashEq`, `ChgAcEst`, `ChgByASRev` |
+| `/indices/bars/daily` | date | 79 | `C`, `Code`, `Date`, `H`, `L`, `O` |
+| `/indices/bars/daily/topix` | なし | 2441 | `C`, `Date`, `H`, `L`, `O` |
+| `/markets/calendar` | なし | 4118 | `Date`, `HolDiv` |
+| `/markets/margin-alert` | date | 194 | `AppDate`, `Code`, `LongNegOut`, `LongNegOutChg`, `LongOut`, `LongOutChg`, `LongOutRatio`, `LongStdOut` |
 | `/markets/margin-interest` | date | 0 |  |
+| `/markets/short-ratio` | date | 34 | `Date`, `S33`, `SellExShortVa`, `ShrtNoResVa`, `ShrtWithResVa` |
+| `/markets/short-sale-report` | code | 22 | `CalcDate`, `Code`, `DICAddr`, `DICName`, `DiscDate`, `FundName`, `Notes`, `PrevRptDate` |
 
 #### 在るが契約が足りない（プレミアムで開く）
 
 | パス | メッセージ |
 |---|---|
+| `/derivatives/bars/daily/futures` | This API is not available on your subscription.  If you want more data, please check other plans:https://jpx-j |
+| `/derivatives/bars/daily/options` | This API is not available on your subscription.  If you want more data, please check other plans:https://jpx-j |
+| `/equities/bars/daily/am` | This API is not available on your subscription.  If you want more data, please check other plans:https://jpx-j |
+| `/equities/bars/minute` | This API is not available on your subscription.  If you want more data, please check other plans:https://jpx-j |
 | `/fins/details` | This API is not available on your subscription.  If you want more data, please check other plans:https://jpx-j |
 | `/fins/dividend` | This API is not available on your subscription.  If you want more data, please check other plans:https://jpx-j |
 | `/markets/breakdown` | This API is not available on your subscription.  If you want more data, please check other plans:https://jpx-j |
 
 #### そのパスには何も無い
 
-`/bulk`、`/derivatives`、`/edinet`、`/equities`、`/equities/ownership`、`/equities/shareholders`、`/fins`、`/fins/announcement`、`/fins/consensus`、`/fins/disclosure`、`/fins/forecast`、`/indices`、`/indices/prices`、`/indices/topix`、`/markets`、`/markets/ownership`、`/markets/short-selling`、`/markets/trades-spec`
+`/bulk`、`/content/drive`、`/derivatives/futures`、`/derivatives/options`、`/equities/ownership`、`/equities/shareholders`、`/equities/trades`、`/examples`、`/fins/announcement`、`/fins/consensus`、`/fins/disclosure`、`/fins/forecast`、`/fins/fs_details`、`/fins/statements`、`/go/pkg/mod`、`/indices/prices`、`/indices/topix`、`/kaggle/input`、`/listed/info`、`/markets/ownership`、`/markets/short-selling`、`/markets/short_selling`、`/markets/short_selling_positions`、`/markets/trades-spec`、`/markets/trades_spec`、`/markets/trading_calendar`、`/markets/weekly_margin_interest`、`/prices/daily_quotes`、`/prices/prices_am`、`/token/auth_refresh`、`/token/auth_user`
 
