@@ -653,26 +653,72 @@
     {
       "path": "/edinet/cross-shareholdings",
       "kind": "OK",
-      "shape": "なし",
+      "shape": "date",
       "status": 200,
-      "rows": 0,
-      "keys": []
+      "rows": 2,
+      "keys": [
+        "Code",
+        "DocId",
+        "DocTypeCode",
+        "EdinetCode",
+        "FilerName",
+        "FilerNameEn",
+        "Largest",
+        "PerEn",
+        "PerSt",
+        "Report",
+        "SecondLargest",
+        "SubDate",
+        "SubTime"
+      ]
     },
     {
       "path": "/edinet/large-volume-shareholders",
       "kind": "OK",
-      "shape": "なし",
+      "shape": "date",
       "status": 200,
-      "rows": 0,
-      "keys": []
+      "rows": 47,
+      "keys": [
+        "ChgRsn",
+        "Code",
+        "DocId",
+        "DocTitle",
+        "DocTypeCode",
+        "EdinetCode",
+        "Hldrs",
+        "IsrName",
+        "LargeHldgTypeCode",
+        "ParDocId",
+        "RptOblgDate",
+        "SubDate",
+        "SubTime",
+        "TotalOutStks",
+        "TotalShsHeld",
+        "TotalShsRatio",
+        "TotalShsRatioLast"
+      ]
     },
     {
       "path": "/edinet/major-shareholders",
       "kind": "OK",
-      "shape": "なし",
+      "shape": "date",
       "status": 200,
-      "rows": 0,
-      "keys": []
+      "rows": 68,
+      "keys": [
+        "Code",
+        "CurPerEn",
+        "CurPerSt",
+        "DocId",
+        "DocTypeCode",
+        "EdinetCode",
+        "FilerName",
+        "FilerNameEn",
+        "Hldrs",
+        "PerEn",
+        "PerSt",
+        "SubDate",
+        "SubTime"
+      ]
     },
     {
       "path": "/equities/bars/daily",
@@ -1092,11 +1138,21 @@
     {
       "path": "/markets/margin-interest",
       "kind": "OK",
-      "shape": "date",
+      "shape": "code",
       "status": 200,
       "msg": "This API requires at least 1 parameter as follows; 'date','code'.",
-      "rows": 0,
-      "keys": []
+      "rows": 507,
+      "keys": [
+        "Code",
+        "Date",
+        "IssType",
+        "LongNegVol",
+        "LongStdVol",
+        "LongVol",
+        "ShrtNegVol",
+        "ShrtStdVol",
+        "ShrtVol"
+      ]
     },
     {
       "path": "/markets/ownership",

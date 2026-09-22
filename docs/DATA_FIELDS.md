@@ -353,9 +353,9 @@ Claude の作業環境からは公式ドキュメントに到達できない（e
 
 | パス | 引数 | 件数 | 主な項目 |
 |---|---|---:|---|
-| `/edinet/cross-shareholdings` | なし | 0 |  |
-| `/edinet/large-volume-shareholders` | なし | 0 |  |
-| `/edinet/major-shareholders` | なし | 0 |  |
+| `/edinet/cross-shareholdings` | date | 2 | `Code`, `DocId`, `DocTypeCode`, `EdinetCode`, `FilerName`, `FilerNameEn`, `Largest`, `PerEn` |
+| `/edinet/large-volume-shareholders` | date | 47 | `ChgRsn`, `Code`, `DocId`, `DocTitle`, `DocTypeCode`, `EdinetCode`, `Hldrs`, `IsrName` |
+| `/edinet/major-shareholders` | date | 68 | `Code`, `CurPerEn`, `CurPerSt`, `DocId`, `DocTypeCode`, `EdinetCode`, `FilerName`, `FilerNameEn` |
 | `/equities/bars/daily` | date | 4359 | `AdjC`, `AdjFactor`, `AdjH`, `AdjL`, `AdjO`, `AdjVo`, `C`, `Code` |
 | `/equities/earnings-calendar` | なし | 1 | `CoName`, `Code`, `Date`, `FQ`, `FY`, `Section`, `SectorNm` |
 | `/equities/investor-types` | なし | 2377 | `BankBal`, `BankBuy`, `BankSell`, `BankTot`, `BrkBal`, `BrkBuy`, `BrkSell`, `BrkTot` |
@@ -367,7 +367,7 @@ Claude の作業環境からは公式ドキュメントに到達できない（e
 | `/indices/bars/daily/topix` | なし | 2441 | `C`, `Date`, `H`, `L`, `O` |
 | `/markets/calendar` | なし | 4118 | `Date`, `HolDiv` |
 | `/markets/margin-alert` | date | 194 | `AppDate`, `Code`, `LongNegOut`, `LongNegOutChg`, `LongOut`, `LongOutChg`, `LongOutRatio`, `LongStdOut` |
-| `/markets/margin-interest` | date | 0 |  |
+| `/markets/margin-interest` | code | 507 | `Code`, `Date`, `IssType`, `LongNegVol`, `LongStdVol`, `LongVol`, `ShrtNegVol`, `ShrtStdVol` |
 | `/markets/short-ratio` | date | 34 | `Date`, `S33`, `SellExShortVa`, `ShrtNoResVa`, `ShrtWithResVa` |
 | `/markets/short-sale-report` | code | 22 | `CalcDate`, `Code`, `DICAddr`, `DICName`, `DiscDate`, `FundName`, `Notes`, `PrevRptDate` |
 
