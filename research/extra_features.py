@@ -342,13 +342,15 @@ def cross_holdings(samples: pd.DataFrame, data_dir: str = DATA_DIR) -> pd.DataFr
     out["xh_days"] = (pd.to_datetime(m["Date"]) - m["XhDate"]).dt.days.to_numpy()
     for c in XH_COLS:
         out[c] = _num(m[c]).to_numpy()
-    # 時価総額との比。規模で割らないと大型株ばかり大きく出る
+    # 時価総額との比。規模で割らないと大型株ばかり大きく出る。
+    # 接尾辞は `_mc`。`_r` はこのリポジトリで「同日内の順位」を表す
+    # 予約語なので使わない（features.RAW_FOR_RANK / RANKED_GROUPS）
     if "market_cap" in samples.columns:
         mc = _num(samples["market_cap"]).to_numpy() * 1e8      # 億円 -> 円
         with np.errstate(divide="ignore", invalid="ignore"):
-            out["xh_bookval_r"] = np.where(mc > 0, out["xh_bookval"] / mc * 100.0,
+            out["xh_bookval_mc"] = np.where(mc > 0, out["xh_bookval"] / mc * 100.0,
                                            np.nan)
-            out["xh_net_r"] = np.where(mc > 0, out["xh_net"] / mc * 100.0, np.nan)
+            out["xh_net_mc"] = np.where(mc > 0, out["xh_net"] / mc * 100.0, np.nan)
     return out
 
 

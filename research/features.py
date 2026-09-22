@@ -168,7 +168,7 @@ GROUPS: Dict[str, List[str]] = {
                       "mjr_trust", "mjr_indiv"],
     #: 政策保有株。売却はガバナンス改善のシグナルとして読まれる
     "holders_cross": ["xh_days", "xh_iss", "xh_bookval", "xh_dec_amt",
-                      "xh_inc_cost", "xh_net", "xh_bookval_r", "xh_net_r"],
+                      "xh_inc_cost", "xh_net", "xh_bookval_mc", "xh_net_mc"],
     #: 信用規制。規制がかかると値動きの性質が変わる
     "margin_alert": ["alert_days", "alert_longoutratio", "alert_shrtoutratio",
                      "alert_slratio"],
