@@ -127,7 +127,7 @@ function StrategyPanel({ signal, day, onSend, sentIds }) {
         <span className="sub">
           発火の多い日に、3モデルが揃って上位10%と見た銘柄を
           {STRATEGY.topK}件まで。翌営業日の寄りで買い、+{STRATEGY.takeProfit}% か
-          {STRATEGY.holdDays}営業日で降りる
+          {STRATEGY.holdDays}営業日で降りる（同時保有は{STRATEGY.maxSlots}銘柄まで）
         </span>
       </div>
 
@@ -162,6 +162,9 @@ function StrategyPanel({ signal, day, onSend, sentIds }) {
             <li>買えたら <b>+{STRATEGY.takeProfit}% の指値</b>を置く（到達は約1割、
                 届くときの中央値は11〜12営業日）</li>
             <li>届かなければ <b>{STRATEGY.holdDays}営業日</b>で手仕舞い</li>
+            <li><b>枠は{STRATEGY.maxSlots}つまで</b>。埋まっていたら見送る。
+                保有中の銘柄は、ここに良い候補が出ても<b>切らない</b>
+                （実測で乗り換え37回のうち24回は切らないほうが良かった）</li>
           </ol>
         </>
       ) : (

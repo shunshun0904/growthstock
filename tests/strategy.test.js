@@ -6,6 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   BOOST, STRATEGY, boostPcts, minPct, passesAgree, dayVerdict, strategySignal, exitPlan,
+  freeSlots,
 } from '../src/lib/strategy.js';
 
 const cand = (code, pcts, score = 0.5) => ({
@@ -124,4 +125,25 @@ test('exitPlan: 終値から指値の目安を出す', () => {
   assert.equal(p.holdDays, 20);
   assert.equal(exitPlan(0), null);
   assert.equal(exitPlan(null), null);
+});
+
+test('STRATEGY: 同時保有の上限は3（実験34で決めた枠）', () => {
+  assert.equal(STRATEGY.maxSlots, 3);
+});
+
+test('freeSlots: 保有数から空き枠を出す', () => {
+  assert.equal(freeSlots(0), 3);
+  assert.equal(freeSlots(2), 1);
+  assert.equal(freeSlots(3), 0);
+  // 上限を超えて持っていても負にはしない
+  assert.equal(freeSlots(5), 0);
+});
+
+test('freeSlots: 保有数が分からなければ null（枠の話をしない）', () => {
+  assert.equal(freeSlots(null), null);
+  assert.equal(freeSlots(undefined), null);
+  assert.equal(freeSlots(NaN), null);
+  assert.equal(freeSlots(-1), null);
+  // 玉の本数は整数。小数は入力の誤りなので黙って丸めない
+  assert.equal(freeSlots(1.7), null);
 });
