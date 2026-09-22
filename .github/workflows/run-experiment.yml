@@ -1,0 +1,121 @@
+name: Run Experiment
+
+# research/exp/ の実験を Actions で回す。
+#
+# 作った理由は単純で、**実験がローカルの4コアには重すぎる**から。
+# 実測（2026-09-22）: 実験40 の隣でテスト全件を走らせただけで
+# load average が 8 に達し、同じ out-of-fold が 47秒 -> 2,661秒（56倍）に
+# 伸びた。実験39 は 3モデル × 3腕 × 種3つ × 11窓 に Optuna 50試行 ×
+# 5分割 × 3モデルが乗るので、桁がひとつ違う。
+#
+# 生データは Release (data-raw) から取り、データセットはここで作り直す。
+# research/_data/ は .gitignore なので、成果物は artifact で持ち出す。
+on:
+  workflow_dispatch:
+    inputs:
+      exp:
+        description: '実験スクリプト名（research/exp/ の中。例: e39_extra_multi.py）'
+        required: true
+      args:
+        description: 'スクリプトに渡す引数（省略可）'
+        required: false
+        default: ''
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+# 同じ実験を二重に走らせない。別の実験なら並行してよい
+concurrency:
+  group: run-experiment-${{ inputs.exp }}
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    # 330分は update-data.yml と同じ考え方（6時間の上限に対する余裕）。
+    # 入力で変えられるようにはしない。timeout-minutes に式を書くと、
+    # 解釈に失敗したときワークフローごと動かなくなる。上限が足りない
+    # 実験は、探索と評価を分けて2回に割る
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r research/requirements.txt
+
+      # **入力をそのままシェルに展開しない。**
+      # ${{ inputs.exp }} を run の中に書くと、入力に `;` を入れられた
+      # ときに任意のコマンドが走る。env で渡し、実在するファイル名と
+      # 突き合わせてから使う。
+      - name: Resolve experiment
+        id: exp
+        env:
+          EXP: ${{ inputs.exp }}
+        run: |
+          ls research/exp/*.py | xargs -n1 basename > /tmp/known.txt
+          if ! grep -qxF -- "$EXP" /tmp/known.txt; then
+            echo "そんな実験はありません: $EXP"
+            echo "使えるもの:"; sed 's/^/  /' /tmp/known.txt
+            exit 1
+          fi
+          echo "name=$EXP" >> "$GITHUB_OUTPUT"
+          echo "実験: research/exp/$EXP"
+
+      - name: Download raw data
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p research/_data
+          gh release download data-raw --dir research/_data --clobber
+          ls -lh research/_data | tail -5
+          echo "ファイル数: $(ls research/_data | wc -l)"
+
+      # 探索の途中結果を次の実行に引き継ぐ。
+      # 上限に当たっても Optuna の study が残っていれば、次は残りの試行
+      # だけで済む（tuning_multi.tune は完了済み試行を引き継ぐ作り）。
+      - name: Restore study database
+        uses: actions/cache@v4
+        with:
+          path: research/_data/oof
+          key: exp-oof-${{ steps.exp.outputs.name }}-${{ github.run_id }}
+          restore-keys: |
+            exp-oof-${{ steps.exp.outputs.name }}-
+
+      - name: Build dataset
+        run: |
+          mkdir -p research/_data/oof
+          python3 research/build_dataset.py 2>&1 | tail -30
+
+      - name: Run experiment
+        env:
+          EXP: ${{ steps.exp.outputs.name }}
+          EXP_ARGS: ${{ inputs.args }}
+        run: |
+          # 引数も入力なので、配列に展開してから渡す（eval しない）
+          read -r -a ARGV <<< "$EXP_ARGS"
+          python3 "research/exp/$EXP" "${ARGV[@]}" 2>&1 | tee exp.log
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## ${{ steps.exp.outputs.name }}"
+            echo '```'
+            tail -200 exp.log 2>/dev/null || echo '(出力なし)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp-${{ steps.exp.outputs.name }}
+          path: |
+            exp.log
+            research/_data/oof/
+          retention-days: 30
