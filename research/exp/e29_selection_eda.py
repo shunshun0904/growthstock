@@ -165,8 +165,9 @@ def cv_scores(df: pd.DataFrame, cols: list, algos=OR.BOOST) -> dict:
 
 def pick(scores: dict, models, pct: float, mode: str) -> pd.DataFrame:
     """
-    mode="oof": しきい値はそれより前の窓の分布（運用の規則）
-    mode="cv" : しきい値はその分割の検証側の分布
+    mode="oof"     : しきい値はそれより前の窓の分布（運用の規則）
+    mode="oof_win" : しきい値はその窓の中の分布（窓ごとの選定率を一定にする変種）
+    mode="cv"      : しきい値はその分割の検証側の分布
     戻り値は選ばれた行（Code, Date, fold, label, ret_o1_*, s_<algo>）。
     """
     first = models[0]
@@ -183,6 +184,8 @@ def pick(scores: dict, models, pct: float, mode: str) -> pd.DataFrame:
                 continue
             ref = {a: prev[f"s_{a}"].to_numpy() for a in models}
         else:
+            if mode == "oof_win" and len(base[base["fold"] < f]) < 500:
+                continue          # 窓1 は OOF と同じ理由で外す（比較の分母を揃える）
             ref = {a: cur[f"s_{a}"].to_numpy() for a in models}
         ok = np.ones(len(cur), dtype=bool)
         for a in models:
@@ -194,7 +197,7 @@ def pick(scores: dict, models, pct: float, mode: str) -> pd.DataFrame:
 def universe(scores: dict, models, mode: str) -> pd.DataFrame:
     """選定と同じ窓（OOF は窓1を除く）の母集団。比較の分母。"""
     base = scores[models[0]][["Code", "Date", "fold", "label", "ret_o1_20", "ret_o1_40"]]
-    if mode == "oof":
+    if mode.startswith("oof"):
         folds = sorted(base["fold"].unique())
         keep = [f for f in folds if len(base[base["fold"] < f]) >= 500]
         return base[base["fold"].isin(keep)]
@@ -319,22 +322,29 @@ def main() -> int:
     s33 = sector_names()
 
     store = {}
-    for mode in ("OOF", "CV"):
-        sc = scores[mode]
-        print(f"\n{'='*100}\n{mode}（"
-              + ("本番と同じ11窓・しきい値は過去の窓の分布" if mode == "OOF"
-                 else "探索と同じ5分割・しきい値は各分割の検証側の分布。楽観に出る")
-              + f"）\n{'='*100}")
+    NOTE = {
+        "OOF": "本番と同じ11窓・しきい値は**過去の窓**の分布（運用そのもの）。"
+               "窓ごとの選定数は大きく偏る",
+        "OOF窓内": "同じ11窓・しきい値は**その窓の中**の分布。窓ごとの選定率が一定に"
+                   "なるので、窓平均の比較にはこちらが素直",
+        "CV": "探索と同じ5分割・しきい値は各分割の検証側の分布。分割の訓練側に未来が"
+              "混ざるので成績は楽観に出る（選ばれる銘柄の性格を見るためのもの）",
+    }
+    MODE_KEY = {"OOF": ("OOF", "oof"), "OOF窓内": ("OOF", "oof_win"), "CV": ("CV", "cv")}
+    for mode in ("OOF", "OOF窓内", "CV"):
+        src, how = MODE_KEY[mode]
+        sc = scores[src]
+        print(f"\n{'='*100}\n{mode}（{NOTE[mode]}）\n{'='*100}")
         for rname, models, pct in OR.RULES:
-            sel = pick(sc, models, pct, mode.lower())
-            uni = universe(sc, models, mode.lower())
+            sel = pick(sc, models, pct, how)
+            uni = universe(sc, models, how)
             fr_ = frequency(sel, uni, cal)
             pf = performance(sel, uni)
             store[(mode, rname)] = {"freq": fr_, "perf": pf}
             print(f"\n--- {rname} ---  対象 {fr_['span']} / 母集団 {len(uni):,}件")
             print(f"  選定 {fr_['n']:,}件（{fr_['rate']*100:.1f}%）/ 銘柄 {fr_['codes']:,} / "
                   f"1回だけ選ばれた銘柄 {fr_['once']*100:.0f}% / 同じ銘柄の最多 {fr_['max_repeat']}回")
-            if mode == "OOF":
+            if src == "OOF":
                 print(f"  頻度: 1営業日 {fr_['per_day']:.2f}件（中央値 {fr_['median_day']:.0f} / "
                       f"ゼロの日 {fr_['zero_day']*100:.0f}% / 最多 {fr_['max_day']}件）/ "
                       f"1週 {fr_['per_week']:.1f}件（ゼロの週 {fr_['zero_week']*100:.0f}%）/ "
@@ -345,13 +355,15 @@ def main() -> int:
                   f"中央値 {pf['median']:+.2f}% / 四分位 {pf['q25']:+.2f}〜{pf['q75']:+.2f}% / "
                   f"10-90% {pf['q10']:+.2f}〜{pf['q90']:+.2f}%")
             print(f"  ret_o1_40 平均 {pf['ret40']:+.2f}%（母集団 {pf['ret40_uni']:+.2f}%）")
-            unit = "窓" if mode == "OOF" else "分割"
+            unit = "窓" if src == "OOF" else "分割"
             print(f"  {unit}平均の超過 {pf['fold_mean']:+.2f}pt（SE {pf['fold_se']:.2f}）/ "
                   f"勝ち {pf['fold_won']}/{pf['n_folds']} / 最悪 {pf['worst']:+.2f}pt")
             print(f"  {unit}ごとの超過: " + " ".join(f"{k}:{v:+.2f}" for k, v in pf["per_fold"].items()))
+            cnt = sel.groupby("fold").size()
+            print(f"  {unit}ごとの選定数: " + " ".join(f"{k}:{v}" for k, v in cnt.items()))
 
             prof = profile(sel, uni, frame)
-            prof.to_csv(os.path.join(OUT, f"e29_profile_{mode}_{models[0]}{int(pct)}.csv"), index=False)
+            prof.to_csv(os.path.join(OUT, f"e29_profile_{how}_{models[0]}{int(pct)}.csv"), index=False)
             print(f"  --- 銘柄の性格（選定の中央値が母集団分布の何%点か。50 なら母集団と同じ）---")
             print(f"    {'特徴量':<30}{'母集団の中央値':>14}{'選定の中央値':>13}{'%点':>7}")
             for _, r in prof.reindex(prof["pctile_of_uni"].sub(50).abs().sort_values(ascending=False).index).iterrows():
@@ -362,14 +374,14 @@ def main() -> int:
                                    ("mkt_code", MKT_JA, "市場区分"),
                                    ("scalecat_code", SCALE_JA, "TOPIX 規模区分")):
                 mx = mix(sel, uni, frame, col, names, top=10)
-                mx.to_csv(os.path.join(OUT, f"e29_mix_{col}_{mode}_{models[0]}{int(pct)}.csv"))
+                mx.to_csv(os.path.join(OUT, f"e29_mix_{col}_{how}_{models[0]}{int(pct)}.csv"))
                 print(f"  --- {ja}の構成比（選定 / 母集団 / 差）---")
                 for _, r in mx.iterrows():
                     print(f"    {r['name']:<22}{r['sel_pct']:>6.1f}% {r['uni_pct']:>6.1f}% "
                           f"{r['diff_pt']:>+6.1f}pt")
 
             yr = by_year(sel, uni)
-            yr.to_csv(os.path.join(OUT, f"e29_year_{mode}_{models[0]}{int(pct)}.csv"), index=False)
+            yr.to_csv(os.path.join(OUT, f"e29_year_{how}_{models[0]}{int(pct)}.csv"), index=False)
             print(f"  --- 年別 ---")
             print(f"    {'年':<6}{'選定':>6}{'母集団':>7}{'選定率':>7}{'正例率':>8}{'(母)':>7}"
                   f"{'ret20':>8}{'(母)':>8}")
@@ -379,8 +391,8 @@ def main() -> int:
                       f"{r['ret20']:>+7.2f}%{r['ret20_uni']:>+7.2f}%")
 
         # 2つの基準の重なり
-        a = pick(sc, OR.RULES[0][1], OR.RULES[0][2], mode.lower())
-        b = pick(sc, OR.RULES[1][1], OR.RULES[1][2], mode.lower())
+        a = pick(sc, OR.RULES[0][1], OR.RULES[0][2], how)
+        b = pick(sc, OR.RULES[1][1], OR.RULES[1][2], how)
         ka = set(map(tuple, a[["Code", "Date"]].to_numpy()))
         kb = set(map(tuple, b[["Code", "Date"]].to_numpy()))
         both = ka & kb
