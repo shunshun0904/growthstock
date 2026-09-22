@@ -155,6 +155,31 @@ def main(argv=None) -> int:
                   f"→ {'満たす' if v['pass'] else '満たさない'}")
         with open(os.path.join(OOF_DIR, f"e28_summary_{tag}_{algo}.json"), "w", encoding="utf-8") as fh:
             json.dump(summary[algo], fh, ensure_ascii=False, indent=1, default=float)
+    # 運用の規則（3モデル揃って上位）で実収益を測る。3モデル分が揃っているときだけ。
+    # out-of-fold の保存名は oof_arm の規則（e27_{algo}_{tag}_s{seed}.parquet）
+    try:
+        import ops_rule as OR
+        from e25_auc_noise import average
+        if all(a in summary for a in OR.BOOST):
+            print("\n=== 運用の規則: ブースティング3モデルすべてが過去窓の 85 パーセンタイル以上 ===")
+            print(OR.HEADER)
+
+            def load(algo, arm_tag):
+                files = [os.path.join(OOF_DIR, f"e27_{algo}_e28{tag}_{arm_tag}_s{s}.parquet")
+                         for s in (42, 7, 123)]
+                return average([pd.read_parquet(f) for f in files]) if all(map(os.path.exists, files)) else None
+
+            arms = [("A", {a: "A" for a in OR.BOOST}), ("B1", {a: "B1" for a in OR.BOOST})]
+            for s_ in LGBM_DRAWS:
+                arms.append((f"B2（lgbm 種{s_} / 他は種0）",
+                             {"lgbm": f"B2t{s_}", "xgb": "B2t0", "cat": "B2t0"}))
+            for name, tags in arms:
+                oofs = {a: load(a, t) for a, t in tags.items()}
+                if any(v is None for v in oofs.values()):
+                    continue
+                print(OR.fmt(name, OR.consensus(oofs, 85)))
+    except Exception as exc:  # noqa: BLE001
+        print(f"  運用の規則の集計に失敗: {type(exc).__name__}: {exc}")
     log(f"記録: {OOF_DIR}/e28_*")
     return 0
 

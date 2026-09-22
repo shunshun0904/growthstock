@@ -420,7 +420,7 @@ A' と B に差が無い以上、学習から外すこと自体に効果は期�
 |---|---|
 | 日次予測の候補から ETF が消える | このコミットの次の Predict Breakouts から |
 | スコア帯・較正確率が株式だけの母集団になる | 次の Retrain Weekly（日曜）から |
-| 「開示からの日数」（`days_since_disc` / `days_since_fy`）はデータセットに作られるが、本番の `all` には入れない（2026-09-22。`docs/MODEL_DISCLOSURE_TIMING.md`） | 本番モデルは 151列のまま。変更なし |
+| 「開示からの日数」（`days_since_disc` / `days_since_fy`）が特徴量に入る（2026-09-22 に採用。`docs/MODEL_DISCLOSURE_TIMING.md`） | 次の Retrain Weekly（日曜）から 153列。日次予測は meta.json の特徴量一覧で採点するので、それまでは旧モデル（151列）のまま |
 
 戻したいときは `EXCLUDE_MKT_CODES = ()`（または環境変数
 `SWEEP_EXCLUDE_MKT_CODES=none`）。実際に効いた設定は
