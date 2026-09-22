@@ -127,6 +127,8 @@ PARAM_SHAPES: List[Tuple[str, dict]] = [
     ("なし", {}),
     ("date", {"date": "2024-05-15"}),
     ("code", {"code": "72030"}),
+    ("code+date", {"code": "72030", "date": "2024-05-15"}),
+    ("code+期間", {"code": "72030", "from": "2023-04-01", "to": "2024-05-15"}),
     ("from/to", {"from": "2024-05-01", "to": "2024-05-15"}),
 ]
 
@@ -315,15 +317,23 @@ def probe(paths: List[str], key: str, red: Redactor) -> List[dict]:
             except Exception:                                # noqa: BLE001
                 msg = body[:200]
             if status == 200:
+                rows_n, keys = 0, []
                 try:
-                    data = json.loads(body)
-                    batch = data.get("data")
-                    rec.update(kind="OK", shape=shape, status=status,
-                               rows=len(batch) if isinstance(batch, list) else 0,
-                               keys=sorted(batch[0].keys())[:40] if batch else [])
+                    batch = json.loads(body).get("data")
+                    if isinstance(batch, list):
+                        rows_n = len(batch)
+                        keys = sorted(batch[0].keys())[:40] if batch else []
                 except Exception:                            # noqa: BLE001
-                    rec.update(kind="OK", shape=shape, status=status, rows=0, keys=[])
-                break
+                    pass
+                # 200 でも0件だと項目が分からない。行が出る形をもっと探す。
+                # すでに行が出ている形があるなら、それを上書きしない
+                if rows_n or rec.get("kind") != "OK":
+                    if rows_n >= rec.get("rows", -1):
+                        rec.update(kind="OK", shape=shape, status=status,
+                                   rows=rows_n, keys=keys)
+                if rows_n:
+                    break
+                continue
             low = msg.lower()
             if "not available on your subscription" in low:
                 rec.update(kind="PLAN", shape=shape, status=status, msg=msg)
