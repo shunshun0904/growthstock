@@ -1412,3 +1412,45 @@ class TestOutcomeVsSize(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class 本番のプリセット(unittest.TestCase):
+    """本番で使う特徴量セットとパラメータの組み合わせを固定する。
+
+    2026-09-22、実験39 の結果で 153列 -> 205列 に切り替えた（運用者の決定）。
+    3モデルとも足切り（PR-AUC の差 > 0.0048）を超えている:
+      lgbm 0.2735 -> 0.2818 / xgb 0.2637 -> 0.2749 / cat 0.2686 -> 0.2780
+
+    **パラメータは探索し直さない。** 205列で探索し直した腕（B2）は
+    3モデルとも B1 より悪く、lgbm では A すら下回った。
+    効いたのは特徴量であって、パラメータではない。
+    """
+
+    def test_本番は_all_plus(self):
+        import features as F
+        self.assertEqual(F.DEFAULT_PRESET, "all_plus")
+        self.assertEqual(len(F.columns(F.DEFAULT_PRESET)), 205)
+
+    def test_学習スクリプトが正本を見ている(self):
+        """既定値を直書きすると、プリセットを変えたときに片方だけ古くなる。"""
+        import argparse
+        import train_production as TP
+        import train_multi as TMlt
+        for mod in (TP, TMlt):
+            src = open(mod.__file__, encoding="utf-8").read()
+            self.assertIn('ap.add_argument("--features", default=F.DEFAULT_PRESET)',
+                          src, mod.__name__)
+            self.assertNotIn('ap.add_argument("--features", default="all")',
+                             src, mod.__name__)
+
+    def test_パラメータの鍵は_all_のまま(self):
+        """特徴量だけ替え、パラメータは替えない（B1 の腕）。"""
+        src = open(__import__("train_production").__file__, encoding="utf-8").read()
+        self.assertIn('ap.add_argument("--params", default="all"', src)
+
+    def test_all_plus_は_all_を含む(self):
+        """153列は全部残っている。足しただけで引いていない。"""
+        import features as F
+        a, b = set(F.columns("all")), set(F.columns("all_plus"))
+        self.assertTrue(a <= b, f"落ちた列: {sorted(a - b)}")
+        self.assertEqual(len(b - a), 52)

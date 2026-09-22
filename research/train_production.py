@@ -216,7 +216,7 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="運用に出すモデルを作る")
     ap.add_argument("--data-dir", default=DATA_DIR)
     ap.add_argument("--dataset", default=os.path.join(DATA_DIR, "dataset.parquet"))
-    ap.add_argument("--features", default="all")
+    ap.add_argument("--features", default=F.DEFAULT_PRESET)
     ap.add_argument("--params", default="all", help="使うハイパーパラメータの鍵")
     ap.add_argument("--out-dir", default=MODEL_DIR)
     args = ap.parse_args(argv)

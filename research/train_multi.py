@@ -154,7 +154,7 @@ def main(argv=None) -> int:
     ap.add_argument("--models", default=",".join(M.EXTRA),
                     help=f"学習するモデル（カンマ区切り）。既定: {','.join(M.EXTRA)}"
                          f"。基準モデル({M.BASELINE})は train_production.py が作る")
-    ap.add_argument("--features", default="all")
+    ap.add_argument("--features", default=F.DEFAULT_PRESET)
     args = ap.parse_args(argv)
 
     algos = [a.strip() for a in args.models.split(",") if a.strip()]
