@@ -28,8 +28,8 @@ WHY = {1: "2倍", 2: "期限", 3: "上場廃止"}
 
 def forward_hc(b: pd.DataFrame, keys: pd.DataFrame, days: int = DAYS, delist_gap_days: int = 30) -> dict:
     """
-    keys の各行（基準日 t）について、1〜days 日目の高値・終値と買値、使える足の数、
-    売買を数えられるか（tradable）を返す。
+    keys の各行（基準日 t）について、1〜days 日目の高値・終値・寄り（b に AdjL があれば安値も）と買値、
+    使える足の数、売買を数えられるか（tradable）を返す。
     tradable = days 日目まで上場している、または途中で上場廃止した（その銘柄の最後の足が
     データの最終日より delist_gap_days 日以上前）。まだ days 日たっていない直近の行は False。
     """
@@ -43,7 +43,9 @@ def forward_hc(b: pd.DataFrame, keys: pd.DataFrame, days: int = DAYS, delist_gap
     ok = step[None, :] <= left[:, None]
     idx = np.where(ok, i0[:, None] + step[None, :], 0)
     out = {}
-    for name, col in (("H", "AdjH"), ("C", "AdjC")):
+    for name, col in (("H", "AdjH"), ("C", "AdjC"), ("L", "AdjL"), ("O", "AdjO")):
+        if col not in b.columns:
+            continue
         a = b[col].to_numpy(dtype=float)[idx]
         a[~ok] = np.nan
         out[name] = a
@@ -84,6 +86,57 @@ def exit_target(P: dict, target: float = TARGET, days: int = DAYS, on: str = "H"
     return ret, held.astype(float), why
 
 
+#: touch_order の区分
+ORDER = {1: "上が先", 2: "下が先→後で上", 3: "下が先→上に届かず", 4: "同じ日に両方", 5: "どちらも無し"}
+
+
+def touch_order(P: dict, up: float = 1.3, down: float = 0.8, days: int = DAYS) -> tuple:
+    """
+    買値から見て、場中の高値が up 倍に届くのと、場中の安値が down 倍まで下がるのと、どちらが先か。
+    戻り値: 区分（ORDER の鍵）、上に届いた日、下に届いた日（買った日が1日目。届かなければ 0）。
+    同じ日に両方に触れたときは、日の中の順番が分からないので区分4にする。P は forward_hc の戻り値
+    （b に AdjL を入れて作ったもの）。
+    """
+    e = P["entry"][:, None]
+    with np.errstate(invalid="ignore"):
+        hu = P["H"][:, :days] >= e * up
+        hd = P["L"][:, :days] <= e * down
+    du = np.where(hu.any(axis=1), hu.argmax(axis=1) + 1, 0)
+    dd = np.where(hd.any(axis=1), hd.argmax(axis=1) + 1, 0)
+    cat = np.select([(du > 0) & ((dd == 0) | (du < dd)),
+                     (dd > 0) & (du > dd),
+                     (dd > 0) & (du == 0),
+                     (du > 0) & (du == dd)],
+                    [1, 2, 3, 4], default=5).astype(np.int8)
+    return cat, du, dd
+
+
+def exit_bracket(P: dict, up: float = 1.3, down: float = 0.8, days: int = DAYS) -> tuple:
+    """
+    利確（場中の高値が up 倍）と損切り（場中の安値が down 倍）を両方置き、先に触れた方で売る。
+    損切りは、その日の寄りがすでに down 倍より下なら寄りで売る（窓を開けて下げた分だけ悪くなる）。
+    同じ日に両方に触れたら損切りが先とみなす（控えめ）。どちらにも触れなければ exit_target と同じ
+    （期限の終値・上場廃止なら最後の終値）。P は安値（L）と寄り（O）を持つ forward_hc の戻り値。
+    戻り値: 収益, 持った日数, 理由（1 = 利確, 2 = 期限, 3 = 上場廃止, 4 = 損切り）
+    """
+    _, du, dd = touch_order(P, up, down, days)
+    ret, held, why = exit_target(P, target=up, days=days)
+    stop = (dd > 0) & ((du == 0) | (dd <= du))
+    e = P["entry"]
+    o = P["O"][np.arange(len(e)), np.maximum(dd - 1, 0)]
+    with np.errstate(invalid="ignore"):
+        px = np.where(np.isfinite(o) & (o < e * down), o, e * down)
+    ret = np.where(stop, px / e - 1.0, ret)
+    held = np.where(stop, dd, held).astype(float)
+    why = np.where(stop, 4, why).astype(np.int8)
+    return ret, held, why
+
+
+def direction_label(cat: np.ndarray) -> np.ndarray:
+    """上が先 = 1、下が先（後で上に届いたものも含む）= 0、同じ日・どちらも無し = NaN。"""
+    return np.where(cat == 1, 1.0, np.where(np.isin(cat, (2, 3)), 0.0, np.nan))
+
+
 def select_prior(frame: pd.DataFrame, cols: list, pct: float, min_prev: int = 500) -> np.ndarray:
     """
     cols のすべてで、点数が「それより前の窓の点数」の pct% 点を超えた行を True にする。
@@ -106,7 +159,7 @@ def select_prior(frame: pd.DataFrame, cols: list, pct: float, min_prev: int = 50
 
 
 def one_at_a_time(buy_idx: np.ndarray, held: np.ndarray, ret: np.ndarray, priority: np.ndarray,
-                  per_year: float = 245.0) -> dict:
+                  per_year: float = 245.0, target: float = TARGET) -> dict:
     """
     1銘柄ずつ買う（持っている間は次を買わない）。同じ日に複数出たら priority の高いものを1つ。
     buy_idx は買う日の営業日の番号。売った日の翌営業日から次を買える。資金は全額で、損益は複利。
@@ -129,14 +182,17 @@ def one_at_a_time(buy_idx: np.ndarray, held: np.ndarray, ret: np.ndarray, priori
     years = max((last_exit - first_buy + 1) / per_year, 1e-9)
     r = ret[taken]
     return {"trades": len(taken), "multiple": eq, "cagr": eq ** (1.0 / years) - 1.0, "years": years,
-            "worst": float(r.min()), "hit": float((r >= TARGET - 1.0 - 1e-12).mean()), "mdd": mdd,
+            "worst": float(r.min()), "hit": float((r >= target - 1.0 - 1e-12).mean()), "mdd": mdd,
             "taken": np.asarray(taken)}
 
 
 def summarize(ret: np.ndarray, held: np.ndarray, why: np.ndarray) -> dict:
     if len(ret) == 0:
         return {"n": 0}
-    return {"n": int(len(ret)), "hit": float((why == 1).mean()), "mean": float(np.mean(ret)),
+    hit = why == 1
+    return {"n": int(len(ret)), "hit": float(hit.mean()), "mean": float(np.mean(ret)),
+            "hit_days": float(np.median(held[hit])) if hit.any() else float("nan"),
             "median": float(np.median(ret)), "win": float((ret > 0).mean()),
             "p10": float(np.percentile(ret, 10)), "worst": float(np.min(ret)),
-            "days": float(np.mean(held)), "sum": float(np.sum(ret)), "delist": int((why == 3).sum())}
+            "days": float(np.mean(held)), "sum": float(np.sum(ret)), "delist": int((why == 3).sum()),
+            "stop": float((why == 4).mean())}

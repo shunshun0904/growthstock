@@ -1,0 +1,7 @@
+{
+ "_note": "m02（run 35849903656）で探索したパラメータ。全205列・窓6の学習の最後（2023-05-10）までの行・時期で5つの塊・検証の塊の前後121営業日を外す・各50試行（Optuna TPE 種0）。m03 以降はここから読む（m02 の保存先は Actions のキャッシュにしか無いため）",
+ "tag": "v3_0c339eed34a0_2023-05-10_k5_p121",
+ "lgbm": {"learning_rate": 0.011788242324027384, "num_leaves": 33, "min_child_samples": 246, "subsample": 0.5971406380201776, "colsample_bytree": 0.4052917103341448, "reg_alpha": 0.0029800399530684756, "reg_lambda": 7.208667982953285},
+ "xgb": {"learning_rate": 0.010123956052040417, "max_depth": 3, "min_child_weight": 29.953604550984483, "subsample": 0.8693638824472902, "colsample_bytree": 0.8385385141565347, "reg_alpha": 0.0001930467299270818, "reg_lambda": 0.016746844927701742, "gamma": 1.2243856529114619e-05},
+ "cat": {"learning_rate": 0.014223233064851893, "depth": 4, "l2_leaf_reg": 5.703215330179731, "random_strength": 0.003057164391163288, "bagging_temperature": 1.0836573707055916, "border_count": 32}
+}

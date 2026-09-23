@@ -93,11 +93,12 @@ def major_label(P: np.ndarray) -> dict:
     return {"y": y, "first1": f1, "first2": f2, "spike": spike, "reach": reach}
 
 
-def load_bars() -> pd.DataFrame:
+def load_bars(extra: tuple = ()) -> pd.DataFrame:
+    """日次の足（分割調整済みの寄り・高値・終値）。extra で列を足せる（例: ("AdjL",)）。"""
     paths = sorted(glob.glob(os.path.join(lab.DATA_DIR, "bars_*.parquet")))
     if not paths:
         raise SystemExit("bars_*.parquet がありません")
-    cols = ["Date", "Code", "AdjO", "AdjH", "AdjC"]
+    cols = ["Date", "Code", "AdjO", "AdjH", "AdjC", *extra]
     b = pd.concat([pd.read_parquet(p, columns=cols) for p in paths], ignore_index=True)
     b["Date"] = pd.to_datetime(b["Date"])
     b = b.sort_values(["Code", "Date"]).reset_index(drop=True)
