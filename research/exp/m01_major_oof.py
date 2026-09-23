@@ -248,6 +248,7 @@ def main(argv=None) -> int:
     names = {"lgbm": "LightGBM（新しいラベル）", "xgb": "XGBoost（新しいラベル）", "cat": "CatBoost（新しいラベル）",
              "ens": "3モデルの平均順位", "ref": "今のモデル（20日ラベルの LightGBM）"}
     names.update({c: f"列1本: {lab_}" for c, _, lab_ in SINGLE})
+    from sklearn.metrics import roc_auc_score
 
     print(f"\n=== 1. 分離力（全窓まとめ。{len(common):,}行・正例 {int(y.sum())}件）===")
     print(HEAD)
@@ -301,6 +302,38 @@ def main(argv=None) -> int:
         v = pf[f"{k}_lift"].dropna()
         print(f"  {names[k]}: 窓平均リフト {v.mean():.2f}x / 1倍を超えた窓 {(v > 1).sum()}/{len(v)} / 最低 {v.min():.2f}x")
     print("  学習 = その窓で学習に使った行数（テスト開始の121営業日前まで）。件数の少ない窓のリフトは大きく揺れる。")
+
+    print("\n=== 4. 日次ボラの近い銘柄どうしで比べると（ボラの五分位ごと）===")
+    print("  列1本の日次ボラが強いので、モデルがボラ以外で当てているかを見る。五分位は比べる行全体で切る。")
+    vol = common["vol_20d"].to_numpy(dtype=float)
+    okv = np.isfinite(vol)
+    qv = pd.qcut(pd.Series(vol[okv]).rank(method="first"), 5, labels=False).to_numpy()
+    band = np.full(len(vol), -1)
+    band[okv] = qv
+    print(f"  {'五分位':<8}{'日次ボラ':>14}{'件数':>7}{'正例':>6}{'正例率':>8}"
+          + "".join(f"{names[k][:10] + ' ROC':>18}" for k in models_) + f"{'ボラ1本 ROC':>13}")
+    acc = {k: [] for k in models_ + ["vol_20d"]}
+    for b_ in range(5):
+        m = band == b_
+        yy = y[m]
+        lo_, hi_ = np.nanmin(vol[m]), np.nanmax(vol[m])
+        cells = ""
+        for k in models_ + ["vol_20d"]:
+            sc = rows[k]["score"].to_numpy(dtype=float)[m]
+            ok = np.isfinite(sc)
+            v = roc_auc_score(yy[ok], sc[ok]) if 0 < yy[ok].sum() < ok.sum() else float("nan")
+            acc[k].append((v, int(m.sum())))
+            cells += f"{v:>18.3f}" if k != "vol_20d" else f"{v:>13.3f}"
+        print(f"  {'Q' + str(b_ + 1):<8}{lo_:>6.2f}〜{hi_:>5.2f}%{int(m.sum()):>7,}{int(yy.sum()):>6}"
+              f"{yy.mean()*100:>7.2f}%{cells}")
+    def wavg(v):
+        v = [(a, n) for a, n in v if np.isfinite(a)]
+        return sum(a * n for a, n in v) / sum(n for _, n in v) if v else float("nan")
+    print("  五分位の中の ROC-AUC（件数で重み付け）: "
+          + " / ".join(f"{names[k]} {wavg(acc[k]):.3f}" for k in models_ + ["vol_20d"]))
+    qe = pct_in_fold(rows["ens"])
+    print(f"  3モデルの平均順位で上位10%に入った行の日次ボラ（中央値） {np.nanmedian(vol[qe > 0.9]):.2f}%"
+          f" / 全体 {np.nanmedian(vol):.2f}%")
 
     pd.DataFrame(res).T.to_csv(os.path.join(OOF_DIR, f"{PREFIX}_summary.csv"))
     pf.to_csv(os.path.join(OOF_DIR, f"{PREFIX}_per_window.csv"), index=False)
