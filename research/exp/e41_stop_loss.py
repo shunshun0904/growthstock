@@ -10,8 +10,10 @@
     について、設計したいからです。」
 
 選定は本番と同じ作り
-  スコア  実験39 の腕 B1（本番の205列 all_plus・本番のパラメータ・種3つの平均）。
-          日曜の再学習から本番が使うのと同じ組み合わせ
+  スコア  実験39 の腕 B2（本番の205列 all_plus・**205列で探索したパラメータ**・
+          種3つの平均）。2026-09-27 の週次再学習から本番はこの形になる
+          （探索は学習と同じ列で行う。運用者の指示 2026-09-23）。
+          --arm B1 なら本番のパラメータのまま（実験39 の腕 B1）
   基準    3モデルすべてが、それより前の窓のスコア分布で90パーセンタイル超
           （ops_rule.consensus をそのまま使う）
 
@@ -41,7 +43,8 @@
   手数料・スリッページ・税は入れない
 
 使い方
-  python3 research/exp/e41_stop_loss.py              # 本番と同じ205列のスコアを作って測る（Actions 向け）
+  python3 research/exp/e41_stop_loss.py              # 腕 B2（205列で探索し直す。Actions 向け・約1時間）
+  python3 research/exp/e41_stop_loss.py --arm B1     # 腕 B1（本番のパラメータのまま）
   python3 research/exp/e41_stop_loss.py --scores e27 # 手元の動作確認（保存済みの153列のスコア）
 
 結果は research/_data/oof/e41_*.csv。**本番の設定には書かない。**
@@ -64,6 +67,7 @@ import build_dataset as B  # noqa: E402
 import features as F  # noqa: E402
 import lab  # noqa: E402
 import ops_rule as OR  # noqa: E402
+import train_model as T  # noqa: E402
 import e27_timing_multi as E27  # noqa: E402
 import e39_extra_multi as E39  # noqa: E402
 from e25_auc_noise import average  # noqa: E402
@@ -133,7 +137,7 @@ def num(x: float, w: int = 6, d: int = 0) -> str:
 # スコアと選定
 # ---------------------------------------------------------------------- #
 
-def load_scores(kind: str, df: pd.DataFrame) -> dict:
+def load_scores(kind: str, df: pd.DataFrame, arm: str = "B2") -> dict:
     if kind == "e27":
         # 手元の動作確認用（153列の旧スコア・保存済み）。結論には使わない
         out = {}
@@ -146,9 +150,24 @@ def load_scores(kind: str, df: pd.DataFrame) -> dict:
         log("スコア: 実験27 の腕 B1（153列・動作確認用。結論には使わない）")
         return out
     cols = [c for c in F.columns(F.DEFAULT_PRESET) if c in df.columns]
-    log(f"スコア: 実験39 の腕 B1（{F.DEFAULT_PRESET} {len(cols)}列・本番のパラメータ・"
-        f"種 {E27.SEEDS3}）")
-    return {a: E39.oof_arm(a, "B1", df, cols, E27.prod_params(a)) for a in RULE_MODELS}
+    if len(cols) != len(F.columns(F.DEFAULT_PRESET)):
+        raise SystemExit(f"{F.DEFAULT_PRESET} の列がデータセットに揃っていない")
+    if arm == "B1":
+        log(f"スコア: 実験39 の腕 B1（{F.DEFAULT_PRESET} {len(cols)}列・本番のパラメータ・"
+            f"種 {E27.SEEDS3}）")
+        return {a: E39.oof_arm(a, "B1", df, cols, E27.prod_params(a)) for a in RULE_MODELS}
+    # 腕 B2: 205列で探索し直す（実験39 と同じ作法。探索はホールドアウトより手前だけ、
+    # 5分割・50試行・year_cap_date）。本番の週次再学習と同じ形
+    d = pd.to_datetime(df["Date"])
+    train_end, _, _ = T.holdout_bounds(d, T.HOLDOUT_MONTHS, T.EMBARGO_DAYS)
+    sub = df[(d <= train_end) & df["label"].notna()]
+    log(f"スコア: 実験39 の腕 B2（{F.DEFAULT_PRESET} {len(cols)}列で探索したパラメータ・"
+        f"探索は 〜{train_end.date()} の {len(sub):,}件・種 {E27.SEEDS3}）")
+    out = {}
+    for a in RULE_MODELS:
+        par = E39.tune_for(a, sub, cols, F.DEFAULT_PRESET)
+        out[a] = E39.oof_arm(a, "B2", df, cols, par)
+    return out
 
 
 def classify(d: pd.DataFrame):
@@ -362,13 +381,15 @@ def sweep_line(s: dict) -> str:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[1])
     ap.add_argument("--scores", choices=("e39", "e27"), default="e39",
-                    help="e39: 本番と同じ205列の腕 B1（既定） / e27: 手元の動作確認用の旧スコア")
+                    help="e39: 本番と同じ205列のスコア（既定） / e27: 手元の動作確認用の旧スコア")
+    ap.add_argument("--arm", choices=("B2", "B1"), default="B2",
+                    help="B2: 205列で探索したパラメータ（本番の形・既定） / B1: 本番のパラメータのまま")
     args = ap.parse_args(argv)
     os.makedirs(OOF_DIR, exist_ok=True)
 
     df = lab.frame()
     df["Date"] = pd.to_datetime(df["Date"])
-    oofs = load_scores(args.scores, df)
+    oofs = load_scores(args.scores, df, args.arm)
     for a in oofs:
         oofs[a]["Date"] = pd.to_datetime(oofs[a]["Date"])
 
@@ -417,6 +438,7 @@ def main(argv=None) -> int:
 
     # ------------------------------------------------------------------ #
     print("\n=== 0. 前提の確認 ===")
+    print(f"  スコア: {'実験27 の旧スコア（動作確認用）' if args.scores == 'e27' else '腕 ' + args.arm}")
     print(f"  基準 {RULE}: 選定 {r['n']:,}件（評価した窓の {r['rate']*100:.1f}%）/ "
           f"正例率 {r['label_rate']*100:.1f}% / ret_o1_20 平均 {r['ret20']:+.2f}%")
     print(f"  評価した窓 {folds[0]}〜{folds[-1]}（{len(folds)}窓。窓1は比べる過去が無いので除く）/ "
