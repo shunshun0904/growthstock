@@ -53,7 +53,11 @@ jobs:
         run: |
           mkdir -p research/_data
           gh release download data-raw --dir research/_data --clobber
-          ls -lh research/_data | head -5
+          # head -5 は使わない。pipefail の下では head が5行で先に閉じると ls が
+          # Broken pipe（終了コード2）で落ち、ダウンロードは済んでいるのにこの段が
+          # 失敗扱いになる（2026-09-22〜23 に4回連続: run 35871378011 など）。
+          # sed -n '1,5p' は最後まで読むので ls は書き切れる
+          ls -lh research/_data | sed -n '1,5p'
 
       # 休場日に走ってもやることが無い。ここで見分けて、以降を飛ばす。
       #
