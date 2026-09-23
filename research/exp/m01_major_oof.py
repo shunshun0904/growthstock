@@ -63,9 +63,15 @@ def log(msg: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
-def fold_plan(dates: pd.Series, cal: pd.DatetimeIndex) -> list:
-    """今のモデルと同じテスト窓と、新しいラベルで学習に使える最後の日（テスト開始の PURGE 営業日前）。"""
-    folds = WF.make_folds(pd.to_datetime(dates), min_train_months=OOF_MIN_TRAIN_MONTHS,
+def fold_plan(dates: pd.Series, cal: pd.DatetimeIndex, shift_months: int = 0) -> list:
+    """
+    今のモデルと同じテスト窓と、新しいラベルで学習に使える最後の日（テスト開始の PURGE 営業日前）。
+    shift_months を渡すと窓の境界をその月数だけ後ろにずらす（実験26・41 と同じずらし方）。
+    """
+    d = pd.to_datetime(dates)
+    if shift_months:
+        d = d[d >= d.min() + pd.DateOffset(months=shift_months)]
+    folds = WF.make_folds(d, min_train_months=OOF_MIN_TRAIN_MONTHS,
                           test_months=OOF_TEST_MONTHS, step_months=OOF_STEP_MONTHS,
                           embargo_days=B.RISE_HORIZON)
     plan = []

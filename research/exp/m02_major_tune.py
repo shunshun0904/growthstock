@@ -212,6 +212,44 @@ def oof_built(algo: str, seed: int, d: pd.DataFrame, cols: list, params: dict, p
     return pd.concat(parts, ignore_index=True)
 
 
+def oof_trade(algo: str, seed: int, d: pd.DataFrame, cols: list, params: dict, plan: list) -> pd.DataFrame:
+    """売買の模擬用の out-of-fold。テストは売買を数えられる行すべて（途中で上場廃止した行も入れる）。"""
+    parts = []
+    try:
+        for f, cut in plan:
+            if cut is None:
+                continue
+            tr = d[(d["Date"] <= cut) & d["y"].notna()]
+            te = d[(d["Date"] >= pd.Timestamp(f.test_start)) & (d["Date"] <= pd.Timestamp(f.test_end))
+                   & d["tradable"]]
+            if len(te) < M1.MIN_TEST or len(tr) < M1.MIN_TRAIN or tr["y"].sum() < M1.MIN_TRAIN_POS:
+                continue
+            TM.SEED = seed
+            ytr = tr["y"].to_numpy(dtype=int)
+            m = TM.build(algo, params, ytr, cols)
+            m.fit(tr[cols].to_numpy(dtype=float), ytr)
+            part = te[["Code", "Date"]].copy()
+            part["score"] = m.predict_proba(te[cols].to_numpy(dtype=float))[:, 1]
+            part["fold"] = f.index
+            parts.append(part)
+    finally:
+        TM.SEED = 0
+    return pd.concat(parts, ignore_index=True)
+
+
+def prior_pct(frame: pd.DataFrame, col: str) -> np.ndarray:
+    """その窓より前の窓の点数の中での位置（0〜1）。同じ日に複数出たときの順番に使う（先の情報を使わない）。"""
+    out = np.full(len(frame), np.nan)
+    fold = frame["fold"].to_numpy()
+    x = frame[col].to_numpy(dtype=float)
+    for f in np.unique(fold):
+        prev = np.sort(x[(fold < f) & np.isfinite(x)])
+        if len(prev):
+            cur = fold == f
+            out[cur] = np.searchsorted(prev, x[cur], side="right") / len(prev)
+    return out
+
+
 def seed_avg(name: str, make) -> pd.DataFrame:
     """種3つの確率平均。種ごとに保存し、2回目以降は読む。"""
     outs = []
@@ -253,6 +291,103 @@ def boot_diff(y, a, b, month, fold, n=N_BOOT, seed=0) -> dict:
             "lift_p95": float(np.percentile(dl, 95)), "lift_pos": float((dl > 0).mean()),
             "roc_p05": float(np.percentile(dr, 5)), "roc_p50": float(np.percentile(dr, 50)),
             "roc_p95": float(np.percentile(dr, 95)), "roc_pos": float((dr > 0).mean()), "n": len(dl)}
+
+
+#: 探索に使った行（〜2023-05-10）のラベルが見る期間より後。ここから始まる窓は探索と重ならない
+CLEAN_FROM = pd.Timestamp("2023-11-01")
+#: 売買の模擬で比べる選び方（名前, 列, 何%点を超えたら買うか）。3モデル95%超が運用者の方針
+TRADE_RULES = (("3モデル 95%超（方針）", ("s_lgbm", "s_xgb", "s_cat"), 95.0),
+               ("3モデル 97.5%超", ("s_lgbm", "s_xgb", "s_cat"), 97.5),
+               ("3モデル 99%超", ("s_lgbm", "s_xgb", "s_cat"), 99.0),
+               ("日次ボラ 95%超", ("vol_20d",), 95.0))
+SHIFTS = (0, 2, 4)
+
+
+def trade_section(df, bars, cal, cols, tuned, tag, key) -> None:
+    """運用者の方針での売買の損益。窓ごと・まとめ・窓の切り方ごと。"""
+    import trade as TR
+    print("\n=== 8. 売買の損益（運用者の方針 2026-09-23）===")
+    print("  買う: 探索後の3モデルがそろって、それより前の窓の点数の95%点を超えた銘柄（翌営業日の寄り）")
+    print("  売る: 場中に買値の2倍に届いたらちょうど2倍（指値）。届かなければ120営業日目の終値。"
+          "途中で上場廃止したら最後の終値")
+    print("  窓の境界を 0 / 2 / 4 か月ずらした3通り。最初の窓は比べる前の窓が無いので除く。手数料・税なし。")
+    print(f"  テスト開始が {CLEAN_FROM.date()} 以降の窓は探索に使っていない。それより前の窓は探索に使った期間と重なる（甘めに出る）")
+    TP = TR.forward_hc(bars, df[["Code", "Date"]])
+    df["tradable"] = TP["tradable"]
+    ex = {"H": TR.exit_target(TP), "C": TR.exit_target(TP, on="C")}
+    row_of = pd.Series(np.arange(len(df)), index=pd.MultiIndex.from_frame(df[["Code", "Date"]]))
+    buy_all = cal.searchsorted(df["Date"].to_numpy()) + 1           # 買う日（翌営業日）の番号
+    SUMH = (f"  {'選び方':<24}{'件数':>6}{'月あたり':>8}{'2倍到達':>8}{'平均':>8}{'中央値':>8}{'勝率':>6}"
+            f"{'下位10%':>9}{'最悪':>8}{'保有日':>7}{'合計':>9}  {'1銘柄ずつ: 回数':>12}{'資産':>8}{'年率':>8}{'最大DD':>8}")
+
+    def sline(name, ii, months, prio, which="H"):
+        r, h, w = (x[ii] for x in ex[which])
+        st = TR.summarize(r, h, w)
+        if not st["n"]:
+            return f"  {name:<24}{0:>6}"
+        o = TR.one_at_a_time(buy_all[ii], h, r, prio)
+        return (f"  {name:<24}{st['n']:>6}{st['n'] / months:>8.2f}{st['hit']*100:>7.1f}%{st['mean']*100:>+7.1f}%"
+                f"{st['median']*100:>+7.1f}%{st['win']*100:>5.0f}%{st['p10']*100:>+8.1f}%{st['worst']*100:>+7.1f}%"
+                f"{st['days']:>7.1f}{st['sum']*100:>+8.0f}%  {o['trades']:>12}{o['multiple']:>7.2f}倍"
+                f"{o['cagr']*100:>+7.1f}%{o['mdd']*100:>+7.1f}%")
+
+    for shift in SHIFTS:
+        plan = M1.fold_plan(df["Date"], cal, shift)
+        sc = {a: seed_avg(f"trade_{a}_{tag}_sh{shift}",
+                          lambda sd, a=a: oof_trade(a, sd, df, cols, tuned[a]["params"], plan)) for a in ALGOS}
+        fr = sc["lgbm"][key + ["fold"]].copy()
+        for a in ALGOS:
+            fr[f"s_{a}"] = sc[a].set_index(key)["score"].reindex(pd.MultiIndex.from_frame(fr[key])).to_numpy()
+        fr = fr.merge(df[key + ["vol_20d", "y"]], on=key, how="left")
+        ii_all = row_of.reindex(pd.MultiIndex.from_frame(fr[key])).to_numpy()
+        wins = {f.index: f for f, _ in plan}
+        with np.errstate(invalid="ignore"), __import__("warnings").catch_warnings():
+            __import__("warnings").simplefilter("ignore", RuntimeWarning)   # 最初の窓は前の窓が無く全部 NaN
+            prio_m = np.nanmean([prior_pct(fr, f"s_{a}") for a in ALGOS], axis=0)
+        prio_v = prior_pct(fr, "vol_20d")
+        evald = np.isfinite(prio_m)                                   # 前の窓がある窓だけ
+        clean = fr["fold"].map(lambda k: pd.Timestamp(wins[k].test_start) >= CLEAN_FROM).to_numpy()
+        sel = {name: TR.select_prior(fr, list(c), pct) for name, c, pct in TRADE_RULES}
+
+        def months_of(mask):
+            ks = np.unique(fr["fold"].to_numpy()[mask])
+            return sum((pd.Timestamp(wins[k].test_end) - pd.Timestamp(wins[k].test_start)).days + 1
+                       for k in ks) / 30.44 if len(ks) else float("nan")
+
+        if shift == 0:
+            print(f"\n  --- ずらし0か月: 窓ごと（3モデル 95%超・場中の2倍で売る）---")
+            print(f"  {'窓':>3} {'テスト':<24}{'候補':>7}{'買った':>7}{'2倍到達':>8}{'平均':>8}{'中央値':>8}"
+                  f"{'最悪':>8}{'保有日':>7}{'正例':>6}  探索と")
+            m0 = sel[TRADE_RULES[0][0]]
+            for k in sorted(np.unique(fr["fold"][evald])):
+                w = (fr["fold"] == k).to_numpy()
+                pick = w & m0
+                r, h, why = (x[ii_all[pick]] for x in ex["H"])
+                st = TR.summarize(r, h, why)
+                f = wins[k]
+                yy = fr["y"].to_numpy()[pick]
+                tail = (f"{st['hit']*100:>7.1f}%{st['mean']*100:>+7.1f}%{st['median']*100:>+7.1f}%"
+                        f"{st['worst']*100:>+7.1f}%{st['days']:>7.1f}{int(np.nansum(yy)):>6}" if st["n"] else f"{'-':>8}" * 5 + f"{'-':>7}{'-':>6}")
+                print(f"  {k:>3} {f.test_start}〜{f.test_end}{int(w.sum()):>7,}{int(pick.sum()):>7}{tail}"
+                      f"  {'重ならない' if pd.Timestamp(f.test_start) >= CLEAN_FROM else '重なる'}")
+            print("  候補 = 売買を数えられるブレイク（途中で上場廃止したものを含む）。正例 = 本ブレイクのラベルが1の数")
+
+        print(f"\n  --- ずらし{shift}か月: まとめ ---")
+        print(SUMH)
+        for part, mask in (("全窓", evald), ("探索と重なる窓", evald & ~clean), ("探索に使っていない窓", evald & clean)):
+            if not mask.any():
+                continue
+            mo = months_of(mask)
+            print(f"  [{part}] {mo:.0f}か月")
+            for name, c, pct in TRADE_RULES:
+                m = mask & sel[name]
+                prio = prio_v if c == ("vol_20d",) else prio_m
+                print(sline(name, ii_all[m], mo, prio[m]))
+            print(sline("（参考）3モデル95%超・終値で2倍", ii_all[mask & sel[TRADE_RULES[0][0]]], mo,
+                        prio_m[mask & sel[TRADE_RULES[0][0]]], which="C"))
+            print(sline("（参考）ブレイク全件", ii_all[mask], mo, prio_m[mask]))
+        print("  件数・月あたり = 条件を満たした全部（重なって持つ前提）。2倍到達 = 期限までに場中で2倍に届いた割合。")
+        print("  1銘柄ずつ = 持っている間は次を買わず、全額で複利。同じ日に複数出たら点数の位置が高いものを1つ。")
 
 
 def main(argv=None) -> int:
@@ -465,6 +600,9 @@ def main(argv=None) -> int:
         r = res[k]
         print(f"  {names[k][:30]:<34}{r['ret_o1_60_top10']*100:>+13.1f}%{r['ret_o1_120_top10']*100:>+15.1f}%"
               f"{r['mx_top10']*100:>+13.1f}%")
+
+    # ------------------------------------------------------------------ #
+    trade_section(df, bars, cal, cols, tuned, tag, key)
 
     pd.DataFrame(res).T.to_csv(os.path.join(OOF_DIR, f"{PREFIX}_summary.csv"))
     log(f"記録: {OOF_DIR}/{PREFIX}_summary.csv / {PREFIX}_params_*.json")
