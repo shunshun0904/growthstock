@@ -88,6 +88,8 @@ TOUCH = (3, 5, 7, 10, 15, 20)              # 「−X% に触れた銘柄はそ�
 DAYS = (1, 3, 5, 10, 15, 20, 40, 60)       # 値動きの途中経過を見る日
 TSTOP_DAYS = (3, 5, 10)                    # 日数で切る: k日目の終値で判定
 TSTOP_LEVELS = (-0.05, -0.03, 0.0)         # その時点で 買値+θ を下回っていたら切る
+BIG = -0.10                                # 大負けの線（20営業日保有の収益）
+SCREEN_Z = 3.0                             # 大負けの共通点として拾う |z|（205列を両側で測るので2では緩い）
 
 
 # ---------------------------------------------------------------------- #
@@ -372,6 +374,208 @@ def sweep_line(s: dict) -> str:
             f"{pc(s['p10'])}{pc(s['worst'], d=1)}{s['days']:>6.1f}{pc(s['per_day'], d=3)}"
             f"{s['pos_cut']*100:>7.1f}%{s['regret']*100 if np.isfinite(s['regret']) else float('nan'):>5.0f}%"
             f"{pc(s['effect_stopped'])}{s['won']:>4}/{s['n_folds']:<2}{pc(s['worst_fold'])}")
+
+
+# ---------------------------------------------------------------------- #
+# 大負けの共通点（§9）
+# ---------------------------------------------------------------------- #
+
+def date_constant(frame: pd.DataFrame, cols: list) -> set:
+    """
+    同じ日ならどの銘柄でも同じ値の列（銘柄ではなく時期を表す列）。
+    すべての日で1種類の値しか無いこと。まれにしか立たない旗（ほとんどの日で
+    全銘柄 0）を拾わないよう、「ほとんどの日」ではなく「すべての日」で見る。
+    """
+    g = frame.groupby("Date")
+    multi = g.size() >= 2
+    out = set()
+    for c in cols:
+        nu = g[c].nunique(dropna=True)[multi]
+        if len(nu) and bool((nu <= 1).all()) and frame[c].nunique(dropna=True) > 1:
+            out.add(c)
+    return out
+
+
+def loser_screen(u: pd.DataFrame, feats: list, big: float = BIG) -> pd.DataFrame:
+    """
+    母集団で、列の上位10% / 下位10% の大負け率が、その窓の大負け率より
+    どれだけ高いかを窓ごとに測り、窓をまたいだ 平均 ÷ 標準誤差 を z とする。
+    （実験23・40 の両側スクリーニングと同じ形。物差しを「大負けしたか」にしただけ）
+    """
+    loss = (u["ret_o1_20"].to_numpy(dtype=float) <= big).astype(float)
+    fo = u["fold"].to_numpy()
+    rows = []
+    for f in feats:
+        x = pd.to_numeric(u[f], errors="coerce").to_numpy(dtype=float)
+        ok = np.isfinite(x)
+        if ok.sum() < 1000 or np.nanstd(x[ok]) == 0:
+            continue
+        ex = {"top": [], "bot": []}
+        for k in np.unique(fo):
+            w = ok & (fo == k)
+            if w.sum() < 200:
+                continue
+            xw, lw = x[w], loss[w]
+            hi, lo = np.percentile(xw, 90), np.percentile(xw, 10)
+            for side, m in (("top", xw >= hi), ("bot", xw <= lo)):
+                # 同じ値が多い列で「上位10%」が半分を超えるなら、上位とは言えない
+                if 20 <= m.sum() <= 0.5 * w.sum():
+                    ex[side].append(lw[m].mean() - lw.mean())
+        rec = {"feature": f, "coverage": float(ok.mean())}
+        for side, arr in ex.items():
+            arr = np.asarray(arr)
+            if len(arr) >= 5 and arr.std(ddof=1) > 0:
+                rec[f"{side}_pt"] = float(arr.mean() * 100)
+                rec[f"{side}_z"] = float(arr.mean() / (arr.std(ddof=1) / np.sqrt(len(arr))))
+                rec[f"{side}_pos"] = int((arr > 0).sum())
+                rec[f"{side}_n"] = int(len(arr))
+        rows.append(rec)
+    return pd.DataFrame(rows)
+
+
+def exclusion(s: pd.DataFrame, ref: pd.DataFrame, f: str, side: str) -> np.ndarray:
+    """
+    選んだ銘柄のうち、列 f が「それより前の窓の母集団」の上位10%（または
+    下位10%）に入るものを True にする。しきい値に先の値は使わない。
+    値が無い行は外さない。
+    """
+    out = np.zeros(len(s), dtype=bool)
+    x = pd.to_numeric(s[f], errors="coerce").to_numpy(dtype=float)
+    fo = s["fold"].to_numpy()
+    for k in np.unique(fo):
+        prev = pd.to_numeric(ref.loc[ref["fold"] < k, f], errors="coerce").dropna()
+        if len(prev) < 500:
+            continue
+        m = fo == k
+        if side == "top":
+            out[m] = x[m] >= np.percentile(prev, 90)
+        else:
+            out[m] = x[m] <= np.percentile(prev, 10)
+    return out
+
+
+def topix_forward(h: int = 20) -> pd.Series:
+    """日付 -> その日の終値から h 営業日後の終値までの TOPIX の騰落。"""
+    paths = sorted(glob.glob(os.path.join(lab.DATA_DIR, "topix_*.parquet")))
+    if not paths:
+        return pd.Series(dtype=float)
+    t = pd.concat([pd.read_parquet(p) for p in paths], ignore_index=True)
+    t["Date"] = pd.to_datetime(t["Date"])
+    t = t.drop_duplicates("Date").sort_values("Date").set_index("Date")["topix"].astype(float)
+    return t.shift(-h) / t - 1.0
+
+
+def loser_section(s: pd.DataFrame, u: pd.DataFrame, ref: pd.DataFrame, feats: list) -> None:
+    import feature_dict as FD
+
+    def say(f: str) -> str:
+        if f == "entry_gap":
+            return "買った日の寄りの窓（前日終値比。寄りの瞬間に分かる）"
+        return FD.describe(f)
+
+    lose = s["ret_o1_20"] <= BIG
+    print(f"\n=== 9. 大負けの共通点（20営業日保有で {BIG*100:.0f}% 以下）===")
+    print(f"  選んだ銘柄 {len(s):,}件のうち 大負け {int(lose.sum())}件（{lose.mean()*100:.1f}%）"
+          f" / −15%以下 {int((s['ret_o1_20'] <= -0.15).sum())}件"
+          f" / −20%以下 {int((s['ret_o1_20'] <= -0.20).sum())}件"
+          f"。母集団では {(u['ret_o1_20'] <= BIG).mean()*100:.1f}%")
+
+    print("\n  9a. 時期に固まっているか（相場全体の下げと重なっていないか）")
+    tf = topix_forward(20)
+    tx = s["Date"].map(tf)
+    down = tx <= -0.05
+    print(f"    同じ20営業日に TOPIX が −5% 以上下げていた割合: 大負け {down[lose].mean()*100:.1f}%"
+          f" / 選んだ銘柄全体 {down.mean()*100:.1f}%（TOPIX の値がある行で）")
+    print(f"    同じ期間の TOPIX の騰落（中央値）: 大負け {pc(med(tx[lose]), 0)}"
+          f" / 大負け以外 {pc(med(tx[~lose]), 0)}")
+    ym = pd.to_datetime(s["Date"]).dt.to_period("M")
+    cnt = ym[lose].value_counts()
+    top5 = cnt.head(5)
+    print(f"    大負けの多い月: " + " / ".join(f"{k} {v}件" for k, v in top5.items())
+          + f"（上位5か月で {top5.sum()/max(lose.sum(), 1)*100:.0f}%。大負けがあった月は {len(cnt)}か月）")
+    same_day = s[lose].groupby("Date").size()
+    print(f"    同じ日に買った銘柄が2件以上そろって大負け: {int(same_day[same_day >= 2].sum())}件"
+          f"（{len(same_day[same_day >= 2])}日）")
+
+    print(f"\n  9b. 母集団（{len(u):,}件・窓ごと）で、大負けが多い側（|z| > {SCREEN_Z:.0f}）")
+    print("      上位/下位 = その列の上位10% / 下位10%。差 = その側の大負け率 − 窓全体の大負け率（窓平均）")
+    scr = loser_screen(u, feats)
+    const = date_constant(u, feats)
+    hits = []
+    for _, r in scr.iterrows():
+        for side in ("top", "bot"):
+            z = r.get(f"{side}_z", np.nan)
+            if np.isfinite(z) and z > SCREEN_Z:
+                hits.append((r["feature"], side, float(z), float(r[f"{side}_pt"]),
+                             int(r[f"{side}_pos"]), int(r[f"{side}_n"])))
+    hits.sort(key=lambda h: -h[2])
+    vol = pd.to_numeric(u["vol_20d"], errors="coerce")
+    n_const = sum(1 for h in hits if h[0] in const)
+    print(f"  該当 {len(hits)}（列×側）。うち日内一定の列 {n_const}。z の大きい順に上位20を出す"
+          "（全件は e41_loser_screen.csv）")
+    print(f"  {'列':<24}{'側':>4}{'差':>8}{'z':>7}{'窓':>7}{'ボラ相関':>8}  {'選んだ銘柄の中で':<22}  説明")
+    for f, side, z, pt, pos, n in hits[:20]:
+        m = exclusion(s, ref, f, side)
+        tag = "［日内一定］" if f in const else ""
+        lr = s.loc[m, "ret_o1_20"]
+        inner = (f"{int(m.sum()):>4}件 大負け率 {(lr <= BIG).mean()*100 if len(lr) else float('nan'):>5.1f}%"
+                 if m.sum() else "   該当なし")
+        rho = pd.to_numeric(u[f], errors="coerce").corr(vol, method="spearman")
+        print(f"  {f:<24}{'上位' if side == 'top' else '下位':>4}{pt:>+7.1f}pt{z:>7.1f}{pos:>4}/{n:<2}"
+              f"{rho:>+8.2f}  {inner:<22}  {tag}{say(f)[:30]}")
+    if not hits:
+        print("    （該当なし）")
+    print("  ボラ相関 = 日次ボラ（vol_20d）との順位相関。大きいものは「値動きが荒い」の言い換え")
+    pd.DataFrame(scr).to_csv(os.path.join(OOF_DIR, "e41_loser_screen.csv"), index=False)
+
+    stock = [(f, side) for f, side, _, _, _, _ in hits if f not in const][:6]
+    print("\n  9c. 銘柄ごとの列で、候補から外したら（しきい値はそれより前の窓の母集団の上位/下位10%）")
+    print(f"  {'外す条件':<30}{'外す':>6}{'大負け':>10}{'正例':>10}{'外した分の20日':>14}"
+          f"{'残りの20日':>11}{'差':>8}{'下位10%':>9}{'最悪':>8}{'勝ち窓':>7}")
+    base = s["ret_o1_20"].to_numpy(dtype=float)
+    y = s["label"].to_numpy(dtype=float)
+    fo = s["fold"].to_numpy()
+    lb = lose.to_numpy()
+
+    def line(name: str, m: np.ndarray) -> None:
+        keep = ~m
+        # 窓ごとに「外したあとの平均 − 外さない平均」
+        won = nf = 0
+        for k in np.unique(fo):
+            w = fo == k
+            if (w & keep).sum():
+                nf += 1
+                won += int(np.nanmean(base[w & keep]) - np.nanmean(base[w]) > 1e-12)
+        print(f"  {name:<30}{int(m.sum()):>5}件"
+              f"{int((m & lb).sum()):>5}/{int(lb.sum()):<4}{int((m & (y == 1)).sum()):>5}/{int((y == 1).sum()):<4}"
+              f"{pc(mean(base[m]), 14)}{pc(mean(base[keep]), 11)}{pc(mean(base[keep]) - mean(base))}"
+              f"{pc(qt(base[keep], 10), 9)}{pc(float(np.nanmin(base[keep])), 8, 1)}{won:>4}/{nf:<2}")
+
+    print(f"  {'（外さない）':<30}{0:>5}件{0:>5}/{int(lb.sum()):<4}{0:>5}/{int((y == 1).sum()):<4}"
+          f"{'-':>14}{pc(mean(base), 11)}{pc(0.0)}{pc(qt(base, 10), 9)}{pc(float(np.nanmin(base)), 8, 1)}")
+    masks = []
+    for f, side in stock:
+        m = exclusion(s, ref, f, side)
+        masks.append(m)
+        line(f"{f} {'上位' if side == 'top' else '下位'}10%", m)
+    if len(masks) >= 2:
+        line("上の2つのどちらか", masks[0] | masks[1])
+    if len(masks) >= 3:
+        line("上の3つのどれか", masks[0] | masks[1] | masks[2])
+    # 検定の結果にかかわらず、よく使われる2つの規則も測る
+    print("  --- よく使われる規則（スクリーニングとは別に、決め打ちで測る）---")
+    line("寄りの窓が上位10%（飛びつかない）", exclusion(s, ref, "entry_gap", "top"))
+    dte = pd.to_numeric(s.get("days_to_earn"), errors="coerce").to_numpy(dtype=float)
+    line("保有期間中に決算予定（28暦日以内）", np.isfinite(dte) & (dte <= 28))
+    print("  大負け = 外した中の大負けの数 / 全体の大負け。正例も同じ（外すと当たりも一緒に失う）。")
+    print("  勝ち窓 = 窓ごとの平均が「外さない」を上回った窓の数。")
+    print("  決算予定は、その日までに公表済みの予定があるものだけ（無い行は外さない）。")
+
+    print("\n  9d. 大負けとそれ以外の中央値（選んだ銘柄。9c の列）")
+    print(f"  {'列':<24}{'大負け':>12}{'それ以外':>12}  説明")
+    for f, side in stock:
+        x = pd.to_numeric(s[f], errors="coerce")
+        print(f"  {f:<24}{med(x[lose]):>12.4g}{med(x[~lose]):>12.4g}  {say(f)[:40]}")
 
 
 # ---------------------------------------------------------------------- #
@@ -713,6 +917,17 @@ def main(argv=None) -> int:
             ret, day, why, both = simulate(Pm, 20, stop=st_, tp=tp, mode=mode, tstop=ts)
             print(sweep_line(summarize(rn, ret, day, why, both, base[m], y20[m], f20[m])))
     print("  件数が少ないので窓ごとの勝ち負けは粗い（上位1件は1窓あたり十数件）。")
+
+    # ------------------------------------------------------------------ #
+    # §9 大負けの共通点。特徴量は本番の205列 + 買う瞬間に分かる寄りの窓
+    allf = list(dict.fromkeys([c for c in F.columns(F.DEFAULT_PRESET) if c in df.columns]
+                              + ["entry_gap"]))
+    # しきい値を引く母集団は窓1も含めた out-of-fold の全行（窓2 のしきい値に窓1 を使う）
+    ref = oofs[RULE_MODELS[0]][["Code", "Date", "fold"]].merge(
+        df[["Code", "Date"] + allf], on=["Code", "Date"], how="left")
+    add = ["Code", "Date"] + [c for c in allf if c not in s.columns]
+    loser_section(s.merge(df[add], on=["Code", "Date"], how="left"),
+                  u.merge(df[add], on=["Code", "Date"], how="left"), ref, allf)
 
     # ------------------------------------------------------------------ #
     keep = (["Code", "Date", "fold", "label", "cls", "need", "vol_20d", "sigma20",

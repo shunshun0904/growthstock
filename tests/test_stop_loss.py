@@ -164,6 +164,37 @@ class 値動きの表(unittest.TestCase):
         self.assertTrue(np.isnan(E41.touch_day(P, 0.10, 3)[0]))
 
 
+class 大負けの共通点(unittest.TestCase):
+
+    def test_日内一定の列だけを拾う(self):
+        d = pd.to_datetime(["2024-01-01"] * 3 + ["2024-01-02"] * 3 + ["2024-01-03"] * 3)
+        fr = pd.DataFrame({"Date": d,
+                           "mkt": [1.0] * 3 + [2.0] * 3 + [3.0] * 3,      # 日ごとに同じ
+                           "stock": np.arange(9, dtype=float),            # 銘柄ごとに違う
+                           "rare": [0.0] * 7 + [1.0, 0.0]})               # まれに立つ旗
+        self.assertEqual(E41.date_constant(fr, ["mkt", "stock", "rare"]), {"mkt"})
+
+    def test_除外のしきい値はそれより前の窓だけで決める(self):
+        ref = pd.DataFrame({"fold": [1] * 600 + [2] * 600,
+                            "x": np.r_[np.arange(600, dtype=float), np.arange(600, dtype=float) + 1000]})
+        s = pd.DataFrame({"fold": [2, 2, 2], "x": [100.0, 560.0, np.nan]})
+        m = E41.exclusion(s, ref, "x", "top")
+        # 窓2 のしきい値は窓1（0〜599）の90パーセンタイル ≒ 539。窓2 自身の値（1000〜）は使わない
+        self.assertEqual(m.tolist(), [False, True, False])     # 値が無い行は外さない
+
+    def test_大負けが多い側を拾う(self):
+        rng = np.random.default_rng(3)
+        n = 6000
+        x = rng.normal(size=n)
+        # x の上位で大負け（-10% 以下）が多くなるように作る
+        r = np.where((x > 1.3) & (rng.random(n) < 0.6), -0.2, rng.normal(0.01, 0.03, n))
+        u = pd.DataFrame({"fold": np.repeat(np.arange(2, 8), n // 6), "ret_o1_20": r,
+                          "x": x, "noise": rng.normal(size=n)})
+        scr = E41.loser_screen(u, ["x", "noise"]).set_index("feature")
+        self.assertGreater(scr.loc["x", "top_z"], 3)
+        self.assertLess(abs(scr.loc["noise", "top_z"]), 3)
+
+
 class 選んだ行を返す(unittest.TestCase):
     """keep=True は行を足すだけで、集計の数字は変えない。"""
 
