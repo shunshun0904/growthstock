@@ -195,6 +195,42 @@ class 大負けの共通点(unittest.TestCase):
         self.assertLess(abs(scr.loc["noise", "top_z"]), 3)
 
 
+class 窓をずらした_out_of_fold(unittest.TestCase):
+    """§10 の切り方違い。Actions で20分学習してから落ちないよう、形だけ先に確かめる。"""
+
+    @classmethod
+    def setUpClass(cls):
+        rng = np.random.default_rng(5)
+        dates = pd.bdate_range("2018-01-01", "2023-12-29")
+        n = len(dates) * 4
+        d = np.repeat(dates, 4)
+        x1, x2 = rng.normal(size=n), rng.normal(size=n)
+        y = (x1 + rng.normal(scale=1.5, size=n) > 1.0).astype(float)
+        cls.df = pd.DataFrame({"Code": np.tile(["1", "2", "3", "4"], len(dates)), "Date": d,
+                               "f1": x1, "f2": x2, "label": y,
+                               "ret_o1_20": rng.normal(0, 0.05, n), "ret_o1_40": rng.normal(0, 0.05, n)})
+
+    def test_ずらすと境界が動く(self):
+        a = E41.folds_for(self.df["Date"], 0)
+        b = E41.folds_for(self.df["Date"], 2)
+        self.assertGreater(len(a), 2)
+        self.assertGreater(pd.Timestamp(b[0].test_start), pd.Timestamp(a[0].test_start))
+        # テスト窓は重ならない
+        for f, g in zip(b, b[1:]):
+            self.assertLess(pd.Timestamp(f.test_end), pd.Timestamp(g.test_start))
+
+    def test_3モデルとも回る(self):
+        folds = E41.folds_for(self.df["Date"], 2)
+        lg = {"objective": "binary", "n_estimators": 20, "learning_rate": 0.1,
+              "num_leaves": 7, "verbose": -1, "n_jobs": 1, "random_state": 0}
+        for algo, par in (("lgbm", {"params": lg}), ("xgb", {"max_depth": 2}),
+                          ("cat", {"depth": 2})):
+            o = E41.oof_folds(algo, self.df, ["f1", "f2"], par, 7, folds)
+            self.assertEqual(set(o["fold"]) <= {f.index for f in folds}, True, algo)
+            self.assertTrue(np.isfinite(o["score"]).all(), algo)
+            self.assertIn("ret_o1_20", o.columns)
+
+
 class 選んだ行を返す(unittest.TestCase):
     """keep=True は行を足すだけで、集計の数字は変えない。"""
 

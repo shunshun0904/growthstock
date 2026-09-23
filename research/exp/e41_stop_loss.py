@@ -56,6 +56,7 @@ import argparse
 import glob
 import os
 import sys
+import time
 import warnings
 
 import numpy as np
@@ -88,6 +89,7 @@ TOUCH = (3, 5, 7, 10, 15, 20)              # 「−X% に触れた銘柄はそ�
 DAYS = (1, 3, 5, 10, 15, 20, 40, 60)       # 値動きの途中経過を見る日
 TSTOP_DAYS = (3, 5, 10)                    # 日数で切る: k日目の終値で判定
 TSTOP_LEVELS = (-0.05, -0.03, 0.0)         # その時点で 買値+θ を下回っていたら切る
+SHIFTS = (0, 2, 4)                         # §10 窓の境界をずらす月数（out-of-fold の切り方）
 BIG = -0.10                                # 大負けの線（20営業日保有の収益）
 SCREEN_Z = 3.0                             # 大負けの共通点として拾う |z|（205列を両側で測るので2では緩い）
 
@@ -158,17 +160,108 @@ def load_scores(kind: str, df: pd.DataFrame, arm: str = "B2") -> dict:
         log(f"スコア: 実験39 の腕 B1（{F.DEFAULT_PRESET} {len(cols)}列・本番のパラメータ・"
             f"種 {E27.SEEDS3}）")
         return {a: E39.oof_arm(a, "B1", df, cols, E27.prod_params(a)) for a in RULE_MODELS}
-    # 腕 B2: 205列で探索し直す（実験39 と同じ作法。探索はホールドアウトより手前だけ、
-    # 5分割・50試行・year_cap_date）。本番の週次再学習と同じ形
+    par = arm_params(df, cols, arm)
+    log(f"スコア: 実験39 の腕 B2（{F.DEFAULT_PRESET} {len(cols)}列で探索したパラメータ・"
+        f"種 {E27.SEEDS3}）")
+    return {a: E39.oof_arm(a, "B2", df, cols, par[a]) for a in RULE_MODELS}
+
+
+def arm_params(df: pd.DataFrame, cols: list, arm: str) -> dict:
+    """
+    腕のパラメータ。B1 は本番のパラメータ、B2 は205列で探索し直したもの
+    （実験39 と同じ作法。探索はホールドアウトより手前だけ、5分割・50試行・
+    year_cap_date。探索済みなら保存から読む）。本番の週次再学習は B2 の形。
+    """
+    if arm == "B1":
+        return {a: E27.prod_params(a) for a in RULE_MODELS}
     d = pd.to_datetime(df["Date"])
     train_end, _, _ = T.holdout_bounds(d, T.HOLDOUT_MONTHS, T.EMBARGO_DAYS)
     sub = df[(d <= train_end) & df["label"].notna()]
-    log(f"スコア: 実験39 の腕 B2（{F.DEFAULT_PRESET} {len(cols)}列で探索したパラメータ・"
-        f"探索は 〜{train_end.date()} の {len(sub):,}件・種 {E27.SEEDS3}）")
+    return {a: E39.tune_for(a, sub, cols, F.DEFAULT_PRESET) for a in RULE_MODELS}
+
+
+# ---------------------------------------------------------------------- #
+# 窓の切り方を変えた out-of-fold（§10）
+# ---------------------------------------------------------------------- #
+
+def folds_for(dates: pd.Series, shift_months: int):
+    """
+    本番の out-of-fold と同じ作り（36ヶ月 / 6ヶ月 / 6ヶ月、エンバーゴ20営業日）で、
+    窓の境界だけ shift_months か月後ろにずらす（実験26 と同じやり方）。
+    訓練は従来どおり期間の最初から使う。
+    """
+    import walkforward as WF
+    from train_production import OOF_MIN_TRAIN_MONTHS, OOF_STEP_MONTHS, OOF_TEST_MONTHS
+
+    d = pd.to_datetime(dates)
+    if shift_months:
+        d = d[d >= d.min() + pd.DateOffset(months=shift_months)]
+    return WF.make_folds(d, min_train_months=OOF_MIN_TRAIN_MONTHS,
+                         test_months=OOF_TEST_MONTHS, step_months=OOF_STEP_MONTHS,
+                         embargo_days=B.RISE_HORIZON)
+
+
+def oof_folds(algo: str, df: pd.DataFrame, cols: list, params: dict, seed: int,
+              folds) -> pd.DataFrame:
+    """
+    folds で out-of-fold を作る。学習器は実験39 と同じ（LightGBM は
+    e19_freshdata.oof_for、他は e27_timing_multi.oof_multi と同じ組み方）。
+    """
+    import lightgbm as lgb
+    import models as M
+    import tuning
+    import tuning_multi as TM
+
+    if isinstance(params, dict) and isinstance(params.get("params"), dict):
+        params = params["params"]
+    d = pd.to_datetime(df["Date"])
+    keep = ["Code", "Date", "label", "ret_o1_20", "ret_o1_40"]
+    parts = []
+    try:
+        for f in folds:
+            tr = df[(d <= pd.Timestamp(f.train_end)) & df["label"].notna()]
+            te = df[(d >= pd.Timestamp(f.test_start)) & (d <= pd.Timestamp(f.test_end))
+                    & df["label"].notna()]
+            if len(te) < 200 or len(tr) < 1000:
+                continue
+            Xtr = tr[cols].to_numpy(dtype=float)
+            ytr = tr["label"].to_numpy(dtype=int)
+            Xte = te[cols].to_numpy(dtype=float)
+            if algo == "lgbm":
+                m = lgb.LGBMClassifier(**{**params, "random_state": seed},
+                                       scale_pos_weight=tuning.scale_pos_weight(ytr))
+                m.fit(Xtr, ytr)
+                sc = m.predict_proba(Xte)[:, 1]
+            else:
+                TM.SEED = seed                  # build() が random_state に使う
+                m = M.fit(algo, Xtr, ytr, cols, params=params)
+                sc = M.predict(m, Xte)
+            part = te[[c for c in keep if c in te.columns]].copy()
+            part["score"] = sc
+            part["fold"] = f.index
+            parts.append(part)
+    finally:
+        TM.SEED = 0
+    return pd.concat(parts, ignore_index=True)
+
+
+def shifted_scores(df: pd.DataFrame, cols: list, par: dict, shift: int, arm: str) -> dict:
+    """窓を shift か月ずらした out-of-fold（種3つの平均）。保存済みなら読む。"""
+    folds = folds_for(df["Date"], shift)
     out = {}
     for a in RULE_MODELS:
-        par = E39.tune_for(a, sub, cols, F.DEFAULT_PRESET)
-        out[a] = E39.oof_arm(a, "B2", df, cols, par)
+        parts = []
+        for sd in E27.SEEDS3:
+            path = os.path.join(OOF_DIR, f"e41_{a}_{arm}_sh{shift}_s{sd}.parquet")
+            if os.path.exists(path):
+                parts.append(pd.read_parquet(path))
+                continue
+            t0 = time.time()
+            o = oof_folds(a, df, cols, par[a], sd, folds)
+            o.to_parquet(path, index=False)
+            parts.append(o)
+            log(f"    {a} ずらし{shift}か月 種 {sd}: {len(o):,}件 / {time.time()-t0:.0f}秒")
+        out[a] = average(parts)
     return out
 
 
@@ -579,6 +672,73 @@ def loser_section(s: pd.DataFrame, u: pd.DataFrame, ref: pd.DataFrame, feats: li
 
 
 # ---------------------------------------------------------------------- #
+# 窓ごと・切り方ごとの損切りの効果（§10）
+# ---------------------------------------------------------------------- #
+
+#: §10 で窓ごとに並べる規則（20営業日保有）。stop="1s" はラベルと同じ σ の1倍
+RULES10 = (
+    ("−5%", {"stop": 0.05}), ("−8%", {"stop": 0.08}), ("−10%", {"stop": 0.10}),
+    ("−15%", {"stop": 0.15}), ("−20%", {"stop": 0.20}), ("−1σ", {"stop": "1s"}),
+    ("終値−10%", {"stop": 0.10, "mode": "close"}), ("利確20%", {"tp": TP}),
+    ("−10%+利確", {"stop": 0.10, "tp": TP}), ("5日目<0", {"tstop": (5, 0.0)}),
+)
+
+
+def pattern_rows(oofs_k: dict, df: pd.DataFrame, bars: pd.DataFrame):
+    """切り方ごとの選定（3モデル 90以上）と、その値動きの表（20日先まで揃う行だけ）。"""
+    r = OR.consensus(oofs_k, RULE_PCT, models=RULE_MODELS, keep=True)
+    sel = r["rows"].copy()
+    folds = sorted(int(f) for f in sel["fold"].unique())
+    pool = oofs_k[RULE_MODELS[0]]
+    nb = pool[pool["fold"].isin(folds)].groupby("Date").size()
+    sel = sel.merge(df[["Code", "Date", "vol_20d"]], on=["Code", "Date"], how="left")
+    sel["n_break"] = sel["Date"].map(nb).to_numpy()
+    sel["sigma20"] = sel["vol_20d"] / 100.0 * np.sqrt(B.RISE_HORIZON)
+    P = forward(bars, sel)
+    fin = np.isfinite(P["x20"]) & np.isfinite(P["entry"])
+    P = {k: (v[fin] if isinstance(v, np.ndarray) else v) for k, v in P.items()}
+    return sel[fin].reset_index(drop=True), P, r
+
+
+def rule_returns(P: dict, sig: np.ndarray) -> dict:
+    """RULES10 の各規則の収益（行ごと）。規則は行ごとに独立なので、絞り込みは後から行を選べばよい。"""
+    out = {"なし": P["x20"]}
+    for name, kw in RULES10:
+        kw = dict(kw)
+        if isinstance(kw.get("stop"), str):
+            kw["stop"] = sig
+        out[name], _, _, _ = simulate(P, 20, **kw)
+    return out
+
+
+def window_table(title: str, fold: np.ndarray, rets: dict, ranges: dict) -> dict:
+    """窓ごとに「規則の平均 − 損切りなしの平均」（pt）を並べる。戻り値は規則ごとの窓の差。"""
+    base = rets["なし"]
+    print(f"\n  [{title}] {len(base):,}件 / 窓 {len(np.unique(fold))}")
+    print(f"  {'窓':>3} {'期間':<22}{'件数':>5}{'損切りなし':>9}{'最悪':>8} |"
+          + "".join(f"{n:>9}" for n, _ in RULES10))
+    agg = {n: [] for n, _ in RULES10}
+    for k in sorted(np.unique(fold)):
+        m = fold == k
+        row = (f"  {int(k):>3} {ranges.get(int(k), ''):<22}{int(m.sum()):>5}{pc(mean(base[m]), 9)}"
+               f"{pc(float(np.nanmin(base[m])), 8, 1)} |")
+        for n, _ in RULES10:
+            dl = mean(rets[n][m]) - mean(base[m])
+            agg[n].append(dl)
+            row += f"{dl*100:>+9.2f}"
+        print(row)
+    print(f"  {'':>3} {'全体':<22}{len(base):>5}{pc(mean(base), 9)}{pc(float(np.nanmin(base)), 8, 1)} |"
+          + "".join(f"{(mean(rets[n]) - mean(base))*100:>+9.2f}" for n, _ in RULES10))
+    print(f"  {'':>3} {'勝ち窓':<22}{'':>22} |"
+          + "".join(f"{sum(x > 1e-12 for x in agg[n]):>6}/{len(agg[n]):<2}" for n, _ in RULES10))
+    print(f"  {'':>3} {'最悪の窓':<22}{'':>22} |"
+          + "".join(f"{min(agg[n])*100:>+9.2f}" for n, _ in RULES10))
+    print(f"  {'':>3} {'最良の窓':<22}{'':>22} |"
+          + "".join(f"{max(agg[n])*100:>+9.2f}" for n, _ in RULES10))
+    return agg
+
+
+# ---------------------------------------------------------------------- #
 # 本体
 # ---------------------------------------------------------------------- #
 
@@ -588,6 +748,8 @@ def main(argv=None) -> int:
                     help="e39: 本番と同じ205列のスコア（既定） / e27: 手元の動作確認用の旧スコア")
     ap.add_argument("--arm", choices=("B2", "B1"), default="B2",
                     help="B2: 205列で探索したパラメータ（本番の形・既定） / B1: 本番のパラメータのまま")
+    ap.add_argument("--shifts", default=",".join(str(k) for k in SHIFTS),
+                    help="§10 で窓の境界をずらす月数（カンマ区切り）。0 は本番と同じ窓")
     args = ap.parse_args(argv)
     os.makedirs(OOF_DIR, exist_ok=True)
 
@@ -928,6 +1090,65 @@ def main(argv=None) -> int:
     add = ["Code", "Date"] + [c for c in allf if c not in s.columns]
     loser_section(s.merge(df[add], on=["Code", "Date"], how="left"),
                   u.merge(df[add], on=["Code", "Date"], how="left"), ref, allf)
+
+    # ------------------------------------------------------------------ #
+    # §10 窓ごと・out-of-fold の切り方ごと。運用者の指示（2026-09-23）
+    # 「oof だけでなく、各cv（異なる窓）でもみたいです。１パターンのoofで戦略を
+    #   決めても絶対にうまくいかないので（過適合）」
+    shifts = [int(x) for x in args.shifts.split(",") if x.strip() != ""]
+    if args.scores == "e27" and any(shifts):
+        log("  --scores e27 では窓をずらした out-of-fold を作らない（ずらし0か月だけ）")
+        shifts = [0]
+    print("\n=== 10. 窓ごと・out-of-fold の切り方ごと（1通りの切り方に合わせ込んでいないか）===")
+    print("  切り方 = 窓の境界を " + " / ".join(f"{k}か月" for k in shifts) + " ずらした out-of-fold。"
+          "ずらしたものは3モデルとも学習し直す（パラメータは同じ）")
+    print("  表の値 = その窓の「規則の平均 − 損切りなしの平均」（pt）。20営業日保有。")
+    print("  列: −X% = 逆指値 / −1σ = ラベルと同じ σ の逆指値 / 終値−10% = 終値で判定して翌寄り /"
+          " 利確20% = +20% 利確のみ / 5日目<0 = 5日目の終値が買値未満なら翌寄り")
+    ok0 = folds_for(df["Date"], 0)
+    got = oofs[RULE_MODELS[0]].groupby("fold")["Date"].agg(["min", "max"])
+    bad = [f.index for f in ok0 if f.index in got.index
+           and not (pd.Timestamp(f.test_start) <= got.loc[f.index, "min"]
+                    and got.loc[f.index, "max"] <= pd.Timestamp(f.test_end))]
+    print(f"  窓の境界の確認（ずらし0か月 = 本番と同じ窓か）: "
+          f"{'一致' if not bad else '不一致の窓 ' + str(bad)}")
+    cols10 = [c for c in F.columns(F.DEFAULT_PRESET) if c in df.columns]
+    par10 = arm_params(df, cols10, args.arm) if any(shifts) else None
+    pats = {}
+    for k in shifts:
+        o = oofs if k == 0 else shifted_scores(df, cols10, par10, k, args.arm)
+        for a in o:
+            o[a]["Date"] = pd.to_datetime(o[a]["Date"])
+        pats[k] = o
+    codes = set().union(*[set(o[RULE_MODELS[0]]["Code"]) for o in pats.values()])
+    bars10 = bars if codes <= set(bars["Code"].unique()) else load_bars(codes)
+    summ = {}
+    for k in shifts:
+        sel_k, P_k, r_k = pattern_rows(pats[k], df, bars10)
+        rng = {f.index: f"{f.test_start}〜{f.test_end}" for f in folds_for(df["Date"], k)}
+        rets = rule_returns(P_k, sel_k["sigma20"].to_numpy(dtype=float))
+        fo = sel_k["fold"].to_numpy()
+        print(f"\n  --- ずらし{k}か月: 選定 {r_k['n']:,}件 / 正例率 {r_k['label_rate']*100:.1f}% / "
+              f"ret_o1_20 {r_k['ret20']:+.2f}% ---")
+        summ[(k, "全日・全件")] = window_table(f"ずらし{k}か月・全日・全件", fo, rets, rng)
+        hot = (sel_k["n_break"] >= 20).to_numpy()
+        summ[(k, "発火20件以上")] = window_table(
+            f"ずらし{k}か月・発火20件以上・全件", fo[hot], {n: v[hot] for n, v in rets.items()}, rng)
+
+    print("\n  --- 10c. まとめ: 規則ごとに、切り方×絞り込みの 勝ち窓 と 窓の差の平均（pt）---")
+    keys = list(summ)
+    print(f"  {'規則':<12}" + "".join(f"{('ずらし' + str(k) + ' ' + g)[:14]:>18}" for k, g in keys)
+          + f"{'勝ち窓の合計':>14}")
+    for n, _ in RULES10:
+        cells, won, tot = [], 0, 0
+        for key in keys:
+            v = summ[key][n]
+            w = sum(x > 1e-12 for x in v)
+            won, tot = won + w, tot + len(v)
+            cells.append(f"{w:>5}/{len(v):<3}{np.mean(v)*100:>+8.2f}  ")
+        print(f"  {n:<12}" + "".join(f"{c:>18}" for c in cells) + f"{won:>9}/{tot:<4}")
+    print("  勝ち窓 = 損切りなしを上回った窓の数。窓の差の平均 = 窓ごとの差を窓の数で平均したもの"
+          "（件数では重み付けしない）。")
 
     # ------------------------------------------------------------------ #
     keep = (["Code", "Date", "fold", "label", "cls", "need", "vol_20d", "sigma20",
