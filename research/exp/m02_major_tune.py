@@ -62,6 +62,17 @@ N_BOOT = 1000
 PURGE = M1.PURGE                # 121営業日
 LABEL_VERSION = "v3"            # ラベルの定義を変えたら上げる（探索の引き継ぎを切るため）
 PREFIX = "m02"                  # 保存するファイルの頭（--quick では別にする）
+#: ボラ系として外す列（運用者の案 2026-09-23「シンプルに日次ボラを使うのと、それ（ボラ系）を除いて
+#: モデル構築して、2つの予測結果を使うのはどうでしょうか？後者はファンダメンタルズ的（ボラ以外の
+#: 要素で）に、本ブレイク起こりそうかを判断してもらうのが意図です」）
+#:   株価・出来高から作る列のグループと、全銘柄で同じ値になる地合いの列。
+#:   残りのうち、探索に使う期間の行で日次ボラとの順位相関の絶対値が RHO_MAX 以上の列も外す
+#:   （vol_20d を1本抜くだけだと、直近20日の上昇率 +0.71 などから荒さを組み立て直すため）
+VOL_GROUPS = ("price", "breakout", "volume", "liquidity", "sector_index", "margin_alert",
+              "supply", "market", "flow")
+VOL_EXTRA = ("cap_band",)
+RHO_MAX = 0.3
+VOL_TOP = (0.2, 0.4)            # 「ボラで絞ってからファンダで並べる」の絞り方。結果を見る前に決めた
 
 
 def log(msg: str) -> None:
@@ -105,10 +116,10 @@ def cv_lift(algo: str, params: dict, d: pd.DataFrame, cols: list, folds: list, l
             "roc": float(np.mean(rocs)), "folds": [round(x, 3) for x in lifts]}
 
 
-def tune(algo: str, d: pd.DataFrame, cols: list, folds: list, tag: str) -> dict:
+def tune(algo: str, d: pd.DataFrame, cols: list, folds: list, tag: str, kind: str = "") -> dict:
     """Optuna（TPE、種0）で N_TRIALS 回。途中で止まっても続きから回せるように保存する。"""
     import optuna
-    path = os.path.join(OOF_DIR, f"{PREFIX}_params_{algo}.json")
+    path = os.path.join(OOF_DIR, f"{PREFIX}_params_{kind + '_' if kind else ''}{algo}.json")
     if os.path.exists(path):
         with open(path, encoding="utf-8") as fh:
             rec = json.load(fh)
@@ -120,7 +131,7 @@ def tune(algo: str, d: pd.DataFrame, cols: list, folds: list, tag: str) -> dict:
     study = optuna.create_study(
         direction="maximize", sampler=optuna.samplers.TPESampler(seed=0),
         storage=f"sqlite:///{os.path.join(OOF_DIR, PREFIX + '_optuna.db')}",
-        study_name=f"{algo}_{tag}", load_if_exists=True)
+        study_name=f"{kind + '_' if kind else ''}{algo}_{tag}", load_if_exists=True)
     done = len([t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE])
     t0 = time.time()
 
@@ -144,6 +155,36 @@ def tune(algo: str, d: pd.DataFrame, cols: list, folds: list, tag: str) -> dict:
     log(f"  [{algo}] 探索 {time.time() - t0:.0f}秒（引き継ぎ {done}試行）/ CV リフト {rec['_cv']['lift']:.3f}"
         f"（±{rec['_cv']['lift_sd']:.3f}）/ ROC {rec['_cv']['roc']:.3f}")
     return rec
+
+
+def exvol_columns(cols: list, rows: pd.DataFrame) -> tuple:
+    """ボラ系を外した列。戻り値: 残す列、グループで外した列、相関で外した列（相関つき）。"""
+    by_group = [c for g in VOL_GROUPS for c in F.GROUPS[g] if c in cols] + [c for c in VOL_EXTRA if c in cols]
+    rest = [c for c in cols if c not in set(by_group)]
+    rho = rows[rest].rank().corrwith(rows["vol_20d"].rank())
+    by_rho = rho[rho.abs() >= RHO_MAX].sort_values(key=lambda v: -v.abs())
+    keep = [c for c in rest if c not in set(by_rho.index)]
+    return keep, by_group, by_rho
+
+
+def cv_predict(algo: str, params: dict, d: pd.DataFrame, cols: list, folds: list) -> tuple:
+    """探索期間の各塊を、その塊を外して学習したモデルで予測する（組み合わせ方の重みを学ぶため）。"""
+    X, y = d[cols].to_numpy(dtype=float), d["y"].to_numpy(dtype=int)
+    out, blk = np.full(len(d), np.nan), np.full(len(d), -1)
+    TM.SEED = 0
+    for i, (tr, va) in enumerate(folds):
+        m = TM.build(algo, params, y[tr], cols)
+        m.fit(X[tr], y[tr])
+        out[va] = m.predict_proba(X[va])[:, 1]
+        blk[va] = i
+    return out, blk
+
+
+def logit_pct(x: np.ndarray, group: np.ndarray) -> np.ndarray:
+    """塊（窓）の中の順位を 0〜1 にして、ロジットに直す（重みを足し算で学ぶため）。"""
+    q = pd.Series(x).groupby(group).rank(pct=True).to_numpy()
+    q = np.clip(q, 0.001, 0.999)
+    return np.log(q / (1 - q))
 
 
 def oof_built(algo: str, seed: int, d: pd.DataFrame, cols: list, params: dict, plan: list) -> pd.DataFrame:
@@ -345,6 +386,85 @@ def main(argv=None) -> int:
     for k in ("t_ens", "p_ens", "vol_20d"):
         r = res[k]
         print(f"  {names[k]:<34}{r['ret_o1_60_top10']*100:>+13.1f}%{r['ret_o1_120_top10']*100:>+15.1f}%{r['mx_top10']*100:>+13.1f}%")
+
+    # ------------------------------------------------------------------ #
+    print("\n=== 6. ボラ系を外したモデル（ファンダメンタルズ中心）===")
+    keep, by_group, by_rho = exvol_columns(cols, tune_rows)
+    print(f"  外した列: 株価・出来高・地合いのグループ {len(by_group)}本 / 日次ボラとの順位相関 |ρ|≥{RHO_MAX} の"
+          f"{len(by_rho)}本 → 残り {len(keep)}本")
+    print("  相関で外した列: " + " / ".join(f"{c} {v:+.2f}" for c, v in by_rho.items()))
+    tag_x = f"{LABEL_VERSION}_{F.signature(keep)}_{cut6.date()}_k{N_SPLITS}_p{PURGE}"
+    tuned_x = {a: tune(a, tune_rows, keep, folds, tag_x, kind="exvol") for a in ALGOS}
+    for a in ALGOS:
+        c = tuned_x[a]["_cv"]
+        print(f"  {a:<6} 探索後 CV リフト {c['lift']:.3f}±{c['lift_sd']:.2f}  ROC {c['roc']:.3f}  塊ごと {c['folds']}")
+    sc_x = {a: seed_avg(f"exvol_{a}_{tag_x}", lambda sd, a=a: oof_built(a, sd, df, keep, tuned_x[a]["params"], ev))
+            for a in ALGOS}
+    for a in ALGOS:
+        rows[f"x_{a}"] = on_common(sc_x[a])
+        names[f"x_{a}"] = f"ボラ系なし {a}"
+    e = common[key + ["fold"]].copy()
+    e["score"] = np.mean([M1.pct_in_fold(rows[f"x_{a}"]) for a in ALGOS], axis=0)
+    rows["x_ens"], names["x_ens"] = e, "ボラ系なし 3モデルの平均順位"
+
+    # 組み合わせ方（窓の中の順位で作る）
+    qv_ = pd.Series(np.where(ok, vol, -np.inf)).groupby(fold).rank(pct=True).to_numpy()
+    qx_ = rows["x_ens"]["score"].to_numpy(dtype=float)
+    comb = {"c_avg": ("ボラ + ボラ系なし 順位の平均", (qv_ + qx_) / 2)}
+    for t in VOL_TOP:
+        comb[f"c_top{int(t*100)}"] = (f"ボラ上位{int(t*100)}%をボラ系なしで並べる", (qv_ >= 1 - t) * 1.0 + qx_)
+    # 探索期間の CV の予測で重みを学ぶ（評価の窓は使わない）
+    from sklearn.linear_model import LogisticRegression
+    pr_tune = []
+    for a in ALGOS:
+        o, blk = cv_predict(a, tuned_x[a]["params"], tune_rows, keep, folds)
+        pr_tune.append(pd.Series(o).groupby(blk).rank(pct=True).to_numpy())
+    qx_t = np.mean(pr_tune, axis=0)
+    blk_t = blk
+    Xt = np.c_[logit_pct(tune_rows["vol_20d"].fillna(tune_rows["vol_20d"].median()).to_numpy(), blk_t),
+               logit_pct(qx_t, blk_t)]
+    lr = LogisticRegression(C=100.0, max_iter=1000).fit(Xt, tune_rows["y"].to_numpy(dtype=int))
+    w = lr.coef_[0]
+    Xe = np.c_[logit_pct(np.where(ok, vol, np.nanmedian(vol)), fold), logit_pct(qx_, fold)]
+    comb["c_lr"] = (f"学習した重み（ボラ {w[0]:.2f} : ボラ系なし {w[1]:.2f}）", Xe @ w)
+    for k, (nm, sc) in comb.items():
+        rows[k], names[k] = common[key + ["fold"]].assign(score=sc), nm
+
+    from scipy.stats import spearmanr
+    rs = spearmanr(rows["x_ens"]["score"][ok], vol[ok]).correlation
+    rf = spearmanr(rows["t_ens"]["score"][ok], vol[ok]).correlation
+    print(f"  評価の窓で、点数と日次ボラの順位相関: ボラ系なし {rs:+.2f} / 全列（探索後）{rf:+.2f}")
+
+    print(f"\n=== 7. 2つの予測を組み合わせる（窓{EVAL_FROM}〜、{len(common):,}行・正例 {int(y.sum())}件）===")
+    print(M1.HEAD)
+    order7 = ["vol_20d", "x_ens", "x_lgbm", "x_xgb", "x_cat", "c_avg"] + [f"c_top{int(t*100)}" for t in VOL_TOP] \
+        + ["c_lr", "t_ens"]
+    for k in order7:
+        o = rows[k]
+        okk = np.isfinite(o["score"].to_numpy(dtype=float))
+        res[k] = M1.measure(o[okk], y[okk], common[okk])
+        print(M1.line(names[k], res[k]))
+    print(f"\n  日次ボラ1本との差（月ごとに入れ替えるブートストラップ {N_BOOT}回）")
+    print(f"  {'比べる組':<40}{'リフトの差 5%':>12}{'中央':>8}{'95%':>8}{'差>0':>7}"
+          f"{'ROCの差 5%':>11}{'中央':>8}{'95%':>8}{'差>0':>7}")
+    for k in ["x_ens", "c_avg"] + [f"c_top{int(t*100)}" for t in VOL_TOP] + ["c_lr", "t_ens"]:
+        a_ = rows[k]["score"].to_numpy(dtype=float)
+        b = boot_diff(y[ok], a_[ok], vol[ok], month[ok], fold[ok])
+        print(f"  {names[k][:24] + ' − 日次ボラ':<40}{b['lift_p05']:>+12.2f}{b['lift_p50']:>+8.2f}{b['lift_p95']:>+8.2f}"
+              f"{b['lift_pos']*100:>6.0f}%{b['roc_p05']:>+11.3f}{b['roc_p50']:>+8.3f}{b['roc_p95']:>+8.3f}{b['roc_pos']*100:>6.0f}%")
+    print("\n  日次ボラの近い銘柄どうしで（五分位ごとの ROC-AUC、件数で重み付け）")
+    for k in ("x_ens", "t_ens", "vol_20d"):
+        s_ = rows[k]["score"].to_numpy(dtype=float)
+        acc = [(roc_auc_score(y[band == b_], s_[band == b_]), int((band == b_).sum())) for b_ in range(5)
+               if 0 < y[band == b_].sum() < (band == b_).sum()]
+        print(f"  {names[k]:<34}{sum(a_ * n for a_, n in acc) / sum(n for _, n in acc):.3f}"
+              f"   （{' / '.join(f'{a_:.3f}' for a_, _ in acc)}）")
+    print("\n  上位10%に入った行のその後（買値から）")
+    print(f"  {'並べ方':<34}{'60日後(5日平均)':>14}{'120日後(5日平均)':>16}{'120日の最高値':>14}")
+    for k in ["vol_20d", "x_ens", "c_avg"] + [f"c_top{int(t*100)}" for t in VOL_TOP] + ["c_lr"]:
+        r = res[k]
+        print(f"  {names[k][:30]:<34}{r['ret_o1_60_top10']*100:>+13.1f}%{r['ret_o1_120_top10']*100:>+15.1f}%"
+              f"{r['mx_top10']*100:>+13.1f}%")
 
     pd.DataFrame(res).T.to_csv(os.path.join(OOF_DIR, f"{PREFIX}_summary.csv"))
     log(f"記録: {OOF_DIR}/{PREFIX}_summary.csv / {PREFIX}_params_*.json")
