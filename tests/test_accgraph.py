@@ -29,6 +29,12 @@ from accgraph import (  # noqa: E402
     leakage, panel, schema, splits, synthetic,
 )
 
+try:        # GNN のテストは torch がある環境（accgraph-gnn.yml）でだけ回す
+    import torch  # noqa: F401
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
+
 
 # --------------------------------------------------------------------------- #
 # 合成データの組み立て
@@ -1005,6 +1011,157 @@ class TestIncrement(unittest.TestCase):
         # 評価のテスト窓に1段目の予測が付かない組み合わせは、走らせる前に止める
         with self.assertRaises(SystemExit):
             inc.run(self.out, min_train_months=36, stage1_min_train_months=18)
+
+
+@unittest.skipUnless(HAS_TORCH, "torch が無い（GNN のワークフローでだけ回す）")
+class TestGNN(unittest.TestCase):
+    """
+    GNN の各版が、名前どおりの情報だけを使っていること。
+
+    切り離し版の差を「エッジの効果」「時系列の効果」と読むので、
+    mlp_gru がエッジを、sage_latest が過去の四半期を見ていないことを固定する。
+    """
+
+    def _setup(self, n=48, seed=0):
+        from accgraph import gnn
+        _, _, src, dst = gnn.jq_graph()
+        rng = np.random.default_rng(seed)
+        arr = gnn.Arrays(
+            rng.normal(size=(n, 8, 18, 14)).astype(np.float32),
+            rng.normal(size=(n, 8, 21, 3)).astype(np.float32),
+            np.ones((n, 8), np.float32),
+            rng.normal(size=(n, 6)).astype(np.float32))
+        return gnn, arr, src, dst
+
+    def _out(self, gnn, variant, arr, src, dst, seed=0):
+        torch.manual_seed(seed)
+        m = gnn.build_model(variant, 18, 14, 3, 6, src, dst, gnn.TrainConfig())
+        return gnn.predict(m, arr, np.arange(len(arr.x)))
+
+    def test_graph_is_the_jq_part_of_the_schema(self):
+        """GNN のグラフは、ベースラインの `_jq` と同じノードとエッジ。"""
+        from accgraph import gnn
+        node_idx, edge_idx, src, dst = gnn.jq_graph()
+        self.assertEqual(len(node_idx), 18)
+        self.assertEqual(len(edge_idx), 21)
+        self.assertTrue(all(schema.NODES[j].source_table == "fins" for j in node_idx))
+        n = len(schema.NODES)
+        nf = np.zeros((2, 8, n, len(schema.NODE_FEATURES)))
+        ef = np.zeros((2, 8, len(schema.EDGES), len(schema.EDGE_FEATURES)))
+        meta = pd.DataFrame({"quarter": [1, 2], "turnover_ma20": [1.0, 2.0],
+                             "entry_date": pd.to_datetime(["2020-01-01"] * 2)})
+        _, names = baselines.flatten(nf, ef, np.ones((2, 8), bool), meta, kind="latest_jq")
+        base_nodes = {m.group(1) for m in (re.match(r"n\[0\](\w+)\.", x) for x in names) if m}
+        base_edges = {m.group(1) for m in (re.match(r"e\[0\](\w+->\w+)\.", x) for x in names) if m}
+        self.assertEqual(base_nodes, {schema.NODE_IDS[j] for j in node_idx})
+        self.assertEqual(base_edges, {f"{schema.EDGES[i].src}->{schema.EDGES[i].dst}"
+                                      for i in edge_idx})
+        self.assertTrue((src < 18).all() and (dst < 18).all())
+
+    def test_outputs_are_probabilities(self):
+        gnn, arr, src, dst = self._setup()
+        for v in gnn.VARIANTS:
+            p = self._out(gnn, v, arr, src, dst)
+            self.assertEqual(p.shape, (48, 3), v)
+            np.testing.assert_allclose(p.sum(axis=1), 1.0, atol=1e-5)
+
+    def test_mlp_gru_does_not_see_edges(self):
+        gnn, arr, src, dst = self._setup()
+        arr2 = gnn.Arrays(arr.x, arr.e * 10 + 3, arr.m, arr.c)
+        np.testing.assert_array_equal(self._out(gnn, "mlp_gru", arr, src, dst),
+                                      self._out(gnn, "mlp_gru", arr2, src, dst))
+        self.assertFalse(np.allclose(self._out(gnn, "sage_gru", arr, src, dst),
+                                     self._out(gnn, "sage_gru", arr2, src, dst)))
+
+    def test_sage_latest_does_not_see_history(self):
+        gnn, arr, src, dst = self._setup()
+        x2 = arr.x.copy()
+        x2[:, 1:] = x2[:, 1:] * 10 + 3
+        arr2 = gnn.Arrays(x2, arr.e, arr.m, arr.c)
+        np.testing.assert_array_equal(self._out(gnn, "sage_latest", arr, src, dst),
+                                      self._out(gnn, "sage_latest", arr2, src, dst))
+        self.assertFalse(np.allclose(self._out(gnn, "sage_gru", arr, src, dst),
+                                     self._out(gnn, "sage_gru", arr2, src, dst)))
+
+    def test_inner_split_is_purged(self):
+        """検証の手前は purge / embargo 済み。ラベルが検証期間に食い込む行は訓練に残らない。"""
+        from accgraph import gnn
+        dates = pd.Series(pd.bdate_range("2019-01-01", periods=400))
+        ready = dates + pd.Timedelta(days=28)
+        rows = np.arange(400)
+        tr, va = gnn.inner_split(dates, ready, rows, 0.15, embargo_days=29)
+        self.assertGreater(len(tr), 250)
+        self.assertGreater(len(va), 50)
+        self.assertLess(ready[tr].max(), dates[va].min())
+        self.assertLessEqual(dates[tr].max(), dates[va].min() - pd.Timedelta(days=29))
+
+    def test_scaler_uses_train_rows_only(self):
+        from accgraph import gnn
+        rng = np.random.default_rng(0)
+        a = rng.normal(size=(100, 8, 18, 14)).astype(np.float32)
+        rows = np.arange(60)
+        b = a.copy()
+        b[60:] = b[60:] * 100 + 50
+        s1, s2 = gnn.Scaler().fit(a, rows), gnn.Scaler().fit(b, rows)
+        np.testing.assert_array_equal(s1.mu, s2.mu)
+        np.testing.assert_array_equal(s1.sd, s2.sd)
+
+    def test_learns_a_planted_signal(self):
+        """当該四半期の売上ノードの値でラベルが決まるなら、本体はそれを拾える。"""
+        gnn, _, src, dst = self._setup()
+        rng = np.random.default_rng(1)
+        n = 3000
+        x = rng.normal(size=(n, 8, 18, 14)).astype(np.float32)
+        s = x[:, 0, 0, 0] + 0.5 * rng.normal(size=n)
+        y = np.digitize(s, np.quantile(s, [0.4, 0.6]))
+        arr = gnn.Arrays(x, rng.normal(size=(n, 8, 21, 3)).astype(np.float32),
+                         np.ones((n, 8), np.float32),
+                         rng.normal(size=(n, 6)).astype(np.float32))
+        tr, va, te = np.arange(2000), np.arange(2000, 2400), np.arange(2400, n)
+        # 件数が小さいのでバッチも小さくし、更新回数を実データ並みに確保する
+        model, _ = gnn.train_one("sage_gru", arr, y, tr, va, src, dst,
+                                 gnn.TrainConfig(max_epochs=10, batch_size=64), seed=0)
+        self.assertGreater(diagnose.macro_auc(y[te], gnn.predict(model, arr, te)), 0.75)
+
+    def test_test_labels_do_not_reach_training(self):
+        """テスト行のラベルを入れ替えても、テスト行の予測は1ビットも変わらない。"""
+        gnn, _, src, dst = self._setup()
+        _, arr, _, _ = self._setup(n=600, seed=2)
+        y = np.random.default_rng(3).integers(0, 3, 600)
+        tr, va, te = np.arange(400), np.arange(400, 480), np.arange(480, 600)
+        y2 = y.copy()
+        y2[te] = np.random.default_rng(4).permutation(y2[te])
+        cfg = gnn.TrainConfig(max_epochs=3)
+        m1, _ = gnn.train_one("sage_gru", arr, y, tr, va, src, dst, cfg, seed=0)
+        m2, _ = gnn.train_one("sage_gru", arr, y2, tr, va, src, dst, cfg, seed=0)
+        np.testing.assert_array_equal(gnn.predict(m1, arr, te), gnn.predict(m2, arr, te))
+
+    def test_verdicts(self):
+        from accgraph import gnn
+        self.assertEqual(gnn.verdict_main((0.001, 0.01)), "GNN が有効")
+        self.assertEqual(gnn.verdict_main((-0.01, -0.001)), "ベースラインのほうが良い")
+        self.assertEqual(gnn.verdict_main((-0.01, 0.01)), "差が見えない")
+        self.assertEqual(gnn.verdict_edges((0.001, 0.01)), "エッジが効いている")
+        self.assertEqual(gnn.verdict_time((-0.01, 0.01)), "時系列の効果は見えない")
+
+    def test_end_to_end_on_synthetic_build(self):
+        from accgraph import gnn
+        tmp = tempfile.mkdtemp(prefix="accgraph_gnn_")
+        try:
+            raw, out = os.path.join(tmp, "raw"), os.path.join(tmp, "out")
+            synthetic.write_all(raw, n_codes=12, start_year=2017, n_years=7)
+            build.build(data_dir=raw, out_dir=out)
+            md = os.path.join(tmp, "gnn.md")
+            gnn.main(["all", "--data-dir", out, "--pred-dir", os.path.join(tmp, "pred"),
+                      "--min-train-months", "36", "--min-test-rows", "5",
+                      "--seeds", "0", "--max-epochs", "2", "--n-boot", "20",
+                      "--out-md", md, "--out-json", os.path.join(tmp, "gnn.json")])
+            with open(md, encoding="utf-8") as fh:
+                text = fh.read()
+            self.assertIn("## 結論", text)
+            self.assertIn("sage_gru − mlp_gru", text)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 class TestGeneratedDoc(unittest.TestCase):

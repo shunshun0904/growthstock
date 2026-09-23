@@ -376,6 +376,44 @@ python3 research/accgraph/diagnose.py
 python3 research/accgraph/increment.py
 ```
 
+### Temporal GNN（GraphSAGE + GRU）
+
+`gnn.py` は、四半期ごとの会計フローグラフ（J-Quants の18ノード・21エッジ）を
+GraphSAGE でまとめ、過去8四半期ぶんを GRU でつないで3クラスを予測します。
+明細の上積みが見つからなかったので、EDINET のノードは使いません。
+
+ベースライン（`latest_jq` / `seq_jq` × logit / lgbm / mlp）と
+**同じ母集団・同じ分割・同じ行**で比べ、勝ち負けの理由を分けるために切り離し版も回します。
+
+| 版 | 中身 | 本体との差が表すもの |
+| --- | --- | --- |
+| `sage_gru` | 本体。エッジ特徴つき GraphSAGE 2層 → GRU | — |
+| `mlp_gru` | ノードの間で情報をやりとりしない（エッジを外す） | エッジ（会計フロー）の効果 |
+| `sage_latest` | 当該四半期のグラフだけ（時系列を外す） | 時系列の効果 |
+
+各版を乱数3通りで学習し、予測確率を平均して評価します。
+判定基準は実行前に固定してあります（区間は発表日単位のブートストラップの95%区間）。
+
+| 比較 | 0 を上回る | 0 を下回る | 0 をまたぐ |
+| --- | --- | --- | --- |
+| `sage_gru` − 最良のベースライン | GNN が有効 | ベースラインのほうが良い | 差が見えない |
+| `sage_gru` − `mlp_gru` | エッジが効いている | エッジが害になっている | エッジの効果は見えない |
+| `sage_gru` − `sage_latest` | 時系列が効いている | 時系列が害になっている | 時系列の効果は見えない |
+
+最良のベースラインは6本の中で AUC が最も高いもの（ベースラインに最も有利な選び方）です。
+バックテストは参考として並べ、判定には使いません。
+
+GNN は別のワークフロー（`accgraph-gnn.yml`、約2〜3.5時間）で回し、
+結果を [`docs/ACCGRAPH_GNN.md`](docs/ACCGRAPH_GNN.md) にコミットします。
+torch が要るので、通常の CI では GNN のテストは飛ばされます。
+
+```bash
+pip install torch                           # ローカルで回すとき
+python3 research/accgraph/gnn.py baselines  # ベースラインの予測を保存
+python3 research/accgraph/gnn.py train      # GNN の予測を保存
+python3 research/accgraph/gnn.py report     # 比べて docs/ACCGRAPH_GNN.md
+```
+
 ### 規模効果を抜いて測る
 
 実データで測ると、単変量の情報係数の上位が軒並み `log_size`（企業規模）でした。
@@ -396,6 +434,7 @@ python3 research/accgraph/eda_report.py  # 集計を組版 -> docs/accgraph_eda.
 python3 research/accgraph/evaluate.py    # ベースラインを比較して docs に書き出す
 python3 research/accgraph/diagnose.py    # 明細ありの群の原因切り分け -> docs
 python3 research/accgraph/increment.py   # 明細の上積みを2段構えで測る -> docs
+python3 research/accgraph/gnn.py all     # GNN とベースラインを比べる (要 torch) -> docs
 python3 tests/test_accgraph.py           # 単体テスト
 ```
 
@@ -440,6 +479,7 @@ Accuracy 55% を大きく超える行が出たら、まずリークを疑って�
 │   ├── fetch-data.yml       # J-Quants V2 データ取得 (secrets.JQUANTS_API)
 │   ├── deploy-pages.yml     # GitHub Pages へのビルド & デプロイ
 │   ├── accgraph.yml         # 会計フローグラフのデータ構築 + ベースライン比較
+│   ├── accgraph-gnn.yml     # 会計フローグラフの Temporal GNN
 │   └── ci.yml               # テスト + ビルド + ブラウザ描画テスト
 ├── scripts/
 │   ├── jquants_data_fetcher.py   # データ取得・指標算出パイプライン
@@ -455,6 +495,7 @@ Accuracy 55% を大きく超える行が出たら、まずリークを疑って�
 │   ├── evaluate.py               # 評価の入口 (CLI)
 │   ├── diagnose.py               # 明細ありの群で信号が消えた原因の切り分け
 │   ├── increment.py              # 明細の上積みを2段構えで測る
+│   ├── gnn.py                    # Temporal GNN（GraphSAGE + GRU）と切り離し版
 │   ├── leakage.py                # リーク検査
 │   ├── edinet.py                 # EDINET DB の明細を as-of で結合
 │   ├── eda.py                    # EDA の集計 (JSON)
