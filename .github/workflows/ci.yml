@@ -39,6 +39,9 @@ jobs:
           # 台帳（スプレッドシート）は利用者の手入力と同居する。
           # 列が増えたときに既存セルがずれないことを回帰で押さえる
           python3 tests/test_sheets.py
+          # 実運用の追跡（research/live_track.py）。規則の値が画面
+          # （src/lib/strategy.js）とずれたら、ここで落ちる
+          python3 tests/test_live_track.py
 
       - name: ビルド
         run: npm run build
