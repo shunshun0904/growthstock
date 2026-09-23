@@ -21,11 +21,17 @@
 評価: m03 と同じ売買（3モデルがそろって前の窓の98%点・95%点を超えたら翌営業日の寄りで買い、+30%に届いたら
   売る。届かなければ120営業日目の終値。参考に −20%損切り）。今のラベルの3モデル（m02 のパラメータ）、
   ブレイク全件、日次ボラ98%超と、同じ窓・同じ行で比べる。窓の切り方3通り（0/2/4か月ずらし）
+
+§6 運用に近い形（運用者の依頼 2026-09-23「aでお願いします」= 月の買い付け数と同時に持つ数に上限を置いて、
+  資金の増え方を窓ごと・区切り方3通りで測る）。research/major/portfolio.py の枠の模擬で、日々の時価から
+  最大の下げを測る。上限の組み合わせ3通りは結果を見る前に決めた。比べ物は、ブレイク全件から毎月
+  空いた枠で最初に出たものを買う「無作為」（同じ日は無作為に1つ。200回）と、TOPIX を持ち続けた場合
 """
 
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import os
 import sys
@@ -58,6 +64,9 @@ UP, DOWN = M3.UP, M3.DOWN       # +30% / −20%
 LABELS = (("A", "届かなければ0"),)
 SETS = ("今のラベル", "A")
 SHIFTS = (0, 2, 4)
+#: §6 の上限（名前, 何か月ごとに数えるか, その期間に何件まで, 枠の数）。結果を見る前に決めた
+VARIANTS = (("月1件・3枠", 1, 1, 3), ("2か月に1件・3枠", 2, 1, 3), ("月1件・6枠", 1, 1, 6))
+N_RAND = 200
 
 
 def log(msg: str) -> None:
@@ -176,14 +185,106 @@ def power(bk, df, cat, mask: np.ndarray, y_a, y_b) -> str:
     return s
 
 
+def load_topix(cal: pd.DatetimeIndex) -> np.ndarray:
+    """TOPIX の終値を営業日の並びにそろえる（配当は入らない）。"""
+    paths = sorted(glob.glob(os.path.join(lab.DATA_DIR, "topix_*.parquet")))
+    t = pd.concat([pd.read_parquet(p) for p in paths], ignore_index=True)
+    t["Date"] = pd.to_datetime(t["Date"])
+    s = t.drop_duplicates("Date", keep="last").set_index("Date")["topix"].astype(float).sort_index()
+    return s.reindex(cal).ffill().to_numpy()
+
+
+def section6(books: dict, cal: pd.DatetimeIndex, ex: dict, path: np.ndarray, buy_all: np.ndarray,
+             topix: np.ndarray) -> None:
+    import portfolio as PF
+    ret, held, _ = ex["+30%"]
+    bdate = cal[np.minimum(buy_all, len(cal) - 1)]
+    ym = np.asarray(bdate.year * 12 + bdate.month - 1)
+    rng = np.random.default_rng(0)
+    print("\n=== 6. 運用に近い形: 買い付け数と同時に持つ数に上限を置いたときの資金の増え方（+30%で利確）===")
+    print("  資金を枠の数で等分し、1つの枠で1銘柄。空いた枠があり、期間の上限に達していなければ、条件を満たした銘柄を"
+          "その枠の資金全部で翌営業日の寄りに買う。売ったら枠の資金が増減し、次に使う（枠ごとの複利）")
+    print("  資産は毎日の時価（持っている銘柄は終値）。最大DD はその毎日の資産から測る。手数料・税なし")
+    print(f"  無作為 = ブレイク全件から、空いた枠があれば期間の最初に出たものを買う（同じ日は無作為に1つ）。{N_RAND}回の"
+          "中央値と10〜90%点。無作為より上 = 無作為の何%より資産が増えたか")
+    head = (f"  {'選び方':<16}{'上限':<16}{'買った':>6}{'見送り枠':>8}{'見送り上限':>9}{'1取引の平均':>10}{'+30%到達':>9}"
+            f"{'資産':>9}{'年率':>8}{'最大DD':>8}{'無作為より上':>11}")
+    keep = {}
+    for shift in SHIFTS:
+        ref = books[("今のラベル", shift)]
+        sels = (("A・98%超", books[("A", shift)], "3モデル 98%超"), ("A・95%超", books[("A", shift)], "3モデル 95%超"),
+                ("今のラベル・98%超", ref, "3モデル 98%超"))
+        print(f"\n  --- ずらし{shift}か月 ---")
+        for part in M3.PARTS:
+            pm = ref.part_mask(part)
+            if not pm.any():
+                continue
+            rows_all = ref.fr["row"].to_numpy()[pm]
+            ks = sorted(np.unique(ref.fr["fold"].to_numpy()[pm]))
+            lo = int(cal.searchsorted(pd.Timestamp(ref.wins[ks[0]].test_start)))
+            hi = int(min(len(cal) - 1, buy_all[rows_all].max() + TR.DAYS - 1))
+            tp = PF.metrics(topix[lo:hi + 1] / topix[lo - 1])
+            print(f"  [{part}] {cal[lo].date()}〜{cal[hi].date()}（{(hi - lo + 1) / 245:.1f}年）。TOPIX を持ち続けると "
+                  f"{tp['mult']:.2f}倍・年率 {tp['cagr']*100:+.1f}%・最大DD {tp['mdd']*100:+.1f}%")
+            print(head)
+            p_all = path[rows_all]
+            for vname, months, per, slots in VARIANTS:
+                period_all = ym // months
+                rand = []
+                for _ in range(N_RAND):
+                    res = PF.simulate(buy_all[rows_all], period_all[rows_all], held[rows_all], ret[rows_all],
+                                      rng.random(len(rows_all)), slots, per)
+                    eq = PF.equity(res, p_all, lo, hi)
+                    rand.append((PF.metrics(eq), len(res["trades"]), eq))
+                rm = np.array([r[0]["mult"] for r in rand])
+                for name, bk, rule in sels:
+                    m = bk.part_mask(part) & bk.sel[rule]
+                    ii = bk.fr["row"].to_numpy()[m]
+                    res = PF.simulate(buy_all[ii], period_all[ii], held[ii], ret[ii], bk.prio("3モデル")[m], slots, per)
+                    eq = PF.equity(res, path[ii], lo, hi)
+                    mt = PF.metrics(eq)
+                    tr_ret = np.array([t[3] for t in res["trades"]])
+                    hit = (tr_ret >= 0.3 - 1e-9).mean() * 100 if len(tr_ret) else float("nan")
+                    avg = tr_ret.mean() * 100 if len(tr_ret) else float("nan")
+                    print(f"  {name:<16}{vname:<16}{len(res['trades']):>6}{res['skipped_slot']:>8}{res['skipped_quota']:>9}"
+                          f"{avg:>+9.1f}%{hit:>8.0f}%{mt['mult']:>8.2f}倍{mt['cagr']*100:>+7.1f}%{mt['mdd']*100:>+7.1f}%"
+                          f"{(rm < mt['mult']).mean()*100:>10.0f}%")
+                    keep[(shift, part, vname, name)] = eq
+                q = lambda k: np.percentile([r[0][k] for r in rand], [50, 10, 90])
+                qm, qc, qd = q("mult"), q("cagr"), q("mdd")
+                print(f"  {'無作為（' + str(N_RAND) + '回）':<16}{vname:<16}{np.median([r[1] for r in rand]):>6.0f}"
+                      f"{'':>17}{'':>10}{'':>9}{qm[0]:>8.2f}倍{qc[0]*100:>+7.1f}%{qd[0]*100:>+7.1f}%"
+                      f"   （資産 10〜90%点 {qm[1]:.2f}〜{qm[2]:.2f}倍・最大DD {qd[1]*100:+.0f}〜{qd[2]*100:+.0f}%）")
+                keep[(shift, part, vname, "無作為")] = np.median([r[2] for r in rand], axis=0)
+            keep[(shift, part, "TOPIX")] = (lo, hi)
+
+    # 窓ごと（ずらし0か月・全窓・最初の上限）
+    v0 = VARIANTS[0][0]
+    ref = books[("今のラベル", 0)]
+    lo, hi = keep[(0, "全窓", "TOPIX")]
+    ks = sorted(np.unique(ref.fr["fold"][ref.fr["evald"]]))
+    bounds = [(int(cal.searchsorted(pd.Timestamp(ref.wins[k].test_start))),
+               int(min(len(cal) - 1, cal.searchsorted(pd.Timestamp(ref.wins[k].test_end), side="right") - 1))) for k in ks]
+    tpx = topix[lo:hi + 1] / topix[lo - 1]
+    cols_ = ("A・98%超", "A・95%超", "今のラベル・98%超", "無作為")
+    wr = {c: PF.window_returns(keep[(0, "全窓", v0, c)], lo, bounds) for c in cols_}
+    wr["TOPIX"] = PF.window_returns(tpx, lo, bounds)
+    print(f"\n  --- 窓ごとの資産の増減（ずらし0か月・全窓・{v0}。その窓の期間の中の増減）---")
+    print(f"  {'窓':>3} {'テスト':<24}" + "".join(f"{c:>14}" for c in cols_ + ("TOPIX",)))
+    for k, b, j in zip(ks, bounds, range(len(ks))):
+        f = ref.wins[k]
+        print(f"  {k:>3} {f.test_start}〜{f.test_end}" + "".join(f"{wr[c][j]*100:>+13.1f}%" for c in cols_ + ("TOPIX",)))
+    print(f"  無作為の列は、{N_RAND}回の日々の資産の中央値から計算した")
+
+
 def main(argv=None) -> int:
-    global N_TRIALS, SHIFTS
+    global N_TRIALS, SHIFTS, N_RAND
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[1])
-    ap.add_argument("--quick", action="store_true", help="手元の動作確認用（探索3試行・種1つ・ずらし0か月だけ）")
+    ap.add_argument("--quick", action="store_true", help="手元の動作確認用（探索3試行・種1つ・ずらし0か月だけ・無作為20回）")
     args = ap.parse_args(argv)
     M2.PREFIX = PREFIX
     if args.quick:
-        N_TRIALS, M2.SEEDS, SHIFTS = 3, (42,), (0,)
+        N_TRIALS, M2.SEEDS, SHIFTS, N_RAND = 3, (42,), (0,), 20
         M2.PREFIX = "m04quick"
     global_prefix = M2.PREFIX
     os.makedirs(OOF_DIR, exist_ok=True)
@@ -208,6 +309,7 @@ def main(argv=None) -> int:
     cat, du, dd = TR.touch_order(P, UP, DOWN)
     df["y_A"], df["y_B"] = labels_from(cat, tradable)
     buy_all = cal.searchsorted(df["Date"].to_numpy()) + 1
+    path = P["C"] / P["entry"][:, None]         # §6: 1〜120日目の終値 ÷ 買値
     del bars, P
 
     print("=== 0. 前提 ===")
@@ -328,6 +430,9 @@ def main(argv=None) -> int:
         r_all = ex["+30%"][0][ref.fr["row"].to_numpy()[mm]]
         print(line + f"{r_all.mean()*100:>+10.1f}%  {'重ならない' if pd.Timestamp(f.test_start) >= M2.CLEAN_FROM else '重なる'}")
     print("  到達 = +30% に届いた割合。全件 = その窓のブレイクを全部買って +30% で売ったときの平均")
+
+    # --- 6. 運用に近い形 --- #
+    section6(books, cal, ex, path, buy_all, load_topix(cal))
 
     for kind, _ in LABELS:
         for a in ALGOS:
