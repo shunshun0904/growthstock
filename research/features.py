@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 from typing import Dict, List
 
 # 決算の軸。build_dataset.py が各軸について q0/q1/q2/chg/chg1/slope を作る。
@@ -352,14 +353,20 @@ PRESETS: Dict[str, List[str]] = {
 #:   xgb  0.2637 -> 0.2749 (+0.0112)
 #:   cat  0.2686 -> 0.2780 (+0.0094)
 #:
-#: **パラメータは探索し直さない。** 205列で探索し直した腕（B2）は
-#: 3モデルとも B1 より悪く、lgbm では A すら下回った（-0.0005）。
-#: 効いたのは特徴量であって、パラメータではない。
-#: train_production.py / train_multi.py の --params は "all" のまま。
+#: **パラメータもこの205列で探索する**（2026-09-23、運用者の指示）。
+#: 「チューニングは実際に学習するモデルの特徴量で行う。out-of-fold を
+#:   最良にすることがチューニングの目的ではない」。
+#: 実験39 では 205列で探索し直した腕（B2）の out-of-fold が B1（153列で
+#: 探索したパラメータのまま）を下回ったが、それはバックテストの結果であって
+#: 探索の列を学習と変えてよい理由にはならない。本番は B2 の形になる:
+#:   research/tune_presets.txt の先頭が all_plus（LightGBM の週次探索）
+#:   research/exp/e15_tune_all.py も DEFAULT_PRESET で探索（追加4モデル）
+#:   train_production.py の --params は既定で --features と同じ鍵
+#: 探索した列と学習する列が違えば学習を止める（tuning.tuned_mismatch）。
 #:
-#: 実収益（3モデル90以上、out-of-fold）
-#:   窓平均超過 +0.50pt -> +1.75pt / SE 1.20 -> 0.78
-#:   **最悪の窓 -9.35pt -> -1.44pt**
+#: 実収益（3モデル90以上、out-of-fold。B2 の形）
+#:   窓平均超過 +0.50pt -> +1.46pt / SE 1.20 -> 0.76
+#:   最悪の窓 -9.35pt -> -1.43pt
 DEFAULT_PRESET = "all_plus"
 
 
@@ -391,6 +398,16 @@ def columns(preset: str) -> List[str]:
     seen = set()
     return [c for c in out
             if c not in drop and not (c in seen or seen.add(c))]
+
+
+def signature(cols: List[str]) -> str:
+    """
+    列の並びの指紋（12桁）。探索したときの列と学習する列が同じかを確かめる。
+
+    列数だけで比べると、同じ本数の別の列（入れ替え・並べ替え）を見逃す。
+    並び順も学習器への入力の一部なので、並びごと比べる。
+    """
+    return hashlib.sha1("\n".join(cols).encode("utf-8")).hexdigest()[:12]
 
 
 def group_of(col: str) -> str:

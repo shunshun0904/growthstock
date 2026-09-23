@@ -79,9 +79,23 @@ def log(msg: str) -> None:
 # ---------------------------------------------------------------------- #
 
 def prod_params(algo: str) -> dict:
+    """
+    本番がいま使っているパラメータ。
+
+    LightGBM は本番のプリセット（features.DEFAULT_PRESET）の鍵を読む。
+    本番は学習する列で探索したパラメータを使う（2026-09-23 から。
+    research/tune_presets.txt）。その鍵がまだ無い間（205列での週次探索が
+    一度も回っていない間）は、それまで本番が使っていた "all" を読み、そう表示する。
+    追加モデルは multi_params.json に1組ずつしか無いので、そのまま読む。
+    """
     if algo == "lgbm":
         with open(LGBM_PARAMS, encoding="utf-8") as fh:
-            rec = json.load(fh)["all"]
+            store = json.load(fh)
+        key = F.DEFAULT_PRESET if F.DEFAULT_PRESET in store else "all"
+        if key != F.DEFAULT_PRESET:
+            log(f"  [lgbm] {F.DEFAULT_PRESET} の探索結果がまだ無いので、"
+                "これまで本番が使っていた all（153列で探索）を読む")
+        rec = store[key]
         return {"params": {k: v for k, v in rec.items() if not k.startswith("_")},
                 "_cv": rec.get("_cv", {})}
     with open(MULTI_PARAMS, encoding="utf-8") as fh:

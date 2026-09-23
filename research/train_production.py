@@ -217,13 +217,29 @@ def main(argv=None) -> int:
     ap.add_argument("--data-dir", default=DATA_DIR)
     ap.add_argument("--dataset", default=os.path.join(DATA_DIR, "dataset.parquet"))
     ap.add_argument("--features", default=F.DEFAULT_PRESET)
-    ap.add_argument("--params", default="all", help="使うハイパーパラメータの鍵")
+    ap.add_argument("--params", default=None,
+                    help="使うハイパーパラメータの鍵。既定は --features と同じ"
+                         "（学習する列で探索したパラメータを使う）")
     ap.add_argument("--out-dir", default=MODEL_DIR)
     args = ap.parse_args(argv)
+    args.params = args.params or args.features
 
     import lightgbm as lgb
 
     cols = F.columns(args.features)
+    # 学習する列と同じ列で探索したパラメータだけを使う（運用者の指示 2026-09-23）。
+    # 鍵が無いときに既定値へ黙って落ちる（tuning.params_for の挙動）のも、
+    # 別の列で探索した結果を使うのも、ここで止める
+    rec = tuning.load_params().get(args.params)
+    if not rec:
+        raise SystemExit(
+            f"パラメータ {args.params} の探索結果がありません（{tuning.PARAMS_PATH}）。"
+            f"先に run_tuning.py --features {args.features} を回す"
+            "（週次の再学習なら tune=yes）")
+    why = tuning.tuned_mismatch(rec.get("_features_sig"), rec.get("_n_features"), cols)
+    if why:
+        raise SystemExit(f"パラメータ {args.params} は学習する列（{args.features}）で"
+                         f"探索したものではありません: {why}")
     params = tuning.params_for(args.params)
     ds = pd.read_parquet(args.dataset)
     ds["Date"] = pd.to_datetime(ds["Date"])

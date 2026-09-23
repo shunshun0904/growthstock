@@ -103,8 +103,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         # LightGBM には渡らない
         # LTR は同じ特徴量セットでも目的関数が違うので鍵を分ける
         key = preset + ("__ltr" if args.model == "ranker" else "")
+        # どの列で探索したかを残す。学習側（train_production）が、学習する
+        # 列と同じ列で探索したパラメータかを確かめるのに使う
         store[key] = {**params, "_cv": dict(tuning.LAST_CV),
-                      "_n_features": len(cols)}
+                      "_n_features": len(cols),
+                      "_features_sig": F.signature(cols),
+                      "_preset": preset}
         tuning.save_params(store)      # 途中で落ちても結果を失わない
 
     print(f"\n[done] {len(store)}件を {tuning.PARAMS_PATH} に保存 "

@@ -1421,9 +1421,11 @@ class 本番のプリセット(unittest.TestCase):
     3モデルとも足切り（PR-AUC の差 > 0.0048）を超えている:
       lgbm 0.2735 -> 0.2818 / xgb 0.2637 -> 0.2749 / cat 0.2686 -> 0.2780
 
-    **パラメータは探索し直さない。** 205列で探索し直した腕（B2）は
-    3モデルとも B1 より悪く、lgbm では A すら下回った。
-    効いたのは特徴量であって、パラメータではない。
+    **パラメータも205列で探索する**（2026-09-23、運用者の指示）。
+    「パラメータチューニングする際も205 全特徴量を使ったモデルでお願いします。
+      でないとチューニングするいみがないので。oofで最良にすることが
+      チューニングの目的ではないです」。
+    切り替えのとき、週次の探索だけ153列（all）のまま残っていた。
     """
 
     def test_本番は_all_plus(self):
@@ -1443,10 +1445,26 @@ class 本番のプリセット(unittest.TestCase):
             self.assertNotIn('ap.add_argument("--features", default="all")',
                              src, mod.__name__)
 
-    def test_パラメータの鍵は_all_のまま(self):
-        """特徴量だけ替え、パラメータは替えない（B1 の腕）。"""
+    def test_週次の探索の先頭は本番の列(self):
+        """LightGBM の週次探索（retrain-weekly の Tune）が本番の列で探索する。"""
+        import features as F
+        path = os.path.join(ROOT, "research", "tune_presets.txt")
+        lines = [ln.strip() for ln in open(path, encoding="utf-8")
+                 if ln.strip() and not ln.startswith("#")]
+        self.assertEqual(lines[0], F.DEFAULT_PRESET)
+
+    def test_追加モデルの探索も本番の列(self):
+        """追加4モデルの週次探索（e15_tune_all）も本番の列で探索する。"""
+        src = open(os.path.join(ROOT, "research", "exp", "e15_tune_all.py"),
+                   encoding="utf-8").read()
+        self.assertIn("preset = F.DEFAULT_PRESET", src)
+        self.assertNotIn('cols = F.columns("all")', src)
+
+    def test_本番の学習はパラメータの鍵を列に合わせる(self):
+        """--params の既定は --features と同じ鍵（学習する列で探索したもの）。"""
         src = open(__import__("train_production").__file__, encoding="utf-8").read()
-        self.assertIn('ap.add_argument("--params", default="all"', src)
+        self.assertIn("args.params = args.params or args.features", src)
+        self.assertNotIn('ap.add_argument("--params", default="all"', src)
 
     def test_all_plus_は_all_を含む(self):
         """153列は全部残っている。足しただけで引いていない。"""
@@ -1454,3 +1472,108 @@ class 本番のプリセット(unittest.TestCase):
         a, b = set(F.columns("all")), set(F.columns("all_plus"))
         self.assertTrue(a <= b, f"落ちた列: {sorted(a - b)}")
         self.assertEqual(len(b - a), 52)
+
+
+class 探索と学習の列を突き合わせる(unittest.TestCase):
+    """探索した列と学習する列が違うパラメータは使わない（2026-09-23）。
+
+    以前は2つの穴があった。
+      1. tuning.params_for は鍵が無いと黙って既定値を返す
+      2. 追加モデルの Optuna の study 名に列が入っておらず、同じ週に列を変えて
+         探索し直すと、別の列で測った50試行を「完了済み」として引き継ぐ
+    """
+
+    def test_指紋は並びまで見る(self):
+        import features as F
+        a = ["x", "y", "z"]
+        self.assertEqual(F.signature(a), F.signature(list(a)))
+        self.assertNotEqual(F.signature(a), F.signature(["y", "x", "z"]))
+        self.assertNotEqual(F.signature(a), F.signature(a[:2]))
+        self.assertNotEqual(F.signature(F.columns("all")), F.signature(F.columns("all_plus")))
+
+    def test_突き合わせ(self):
+        import features as F
+        import tuning
+        cols = F.columns("all_plus")
+        self.assertIsNone(tuning.tuned_mismatch(F.signature(cols), len(cols), cols))
+        self.assertIn("列が違います",
+                      tuning.tuned_mismatch(F.signature(F.columns("all")), 153, cols))
+        # 指紋の無い古い記録は列数で比べる
+        self.assertIsNone(tuning.tuned_mismatch(None, 205, cols))
+        self.assertIn("列数", tuning.tuned_mismatch(None, 153, cols))
+        # 何で探索したか分からない記録は使わない
+        self.assertIn("分からない", tuning.tuned_mismatch(None, None, cols))
+
+    def _run_production(self, store):
+        import tuning
+        import train_production as TP
+        orig = tuning.load_params
+        tuning.load_params = lambda path=None: store
+        try:
+            with self.assertRaises(SystemExit) as cm:
+                TP.main(["--dataset", "/nonexistent/dataset.parquet"])
+        finally:
+            tuning.load_params = orig
+        return str(cm.exception)
+
+    def test_本番の学習は鍵が無ければ止まる(self):
+        """既定値で黙って学習しない。鍵は --features と同じ all_plus。"""
+        msg = self._run_production({"all": {"_n_features": 153}})
+        self.assertIn("all_plus の探索結果がありません", msg)
+
+    def test_本番の学習は別の列で探索したパラメータなら止まる(self):
+        import features as F
+        cols = F.columns("all")
+        msg = self._run_production({"all_plus": {"_n_features": 153,
+                                                 "_features_sig": F.signature(cols)}})
+        self.assertIn("探索したものではありません", msg)
+
+    def test_本番の学習は同じ列なら先へ進む(self):
+        """突き合わせを通れば、データセットを読みに行く（ここでは無いので落ちる）。"""
+        import features as F
+        cols = F.columns("all_plus")
+        store = {"all_plus": {"_n_features": len(cols), "_features_sig": F.signature(cols)}}
+        import tuning
+        import train_production as TP
+        orig = tuning.load_params
+        tuning.load_params = lambda path=None: store
+        try:
+            with self.assertRaises((FileNotFoundError, OSError)):
+                TP.main(["--dataset", "/nonexistent/dataset.parquet"])
+        finally:
+            tuning.load_params = orig
+
+    def test_追加モデルの探索は列が変われば探索し直す(self):
+        sys.path.insert(0, os.path.join(ROOT, "research", "exp"))
+        import e15_tune_all as E15
+        prev = {"train_to": "2025-07-23", "features_sig": "aaaaaaaaaaaa", "n_features": 153}
+        self.assertIsNone(E15.why_retune(prev, "2025-07-23", "aaaaaaaaaaaa"))
+        self.assertIn("列が違う", E15.why_retune(prev, "2025-07-23", "bbbbbbbbbbbb"))
+        self.assertIn("訓練最終日", E15.why_retune(prev, "2025-07-30", "aaaaaaaaaaaa"))
+        # 列の記録が無い古い探索（153列の時代）は探索し直す
+        old = {"train_to": "2025-07-23", "mean_pr_auc": 0.33}
+        self.assertIn("列が違う", E15.why_retune(old, "2025-07-23", "aaaaaaaaaaaa"))
+        self.assertIsNotNone(E15.why_retune({}, "2025-07-23", "aaaaaaaaaaaa"))
+
+    def test_探索の試行は列ごとに別の_study(self):
+        import features as F
+        import tuning_multi as TM
+        a = TM.study_name("xgb", 5, "2025-07-23", F.columns("all"))
+        b = TM.study_name("xgb", 5, "2025-07-23", F.columns("all_plus"))
+        self.assertNotEqual(a, b)
+        self.assertTrue(b.startswith("xgb_s5_2025-07-23_"))
+
+    def test_追加モデルは別の列で探索したものなら学習しない(self):
+        import features as F
+        import train_multi as TMlt
+        cols = F.columns("all_plus")
+        store = {
+            "xgb": {"_cv": {"features_sig": F.signature(cols), "n_features": len(cols)}},
+            "cat": {"_cv": {"features_sig": F.signature(F.columns("all")), "n_features": 153}},
+            "mlp": {"_cv": {"train_to": "2025-07-23"}},            # 列の記録なし
+        }
+        out = TMlt.untuned(["xgb", "cat", "mlp", "logit"], store, cols)
+        self.assertNotIn("xgb", out)
+        self.assertIn("列が違います", out["cat"])
+        self.assertIn("分からない", out["mlp"])
+        self.assertIn("ありません", out["logit"])

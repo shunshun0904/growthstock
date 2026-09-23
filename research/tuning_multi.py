@@ -46,6 +46,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import average_precision_score, roc_auc_score
 
+import features as F
 import tuning
 
 PARAMS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -322,6 +323,14 @@ def fit_eval(algo: str, params: Dict, tr: pd.DataFrame, va: pd.DataFrame,
 # 探索
 # --------------------------------------------------------------------------- #
 
+def study_name(algo: str, n_splits: int, train_to: str, cols: List[str]) -> str:
+    """
+    Optuna の study 名。「解こうとしている問題」を表すものだけで作る
+    （モデル・分割数・訓練データの最終日・列）。理由は tune() の中の注記。
+    """
+    return f"{algo}_s{n_splits}_{train_to}_{F.signature(cols)}"
+
+
 def tune(algo: str, df: pd.DataFrame, cols: List[str], *, n_trials: int = 50,
          n_splits: int = 5, seed: int = SEED, verbose: bool = True) -> Dict:
     """
@@ -360,6 +369,7 @@ def tune(algo: str, df: pd.DataFrame, cols: List[str], *, n_trials: int = 50,
         return float(np.mean(prs))
 
     train_to = str(pd.to_datetime(df["Date"]).max().date())
+    sig = F.signature(cols)
     os.makedirs(os.path.dirname(STUDY_DB), exist_ok=True)
     study = optuna.create_study(
         direction="maximize",
@@ -375,7 +385,12 @@ def tune(algo: str, df: pd.DataFrame, cols: List[str], *, n_trials: int = 50,
         # 同じ study に混ぜると best_value が先週のデータで決まってしまう。
         # 日付を入れておけば、週が変われば自動的に新しい study から
         # 50試行やり直し、同じ週のやり直しでは試行を引き継ぐ
-        study_name=f"{algo}_s{n_splits}_{train_to}",
+        #
+        # 列の指紋も入れる。入れないと、同じ週に列を変えて探索し直したとき
+        # 別の列で測った50試行を「完了済み」として引き継ぎ、1試行もせずに
+        # 旧い列の最良値を返す（153列 -> 205列 に切り替えた 2026-09-23 に
+        # この穴に気づいた）
+        study_name=study_name(algo, n_splits, train_to, cols),
         load_if_exists=True,
     )
     done = len([t for t in study.trials
@@ -401,6 +416,10 @@ def tune(algo: str, df: pd.DataFrame, cols: List[str], *, n_trials: int = 50,
             # 次に探索すべきかの判定に使う（research/exp/e15_tune_all.py）。
             # 訓練データの最終日が動いていれば母集団が変わっている
             "train_to": train_to,
+            # どの列で探索したか。学習側（train_multi）が、学習する列と
+            # 同じ列で探索したパラメータかを確かめるのに使う
+            "n_features": len(cols),
+            "features_sig": sig,
         },
     }
     if verbose:

@@ -60,6 +60,7 @@ import build_dataset as B  # noqa: E402
 import features as F  # noqa: E402
 import models as M  # noqa: E402
 import sweep_design as S  # noqa: E402
+import tuning  # noqa: E402
 import tuning_multi as TM  # noqa: E402
 import lab as L  # noqa: E402
 from train_production import (  # noqa: E402
@@ -102,8 +103,25 @@ def oof_scores(algo: str, ds: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
     return pd.concat(parts, ignore_index=True)
 
 
+def untuned(algos: List[str], store: Dict, cols: List[str]) -> Dict[str, str]:
+    """
+    学習する列 cols と同じ列で探索したパラメータが無いモデルと、その理由。
+    store は multi_params.json の中身（tuning_multi.load()）。
+    """
+    out = {}
+    for a in algos:
+        if a not in store:
+            out[a] = "探索済みパラメータがありません"
+            continue
+        cv = store[a].get("_cv", {})
+        why = tuning.tuned_mismatch(cv.get("features_sig"), cv.get("n_features"), cols)
+        if why:
+            out[a] = why
+    return out
+
+
 def train_one(algo: str, ds: pd.DataFrame, cols: List[str],
-              out_root: str) -> Dict:
+              out_root: str, preset: str = F.DEFAULT_PRESET) -> Dict:
     """1モデルぶんを学習して保存し、要約を返す。"""
     t0 = time.time()
     oof = oof_scores(algo, ds, cols)
@@ -122,7 +140,7 @@ def train_one(algo: str, ds: pd.DataFrame, cols: List[str],
         "note": M.NOTE.get(algo, ""),
         "trainedAt": pd.Timestamp.utcnow().isoformat(),
         "label": B.DEFAULT_RISE.name,
-        "preset": "all",
+        "preset": preset,
         "features": cols,
         "params": params,
         "nTrain": int(len(ds)),
@@ -183,21 +201,28 @@ def main(argv=None) -> int:
     ds = ds.merge(L.realized_returns(bars), on=["Code", "Date"], how="left")
     del bars
 
-    tuned = set(TM.load())
-    missing = [a for a in algos if a not in tuned]
+    # 学習する列と同じ列で探索したパラメータがあるモデルだけ学習する
+    # （運用者の指示 2026-09-23）。無い・違うモデルは学習しない。
+    # 前回のモデルが Release に残るので、日次の予測はそれで続く。
+    # 以前は探索が無ければ既定値で学習していたが、それも「その列で探索した
+    # パラメータ」ではないので同じ扱いにする
+    skipped = untuned(algos, TM.load(), cols)
     print(f"[load] {len(ds):,}件 / 正例率 {ds['label'].mean()*100:.2f}% "
           f"/ {ds['Date'].min().date()} 〜 {ds['Date'].max().date()}")
-    print(f"[setup] 特徴量 {len(cols)}列 / 学習するモデル {algos}")
-    if missing:
-        print(f"[warn] 探索済みパラメータが無いモデル: {missing}")
-        print("       既定値で学習します（research/exp/e15_tune_all.py で探索できます）")
+    print(f"[setup] 特徴量 {args.features}（{len(cols)}列・指紋 {F.signature(cols)}） / "
+          f"学習するモデル {[a for a in algos if a not in skipped]}")
+    if skipped:
+        print("[stop] 学習する列で探索していないので学習しない（前回のモデルのまま）:")
+        for a, why in skipped.items():
+            print(f"       {a}: {why}")
+        print("       research/exp/e15_tune_all.py で探索し直してから学習する")
     print()
 
     rows = []
-    for algo in algos:
+    for algo in [a for a in algos if a not in skipped]:
         print(f"[{algo}] out-of-fold を作って学習")
         try:
-            r = train_one(algo, ds, cols, args.out_dir)
+            r = train_one(algo, ds, cols, args.out_dir, args.features)
         except Exception as exc:          # noqa: BLE001
             # 1モデルの失敗で他を落とさない。画面はあるモデルだけ並べる
             print(f"[{algo}] 失敗: {type(exc).__name__}: {exc}")
@@ -222,9 +247,14 @@ def main(argv=None) -> int:
     ok = [r["algo"] for r in rows]
     print()
     print(f"[done] {len(ok)}/{len(algos)} モデル: {ok}")
-    if len(ok) < len(algos):
-        print(f"[warn] 失敗: {[a for a in algos if a not in ok]}")
-    return 0 if ok else 1
+    failed = [a for a in algos if a not in ok and a not in skipped]
+    if failed:
+        print(f"[warn] 失敗: {failed}")
+    if skipped:
+        print(f"[warn] 学習しなかった（探索の列が違う・無い）: {list(skipped)}")
+    # 学習しなかったモデルがあれば失敗で返す。ステップが赤くなって気づける
+    # （ワークフローは continue-on-error なので、学習できたモデルは上がる）
+    return 0 if ok and not skipped else 1
 
 
 if __name__ == "__main__":

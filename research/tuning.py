@@ -605,6 +605,31 @@ def save_params(params: Dict[str, Dict], path: str = PARAMS_PATH) -> None:
 LAST_CV: Dict = {}
 
 
+def tuned_mismatch(sig: Optional[str], n: Optional[int],
+                   cols: List[str]) -> Optional[str]:
+    """
+    探索の記録（列の指紋 sig / 列数 n）が、学習する列 cols と同じ列で
+    探索したものかを確かめる。同じなら None、違えば理由を返す。
+
+    運用者の指示（2026-09-23）「パラメータチューニングする際も205 全特徴量を
+    使ったモデルでお願いします。でないとチューニングするいみがないので」。
+    探索した列と学習する列が違うパラメータは使わない。
+
+    指紋が無い古い記録は列数で比べる（指紋を残す前の探索結果）。
+    どちらも無ければ、何で探索したか分からないので使わない。
+    """
+    import features as F
+
+    if sig is None and n is None:
+        return "探索の記録に特徴量の情報がありません（どの列で探索したか分からない）"
+    if sig is not None and sig != F.signature(cols):
+        return (f"探索した列と学習する列が違います（指紋 {sig} / "
+                f"学習 {F.signature(cols)}・{len(cols)}列）")
+    if sig is None and int(n) != len(cols):
+        return f"探索した列数 {n} と学習する列数 {len(cols)} が違います"
+    return None
+
+
 def params_for(preset: str, store: Optional[Dict[str, Dict]] = None) -> Dict:
     """
     プリセット名から学習用パラメータを返す。無ければ既定値。
