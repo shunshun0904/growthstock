@@ -29,12 +29,15 @@ RULES = (
 
 
 def consensus(oofs: Dict[str, pd.DataFrame], pct: float = 85.0,
-              min_rows: int = 100, models=BOOST) -> dict:
+              min_rows: int = 100, models=BOOST, keep: bool = False) -> dict:
     """
     oofs: {algo: out-of-fold（Code, Date, fold, label, score, ret_o1_*）}。
     models のモデルすべてが pct パーセンタイル以上の行を選ぶ。
     models=("lgbm",) なら LightGBM 単体（lab.threshold_edge と同じ選び方）。
     モデル同士は同じ行・同じ窓であること（同じ df から作った out-of-fold）。
+
+    keep=True なら、選んだ行そのものを out["rows"] に入れて返す
+    （選んだ後の値動きを追う実験41 用）。集計の数字は変わらない。
     """
     first = models[0]
     base = oofs[first][["Code", "Date", "fold", "label"] + list(OUTCOMES)].copy()
@@ -75,6 +78,8 @@ def consensus(oofs: Dict[str, pd.DataFrame], pct: float = 85.0,
                    "won": int((v > 0).sum()), "n_folds": int(len(v)),
                    "worst": float(v.min()) if len(v) else float("nan"),
                    "per_fold": {int(k): float(x) for k, x in per_fold[oc].items()}}
+    if keep:
+        out["rows"] = sel.reset_index(drop=True)
     return out
 
 
