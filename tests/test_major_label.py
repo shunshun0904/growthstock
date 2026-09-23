@@ -9,27 +9,55 @@ sys.path.insert(0, os.path.join(ROOT, "research"))
 sys.path.insert(0, os.path.join(ROOT, "research", "major"))
 
 import numpy as np  # noqa: E402
-import pandas as pd  # noqa: E402
 
 import label_eda as M  # noqa: E402
+
+NAN = float("nan")
+
+
+def path(points, n=M.DAYS_2):
+    """{日: 値} から、1日目〜n日目の値（買値 = 1.0）の並びを作る。書いていない日は 1.0。"""
+    v = np.ones(n)
+    for d, x in points.items():
+        v[d - 1] = x
+    return v
 
 
 class 本ブレイクのラベル(unittest.TestCase):
 
-    def test_両方届いたときだけ正例(self):
-        r60 = pd.Series([0.50, 0.49, 0.80, 0.60])
-        r120 = pd.Series([1.00, 1.50, 0.99, 1.20])
-        self.assertEqual(M.major_label(r60, r120).tolist(), [1.0, 0.0, 0.0, 1.0])
+    def label(self, *rows):
+        return M.major_label(np.vstack(rows))
 
-    def test_どちらかが欠測なら判定しない(self):
-        y = M.major_label(pd.Series([0.6, np.nan]), pd.Series([np.nan, 1.2]))
-        self.assertTrue(y.isna().all())
+    def test_期限までに一度でも届けば正例(self):
+        # 40日目に +50%、100日目に2倍。期限の日（60・120日目）には下がっていても正例
+        L = self.label(path({40: 1.55, 60: 1.2, 100: 2.05, 120: 1.4}))
+        self.assertEqual(L["y"][0], 1.0)
+        self.assertEqual((L["first1"][0], L["first2"][0]), (40.0, 100.0))
+
+    def test_50パーセントが60日を過ぎてからなら負例(self):
+        L = self.label(path({61: 1.6, 90: 2.1}))
+        self.assertEqual(L["y"][0], 0.0)
+        self.assertTrue(np.isnan(L["first1"][0]))
+        self.assertEqual(L["first2"][0], 90.0)
+
+    def test_2倍が120日を過ぎてからなら負例(self):
+        L = M.major_label(path({30: 1.6, 121: 2.2}, n=130)[None, :])
+        self.assertEqual(L["y"][0], 0.0)
+
+    def test_3営業日以内に50パーセントなら急騰として印を付ける(self):
+        L = self.label(path({3: 1.5, 50: 2.0}), path({4: 1.5, 50: 2.0}))
+        self.assertEqual(L["spike"].tolist(), [True, False])
+        self.assertEqual(L["y"].tolist(), [1.0, 1.0])          # 正例かどうかは別に持ち、外すのは呼ぶ側
+
+    def test_売買の無い日は届かなかった扱い(self):
+        L = self.label(path({20: NAN, 40: 1.49, 80: 2.0}))
+        self.assertEqual(L["y"][0], 0.0)
 
     def test_チャートの区間は約2年半で78週高値の判定区間を含む(self):
         n = M.BEFORE + M.AFTER + 1
         self.assertTrue(600 <= n <= 625)                   # 245営業日 × 2.5 ≒ 612
         self.assertGreater(M.BEFORE, M.B.HIGH_WINDOW)      # 判定区間（368営業日）がまるごと入る
-        self.assertGreaterEqual(M.AFTER, 120)              # 120営業日後の判定日が入る
+        self.assertGreaterEqual(M.AFTER, M.DAYS_2)         # 120営業日目が入る
 
 
 if __name__ == "__main__":
