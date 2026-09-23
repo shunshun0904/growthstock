@@ -11,6 +11,8 @@
    します。買うのは、新高値を更新した次の日の寄り付き始値を想定していますが、
    さすがにその後3営業日以内の到達のような（超短期での急騰のような）、特殊な事例は
    除いてほしいです」
+  さらに「終値の判定で良いです。急騰は不例にも入れてください。というより、運用の際に
+   予測対象銘柄に事前ガードレールを入れるつもりはないので」
 
 定義
   母集団  今のモデルと同じ。78週高値の更新日（場中の高値で判定。直前20営業日に
@@ -18,7 +20,8 @@
   買値    翌営業日の寄り（AdjO[t+1]）。買った日を1日目と数える
   正例    60営業日以内に一度でも終値が 買値+50% 以上、かつ
           120営業日以内に一度でも終値が 買値の2倍 以上
-  除く    3営業日以内に終値が 買値+50% に届いたもの（超短期の急騰。正例にも負例にも入れない）
+  急騰    3営業日以内に終値が 買値+50% に届いたもの（超短期の急騰）は負例。
+          運用では予測する銘柄を前もって絞らないので、学習からも外さない
   判定    120営業日先まで上場している行だけ（途中で上場廃止した行は判定できないので外す）
   終値で測るのは、場中に一瞬触れただけを到達にしないため（今のモデルのラベルと同じ考え方）。
   参考に、場中の高値で測った場合の件数も出す
@@ -74,17 +77,19 @@ def major_label(P: np.ndarray) -> dict:
     """
     P = 買った日からの値（終値など）÷ 買値。列は1日目から少なくとも DAYS_2 日ぶん。
     戻り値
-      y      正例 1 / 負例 0（除く行も 0 のまま。spike で外す）
+      y      正例 1 / 負例 0。急騰（spike）は両方に届いていても負例
       first1 +50% に初めて届いた日（DAYS_1 日以内。届かなければ NaN）
       first2 2倍 に初めて届いた日（DAYS_2 日以内）
-      spike  SPIKE_DAYS 日以内に +50% に届いた（除く行）
+      spike  SPIKE_DAYS 日以内に +50% に届いた（超短期の急騰）
+      reach  急騰かどうかを問わず、両方に届いた
     """
     f1 = first_reach(P, 1.0 + RISE_1, DAYS_1)
     f2 = first_reach(P, 1.0 + RISE_2, DAYS_2)
-    y = (np.isfinite(f1) & np.isfinite(f2)).astype(float)
+    reach = np.isfinite(f1) & np.isfinite(f2)
     with np.errstate(invalid="ignore"):
         spike = f1 <= SPIKE_DAYS
-    return {"y": y, "first1": f1, "first2": f2, "spike": spike}
+    y = (reach & ~spike).astype(float)
+    return {"y": y, "first1": f1, "first2": f2, "spike": spike, "reach": reach}
 
 
 def load_bars() -> pd.DataFrame:
@@ -152,21 +157,21 @@ def main(argv=None) -> int:
     Lc = major_label(C[:, fwd] / e[:, None])
     Lh = major_label(W["H"][:, fwd] / e[:, None])
     det = W["listed"] & np.isfinite(e)
-    keep = det & ~Lc["spike"]
+    keep = det                      # 急騰も負例として残す（運用で予測する銘柄を前もって絞らない）
     y = Lc["y"]
 
     print("=== 1. 件数（終値で測る。一度でも届けばよい）===")
     print(f"  母集団（78週高値の更新日）: {len(df):,}件 / 120営業日先まで上場していて判定できる: {int(det.sum()):,}件"
           f"（買った日 {df.loc[det, 'Date'].min().date()}〜{df.loc[det, 'Date'].max().date()}）")
     sp = det & Lc["spike"]
-    print(f"  除いた急騰（{SPIKE_DAYS}営業日以内に +50%）: {int(sp.sum())}件"
-          f"（除かなければ正例だったもの {int((sp & (y == 1)).sum())}件）")
+    print(f"  急騰（{SPIKE_DAYS}営業日以内に +50%）: {int(sp.sum())}件。負例にする"
+          f"（そのうち正例の条件も満たしていたもの {int((sp & Lc['reach']).sum())}件）")
     n, npos = int(keep.sum()), int(y[keep].sum())
-    print(f"  残り {n:,}件のうち 正例 {npos}件 / {npos / n * 100:.2f}%"
+    print(f"  {n:,}件のうち 正例 {npos}件 / {npos / n * 100:.2f}%"
           f"（銘柄の数 {df.loc[keep & (y == 1), 'Code'].nunique()}）")
     h1, h2 = np.isfinite(Lc["first1"]), np.isfinite(Lc["first2"])
     print(f"  60営業日以内に +50%: {h1[keep].mean()*100:.2f}% / 120営業日以内に 2倍: {h2[keep].mean()*100:.2f}%")
-    near1 = keep & h1 & ~h2
+    near1 = keep & h1 & ~h2 & ~Lc["spike"]
     near2 = keep & h2 & ~h1
     print(f"  +50% は届いたが 2倍 に届かず: {int(near1.sum())}件"
           f" / 2倍 には届いたが 60日以内の +50% に届かず（出足が遅い）: {int(near2.sum())}件")
@@ -178,8 +183,8 @@ def main(argv=None) -> int:
         print(f"    {y_}: {int(r['n']):>6,}件 正例 {int(r['pos']):>3}件 {r['rate']:>5.2f}%")
 
     print("\n=== 2. 参考 ===")
-    keep_h = det & ~Lh["spike"]
-    print(f"  場中の高値で測ると: 除く急騰 {int((det & Lh['spike']).sum())}件 / 正例 {int(Lh['y'][keep_h].sum())}件"
+    keep_h = det
+    print(f"  場中の高値で測ると: 急騰 {int((det & Lh['spike']).sum())}件 / 正例 {int(Lh['y'][keep_h].sum())}件"
           f" / {Lh['y'][keep_h].mean()*100:.2f}%")
     old = ((df["ret_o1_60"] >= RISE_1) & (df["ret_o1_120"] >= RISE_2)).to_numpy()
     print(f"  前の定義（60・120営業日目の5日平均がそれぞれ届いている）: 正例 {int(old[det].sum())}件"
@@ -254,7 +259,7 @@ def main(argv=None) -> int:
         "det": int(det.sum()), "n": n, "pos": npos, "codes": int(df.loc[pos, "Code"].nunique()),
         "rate": npos / n, "r1": float(h1[keep].mean()), "r2": float(h2[keep].mean()),
         "near1": int(near1.sum()), "near2": int(near2.sum()), "neg": int((keep & (y == 0)).sum()),
-        "spike": int(sp.sum()), "spike_pos": int((sp & (y == 1)).sum()),
+        "spike": int(sp.sum()), "spike_pos": int((sp & Lc["reach"]).sum()),
         "high_pos": int(Lh["y"][keep_h].sum()), "high_rate": float(Lh["y"][keep_h].mean()),
         "old_pos": int(old[det].sum()),
         "from": df.loc[det, "Date"].min().strftime("%Y-%m-%d"), "to": df.loc[det, "Date"].max().strftime("%Y-%m-%d"),

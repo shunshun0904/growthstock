@@ -44,10 +44,12 @@ class 本ブレイクのラベル(unittest.TestCase):
         L = M.major_label(path({30: 1.6, 121: 2.2}, n=130)[None, :])
         self.assertEqual(L["y"][0], 0.0)
 
-    def test_3営業日以内に50パーセントなら急騰として印を付ける(self):
+    def test_3営業日以内に50パーセントなら急騰で負例(self):
+        # 運用で予測する銘柄を前もって絞らないので、急騰は外さずに負例にする
         L = self.label(path({3: 1.5, 50: 2.0}), path({4: 1.5, 50: 2.0}))
         self.assertEqual(L["spike"].tolist(), [True, False])
-        self.assertEqual(L["y"].tolist(), [1.0, 1.0])          # 正例かどうかは別に持ち、外すのは呼ぶ側
+        self.assertEqual(L["reach"].tolist(), [True, True])
+        self.assertEqual(L["y"].tolist(), [0.0, 1.0])
 
     def test_売買の無い日は届かなかった扱い(self):
         L = self.label(path({20: NAN, 40: 1.49, 80: 2.0}))
