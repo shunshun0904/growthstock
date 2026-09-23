@@ -389,6 +389,12 @@ def main(argv=None) -> int:
     d = pool.merge(df[["Code", "Date"] + extra], on=["Code", "Date"], how="left")
     d = d.merge(sel[["Code", "Date"] + [f"s_{a}" for a in RULE_MODELS]],
                 on=["Code", "Date"], how="left")
+    # 3モデルの最小順位（PLAYBOOK の並べ方。実験32 と同じく母集団の中の順位）
+    for a in RULE_MODELS:
+        sc = oofs[a][["Code", "Date", "score"]].rename(columns={"score": f"p_{a}"})
+        d = d.merge(sc, on=["Code", "Date"], how="left")
+        d[f"p_{a}"] = d[f"p_{a}"].rank(pct=True)
+    d["p_min"] = d[[f"p_{a}" for a in RULE_MODELS]].min(axis=1)
     cls, need, end_need, rebuilt = classify(d)
     d["cls"] = cls
     d["need"] = need
@@ -427,6 +433,8 @@ def main(argv=None) -> int:
     print(f"  買値（翌日の寄り）が付かない行: {int(d['entry'].isna().sum())}件（以下の集計から外す）")
 
     s = d[d["selected"] & d["entry"].notna()].reset_index(drop=True)
+    # その日の選定の中での順位（並べ替えはしない。値動きの表と行を揃えたままにする）
+    s["rank_day"] = s.groupby("Date")["p_min"].rank(ascending=False, method="first")
     u = d[d["entry"].notna()].reset_index(drop=True)
     groups = [("母集団（全ブレイク）", u), ("3モデル 90以上（全体）", s)]
     groups += [(f"  {c}", s[s["cls"] == c]) for c in CLASSES]
@@ -652,8 +660,41 @@ def main(argv=None) -> int:
               + "".join(pc(mean(yr[n_][idx]), 12) for n_, _, _ in yr_specs))
 
     # ------------------------------------------------------------------ #
+    print("\n=== 8. 運用の絞り込み（PLAYBOOK: 発火20件以上・3モデルの最小順位で上位1〜2件）でも同じか ===")
+    hot = (s20["n_break"] >= 20).to_numpy()
+    rk = s20["rank_day"].to_numpy()
+    subsets = [("全日・全件（5 と同じ）", np.ones(len(s20), dtype=bool)),
+               ("発火20件以上・全件", hot),
+               ("発火20件以上・上位2件", hot & (rk <= 2)),
+               ("発火20件以上・上位1件", hot & (rk <= 1))]
+    print(f"  {'絞り込み':<24}{'件数':>6}{'正例率':>7}{'未到達':>7}{'最大上昇':>9}{'最大下落':>9}"
+          f"{'−5%接触':>8}{'−10%接触':>9}{'20日':>9}{'勝率':>6}")
+    for name, m in subsets:
+        g = s20[m]
+        print(f"  {name:<24}{len(g):>6}{g['label'].mean()*100:>6.1f}%"
+              f"{(g['cls'] == '未到達').mean()*100:>6.1f}%{pc(med(g['mfe20']), 9)}{pc(med(g['mae20']), 9)}"
+              f"{(g['mae20'] <= -0.05).mean()*100:>7.1f}%{(g['mae20'] <= -0.10).mean()*100:>8.1f}%"
+              f"{pc(mean(g['ret_o1_20']), 9)}{win(g['ret_o1_20'])*100:>5.0f}%")
+    print("  最大上昇・最大下落は20営業日以内の中央値。")
+    rules8 = [("なし", None, None, None), ("逆指値 −5%", 0.05, None, None),
+              ("逆指値 −8%", 0.08, None, None), ("逆指値 −10%", 0.10, None, None),
+              ("逆指値 −15%", 0.15, None, None), ("逆指値 −1.0σ", "1s", None, None),
+              ("終値 −10%", 0.10, None, None), ("なし・利確+20%", None, TP, None),
+              ("逆指値 −10%・利確+20%", 0.10, TP, None), ("5日目 +0%未満", None, None, (5, 0.0))]
+    for name, m in subsets[1:]:
+        print(f"\n  --- {name}（{int(m.sum())}件）---")
+        print(SWEEP_HEAD)
+        Pm = {k: (v[m] if isinstance(v, np.ndarray) else v) for k, v in P20.items()}
+        for rn, stop, tp, ts in rules8:
+            st_ = sig[m] if isinstance(stop, str) else stop
+            mode = "close" if rn.startswith("終値") else "intraday"
+            ret, day, why, both = simulate(Pm, 20, stop=st_, tp=tp, mode=mode, tstop=ts)
+            print(sweep_line(summarize(rn, ret, day, why, both, base[m], y20[m], f20[m])))
+    print("  件数が少ないので窓ごとの勝ち負けは粗い（上位1件は1窓あたり十数件）。")
+
+    # ------------------------------------------------------------------ #
     keep = (["Code", "Date", "fold", "label", "cls", "need", "vol_20d", "sigma20",
-             "entry_gap", "n_break"] + [f"s_{a}" for a in RULE_MODELS]
+             "entry_gap", "n_break", "p_min", "rank_day"] + [f"s_{a}" for a in RULE_MODELS]
             + [f"ret_o1_{h}" for h in lab.HORIZONS]
             + list(ex20.columns) + list(ex60.columns) + [f"c{k}" for k in DAYS])
     out = s[keep].copy()
