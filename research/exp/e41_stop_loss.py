@@ -90,6 +90,9 @@ DAYS = (1, 3, 5, 10, 15, 20, 40, 60)       # 値動きの途中経過を見る�
 TSTOP_DAYS = (3, 5, 10)                    # 日数で切る: k日目の終値で判定
 TSTOP_LEVELS = (-0.05, -0.03, 0.0)         # その時点で 買値+θ を下回っていたら切る
 SHIFTS = (0, 2, 4)                         # §10 窓の境界をずらす月数（out-of-fold の切り方）
+K_PLAN = 120                               # §11 プラ転まで待つとき、最長で追う日数
+PLAN_CAPS = (40, 60, 120)                  # §11 20日目にマイナスで持ち越したときの上限日数
+SLOTS = 3                                  # §11 同時に持つ銘柄数（PLAYBOOK と同じ）
 BIG = -0.10                                # 大負けの線（20営業日保有の収益）
 SCREEN_Z = 3.0                             # 大負けの共通点として拾う |z|（205列を両側で測るので2では緩い）
 
@@ -558,7 +561,7 @@ def topix_forward(h: int = 20) -> pd.Series:
     return t.shift(-h) / t - 1.0
 
 
-def loser_section(s: pd.DataFrame, u: pd.DataFrame, ref: pd.DataFrame, feats: list) -> None:
+def loser_section(s: pd.DataFrame, u: pd.DataFrame, ref: pd.DataFrame, feats: list) -> list:
     import feature_dict as FD
 
     def say(f: str) -> str:
@@ -669,6 +672,7 @@ def loser_section(s: pd.DataFrame, u: pd.DataFrame, ref: pd.DataFrame, feats: li
     for f, side in stock:
         x = pd.to_numeric(s[f], errors="coerce")
         print(f"  {f:<24}{med(x[lose]):>12.4g}{med(x[~lose]):>12.4g}  {say(f)[:40]}")
+    return stock
 
 
 # ---------------------------------------------------------------------- #
@@ -684,8 +688,12 @@ RULES10 = (
 )
 
 
-def pattern_rows(oofs_k: dict, df: pd.DataFrame, bars: pd.DataFrame):
-    """切り方ごとの選定（3モデル 90以上）と、その値動きの表（20日先まで揃う行だけ）。"""
+def pattern_rows(oofs_k: dict, df: pd.DataFrame, bars: pd.DataFrame, k: int = K_PLAN):
+    """
+    切り方ごとの選定（3モデル 90以上）と、その値動きの表（20日先まで揃う行だけ）。
+    値動きは k 日先まで持つ（§11 の「プラ転まで待つ」に要る）。
+    p_min = 3モデルの最小順位（その切り方の母集団の中の順位。PLAYBOOK の並べ方）。
+    """
     r = OR.consensus(oofs_k, RULE_PCT, models=RULE_MODELS, keep=True)
     sel = r["rows"].copy()
     folds = sorted(int(f) for f in sel["fold"].unique())
@@ -694,7 +702,12 @@ def pattern_rows(oofs_k: dict, df: pd.DataFrame, bars: pd.DataFrame):
     sel = sel.merge(df[["Code", "Date", "vol_20d"]], on=["Code", "Date"], how="left")
     sel["n_break"] = sel["Date"].map(nb).to_numpy()
     sel["sigma20"] = sel["vol_20d"] / 100.0 * np.sqrt(B.RISE_HORIZON)
-    P = forward(bars, sel)
+    for a in RULE_MODELS:
+        sc = oofs_k[a][["Code", "Date", "score"]].copy()
+        sc[f"p_{a}"] = sc["score"].rank(pct=True)
+        sel = sel.merge(sc[["Code", "Date", f"p_{a}"]], on=["Code", "Date"], how="left")
+    sel["p_min"] = sel[[f"p_{a}" for a in RULE_MODELS]].min(axis=1)
+    P = forward(bars, sel, k=k)
     fin = np.isfinite(P["x20"]) & np.isfinite(P["entry"])
     P = {k: (v[fin] if isinstance(v, np.ndarray) else v) for k, v in P.items()}
     return sel[fin].reset_index(drop=True), P, r
@@ -736,6 +749,256 @@ def window_table(title: str, fold: np.ndarray, rets: dict, ranges: dict) -> dict
     print(f"  {'':>3} {'最良の窓':<22}{'':>22} |"
           + "".join(f"{max(agg[n])*100:>+9.2f}" for n, _ in RULES10))
     return agg
+
+
+# ---------------------------------------------------------------------- #
+# §9e 除外規則を切り方ごとに
+# ---------------------------------------------------------------------- #
+
+def exclusion_by_split(splits: dict, pats: dict, df: pd.DataFrame, stock: list) -> None:
+    """§9c の除外規則を、窓の切り方ごと（§10 と同じ out-of-fold）に測る。"""
+    if not stock:
+        return
+    rules = [(f"{f} {'上位' if sd == 'top' else '下位'}10%", [(f, sd)]) for f, sd in stock]
+    if len(stock) >= 2:
+        rules.append(("上の2つのどちらか", stock[:2]))
+    if len(stock) >= 3:
+        rules.append(("上の3つのどれか", stock[:3]))
+    feats = sorted({f for f, _ in stock})
+    print("\n  9e. 9c の除外を、窓の切り方ごとに（ずらし 0 / 2 / 4 か月。§10 と同じ out-of-fold）")
+    print("      値 = 外したあとの平均 − 外さない平均（pt）と、勝ち窓（窓ごとに外したほうが良かった数）")
+    print(f"  {'外す条件':<28}" + "".join(f"{'ずらし' + str(k) + 'か月':>18}" for k in splits))
+    for name, conds in rules:
+        cells = []
+        for k, (sel_k, _, _) in splits.items():
+            ref = pats[k][RULE_MODELS[0]][["Code", "Date", "fold"]].merge(
+                df[["Code", "Date"] + feats], on=["Code", "Date"], how="left")
+            sx = sel_k.merge(df[["Code", "Date"] + [f for f in feats if f not in sel_k.columns]],
+                             on=["Code", "Date"], how="left")
+            m = np.zeros(len(sx), dtype=bool)
+            for f, sd in conds:
+                m |= exclusion(sx, ref, f, sd)
+            base = sx["ret_o1_20"].to_numpy(dtype=float)
+            fo = sx["fold"].to_numpy()
+            won = nf = 0
+            for w in np.unique(fo):
+                ww = fo == w
+                if (ww & ~m).sum():
+                    nf += 1
+                    won += int(np.nanmean(base[ww & ~m]) - np.nanmean(base[ww]) > 1e-12)
+            cells.append(f"{(mean(base[~m]) - mean(base))*100:>+8.2f}pt {won:>2}/{nf:<2}")
+        print(f"  {name:<28}" + "".join(f"{c:>18}" for c in cells))
+
+
+# ---------------------------------------------------------------------- #
+# §11 運用者の出口案（2026-09-23）
+# ---------------------------------------------------------------------- #
+
+def plan_exit(P: dict, cap: int, tp=TP, decide: int = 20, stop=None, be: float = 0.0):
+    """
+    運用者の出口案
+      1〜decide 日目  買値×(1+tp) の指値（届けばちょうど +tp。tp=None なら指値なし）
+      decide 日目の終値が買値以上なら、その終値で売る
+      下回っていれば持ち続け、次の日から 買値×(1+be) の指値（プラ転で売る。届けばちょうど be）
+      cap 日目の終値で、まだ持っていれば売る（cap = decide なら decide 日目の終値で必ず売る）
+      stop を渡すと逆指値も掛ける（窓を開けて割れば寄値。simulate と同じ）
+    戻り値: 収益, 手仕舞った日, 理由
+      1 利確 / 2 decide日目にプラスで売った / 3 プラ転で売った / 4 上限の日に売った / 5 逆指値
+    """
+    e = P["entry"]
+    O, H, L, C = (P[c] for c in "OHLC")
+    m = len(e)
+    cap = min(cap, O.shape[1])
+    S = e * (1.0 - stop) if stop is not None else None
+    T = e * (1.0 + tp) if tp is not None else None
+    BE = e * (1.0 + be)
+    ret = np.full(m, np.nan)
+    day = np.full(m, np.nan)
+    why = np.zeros(m, dtype=np.int8)
+    done = np.zeros(m, dtype=bool)
+    lastc = np.full(m, np.nan)
+
+    def settle(mask, val, k, w):
+        if mask.any():
+            ret[mask] = val[mask] if isinstance(val, np.ndarray) else val
+            day[mask] = k + 1
+            why[mask] = w
+            done[mask] = True
+
+    with np.errstate(invalid="ignore", divide="ignore"):
+        for k in range(cap):
+            o, h, lo, c = O[:, k], H[:, k], L[:, k], C[:, k]
+            if S is not None:
+                settle(~done & (o <= S), o / e - 1.0, k, 5)
+                settle(~done & (lo <= S), S / e - 1.0, k, 5)
+            if k < decide:
+                if T is not None:
+                    settle(~done & (h >= T), tp, k, 1)
+            else:
+                settle(~done & (h >= BE), be, k, 3)
+            lastc = np.where(np.isfinite(c), c, lastc)
+            if k + 1 == decide:
+                settle(~done & np.isfinite(lastc) & (lastc >= e), lastc / e - 1.0, k, 2)
+            if k + 1 == cap:
+                settle(~done & np.isfinite(lastc), lastc / e - 1.0, k, 4)
+    return ret, day, why
+
+
+def plan_rules(sig: np.ndarray) -> list:
+    """§11 で比べる出口（名前, plan_exit の引数）。"""
+    out = [("20日目の終値", dict(cap=20, tp=None)),
+           ("+20%指値・20日目", dict(cap=20)),
+           ("+20%指値・40日目", dict(cap=40, decide=40))]
+    out += [(f"運用者案・上限{c}日", dict(cap=c)) for c in PLAN_CAPS]
+    out += [("運用者案・上限60日・逆指値−15%", dict(cap=60, stop=0.15)),
+            ("運用者案・上限60日・逆指値−10%", dict(cap=60, stop=0.10))]
+    return out
+
+
+PLAN_HEAD = (f"  {'出口':<28}{'平均':>8}{'中央値':>8}{'勝率':>6}{'下位10%':>9}{'最悪':>8}"
+             f"{'保有日':>7}{'1日':>8}{'利確':>6}{'持越し':>7}{'プラ転':>7}{'上限で':>7}"
+             f"{'上限の平均':>10}{'勝ち窓':>7}")
+
+
+def plan_line(name: str, ret, day, why, fold, base) -> str:
+    ok = np.isfinite(ret)
+    r, d, w, fo, b = ret[ok], day[ok], why[ok], fold[ok], base[ok]
+    won = nf = 0
+    for k in np.unique(fo):
+        m = fo == k
+        nf += 1
+        won += int(r[m].mean() - b[m].mean() > 1e-12)
+    if name.startswith("運用者案"):
+        held = d > 20
+        capm = w == 4
+        tail = (f"{held.mean()*100:>6.1f}%{(w == 3).mean()*100:>6.1f}%{capm.mean()*100:>6.1f}%"
+                f"{pc(mean(r[capm]) if capm.any() else float('nan'), 10)}")
+    else:
+        # 比べる出口には「持ち越し・プラ転・上限」が無い
+        tail = f"{'-':>7}{'-':>7}{'-':>7}{'-':>10}"
+    return (f"  {name:<28}{pc(mean(r))}{pc(med(r))}{win(r)*100:>5.0f}%{pc(qt(r, 10), 9)}"
+            f"{pc(float(np.min(r)), 8, 1)}{mean(d):>7.1f}{pc(mean(r) / mean(d), 8, 3)}"
+            f"{(w == 1).mean()*100:>5.1f}%{tail}{won:>4}/{nf:<2}")
+
+
+def slot_sim(sig: pd.DataFrame, cal: pd.Series, ret: np.ndarray, day: np.ndarray,
+             why: np.ndarray, slots: int = SLOTS) -> dict:
+    """
+    枠 slots。sig は買う順に並べた候補（行番号 i が ret/day/why を指す）。
+    空き枠があれば翌営業日の寄りで買う（先着）。売った日の翌営業日から枠が空く。
+    資金は買うたびに「現金 + 建玉の簿価」の 1/slots（実験35 と同じ）。
+    月利は実現ベース（売った月に損益を数え、持っている間は簿価で置く）。
+    """
+    idx = {d: i for i, d in enumerate(cal)}
+    pos = [None] * slots
+    cash = 1.0
+    done, events = [], []
+
+    def close_until(t):
+        nonlocal cash
+        for s_, p_ in enumerate(pos):
+            if p_ is not None and p_["free"] <= t:
+                cash += p_["cost"] * (1.0 + p_["ret"])
+                done.append(p_)
+                events.append((p_["exit"], cash + sum(q["cost"] for q in pos if q and q is not p_)))
+                pos[s_] = None
+
+    skipped = 0
+    for _, row in sig.iterrows():
+        di = idx.get(pd.Timestamp(row["Date"]))
+        i = int(row["i"])
+        if di is None or not np.isfinite(ret[i]):
+            continue
+        buy = di + 1
+        if buy + int(day[i]) - 1 >= len(cal):
+            continue
+        close_until(buy)
+        empty = [s_ for s_, p_ in enumerate(pos) if p_ is None]
+        if not empty:
+            skipped += 1
+            continue
+        cost = (cash + sum(q["cost"] for q in pos if q)) / slots
+        cash -= cost
+        pos[empty[0]] = {"buy": buy, "free": buy + int(day[i]), "exit": buy + int(day[i]) - 1,
+                         "ret": float(ret[i]), "why": int(why[i]), "cost": cost}
+    close_until(10 ** 9)
+    if not done:
+        return {"taken": 0}
+    t = pd.DataFrame(done)
+    first, last = int(t["buy"].min()), int(t["exit"].max())
+    occ = np.zeros(last - first + 1)
+    for _, q in t.iterrows():
+        occ[int(q["buy"]) - first:int(q["exit"]) - first + 1] += 1
+    ev = pd.DataFrame(events, columns=["i", "equity"])
+    ev["month"] = pd.to_datetime(cal.iloc[ev["i"].to_numpy()].to_numpy()).to_period("M")
+    months = pd.period_range(pd.Timestamp(cal.iloc[first]).to_period("M"),
+                             pd.Timestamp(cal.iloc[last]).to_period("M"), freq="M")
+    eq = ev.groupby("month")["equity"].last().reindex(months).ffill().fillna(1.0)
+    mret = eq / eq.shift(1).fillna(1.0) - 1.0
+    t["month"] = pd.to_datetime(cal.iloc[t["exit"].to_numpy()].to_numpy()).to_period("M")
+    nm = len(months)
+    peak = eq.cummax()
+    return {"taken": len(t), "skipped": skipped, "months": nm,
+            "per_month": len(t) / nm, "tp_month": float((t["why"] == 1).sum()) / nm,
+            "plus_month": float((t["ret"] > 0).sum()) / nm,
+            "mean": t["ret"].mean(), "days": (t["exit"] - t["buy"] + 1).mean(),
+            "util": float(occ.mean()) / slots, "m_mean": float(mret.mean()),
+            "m_med": float(mret.median()), "m_worst": float(mret.min()),
+            "m_10": float((mret >= 0.10).mean()), "cagr": float(eq.iloc[-1] ** (12 / nm) - 1),
+            "mdd": float((eq / peak - 1).min()), "worst": float(t["ret"].min()),
+            "span": f"{pd.Timestamp(cal.iloc[first]).date()}〜{pd.Timestamp(cal.iloc[last]).date()}"}
+
+
+SLOT_HEAD = (f"  {'出口':<28}{'取引':>5}{'月の取引':>7}{'月の利確':>7}{'月のプラス':>8}{'保有日':>7}"
+             f"{'稼働率':>7}{'月利平均':>9}{'月利中央':>9}{'最悪の月':>9}{'月10%超':>8}{'年率':>8}"
+             f"{'最大DD':>8}")
+
+
+def slot_line(name: str, r: dict) -> str:
+    if not r.get("taken"):
+        return f"  {name:<28} （取引なし）"
+    return (f"  {name:<28}{r['taken']:>5}{r['per_month']:>7.2f}{r['tp_month']:>7.2f}"
+            f"{r['plus_month']:>8.2f}{r['days']:>7.1f}{r['util']*100:>6.0f}%"
+            f"{pc(r['m_mean'], 9)}{pc(r['m_med'], 9)}{pc(r['m_worst'], 9, 1)}"
+            f"{r['m_10']*100:>7.0f}%{pc(r['cagr'], 8, 1)}{pc(r['mdd'], 8, 1)}")
+
+
+def plan_section(splits: dict, bars: pd.DataFrame) -> None:
+    print("\n=== 11. 運用者の出口案（+20%指値。20日目にマイナスなら持ち続け、プラ転で売る）===")
+    print("  運用者の方針（2026-09-23）「買値+20%で指値で入れる。下落トレンドに入り、20営業日付近で")
+    print("  マイナスの場合はもう少しホールドし、プラ転した時点で売る」。気にしている点は回転率")
+    print("  （月2回くらいは利確して、月利10%を目指したい）。")
+    print("  約定: +20%・プラ転はちょうどその値。20日目・上限の日は終値。逆指値は §5 と同じ。")
+    print("  比べる行は、上限の日（最長120日）まで値動きが揃っている取引だけ（全出口で同じ取引）。")
+    cal = pd.Series(np.sort(pd.to_datetime(bars["Date"].unique())))
+    for k, (sel_k, P_k, _) in splits.items():
+        full = P_k["ok"][:, K_PLAN - 1]
+        Pf = {a: (v[full] if isinstance(v, np.ndarray) else v) for a, v in P_k.items()}
+        sf = sel_k[full].reset_index(drop=True)
+        fo = sf["fold"].to_numpy()
+        res = {n: plan_exit(Pf, **kw) for n, kw in plan_rules(sf["sigma20"].to_numpy(float))}
+        base = res["+20%指値・20日目"][0]
+        span = f"{pd.Timestamp(sf['Date'].min()).date()}〜{pd.Timestamp(sf['Date'].max()).date()}"
+        hot = (sf["n_break"] >= 20).to_numpy()
+        for tag, m in (("全日・全件", np.ones(len(sf), dtype=bool)), ("発火20件以上", hot)):
+            print(f"\n  --- ずらし{k}か月・{tag}: 1取引ごと（{int(m.sum()):,}件・買った日 {span}）---")
+            print(PLAN_HEAD)
+            for n, (r_, d_, w_) in res.items():
+                print(plan_line(n, r_[m], d_[m], w_[m], fo[m], base[m]))
+        print("  持越し = 20日目にマイナスで持ち越した割合。プラ転 = そのあと買値に戻して売れた割合（全体比）。"
+              "上限で = 上限の日まで戻らなかった割合と、その平均。勝ち窓は「+20%指値・20日目」と比べる。")
+
+        # 枠3のシミュレーション
+        sf = sf.assign(i=np.arange(len(sf)))
+        sf["rank"] = sf.groupby("Date")["p_min"].rank(ascending=False, method="first")
+        for tag, mb in (("全日・上位2件", 0), ("発火8件以上・上位2件（PLAYBOOK）", 8)):
+            sig = sf[(sf["rank"] <= 2) & (sf["n_break"] >= mb)].sort_values(["Date", "rank"])
+            print(f"\n  --- ずらし{k}か月・枠{SLOTS}・{tag}: 候補 {len(sig):,}件 ---")
+            print(SLOT_HEAD)
+            for n, (r_, d_, w_) in res.items():
+                print(slot_line(n, slot_sim(sig, cal, r_, d_, w_)))
+        print("  月の利確 = +20% で売れた回数 / 月。月のプラス = プラスで終えた取引の数 / 月。"
+              "月利は実現ベース（売った月に数える）。稼働率 = 埋まっていた枠の割合。")
 
 
 # ---------------------------------------------------------------------- #
@@ -1088,8 +1351,8 @@ def main(argv=None) -> int:
     ref = oofs[RULE_MODELS[0]][["Code", "Date", "fold"]].merge(
         df[["Code", "Date"] + allf], on=["Code", "Date"], how="left")
     add = ["Code", "Date"] + [c for c in allf if c not in s.columns]
-    loser_section(s.merge(df[add], on=["Code", "Date"], how="left"),
-                  u.merge(df[add], on=["Code", "Date"], how="left"), ref, allf)
+    stock9 = loser_section(s.merge(df[add], on=["Code", "Date"], how="left"),
+                           u.merge(df[add], on=["Code", "Date"], how="left"), ref, allf)
 
     # ------------------------------------------------------------------ #
     # §10 窓ごと・out-of-fold の切り方ごと。運用者の指示（2026-09-23）
@@ -1123,8 +1386,10 @@ def main(argv=None) -> int:
     codes = set().union(*[set(o[RULE_MODELS[0]]["Code"]) for o in pats.values()])
     bars10 = bars if codes <= set(bars["Code"].unique()) else load_bars(codes)
     summ = {}
+    splits = {}
     for k in shifts:
         sel_k, P_k, r_k = pattern_rows(pats[k], df, bars10)
+        splits[k] = (sel_k, P_k, r_k)
         rng = {f.index: f"{f.test_start}〜{f.test_end}" for f in folds_for(df["Date"], k)}
         rets = rule_returns(P_k, sel_k["sigma20"].to_numpy(dtype=float))
         fo = sel_k["fold"].to_numpy()
@@ -1149,6 +1414,10 @@ def main(argv=None) -> int:
         print(f"  {n:<12}" + "".join(f"{c:>18}" for c in cells) + f"{won:>9}/{tot:<4}")
     print("  勝ち窓 = 損切りなしを上回った窓の数。窓の差の平均 = 窓ごとの差を窓の数で平均したもの"
           "（件数では重み付けしない）。")
+
+    # §9e（§9c の除外を切り方ごとに）と §11（運用者の出口案）
+    exclusion_by_split(splits, pats, df, stock9)
+    plan_section(splits, bars10)
 
     # ------------------------------------------------------------------ #
     keep = (["Code", "Date", "fold", "label", "cls", "need", "vol_20d", "sigma20",

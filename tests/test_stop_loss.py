@@ -195,6 +195,65 @@ class 大負けの共通点(unittest.TestCase):
         self.assertLess(abs(scr.loc["noise", "top_z"]), 3)
 
 
+class 運用者の出口案(unittest.TestCase):
+    """+20% 指値 / 20日目にプラスなら売る / マイナスなら持ち続けてプラ転で売る / 上限で売る。"""
+
+    def _p(self, rows):
+        return paths(rows, [0.0] * len(rows))
+
+    def test_利確は20日目までに届けばちょうど20パーセント(self):
+        P = self._p([[QUIET] * 5 + [(110.0, 121.0, 109.0, 118.0)] + [QUIET] * 30])
+        r, d, w = E41.plan_exit(P, cap=30, decide=20)
+        self.assertAlmostEqual(r[0], 0.20)
+        self.assertEqual((d[0], w[0]), (6, 1))
+
+    def test_20日目にプラスならその終値で売る(self):
+        P = self._p([[QUIET] * 19 + [(101.0, 104.0, 100.5, 103.0)] + [QUIET] * 10])
+        r, d, w = E41.plan_exit(P, cap=30, decide=20)
+        self.assertAlmostEqual(r[0], 0.03)
+        self.assertEqual((d[0], w[0]), (20, 2))
+
+    def test_マイナスなら持ち続けて買値に戻したら売る(self):
+        low = (95.0, 96.0, 94.0, 95.0)
+        P = self._p([[QUIET] * 19 + [low] * 5 + [(97.0, 100.5, 96.5, 99.0)] + [QUIET] * 5])
+        r, d, w = E41.plan_exit(P, cap=30, decide=20)
+        self.assertAlmostEqual(r[0], 0.0)
+        self.assertEqual((d[0], w[0]), (25, 3))
+
+    def test_戻らなければ上限の日の終値で売る(self):
+        low = (95.0, 96.0, 94.0, 95.0)
+        P = self._p([[QUIET] * 19 + [low] * 11])
+        r, d, w = E41.plan_exit(P, cap=30, decide=20)
+        self.assertAlmostEqual(r[0], -0.05)
+        self.assertEqual((d[0], w[0]), (30, 4))
+
+    def test_上限が20日なら20日目の終値で必ず売る(self):
+        low = (95.0, 96.0, 94.0, 95.0)
+        P = self._p([[QUIET] * 19 + [low] * 11])
+        r, d, w = E41.plan_exit(P, cap=20, tp=None)
+        self.assertAlmostEqual(r[0], -0.05)
+        self.assertEqual(d[0], 20)
+
+    def test_逆指値を重ねられる(self):
+        # 20日目にマイナスで持ち越し、23日目に場中で −15% に触れる
+        low = (95.0, 96.0, 94.0, 95.0)
+        P = self._p([[QUIET] * 19 + [low] * 3 + [(90.0, 91.0, 80.0, 82.0)] + [QUIET] * 7])
+        r, d, w = E41.plan_exit(P, cap=30, decide=20, stop=0.15)
+        self.assertAlmostEqual(r[0], -0.15)
+        self.assertEqual((d[0], w[0]), (23, 5))
+
+    def test_枠3で売った翌日から枠が空く(self):
+        cal = pd.Series(pd.bdate_range("2024-01-01", periods=60))
+        sig = pd.DataFrame({"Date": [cal[0], cal[0], cal[0], cal[0], cal[5]],
+                            "i": [0, 1, 2, 3, 4]})
+        ret = np.array([0.10, 0.0, -0.05, 0.2, 0.2])
+        day = np.array([5.0, 20.0, 20.0, 20.0, 3.0])      # 0番は 1〜5日目（cal[1]〜cal[5]）
+        why = np.array([2, 3, 4, 1, 1], dtype=np.int8)
+        r = E41.slot_sim(sig, cal, ret, day, why, slots=3)
+        # 4件目（同じ日）は枠が無くて見送り。cal[5] の信号は cal[6] に買う: 0番が空くのは cal[6]
+        self.assertEqual((r["taken"], r["skipped"]), (4, 1))
+
+
 class 窓をずらした_out_of_fold(unittest.TestCase):
     """§10 の切り方違い。Actions で20分学習してから落ちないよう、形だけ先に確かめる。"""
 
