@@ -144,6 +144,41 @@ def windows(b: pd.DataFrame, keys: pd.DataFrame) -> dict:
     return out
 
 
+def forward_closes(b: pd.DataFrame, keys: pd.DataFrame, days: int = DAYS_2) -> dict:
+    """
+    keys の各行（基準日 t）について、1〜days 日目（t+1 〜 t+days）の終値と、
+    買値（t+1 の寄り）、t+days まで上場しているか（判定できるか）を返す。
+    windows() の前後2.5年ぶんは要らない学習用の軽い版。
+    """
+    pos = b[["Code", "Date"]].assign(_i=np.arange(len(b)))
+    i0 = keys[["Code", "Date"]].merge(pos, on=["Code", "Date"], how="left")["_i"]
+    if i0.isna().any():
+        raise SystemExit(f"bars に無い基準日が {int(i0.isna().sum())}件")
+    i0 = i0.to_numpy(dtype=np.int64)
+    left = b.groupby("Code", sort=False).cumcount(ascending=False).to_numpy()[i0]
+    step = np.arange(1, days + 1)
+    ok = step[None, :] <= left[:, None]
+    idx = np.where(ok, i0[:, None] + step[None, :], 0)
+    C = b["AdjC"].to_numpy(dtype=float)[idx]
+    C[~ok] = np.nan
+    o = b["AdjO"].to_numpy(dtype=float)
+    entry = np.where(left >= 1, o[np.minimum(i0 + 1, len(o) - 1)], np.nan)
+    return {"C": C, "entry": entry, "listed": left >= days}
+
+
+def label_frame(df: pd.DataFrame, bars: pd.DataFrame) -> pd.DataFrame:
+    """
+    df の行（Code, Date）に本ブレイクのラベルを付ける。
+    y_major は 1 / 0。120営業日先まで上場していない行（判定できない行）は NaN。
+    """
+    W = forward_closes(bars, df)
+    L = major_label(W["C"] / W["entry"][:, None])
+    det = W["listed"] & np.isfinite(W["entry"])
+    return pd.DataFrame({"Code": df["Code"].to_numpy(), "Date": df["Date"].to_numpy(),
+                         "y_major": np.where(det, L["y"], np.nan),
+                         "first1": L["first1"], "first2": L["first2"], "spike": L["spike"] & det})
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[1])
     ap.add_argument("--out", default="", help="チャート用 JSON の出力先（省略なら書かない）")

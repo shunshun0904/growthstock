@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.join(ROOT, "research"))
 sys.path.insert(0, os.path.join(ROOT, "research", "major"))
 
 import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
 
 import label_eda as M  # noqa: E402
 
@@ -54,6 +55,22 @@ class 本ブレイクのラベル(unittest.TestCase):
     def test_売買の無い日は届かなかった扱い(self):
         L = self.label(path({20: NAN, 40: 1.49, 80: 2.0}))
         self.assertEqual(L["y"][0], 0.0)
+
+    def test_データの行にラベルを付ける(self):
+        # 銘柄A: 翌日の寄り 100 で買い、10日目に 150、30日目に 200 → 正例
+        # 銘柄B: 120営業日先まで行が無い → 判定できない（NaN）
+        n = M.DAYS_2 + 5
+        d = pd.bdate_range("2024-01-01", periods=n)
+        ca = np.full(n, 100.0); ca[10] = 150.0; ca[30] = 200.0
+        bars = pd.concat([
+            pd.DataFrame({"Date": d, "Code": "1111", "AdjO": 100.0, "AdjH": ca, "AdjC": ca}),
+            pd.DataFrame({"Date": d[:60], "Code": "2222", "AdjO": 100.0, "AdjH": 100.0, "AdjC": 100.0}),
+        ]).sort_values(["Code", "Date"]).reset_index(drop=True)
+        keys = pd.DataFrame({"Code": ["1111", "2222"], "Date": [d[0], d[0]]})
+        out = M.label_frame(keys, bars)
+        self.assertEqual(out["y_major"].iloc[0], 1.0)
+        self.assertEqual((out["first1"].iloc[0], out["first2"].iloc[0]), (10.0, 30.0))
+        self.assertTrue(np.isnan(out["y_major"].iloc[1]))
 
     def test_チャートの区間は約2年半で78週高値の判定区間を含む(self):
         n = M.BEFORE + M.AFTER + 1
