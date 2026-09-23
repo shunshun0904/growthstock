@@ -93,6 +93,8 @@ SHIFTS = (0, 2, 4)                         # §10 窓の境界をずらす月数
 K_PLAN = 120                               # §11 プラ転まで待つとき、最長で追う日数
 PLAN_CAPS = (40, 60, 120)                  # §11 20日目にマイナスで持ち越したときの上限日数
 SLOTS = 3                                  # §11 同時に持つ銘柄数（PLAYBOOK と同じ）
+TP_LEVELS = (0.05, 0.10, 0.15, 0.20)       # §12 利確の水準（+X% の指値）
+P_BANDS = ((0.0, 0.5), (0.5, 0.8), (0.8, 0.9), (0.9, 0.95), (0.95, 1.0))  # §12a 3モデルの最小順位の帯
 BIG = -0.10                                # 大負けの線（20営業日保有の収益）
 SCREEN_Z = 3.0                             # 大負けの共通点として拾う |z|（205列を両側で測るので2では緩い）
 
@@ -324,7 +326,7 @@ def forward(b: pd.DataFrame, keys: pd.DataFrame, k: int = K) -> dict:
     out["entry"] = e
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
-        for h in HOLDS:
+        for h in (h for h in HOLDS if h <= k):
             # h日目の5日平均終値（t+h-4 〜 t+h）。lab.realized_returns の
             # rolling(5, min_periods=1) と同じく欠測は飛ばして平均する
             x = np.nanmean(out["C"][:, h - 5:h], axis=1)
@@ -868,7 +870,7 @@ def plan_line(name: str, ret, day, why, fold, base) -> str:
         m = fo == k
         nf += 1
         won += int(r[m].mean() - b[m].mean() > 1e-12)
-    if name.startswith("運用者案"):
+    if "運用者案" in name:
         held = d > 20
         capm = w == 4
         tail = (f"{held.mean()*100:>6.1f}%{(w == 3).mean()*100:>6.1f}%{capm.mean()*100:>6.1f}%"
@@ -999,6 +1001,128 @@ def plan_section(splits: dict, bars: pd.DataFrame) -> None:
                 print(slot_line(n, slot_sim(sig, cal, r_, d_, w_)))
         print("  月の利確 = +20% で売れた回数 / 月。月のプラス = プラスで終えた取引の数 / 月。"
               "月利は実現ベース（売った月に数える）。稼働率 = 埋まっていた枠の割合。")
+
+
+def reach_day(P: dict, x, n: int = 20) -> np.ndarray:
+    """場中の高値が 買値×(1+x) に最初に届いた日（届かなければ NaN）。x は行ごとの配列でもよい。"""
+    H = P["H"][:, :n]
+    hit = H >= (P["entry"] * (1.0 + np.asarray(x, dtype=float)))[:, None]
+    first = hit.argmax(axis=1) + 1.0
+    return np.where(hit.any(axis=1), first, np.nan)
+
+
+REACH_HEAD = (f"  {'区分':<26}{'件数':>7}{'日次ボラ':>8}"
+              + "".join(f"{'+' + str(round(x * 100)) + '%':>7}" for x in TP_LEVELS)
+              + f"{'+10%の日':>8}{'+1σ':>7}{'+2σ':>7}{'最大上昇':>9}{'20日目':>8}"
+              f"{'+10%組の20日目':>14}{'+20%組の20日目':>14}")
+
+
+def reach_line(name: str, g: pd.DataFrame, P: dict) -> str:
+    """§12a の1行。g と P は同じ行の並び（買値が付き、20日目の終値がある行）。"""
+    e = P["entry"]
+    c20 = P["C"][:, 19] / e - 1.0
+    d10 = reach_day(P, 0.10)
+    sig = g["sigma20"].to_numpy(dtype=float)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        mfe = np.nanmax(P["H"][:, :20], axis=1) / e - 1.0
+    h10, h20 = mfe >= 0.10, mfe >= 0.20
+    return (f"  {name:<26}{len(g):>7,}{med(g['vol_20d']):>7.2f}%"
+            + "".join(f"{(mfe >= x).mean()*100:>6.1f}%" for x in TP_LEVELS)
+            + f"{num(med(d10), 7)}日"
+            f"{np.isfinite(reach_day(P, sig)).mean()*100:>6.1f}%"
+            f"{np.isfinite(reach_day(P, 2.0 * sig)).mean()*100:>6.1f}%"
+            f"{pc(med(mfe), 9)}{pc(mean(c20), 8)}"
+            f"{pc(mean(c20[h10]) if h10.any() else float('nan'), 14)}"
+            f"{pc(mean(c20[h20]) if h20.any() else float('nan'), 14)}")
+
+
+def tp_rules() -> list:
+    """§12 で比べる出口（名前, plan_exit の引数）。"""
+    out = [("20日目の終値", dict(cap=20, tp=None))]
+    out += [(f"+{round(x * 100)}%指値・20日目", dict(cap=20, tp=x)) for x in TP_LEVELS]
+    out += [(f"+10%指値・運用者案・上限{c}日", dict(cap=c, tp=0.10)) for c in (40, 60)]
+    return out
+
+
+def tp_section(splits: dict, pats: dict, df: pd.DataFrame, bars: pd.DataFrame) -> None:
+    print("\n=== 12. 利確の水準（+5/+10/+15/+20%）と、選んだ銘柄は短期で跳ねやすいか ===")
+    print("  運用者の問い（2026-09-23）「10%到達時点で、20営業日待たずに売ると思います。")
+    print("  このモデルが指し示す上位の銘柄は、（間接的には）そういった短期での高騰ポテンシャルを")
+    print("  秘めている銘柄だと思ってます」")
+    print("  到達 = 買った日から20営業日のうちに、場中の高値が一度でも 買値+X% に触れたか（§11 の指値と同じ判定）。")
+    cal = pd.Series(np.sort(pd.to_datetime(bars["Date"].unique())))
+    for k, (sel_k, P_k, _) in splits.items():
+        # 12a 同じ窓の母集団（全ブレイク）と、3モデルの最小順位の帯、選定
+        o = pats[k]
+        folds = sorted(int(f) for f in sel_k["fold"].unique())
+        pool = o[RULE_MODELS[0]]
+        pool = pool[pool["fold"].isin(folds)][["Code", "Date", "fold"]].copy()
+        for a in RULE_MODELS:
+            sc = o[a][["Code", "Date", "score"]].copy()
+            sc[f"p_{a}"] = sc["score"].rank(pct=True)     # pattern_rows と同じ順位
+            pool = pool.merge(sc[["Code", "Date", f"p_{a}"]], on=["Code", "Date"], how="left")
+        pool["p_min"] = pool[[f"p_{a}" for a in RULE_MODELS]].min(axis=1)
+        pool = pool.merge(df[["Code", "Date", "vol_20d"]], on=["Code", "Date"], how="left")
+        pool["sigma20"] = pool["vol_20d"] / 100.0 * np.sqrt(B.RISE_HORIZON)
+        Pp = forward(bars, pool, k=20)
+        okp = Pp["ok"][:, 19] & np.isfinite(Pp["entry"])
+        pool = pool[okp].reset_index(drop=True)
+        Pp = {a: (v[okp] if isinstance(v, np.ndarray) else v) for a, v in Pp.items()}
+
+        sk = sel_k.reset_index(drop=True)
+        sk["rank"] = sk.groupby("Date")["p_min"].rank(ascending=False, method="first")
+        P20 = {a: (v[:, :20] if isinstance(v, np.ndarray) and v.ndim == 2 else v)
+               for a, v in P_k.items()}
+
+        def sub(P, m):
+            return {a: (v[m] if isinstance(v, np.ndarray) else v) for a, v in P.items()}
+
+        print(f"\n  --- 12a. ずらし{k}か月: 20営業日以内に 買値+X% に届いた割合 ---")
+        print(REACH_HEAD)
+        print(reach_line("母集団（全ブレイク）", pool, Pp))
+        pm = pool["p_min"].to_numpy(dtype=float)
+        for lo, hi in P_BANDS:
+            m = (pm >= lo) & ((pm < hi) if hi < 1.0 else (pm <= hi))
+            print(reach_line(f"  最小順位 {lo*100:.0f}〜{hi*100:.0f}%", pool[m], sub(Pp, m)))
+        hot = (sk["n_break"] >= 20).to_numpy()
+        top2 = (sk["rank"] <= 2).to_numpy()
+        print(reach_line("選定（3モデル 90以上）", sk, P20))
+        print(reach_line("  発火20件以上", sk[hot], sub(P20, hot)))
+        print(reach_line("  その日の上位2件", sk[top2], sub(P20, top2)))
+        print("  最小順位 = 3モデルのスコア順位（母集団の中の百分位）の最小。選定は前の窓の分布で"
+              "90% を超えたもので、帯の 90〜100% とほぼ重なる。")
+        print("  +1σ/+2σ = ラベルと同じ σ（日次ボラ×√20）。+10%の日 = 届いた取引の中央値。"
+              "+10%組の20日目 = +10% に届いた取引を20日目の終値まで持った場合の平均。")
+
+        # 12b 1取引ごと（§11 と同じ行: 上限の日まで値動きが揃う取引）
+        full = P_k["ok"][:, K_PLAN - 1]
+        Pf = sub(P_k, full)
+        sf = sel_k[full].reset_index(drop=True)
+        sf["rank"] = sf.groupby("Date")["p_min"].rank(ascending=False, method="first")
+        fo = sf["fold"].to_numpy()
+        res = {n: plan_exit(Pf, **kw) for n, kw in tp_rules()}
+        base = res["20日目の終値"][0]
+        span = f"{pd.Timestamp(sf['Date'].min()).date()}〜{pd.Timestamp(sf['Date'].max()).date()}"
+        tags = (("全日・全件", np.ones(len(sf), dtype=bool)),
+                ("発火20件以上", (sf["n_break"] >= 20).to_numpy()),
+                ("その日の上位2件", (sf["rank"] <= 2).to_numpy()))
+        for tag, m in tags:
+            print(f"\n  --- 12b. ずらし{k}か月・{tag}: 1取引ごと（{int(m.sum()):,}件・買った日 {span}）---")
+            print(PLAN_HEAD)
+            for n, (r_, d_, w_) in res.items():
+                print(plan_line(n, r_[m], d_[m], w_[m], fo[m], base[m]))
+        print("  利確 = 指値で売れた割合。勝ち窓は「20日目の終値」と比べる。")
+
+        # 12c 枠3（§11 と同じ模擬）
+        sf = sf.assign(i=np.arange(len(sf)))
+        for tag, mb in (("全日・上位2件", 0), ("発火8件以上・上位2件（PLAYBOOK）", 8)):
+            sig = sf[(sf["rank"] <= 2) & (sf["n_break"] >= mb)].sort_values(["Date", "rank"])
+            print(f"\n  --- 12c. ずらし{k}か月・枠{SLOTS}・{tag}: 候補 {len(sig):,}件 ---")
+            print(SLOT_HEAD)
+            for n, (r_, d_, w_) in res.items():
+                print(slot_line(n, slot_sim(sig, cal, r_, d_, w_)))
+        print("  月の利確 = 指値で売れた回数 / 月。")
 
 
 # ---------------------------------------------------------------------- #
@@ -1418,6 +1542,8 @@ def main(argv=None) -> int:
     # §9e（§9c の除外を切り方ごとに）と §11（運用者の出口案）
     exclusion_by_split(splits, pats, df, stock9)
     plan_section(splits, bars10)
+    # §12 利確の水準と、選んだ銘柄が短期で跳ねやすいか（運用者の問い 2026-09-23）
+    tp_section(splits, pats, df, bars10)
 
     # ------------------------------------------------------------------ #
     keep = (["Code", "Date", "fold", "label", "cls", "need", "vol_20d", "sigma20",

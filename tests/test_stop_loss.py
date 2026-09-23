@@ -254,6 +254,62 @@ class 運用者の出口案(unittest.TestCase):
         self.assertEqual((r["taken"], r["skipped"]), (4, 1))
 
 
+class 利確の水準(unittest.TestCase):
+    """§12 +10% などの指値と、20営業日以内に届いたかの判定。"""
+
+    def test_届いた日は1日目から数えて最初の日(self):
+        P = paths([[QUIET, QUIET, (105.0, 111.0, 104.0, 108.0), (108.0, 125.0, 107.0, 120.0)],
+                   [QUIET] * 4], [0.0, 0.0])
+        d = E41.reach_day(P, 0.10)
+        self.assertEqual(d[0], 3)
+        self.assertTrue(np.isnan(d[1]))
+        self.assertEqual(E41.reach_day(P, 0.20)[0], 4)
+
+    def test_行ごとのしきい値でも判定できる(self):
+        P = paths([[QUIET, (100.0, 104.0, 99.0, 103.0)], [QUIET, (100.0, 104.0, 99.0, 103.0)]],
+                  [0.0, 0.0])
+        d = E41.reach_day(P, np.array([0.03, 0.05]))
+        self.assertEqual(d[0], 2)
+        self.assertTrue(np.isnan(d[1]))
+
+    def test_10パーセントの指値は届けばちょうど10パーセント(self):
+        P = paths([[QUIET] * 4 + [(104.0, 112.0, 103.0, 111.0)] + [QUIET] * 20], [0.0])
+        r, d, w = E41.plan_exit(P, cap=20, tp=0.10)
+        self.assertAlmostEqual(r[0], 0.10)
+        self.assertEqual((d[0], w[0]), (5, 1))
+
+    def test_持ち越したあとは10パーセントの指値を使わず建値で売る(self):
+        # 20日目にマイナスで持ち越し、22日目に窓を開けて +12% まで上げても、売るのは建値（0%）
+        low = (95.0, 96.0, 94.0, 95.0)
+        P = paths([[QUIET] * 19 + [low, low, (110.0, 112.0, 109.0, 111.0)] + [QUIET] * 5], [0.0])
+        r, d, w = E41.plan_exit(P, cap=40, tp=0.10)
+        self.assertAlmostEqual(r[0], 0.0)
+        self.assertEqual((d[0], w[0]), (22, 3))
+
+    def test_比べる出口の名前(self):
+        names = [n for n, _ in E41.tp_rules()]
+        self.assertEqual(names[0], "20日目の終値")
+        self.assertIn("+10%指値・20日目", names)
+        self.assertIn("+10%指値・運用者案・上限60日", names)
+
+    def test_10パーセント版の運用者案も持ち越しの列を出す(self):
+        low = (95.0, 96.0, 94.0, 95.0)
+        P = paths([[QUIET] * 19 + [low] * 21, [QUIET] * 40], [0.0, 0.0])
+        r, d, w = E41.plan_exit(P, cap=40, tp=0.10)
+        line = E41.plan_line("+10%指値・運用者案・上限40日", r, d, w, np.array([2, 2]), r)
+        self.assertIn("50.0%", line)                  # 持ち越し 1/2
+        self.assertNotIn("      -      -", line)
+
+    def test_到達の表の1行(self):
+        rows = [[QUIET] * 5 + [(105.0, 121.0, 104.0, 118.0)] + [QUIET] * 14,
+                [QUIET] * 20]
+        P = paths(rows, [0.0, 0.0])
+        g = pd.DataFrame({"vol_20d": [1.0, 2.0], "sigma20": [0.05, 0.05]})
+        line = E41.reach_line("テスト", g, P)
+        self.assertIn("50.0%", line)                  # +10%・+20% とも 1/2 が届く
+        self.assertIn("6日", line)                   # +10% に届いた日
+
+
 class 窓をずらした_out_of_fold(unittest.TestCase):
     """§10 の切り方違い。Actions で20分学習してから落ちないよう、形だけ先に確かめる。"""
 
