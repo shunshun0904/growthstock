@@ -42,6 +42,9 @@ on:
     paths:
       - 'research/accgraph/**'
       - '.github/workflows/accgraph.yml'
+      # GNN は accgraph-gnn.yml で回す。ここで本体評価（約140分）まで
+      # 走り直さないように外す
+      - '!research/accgraph/gnn.py'
 
 permissions:
   contents: write
