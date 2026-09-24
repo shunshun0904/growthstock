@@ -12,6 +12,11 @@
        ss_days    最後の報告が使えるようになってからの暦日数
   C  B + 市場全体の空売り比率2列（all_plus_ss_mkt: short_ratio_mkt / _20）。
      本番の short_ratio は S33=9999（その他）の1行で、市場全体ではなかった
+  P  対照。B と同じ4列を、**同じ日の銘柄どうしで入れ替えた**もの（分布と日ごとの
+     充足はそのまま、銘柄との対応だけを壊す）。列を足しただけで動く幅（偶然と、
+     木が増えた列を使うことによる揺れ）を測る。B の差は P の差と比べて読む。
+     手元の試運転では、乱数の4列を足しただけで LightGBM の PR-AUC が
+     +0.0035 ± 0.0035（11窓中8窓で上）動いた
 共通: 本番のパラメータ（205列で探索したもの。読むだけ）、ブースティング3モデル、
       種3つの平均、窓の切り方3通り（research/exp/ab_oof.py）
 
@@ -42,7 +47,25 @@ import ab_oof as AB  # noqa: E402
 import e27_timing_multi as E27  # noqa: E402
 
 PRESETS = {"A": "all_plus", "B": "all_plus_ss", "C": "all_plus_ss_mkt"}
-LABELS = {"A": "A 本番205列", "B": "B +空売り残高報告", "C": "C +市場全体の空売り比率"}
+LABELS = {"A": "A 本番205列", "B": "B +空売り残高報告", "C": "C +市場全体の空売り比率",
+          "P": "P 対照（Bの4列を日付内で入れ替え）"}
+#: 対照の入れ替えの種（結果を見る前に決めた）
+PERM_SEED = 20260924
+
+
+def permuted(fb, cols, seed: int = PERM_SEED):
+    """cols の値を、同じ日付の行どうしで入れ替えた写し（行の並びと他の列はそのまま）。"""
+    import numpy as np
+
+    out = fb.copy()
+    rng = np.random.default_rng(seed)
+    idx = out.groupby("Date").indices
+    for c in cols:
+        v = out[c].to_numpy().copy()
+        for rows in idx.values():
+            v[rows] = v[rng.permutation(rows)]
+        out[c] = v
+    return out
 #: これより少ない行にしか報告が無ければ、取り込みが届いていないとみなして止める
 MIN_SS_SHARE = 0.02
 
@@ -96,8 +119,11 @@ def main(argv=None) -> int:
         print(f"  {LABELS[arm]:<24}{p:<18}{len(cols[arm])}列  指紋 {F.signature(cols[arm])}")
     print("=" * 78)
     coverage(fb)
-    AB.compare("e44", {arm: (fb, cols[arm]) for arm in PRESETS}, "A", LABELS,
-               shifts, seeds, algos)
+    ss_cols = F.GROUPS["short_pos"]
+    fp = permuted(fb, ss_cols)
+    arms = {arm: (fb, cols[arm]) for arm in PRESETS}
+    arms["P"] = (fp, cols["B"])
+    AB.compare("e44", arms, "A", LABELS, shifts, seeds, algos)
     return 0
 
 
