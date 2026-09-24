@@ -301,6 +301,7 @@ PRESETS: Dict[str, List[str]] = {
     "all_earn": ALL_GROUPS + ["earn_ahead"],
     "all_revision": ALL_GROUPS + ["revision"],
     # --- 2026-09-24 の候補（実験44）。本番の205列 + 空売り残高報告 / 市場全体の空売り比率 --- #
+    # どちらも採用しなかった（docs/MODEL_ADOPTION_RULES.md §9）。比べ直すときのために残す
     "all_plus_ss": ALL_GROUPS + EXTRA_GROUPS + ["short_pos"],
     "all_plus_ss_mkt": ALL_GROUPS + EXTRA_GROUPS + ["short_pos", "flow_mkt"],
 

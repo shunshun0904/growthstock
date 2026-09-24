@@ -28,6 +28,7 @@
 
   --shifts 0,2,4  --seeds 3  --algos lgbm,xgb,cat
   結果は research/_data/oof/e44_*。本番の設定には書かない。
+  2026-09-24 の結果（B・C とも採用しない）は docs/MODEL_ADOPTION_RULES.md §9。
 """
 
 from __future__ import annotations
