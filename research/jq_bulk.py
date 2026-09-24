@@ -436,11 +436,27 @@ def _sanitize(df: pd.DataFrame, label: str = "") -> pd.DataFrame:
         if out[c].dtype != object:
             continue
         v = out[c]
-        # **入れ子（list / dict）の列は触らない。**
-        # 大株主一覧（Hldrs）や政策保有の明細（Report / Largest）がこれで、
-        # 文字列に潰すと構造が壊れる。parquet は入れ子のまま書ける。
-        sample = v.dropna()
-        if len(sample) and isinstance(sample.iloc[0], (list, dict, tuple)):
+        # **入れ子（list / dict）の列は文字列に潰さない。**
+        # 大株主一覧（Hldrs）や政策保有の明細（Report / Largest）、信用規制の
+        # 理由（PubReason）がこれで、parquet は入れ子のまま書ける。
+        #
+        # 入れ子かどうかは**全部の値**で見る。以前は最初の値だけで決めていて、
+        #   最初が "" や "-" の日: 列ごと文字列にして、入れ子を str() で潰した
+        #     （信用規制の 2026 年ぶんの PubReason がこれで文字列になっていた）
+        #   最初が入れ子の日: 列を素通しし、混ざった "" や "-" が残った
+        # どちらも parquet が「入れ子と入れ子でない値が混ざっている」で書けず
+        # （ArrowInvalid: cannot mix list and non-list / struct and non-struct）、
+        # 全期間の取り直しを毎日やり直しては保存に失敗していた（2026-09-23 の実測）
+        nested = v.map(_is_nested)
+        if nested.any():
+            loose = v.notna() & ~nested
+            if loose.any():
+                mark = v.map(lambda x: isinstance(x, str) and x.strip() in NULL_MARKERS)
+                other = int((loose & ~mark).sum())
+                print(f"  [sanitize] {label} {c}: 入れ子の列に混ざった値 {int(loose.sum())}件を"
+                      f"欠測にする（欠測記号 {int((loose & mark).sum())}件 / それ以外 {other}件）",
+                      file=sys.stderr)
+                out[c] = v.where(~loose, None)
             continue
         # 欠測記号は**文字列のときだけ**見る。他の型を str 化して
         # 判定すると、入れ子や None を巻き込む
@@ -453,6 +469,12 @@ def _sanitize(df: pd.DataFrame, label: str = "") -> pd.DataFrame:
         else:
             out[c] = col.astype("string")
     return out
+
+
+def _is_nested(x) -> bool:
+    import numpy as np
+
+    return isinstance(x, (list, dict, tuple, np.ndarray))
 
 
 def _numify(df: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
@@ -745,11 +767,21 @@ def _run_incremental(client: JQuantsClient, days: List[dt.date],
             # （実測: marginalert の '-' で parquet が書けず、後続の
             #   earndate / investor が丸ごと走らなかった）
             if name in DAILY_KINDS:
-                print(f"[warn] {name} を保存できませんでした（続行する）: "
-                      f"{type(exc).__name__}: {str(exc)[:200]}", file=sys.stderr)
+                msg = f"{type(exc).__name__}: {str(exc)[:200]}"
+                print(f"[warn] {name} を保存できませんでした（続行する）: {msg}",
+                      file=sys.stderr)
+                # 黙って続けない。ジョブは緑のままでも、実行の画面に赤い注記を出し、
+                # manifest に残す（2026-09-23 まで、大量保有と信用規制が毎日
+                # 全期間を取り直しては保存に失敗していたのに、ログの中の [warn] だけ
+                # だったので気づけなかった）
+                print(f"::error title=取り込みの保存に失敗 ({name})::"
+                      + " ".join(msg.split()).replace("::", ":"))
+                manifest.setdefault("save_failures", {})[name] = {
+                    "at": dt.datetime.now(dt.timezone.utc).isoformat(), "error": msg}
                 continue
             raise
         _record_fetched(manifest, name, todo, df, date_col)
+        manifest.get("save_failures", {}).pop(name, None)
         total_new += len(df)
         print(f"[{name}] {len(df):,}行を追加 / 更新ファイル {len(written)}件 "
               f"({time.time()-t0:.0f}秒)")

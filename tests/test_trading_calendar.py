@@ -482,6 +482,26 @@ class TestSanitize(unittest.TestCase):
         self.assertIsInstance(out["Report"].iloc[0], dict)
         self.assertTrue(pd.isna(out["Report"].iloc[1]))
 
+    def test_入れ子の列に混ざった欠測記号は欠測にする_最初が入れ子(self):
+        # 最初が入れ子だと、以前は列を素通しして "" や "-" が残り、parquet が書けなかった
+        d = pd.DataFrame({"PubReason": [{"a": "1"}, "", {"a": "0"}, "-", None]})
+        out = jq_bulk._sanitize(d)
+        self.assertIsInstance(out["PubReason"].iloc[0], dict)
+        self.assertTrue(pd.isna(out["PubReason"].iloc[1]))
+        self.assertTrue(pd.isna(out["PubReason"].iloc[3]))
+        path = os.path.join(tempfile.mkdtemp(), "x.parquet")
+        out.to_parquet(path)                          # 書ける（以前は ArrowInvalid）
+        self.assertIsInstance(pd.read_parquet(path)["PubReason"].iloc[2], dict)
+
+    def test_入れ子の列に混ざった欠測記号は欠測にする_最初が文字列(self):
+        # 最初が "" だと、以前は列ごと文字列にして入れ子を str() で潰していた
+        d = pd.DataFrame({"Hldrs": ["", [{"Rank": 1}], [{"Rank": 2}]]})
+        out = jq_bulk._sanitize(d)
+        self.assertTrue(pd.isna(out["Hldrs"].iloc[0]))
+        self.assertIsInstance(out["Hldrs"].iloc[1], list)
+        path = os.path.join(tempfile.mkdtemp(), "x.parquet")
+        out.to_parquet(path)
+
     def test_None_を欠測記号にしない(self):
         # "None"/"null" を記号に入れると入れ子や本物の None を巻き込む
         self.assertNotIn("None", jq_bulk.NULL_MARKERS)
