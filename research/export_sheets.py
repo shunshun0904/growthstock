@@ -41,6 +41,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import trading_calendar as TC  # noqa: E402
 import models as M  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -152,12 +153,15 @@ def latest_closes(data_dir: str) -> "pd.Series":
 
 
 def track_values(jq_code: str, price_at_pick, pick_date: str,
-                 closes: "pd.Series", as_of: Optional[pd.Timestamp]) -> Dict:
+                 closes: "pd.Series", as_of: Optional[pd.Timestamp],
+                 cal=None) -> Dict:
     """その行の『いま』。値が取れないところは空にする（0 で埋めない）。"""
     cur = closes.get(jq_code)
     if cur is None or not np.isfinite(cur) or not price_at_pick:
         return {}
-    days = (int(np.busday_count(np.datetime64(pick_date), np.datetime64(as_of.date())))
+    # 取引所の営業日で数える（cal が無い・覆っていないときは平日）。
+    # 平日で数えると祝日も経過日になる（2026-09-21〜23 の連休が3日に数わった）
+    days = (TC.elapsed_days(pd.Timestamp(pick_date).date(), as_of.date(), cal)
             if as_of is not None else "")
     return {"現在値": round(float(cur), 1),
             "騰落率%": round(float(cur) / float(price_at_pick) * 100 - 100, 2),
@@ -374,7 +378,8 @@ def a1(col_idx: int, row_idx: int) -> str:
     return f"{s}{row_idx}"
 
 
-def sync(ws, rows: List[Dict], closes, as_of, dry_run: bool = False) -> Dict[str, int]:
+def sync(ws, rows: List[Dict], closes, as_of, dry_run: bool = False,
+         cal=None) -> Dict[str, int]:
     values = ws.get_all_values()
     if not values:
         raise SystemExit("シートが空です。見出し行が作られていません")
@@ -398,7 +403,7 @@ def sync(ws, rows: List[Dict], closes, as_of, dry_run: bool = False) -> Dict[str
         line = [""] * len(header)
         merged = dict(x)
         merged.update(track_values(x["_jqCode"], x.get("予測時株価"),
-                                   x["予測日"], closes, as_of))
+                                   x["予測日"], closes, as_of, cal))
         for name, v in merged.items():
             if name.startswith("_") or name not in pos:
                 continue
@@ -438,7 +443,7 @@ def sync(ws, rows: List[Dict], closes, as_of, dry_run: bool = False) -> Dict[str
                 except (TypeError, ValueError):
                     price = None
             jq = f"{code}0" if len(str(code)) == 4 else str(code)
-        tv = track_values(jq, price, d, closes, as_of)
+        tv = track_values(jq, price, d, closes, as_of, cal)
         for name, v in tv.items():
             if name in pos:
                 updates.append({"range": a1(pos[name] + 1, r), "values": [[v]]})
@@ -501,7 +506,7 @@ def main(argv=None) -> int:
                 for c in [ "予測日", "コード"] + mc))
         for x in rows[:3]:
             tv = track_values(x["_jqCode"], x.get("予測時株価"), x["予測日"],
-                              closes, as_of)
+                              closes, as_of, TC.load(args.data_dir))
             print(f"  {x['予測日']} {x['コード']} {x['銘柄名']} "
                   f"{x['順位']}/{x['候補数']}位 帯{x['帯']} → {tv}")
         print("[dry-run] 通信していません")
@@ -513,7 +518,7 @@ def main(argv=None) -> int:
     ws, created = ensure_worksheet(book, args.title)
     if created:
         print(f"[sheet] ワークシート「{args.title}」を作成し、見出しを置きました")
-    res = sync(ws, rows, closes, as_of)
+    res = sync(ws, rows, closes, as_of, cal=TC.load(args.data_dir))
     print(f"[done] 追記 {res['appended']}行 / 追跡列の更新 {res['updated']}セル")
     print(f"[done] https://docs.google.com/spreadsheets/d/{args.sheet_id}/edit")
     return 0

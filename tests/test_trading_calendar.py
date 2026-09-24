@@ -223,8 +223,74 @@ class TestGate(unittest.TestCase):
         self.assertFalse(run, why)
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
+class TestNoRepredict(unittest.TestCase):
+    """
+    予測済みの日を二度と予測しない（2026-09-24 に足した第一の規則）。
+
+    2026-09-24 03:24 JST、休場日（9/23）の取り込みが日付をまたいで終わり、
+    連鎖した予測が「今日（9/24）は営業日」と判定して 9/18 を新しいモデルで
+    予測し直し、追跡記録に混ぜた（1f18614）。壁時計ではなく
+    「未予測の日足があるか」で決めることを固定する。
+    """
+
+    def setUp(self):
+        self.cal = TC.Calendar(TC.parse_rows(rows_2026_09()),
+                               [D(f"2026-09-{d:02d}") for d in range(14, 31)])
+
+    def jst(self, day, hh, mm=0):
+        return dt.datetime(2026, 9, day, hh, mm, tzinfo=GATE.JST)
+
+    def decide(self, last_bar, as_of, now):
+        return GATE.decide_new_data(D(last_bar), D(as_of),
+                                    GATE.expected_bar_date(self.cal, now))
+
+    def test_未明の自動実行は予測済みの日を予測し直さない(self):
+        run, why, stale, _ = self.decide("2026-09-18", "2026-09-18", self.jst(24, 3, 24))
+        self.assertFalse(run, why)
+        self.assertFalse(stale)                      # 9/24 の日足はまだ出ていなくて正常
+
+    def test_営業日の夜に新しい日足があれば進む(self):
+        run, why, stale, _ = self.decide("2026-09-24", "2026-09-18", self.jst(24, 21))
+        self.assertTrue(run, why)
+        self.assertFalse(stale)
+
+    def test_営業日の夜に日足が無ければ赤にする(self):
+        run, why, stale, stale_why = self.decide("2026-09-18", "2026-09-18",
+                                                 self.jst(24, 21))
+        self.assertFalse(run, why)                   # 前の日を予測し直さない
+        self.assertTrue(stale)                       # ただし黙って緑にしない
+        self.assertIn("2026-09-24", stale_why)
+
+    def test_18時前は前営業日までで足りる(self):
+        run, _, stale, _ = self.decide("2026-09-18", "2026-09-18", self.jst(24, 17, 30))
+        self.assertFalse(run)
+        self.assertFalse(stale)
+
+    def test_休場日でも未予測の日足があれば進む(self):
+        # 金曜の予測が失敗していたら、土曜や連休中でもその日を予測する
+        run, why, _, _ = self.decide("2026-09-18", "2026-09-17", self.jst(22, 12))
+        self.assertTrue(run, why)
+
+    def test_休場日で予測済みなら静かに飛ばす(self):
+        run, _, stale, _ = self.decide("2026-09-18", "2026-09-18", self.jst(22, 21))
+        self.assertFalse(run)
+        self.assertFalse(stale)
+
+    def test_読めなければ従来の判定に落ちる(self):
+        self.assertIsNone(GATE.decide_new_data(None, D("2026-09-18"), None))
+        self.assertIsNone(GATE.decide_new_data(D("2026-09-18"), None, None))
+
+    def test_asOf_を予測ファイルから読む(self):
+        d = tempfile.mkdtemp()
+        try:
+            p = os.path.join(d, "predictions.json")
+            with open(p, "w", encoding="utf-8") as fh:
+                fh.write('{"asOf": "2026-09-18", "candidates": []}')
+            self.assertEqual(GATE.published_as_of(p), D("2026-09-18"))
+            self.assertIsNone(GATE.published_as_of(os.path.join(d, "無い.json")))
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
 
 
 class TestLookahead(unittest.TestCase):
@@ -359,3 +425,7 @@ class TestEarnDateColumn(unittest.TestCase):
 
     def test_公表日で記録する(self):
         self.assertEqual(jq_bulk.DAILY_KINDS["earndate"][1], "PubDate")
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

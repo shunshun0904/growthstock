@@ -230,9 +230,6 @@ class TestAttach(unittest.TestCase):
             self.assertTrue(np.isnan(out[c].iloc[0]))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class 固有項目の比率(unittest.TestCase):
     """2026-09-22 に足した EDINET DB 固有の7つ。
@@ -306,3 +303,7 @@ class 固有項目の比率(unittest.TestCase):
         for bad in ("ghg_scope1", "ghg_scope2", "ghg_scope3",
                     "gender_pay_gap_regular", "gender_pay_gap_all"):
             self.assertFalse(any(bad in c for c in cols), bad)
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -10,8 +10,15 @@ on:
     workflows: ['Update Data Store']
     types: [completed]
   workflow_dispatch:
-  # 取り込みが失敗した日でも、手前のデータで一応出しておく保険。
-  # 平日 23:00 JST (= 14:00 UTC)
+    inputs:
+      force:
+        description: '予測済みの日でも予測し直す（通常は false。記録を上書きする意図があるときだけ）'
+        required: false
+        type: boolean
+        default: false
+  # 取り込みの連鎖が起動しなかった日の保険。平日 23:00 JST (= 14:00 UTC)。
+  # 予測済みの日しか無ければ何もしない（ゲートが飛ばす）。その時刻に当日の
+  # 日足が無ければ赤で止まるので、取り込みの失敗に気づける
   schedule:
     - cron: '0 14 * * 1-5'
 
@@ -70,8 +77,14 @@ jobs:
       # データが揃っている」ことまで確かめてから飛ばすので、取り込みが
       # 壊れていれば休場日でも飛ばさず、次の鮮度チェックで落ちる。
       # 判断できないときは必ず「進む」側へ倒れる（exit 0 固定）。
+      # 予測済みの日（public/data/predictions.json の asOf）より新しい日足が
+      # 無ければ飛ばす。壁時計の日付では決めない（2026-09-24 03:24 JST に、
+      # 日付をまたいだ自動実行が 9/18 を予測し直して記録に混ぜた）。
+      # その時刻に揃っているはずの日足が無ければ stale=true（最後に赤にする）
       - name: Trading-day gate
         id: gate
+        env:
+          FORCE_PREDICT: ${{ inputs.force && 'true' || 'false' }}
         run: python3 research/trading_day_gate.py
 
       # 取り込みが失敗した日に、黙って昨日と同じ候補を出さないための関門。
@@ -194,9 +207,12 @@ jobs:
         run: |
           { echo '## ブレイク予測'
             if [ "${{ steps.gate.outputs.run }}" = "false" ]; then
-              echo "> 🛌 **本日は非営業日のため予測を行いませんでした。**"
+              echo "> **予測を行いませんでした（新しい日足が無い）。**"
               echo "> ${{ steps.gate.outputs.reason }}"
-              echo '> 画面は前営業日の内容のままです。'
+              echo '> 画面は予測済みの日の内容のままです。'
+            fi
+            if [ "${{ steps.gate.outputs.stale }}" = "true" ]; then
+              echo "> ⚠ **揃っているはずの日足がありません。** ${{ steps.gate.outputs.stale_reason }}"
             fi
             if [ "${{ steps.sheets.outcome }}" = "failure" ]; then
               echo '> ⚠ **スプレッドシートへの追記に失敗しました。**'
@@ -205,3 +221,11 @@ jobs:
             echo '```'
             if [ -f predict.log ]; then cat predict.log; else echo "(実行せず)"; fi
             echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      # 取り込みが当日の日足を持っていないのに、緑で終わらせない。
+      # 予測（未予測の日があればそれ）と記録は済ませてから、最後にここで落とす
+      - name: Fail if bars are missing
+        if: always() && steps.gate.outputs.stale == 'true'
+        run: |
+          echo "::error::${{ steps.gate.outputs.stale_reason }}"
+          exit 1

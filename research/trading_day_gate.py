@@ -45,6 +45,28 @@
 
 どれか1つでも欠ければ「通常どおり進む」。**飛ばす側に倒さない。**
 
+予測済みの日を二度と予測しない（2026-09-24 に足した第一の規則）
+------------------------------------------------------------
+上の判定は「今日が営業日か」を壁時計の日付で見ていた。これでは、
+休場日の取り込みが日付をまたいで終わり、連鎖した予測が翌営業日の
+**未明**（まだ当日の日足が無い時刻）に走ると「営業日だから進む」になり、
+既に予測・公開した日（asOf）を**新しいモデルで予測し直して記録に混ぜる**。
+実際に 2026-09-24 03:24 JST の自動実行（1f18614）で、9/18 の追跡記録に
+9/20 学習のモデルが選んだ銘柄（日本ナレッジ）が入った。
+
+問うべきは「今日は営業日か」ではなく「**まだ予測していない日足があるか**」。
+
+  最終バー日 > 公開済みの asOf   → 進む（未予測の日がある。休場日でも）
+  最終バー日 <= 公開済みの asOf  → 飛ばす（予測するものが無い）
+
+飛ばす日でも、**その時刻に揃っているはずの日足が無ければ** stale=true を
+出す（ワークフローはそれで赤にする）。揃っているはずの日は、営業日の
+18:00 JST（取り込みの待ちの締切）以降ならその日、それより前なら直前の
+営業日。取り込みが壊れているのに「予測済みだから」と黙って緑にしない。
+
+意図して予測し直すときは FORCE_PREDICT=true（workflow_dispatch の force）。
+最終バー日か asOf が読めないときは、従来の判定に落ちる。
+
 止めない
 ------
 判断できない事情（manifest が読めない、バーが無い、時刻が壊れている）は
@@ -73,6 +95,12 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_data")
 STALE_HOURS = 12
 #: 「今日」は東京の日付で決める。ランナーは UTC なので明示する
 JST = dt.timezone(dt.timedelta(hours=9))
+#: 公開済みの予測。asOf がそこまで予測した日
+PRED_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         "public", "data", "predictions.json")
+#: 営業日の当日の日足が揃っているはずの時刻（JST）。取り込みは 18:00 まで待つ
+#: （update-data.yml の wait_for_data --deadline 18:00）
+READY_JST = dt.time(18, 0)
 
 
 def last_bar_date(data_dir: str) -> Optional[dt.date]:
@@ -85,6 +113,53 @@ def last_bar_date(data_dir: str) -> Optional[dt.date]:
     if not len(d):
         return None
     return pd.Timestamp(pd.to_datetime(d["Date"]).max()).date()
+
+
+def published_as_of(path: str = PRED_PATH) -> Optional[dt.date]:
+    """公開済みの予測がどの日まで予測しているか。読めなければ None。"""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            v = json.load(fh).get("asOf")
+        return dt.date.fromisoformat(str(v)[:10]) if v else None
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+
+
+def expected_bar_date(cal, now_jst: dt.datetime) -> Optional[dt.date]:
+    """
+    この時刻に保存データに揃っているはずの最新の日足の日。分からなければ None。
+
+    営業日の 18:00 JST 以降ならその日、それより前（未明を含む）や休場日なら
+    直前の営業日。
+    """
+    if cal is None or not cal:
+        return None
+    today = now_jst.date()
+    if not cal.covers(today):
+        return None
+    if cal.is_trading_day(today) and now_jst.time() >= READY_JST:
+        return today
+    return cal.last_trading_day(today - dt.timedelta(days=1))
+
+
+def decide_new_data(last_bar: Optional[dt.date], as_of: Optional[dt.date],
+                    expected: Optional[dt.date]
+                    ) -> Optional[Tuple[bool, str, bool, str]]:
+    """
+    (進むか, 理由, 日足が欠けているか, その理由)。判断できなければ None。
+
+    **壁時計の日付では決めない。** 未予測の日足があるかだけで決める。
+    """
+    if last_bar is None or as_of is None:
+        return None
+    stale = expected is not None and last_bar < expected
+    stale_why = (f"{expected} の日足が保存データに無い（最終バー {last_bar}）。"
+                 "取り込みを疑う" if stale else "")
+    if last_bar > as_of:
+        return True, f"未予測の日足がある（最終バー {last_bar} > 予測済み {as_of}）", \
+            stale, stale_why
+    return False, (f"新しい日足が無い（最終バー {last_bar} は予測済み {as_of}）。"
+                   "予測済みの日を予測し直さない"), stale, stale_why
 
 
 def decide_by_calendar(cal, last_bar: Optional[dt.date], today: dt.date
@@ -171,29 +246,45 @@ def main(argv=None) -> int:
         description="非営業日なら日次予測を飛ばす（判断できなければ進む）")
     ap.add_argument("--data-dir", default=DATA_DIR)
     ap.add_argument("--stale-hours", type=int, default=STALE_HOURS)
+    ap.add_argument("--predictions", default=PRED_PATH,
+                    help="公開済みの予測（asOf を読む）")
     args = ap.parse_args(argv)
 
     run, why = True, "判定できなかったので通常どおり進む"
+    stale, stale_why = False, ""
+    force = os.environ.get("FORCE_PREDICT", "").strip().lower() in ("1", "true", "yes")
     try:
         path = os.path.join(args.data_dir, "manifest.json")
         manifest = {}
         if os.path.exists(path):
             with open(path, encoding="utf-8") as fh:
                 manifest = json.load(fh)
-        run, why = decide(manifest, last_bar_date(args.data_dir),
-                          dt.datetime.now(dt.timezone.utc), args.stale_hours,
-                          cal=trading_calendar.load(args.data_dir))
+        now = dt.datetime.now(dt.timezone.utc)
+        cal = trading_calendar.load(args.data_dir)
+        last_bar = last_bar_date(args.data_dir)
+        nd = None
+        if force:
+            print("[gate] FORCE_PREDICT が指定されたので、予測済みの日でも予測し直す")
+        else:
+            nd = decide_new_data(last_bar, published_as_of(args.predictions),
+                                 expected_bar_date(cal, now.astimezone(JST)))
+        if nd is not None:
+            run, why, stale, stale_why = nd
+        else:
+            run, why = decide(manifest, last_bar, now, args.stale_hours, cal=cal)
     except Exception as exc:                      # noqa: BLE001
         # 判断できない理由が何であれ、止めずに通常どおり進む。
         # ここを失敗にすると、連休対応のための部品が新しい障害になる
         print(f"[warn] 判定に失敗したので通常どおり進む: "
               f"{type(exc).__name__}: {str(exc)[:160]}", file=sys.stderr)
 
+    if stale:
+        print(f"[gate] 日足が欠けている — {stale_why}")
     if run:
         print(f"[gate] 予測を実行する — {why}")
     else:
         print(f"[gate] 予測を飛ばす — {why}")
-        print("       休場日なので新しい候補は出ない。画面は前営業日のまま。")
+        print("       新しい日足が無いので新しい候補は出ない。画面は予測済みの日のまま。")
 
     out = os.environ.get("GITHUB_OUTPUT")
     if out:
@@ -203,6 +294,9 @@ def main(argv=None) -> int:
         with open(out, "a", encoding="utf-8") as fh:
             fh.write(f"run={'true' if run else 'false'}\n")
             fh.write(f"reason={safe}\n")
+            fh.write(f"stale={'true' if stale else 'false'}\n")
+            fh.write("stale_reason=" + " ".join(str(stale_why).split()).replace('"', "'")
+                     + "\n")
     return 0
 
 

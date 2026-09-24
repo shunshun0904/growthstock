@@ -97,6 +97,25 @@ class Calendar:
         return max(past) if past else None
 
 
+def elapsed_days(start: dt.date, end: dt.date, cal: Optional[Calendar] = None) -> int:
+    """
+    start（その日を含む）から end（含まない）までの営業日の数。
+
+    カレンダーが両端を覆っていれば取引所の営業日で数え、覆っていなければ
+    平日で数える（np.busday_count と同じ半開区間）。予測からの経過日数に使う。
+    平日で数えると祝日も1日に数えてしまい、2026-09-21〜23 の連休が
+    「3営業日経過」になっていた。
+    """
+    if cal is not None and cal:
+        n = cal.count_between(start, end)
+        if n is not None:
+            return n
+    if end <= start:
+        return 0
+    return sum(1 for i in range((end - start).days)
+               if (start + dt.timedelta(days=i)).weekday() < 5)
+
+
 def parse_rows(rows: Iterable[dict]) -> List[dt.date]:
     """API の応答（または保存した行）から営業日だけを取り出す。"""
     out = []

@@ -1410,9 +1410,6 @@ class TestOutcomeVsSize(unittest.TestCase):
 
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
-
 
 class 本番のプリセット(unittest.TestCase):
     """本番で使う特徴量セットとパラメータの組み合わせを固定する。
@@ -1577,3 +1574,7 @@ class 探索と学習の列を突き合わせる(unittest.TestCase):
         self.assertIn("列が違います", out["cat"])
         self.assertIn("分からない", out["mlp"])
         self.assertIn("ありません", out["logit"])
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

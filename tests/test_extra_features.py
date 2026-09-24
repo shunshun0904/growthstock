@@ -222,9 +222,6 @@ class TestGroups(unittest.TestCase):
                 seen[c] = g
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
-
 
 class TestForecastRevisions(unittest.TestCase):
     """
@@ -414,3 +411,7 @@ class APIのROEは小数で来る(unittest.TestCase):
                              "gap が -ROE_q0 になっている（単位がずれている）")
         finally:
             shutil.rmtree(tmp)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

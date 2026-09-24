@@ -39,6 +39,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_dataset as B  # noqa: E402
 import feature_dict as FD  # noqa: E402
 import features as F  # noqa: E402
+import trading_calendar as TC  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(HERE, "_data")
@@ -480,13 +481,22 @@ def update_history(args, rows: List[Dict], days) -> None:
     hist = {"entries": []}
     if os.path.exists(path):
         try:
-            hist = json.load(open(path, encoding="utf-8"))
+            with open(path, encoding="utf-8") as fh:
+                hist = json.load(fh)
         except Exception as e:
             print(f"[warn] 追跡ファイルを読めないので作り直す: {e}")
 
     latest = pd.Timestamp(days[-1]).date().isoformat()
     existing = {(e["date"], e["jqCode"]) for e in hist.get("entries", [])}
+    # **記録は日付ごとに、最初の予測で凍結する。** 同じ日を後から予測し直すと
+    # （別のモデルで）上位が入れ替わり、当時は選んでいない銘柄が記録に混ざる。
+    # 2026-09-23・24 に2回起きた（9/18 に 日本ナレッジ が入った）。その日の
+    # 記録が1件でもあれば足さない。追跡列（現在値など）の更新は続ける
+    recorded = {e["date"] for e in hist.get("entries", [])}
     added = 0
+    if latest in recorded:
+        print(f"[history] {latest} は記録済み。最初の予測のまま凍結する（追加しない）")
+        rows = []
     for x in rows:
         if x["date"] != latest or x["rankInDay"] > HISTORY_TOP:
             continue
@@ -509,14 +519,16 @@ def update_history(args, rows: List[Dict], days) -> None:
         bars["Date"] = pd.to_datetime(bars["Date"])
         last = bars.sort_values("Date").groupby("Code")["C"].last()
         asof = bars["Date"].max()
+        cal = TC.load(args.data_dir)
         for e in hist["entries"]:
             cur = last.get(e["jqCode"])
             if cur is None or not np.isfinite(cur) or not e.get("closeAtPick"):
                 continue
             e["closeNow"] = round(float(cur), 1)
             e["returnPct"] = round(float(cur) / e["closeAtPick"] * 100 - 100, 2)
-            e["daysElapsed"] = int(np.busday_count(
-                np.datetime64(e["date"]), np.datetime64(asof.date())))
+            # 平日ではなく取引所の営業日で数える（祝日を経過日に数えない）
+            e["daysElapsed"] = TC.elapsed_days(
+                pd.Timestamp(e["date"]).date(), asof.date(), cal)
         hist["asOf"] = str(asof.date())
 
     # 古すぎる分は落とす（参照ホライズンを大きく超えたら追跡の意味が薄い）

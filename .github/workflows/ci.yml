@@ -30,18 +30,19 @@ jobs:
       # research/ 配下は pandas / scikit-learn が要る。
       # ここを回していなかったため、特徴量の列がデータセットから
       # 黙って落ちる不具合を実際の学習実行まで検出できなかった。
-      - name: 研究コードの単体テスト
+      # tests/ の**全部**を回す（2026-09-24 から）。
+      #
+      # それまでは回すファイルをここに1本ずつ書いていて、14本のうち6本しか
+      # 回っていなかった（営業日ゲート・特徴量・損切りのテストは CI で一度も
+      # 走っていない）。さらに4本はファイルの途中で unittest.main() を呼んで
+      # いたため、スクリプトとして実行すると後ろのクラスが黙って飛ばされ、
+      # test_model.py は 120本中106本しか走っていなかった。
+      # discover はファイル単位で読み込むので、どちらの取りこぼしも起きない。
+      # 新しいテストを足しても、ここを書き換える必要は無い。
+      - name: 研究コードの単体テスト（tests/ の全部）
         run: |
           pip install -r research/requirements.txt
-          python3 tests/test_dataset.py
-          python3 tests/test_model.py
-          python3 tests/test_data_store.py
-          # 台帳（スプレッドシート）は利用者の手入力と同居する。
-          # 列が増えたときに既存セルがずれないことを回帰で押さえる
-          python3 tests/test_sheets.py
-          # 実運用の追跡（research/live_track.py）。規則の値が画面
-          # （src/lib/strategy.js）とずれたら、ここで落ちる
-          python3 tests/test_live_track.py
+          python3 -m unittest discover -s tests -p "test_*.py"
 
       - name: ビルド
         run: npm run build
