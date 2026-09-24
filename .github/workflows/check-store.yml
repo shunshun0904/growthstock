@@ -1,0 +1,68 @@
+name: Check Data Store
+
+# 保存データ（Release の data-raw）が API の応答を落としていないかを、毎週、
+# 種別ごとに数日ぶんを叩き直して確かめる（research/check_store_completeness.py）。
+# 2026-09-24 に、取り込みが同じ日・同じ銘柄の行を1行に潰していたのが見つかった。
+# EDA が保存データを数えていたので気づけなかった。API の応答を正として数える。
+on:
+  schedule:
+    # 土曜 10:05 JST（= 01:05 UTC）。取り込み（平日）と学習（日曜）のどちらとも重ならない
+    - cron: '5 1 * * 6'
+  workflow_dispatch:
+    inputs:
+      days:
+        description: '種別ごとに叩き直す日数'
+        required: false
+        default: '5'
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r research/requirements.txt
+
+      # 株価の年別ファイルは大きいので、確かめる種別とカレンダーだけ落とす
+      - name: Download stored data
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p research/_data
+          KINDS=$(python3 -c "import sys;sys.path.insert(0,'research');sys.path.insert(0,'scripts');import check_store_completeness as C;print(' '.join(C.KINDS))")
+          gh release download data-raw --dir research/_data --clobber --pattern 'calendar.parquet'
+          for k in $KINDS; do
+            y1=$(date -u +%Y); y0=$((y1 - 1)); y2=$((y1 - 2))
+            for y in $y2 $y0 $y1; do
+              gh release download data-raw --dir research/_data --clobber \
+                --pattern "${k}_${y}.parquet" 2>/dev/null || true
+            done
+          done
+          ls research/_data | wc -l
+
+      - name: Check
+        env:
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+          DAYS: ${{ inputs.days || '5' }}
+        run: |
+          [[ "$DAYS" =~ ^[0-9]{1,2}$ ]] || { echo "日数が不正: $DAYS"; exit 1; }
+          python3 research/check_store_completeness.py --days "$DAYS" 2>&1 | tee check.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Summary
+        if: always()
+        run: |
+          { echo '## 保存データと API の応答の行数'; echo '```'
+            cat check.log 2>/dev/null || echo '(出力なし)'
+            echo '```'; } >> "$GITHUB_STEP_SUMMARY"
