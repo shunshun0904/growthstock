@@ -22,7 +22,6 @@
 
 from __future__ import annotations
 
-import datetime as dt
 from typing import Dict, Optional, Sequence, Tuple
 
 import numpy as np
@@ -37,6 +36,12 @@ MARGIN_PUBLISH_BD = 2
 #: 投資部門別（/equities/investor-types）の「使ってよい日」の列。
 #: 集計期間の末日（EnDate）ではない。実測で EnDate の 6暦日後（木曜）が中心
 INVESTOR_DATE_COL = "PubDate"
+
+#: 空売り残高報告（/markets/short-sale-report）を公表日（DiscDate）の**当日**から
+#: 使うか。当日の夜の取り込みに間に合うかは research/probe_update_time.py の
+#: shortsale で測る（2026-09-24 に測定開始）。測るまでは翌営業日から使う
+#: （間に合わないのに当日から使うと、学習だけが1日早い値を見る）
+SHORTSALE_SAME_DAY = False
 
 #: 修正の前後を比べる実験（research/exp/e43_pit_fix.py）のためだけのスイッチ。
 #: True にすると 2026-09-24 以前の結合（信用残は基準日、投資部門別は集計期間の
@@ -61,6 +66,8 @@ RULES: Dict[str, Tuple[str, str]] = {
     "lvshld":      ("SubDate（提出日）", "要確認: J-Quants に載る時刻を probe で測る"),
     "mjrshld":     ("SubDate（提出日）", "要確認: 同上"),
     "xhold":       ("SubDate（提出日）", "要確認: 同上"),
+    "shortsale":   ("DiscDate（公表日）の翌営業日",
+                    "当日の夜に間に合うかを probe で測るまでは翌営業日（SHORTSALE_SAME_DAY）"),
 }
 
 
@@ -123,3 +130,34 @@ def investor_available(d: pd.DataFrame) -> pd.Series:
         fallback = pd.to_datetime(d["EnDate"], errors="coerce") + pd.Timedelta(days=6)
         pub = pub.fillna(fallback)
     return pub
+
+
+def next_trading_day(dates: pd.Series, days: Optional[Sequence]) -> pd.Series:
+    """
+    その日より**後**の最初の営業日（当日は含まない）。
+
+    営業日は取引所カレンダー（days）で数える。カレンダーが覆っていない日は
+    平日で数える。
+    """
+    a = pd.to_datetime(dates, errors="coerce").dt.normalize()
+    cal = _trading_days(days)
+    out = pd.Series(pd.NaT, index=a.index, dtype="datetime64[ns]")
+    ok = a.notna().to_numpy()
+    d = a.to_numpy(dtype="datetime64[D]")
+    if len(cal):
+        i = np.searchsorted(cal, d, side="right")
+        inside = ok & (d >= cal[0]) & (i < len(cal))
+        out[inside] = pd.to_datetime(cal[i[inside]])
+    else:
+        inside = np.zeros(len(a), dtype=bool)
+    rest = ok & ~inside
+    if rest.any():
+        out[rest] = pd.to_datetime(np.busday_offset(d[rest], 1, roll="forward"))
+    return out
+
+
+def shortsale_available(disc: pd.Series, days: Optional[Sequence]) -> pd.Series:
+    """空売り残高報告の各行を、予測に使ってよい日（SHORTSALE_SAME_DAY を見る）。"""
+    if SHORTSALE_SAME_DAY:
+        return pd.to_datetime(disc, errors="coerce").dt.normalize()
+    return next_trading_day(disc, days)

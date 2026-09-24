@@ -190,7 +190,7 @@ class TestResilience(unittest.TestCase):
     def test_期待する列は_features_pyが正本(self):
         import features as _F
         mine = ("fwd", "holders_lvs", "holders_major", "holders_cross",
-                "margin_alert", "earn_ahead", "flow")
+                "margin_alert", "earn_ahead", "flow", "flow_mkt", "short_pos")
         want = [c for g in mine for c in _F.GROUPS[g]]
         self.assertEqual(EF.expected_columns(), want)
 

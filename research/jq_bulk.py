@@ -101,6 +101,16 @@ DAILY_KINDS = {
     # （範囲内 PubDate 100% / SchDate 0%）。SchDate で記録すると
     # 取得済みの管理がずれるうえ、**未来の情報で学習する**ことになる。
     "earndate":    ("/fins/earnings-date", "PubDate", "決算発表予定日"),
+    # 0.5% 以上の空売りの持ち高（報告者ごと）。1日300〜900行、2016-10 から。
+    # 引数は disc_date（公表日）。date は HTTP 400（実測 2026-09-24、
+    # research/probe_shortsale.py）。同じ日・同じ銘柄に報告者が何人もいるので、
+    # 行のキーは data_store.ROW_KEYS で全列にしてある
+    "shortsale":   ("/markets/short-sale-report", "DiscDate", "空売り残高報告"),
+}
+
+#: 日付の引数名が date でない種別。書いていない種別は date
+DAY_PARAM = {
+    "shortsale": "disc_date",
 }
 
 #: 日付を指定せず一度に全部返る種別 -> (パス, 日付列, 表示名)
@@ -186,8 +196,9 @@ def _fetch_by_day(
     columns: List[str],
     label: str,
     progress_every: int = 50,
+    param: str = "date",
 ) -> pd.DataFrame:
-    """日付を1日ずつ指定して全銘柄ぶんを集める。"""
+    """日付を1日ずつ指定して全銘柄ぶんを集める。param は日付の引数名。"""
     global LAST_FAILED_DAYS
     frames: List[pd.DataFrame] = []
     days = list(days)
@@ -198,7 +209,7 @@ def _fetch_by_day(
 
     for i, d in enumerate(days, 1):
         try:
-            rows = client.get_paginated(path, {"date": d.isoformat()})
+            rows = client.get_paginated(path, {param: d.isoformat()})
         except JQuantsError as exc:
             failed.append(f"{d}: {str(exc)[:120]}")
             LAST_FAILED_DAYS.append(d)
@@ -710,7 +721,8 @@ def _run_incremental(client: JQuantsClient, days: List[dt.date],
             df = _numify(df, ["LongVol", "ShrtVol"])
         elif name in DAILY_KINDS:
             path_, _, _ = DAILY_KINDS[name]
-            df = _sanitize(_fetch_by_day(client, path_, todo, None, name), name)
+            df = _sanitize(_fetch_by_day(client, path_, todo, None, name,
+                                         param=DAY_PARAM.get(name, "date")), name)
         else:
             raise SystemExit(f"日付ループで扱えない種別です: {name}")
 

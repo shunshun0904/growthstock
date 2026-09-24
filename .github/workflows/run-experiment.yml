@@ -20,6 +20,10 @@ on:
         description: 'スクリプトに渡す引数（省略可）'
         required: false
         default: ''
+      snapshot:
+        description: '生データの写しのタグ（Snapshot Raw Data で作ったもの。省略可）。research/_data/snapshot/<タグ>/ に置く'
+        required: false
+        default: ''
 
 defaults:
   run:
@@ -75,6 +79,19 @@ jobs:
           gh release download data-raw --dir research/_data --clobber
           ls -lh research/_data | tail -5
           echo "ファイル数: $(ls research/_data | wc -l)"
+
+      - name: Download snapshot
+        if: inputs.snapshot != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SNAP: ${{ inputs.snapshot }}
+        run: |
+          if ! [[ "$SNAP" =~ ^[a-z0-9][a-z0-9-]{2,60}$ ]] || [ "$SNAP" = "data-raw" ]; then
+            echo "タグ名が不正: $SNAP"; exit 1
+          fi
+          mkdir -p "research/_data/snapshot/$SNAP"
+          gh release download "$SNAP" --dir "research/_data/snapshot/$SNAP" --clobber
+          ls -lh "research/_data/snapshot/$SNAP"
 
       # 探索の途中結果を次の実行に引き継ぐ。
       # 上限に当たっても Optuna の study が残っていれば、次は残りの試行

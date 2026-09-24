@@ -126,10 +126,106 @@ class TestMergeIntoYears(unittest.TestCase):
 
     def test_custom_date_column(self):
         """財務は DiscDate（開示日）で年を分ける。"""
-        df = pd.DataFrame([("2024-05-10", "00010", 1)], columns=["DiscDate", "Code", "Sales"])
+        df = pd.DataFrame([("2024-05-10", "00010", 1, 1)],
+                          columns=["DiscDate", "Code", "DiscNo", "Sales"])
         written = data_store.merge_into_years(self.dir, "fins", df, date_col="DiscDate")
         self.assertEqual(len(written), 1)
         self.assertIn("fins_2024", written[0])
+
+
+class TestRowKeys(unittest.TestCase):
+    """
+    同じ日に同じ銘柄の行が複数あるデータを1行に潰さない（2026-09-24 に直した）。
+
+    直す前は全種別を (日付列, Code) で重複除去していて、実測で業種別の空売り比率の
+    97%（1日34行 -> 1行）、大量保有報告書の15%、大株主の8%、決算発表予定の6%、
+    決算の3% を捨てていた（research/probe_dedupe_keys.py）。
+    """
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def read(self, kind, year):
+        return pd.read_parquet(data_store.year_path(self.dir, kind, year))
+
+    def test_sector_rows_of_one_day_are_all_kept(self):
+        """業種別の空売り比率は銘柄の列が無い。日付だけで潰すと1日1行になる。"""
+        df = pd.DataFrame({"Date": ["2026-09-18"] * 3, "S33": ["0050", "3050", "9999"],
+                           "SellExShortVa": [1.0, 2.0, 3.0]})
+        data_store.merge_into_years(self.dir, "shortratio", df, "Date")
+        self.assertEqual(len(self.read("shortratio", 2026)), 3)
+
+    def test_two_filings_same_day_same_code_are_both_kept(self):
+        """大量保有報告書: 同じ日・同じ銘柄に提出者が2人。"""
+        df = pd.DataFrame({"DocId": ["S1", "S2"], "Code": ["72030", "72030"],
+                           "SubDate": ["2026-02-13", "2026-02-13"],
+                           "TotalShsRatio": [0.05, 0.07]})
+        data_store.merge_into_years(self.dir, "lvshld", df, "SubDate")
+        self.assertEqual(len(self.read("lvshld", 2026)), 2)
+
+    def test_same_day_disclosures_are_both_kept(self):
+        """決算: 同じ日・同じ銘柄に決算短信と業績予想の修正。"""
+        df = pd.DataFrame({"DiscNo": [1, 2], "Code": ["72030", "72030"],
+                           "DiscDate": ["2024-05-14", "2024-05-14"],
+                           "DocType": ["FY", "EarnForecastRevision"]})
+        data_store.merge_into_years(self.dir, "fins", df, "DiscDate")
+        self.assertEqual(len(self.read("fins", 2024)), 2)
+
+    def test_short_sale_reports_keep_every_distinct_row(self):
+        """空売り残高報告は ID が無い。同じ報告者・同じ計算日でも比率が違えば別の行。"""
+        df = pd.DataFrame({"DiscDate": ["2019-06-27"] * 3, "CalcDate": ["2019-06-25"] * 3,
+                           "Code": ["72030"] * 3, "SSName": ["A", "A", "B"],
+                           "ShrtPosToSO": [0.0052, 0.0061, 0.0052]})
+        data_store.merge_into_years(self.dir, "shortsale", df, "DiscDate")
+        self.assertEqual(len(self.read("shortsale", 2019)), 3)
+        # 同じ日を取り直しても増えない（まったく同じ行は1行）
+        data_store.merge_into_years(self.dir, "shortsale", df, "DiscDate")
+        self.assertEqual(len(self.read("shortsale", 2019)), 3)
+
+    def test_refetch_replaces_by_key(self):
+        """取り直すと同じキーの行は後勝ち（訂正を反映）で、行は増えない。"""
+        a = pd.DataFrame({"DocId": ["S1", "S2"], "Code": ["72030"] * 2,
+                          "SubDate": ["2026-02-13"] * 2, "TotalShsRatio": [0.05, 0.07]})
+        b = a.assign(TotalShsRatio=[0.05, 0.08])
+        data_store.merge_into_years(self.dir, "lvshld", a, "SubDate")
+        data_store.merge_into_years(self.dir, "lvshld", b, "SubDate")
+        got = self.read("lvshld", 2026).set_index("DocId")["TotalShsRatio"]
+        self.assertEqual(len(got), 2)
+        self.assertAlmostEqual(float(got["S2"]), 0.08)
+
+    def test_nested_columns_are_compared_by_content(self):
+        """大株主の一覧（入れ子の列）があっても重複の判定ができる。"""
+        df = pd.DataFrame({"DocId": ["S1"], "Code": ["72030"], "SubDate": ["2025-06-27"],
+                           "Hldrs": [[{"HldrName": "x", "ShsRatio": 0.1}]]})
+        data_store.merge_into_years(self.dir, "mjrshld", df, "SubDate")
+        data_store.merge_into_years(self.dir, "mjrshld", df, "SubDate")
+        self.assertEqual(len(self.read("mjrshld", 2025)), 1)
+
+    def test_a_key_that_would_collapse_rows_refuses_to_save(self):
+        """今回取った行の中でキーが重なり、中身が違う = キーの決め方が誤り。保存しない。"""
+        df = pd.DataFrame({"Date": ["2024-01-04", "2024-01-04"], "Code": ["00010"] * 2,
+                           "C": [100, 999]})
+        with self.assertRaises(ValueError):
+            data_store.merge_into_years(self.dir, "bars", df, "Date")
+        self.assertFalse(os.path.exists(data_store.year_path(self.dir, "bars", 2024)))
+
+    def test_identical_rows_in_one_batch_are_merged(self):
+        df = pd.DataFrame({"Date": ["2024-01-04"] * 2, "Code": ["00010"] * 2, "C": [100, 100]})
+        data_store.merge_into_years(self.dir, "bars", df, "Date")
+        self.assertEqual(len(self.read("bars", 2024)), 1)
+
+    def test_unregistered_kind_is_not_saved(self):
+        df = pd.DataFrame({"Date": ["2024-01-04"], "Code": ["00010"]})
+        with self.assertRaises(KeyError):
+            data_store.merge_into_years(self.dir, "新しい種別", df, "Date")
+
+    def test_every_kind_the_ingestion_writes_has_a_key(self):
+        import jq_bulk as J
+        kinds = {"bars", "fins", "margin", "topix", "indices", "master_hist"} | set(J.DAILY_KINDS)
+        self.assertEqual(sorted(kinds - set(data_store.ROW_KEYS)), [])
 
 
 class TestResetKind(unittest.TestCase):

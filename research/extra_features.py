@@ -454,7 +454,14 @@ def earnings_ahead(samples: pd.DataFrame, data_dir: str = DATA_DIR,
 # --------------------------------------------------------------------------- #
 
 def short_ratio(samples: pd.DataFrame, data_dir: str = DATA_DIR) -> pd.DataFrame:
-    """市場全体の空売り比率（実測では S33=9999 の1系列だけ）。"""
+    """
+    S33=9999（「その他」業種）の空売り比率。**市場全体ではない。**
+
+    以前は「市場全体（実測では S33=9999 の1系列だけ）」と書いていたが、その実測は
+    取り込みが1日34行を1行に潰した後の保存データで行っていた（2026-09-24 に判明。
+    9999 の行はほかの33行の合計の 4〜22%）。本番の205列に入っているので、意味を
+    黙って変えないよう計算はそのまま残す。市場全体は short_ratio_market。
+    """
     d = _read("shortratio", data_dir)
     out = pd.DataFrame(index=samples.index)
     need = {"Date", "SellExShortVa", "ShrtWithResVa", "ShrtNoResVa"}
@@ -476,6 +483,159 @@ def short_ratio(samples: pd.DataFrame, data_dir: str = DATA_DIR) -> pd.DataFrame
     m = _asof(samples[["Code", "Date"]], keep, "SrDate", by_code=False)
     for c in ("short_ratio", "short_ratio_20"):
         out[c] = _num(m[c]).to_numpy()
+    return out
+
+
+def short_ratio_market(samples: pd.DataFrame, data_dir: str = DATA_DIR) -> pd.DataFrame:
+    """
+    **市場全体**の空売り比率（33業種と S33=9999 の全行の合計から作る）。
+
+    上の short_ratio は S33=9999 の1行だけを使っている。9999 は全業種の合計では
+    なく「その他」で、実測（2026-09-24、research/probe_dedupe_keys.py）では
+    ほかの33行の合計の 4〜22% しかない。取り込みが1日34行を1行に潰していた
+    ために、残った 9999 の行を市場全体と取り違えていた。本番の列の意味を
+    黙って変えないよう、あちらはそのまま残し、こちらを候補として別に測る。
+    """
+    d = _read("shortratio", data_dir)
+    out = pd.DataFrame(index=samples.index)
+    need = {"Date", "S33", "SellExShortVa", "ShrtWithResVa", "ShrtNoResVa"}
+    if not len(d) or not need <= set(d.columns):
+        return out
+    d = d.copy()
+    d["Date"] = pd.to_datetime(d["Date"], errors="coerce")
+    d = d.dropna(subset=["Date"])
+    # 業種が揃っていない日（取り込みが潰していた日の名残り）は使わない
+    n = d.groupby("Date")["S33"].nunique()
+    full = n[n >= SHORT_RATIO_MIN_SECTORS].index
+    d = d[d["Date"].isin(full)]
+    if not len(d):
+        return out
+    g = d.groupby("Date")[["SellExShortVa", "ShrtWithResVa", "ShrtNoResVa"]].sum(min_count=1)
+    tot = g.sum(axis=1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        r = np.where(tot > 0, (g["ShrtWithResVa"] + g["ShrtNoResVa"]) / tot * 100.0, np.nan)
+    keep = pd.DataFrame({"SrmDate": g.index, "short_ratio_mkt": r}).sort_values("SrmDate")
+    keep["short_ratio_mkt_20"] = (keep["short_ratio_mkt"]
+                                  - keep["short_ratio_mkt"].rolling(20).mean())
+    m = _asof(samples[["Code", "Date"]], keep, "SrmDate", by_code=False)
+    for c in ("short_ratio_mkt", "short_ratio_mkt_20"):
+        out[c] = _num(m[c]).to_numpy()
+    return out
+
+
+#: 1日ぶんの業種別の空売り比率が揃っているとみなす業種の数（実測は 9999 を含めて34）
+SHORT_RATIO_MIN_SECTORS = 34
+
+
+# --------------------------------------------------------------------------- #
+# 9. 空売り残高報告（/markets/short-sale-report。銘柄×報告者）
+# --------------------------------------------------------------------------- #
+
+#: ShrtPosToSO は**割合**（0.008 = 0.8%）。実測（2026-09-24、8日ぶん）で中央 0.008、
+#: 10% 点 0.005、最大 0.10。%に直して持つ
+SS_TO_PCT = 100.0
+#: 公表の対象になる持ち高の下限（%）。これを下回った報告は「持ち高を閉じた」とみなす
+SS_THRESHOLD_PCT = 0.5
+#: 最後の報告からこれより古い持ち高は数えない（暦日）。報告が止まったまま残る
+#: 持ち高を、いつまでも数えないため。結果を見る前に決めた
+SS_LOOKBACK_DAYS = 365
+#: 前との比較の間隔（暦日。約20営業日）
+SS_CHG_DAYS = 28
+#: 最後の報告からの日数の上限（暦日）
+SS_DAYS_CLIP = 730
+#: 報告者を見分ける列。住所（SSAddr）は入れない（移転で同じ報告者が2人になる）
+SS_REPORTER = ("SSName", "FundName", "DICName")
+
+
+def _ss_reports(data_dir: str, days) -> pd.DataFrame:
+    """報告1件ごとに (Code, 使ってよい日, 報告者, 比率%)。"""
+    d = _read("shortsale", data_dir)
+    need = {"Code", "DiscDate", "ShrtPosToSO", "SSName"}
+    if not len(d) or not need <= set(d.columns):
+        return pd.DataFrame()
+    d = d.copy()
+    d["Code"] = d["Code"].astype(str)
+    d["avail"] = AV.shortsale_available(d["DiscDate"], days)
+    d["calc"] = pd.to_datetime(d["CalcDate"], errors="coerce") if "CalcDate" in d.columns \
+        else pd.NaT
+    d["ratio"] = _num(d["ShrtPosToSO"]) * SS_TO_PCT
+    rep = [c for c in SS_REPORTER if c in d.columns]
+    key = d[rep[0]].astype("string").fillna("")
+    for c in rep[1:]:
+        key = key + "|" + d[c].astype("string").fillna("")
+    d["rep"] = key
+    d = d.dropna(subset=["avail", "ratio"])
+    return d[["Code", "avail", "calc", "rep", "ratio"]].reset_index(drop=True)
+
+
+def _ss_timeline(rep: pd.DataFrame) -> pd.DataFrame:
+    """
+    銘柄ごとに、持ち高の合計（%）と報告者の数が変わる時点の表。
+
+    報告者ごとの報告を「使ってよい日」の順に並べ、各報告が効くのは
+    [使ってよい日, 次の報告の使ってよい日 と 使ってよい日+SS_LOOKBACK_DAYS の早いほう)。
+    下限を下回った報告は 0 として効く（閉じた持ち高）。区間の始まりに +、
+    終わりに − を置いて累積すると、各時点の合計になる。
+    """
+    r = rep.sort_values(["Code", "rep", "avail", "calc", "ratio"], kind="stable").copy()
+    nxt = r.groupby(["Code", "rep"], sort=False)["avail"].shift(-1)
+    exp = r["avail"] + pd.Timedelta(days=SS_LOOKBACK_DAYS)
+    r["end"] = nxt.where(nxt < exp, exp)
+    live = r["ratio"] >= SS_THRESHOLD_PCT
+    r["v"] = np.where(live, r["ratio"], 0.0)
+    r["c"] = live.astype(float)
+    ev = pd.concat([
+        pd.DataFrame({"Code": r["Code"], "t": r["avail"], "v": r["v"], "c": r["c"]}),
+        pd.DataFrame({"Code": r["Code"], "t": r["end"], "v": -r["v"], "c": -r["c"]}),
+    ], ignore_index=True)
+    ev = ev.groupby(["Code", "t"], as_index=False)[["v", "c"]].sum().sort_values(["Code", "t"])
+    ev["ss_ratio"] = ev.groupby("Code")["v"].cumsum()
+    ev["ss_n"] = ev.groupby("Code")["c"].cumsum()
+    # 足し引きの丸め誤差で 0 がわずかに負になるのを戻す
+    ev["ss_ratio"] = ev["ss_ratio"].where(ev["ss_ratio"].abs() > 1e-9, 0.0)
+    ev["ss_n"] = ev["ss_n"].round()
+    return ev[["Code", "t", "ss_ratio", "ss_n"]]
+
+
+def short_positions(samples: pd.DataFrame, data_dir: str = DATA_DIR) -> pd.DataFrame:
+    """
+    空売り残高報告から、その日に公表済みの大口の空売りの持ち高。
+
+      ss_ratio    報告者ごとの最新の持ち高（0.5% 以上）の合計（発行済みに対する%）
+      ss_n        その報告者の数
+      ss_chg_20   ss_ratio の約20営業日（28暦日）前との差
+      ss_days     どの報告者でも、最後の報告が使えるようになってからの暦日数
+                  （報告が一度も無い銘柄は欠測）
+
+    報告が無い銘柄の ss_ratio / ss_n は 0（公表の対象になる持ち高が無い）。
+    データは 2016-10 から、データセットは 2018-04 からなので、365日さかのぼる
+    持ち高は全期間で数えられる。報告は公表日（DiscDate）の**翌営業日**から使う
+    （当日の夜に間に合うか測るまで。availability.SHORTSALE_SAME_DAY）。
+    """
+    import trading_calendar as TC
+
+    out = pd.DataFrame(index=samples.index)
+    try:
+        days = TC.load(data_dir).days
+    except Exception:                                        # noqa: BLE001
+        days = None
+    rep = _ss_reports(data_dir, days)
+    if not len(rep):
+        return out
+    tl = _ss_timeline(rep)
+    left = samples[["Code", "Date"]].copy()
+    left["Code"] = left["Code"].astype(str)
+    left["Date"] = pd.to_datetime(left["Date"])
+    now = _asof(left, tl, "t")
+    before = _asof(left.assign(Date=left["Date"] - pd.Timedelta(days=SS_CHG_DAYS)), tl, "t")
+    ratio = _num(now["ss_ratio"]).fillna(0.0).to_numpy()
+    out["ss_ratio"] = ratio
+    out["ss_n"] = _num(now["ss_n"]).fillna(0.0).to_numpy()
+    out["ss_chg_20"] = ratio - _num(before["ss_ratio"]).fillna(0.0).to_numpy()
+    last = rep.groupby(["Code", "avail"], as_index=False).size()[["Code", "avail"]]
+    m = _asof(left, last.rename(columns={"avail": "SsDate"}), "SsDate")
+    gap = (pd.to_datetime(m["Date"]) - m["SsDate"]).dt.days.to_numpy(dtype=float)
+    out["ss_days"] = np.clip(gap, 0, SS_DAYS_CLIP)
     return out
 
 
@@ -540,6 +700,9 @@ BUILDERS = [
     ("earndate", earnings_ahead),
     ("shortratio", short_ratio),
     ("investor", investor_types),
+    # 2026-09-24 に足した候補（本番の205列には入れていない。実験44で測る）
+    ("shortratio_mkt", short_ratio_market),
+    ("shortsale", short_positions),
 ]
 
 
@@ -554,7 +717,7 @@ def expected_columns() -> List[str]:
     """
     import features as _F
     mine = ("fwd", "holders_lvs", "holders_major", "holders_cross",
-            "margin_alert", "earn_ahead", "flow")
+            "margin_alert", "earn_ahead", "flow", "flow_mkt", "short_pos")
     return [c for g in mine for c in _F.GROUPS.get(g, ())]
 
 

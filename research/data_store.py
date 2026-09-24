@@ -191,12 +191,72 @@ def year_path(data_dir: str, kind: str, year: int) -> str:
     return os.path.join(data_dir, f"{kind}_{year}.parquet")
 
 
+#: 年別ファイルにマージするとき「同じ行」とみなすキー（種別ごと）。
+#:
+#: 2026-09-24 まで全種別で (日付列, Code) を使っていて、同じ日に同じ銘柄の行が
+#: 複数あるデータを黙って1行に潰していた。取り込みと同じ引数で8日ぶんを叩いた
+#: 実測（research/probe_dedupe_keys.py）で捨てていた割合は、業種別の空売り比率
+#: 97%（銘柄の列が無いので「同じ日」で潰れ、1日34行が1行になっていた）、大量保有
+#: 報告書 15%、大株主 8%、決算発表予定 6%、決算 3%。
+#:
+#: どのキーも API の応答で一意になることを実測で確かめたもの。**ここに無い種別は
+#: 保存しない**（KeyError）。種別を足したら、ここにキーを書いてテストで確かめる。
+#: None は行そのもの（全列）で見分ける。報告に ID が無い空売り残高報告は、
+#: 同じ報告者・同じ計算日でも比率の違う行があり、どの列の組でも一意にならない。
+ROW_KEYS: Dict[str, Optional[List[str]]] = {
+    "bars": ["Date", "Code"],
+    "fins": ["DiscNo"],
+    "margin": ["Date", "Code"],
+    "topix": ["Date"],
+    "indices": ["Date", "Code"],
+    "master_hist": ["Date", "Code"],
+    "valuation": ["Date", "Code"],
+    "shortratio": ["Date", "S33"],
+    "marginalert": ["PubDate", "Code"],
+    "earndate": ["PubDate", "Code", "FQName", "SchDate"],
+    "lvshld": ["DocId"],
+    "mjrshld": ["DocId"],
+    "xhold": ["DocId"],
+    "shortsale": None,
+}
+
+
+def _comparable(df):
+    """入れ子の列（list / dict / ndarray）を文字列にした写し。行の比較だけに使う。"""
+    import numpy as np
+
+    out = df.copy()
+    for c in out.columns:
+        if out[c].dtype == object and out[c].map(
+                lambda v: isinstance(v, (list, dict, tuple, np.ndarray))).any():
+            out[c] = out[c].map(lambda v: repr(v.tolist() if isinstance(v, np.ndarray) else v))
+    return out
+
+
+def row_key(kind: str, df) -> List[str]:
+    """その種別の行のキー（列名の並び）。登録が無い・列が無いなら例外。"""
+    if kind not in ROW_KEYS:
+        raise KeyError(f"{kind}: 行のキーが決まっていない（data_store.ROW_KEYS に足す）")
+    key = ROW_KEYS[kind]
+    if key is None:
+        return list(df.columns)
+    missing = [c for c in key if c not in df.columns]
+    if missing:
+        raise KeyError(f"{kind}: キーの列が無い {missing}（列: {list(df.columns)[:12]}）")
+    return list(key)
+
+
 def merge_into_years(data_dir: str, kind: str, new_df, date_col: str = "Date") -> List[str]:
     """
     新しく取得したデータを年別 parquet にマージする。
 
     年で分けるのは、更新時に触るファイルを最小限にするため
     （今年ぶんだけ書き換えれば済み、過去年は再アップロード不要）。
+
+    同じキーの行は後勝ち（訂正を反映）。キーは種別ごと（ROW_KEYS）。
+    **今回取った行どうしでキーが重なり、ほかの列が違うなら保存しない**
+    （ValueError）。キーの決め方が誤っていて、別々の行を潰すことになるため。
+    まったく同じ行の重なりは1行にする。
     """
     import pandas as pd
 
@@ -204,19 +264,30 @@ def merge_into_years(data_dir: str, kind: str, new_df, date_col: str = "Date") -
         return []
     df = new_df.copy()
     df[date_col] = pd.to_datetime(df[date_col])
-    written: List[str] = []
+    key = row_key(kind, df)
 
+    cmp_new = _comparable(df)
+    df = df.loc[~cmp_new.duplicated()]                     # まったく同じ行は1行に
+    cmp_new = cmp_new.loc[df.index]
+    clash = cmp_new.duplicated(subset=key, keep=False)
+    if clash.any():
+        raise ValueError(
+            f"{kind}: 今回取った行の中でキー {key} が重なり、ほかの列が違う行が "
+            f"{int(clash.sum())}行ある。別々の行を潰すことになるので保存しない"
+            f"（data_store.ROW_KEYS を見直す）")
+
+    written: List[str] = []
     for year, part in df.groupby(df[date_col].dt.year):
         p = year_path(data_dir, kind, int(year))
         if os.path.exists(p):
             old = pd.read_parquet(p)
             old[date_col] = pd.to_datetime(old[date_col])
             part = pd.concat([old, part], ignore_index=True)
-        # 同じ日・同じ銘柄の重複は後勝ち（訂正を反映）
-        subset = [c for c in (date_col, "Code") if c in part.columns]
-        if subset:
-            part = part.drop_duplicates(subset=subset, keep="last")
-        part = part.sort_values(subset or [date_col]).reset_index(drop=True)
+        # 同じキーの行は後勝ち（訂正を反映）
+        cmp = _comparable(part)
+        part = part.loc[~cmp.duplicated(subset=key, keep="last")]
+        order = [c for c in (date_col, "Code") if c in part.columns]
+        part = part.sort_values(order, kind="stable").reset_index(drop=True)
         part.to_parquet(p, index=False, compression="zstd")
         written.append(p)
 

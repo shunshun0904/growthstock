@@ -293,6 +293,23 @@ class TestNoRepredict(unittest.TestCase):
 
 
 
+class TestStaleExcused(unittest.TestCase):
+    """過去日の取り直し（to を今日より前にした手動の取り込み）で、欠けの警報を出さない。"""
+
+    def test_backfill_that_stops_before_the_expected_day_is_excused(self):
+        m = {"calendar": {"requestedTo": "2026-09-23"}}
+        self.assertTrue(GATE.stale_excused(m, D("2026-09-24")))
+
+    def test_normal_ingestion_is_not_excused(self):
+        m = {"calendar": {"requestedTo": "2026-09-24"}}
+        self.assertIsNone(GATE.stale_excused(m, D("2026-09-24")))
+
+    def test_missing_note_is_not_excused(self):
+        self.assertIsNone(GATE.stale_excused({}, D("2026-09-24")))
+        self.assertIsNone(GATE.stale_excused({"calendar": {"requestedTo": None}},
+                                              D("2026-09-24")))
+
+
 class TestLookahead(unittest.TestCase):
     """
     カレンダーは end より先まで取っておく。下流は「今日」が範囲に入って
@@ -350,9 +367,15 @@ class TestNewKinds(unittest.TestCase):
     2回起こしているので、固定しておく（FIN_COLS / MASTER_COLS）。
     """
 
-    def test_足した種別が7本ある(self):
-        self.assertEqual(len(jq_bulk.DAILY_KINDS), 7)
+    def test_足した種別が8本ある(self):
+        # 2026-09-22 の7本 + 2026-09-24 の空売り残高報告
+        self.assertEqual(len(jq_bulk.DAILY_KINDS), 8)
         self.assertEqual(len(jq_bulk.BULK_KINDS), 1)
+
+    def test_空売り残高報告は公表日で引いて公表日で記録する(self):
+        # ?date= は HTTP 400（実測）。disc_date で引く
+        self.assertEqual(jq_bulk.DAY_PARAM.get("shortsale"), "disc_date")
+        self.assertEqual(jq_bulk.DAILY_KINDS["shortsale"][1], "DiscDate")
 
     def test_日付列はその行を知りえた日(self):
         # EDINET は提出日、信用規制は公表日。ここを取り違えると未来を見る
@@ -372,6 +395,57 @@ class TestNewKinds(unittest.TestCase):
         base = {"bars", "fins", "margin", "topix", "indices", "master", "master_hist"}
         for kind in list(jq_bulk.DAILY_KINDS) + list(jq_bulk.BULK_KINDS):
             self.assertNotIn(kind, base, f"{kind} は既存の種別と同名")
+
+
+class TestShortSaleIngestion(unittest.TestCase):
+    """
+    空売り残高報告を差分取得の経路（_run_incremental）に通す。
+
+    引数名（disc_date）・日付列（DiscDate）・行のキー（同じ日・同じ銘柄に報告者が
+    何人もいる）のどれかを取り違えると、黙って0件になるか行を潰す。
+    """
+
+    class FakeClient:
+        def __init__(self):
+            self.asked = []
+
+        def get_paginated(self, path, params):
+            self.asked.append((path, dict(params)))
+            if path == "/markets/calendar":
+                return rows_2026_09()
+            day = params.get("disc_date")
+            if path != "/markets/short-sale-report" or day is None:
+                raise AssertionError(f"想定外の問い合わせ: {path} {params}")
+            return [{"DiscDate": day, "CalcDate": day, "Code": "72030", "SSName": n,
+                     "FundName": None, "DICName": None, "ShrtPosToSO": r}
+                    for n, r in (("A", 0.0061), ("B", 0.0052))]
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def test_報告者ごとの行が全部残る(self):
+        c = self.FakeClient()
+        orig = (jq_bulk.JQuantsClient, jq_bulk.resolve_api_key)
+        jq_bulk.JQuantsClient = lambda *a, **k: c
+        jq_bulk.resolve_api_key = lambda: "x"
+        try:
+            rc = jq_bulk.main(["--incremental", "--what", "shortsale", "--from", "2026-09-14",
+                               "--to", "2026-09-18", "--out-dir", self.dir])
+        finally:
+            jq_bulk.JQuantsClient, jq_bulk.resolve_api_key = orig
+        self.assertEqual(rc, 0)
+        asked = [p for path, p in c.asked if path == "/markets/short-sale-report"]
+        self.assertTrue(asked)
+        self.assertTrue(all(set(p) == {"disc_date"} for p in asked))
+        got = pd.read_parquet(os.path.join(self.dir, "shortsale_2026.parquet"))
+        # 9/14〜18 は5営業日（敬老の日は 9/21）。1日2人ぶん
+        self.assertEqual(sorted({p["disc_date"] for p in asked}),
+                         ["2026-09-14", "2026-09-15", "2026-09-16", "2026-09-17", "2026-09-18"])
+        self.assertEqual(len(got), 10)
+        self.assertEqual(sorted(got["SSName"].unique()), ["A", "B"])
 
 
 class TestSanitize(unittest.TestCase):

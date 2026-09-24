@@ -162,6 +162,24 @@ def decide_new_data(last_bar: Optional[dt.date], as_of: Optional[dt.date],
                    "予測済みの日を予測し直さない"), stale, stale_why
 
 
+def stale_excused(manifest: dict, expected: Optional[dt.date]) -> Optional[str]:
+    """
+    日足が欠けていても「取り込みを疑う」べきでない理由。無ければ None。
+
+    直前の取り込みが、揃っているはずの日より**前までしか要求していない**とき
+    （過去日の取り直しなど、to を指定した手動の取り込み）。その取り込みが終わると
+    日次予測が起動するが、今日の日足が無いのは取り込みの故障ではない。
+    """
+    note = (manifest or {}).get("calendar") or {}
+    try:
+        req = dt.date.fromisoformat(str(note.get("requestedTo"))[:10])
+    except (TypeError, ValueError):
+        return None
+    if expected is not None and req < expected:
+        return f"直前の取り込みは {req} までしか要求していない（過去日の取り直し）"
+    return None
+
+
 def decide_by_calendar(cal, last_bar: Optional[dt.date], today: dt.date
                        ) -> Optional[Tuple[bool, str]]:
     """
@@ -266,8 +284,13 @@ def main(argv=None) -> int:
         if force:
             print("[gate] FORCE_PREDICT が指定されたので、予測済みの日でも予測し直す")
         else:
-            nd = decide_new_data(last_bar, published_as_of(args.predictions),
-                                 expected_bar_date(cal, now.astimezone(JST)))
+            expected = expected_bar_date(cal, now.astimezone(JST))
+            nd = decide_new_data(last_bar, published_as_of(args.predictions), expected)
+            if nd is not None and nd[2]:
+                excuse = stale_excused(manifest, expected)
+                if excuse:
+                    print(f"[gate] 日足が欠けているが、取り込みの故障ではない — {excuse}")
+                    nd = (nd[0], nd[1], False, "")
         if nd is not None:
             run, why, stale, stale_why = nd
         else:

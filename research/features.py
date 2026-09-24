@@ -185,6 +185,12 @@ GROUPS: Dict[str, List[str]] = {
              "inv_foreign", "inv_foreign_4w", "inv_trust", "inv_trust_4w",
              "inv_indiv", "inv_indiv_4w", "inv_prop", "inv_prop_4w",
              "inv_busco", "inv_busco_4w"],
+    # --- 2026-09-24 に足した候補。本番（all_plus）には入れていない。実験44で測る --- #
+    #: 市場全体の空売り比率（33業種＋その他の合計）。flow の short_ratio は
+    #: S33=9999（その他）の1行で、市場全体ではなかった（extra_features.short_ratio）
+    "flow_mkt": ["short_ratio_mkt", "short_ratio_mkt_20"],
+    #: 空売り残高報告（0.5% 以上の空売りの持ち高。報告者ごとの最新の合計）
+    "short_pos": ["ss_ratio", "ss_n", "ss_chg_20", "ss_days"],
 }
 
 #: 横断面正規化（同じ日付内でのパーセンタイル順位）を作る対象の列。
@@ -294,6 +300,9 @@ PRESETS: Dict[str, List[str]] = {
     "all_flow": ALL_GROUPS + ["flow", "margin_alert"],
     "all_earn": ALL_GROUPS + ["earn_ahead"],
     "all_revision": ALL_GROUPS + ["revision"],
+    # --- 2026-09-24 の候補（実験44）。本番の205列 + 空売り残高報告 / 市場全体の空売り比率 --- #
+    "all_plus_ss": ALL_GROUPS + EXTRA_GROUPS + ["short_pos"],
+    "all_plus_ss_mkt": ALL_GROUPS + EXTRA_GROUPS + ["short_pos", "flow_mkt"],
 
     # --- 決算を「変化」だけで組むセット --- #
     # 絶対水準（ROE 何%、営業利益率 何%）ではなく、
