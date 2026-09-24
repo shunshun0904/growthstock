@@ -32,10 +32,14 @@ from __future__ import annotations
 import glob
 import os
 import re
+import sys
 from typing import List, Optional
 
 import numpy as np
 import pandas as pd
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import availability as AV  # noqa: E402
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_data")
 
@@ -493,13 +497,22 @@ def investor_types(samples: pd.DataFrame, data_dir: str = DATA_DIR) -> pd.DataFr
         return out
     d = d.copy()
     d["EnDate"] = pd.to_datetime(d["EnDate"], errors="coerce")
-    d = d.dropna(subset=["EnDate"])
-    # 市場区分ごとに行があるなら、日付でまとめる（全市場の合計にする）
-    num = [c for c in d.columns if d[c].dtype != object and c != "EnDate"]
+    # **公表日で結合する**（availability.investor_available）。集計期間の末日
+    # （EnDate）で結合していたときは、公表（EnDate の約6日後）より前の行が
+    # その週の値を見ていた（母集団の 85.7%）。予測の時点では手に入らない
+    d["_avail"] = AV.investor_available(d)
+    d = d.dropna(subset=["EnDate", "_avail"])
+    # 市場区分ごとに行があるなら、日付でまとめる（全市場の合計にする）。
+    # 公表日は区分で揃っているはずだが、遅いほうに合わせる（早いほうを取ると先読み）
+    num = [c for c in d.columns
+           if d[c].dtype != object and c not in ("EnDate", "_avail")
+           and not pd.api.types.is_datetime64_any_dtype(d[c])]
+    avail = d.groupby("EnDate")["_avail"].max()
     d = d.groupby("EnDate", as_index=False)[num].sum(min_count=1).sort_values("EnDate")
+    d["_avail"] = d["EnDate"].map(avail)
     tot = sum((_num(d.get(f"{g}Buy", 0)) + _num(d.get(f"{g}Sell", 0)))
               for g in INVESTOR_GROUPS)
-    keep = pd.DataFrame({"InvDate": d["EnDate"]})
+    keep = pd.DataFrame({"InvDate": d["_avail"].to_numpy()})
     for g, name in INVESTOR_GROUPS.items():
         bal = _num(d.get(f"{g}Bal"))
         if bal is None or not bal.notna().any():

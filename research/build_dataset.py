@@ -26,8 +26,10 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import availability as AV  # noqa: E402
 import features  # noqa: E402
 import extra_features  # noqa: E402
+import trading_calendar  # noqa: E402
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_data")
 
@@ -2078,6 +2080,38 @@ def attach_sector_index(samples: pd.DataFrame, indices: pd.DataFrame) -> pd.Data
 # 組み立て
 # --------------------------------------------------------------------------- #
 
+def attach_credit_ratio(samples: pd.DataFrame, margin: pd.DataFrame,
+                        days=None) -> pd.DataFrame:
+    """
+    信用倍率（信用買残 ÷ 信用売残）を、**公表日**で結合する。
+
+    週次の信用残は基準日（通常は金曜）の翌週の第2営業日に公表される
+    （availability.MARGIN_PUBLISH_BD）。2026-09-24 まで基準日で結合していて、
+    金曜・月曜のブレイク（母集団の 38.5%）で公表前の値を学習に使っていた。
+    予測の時点では同じ新しさの値は手に入らない。
+
+    古すぎる値は使わない: 公表日から 21日より前のものは欠測にする
+    （基準日で21日としていたのと同じ考え方を、公表日で数え直した）。
+    """
+    if not len(margin):
+        out = samples.copy()
+        out["credit_ratio"] = np.nan
+        return out
+    m = margin[["Date", "Code", "LongVol", "ShrtVol"]].copy()
+    m["Date"] = pd.to_datetime(m["Date"])
+    m["Code"] = m["Code"].astype(str)
+    m["credit_ratio"] = np.where(m["ShrtVol"] > 0, m["LongVol"] / m["ShrtVol"], np.nan)
+    m["_avail"] = AV.margin_available(m, days)
+    m = m.dropna(subset=["_avail"]).sort_values("_avail")[["_avail", "Code", "credit_ratio"]]
+    # 並びは従来（基準日で結合していたとき）と同じく Date 順で返す。
+    # 行の並びが変わると学習の結果も僅かに動き、結合の修正の効果と混ざる
+    left = samples.drop(columns=["credit_ratio"], errors="ignore").sort_values("Date")
+    out = pd.merge_asof(left, m, left_on="Date", right_on="_avail", by="Code",
+                        direction="backward", allow_exact_matches=True,
+                        tolerance=pd.Timedelta("21D"))
+    return out.drop(columns=["_avail"])
+
+
 def build(data_dir: str, out_path: str) -> pd.DataFrame:
     bars = load_parts("bars", data_dir)
     fins = load_parts("fins", data_dir)
@@ -2341,7 +2375,9 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     #
     # 取り込みが届いていない種別は列が空になるだけで、ここは落ちない。
     # 時価総額・株価・per・ROE_q0 を使うので、バリュエーションの後に置く。
-    extra = extra_features.attach(samples, DATA_DIR)
+    # 引数の data_dir を渡す（既定の場所を決め打ちすると、別の場所のデータで
+    # 作ったつもりの追加特徴量が、既定の場所から読まれていた）
+    extra = extra_features.attach(samples, data_dir)
     if extra.shape[1]:
         dup = [c for c in extra.columns if c in samples.columns]
         if dup:
@@ -2362,21 +2398,7 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
               f"{before:,} -> {len(samples):,}")
 
     # --- 信用倍率 --- #
-    if len(margin):
-        margin = margin.copy()
-        margin["Date"] = pd.to_datetime(margin["Date"])
-        margin["credit_ratio"] = np.where(
-            margin["ShrtVol"] > 0, margin["LongVol"] / margin["ShrtVol"], np.nan
-        )
-        m = margin[["Date", "Code", "credit_ratio"]].sort_values("Date")
-        samples = pd.merge_asof(
-            samples.sort_values("Date"), m,
-            on="Date", by="Code", direction="backward",
-            # 信用残は週次公表。3週間以上前の値は古すぎるので使わない
-            tolerance=pd.Timedelta("21D"),
-        )
-    else:
-        samples["credit_ratio"] = np.nan
+    samples = attach_credit_ratio(samples, margin, trading_calendar.load(data_dir).days)
 
     # --- 業種・市場区分を時点別に結合 --- #
     # 最新のマスタを過去のサンプルに当てると先読みになる。

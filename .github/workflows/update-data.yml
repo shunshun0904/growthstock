@@ -271,6 +271,14 @@ jobs:
         run: |
           shopt -s nullglob
           files=(research/_data/*.parquet research/_data/manifest.json)
+          # 予測時の特徴量の控え（live_features.parquet）は日次予測だけが書く。
+          # ここで上げ直すと、取り込みの最中に予測が足した日を古い版で潰しうる
+          keep=()
+          for f in "${files[@]}"; do
+            [ "$(basename "$f")" = "live_features.parquet" ] && continue
+            keep+=("$f")
+          done
+          files=("${keep[@]}")
           if [ ${#files[@]} -eq 0 ]; then
             echo "アップロードするファイルがありません"; exit 1
           fi

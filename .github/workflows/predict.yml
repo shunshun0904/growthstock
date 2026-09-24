@@ -145,6 +145,33 @@ jobs:
         if: steps.gate.outputs.run != 'false'
         run: python3 research/predict_daily.py 2>&1 | tee predict.log
 
+      # 学習と予測で特徴量の値が一致するか（research/check_train_serve.py）。
+      # 過去に予測した日の行を、今日作り直したデータセット（学習に使うのと同じ作り）
+      # と比べる。違う列は「学習だけが、予測の時点では手に入らなかった値を見ている」
+      # 疑いがある（2026-09-24 に信用残と投資部門別で見つかった種類の誤り）。
+      # 画面の更新は止めないが、許容を超えたら赤にして気づけるようにする
+      - name: Check train/serve consistency
+        id: trainserve
+        if: steps.gate.outputs.run != 'false'
+        continue-on-error: true
+        run: |
+          python3 research/check_train_serve.py 2>&1 | tee train_serve.log
+          exit "${PIPESTATUS[0]}"
+
+      # 予測に使った特徴量の控えを Release に置く（日付ごとに最初の予測で凍結）
+      - name: Save live features (release)
+        if: steps.gate.outputs.run != 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          f=research/_data/live_features.parquet
+          if [ -f "$f" ]; then
+            gh release upload data-raw "$f" --clobber
+            echo "控えを上げた: $(du -h "$f" | cut -f1)"
+          else
+            echo "控えが無い（候補が無かった日）"
+          fi
+
       # その日の上位銘柄を、既存の取得スクリプトに通して stocks.json を作る。
       #
       # これが無いと、予測タブで見つけた銘柄をオクタゴンへ送っても
@@ -213,6 +240,12 @@ jobs:
             fi
             if [ "${{ steps.gate.outputs.stale }}" = "true" ]; then
               echo "> ⚠ **揃っているはずの日足がありません。** ${{ steps.gate.outputs.stale_reason }}"
+            fi
+            if [ "${{ steps.trainserve.outcome }}" = "failure" ]; then
+              echo '> ⚠ **学習と予測で特徴量の値が食い違う列があります**（下の train/serve）。'
+            fi
+            if [ -f train_serve.log ]; then
+              echo '### train/serve'; echo '```'; cat train_serve.log; echo '```'
             fi
             if [ "${{ steps.sheets.outcome }}" = "failure" ]; then
               echo '> ⚠ **スプレッドシートへの追記に失敗しました。**'

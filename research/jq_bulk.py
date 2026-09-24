@@ -104,9 +104,12 @@ DAILY_KINDS = {
 }
 
 #: 日付を指定せず一度に全部返る種別 -> (パス, 日付列, 表示名)
-#: 投資部門別は週次で、全期間でも2,400行ほど。1リクエストで足りる
+#: 投資部門別は週次で、全期間でも2,400行ほど。1リクエストで足りる。
+#: 日付列は公表日（PubDate）。集計期間の末日（EnDate）はその約6日前で、
+#: そちらを「知りえた日」として扱うと公表前の値を使うことになる
+#: （2026-09-24 に特徴量側で見つかった。research/availability.py）
 BULK_KINDS = {
-    "investor": ("/equities/investor-types", "EnDate", "投資部門別売買"),
+    "investor": ("/equities/investor-types", "PubDate", "投資部門別売買"),
 }
 
 

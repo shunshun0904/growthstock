@@ -408,6 +408,7 @@ def main(argv=None) -> int:
     print(f"[done] {out_path} ({os.path.getsize(out_path)/1e3:.0f}KB)")
 
     update_history(args, rows, days)
+    save_live_features(cand, cols, days, args.data_dir, meta.get("trainedAt"))
 
     # 詳細を取りに行く銘柄コードを素のテキストで出す。
     # 取得スクリプト（scripts/jquants_data_fetcher.py --extra-codes）へ渡して、
@@ -468,6 +469,49 @@ def detail_codes(rows: List[Dict], limit: int) -> List[str]:
         if limit and len(picked) >= limit:
             break
     return picked
+
+
+#: 予測に使った特徴量の控え。学習用に後から作り直した値と比べ、公表前の値や
+#: 後からの書き換えで「学習だけが見ている値」が無いかを確かめる
+#: （research/check_train_serve.py）。Release に置く（predict.yml が上げる）
+LIVE_FEATURES = "live_features.parquet"
+#: 控えを残す日数。比べるのは直近の数週間なので、1年あれば足りる
+LIVE_KEEP_DAYS = 400
+
+
+def save_live_features(cand: pd.DataFrame, cols: List[str], days, data_dir: str,
+                       trained_at=None) -> None:
+    """
+    その日の候補に使った特徴量を控える。**最初の予測で凍結**する（予測の記録と
+    同じ）: その日の控えが既にあれば書き換えない。
+    """
+    path = os.path.join(data_dir, LIVE_FEATURES)
+    latest = pd.Timestamp(days[-1])
+    today = cand[pd.to_datetime(cand["Date"]) == latest]
+    if today.empty:
+        return
+    keep = ["Code", "Date"] + [c for c in cols if c in today.columns]
+    new = today[keep].copy()
+    new["Code"] = new["Code"].astype(str)
+    new["Date"] = pd.to_datetime(new["Date"])
+    new["_saved_at"] = pd.Timestamp.now(tz="UTC").isoformat()
+    new["_trained_at"] = str(trained_at or "")
+    old = None
+    if os.path.exists(path):
+        try:
+            old = pd.read_parquet(path)
+            old["Date"] = pd.to_datetime(old["Date"])
+        except Exception as exc:                 # noqa: BLE001
+            print(f"[live] 控えを読めないので作り直す: {type(exc).__name__}")
+    if old is not None and (old["Date"] == latest).any():
+        print(f"[live] {latest.date()} の特徴量は控え済み。最初の予測のまま凍結する")
+        return
+    out = new if old is None else pd.concat([old, new], ignore_index=True)
+    cutoff = latest - pd.Timedelta(days=LIVE_KEEP_DAYS)
+    out = out[out["Date"] >= cutoff]
+    out.to_parquet(path, index=False, compression="zstd")
+    print(f"[live] {latest.date()} の {len(new)}件 × {len(keep) - 2}列を控えた"
+          f"（累計 {out['Date'].nunique()}日 / {len(out):,}件）")
 
 
 def update_history(args, rows: List[Dict], days) -> None:
