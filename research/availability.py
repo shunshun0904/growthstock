@@ -30,7 +30,8 @@ import pandas as pd
 #: 週次の信用残（/markets/margin-interest）は、基準日（通常は金曜）の
 #: **翌週の第何営業日**に公表されるか。JPX の週次公表は翌週第2営業日。
 #: J-Quants がその日の夜の取り込みに間に合うかは research/probe_update_time.py の
-#: margin_fri で測る（2026-09-24〜25 に測定。結果は docs/DATA_TIMING.md）
+#: margin_fri で測る。9/24（連休明けの第1営業日）は 20:00 JST までに出なかった
+#: （規則どおり）。第2営業日の 9/25 に測る（結果は docs/DATA_TIMING.md）
 MARGIN_PUBLISH_BD = 2
 
 #: 投資部門別（/equities/investor-types）の「使ってよい日」の列。
@@ -38,9 +39,10 @@ MARGIN_PUBLISH_BD = 2
 INVESTOR_DATE_COL = "PubDate"
 
 #: 空売り残高報告（/markets/short-sale-report）を公表日（DiscDate）の**当日**から
-#: 使うか。当日の夜の取り込みに間に合うかは research/probe_update_time.py の
-#: shortsale で測る（2026-09-24 に測定開始）。測るまでは翌営業日から使う
-#: （間に合わないのに当日から使うと、学習だけが1日早い値を見る）
+#: 使うか。実測（research/probe_update_time.py、2026-09-24）では当日の 18:02 JST に
+#: 出た。夜の取り込み（実績 21〜23時）には間に合うが、取り込みが定刻（16:05 JST）
+#: どおりに起動した日には間に合わない。間に合わないのに当日から使うと学習だけが
+#: 1日早い値を見るので、1日遅れを受け入れて翌営業日から使う
 SHORTSALE_SAME_DAY = False
 
 #: 修正の前後を比べる実験（research/exp/e43_pit_fix.py）のためだけのスイッチ。
@@ -52,22 +54,24 @@ LEGACY = False
 
 #: 種別 -> (使ってよい日, 根拠)。docs/DATA_TIMING.md と同じ中身
 RULES: Dict[str, Tuple[str, str]] = {
-    "bars":        ("Date（当日）", "16:30 JST までに出る（実測 2026-09-18）"),
+    "bars":        ("Date（当日）", "16:00 JST（実測 2026-09-18・09-24）"),
     "indices":     ("Date（当日）", "16:30 JST（実測）"),
     "topix":       ("Date（当日）", "16:30 JST（実測）"),
     "master_hist": ("Date（当日）", "16:00 JST より前（実測）"),
     "fins":        ("DiscDate（当日）", "18:00 JST ごろ出る（実測）。取り込みはその後"),
     "margin":      (f"基準日の翌週 第{MARGIN_PUBLISH_BD}営業日", "JPX の週次公表"),
     "investor":    (INVESTOR_DATE_COL, "J-Quants の公表日の列"),
-    "marginalert": ("PubDate", "公表日の列"),
-    "earndate":    ("PubDate", "公表日の列。SchDate（予定日）では結合しない"),
-    "valuation":   ("Date（当日）", "要確認: 2026-09-24 の probe で測る"),
-    "shortratio":  ("Date（当日）", "要確認: 2026-09-24 の probe で測る"),
-    "lvshld":      ("SubDate（提出日）", "要確認: J-Quants に載る時刻を probe で測る"),
-    "mjrshld":     ("SubDate（提出日）", "要確認: 同上"),
-    "xhold":       ("SubDate（提出日）", "要確認: 同上"),
+    "marginalert": ("PubDate", "公表日の列。16:30 JST に出る（実測 2026-09-24）"),
+    "earndate":    ("PubDate", "公表日の列。SchDate（予定日）では結合しない。16:00 JST（実測）"),
+    "valuation":   ("Date（当日）", "16:00 JST（実測 2026-09-24）"),
+    "shortratio":  ("Date（当日）", "16:30 JST（実測 2026-09-24）"),
+    "lvshld":      ("SubDate（提出日）", "16:00〜17:31 JST に少しずつ出る（実測 2026-09-24）。"
+                    "今日の日は取得済みにせず翌日に取り直す（jq_bulk._record_fetched）"),
+    "mjrshld":     ("SubDate（提出日）", "同上"),
+    "xhold":       ("SubDate（提出日）", "同上"),
     "shortsale":   ("DiscDate（公表日）の翌営業日",
-                    "当日の夜に間に合うかを probe で測るまでは翌営業日（SHORTSALE_SAME_DAY）"),
+                    "18:02 JST に出る（実測 2026-09-24）。取り込みの時刻に左右されないよう"
+                    "翌営業日のまま（SHORTSALE_SAME_DAY）"),
 }
 
 

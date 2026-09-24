@@ -560,11 +560,23 @@ class TestRecordFetched(unittest.TestCase):
                                 empty, "Date", today=dt.date(2026, 9, 18))
         self.assertEqual(m["indices"]["fetched_days"], ["2026-09-17"])
 
-    def test_records_today_when_rows_came_back(self):
+    def test_today_is_fetched_again_even_when_rows_came_back(self):
+        """
+        今日の行は後から増えることがある（2026-09-24 の実測で EDINET 系が 16:00〜17:30 に
+        増えた）。行が取れても今日は取得済みにせず、次の取り込みでもう一度取る。
+        （以前はここで今日を取得済みにしていて、その後に来た行を取りに行かなかった）
+        """
         m = {"indices": {"fetched_days": []}}
         df = pd.DataFrame({"Date": ["2026-09-18"], "Code": ["0040"], "C": [1.0]})
         self.jq._record_fetched(m, "indices", days("2026-09-18"), df, "Date",
                                 today=dt.date(2026, 9, 18))
+        self.assertEqual(m["indices"]["fetched_days"], [])
+
+    def test_records_a_past_day_when_rows_came_back(self):
+        m = {"indices": {"fetched_days": []}}
+        df = pd.DataFrame({"Date": ["2026-09-18"], "Code": ["0040"], "C": [1.0]})
+        self.jq._record_fetched(m, "indices", days("2026-09-18"), df, "Date",
+                                today=dt.date(2026, 9, 24))
         self.assertEqual(m["indices"]["fetched_days"], ["2026-09-18"])
 
     def test_empty_frame_without_the_date_column_does_not_crash(self):
@@ -582,7 +594,7 @@ class TestRecordFetched(unittest.TestCase):
         m = {"fins": {"fetched_days": []}}
         df = pd.DataFrame({"DiscDate": ["2026-09-18"], "Code": ["13010"]})
         self.jq._record_fetched(m, "fins", days("2026-09-18"), df, "DiscDate",
-                                today=dt.date(2026, 9, 18))
+                                today=dt.date(2026, 9, 24))
         self.assertEqual(m["fins"]["fetched_days"], ["2026-09-18"])
 
 

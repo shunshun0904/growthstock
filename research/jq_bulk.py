@@ -599,10 +599,20 @@ def _record_fetched(manifest: dict, name: str, todo: List[dt.date],
     got = set()
     if len(df) and date_col in df.columns:
         got = set(pd.to_datetime(df[date_col], errors="coerce").dropna().dt.date)
+    # **今日の日は、行が取れていても取得済みにしない**（次の取り込みでもう一度取る）。
+    # 実測（2026-09-24 の Probe Update Time）で、EDINET 系は提出日の行が 16:00〜17:30 に
+    # 少しずつ増えた（大量保有 112 -> 123行、大株主 37 -> 48行）。早い時刻の取り込みで
+    # 取得済みにすると、後から来た行を二度と取りに行かない。行のキー
+    # （data_store.ROW_KEYS）で重なりは1行になるので、取り直しても行は増えない
     ok = [d for d in data_store.confirmed_days(name, todo, got, today)
-          if d not in bad]
+          if d not in bad and d < today]
     data_store.mark_fetched(manifest, name, ok)
     held = [d for d in todo if d not in set(ok)]
+    later = [d for d in held if d >= today and d in got]
+    held = [d for d in held if d not in set(later)]
+    if later:
+        print(f"[{name}] 今日（{today}）の行は後から増えることがあるので、"
+              f"取得済みにしない（次回もう一度取る）")
     if held:
         shown = ", ".join(d.isoformat() for d in held[:5])
         more = f" ほか{len(held)-5}日" if len(held) > 5 else ""
