@@ -1,0 +1,37 @@
+name: Probe Dedupe Keys
+
+# 取り込みの重複除去（同じ日・同じ銘柄を1行に）が、別々の行を潰していないかを
+# 種別ごとに実測する（research/probe_dedupe_keys.py）。
+# 出すのは件数と比だけで、値そのものと鍵はログに出さない。
+on:
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pandas
+      - name: Probe
+        env:
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+        run: |
+          python3 research/probe_dedupe_keys.py 2>&1 | tee probe.log
+          exit "${PIPESTATUS[0]}"
+      - name: Summary
+        if: always()
+        run: |
+          { echo '## 取り込みの重複除去の実測'; echo '```'
+            cat probe.log 2>/dev/null || echo '(出力なし)'
+            echo '```'; } >> "$GITHUB_STEP_SUMMARY"
