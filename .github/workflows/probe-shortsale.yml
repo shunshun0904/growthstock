@@ -1,0 +1,36 @@
+name: Probe Short-sale Report
+
+# 空売り残高報告（/markets/short-sale-report）の引数・過去の深さ・1日の件数を
+# 実測する（research/probe_shortsale.py）。取り込みを書く前の下調べ。
+# 出すのは件数・列名・日付の範囲だけで、鍵はログに出さない。
+on:
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Probe
+        env:
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+        run: |
+          python3 research/probe_shortsale.py 2>&1 | tee probe.log
+          exit "${PIPESTATUS[0]}"
+      - name: Summary
+        if: always()
+        run: |
+          { echo '## 空売り残高報告の下調べ'; echo '```'
+            cat probe.log 2>/dev/null || echo '(出力なし)'
+            echo '```'; } >> "$GITHUB_STEP_SUMMARY"
