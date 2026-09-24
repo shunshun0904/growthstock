@@ -166,6 +166,16 @@ class TestRowKeys(unittest.TestCase):
         data_store.merge_into_years(self.dir, "lvshld", df, "SubDate")
         self.assertEqual(len(self.read("lvshld", 2026)), 2)
 
+    def test_same_document_on_two_submission_dates_is_kept_twice(self):
+        """
+        大株主: 同じ DocId が別の提出日でも出る（実測で612文書）。DocId だけをキーに
+        すると、全期間を取り直したときに重なって保存を止める（2026-09-24 に実際に止まった）。
+        """
+        df = pd.DataFrame({"DocId": ["S1", "S1"], "Code": ["72030", "72030"],
+                           "SubDate": ["2025-06-27", "2025-07-10"]})
+        data_store.merge_into_years(self.dir, "mjrshld", df, "SubDate")
+        self.assertEqual(len(self.read("mjrshld", 2025)), 2)
+
     def test_same_day_disclosures_are_both_kept(self):
         """決算: 同じ日・同じ銘柄に決算短信と業績予想の修正。"""
         df = pd.DataFrame({"DiscNo": [1, 2], "Code": ["72030", "72030"],

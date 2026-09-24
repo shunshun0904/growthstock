@@ -201,6 +201,10 @@ def year_path(data_dir: str, kind: str, year: int) -> str:
 #:
 #: どのキーも API の応答で一意になることを実測で確かめたもの。**ここに無い種別は
 #: 保存しない**（KeyError）。種別を足したら、ここにキーを書いてテストで確かめる。
+#: 一意かどうかは**日をまたいで**確かめる（probe_dedupe_keys.py --span）。EDINET の
+#: 3種別は最初 DocId にしていたが、同じ文書が別の提出日でも出る（大株主で612文書）ため、
+#: 全期間の取り直しで下の「保存しない」が働いて止まった。提出日を足して一意になる
+#: （問い合わせた日と提出日が常に一致し、1日の中では DocId が一意なので）。
 #: None は行そのもの（全列）で見分ける。報告に ID が無い空売り残高報告は、
 #: 同じ報告者・同じ計算日でも比率の違う行があり、どの列の組でも一意にならない。
 ROW_KEYS: Dict[str, Optional[List[str]]] = {
@@ -214,9 +218,9 @@ ROW_KEYS: Dict[str, Optional[List[str]]] = {
     "shortratio": ["Date", "S33"],
     "marginalert": ["PubDate", "Code"],
     "earndate": ["PubDate", "Code", "FQName", "SchDate"],
-    "lvshld": ["DocId"],
-    "mjrshld": ["DocId"],
-    "xhold": ["DocId"],
+    "lvshld": ["DocId", "SubDate"],
+    "mjrshld": ["DocId", "SubDate"],
+    "xhold": ["DocId", "SubDate"],
     "shortsale": None,
 }
 
