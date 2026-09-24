@@ -57,13 +57,68 @@ TARGETS = [
      "決算開示。当日ぶんが遅れても翌営業日に入る"),
     ("margin", "/markets/margin-interest", "date",
      "信用残。週次なので当日に出ない日が普通"),
+    # --- 2026-09-24 追加: 特徴量の「知りえた日」を実測で確かめる ---
+    # 学習では同じ日の行として結合している。予測の時刻（取り込みは
+    # 平日 21〜23時 JST に走る実績）までに出ていなければ、学習だけが
+    # 公表前の値を見ていることになる。
+    ("margin_fri", "/markets/margin-interest", "date:prev_friday",
+     "直前の金曜の信用残。JPX の週次公表は翌週の第2営業日"),
+    ("valuation", "/equities/valuation", "date",
+     "バリュエーション（PER/PBR/FwdEPS など）。学習は当日の行で結合"),
+    ("shortratio", "/markets/short-ratio", "date",
+     "業種別の空売り比率。学習は当日の行で結合"),
+    ("marginalert", "/markets/margin-alert", "date",
+     "信用規制（?date は PubDate）"),
+    ("earndate", "/fins/earnings-date", "date",
+     "決算発表予定（?date は PubDate）"),
+    ("lvshld", "/edinet/large-volume-shareholders", "date",
+     "大量保有報告書（?date は SubDate）。学習は提出日の行で結合"),
+    ("mjrshld", "/edinet/major-shareholders", "date",
+     "大株主（?date は SubDate）"),
+    ("xhold", "/edinet/cross-shareholdings", "date",
+     "政策保有株（?date は SubDate）"),
+    ("investor", "/equities/investor-types", "bulk:PubDate",
+     "投資部門別（週次）。PubDate がその日の行を数える"),
+    ("shortsale", "/markets/short-sale-report", "try:disc_date,calc_date,date",
+     "空売り残高報告。日付の引数名が未確認なので順に試す"),
 ]
+
+
+def _prev_friday(day: dt.date) -> dt.date:
+    """day より前の直近の金曜。"""
+    d = day - dt.timedelta(days=1)
+    while d.weekday() != 4:
+        d -= dt.timedelta(days=1)
+    return d
 
 
 def _params(kind: str, day: dt.date) -> dict:
     if kind == "range":
         return {"from": day.isoformat(), "to": day.isoformat()}
+    if kind == "date:prev_friday":
+        return {"date": _prev_friday(day).isoformat()}
     return {"date": day.isoformat()}
+
+
+def _count(client: JQuantsClient, path: str, kind: str, day: dt.date) -> str:
+    """その日の行数。bulk は全件から日付列で数え、try は引数名を順に試す。"""
+    if kind.startswith("bulk:"):
+        col = kind.split(":", 1)[1]
+        rows = client.get_paginated(path, {})
+        n = sum(1 for r in rows if str(r.get(col, ""))[:10] == day.isoformat())
+        return f"{n}行"
+    if kind.startswith("try:"):
+        errs = []
+        for name in kind.split(":", 1)[1].split(","):
+            try:
+                rows = client.get_paginated(path, {name: day.isoformat()})
+            except JQuantsError as exc:
+                errs.append(f"{name}:{str(exc)[:40]}")
+                continue
+            return f"{len(rows)}行({name})"
+        return "err:" + " / ".join(errs)[:120]
+    rows = client.get_paginated(path, _params(kind, day))
+    return f"{len(rows)}行"
 
 
 def probe_once(client: JQuantsClient, day: dt.date) -> Dict[str, object]:
@@ -71,18 +126,17 @@ def probe_once(client: JQuantsClient, day: dt.date) -> Dict[str, object]:
     out: Dict[str, object] = {}
     for name, path, kind, _ in TARGETS:
         try:
-            rows = client.get_paginated(path, _params(kind, day))
+            if name == "bars":
+                rows = client.get_paginated(path, _params(kind, day))
+                # 行が返るだけでは足りない。前場だけ入って終値が空、という
+                # 出方をされると気づかずに欠測を取り込むことになる。
+                closed = sum(1 for r in rows
+                             if r.get("C") not in (None, "", "-"))
+                out[name] = f"{len(rows)}行/終値{closed}件"
+            else:
+                out[name] = _count(client, path, kind, day)
         except JQuantsError as exc:
             out[name] = f"err:{str(exc)[:60]}"
-            continue
-        if name == "bars":
-            # 行が返るだけでは足りない。前場だけ入って終値が空、という
-            # 出方をされると気づかずに欠測を取り込むことになる。
-            closed = sum(1 for r in rows
-                         if r.get("C") not in (None, "", "-"))
-            out[name] = f"{len(rows)}行/終値{closed}件"
-        else:
-            out[name] = f"{len(rows)}行"
     return out
 
 
