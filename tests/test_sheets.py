@@ -283,7 +283,8 @@ class TestSync(unittest.TestCase):
         ws = self._old_sheet()
         before = ws.col_count
         ES.sync(ws, ES.rows_from_predictions(PRED), {}, None)
-        want = len(self.OLD_HEADER) + len(ES.MODEL_COLS) + len(ES.SCORE_COLS) + 1
+        want = (len(self.OLD_HEADER) + len(ES.MODEL_COLS) + len(ES.SCORE_COLS) + 1
+                + len(ES.ENTRY_COLS))
         self.assertGreaterEqual(ws.col_count, want,
                                 f"器が広がっていない（{before} のまま）")
         self.assertEqual(len(ws.values[0]), want)
@@ -296,10 +297,126 @@ class TestSync(unittest.TestCase):
 
     def test_header_is_not_touched_when_nothing_is_missing(self):
         header = (ES.OWNED_COLS + ES.MODEL_COLS + ES.SCORE_COLS
-                  + [ES.AGREE_COL] + ES.TRACK_COLS + ES.USER_COLS)
+                  + [ES.AGREE_COL] + ES.ENTRY_COLS + ES.TRACK_COLS + ES.USER_COLS)
         ws = FakeWorksheet([header])
         ES.sync(ws, ES.rows_from_predictions(PRED), {}, None)
         self.assertEqual(ws.updates, [], "見出しを不要に書き換えた")
+
+
+class TestNextOpen(unittest.TestCase):
+    """
+    翌営業日始値: 予測日の次の営業日の始値（分割調整なし）。
+
+    運用の規則は「翌営業日の寄りで買う」なので、収益はこの値を基準に数える。
+    取り違えると損益の計算が全部ずれる。固定すること:
+      - 祝日をまたいでも「次の営業日」の始値（暦の翌日ではない）
+      - 分割調整なしの O を使う（予測時株価・現在値と同じ、実際に付いた値）
+      - 次の営業日の日足がまだ無ければ空（予測した夜）
+      - 寄り付かなかった日（始値が無い）は空。0 で埋めない
+      - 保存データに営業日の欠けがあれば空（2日後の始値を書かない）
+      - 埋まっているセルは書き直さない（手で直した値を消さない）
+    """
+    # 2026年は 9/19〜23 が休場（敬老の日・国民の休日・秋分の日と土日）。
+    # 9/18（金）の次の営業日は 9/24（木）
+    BARS = pd.DataFrame(
+        [("2026-09-17", "12340", 990.0, 495.0),
+         ("2026-09-18", "12340", 1000.0, 500.0),
+         ("2026-09-24", "12340", 1010.0, 505.0),
+         ("2026-09-17", "56780", 480.0, 480.0),
+         ("2026-09-18", "56780", 500.0, 500.0),
+         ("2026-09-24", "56780", float("nan"), float("nan"))],   # 寄り付かず
+        columns=["Date", "Code", "O", "AdjO"])
+    BARS["Date"] = pd.to_datetime(BARS["Date"])
+
+    @staticmethod
+    def cal(*extra):
+        import datetime as dt
+        import trading_calendar as TC
+        days = [dt.date(2026, 9, 17), dt.date(2026, 9, 18), dt.date(2026, 9, 24)]
+        return TC.Calendar(days + list(extra))
+
+    def test_next_trading_day_across_holidays_uses_raw_open(self):
+        got = ES.next_opens(self.BARS, [("12340", "2026-09-18")], self.cal())
+        # 9/19（暦の翌日）でも、分割調整後の 505 でもない
+        self.assertEqual(got, {("12340", "2026-09-18"): 1010.0})
+
+    def test_open_of_the_next_day_not_the_pick_day(self):
+        got = ES.next_opens(self.BARS, [("12340", "2026-09-17")], self.cal())
+        self.assertEqual(got, {("12340", "2026-09-17"): 1000.0})
+
+    def test_empty_until_the_next_day_is_stored(self):
+        """予測した夜は、次の営業日の日足がまだ無い。"""
+        self.assertEqual(
+            ES.next_opens(self.BARS, [("12340", "2026-09-24")], self.cal()), {})
+
+    def test_no_value_when_the_stock_did_not_open(self):
+        self.assertEqual(
+            ES.next_opens(self.BARS, [("56780", "2026-09-18")], self.cal()), {})
+
+    def test_no_value_when_a_trading_day_is_missing_from_the_store(self):
+        """9/22 が営業日なのに保存データに無いとき、9/24 の始値を書かない。"""
+        import datetime as dt
+        got = ES.next_opens(self.BARS, [("12340", "2026-09-18")],
+                            self.cal(dt.date(2026, 9, 22)))
+        self.assertEqual(got, {})
+
+    def test_rows_without_a_date_are_skipped_not_fatal(self):
+        """利用者が足した行（予測日の欄が日付でない）で落ちない。"""
+        got = ES.next_opens(self.BARS, [("12340", "メモ"), ("12340", ""),
+                                        ("12340", "2026-09-18")], self.cal())
+        self.assertEqual(got, {("12340", "2026-09-18"): 1010.0})
+
+    def _sheet(self, entry=""):
+        header = (ES.OWNED_COLS + ES.MODEL_COLS + ES.SCORE_COLS + [ES.AGREE_COL]
+                  + ES.TRACK_COLS + ES.USER_COLS)
+        p = {h: i for i, h in enumerate(header)}
+        line = [""] * len(header)
+        line[p["予測日"]] = "2026-09-18"
+        line[p["コード"]] = "1234"
+        line[p["予測時株価"]] = "1000"
+        line[p["建値"]] = "1012"                 # 利用者の記入
+        if entry:
+            header = header + ES.ENTRY_COLS
+            line = line + [entry]
+        return FakeWorksheet([header, line])
+
+    def _written(self, ws):
+        header = ws.values[0]
+        out = {}
+        for u in ws.batches:
+            row, col = a1_to_rc(u["range"].split("!")[-1])
+            out[(row, header[col - 1])] = u["values"][0][0]
+        return out
+
+    def test_existing_row_gets_the_open_and_column_is_added_right(self):
+        ws = self._sheet()
+        ES.sync(ws, [], pd.Series({"12340": 1100.0}), pd.Timestamp("2026-09-24"),
+                cal=self.cal(), opens=self.BARS)
+        header = ws.values[0]
+        # 見出しの右端に足している（記入欄は動かない）
+        self.assertEqual(header[-1], "翌営業日始値")
+        self.assertLess(header.index("メモ"), header.index("翌営業日始値"))
+        wrote = self._written(ws)
+        self.assertEqual(wrote.get((2, "翌営業日始値")), 1010.0)
+        self.assertNotIn((2, "建値"), wrote)
+
+    def test_filled_cell_is_not_rewritten(self):
+        ws = self._sheet(entry="1008")           # 手で直した値
+        ES.sync(ws, [], pd.Series({"12340": 1100.0}), pd.Timestamp("2026-09-24"),
+                cal=self.cal(), opens=self.BARS)
+        self.assertNotIn((2, "翌営業日始値"), self._written(ws))
+
+    def test_new_row_of_tonight_leaves_the_open_empty(self):
+        """その夜に追記する行は、次の営業日がまだ来ていないので空。"""
+        ws = self._sheet()
+        pred = {"candidates": [
+            {"date": "2026-09-24", "code": "1234", "jqCode": "12340",
+             "rankInDay": 1, "nInDay": 1, "score": 0.4, "band": 6, "close": 1100.0}]}
+        ES.sync(ws, ES.rows_from_predictions(pred), pd.Series({"12340": 1100.0}),
+                pd.Timestamp("2026-09-24"), cal=self.cal(), opens=self.BARS)
+        header = ws.values[0]
+        self.assertEqual(len(ws.appended), 1)
+        self.assertEqual(ws.appended[0][header.index("翌営業日始値")], "")
 
 
 class TestSheetExport(unittest.TestCase):

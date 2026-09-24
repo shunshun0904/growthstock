@@ -88,6 +88,20 @@ AGREE_COL = "一致(上位10%)"
 #: 毎回更新する列。実行のたびに最新の株価で書き直す。
 TRACK_COLS = ["現在値", "騰落率%", "経過営業日"]
 
+#: 値が決まるまで毎回見に行き、決まったら触らない列。
+#:
+#:   翌営業日始値  予測日の次の営業日の始値。運用の規則（research/live_track.py）で
+#:                買う値と同じ日・同じ場面（寄り付き）の値で、収益はこの値を基準に数える。
+#:                「予測時株価」「現在値」と同じく、その日に実際に付いた値（分割調整なし）。
+#:                live_track は分割調整後の始値で数えるので、予測日より後に分割した
+#:                銘柄だけ数字が合わない
+#:
+#: 予測した夜にはまだ無い（次の営業日の日足が取り込まれた夜に入る）。一度決まれば
+#: 変わらないので、埋まっているセルは書き直さない（手で直した値も残る）。
+#: 寄り付かなかった日（売買が無い・売買停止）と、保存データに営業日の欠けがあって
+#: 次の営業日を確かめられないときは空のまま。0 では埋めない。
+ENTRY_COLS = ["翌営業日始値"]
+
 #: 見出しだけ作って中身は一切触らない列。利用者の記入欄。
 USER_COLS = ["建値", "株数", "手仕舞い日", "手仕舞い値", "損益", "メモ"]
 
@@ -150,6 +164,64 @@ def latest_closes(data_dir: str) -> "pd.Series":
                       for p in paths[-2:]], ignore_index=True)
     bars["Date"] = pd.to_datetime(bars["Date"])
     return bars.sort_values("Date").groupby("Code")["C"].last()
+
+
+def load_opens(data_dir: str) -> "pd.DataFrame":
+    """直近2年ぶんの日足の始値（分割調整なし）。翌営業日始値に使う。"""
+    paths = sorted(glob.glob(os.path.join(data_dir, "bars_*.parquet")))
+    if not paths:
+        return pd.DataFrame(columns=["Date", "Code", "O"])
+    bars = pd.concat([pd.read_parquet(p, columns=["Date", "Code", "O"])
+                      for p in paths[-2:]], ignore_index=True)
+    bars["Date"] = pd.to_datetime(bars["Date"])
+    bars["Code"] = bars["Code"].astype(str)
+    return bars
+
+
+def next_opens(bars: "pd.DataFrame", keys, cal=None) -> Dict:
+    """
+    (5桁コード, 予測日) ごとの翌営業日の始値。値が決まったものだけ返す。
+
+    次の営業日は日足にある日付から決める（J-Quants の日足は売買の無い銘柄にも
+    その日の行があるので、日付の集合がそのまま営業日になる）。カレンダーが
+    覆っていれば、その日が予測日の**すぐ次の**営業日かを確かめる。保存データに
+    営業日の欠けがあると、2日後の始値を「翌営業日」として書いてしまうため。
+    """
+    if bars is None or not len(bars):
+        return {}
+    days = np.sort(pd.to_datetime(bars["Date"]).unique())
+    nxt = {}
+    for d in sorted({d for _, d in keys}):
+        # 予測日の欄は手で書き換えられることがある（メモの行など）。日付として
+        # 読めない行は飛ばす。ここで落ちると、その夜の追記ごと失敗する
+        t = pd.to_datetime(d, errors="coerce")
+        if pd.isna(t):
+            continue
+        i = int(np.searchsorted(days, np.datetime64(t, "ns"), side="right"))
+        if i >= len(days):
+            continue                      # 次の営業日の日足がまだ無い
+        n = pd.Timestamp(days[i])
+        if cal is not None and cal:
+            k = cal.count_between(t.date(), n.date())
+            if k is not None and k != 1:
+                continue                  # 間の営業日が保存データに無い
+        nxt[d] = n
+    if not nxt:
+        return {}
+    want = bars[pd.to_datetime(bars["Date"]).isin(set(nxt.values()))]
+    opens = {(str(c), pd.Timestamp(dd)): v
+             for c, dd, v in want[["Code", "Date", "O"]].itertuples(index=False)}
+    out = {}
+    for code, d in keys:
+        n = nxt.get(d)
+        v = opens.get((code, n)) if n is not None else None
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            continue
+        if np.isfinite(v) and v > 0:      # 寄り付かなかった日は空のまま
+            out[(code, d)] = round(v, 1)
+    return out
 
 
 def track_values(jq_code: str, price_at_pick, pick_date: str,
@@ -321,7 +393,8 @@ def ensure_worksheet(book, title: str):
         return ws, False
     except Exception:
         pass
-    header = OWNED_COLS + MODEL_COLS + SCORE_COLS + [AGREE_COL] + TRACK_COLS + USER_COLS
+    header = (OWNED_COLS + MODEL_COLS + SCORE_COLS + [AGREE_COL] + ENTRY_COLS
+              + TRACK_COLS + USER_COLS)
     ws = book.add_worksheet(title=title, rows=2000, cols=max(30, len(header) + 5))
     ws.update([header], "A1")
     ws.freeze(rows=1)
@@ -341,7 +414,7 @@ def ensure_columns(ws, header: List[str], dry_run: bool = False) -> List[str]:
     既存の中身に触らない。並び順が気になるときは利用者が手で動かしてよい
     （名前を変えなければ、そのまま正しく書き込まれる）。
     """
-    want = OWNED_COLS + MODEL_COLS + SCORE_COLS + [AGREE_COL] + TRACK_COLS
+    want = OWNED_COLS + MODEL_COLS + SCORE_COLS + [AGREE_COL] + ENTRY_COLS + TRACK_COLS
     missing = [c for c in want if c not in header]
     if not missing:
         return header
@@ -379,7 +452,10 @@ def a1(col_idx: int, row_idx: int) -> str:
 
 
 def sync(ws, rows: List[Dict], closes, as_of, dry_run: bool = False,
-         cal=None) -> Dict[str, int]:
+         cal=None, opens=None) -> Dict[str, int]:
+    """
+    opens: 日足の始値（load_opens の形）。渡さなければ翌営業日始値は書かない。
+    """
     values = ws.get_all_values()
     if not values:
         raise SystemExit("シートが空です。見出し行が作られていません")
@@ -396,27 +472,50 @@ def sync(ws, rows: List[Dict], closes, as_of, dry_run: bool = False,
             continue
         seen[(line[pos[KEY_COLS[0]]], line[pos[KEY_COLS[1]]])] = r
 
+    by_key = {(x["予測日"], x["コード"]): x for x in rows}
+
+    def jq_of(d, code):
+        x = by_key.get((d, code))
+        if x:
+            return x["_jqCode"]
+        return f"{code}0" if len(str(code)) == 4 else str(code)
+
+    # --- 翌営業日始値: 空のセルの行だけ、値が決まっていれば入れる --- #
+    entry_col = ENTRY_COLS[0]
+    empty_entry = []
+    if entry_col in pos:
+        for (d, code), r in seen.items():
+            line = values[r - 1]
+            cur = line[pos[entry_col]] if len(line) > pos[entry_col] else ""
+            if not str(cur).strip():
+                empty_entry.append(((d, code), r))
+
     # --- 追記する行 --- #
     new = [x for x in rows if (x["予測日"], x["コード"]) not in seen]
+    keys = ([(x["_jqCode"], x["予測日"]) for x in new]
+            + [(jq_of(d, code), d) for (d, code), _ in empty_entry])
+    entry = next_opens(opens, keys, cal) if opens is not None else {}
     appended = []
     for x in new:
         line = [""] * len(header)
         merged = dict(x)
         merged.update(track_values(x["_jqCode"], x.get("予測時株価"),
                                    x["予測日"], closes, as_of, cal))
+        v = entry.get((x["_jqCode"], x["予測日"]))
+        if v is not None:
+            merged[entry_col] = v
         for name, v in merged.items():
             if name.startswith("_") or name not in pos:
                 continue
             line[pos[name]] = "" if v is None else v
         appended.append(line)
 
-    # --- 既存行を更新する（追跡列と、空のままのモデル別列だけ） --- #
+    # --- 既存行を更新する（追跡列と、空のままのモデル別列・翌営業日始値だけ） --- #
     updates = []
     # 列が増えた直後は、直近5営業日ぶんの既存行にモデル別の値が入っていない。
     # 空のセルにだけ入れる。既に値があるセルは触らない（利用者が手で
     # 上書きしている可能性がある。この台帳は手書きと同居する前提）
     backfill = [c for c in MODEL_COLS + SCORE_COLS + [AGREE_COL] if c in pos]
-    by_key = {(x["予測日"], x["コード"]): x for x in rows}
     for (d, code), r in seen.items():
         x = by_key.get((d, code))
         price = None
@@ -442,11 +541,15 @@ def sync(ws, rows: List[Dict], closes, as_of, dry_run: bool = False,
                     price = float(line[pos["予測時株価"]])
                 except (TypeError, ValueError):
                     price = None
-            jq = f"{code}0" if len(str(code)) == 4 else str(code)
+            jq = jq_of(d, code)
         tv = track_values(jq, price, d, closes, as_of, cal)
         for name, v in tv.items():
             if name in pos:
                 updates.append({"range": a1(pos[name] + 1, r), "values": [[v]]})
+    for (d, code), r in empty_entry:
+        v = entry.get((jq_of(d, code), d))
+        if v is not None:
+            updates.append({"range": a1(pos[entry_col] + 1, r), "values": [[v]]})
 
     if dry_run:
         print(f"[dry-run] 追記 {len(appended)}行 / 追跡列の更新 {len(updates)}セル")
@@ -482,6 +585,7 @@ def main(argv=None) -> int:
     pred = json.load(open(args.predictions, encoding="utf-8"))
     rows = rows_from_predictions(pred)
     closes = latest_closes(args.data_dir)
+    opens = load_opens(args.data_dir)
     as_of = None
     paths = sorted(glob.glob(os.path.join(args.data_dir, "bars_*.parquet")))
     if paths:
@@ -492,7 +596,8 @@ def main(argv=None) -> int:
 
     if args.dry_run:
         # 通信しないので、見出しは初期構成を仮定して整合だけ見る
-        header = OWNED_COLS + MODEL_COLS + SCORE_COLS + [AGREE_COL] + TRACK_COLS + USER_COLS
+        header = (OWNED_COLS + MODEL_COLS + SCORE_COLS + [AGREE_COL] + ENTRY_COLS
+                  + TRACK_COLS + USER_COLS)
         print(f"[dry-run] 列 {len(header)}個: {' / '.join(header)}")
         unknown = sorted({k for x in rows for k in x
                           if not k.startswith('_') and k not in header})
@@ -504,11 +609,21 @@ def main(argv=None) -> int:
             print("  " + " ".join(
                 f"{c}={x.get(c) if x.get(c) is not None else '—'}"
                 for c in [ "予測日", "コード"] + mc))
+        cal = TC.load(args.data_dir)
+        entry = next_opens(opens, [(x["_jqCode"], x["予測日"]) for x in rows], cal)
         for x in rows[:3]:
             tv = track_values(x["_jqCode"], x.get("予測時株価"), x["予測日"],
-                              closes, as_of, TC.load(args.data_dir))
+                              closes, as_of, cal)
             print(f"  {x['予測日']} {x['コード']} {x['銘柄名']} "
                   f"{x['順位']}/{x['候補数']}位 帯{x['帯']} → {tv}")
+        by_day = {}
+        for x in rows:
+            k = x["予測日"]
+            got = (x["_jqCode"], k) in entry
+            n, m = by_day.get(k, (0, 0))
+            by_day[k] = (n + got, m + 1)
+        print("[dry-run] 翌営業日始値が決まった行（予測日ごと）: " + " / ".join(
+            f"{k} {n}/{m}" for k, (n, m) in sorted(by_day.items())))
         print("[dry-run] 通信していません")
         return 0
 
@@ -518,7 +633,7 @@ def main(argv=None) -> int:
     ws, created = ensure_worksheet(book, args.title)
     if created:
         print(f"[sheet] ワークシート「{args.title}」を作成し、見出しを置きました")
-    res = sync(ws, rows, closes, as_of, cal=TC.load(args.data_dir))
+    res = sync(ws, rows, closes, as_of, cal=TC.load(args.data_dir), opens=opens)
     print(f"[done] 追記 {res['appended']}行 / 追跡列の更新 {res['updated']}セル")
     print(f"[done] https://docs.google.com/spreadsheets/d/{args.sheet_id}/edit")
     return 0
