@@ -5,6 +5,11 @@ name: Probe Dedupe Keys
 # 出すのは件数と比だけで、値そのものと鍵はログに出さない。
 on:
   workflow_dispatch:
+    inputs:
+      span:
+        description: '日をまたいだ一意性を確かめる無作為の日数（0 なら1日ごとの実測だけ）'
+        required: false
+        default: '0'
 
 defaults:
   run:
@@ -26,8 +31,14 @@ jobs:
       - name: Probe
         env:
           JQUANTS_API: ${{ secrets.JQUANTS_API }}
+          SPAN: ${{ inputs.span || '0' }}
         run: |
-          python3 research/probe_dedupe_keys.py 2>&1 | tee probe.log
+          [[ "$SPAN" =~ ^[0-9]{1,4}$ ]] || { echo "日数が不正: $SPAN"; exit 1; }
+          if [ "$SPAN" -gt 0 ]; then
+            python3 research/probe_dedupe_keys.py --span "$SPAN" 2>&1 | tee probe.log
+          else
+            python3 research/probe_dedupe_keys.py 2>&1 | tee probe.log
+          fi
           exit "${PIPESTATUS[0]}"
       - name: Summary
         if: always()

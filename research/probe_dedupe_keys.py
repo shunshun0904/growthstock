@@ -80,7 +80,71 @@ def merge_key(df: pd.DataFrame, date_col: str) -> list:
     return [c for c in (date_col, "Code") if c in df.columns]
 
 
+#: --span で日をまたいで確かめる種別と候補のキー。1日の中で一意でも、全期間をまとめると
+#: 重なることがある（2026-09-24: 大株主は同じ DocId が別の提出日で2回出る。1日ぶんの
+#: 実測では見えず、全期間の取り直しで保存を止めた）
+SPAN_KINDS = {
+    "lvshld": [["DocId"], ["DocId", "SubDate"], ["DocId", "Code"], ["DocId", "SubDate", "Code"]],
+    "mjrshld": [["DocId"], ["DocId", "SubDate"], ["DocId", "Code"], ["DocId", "SubDate", "Code"]],
+    "xhold": [["DocId"], ["DocId", "SubDate"], ["DocId", "Code"], ["DocId", "SubDate", "Code"]],
+    "earndate": [["PubDate", "Code", "FQName", "SchDate"], ["PubDate", "Code", "FQName"]],
+}
+
+
+def span(n_days: int, seed: int = 0) -> int:
+    """
+    日をまたいでキーが一意かを確かめる。
+
+    無作為の n_days 日と固定の8日をまとめて、候補のキーごとに一意かを数える。
+    同じ文書が何日に出るか・提出日が問い合わせた日と違う行がどれだけあるかも出す。
+    """
+    import numpy as np
+
+    client = JQuantsClient(resolve_api_key(), pause=0.2)
+    pool = pd.bdate_range("2016-10-03", "2026-09-18")
+    rng = np.random.default_rng(seed)
+    days = sorted(set(DAYS) | {pd.Timestamp(d).date().isoformat()
+                               for d in rng.choice(pool, size=n_days, replace=False)})
+    print(f"=== 日をまたいだ一意性（{len(days)}日。無作為 {n_days}日 + 固定8日） ===")
+    for name, cands in SPAN_KINDS.items():
+        path, param, date_col, _ = KINDS[name]
+        frames = []
+        for d in days:
+            try:
+                rows = client.get_paginated(path, {param: d})
+            except JQuantsError as exc:
+                print(f"  {name} {d} err: {str(exc)[:60]}")
+                continue
+            if rows:
+                frames.append(hashable(pd.DataFrame.from_records(rows)).assign(_asked=d))
+        if not frames:
+            print(f"  {name}: 0行")
+            continue
+        df = pd.concat(frames, ignore_index=True)
+        body = df.drop(columns=["_asked"])
+        exact = len(body.drop_duplicates())
+        parts = []
+        for k in cands:
+            cols = [c for c in k if c in body.columns]
+            if len(cols) < len(k):
+                parts.append(f"{'+'.join(k)}=列なし")
+                continue
+            parts.append(f"{'+'.join(k)}={len(body.drop_duplicates(subset=cols))}")
+        off = int((pd.to_datetime(df[date_col], errors="coerce").dt.date.astype(str)
+                   != df["_asked"]).sum()) if date_col in df.columns else -1
+        multi = ""
+        if "DocId" in df.columns:
+            per_doc = df.groupby("DocId")["_asked"].nunique()
+            multi = f" / 2日以上に出る文書 {int((per_doc > 1).sum())}"
+        print(f"  {name:<9} {len(df):>6}行（まったく同じ行を除くと {exact}）/ "
+              f"日付列が問い合わせた日と違う行 {off}{multi}")
+        print("            " + "  ".join(parts))
+    return 0
+
+
 def main() -> int:
+    if len(sys.argv) > 2 and sys.argv[1] == "--span":
+        return span(int(sys.argv[2]))
     key = resolve_api_key()
     if not key:
         print("[stop] JQUANTS_API が無い")
