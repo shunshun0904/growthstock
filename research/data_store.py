@@ -216,7 +216,11 @@ ROW_KEYS: Dict[str, Optional[List[str]]] = {
     "master_hist": ["Date", "Code"],
     "valuation": ["Date", "Code"],
     "shortratio": ["Date", "S33"],
-    "marginalert": ["PubDate", "Code"],
+    # 行そのもの（全列）。(PubDate, Code) は8日ぶんの実測では一意だったが、全期間の
+    # 取り直しで 808行が重なり、保存を止めた（2026-09-24。同じ日・同じ銘柄に中身の違う
+    # 規制の行が複数ある）。一意になる列の組を全期間で確かめるまでは、まったく同じ行
+    # だけを1行にする
+    "marginalert": None,
     "earndate": ["PubDate", "Code", "FQName", "SchDate"],
     "lvshld": ["DocId", "SubDate"],
     "mjrshld": ["DocId", "SubDate"],

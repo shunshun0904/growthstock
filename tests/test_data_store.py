@@ -176,6 +176,17 @@ class TestRowKeys(unittest.TestCase):
         data_store.merge_into_years(self.dir, "mjrshld", df, "SubDate")
         self.assertEqual(len(self.read("mjrshld", 2025)), 2)
 
+    def test_margin_alert_rows_on_the_same_day_and_code_are_all_kept(self):
+        """
+        信用規制: 同じ日・同じ銘柄に中身の違う行がある（全期間の取り直しで 808行）。
+        (PubDate, Code) をキーにすると保存を止める（2026-09-24 に実際に止まった）。
+        """
+        df = pd.DataFrame({"PubDate": ["2026-03-02", "2026-03-02"], "Code": ["72030"] * 2,
+                           "AppDate": ["2026-03-03", "2026-03-04"],
+                           "PubReason": [{"Restricted": "1"}, {"Restricted": "0"}]})
+        data_store.merge_into_years(self.dir, "marginalert", df, "PubDate")
+        self.assertEqual(len(self.read("marginalert", 2026)), 2)
+
     def test_same_day_disclosures_are_both_kept(self):
         """決算: 同じ日・同じ銘柄に決算短信と業績予想の修正。"""
         df = pd.DataFrame({"DiscNo": [1, 2], "Code": ["72030", "72030"],
