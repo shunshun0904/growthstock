@@ -37,7 +37,7 @@ ALL = "全列"
 KINDS = {
     "fins":        ("/fins/summary", "date", "DiscDate",
                     [["DiscDate", "Code"], ["DiscDate", "Code", "DocType"],
-                     ["DiscDate", "Code", "DiscTime", "DocType"], ALL]),
+                     ["DiscDate", "Code", "DiscTime", "DocType"], ["DiscNo"], ALL]),
     "margin":      ("/markets/margin-interest", "date", "Date", [["Date", "Code"], ALL]),
     "valuation":   ("/equities/valuation", "date", "Date", [["Date", "Code"], ALL]),
     "shortratio":  ("/markets/short-ratio", "date", "Date", [["Date"], ["Date", "S33"], ALL]),
@@ -46,7 +46,8 @@ KINDS = {
                      ["PubDate", "Code", "PubReason"], ALL]),
     "earndate":    ("/fins/earnings-date", "date", "PubDate",
                     [["PubDate", "Code"], ["PubDate", "Code", "SchDate"],
-                     ["PubDate", "Code", "FQName"], ALL]),
+                     ["PubDate", "Code", "FQName"],
+                     ["PubDate", "Code", "FQName", "SchDate"], ALL]),
     "lvshld":      ("/edinet/large-volume-shareholders", "date", "SubDate",
                     [["SubDate", "Code"], ["DocId"], ALL]),
     "mjrshld":     ("/edinet/major-shareholders", "date", "SubDate",
@@ -115,6 +116,19 @@ def main() -> int:
                 agg[label] = agg.get(label, 0) + u
             print(f"  {d} {len(df):>6}行  今の判定({'+'.join(mk)})で残る {kept:>6}  | "
                   + "  ".join(parts))
+            if name == "shortsale":
+                near = ["DiscDate", "CalcDate", "Code", "SSName", "FundName", "DICName"]
+                near = [c for c in near if c in df.columns]
+                g = df[df.duplicated(subset=near, keep=False)]
+                if len(g):
+                    diff = sorted({c for _, x in g.groupby(near, dropna=False)
+                                   for c in df.columns if x[c].nunique(dropna=False) > 1})
+                    print(f"           近いキーで重なる {len(g)}行。違う列: {diff}")
+                r = pd.to_numeric(df.get("ShrtPosToSO"), errors="coerce").dropna()
+                if len(r):
+                    print(f"           ShrtPosToSO の分位（単位の確認）: 最小 {r.min():.4f} / "
+                          f"10% {r.quantile(.1):.4f} / 中央 {r.median():.4f} / 最大 {r.max():.4f}"
+                          f" / 0.5 未満 {int((r < 0.5).sum())}行 / 0.005 未満 {int((r < 0.005).sum())}行")
             if name == "shortratio" and "S33" in df.columns:
                 s33 = pd.to_numeric(df["S33"], errors="coerce")
                 tail = df[s33 == 9999]
