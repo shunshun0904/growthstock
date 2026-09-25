@@ -26,9 +26,13 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# 画面のデータ取得（進捗期待の基準の規則を共有する）。research の後ろに置き、名前で隠さない
+sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             "scripts"))
 import availability as AV  # noqa: E402
 import features  # noqa: E402
 import extra_features  # noqa: E402
+import jquants_data_fetcher as JF  # noqa: E402
 import trading_calendar  # noqa: E402
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_data")
@@ -1435,6 +1439,159 @@ def disclosure_timing(samples: pd.DataFrame, fins: pd.DataFrame) -> pd.DataFrame
     return out
 
 
+# --------------------------------------------------------------------------- #
+# 進捗期待（画面の8軸と同じ定義。2026-09-25、運用者の指示で特徴量にも入れる候補）
+# --------------------------------------------------------------------------- #
+
+#: 前年同期の進捗の下限（均等ペース Q×25% に対する割合）。画面のデータ取得の値を
+#: そのまま使う（同じ定数を2か所に書くと、片方だけ直す事故が起きる）
+PROGRESS_FLOOR = JF.PROGRESS_FLOOR
+
+#: 順位を付けるのに要る、それより前の開示の数（同じ四半期・同じ物差し）。
+#: 少ないと順位が荒れる。データの最初（2016-10）の直後だけ欠測になる
+PROGRESS_PCT_MIN_HISTORY = 200
+
+
+def seasonal_progress(df: pd.DataFrame, raw: pd.DataFrame) -> pd.DataFrame:
+    """
+    決算の行ごとに、進捗率の基準（前年同期の進捗）・物差し・比率を返す（df と同じ index）。
+
+    画面（scripts/jquants_data_fetcher.progress_benchmark）と同じ規則:
+      基準 = 前年の同じ四半期までの累計営業利益 ÷ 前年の通期実績（%）。
+             前年度はちょうど1年前に始まったものだけ（決算期の変更で長さが違う年は使わない）
+             Q×12.5% 未満なら Q×12.5%（'floor'）、前年の数字が無い・0以下なら Q×25%（'linear'）
+      比率 = 進捗率 ÷ 基準（1.0 = 例年どおりのペース）
+    本決算（4Q）と、進捗率が無い行は欠測。
+
+    df:  重複を除いた決算（Code / CurFYSt / quarter / DiscDate / progress_rate）
+    raw: 重複を除く前の、実績のある開示（Code / CurFYSt / quarter / DiscDate / DiscTime / OP）
+
+    **前年の数字は、その行の開示日までに出ていた版を使う。** df は同じ四半期の
+    重複を「最後の開示」に絞ってあるので、そこから前年を引くと、この行より後に
+    出た前年の訂正を先に見てしまう（先読み）。
+    """
+    q = df["quarter"].to_numpy(dtype=int)
+    prev = (pd.to_datetime(df["CurFYSt"], errors="coerce")
+            - pd.DateOffset(years=1)).dt.strftime("%Y-%m-%d")
+    r = raw.copy()
+    r["CurFYSt"] = pd.to_datetime(r["CurFYSt"], errors="coerce").dt.strftime("%Y-%m-%d")
+    r["DiscDate"] = pd.to_datetime(r["DiscDate"])
+    r["quarter"] = r["quarter"].astype(int)
+    r = r.dropna(subset=["CurFYSt", "DiscDate"])
+    order = ["DiscDate"] + (["DiscTime"] if "DiscTime" in r.columns else [])
+    r = r.sort_values(order, kind="mergesort")[["Code", "CurFYSt", "quarter", "DiscDate", "OP"]]
+    r["OP"] = pd.to_numeric(r["OP"], errors="coerce")
+
+    def as_of(quarters: np.ndarray) -> np.ndarray:
+        """前年度の指定の四半期の累計営業利益（その行の開示日までに出ていた最後の版）。"""
+        left = pd.DataFrame({"_i": np.arange(len(df)), "Code": df["Code"].to_numpy(),
+                             "CurFYSt": prev.to_numpy(), "quarter": quarters,
+                             "DiscDate": pd.to_datetime(df["DiscDate"]).to_numpy()})
+        left = left.dropna(subset=["CurFYSt", "DiscDate"]).sort_values("DiscDate",
+                                                                        kind="mergesort")
+        m = pd.merge_asof(left, r, on="DiscDate", by=["Code", "CurFYSt", "quarter"],
+                          direction="backward", allow_exact_matches=True)
+        v = np.full(len(df), np.nan)
+        v[m["_i"].to_numpy()] = m["OP"].to_numpy(dtype=float)
+        return v
+
+    part = as_of(q)                                  # 前年の同じ四半期までの累計
+    whole = as_of(np.full(len(df), 4, dtype=int))    # 前年の通期
+    even = q * 25.0
+    floor = even * PROGRESS_FLOOR
+    with np.errstate(invalid="ignore", divide="ignore"):
+        share = np.where((part > 0) & (whole > 0), part / whole * 100.0, np.nan)
+    rate = pd.to_numeric(df["progress_rate"], errors="coerce").to_numpy(dtype=float)
+    has = np.isfinite(rate) & np.isin(q, (1, 2, 3))
+    seasonal = np.isfinite(share)
+    bench = np.where(seasonal, np.maximum(share, floor), even)
+    basis = np.where(seasonal, np.where(share < floor, "floor", "seasonal"), "linear")
+    return pd.DataFrame({
+        "progress_bench": np.where(has, bench, np.nan),
+        "progress_basis": pd.Series(basis).where(has, None).to_numpy(),
+        "progress_ratio": np.where(has, rate / bench, np.nan),
+    }, index=df.index)
+
+
+def progress_percentile(dates, quarter, basis, ratio,
+                        min_history: int = PROGRESS_PCT_MIN_HISTORY) -> np.ndarray:
+    """
+    進捗の比率の順位（0〜100）。同じ四半期・同じ物差し（前年同期 / Q×25%）の、
+    **その開示日より前の**開示の中で数える。同じ日の開示は数えず、同順位は半分ずつ数える。
+
+    画面の点数（src/lib/scoring.js の PROGRESS_TABLE）は 2016〜2026年の全期間で作った
+    固定の表で順位を付ける。学習に使う列でそれをすると、過去の行を未来の分布で
+    順位付けることになる（未来の情報の混入）ので、ここではその日までの開示だけを使う。
+    それより前の開示が min_history 件に満たないうちは欠測。
+    """
+    ratio = np.asarray(ratio, dtype=float)
+    quarter = np.asarray(quarter)
+    table = np.where(np.isin(np.asarray(basis, dtype=object), ["seasonal", "floor"]),
+                     "seasonal", "linear")
+    days = pd.to_datetime(pd.Series(dates)).to_numpy()
+    ok = np.isfinite(ratio) & np.isin(quarter, (1, 2, 3))
+    out = np.full(len(ratio), np.nan)
+    for qq in (1, 2, 3):
+        for t in ("seasonal", "linear"):
+            idx = np.where(ok & (quarter == qq) & (table == t))[0]
+            if not len(idx):
+                continue
+            vals, rank = np.unique(ratio[idx], return_inverse=True)
+            n = len(vals)
+            tree = np.zeros(n + 1, dtype=np.int64)       # 値の順位ごとの件数（Fenwick 木）
+
+            def below(k: int) -> int:                    # 順位 k 未満の件数
+                s = 0
+                while k > 0:
+                    s += tree[k]
+                    k -= k & -k
+                return int(s)
+
+            seq = idx[np.argsort(days[idx], kind="mergesort")]
+            pos = {int(i): int(rk) for i, rk in zip(idx, rank)}
+            total, i = 0, 0
+            while i < len(seq):
+                j = i
+                while j < len(seq) and days[seq[j]] == days[seq[i]]:
+                    j += 1
+                if total >= min_history:                 # 同じ日の開示どうしは数えない
+                    for s_ in seq[i:j]:
+                        k = pos[int(s_)]
+                        less = below(k)
+                        eq = below(k + 1) - less
+                        out[s_] = (less + 0.5 * eq) / total * 100.0
+                for s_ in seq[i:j]:
+                    k = pos[int(s_)] + 1
+                    while k <= n:
+                        tree[k] += 1
+                        k += k & -k
+                total += j - i
+                i = j
+    return out
+
+
+def attach_fins(samples: pd.DataFrame, q: pd.DataFrame) -> pd.DataFrame:
+    """
+    決算（quarterize_panel の出力）を、基準日までに開示済みの直近のものとして結合する。
+
+    **同じ日に複数の期が出ることがある**（古い期の出し直しと新しい期が同じ日。
+    実測で決算の行の 0.87%、学習データの 37行・0.17%）。merge_asof は同じ開示日の
+    中では最後の行を取るので、会計期間の順（事業年度の開始日・四半期）に並べて
+    いちばん新しい期を最後に置く。画面のデータ取得の「最新 = 会計期間が
+    いちばん新しい四半期」と同じ規則。2026-09-25 まで開示日だけで並べていて
+    （安定でない並べ替え）、どちらの期の決算が付くかが並びまかせだった。
+    """
+    s = samples.sort_values("Date", kind="mergesort")
+    qq = q.sort_values(["DiscDate", "CurFYSt", "quarter"], kind="mergesort")
+    out = pd.merge_asof(
+        s, qq,
+        left_on="Date", right_on="DiscDate", by="Code",
+        direction="backward",   # 基準日までに開示済みの直近決算のみ
+        allow_exact_matches=True,
+    )
+    return out.drop(columns=["CurFYSt"])
+
+
 def quarterize_panel(fins: pd.DataFrame) -> pd.DataFrame:
     """
     累計ベースの決算を単一四半期に差分展開し、前年同期比を付ける。
@@ -1450,6 +1607,9 @@ def quarterize_panel(fins: pd.DataFrame) -> pd.DataFrame:
     df = df[df["quarter"].notna() & has_actual].copy()
     df["quarter"] = df["quarter"].astype(int)
     df["DiscDate"] = pd.to_datetime(df["DiscDate"])
+    # 重複を除く前の開示。進捗の基準（前年同期）を「その日までに出ていた版」で引くため
+    raw_op = df[[c for c in ("Code", "CurFYSt", "quarter", "DiscDate", "DiscTime", "OP")
+                 if c in df.columns]].copy()
 
     # 同一(銘柄, 会計年度, 四半期)の重複開示は最後の開示を採用（訂正を反映）
     df = (df.sort_values(["Code", "CurFYSt", "quarter", "DiscDate", "DiscTime"])
@@ -1483,6 +1643,10 @@ def quarterize_panel(fins: pd.DataFrame) -> pd.DataFrame:
         (df["FOP"] > 0) & df["OP"].notna(), df["OP"] / df["FOP"] * 100.0, np.nan
     )
     df["progress_vs_base"] = df["progress_rate"] - df["quarter"] * 25.0
+    # 画面の「進捗期待」と同じ定義（前年同期の進捗で割った比率）。実験46の候補
+    sp = seasonal_progress(df, raw_op)
+    for c in sp.columns:
+        df[c] = sp[c]
 
     # 営業利益率（単一四半期）
     df["op_margin"] = np.where(
@@ -1771,7 +1935,17 @@ def quarterize_panel(fins: pd.DataFrame) -> pd.DataFrame:
         pos = pd.concat([(s > 0) & s.notna() for s in levels], axis=1).sum(axis=1)
         df[f"{a}_pos_ratio"] = (pos / avail.where(avail > 0)).where(enough)
 
-    keep = (["Code", "DiscDate", "quarter", "progress_vs_base", "shares_out",
+    # 比率の順位（その開示日より前の開示だけで数える）。行の並びに依らない
+    df["progress_pct"] = progress_percentile(df["DiscDate"], df["quarter"].to_numpy(),
+                                             df["progress_basis"].to_numpy(),
+                                             df["progress_ratio"].to_numpy())
+    print(f"[progress] 前年同期の基準 {int(df['progress_basis'].isin(['seasonal', 'floor']).sum()):,}行"
+          f"（うち下限 {int((df['progress_basis'] == 'floor').sum()):,}）/ Q×25% "
+          f"{int((df['progress_basis'] == 'linear').sum()):,}行 / 順位あり "
+          f"{int(df['progress_pct'].notna().sum()):,}行")
+
+    keep = (["Code", "DiscDate", "CurFYSt", "quarter", "progress_vs_base", "shares_out",
+             "progress_ratio", "progress_pct", "progress_basis",
              "eps_growth_turn", "sales_growth_turn", "BPS", "bps_basis", "roe_basis",
              # 配当・キャッシュフロー・会社予想・その他の比率
              "dps", "has_dividend", "payout_ratio",
@@ -2254,17 +2428,10 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     # --- 財務をマージ（開示日ベースの point-in-time） --- #
     print("\n[merge] 財務情報を開示日ベースで結合")
     q = quarterize_panel(fins)
-    samples = samples.sort_values("Date")
-    q = q.sort_values("DiscDate")
-    samples = pd.merge_asof(
-        samples, q,
-        left_on="Date", right_on="DiscDate", by="Code",
-        direction="backward",   # 基準日までに開示済みの直近決算のみ
-        allow_exact_matches=True,
-    )
+    samples = attach_fins(samples, q)
     # 決算が古すぎる（1年以上前）場合は使わない
     stale = (samples["Date"] - samples["DiscDate"]).dt.days > 365
-    fin_cols = [c for c in q.columns if c not in ("Code", "DiscDate")]
+    fin_cols = [c for c in q.columns if c not in ("Code", "DiscDate", "CurFYSt")]
     samples.loc[stale, fin_cols] = np.nan
     print(f"[merge] 決算が1年以上古いサンプル: {int(stale.sum()):,}件を欠測扱い")
 
@@ -2511,7 +2678,9 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
                  "eps_ttm", "BPS", "roe_basis", "bps_basis",
                  # PER / PBR / ROE を API に寄せた（実験38）。
                  # どの行がどちらから来たかを追えるようにしておく
-                 "per_basis", "pbr_basis"]
+                 "per_basis", "pbr_basis",
+                 # 進捗の基準の物差し（前年同期 / 下限 / Q×25%。実験46）
+                 "progress_basis"]
     meta_cols = [c for c in meta_cols if c in samples.columns]
 
     # 未来から作った列が特徴量に混ざるとリークで結果が無意味になる。

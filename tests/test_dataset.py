@@ -1212,6 +1212,92 @@ class TestQuarterizePanel(unittest.TestCase):
         self.assertNotIn("2025-09-01", set(q["DiscDate"].astype(str).str[:10]))
 
 
+class TestProgressPercentile(unittest.TestCase):
+    """
+    進捗の比率の順位（実験46の候補 progress_pct）は、その開示日より前の開示だけで付ける。
+    全期間の分布で順位を付けると、過去の行を未来の分布で測ることになる。
+    """
+
+    def pct(self, dates, ratio, quarter=None, basis=None, min_history=3):
+        from build_dataset import progress_percentile
+        n = len(ratio)
+        return progress_percentile(pd.to_datetime(dates), np.array(quarter or [1] * n),
+                                   np.array(basis or ["seasonal"] * n, dtype=object),
+                                   np.array(ratio, dtype=float), min_history=min_history)
+
+    def test_only_earlier_days_count(self):
+        out = self.pct(["2020-01-01"] * 3 + ["2020-02-01"] * 2, [1.0, 2.0, 3.0, 2.0, 10.0])
+        # 最初の日は、それより前の開示が無い（同じ日の開示どうしは数えない）
+        self.assertTrue(np.isnan(out[:3]).all())
+        # 2.0: それより前の [1, 2, 3] のうち 1 が下、2 が同じ -> (1 + 0.5) / 3
+        self.assertAlmostEqual(out[3], 1.5 / 3 * 100)
+        self.assertAlmostEqual(out[4], 100.0)
+
+    def test_later_values_do_not_change_earlier_ranks(self):
+        dates = ["2020-01-01"] * 3 + ["2020-02-01", "2020-03-01"]
+        a = self.pct(dates, [1.0, 2.0, 3.0, 2.0, 0.0])
+        b = self.pct(dates, [1.0, 2.0, 3.0, 2.0, 99.0])
+        self.assertAlmostEqual(a[3], b[3])
+
+    def test_quarters_and_yardsticks_are_ranked_separately(self):
+        out = self.pct(["2020-01-01"] * 4 + ["2020-02-01"] * 3,
+                       [1.0, 1.0, 1.0, 5.0, 2.0, 2.0, 2.0],
+                       quarter=[1, 1, 1, 2, 1, 2, 1],
+                       basis=["seasonal", "seasonal", "seasonal", "seasonal",
+                              "seasonal", "seasonal", "linear"], min_history=1)
+        self.assertAlmostEqual(out[4], 100.0)          # 1Q・前年同期: 過去は 1.0 が3件
+        self.assertAlmostEqual(out[5], 0.0)            # 2Q・前年同期: 過去は 5.0 の1件
+        self.assertTrue(np.isnan(out[6]))              # 1Q・Q×25%: 過去が0件
+        # 下限（floor）は前年同期と同じ物差し
+        f = self.pct(["2020-01-01", "2020-02-01"], [1.0, 2.0],
+                     basis=["seasonal", "floor"], min_history=1)
+        self.assertAlmostEqual(f[1], 100.0)
+
+    def test_too_little_history_is_missing(self):
+        out = self.pct(["2020-01-01", "2020-02-01", "2020-03-01"], [1.0, 2.0, 3.0],
+                       min_history=2)
+        self.assertTrue(np.isnan(out[:2]).all())
+        self.assertAlmostEqual(out[2], 100.0)
+
+    def test_missing_ratio_and_full_year_are_missing(self):
+        out = self.pct(["2020-01-01", "2020-02-01", "2020-03-01"], [1.0, np.nan, 3.0],
+                       quarter=[1, 1, 4], min_history=1)
+        self.assertTrue(np.isnan(out[1]) and np.isnan(out[2]))
+
+
+class TestAttachFinsSameDay(unittest.TestCase):
+    """
+    同じ日に古い期の出し直しと新しい期が出たら、新しい期の決算を結合する
+    （実測で学習データの 37行・0.17%）。並べ替えの順に左右されないこと。
+    """
+
+    def test_latest_fiscal_period_wins(self):
+        from build_dataset import attach_fins
+        q = pd.DataFrame({
+            "Code": ["00010"] * 3,
+            "DiscDate": pd.to_datetime(["2024-03-13", "2024-03-13", "2023-12-13"]),
+            "CurFYSt": ["2023-05-01", "2022-05-01", "2023-05-01"],
+            "quarter": [3, 3, 2], "x": [3.0, -1.0, 2.0]})
+        samples = pd.DataFrame({"Code": ["00010"] * 3,
+                                "Date": pd.to_datetime(["2024-01-10", "2024-03-13",
+                                                        "2024-03-20"])})
+        for order in (q, q.iloc[::-1], q.iloc[[1, 2, 0]], q.iloc[[0, 2, 1]]):
+            out = attach_fins(samples, order.reset_index(drop=True))
+            self.assertEqual(out["x"].tolist(), [2.0, 3.0, 3.0])
+            self.assertNotIn("CurFYSt", out.columns)
+
+    def test_same_day_old_period_alone_is_still_used(self):
+        """その日に古い期しか出ていなければ、それを使う（新しい期を作り出さない）。"""
+        from build_dataset import attach_fins
+        q = pd.DataFrame({"Code": ["00010"] * 2,
+                          "DiscDate": pd.to_datetime(["2024-03-13", "2023-12-13"]),
+                          "CurFYSt": ["2022-05-01", "2023-05-01"], "quarter": [3, 2],
+                          "x": [-1.0, 2.0]})
+        out = attach_fins(pd.DataFrame({"Code": ["00010"], "Date": pd.to_datetime(["2024-03-20"])}),
+                          q)
+        self.assertEqual(out["x"].tolist(), [-1.0])
+
+
 class TestMarketEnvironment(unittest.TestCase):
     """
     市場環境（地合い）の特徴量。

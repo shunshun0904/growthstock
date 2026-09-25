@@ -191,6 +191,15 @@ GROUPS: Dict[str, List[str]] = {
     "flow_mkt": ["short_ratio_mkt", "short_ratio_mkt_20"],
     #: 空売り残高報告（0.5% 以上の空売りの持ち高。報告者ごとの最新の合計）
     "short_pos": ["ss_ratio", "ss_n", "ss_chg_20", "ss_days"],
+    # --- 2026-09-25 の候補。本番（all_plus）には入れていない。実験46で測る --- #
+    #: 進捗期待の新しい定義（画面の8軸と同じ。運用者の指示で特徴量にも入れる候補）。
+    #: progress_ratio = 進捗率 ÷ 前年同期の進捗（Q×12.5% 未満なら Q×12.5%、無ければ Q×25%）
+    #: progress_pct   = その比率の、同じ四半期・同じ物差しの過去の開示の中での順位（0〜100）
+    #: progress（progress_vs_base = 進捗率 − Q×25）と違い、下期偏重の会社を「遅れ」と
+    #: 見ず、四半期どうしの幅の違いも順位でそろう（build_dataset.seasonal_progress）
+    "progress_seasonal": ["progress_ratio", "progress_pct"],
+    #: 置き換えの腕用。progress_vs_base の位置に順位だけを置く
+    "progress_seasonal_pct": ["progress_pct"],
 }
 
 #: 横断面正規化（同じ日付内でのパーセンタイル順位）を作る対象の列。
@@ -304,6 +313,12 @@ PRESETS: Dict[str, List[str]] = {
     # どちらも採用しなかった（docs/MODEL_ADOPTION_RULES.md §9）。比べ直すときのために残す
     "all_plus_ss": ALL_GROUPS + EXTRA_GROUPS + ["short_pos"],
     "all_plus_ss_mkt": ALL_GROUPS + EXTRA_GROUPS + ["short_pos", "flow_mkt"],
+    # --- 2026-09-25 の候補（実験46）。進捗期待の新しい定義 --- #
+    # 置き換え: progress_vs_base の代わりに順位（列数は205のまま、並びも同じ位置）
+    "all_plus_prog_swap": [("progress_seasonal_pct" if g == "progress" else g)
+                           for g in ALL_GROUPS] + EXTRA_GROUPS,
+    # 追加: 205列 + 比率と順位（207列）
+    "all_plus_prog": ALL_GROUPS + EXTRA_GROUPS + ["progress_seasonal"],
 
     # --- 決算を「変化」だけで組むセット --- #
     # 絶対水準（ROE 何%、営業利益率 何%）ではなく、

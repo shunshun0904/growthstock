@@ -5,11 +5,12 @@
   基準 = 前年同期の進捗（scripts/jquants_data_fetcher.py の progress_benchmark）
   点数 = 進捗率 ÷ 基準 の、過去の開示の中での順位（src/lib/scoring.js の PROGRESS_TABLE）
 
-同じ定義が4か所に出てくる。ずれると、同じ銘柄の点数が経路によって変わる:
+同じ定義が5か所に出てくる。ずれると、同じ銘柄の点数が経路によって変わる:
   ・データ取得（stocks.json）          scripts/jquants_data_fetcher.py
   ・予測タブから送った候補              research/predict_daily.progress_fields
   ・点数表の作成                        research/progress_percentiles.py
   ・点数の計算                          src/lib/scoring.js
+  ・モデルの特徴量（実験46の候補）      research/build_dataset.seasonal_progress
 
   python3 tests/test_progress.py
 """
@@ -26,6 +27,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 sys.path.insert(0, os.path.join(ROOT, "research"))
 
+import build_dataset as B  # noqa: E402
 import jquants_data_fetcher as JF  # noqa: E402
 import predict_daily as PD  # noqa: E402
 import progress_percentiles as PP  # noqa: E402
@@ -147,6 +149,95 @@ class TestTableBuilder(unittest.TestCase):
 def read_js() -> str:
     with open(SCORING_JS, encoding="utf-8") as fh:
         return fh.read()
+
+
+def statement(code, fy, period, disc, op, fop=None):
+    """build_dataset.quarterize_panel と API の両方に渡せる決算の行（日付は文字列）。"""
+    return {"Code": code, "DiscDate": disc, "DiscTime": "15:00", "CurPerType": period,
+            "CurFYSt": fy, "CurPerEn": disc, "DocType": "FinancialStatements",
+            "Sales": 100.0, "OP": float(op), "NP": 1.0, "EPS": 1.0,
+            "Eq": 1000.0, "TA": 2000.0, "ROE": None, "FSales": None, "FNP": None, "FEPS": None,
+            "FOP": None if fop is None else float(fop), "ShOutFY": 1_000_000, "TrShFY": 0}
+
+
+def scenarios():
+    rows = []
+    # A: 前年同期の進捗 38.5%（9081 の形）
+    rows += [statement("10010", "2025-04-01", "1Q", "2025-08-05", 385, 1000),
+             statement("10010", "2025-04-01", "FY", "2026-05-10", 1000),
+             statement("10010", "2026-04-01", "1Q", "2026-08-05", 469, 1000)]
+    # B: 前年同期の進捗 5% -> 下限 12.5%
+    rows += [statement("20020", "2025-04-01", "1Q", "2025-08-06", 50, 1000),
+             statement("20020", "2025-04-01", "FY", "2026-05-11", 1000),
+             statement("20020", "2026-04-01", "1Q", "2026-08-06", 200, 1000)]
+    # C: 前年の通期が赤字 -> Q×25%
+    rows += [statement("30030", "2025-04-01", "1Q", "2025-08-07", 50, 1000),
+             statement("30030", "2025-04-01", "FY", "2026-05-12", -100),
+             statement("30030", "2026-04-01", "1Q", "2026-08-07", 200, 1000)]
+    # D: 決算期の変更（前年度が 2025-01-01 開始）-> Q×25%
+    rows += [statement("40040", "2025-01-01", "1Q", "2025-05-08", 300, 1000),
+             statement("40040", "2025-01-01", "FY", "2026-02-12", 1000),
+             statement("40040", "2026-04-01", "1Q", "2026-08-08", 300, 1000)]
+    # E: 前年の本決算を 1Q の後に訂正（1000 -> 800）。1Q の時点では訂正前で計算する。
+    #    2Q の時点では訂正後が見えている
+    rows += [statement("50050", "2025-04-01", "1Q", "2025-08-05", 385, 1000),
+             statement("50050", "2025-04-01", "2Q", "2025-11-05", 450, 1000),
+             statement("50050", "2025-04-01", "FY", "2026-05-10", 1000),
+             statement("50050", "2026-04-01", "1Q", "2026-08-05", 469, 1000),
+             statement("50050", "2025-04-01", "FY", "2026-10-01", 800),
+             statement("50050", "2026-04-01", "2Q", "2026-11-05", 520, 1000)]
+    return rows
+
+
+class TestDatasetAgreesWithTheScreen(unittest.TestCase):
+    """モデルの特徴量（build_dataset）が、画面のデータ取得と同じ基準・比率を出すこと。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.rows = scenarios()
+        q = B.quarterize_panel(pd.DataFrame(cls.rows))
+        cls.q = q.assign(D=pd.to_datetime(q["DiscDate"]).dt.strftime("%Y-%m-%d"))
+
+    def row(self, code, day):
+        x = self.q[(self.q["Code"] == code) & (self.q["D"] == day)]
+        self.assertEqual(len(x), 1, (code, day))
+        return x.iloc[0]
+
+    def test_every_row_matches_the_fetcher(self):
+        n = 0
+        for r in self.q[self.q["progress_basis"].notna()].itertuples(index=False):
+            m = JF.fundamentals_as_of([x for x in self.rows if x["Code"] == r.Code], r.D)
+            self.assertEqual(m["progressBasis"], r.progress_basis, (r.Code, r.D))
+            self.assertAlmostEqual(m["progressRate"] / m["progressBenchmark"],
+                                   r.progress_ratio, places=12, msg=(r.Code, r.D))
+            n += 1
+        # 通期予想のある四半期の行: A・B・C・D は前年と今年の1Q（2行ずつ）、E は1Q・2Q が2年ぶん
+        self.assertEqual(n, 12)
+
+    def test_each_rule(self):
+        self.assertEqual(self.row("10010", "2026-08-05")["progress_basis"], "seasonal")
+        self.assertAlmostEqual(self.row("10010", "2026-08-05")["progress_ratio"], 46.9 / 38.5)
+        self.assertEqual(self.row("20020", "2026-08-06")["progress_basis"], "floor")
+        self.assertAlmostEqual(self.row("20020", "2026-08-06")["progress_ratio"], 20.0 / 12.5)
+        self.assertEqual(self.row("30030", "2026-08-07")["progress_basis"], "linear")
+        self.assertEqual(self.row("40040", "2026-08-08")["progress_basis"], "linear")
+        self.assertAlmostEqual(self.row("40040", "2026-08-08")["progress_ratio"], 30.0 / 25.0)
+
+    def test_a_later_correction_is_not_seen_earlier(self):
+        """前年の本決算の訂正（2026-10-01）は、それより前の 1Q の行の基準に入らない。"""
+        self.assertAlmostEqual(self.row("50050", "2026-08-05")["progress_ratio"], 46.9 / 38.5)
+        # 2Q（2026-11-05）の時点では訂正後の通期 800 で割る
+        self.assertAlmostEqual(self.row("50050", "2026-11-05")["progress_ratio"],
+                               52.0 / (450 / 800 * 100))
+
+    def test_full_year_rows_have_no_ratio(self):
+        fy = self.q[self.q["quarter"] == 4]
+        self.assertTrue(len(fy) > 0)
+        self.assertTrue(fy["progress_ratio"].isna().all())
+        self.assertTrue(fy["progress_basis"].isna().all())
+
+    def test_floor_is_shared_with_the_fetcher(self):
+        self.assertIs(B.PROGRESS_FLOOR, JF.PROGRESS_FLOOR)
 
 
 def js_array(name: str) -> list:

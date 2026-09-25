@@ -38,7 +38,7 @@ MACRO: List[tuple] = [
     ("決算（水準）", ["fund_level", "fund_lag"],
      "決算のその時点の値と、1〜3期前の値。業種や事業モデルで水準が決まる部分が大きい"),
     ("決算（変化）", ["fund_growth", "fund_trend", "fund_streak", "turnaround",
-                      "progress", "guidance"],
+                      "progress", "guidance", "progress_seasonal", "progress_seasonal_pct"],
      "前期との差分・加速・連続性。「良くなっているか」を測る。今回の主役"),
     ("バリュエーション・配当", ["valuation", "dividend", "cashflow", "efficiency"],
      "株価と決算の比。割高・割安と、利益の質"),
@@ -215,6 +215,10 @@ COL_JA = {
     "growth250_ret_120": "東証グロース250の直近120営業日リターン（%）",
     "risk_off_20": "金 − TOPIX の20日リターン差（pt）。リスクオフの度合い",
     "progress_vs_base": "通期予想に対する累計営業利益の進捗率 − 期間経過率。予想の上振れ度",
+    "progress_ratio": "進捗率 ÷ 前年同期の進捗（Q×12.5% 未満なら Q×12.5%、前年が無ければ Q×25%）。"
+                      "1.0 が例年どおりのペース。画面の「進捗期待」と同じ比率",
+    "progress_pct": "progress_ratio の、同じ四半期・同じ物差しの過去の開示（その日より前）の中での"
+                    "順位（0〜100）。四半期ごとの幅の違いをそろえる",
     "per": "株価収益率（株価 ÷ 1株利益TTM）",
     "pbr": "株価純資産倍率（株価 ÷ BPS）",
     "psr": "株価売上高倍率（時価総額 ÷ 売上TTM）",
