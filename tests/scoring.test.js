@@ -8,11 +8,12 @@ import {
   normalize, scoreEpsGrowth, scoreSalesGrowth, scoreRoe, scoreOpMargin,
   scoreTechnical, scoreVolume, scoreCreditRatio, scoreProgress,
   liquidityTier, institutionalLevel, priceZone, computeScores, AXES,
+  PROGRESS_TABLE, PROGRESS_PCTS, percentileOf, progressBenchmark, progressDetail,
 } from '../src/lib/scoring.js';
 import {
   candidateToStock, marketTone, bandLabel, bandColor,
 } from '../src/lib/predictions.js';
-import { mergeStocks } from '../src/lib/store.js';
+import { mergeStocks, dropOldPredictionProgress } from '../src/lib/store.js';
 
 const close = (a, b, msg) => assert.ok(Math.abs(a - b) < 1e-9, msg ?? `${a} != ${b}`);
 
@@ -129,14 +130,103 @@ test('軸7 信用倍率: 単調非増加である', () => {
 
 /* -------------------------------------------------- 軸8 進捗期待 */
 
-test('軸8 進捗期待: B = Quarter × 25 を基準に ±2%ptで1点動く', () => {
-  close(scoreProgress(50, 2), 5.0);   // 2Q で進捗50% = 基準通り
-  close(scoreProgress(60, 2), 10.0);  // 基準+10pt -> 5 + 5
-  close(scoreProgress(56, 2), 8.0);
-  close(scoreProgress(40, 2), 0);     // 基準-10pt -> クランプで 0
-  close(scoreProgress(25, 1), 5.0);
-  close(scoreProgress(75, 3), 5.0);
+const P = (q, i, table = 'linear') => PROGRESS_TABLE[table][q][i];   // i 番目の区切りの比率
+
+test('軸8 進捗期待: 点数表の形（13区切り・昇順・百分位は Python 側と同じ）', () => {
+  assert.equal(PROGRESS_PCTS.length, 13);
+  for (const table of ['seasonal', 'linear']) {
+    for (const q of [1, 2, 3]) {
+      const xs = PROGRESS_TABLE[table][q];
+      assert.equal(xs.length, PROGRESS_PCTS.length, `${table} ${q}Q`);
+      for (let i = 1; i < xs.length; i++) assert.ok(xs[i] > xs[i - 1], `${table} ${q}Q が昇順でない`);
+    }
+  }
+});
+
+test('軸8 進捗期待: 区切りちょうどの比率は、その百分位 × 10 点', () => {
+  // 例年並み（中央値の比率）が 5 点、上位10%（P90）が 9 点
+  close(scoreProgress(P(2, 6) * 50, 2), 5.0);                  // 2Q・Q×25% の中央値
+  close(scoreProgress(P(3, 10) * 75, 3), 9.0);                 // 3Q・Q×25% の P90
+  close(scoreProgress(P(1, 6, 'seasonal') * 40, 1, 40, 'seasonal'), 5.0);
+  close(scoreProgress(P(1, 10, 'seasonal') * 40, 1, 40, 'seasonal'), 9.0);
+});
+
+test('軸8 進捗期待: 区切りの間は直線、P1 未満は 0、P99 超は 10', () => {
+  const lo = P(2, 6), hi = P(2, 7);                           // P50 と P60 の中点 -> 5.5
+  close(scoreProgress(((lo + hi) / 2) * 50, 2), 5.5);
+  assert.equal(scoreProgress((P(2, 0) - 0.01) * 50, 2), 0);
+  assert.equal(scoreProgress((P(2, 12) + 0.01) * 50, 2), 10);
+  assert.equal(percentileOf(null, [0, 1], [0.1, 0.9]), null);
+});
+
+test('軸8 進捗期待: 進捗率に対して単調非減少（四半期・物差しごと）', () => {
+  for (const [bench, basis] of [[null, null], [40, 'seasonal'], [12.5, 'floor']]) {
+    for (const q of [1, 2, 3]) {
+      let prev = -1;
+      for (let p = -100; p <= 300; p += 0.5) {
+        const sc = scoreProgress(p, q, bench, basis);
+        assert.ok(sc >= prev - 1e-12, `${basis} ${q}Q 進捗 ${p}% で下がった`);
+        assert.ok(sc >= 0 && sc <= 10);
+        prev = sc;
+      }
+    }
+  }
+});
+
+test('軸8 進捗期待: 前年同期の基準があれば、その比率を前年同期の表で順位付けする', () => {
+  // 9081 神奈川中央交通の 2026年度1Q: 進捗 46.9%、前年同期の進捗 38.5%（比率 1.22 倍）
+  const withBench = scoreProgress(46.9, 1, 38.5, 'seasonal');
+  const r = 46.9 / 38.5;
+  const i = PROGRESS_TABLE.seasonal[1].findIndex((x) => x >= r);   // P70 の区切り
+  const lo = PROGRESS_TABLE.seasonal[1][i - 1], hi = PROGRESS_TABLE.seasonal[1][i];
+  close(withBench, 10 * (PROGRESS_PCTS[i - 1] + (r - lo) / (hi - lo) * (PROGRESS_PCTS[i] - PROGRESS_PCTS[i - 1])));
+  assert.ok(withBench > 6.5 && withBench < 7.5, `${withBench}`);
+  // 同じ進捗を Q×25% で測ると 1.88 倍で上位1割に入る（下期偏重の会社を過大に見る）
+  assert.ok(scoreProgress(46.9, 1) > 9, `${scoreProgress(46.9, 1)}`);
+});
+
+test('軸8 進捗期待: 下限（floor）も前年同期の表、基準が無ければ Q×25% の表', () => {
+  close(scoreProgress(20, 1, 12.5, 'floor'),
+        10 * percentileOf(20 / 12.5, PROGRESS_TABLE.seasonal[1], PROGRESS_PCTS));
+  close(scoreProgress(20, 1), 10 * percentileOf(20 / 25, PROGRESS_TABLE.linear[1], PROGRESS_PCTS));
+  // 種類が不明・基準が数でない・0以下なら Q×25%
+  close(scoreProgress(20, 1, 38.5, 'unknown'), scoreProgress(20, 1));
+  close(scoreProgress(20, 1, null, 'seasonal'), scoreProgress(20, 1));
+  close(scoreProgress(20, 1, 0, 'seasonal'), scoreProgress(20, 1));
+});
+
+test('軸8 進捗期待: 運用者の例（3Q で 85% = 85/75）は Q×25% の表で約7点', () => {
+  const sc = scoreProgress(85, 3);
+  assert.ok(sc > 6.5 && sc < 7.5, `${sc}`);
+  // 旧式（5 + (85 − 75)/2 = 10）のような張り付きは起きない
+  assert.ok(scoreProgress(35, 1) < 10);
+});
+
+test('軸8 進捗期待: 本決算（4Q）・四半期不明・進捗率なしは null', () => {
+  assert.equal(scoreProgress(90, 4), null);
   assert.equal(scoreProgress(50, null), null);
+  assert.equal(scoreProgress(50, 2.5), null);
+  assert.equal(scoreProgress(50, 0), null);
+  assert.equal(scoreProgress(null, 2, 40, 'seasonal'), null);
+  assert.equal(progressBenchmark(4, 90, 'seasonal'), null);
+});
+
+test('軸8 進捗期待: 表に基準の説明を出す（何で割った比率かが分かるように）', () => {
+  assert.deepEqual(progressDetail({ progressRate: 46.9, quarter: 1, progressBenchmark: 38.5,
+                                    progressBasis: 'seasonal' }),
+                   ['基準 38.5%（前年同期）', '比率 1.22倍']);
+  assert.deepEqual(progressDetail({ progressRate: 30, quarter: 2 }),
+                   ['基準 50.0%（Q×25%）', '比率 0.60倍']);
+  assert.deepEqual(progressDetail({ progressRate: 20, quarter: 1, progressBenchmark: 12.5,
+                                    progressBasis: 'floor' }),
+                   ['基準 12.5%（前年同期が小さいため下限）', '比率 1.60倍']);
+  assert.equal(progressDetail({ quarter: 1 }), null);
+  const r = computeScores({ progressRate: 46.9, quarter: 1, progressBenchmark: 38.5,
+                            progressBasis: 'seasonal' });
+  const ax = r.axisScores.find((a) => a.key === 'progress');
+  assert.deepEqual(ax.detail, ['基準 38.5%（前年同期）', '比率 1.22倍']);
+  close(r.scores.progress, scoreProgress(46.9, 1, 38.5, 'seasonal'));
+  assert.equal(r.axisScores.find((a) => a.key === 'roe').detail, null);
 });
 
 /* -------------------------------------------------- §4.2 機関投資家参入度 */
@@ -179,7 +269,8 @@ test('computeScores: 全軸が満点なら総合10.0', () => {
   const r = computeScores({
     epsGrowth: 60, salesGrowth: 50, roe: 30, opMargin: 25,
     highRatio: 99, volumeTrend: 250, creditRatio: 0.8,
-    progressRate: 80, quarter: 2, tradingValue: 40, marketCap: 3000,
+    // 2Q で通期予想の2倍 = Q×25% の4倍。過去の開示の99%より上なので満点
+    progressRate: 200, quarter: 2, tradingValue: 40, marketCap: 3000,
   });
   assert.equal(r.totalScore, 10);
   assert.equal(r.strictTotalScore, 10);
@@ -273,6 +364,35 @@ test('candidateToStock は取れていない指標を 0 で埋めない', () => 
   assert.equal(s.metrics.salesGrowth, null);
   assert.equal(s.origin, 'prediction');
   assert.equal(s.id, 'pred:12345');
+});
+
+test('candidateToStock は進捗期待の基準を運ぶ（古い候補は点数を付けない）', () => {
+  const s = candidateToStock({
+    jqCode: '90810', code: '9081', name: 'テスト', date: '2026-09-24', rankInDay: 1,
+    progressRate: 46.9, quarter: 1, progressBenchmark: 38.5, progressBasis: 'seasonal',
+  });
+  assert.equal(s.metrics.quarter, 1);
+  assert.equal(s.metrics.progressBenchmark, 38.5);
+  assert.equal(s.metrics.progressBasis, 'seasonal');
+  close(computeScores(s.metrics).scores.progress, scoreProgress(46.9, 1, 38.5, 'seasonal'));
+  // 2026-09-25 より前の predictions.json（progressRate は「進捗率 − Q×25」、quarter なし）
+  const old = candidateToStock({ jqCode: '69150', code: '6915', date: '2026-09-24',
+                                 rankInDay: 1, progressRate: 2.97 });
+  assert.equal(computeScores(old.metrics).scores.progress, null);
+});
+
+test('dropOldPredictionProgress は古い候補の別物の進捗だけを外す', () => {
+  const saved = [
+    { id: 'pred:69150', origin: 'prediction', metrics: { progressRate: 2.97 } },
+    { id: 'pred:90810', origin: 'prediction', metrics: { progressRate: 46.9, quarter: 1 } },
+    { id: 'manual-1', origin: 'manual', metrics: { progressRate: 30, quarter: null } },
+  ];
+  const got = dropOldPredictionProgress(saved);
+  assert.equal(got[0].metrics.progressRate, null);
+  assert.equal(got[1].metrics.progressRate, 46.9);
+  assert.equal(got[2].metrics.progressRate, 30);        // 手入力はそのまま
+  assert.equal(saved[0].metrics.progressRate, 2.97);    // 元の配列は書き換えない
+  assert.deepEqual(dropOldPredictionProgress(null), []);
 });
 
 test('marketTone は地合い寄与の中央値で向きを決める', () => {

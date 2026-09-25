@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect, useRef } from 'react';
 import RadarPanel from '../components/RadarPanel.jsx';
 import AxisTable from '../components/AxisTable.jsx';
 import { InstitutionalBadge, ZoneBadge } from '../components/Badges.jsx';
-import { computeScores, INSTITUTIONAL_META } from '../lib/scoring.js';
+import { computeScores, INSTITUTIONAL_META, progressBenchmark, PROGRESS_BASIS_JA } from '../lib/scoring.js';
 import { fmt, fmtOku, scoreColor, DASH } from '../lib/format.js';
 
 /** スライダー定義 (仕様書 §5.3) */
@@ -19,7 +19,29 @@ const SLIDERS = [
   { key: 'marketCap',    label: '時価総額',          min: 10,  max: 5000, step: 10,  unit: '億円', fallback: 500 },
 ];
 
-const QUARTERS = [1, 2, 3, 4];
+// 本決算（4Q）は通期予想に対する進捗が無いので、進捗期待の点数が付かない
+const QUARTERS = [1, 2, 3];
+
+/**
+ * 進捗の基準。銘柄の実際の四半期なら、データ取得が出した前年同期の基準を使う。
+ * 別の四半期を選んだら、その四半期の前年同期の数字は持っていないので Q×25%。
+ */
+function benchmarkFor(m, quarter) {
+  return quarter === m.quarter
+    ? { progressBenchmark: m.progressBenchmark ?? null, progressBasis: m.progressBasis ?? null }
+    : { progressBenchmark: null, progressBasis: null };
+}
+
+/** 銘柄の現在値でスライダーを初期化する */
+function initialParams(m) {
+  const init = {};
+  for (const s of SLIDERS) {
+    const v = m[s.key];
+    init[s.key] = Number.isFinite(v) ? clamp(v, s.min, s.max) : s.fallback;
+  }
+  init.quarter = QUARTERS.includes(m.quarter) ? m.quarter : 2;
+  return { ...init, ...benchmarkFor(m, init.quarter) };
+}
 
 /** 5.3 What-If 感度シミュレーター View */
 export default function SimulatorView({ rows, selectedId, onSelect }) {
@@ -31,14 +53,7 @@ export default function SimulatorView({ rows, selectedId, onSelect }) {
   // 銘柄が切り替わったら現在値でスライダーを初期化する
   useEffect(() => {
     if (!row) return;
-    const m = row.stock.metrics || {};
-    const init = {};
-    for (const s of SLIDERS) {
-      const v = m[s.key];
-      init[s.key] = Number.isFinite(v) ? clamp(v, s.min, s.max) : s.fallback;
-    }
-    init.quarter = Number.isFinite(m.quarter) ? m.quarter : 2;
-    setParams(init);
+    setParams(initialParams(row.stock.metrics || {}));
   }, [row?.stock.id]);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const baseline = row?.result ?? null;
@@ -63,16 +78,13 @@ export default function SimulatorView({ rows, selectedId, onSelect }) {
     setParams((p) => ({ ...p, [key]: Number(e.target.value) }));
   };
 
-  const reset = () => {
-    const m = row.stock.metrics || {};
-    const init = {};
-    for (const s of SLIDERS) {
-      const v = m[s.key];
-      init[s.key] = Number.isFinite(v) ? clamp(v, s.min, s.max) : s.fallback;
-    }
-    init.quarter = Number.isFinite(m.quarter) ? m.quarter : 2;
-    setParams(init);
+  const reset = () => setParams(initialParams(row.stock.metrics || {}));
+
+  const setQuarter = (q) => {
+    pendingRef.current = true;
+    setParams((p) => ({ ...p, quarter: q, ...benchmarkFor(row.stock.metrics || {}, q) }));
   };
+  const bench = progressBenchmark(params.quarter, params.progressBenchmark, params.progressBasis);
 
   const series = [
     ...(baseline ? [{ name: '現状', color: '#5c6980', scores: baseline.scores, dashed: true }] : []),
@@ -148,13 +160,13 @@ export default function SimulatorView({ rows, selectedId, onSelect }) {
           </div>
 
           <div className="field" style={{ marginBottom: 'var(--s4)' }}>
-            <label htmlFor="sim-quarter">経過四半期（進捗基準 = Quarter × 25%）</label>
+            <label htmlFor="sim-quarter">経過四半期（進捗の基準 = 前年同期の進捗。無ければ Q×25%）</label>
             <div className="row" style={{ gap: 4 }}>
               {QUARTERS.map((q) => (
                 <button
                   key={q}
                   className="btn"
-                  onClick={() => { pendingRef.current = true; setParams((p) => ({ ...p, quarter: q })); }}
+                  onClick={() => setQuarter(q)}
                   style={params.quarter === q
                     ? { background: 'var(--accent-dim)', borderColor: 'var(--accent)' }
                     : undefined}
@@ -162,7 +174,9 @@ export default function SimulatorView({ rows, selectedId, onSelect }) {
                   {q}Q
                 </button>
               ))}
-              <span className="chip" style={{ marginLeft: 4 }}>基準 {(params.quarter ?? 0) * 25}%</span>
+              <span className="chip" style={{ marginLeft: 4 }}>
+                {bench ? `基準 ${bench.value.toFixed(1)}%（${PROGRESS_BASIS_JA[bench.basis]}）` : '基準 —'}
+              </span>
             </div>
           </div>
 

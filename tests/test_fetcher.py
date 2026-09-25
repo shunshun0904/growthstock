@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.join(ROOT, "scripts"))
 sys.path.insert(0, os.path.join(ROOT, "research"))
 
 from jquants_data_fetcher import (  # noqa: E402
-    build_milestones, credit_metrics, describe_secret, display_code,
+    _one_year_before, build_milestones, credit_metrics, describe_secret, display_code,
     fundamental_metrics, fundamentals_as_of, margin_published_on, normalize_code,
     pct_change, price_metrics, quarterize,
 )
@@ -330,6 +330,93 @@ class TestRefiledPeriods(unittest.TestCase):
         fm = fundamentals_as_of(rows, as_of="2025-09-01")
         self.assertEqual(fm["fiscalPeriod"], "1Q")
         self.assertIsNone(fm["salesGrowth"])
+
+
+class TestProgressBenchmark(unittest.TestCase):
+    """
+    進捗期待の基準（2026-09-25 に運用者の選択 A で入れた）。
+
+    基準 = 前年のその四半期までの累計営業利益 ÷ 前年の通期実績。
+    前年同期の進捗が Q×12.5% 未満なら Q×12.5%（'floor'）、前年の数字が無い・
+    0以下・前年度がちょうど1年前に始まっていないときは Q×25%（'linear'）。
+    """
+
+    def rows(self, prev_q_op=385, prev_fy_op=1000, prev_fy="2025-04-01", period="1Q",
+             cur_op=469, fop=1000):
+        cur = {"1Q": ("2026-08-05", 110), "2Q": ("2026-11-05", 230),
+               "3Q": ("2027-02-05", 350)}[period]
+        prev = {"1Q": "2025-08-05", "2Q": "2025-11-05", "3Q": "2026-02-05"}[period]
+        return [
+            statement(prev_fy, period, prev, 100, prev_q_op, 1, 1.0),
+            statement(prev_fy, "FY", "2026-05-10", 400, prev_fy_op, 1, 1.0),
+            statement("2026-04-01", period, cur[0], cur[1], cur_op, 1, 1.0, FOP=fop),
+        ]
+
+    def test_seasonal_benchmark_is_last_years_share(self):
+        """9081 の 2026年度1Q と同じ形: 進捗 46.9%、前年同期の進捗 38.5%。"""
+        fm = fundamentals_as_of(self.rows(), as_of="2026-09-01")
+        self.assertAlmostEqual(fm["progressRate"], 46.9)
+        self.assertAlmostEqual(fm["progressBenchmark"], 38.5)
+        self.assertEqual(fm["progressBasis"], "seasonal")
+
+    def test_same_quarter_of_the_previous_year(self):
+        fm = fundamentals_as_of(self.rows(prev_q_op=450, period="2Q", cur_op=520),
+                                as_of="2026-12-01")
+        self.assertEqual(fm["quarter"], 2)
+        self.assertAlmostEqual(fm["progressBenchmark"], 45.0)
+        self.assertEqual(fm["progressBasis"], "seasonal")
+
+    def test_small_share_is_floored_at_half_the_even_pace(self):
+        """前年同期の進捗 5% は分母として小さすぎる。1Q の下限 12.5% を使う。"""
+        fm = fundamentals_as_of(self.rows(prev_q_op=50), as_of="2026-09-01")
+        self.assertAlmostEqual(fm["progressBenchmark"], 12.5)
+        self.assertEqual(fm["progressBasis"], "floor")
+        fm = fundamentals_as_of(self.rows(prev_q_op=50, period="3Q"), as_of="2027-03-01")
+        self.assertAlmostEqual(fm["progressBenchmark"], 37.5)     # 3Q の下限 = 3 × 12.5
+        self.assertEqual(fm["progressBasis"], "floor")
+
+    def test_floor_boundary_is_not_floored(self):
+        fm = fundamentals_as_of(self.rows(prev_q_op=125), as_of="2026-09-01")
+        self.assertAlmostEqual(fm["progressBenchmark"], 12.5)
+        self.assertEqual(fm["progressBasis"], "seasonal")
+
+    def test_linear_without_the_previous_year(self):
+        fm = fundamentals_as_of(self.rows()[2:], as_of="2026-09-01")
+        self.assertAlmostEqual(fm["progressBenchmark"], 25.0)
+        self.assertEqual(fm["progressBasis"], "linear")
+
+    def test_linear_when_the_previous_year_was_a_loss(self):
+        for kw in ({"prev_fy_op": -100}, {"prev_q_op": -5}, {"prev_q_op": 0}):
+            fm = fundamentals_as_of(self.rows(**kw), as_of="2026-09-01")
+            self.assertEqual(fm["progressBasis"], "linear", kw)
+            self.assertAlmostEqual(fm["progressBenchmark"], 25.0)
+
+    def test_linear_when_the_fiscal_year_changed(self):
+        """前年度が 2025-01-01 開始（決算期の変更）。長さの違う年の進捗は基準にしない。"""
+        fm = fundamentals_as_of(self.rows(prev_fy="2025-01-01"), as_of="2026-09-01")
+        self.assertEqual(fm["progressBasis"], "linear")
+
+    def test_no_benchmark_after_the_full_year_results(self):
+        """本決算の行には通期予想（FOP）が無く、進捗率も基準も出さない。"""
+        fm = fundamentals_as_of(self.rows(), as_of="2026-06-01")
+        self.assertEqual(fm["quarter"], 4)
+        self.assertIsNone(fm["progressRate"])
+        self.assertIsNone(fm["progressBenchmark"])
+        self.assertIsNone(fm["progressBasis"])
+
+    def test_benchmark_is_point_in_time(self):
+        """前年の本決算が後日訂正されても、訂正前の時点では元の数字で基準を出す。"""
+        rows = self.rows() + [statement("2025-04-01", "FY", "2026-10-01", 400, 800, 1, 1.0)]
+        self.assertAlmostEqual(
+            fundamentals_as_of(rows, as_of="2026-09-01")["progressBenchmark"], 38.5)
+        self.assertAlmostEqual(
+            fundamentals_as_of(rows, as_of="2026-10-15")["progressBenchmark"], 385 / 800 * 100)
+
+    def test_one_year_before(self):
+        self.assertEqual(_one_year_before("2026-04-01"), "2025-04-01")
+        self.assertEqual(_one_year_before("2024-02-29"), "2023-02-28")
+        self.assertIsNone(_one_year_before(None))
+        self.assertIsNone(_one_year_before("not-a-date"))
 
 
 class TestMarginPublication(unittest.TestCase):

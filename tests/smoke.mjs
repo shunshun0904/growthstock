@@ -140,6 +140,13 @@ check(!body.includes('undefined'), 'undefined が画面に出ていない');
 const scoreA = await page.locator('.stock-card').first().locator('.score-big').first().textContent();
 check(/^\d\.\d/.test(scoreA.trim()), `総合スコアが数値で表示される (取得値: ${scoreA.trim()})`);
 
+// 進捗期待は、何で割った比率かを表に出す（銘柄A は前年同期の基準 45% を持つ）
+await page.locator('.stock-card').first().locator('button').first().click();
+await page.waitForTimeout(250);
+const axisA = await page.locator('.axis-table').first().textContent();
+check(axisA.includes('基準 45.0%（前年同期）') && axisA.includes('比率 1.41倍'),
+      '進捗期待に前年同期の基準と比率が出る');
+
 // 欠測軸が「—」になっていること
 await page.locator('.stock-card').nth(1).locator('button').first().click();
 await page.waitForTimeout(250);

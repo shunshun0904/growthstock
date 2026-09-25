@@ -36,9 +36,12 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                "scripts"))
 import build_dataset as B  # noqa: E402
 import feature_dict as FD  # noqa: E402
 import features as F  # noqa: E402
+import jquants_data_fetcher as JF  # noqa: E402
 import trading_calendar as TC  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -209,6 +212,40 @@ def score_others(cand: pd.DataFrame, cols: List[str],
     return scores, info
 
 
+def progress_fields(data_dir: str, keys) -> Dict[Tuple[str, str], dict]:
+    """
+    候補（銘柄コード5桁, 'YYYY-MM-DD'）ごとに、画面の「進捗期待」に使う値を出す。
+
+    画面のデータ取得（scripts/jquants_data_fetcher.py）と同じ関数に、その日までの
+    開示だけを渡す。データセットの progress_vs_base は「進捗率 − Q×25」で、
+    画面の進捗率とは別物（2026-09-25 まで progressRate としてそのまま渡していて、
+    予測タブからオクタゴンへ送った銘柄の「進捗期待」の指標値が違う数字だった）。
+    """
+    keys = sorted({(str(c), str(d)[:10]) for c, d in keys})
+    paths = sorted(glob.glob(os.path.join(data_dir, "fins_*.parquet")))
+    if not keys or not paths:
+        return {}
+    codes = sorted({c for c, _ in keys})
+    f = pd.concat([pd.read_parquet(p, filters=[("Code", "in", codes)]) for p in paths],
+                  ignore_index=True)
+    if f.empty:
+        return {}
+    for c in ("DiscDate", "CurFYSt", "CurPerEn"):
+        if c in f.columns:
+            f[c] = pd.to_datetime(f[c], errors="coerce").dt.strftime("%Y-%m-%d")
+    f = f.astype(object).where(f.notna(), None)
+    by_code = {c: g.to_dict("records") for c, g in f.groupby("Code", sort=False)}
+    out = {}
+    for code, day in keys:
+        rows = by_code.get(code)
+        if not rows:
+            continue
+        m = JF.fundamentals_as_of(rows, day)
+        out[(code, day)] = {k: m.get(k) for k in
+                            ("progressRate", "quarter", "progressBenchmark", "progressBasis")}
+    return out
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="当日のブレイク候補を採点する")
     ap.add_argument("--data-dir", default=DATA_DIR)
@@ -264,11 +301,15 @@ def main(argv=None) -> int:
     def r(v, d=2):
         return None if v is None or not np.isfinite(v) else round(float(v), d)
 
+    prog = progress_fields(args.data_dir, zip(cand["Code"].astype(str),
+                                              cand["Date"].dt.strftime("%Y-%m-%d")))
+
     rows = []
     for i, (_, s) in enumerate(cand.iterrows()):
         sc = float(s["score"])
         band = band_of(sc, meta["scoreBands"])
         jq = str(s["Code"])
+        pf = prog.get((jq, pd.Timestamp(s["Date"]).date().isoformat()), {})
         rows.append({
             "code": jq[:4], "jqCode": jq,
             "name": s.get("CoName") or None,
@@ -313,7 +354,11 @@ def main(argv=None) -> int:
             "roe": r(s.get("ROE_q0")),
             "opMargin": r(s.get("op_margin_q0")),
             "volumeTrend": r(s.get("volume_trend")),
-            "progressRate": r(s.get("progress_vs_base")),
+            # 画面の「進捗期待」。データ取得と同じ関数で出す（progress_fields）
+            "progressRate": r(pf.get("progressRate")),
+            "quarter": pf.get("quarter"),
+            "progressBenchmark": r(pf.get("progressBenchmark")),
+            "progressBasis": pf.get("progressBasis"),
             "high52w": r(s.get("high52w"), 1),
             # --- 内部挙動 --- #
             "contrib": contrib[i],

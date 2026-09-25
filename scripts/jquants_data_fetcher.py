@@ -54,7 +54,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 API_BASE = "https://api.jquants.com/v2"
 USER_AGENT = "GrowthStockAnalyzer-Focus/1.0 (+https://github.com/shunshun0904/growthstock)"
@@ -570,6 +570,62 @@ def last_four_quarters(hist: Sequence[dict], latest: dict) -> Optional[List[dict
     return list(reversed(seq))
 
 
+def _one_year_before(fy_start: Optional[str]) -> Optional[str]:
+    """事業年度の開始日のちょうど1年前（'YYYY-MM-DD'）。2/29 は 2/28 にする。"""
+    try:
+        d = dt.date.fromisoformat(str(fy_start)[:10])
+    except (TypeError, ValueError):
+        return None
+    try:
+        return d.replace(year=d.year - 1).isoformat()
+    except ValueError:
+        return d.replace(year=d.year - 1, day=28).isoformat()
+
+
+#: 前年同期の進捗を基準にするときの下限（均等ペース Q×25% に対する割合）
+PROGRESS_FLOOR = 0.5
+
+
+def progress_benchmark(hist: Sequence[dict], latest: dict) -> Tuple[float, str]:
+    """
+    決算進捗率の基準（%）と、その種類（'seasonal' | 'floor' | 'linear'）。
+
+    基準 = 前年の同じ四半期の進捗（前年のその四半期までの累計営業利益 ÷ 前年の通期実績）。
+    下期に利益が偏る会社は、例年どおりでも第1四半期の進捗が 25% に届かない。
+    Q×25% を基準にすると、そういう会社がいつも「遅れ」に見える。
+
+    'floor': 前年同期の進捗が均等ペースの半分（Q×12.5%）より小さいときは、半分を基準にする。
+      分母が小さいと比率が荒れ、そこでは Q×25% より見分けが悪かった
+      （通期実績が会社予想を上回るかの AUC 0.699 対 0.724、6,732件）。
+      下限を入れると全体で 0.733 -> 0.739（Q×25% は 0.705）になり、2017〜2026 の
+      10年すべてで下限なし以上だった（research/progress_percentiles.py --auc）。
+      上限は入れない（前年同期の進捗が Q×25% の2倍以上の開示でも比率は Q×25% と
+      同等の 0.690 対 0.691 で、上限2倍にすると全体は 0.738 に下がった）
+    'linear': 前年の数字が無い・どちらかが0以下・前年度がちょうど1年前に始まっていない
+      （決算期の変更で前年度の長さが違う）ときは Q×25%。
+
+    点数表（research/progress_percentiles.py）もこの関数で作るので、
+    ここを変えたら点数表も作り直すこと。
+    """
+    q = latest["quarter"]
+    even = q * 25.0
+    linear = (even, "linear")
+    prev = _one_year_before(latest.get("fiscalYearStart"))
+    if prev is None:
+        return linear
+    by = {_fiscal_key(r): r for r in hist}
+    same_q, full = by.get((prev, q)), by.get((prev, 4))
+    if not same_q or not full:
+        return linear
+    part, whole = same_q.get("cumOperatingProfit"), full.get("cumOperatingProfit")
+    if part is None or whole is None or part <= 0 or whole <= 0:
+        return linear
+    share = part / whole * 100.0
+    if share < even * PROGRESS_FLOOR:
+        return even * PROGRESS_FLOOR, "floor"
+    return share, "seasonal"
+
+
 def fundamental_metrics(quarters: Sequence[dict], as_of: Optional[str] = None) -> Dict[str, Any]:
     """
     指定日時点で「開示済み」の決算のみを使って財務指標を算出する。
@@ -583,7 +639,7 @@ def fundamental_metrics(quarters: Sequence[dict], as_of: Optional[str] = None) -
         "epsGrowth": None, "salesGrowth": None, "roe": None, "opMargin": None,
         "progressRate": None, "quarter": None, "sharesOutstanding": None,
         "fiscalPeriod": None, "disclosedDate": None, "opMarginBasis": None,
-        "roeBasis": None,
+        "roeBasis": None, "progressBenchmark": None, "progressBasis": None,
     }
     if not hist:
         return out
@@ -639,10 +695,16 @@ def fundamental_metrics(quarters: Sequence[dict], as_of: Optional[str] = None) -
         out["opMarginBasis"] = f"当期累計 ({latest['period']})"
 
     # --- 決算進捗率: 当期累計営業利益 / 通期会社予想営業利益 ---
+    # 点数（画面の「進捗期待」）は 進捗率 ÷ 基準 の比率で付ける（src/lib/scoring.js）。
+    # 基準は前年同期の進捗。取れなければ Q×25%（progress_benchmark）
     forecast = latest.get("forecastOperatingProfit")
     cum_op = latest.get("cumOperatingProfit")
     if forecast and forecast > 0 and cum_op is not None:
         out["progressRate"] = cum_op / forecast * 100.0
+        if latest["quarter"] in (1, 2, 3):
+            bench, basis = progress_benchmark(hist, latest)
+            out["progressBenchmark"] = bench
+            out["progressBasis"] = basis
 
     return out
 

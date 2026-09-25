@@ -45,10 +45,25 @@ function safeParse(raw, fallback) {
 
 export function loadManualStocks() {
   try {
-    return safeParse(localStorage.getItem(LS_MANUAL), []);
+    return dropOldPredictionProgress(safeParse(localStorage.getItem(LS_MANUAL), []));
   } catch {
     return [];
   }
+}
+
+/**
+ * 2026-09-25 より前に予測タブから送った銘柄の progressRate は「進捗率 − Q×25」で、
+ * 画面の進捗率とは別物だった（四半期を持たないので点数は付かず、指標値だけが
+ * 違う数字で出ていた）。保存済みのものは読み込むときに外す。
+ * 新しく送った銘柄は四半期を持つので、そのまま残る。
+ */
+export function dropOldPredictionProgress(stocks) {
+  if (!Array.isArray(stocks)) return [];
+  return stocks.map((s) => (
+    s?.origin === 'prediction' && s.metrics
+      && s.metrics.quarter == null && s.metrics.progressRate != null
+      ? { ...s, metrics: { ...s.metrics, progressRate: null } }
+      : s));
 }
 
 export function saveManualStocks(stocks) {

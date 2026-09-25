@@ -15,7 +15,8 @@ const FIELDS = [
   { key: 'opMargin', label: '営業利益率', unit: '%' },
   { key: 'creditRatio', label: '信用倍率', unit: '倍' },
   { key: 'progressRate', label: '決算進捗率', unit: '%' },
-  { key: 'quarter', label: '経過四半期', unit: '1〜4' },
+  // 手入力には前年同期の数字が無いので、進捗の基準は Q×25%（src/lib/scoring.js）
+  { key: 'quarter', label: '経過四半期', unit: '1〜3・基準はQ×25%' },
 ];
 
 /** 動的銘柄追加モーダル (仕様書 §5.4) */

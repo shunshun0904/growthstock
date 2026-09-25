@@ -31,6 +31,8 @@
     "creditRatio": 0.82,
     "progressRate": 63.5,
     "quarter": 2,
+    "progressBenchmark": 45.0,
+    "progressBasis": "seasonal",
     "fiscalPeriod": "2Q",
     "disclosedDate": "2025-11-07",
     "opMarginBasis": "TTM (直近4四半期)",
@@ -54,6 +56,8 @@
      "creditRatio": 0.82,
      "progressRate": 63.5,
      "quarter": 2,
+     "progressBenchmark": 45.0,
+     "progressBasis": "seasonal",
      "fiscalPeriod": "2Q"
     },
     "m3": {
@@ -72,6 +76,8 @@
      "creditRatio": 1.9,
      "progressRate": 31.0,
      "quarter": 1,
+     "progressBenchmark": 20.0,
+     "progressBasis": "seasonal",
      "fiscalPeriod": "1Q"
     },
     "m6": {

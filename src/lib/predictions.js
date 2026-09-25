@@ -175,7 +175,13 @@ export function candidateToStock(c) {
       salesGrowth: n(c.salesGrowth),
       roe: n(c.roe),
       opMargin: n(c.opMargin),
+      // 進捗期待。predict_daily がデータ取得と同じ関数で出した値（基準つき）。
+      // 2026-09-25 より前の predictions.json の progressRate は「進捗率 − Q×25」で
+      // 別物だった。そのころの候補は quarter を持たないので点数は付かない
       progressRate: n(c.progressRate),
+      quarter: n(c.quarter),
+      progressBenchmark: n(c.progressBenchmark),
+      progressBasis: typeof c.progressBasis === 'string' ? c.progressBasis : null,
     },
   };
 }

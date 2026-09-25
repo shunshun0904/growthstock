@@ -31,6 +31,10 @@ export default function AxisTable({ axisScores, compareTo = null }) {
               <td title={`${a.full} — ${a.rule}`}>
                 {a.label}
                 <div style={{ fontSize: 10.5, color: 'var(--text-faint)' }}>{a.full}</div>
+                {/* 進捗期待は、何を基準にした比率かが分からないと点数が読めない */}
+                {a.detail?.map((t) => (
+                  <div key={t} style={{ fontSize: 10.5, color: 'var(--text-dim)' }}>{t}</div>
+                ))}
               </td>
               <td className="val">
                 {isNum(a.value)
