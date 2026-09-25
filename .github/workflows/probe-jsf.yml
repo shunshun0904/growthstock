@@ -1,0 +1,79 @@
+name: Probe JSF
+
+# 日本証券金融（日証金、taisyaku.jp）の公開データが、どういう形で取れるかを実測する
+# （research/probe_jsf.py）。運用者の希望（2026-09-25）で、日証金の需給データ
+# （銘柄別の融資・貸株残高、品貸料率＝逆日歩、制限措置）を特徴量の候補にするための下調べ。
+#
+# 作業環境（Claude Code）からは taisyaku.jp につなげないので、ここから叩く。
+# robots.txt で許されない道は叩かない。叩く数は入力で固定し、間を2秒空ける。
+#
+# 掲載内容は私的利用の範囲を超えて使えない（公開・第三者への提供の禁止）。
+# このリポジトリと Actions のログは公開なので、**データの値は出さない**
+# （URL・見出し・件数・日付の範囲だけ）。取ったファイルは保存しない。
+on:
+  workflow_dispatch:
+    inputs:
+      codes:
+        description: '銘柄ごとのページを見る証券コード（空白区切り）'
+        required: false
+        default: '7203 9984'
+      max_requests:
+        description: 'この実行で叩く上限'
+        required: false
+        default: '25'
+      extra_paths:
+        description: '追加で形を見るパス（空白区切り。/ から）'
+        required: false
+        default: ''
+
+# すべての run を pipefail 付きの bash にする（tee で python の失敗を握り潰さない）
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+concurrency:
+  group: probe-jsf
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # 標準ライブラリだけで動く。pip install は要らない
+      - name: Probe
+        env:
+          INPUT_CODES: ${{ inputs.codes }}
+          INPUT_MAX: ${{ inputs.max_requests }}
+          INPUT_EXTRA: ${{ inputs.extra_paths }}
+        run: |
+          # 入力はシェルに直接展開せず、環境変数から配列にして渡す
+          read -ra CODES <<< "$INPUT_CODES"
+          read -ra EXTRA <<< "$INPUT_EXTRA"
+          args=(--max-requests "$INPUT_MAX" --codes "${CODES[@]}")
+          if [ ${#EXTRA[@]} -gt 0 ]; then args+=(--extra-paths "${EXTRA[@]}"); fi
+          python3 -u research/probe_jsf.py "${args[@]}" 2>&1 | tee probe.log
+          exit "${PIPESTATUS[0]}"
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo '## 日証金（taisyaku.jp）の公開データの形'
+            echo
+            echo '```'
+            cat probe.log 2>/dev/null || echo '(出力なし)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: probe-jsf
+          path: probe.log
+          retention-days: 14
