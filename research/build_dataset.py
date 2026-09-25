@@ -263,9 +263,11 @@ TPM_NAME = "TOKYO PRO MARKET"
 #: そこで master_hist で最後に TPM だった月末を調べ、その後で最初に値が付いた日から
 #: 数える（general_market_start）。
 #:
-#: 学習データが変わるので、実験47で影響を測ってから True にする（それまでは既定 False。
-#: 画面の78週高値も同じ切り替えに従う: general_market_start.json の enabled）
-GENERAL_MARKET_START = _sweep_override("GENERAL_MARKET_START", False, _flag)
+#: 2026-09-25 から True（運用者の決定。データの誤りを直すもので、分離力の足切りでは
+#: 決めない）。実験47（1回目）の実測: 学習データの行は 21,867 -> 21,864（3行減る）、
+#: 共通の行で値が変わった列は0本。画面の78週高値も同じ切り替えに従う
+#: （general_market_start.json の enabled）
+GENERAL_MARKET_START = _sweep_override("GENERAL_MARKET_START", True, _flag)
 
 #: 上場からの年数（listing_years、実験47の候補）の打ち止め（年）。
 #: J-Quants は 2016-10 より前が見えないので、それより前から上場している銘柄の年数は

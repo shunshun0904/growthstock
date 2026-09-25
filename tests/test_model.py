@@ -1423,12 +1423,33 @@ class 本番のプリセット(unittest.TestCase):
       でないとチューニングするいみがないので。oofで最良にすることが
       チューニングの目的ではないです」。
     切り替えのとき、週次の探索だけ153列（all）のまま残っていた。
+
+    2026-09-25、205列 -> 206列（all_plus_prog_listing）に切り替えた（運用者の決定。
+    データの誤りを直すもので、分離力の足切りでは決めていない）。
+    進捗期待を新しい定義（progress_vs_base -> progress_pct）にし、上場からの年数を足す。
     """
 
-    def test_本番は_all_plus(self):
+    def test_本番は_all_plus_prog_listing(self):
         import features as F
-        self.assertEqual(F.DEFAULT_PRESET, "all_plus")
-        self.assertEqual(len(F.columns(F.DEFAULT_PRESET)), 205)
+        self.assertEqual(F.DEFAULT_PRESET, "all_plus_prog_listing")
+        self.assertEqual(len(F.columns(F.DEFAULT_PRESET)), 206)
+
+    def test_本番の列は205列の進捗期待を置き換えて上場年数を足したもの(self):
+        """旧の進捗（進捗率 − Q×25）は外し、新しい定義の順位と上場からの年数を入れる。"""
+        import features as F
+        old, new = F.columns("all_plus"), F.columns(F.DEFAULT_PRESET)
+        self.assertEqual(sorted(set(old) - set(new)), ["progress_vs_base"])
+        self.assertEqual(sorted(set(new) - set(old)), ["listing_years", "progress_pct"])
+        # 置き換えた列は同じ位置（ほかの列の並びは205列のまま）
+        self.assertEqual(new.index("progress_pct"), old.index("progress_vs_base"))
+        self.assertEqual([c for c in new if c not in ("progress_pct", "listing_years")],
+                         [c for c in old if c != "progress_vs_base"])
+
+    def test_本番のデータセットは母集団の直しを入れる(self):
+        """TOKYO PRO MARKET の時期の空の行を78週の履歴に数えない（2026-09-25 から）。"""
+        import build_dataset as B
+        if os.environ.get("SWEEP_GENERAL_MARKET_START") is None:
+            self.assertTrue(B.GENERAL_MARKET_START)
 
     def test_学習スクリプトが正本を見ている(self):
         """既定値を直書きすると、プリセットを変えたときに片方だけ古くなる。"""
@@ -1514,22 +1535,32 @@ class 探索と学習の列を突き合わせる(unittest.TestCase):
         return str(cm.exception)
 
     def test_本番の学習は鍵が無ければ止まる(self):
-        """既定値で黙って学習しない。鍵は --features と同じ all_plus。"""
+        """既定値で黙って学習しない。鍵は --features と同じ（features.DEFAULT_PRESET）。"""
+        import features as F
         msg = self._run_production({"all": {"_n_features": 153}})
-        self.assertIn("all_plus の探索結果がありません", msg)
+        self.assertIn(f"{F.DEFAULT_PRESET} の探索結果がありません", msg)
 
     def test_本番の学習は別の列で探索したパラメータなら止まる(self):
         import features as F
         cols = F.columns("all")
-        msg = self._run_production({"all_plus": {"_n_features": 153,
-                                                 "_features_sig": F.signature(cols)}})
+        msg = self._run_production({F.DEFAULT_PRESET: {"_n_features": 153,
+                                                       "_features_sig": F.signature(cols)}})
+        self.assertIn("探索したものではありません", msg)
+
+    def test_205列で探索したパラメータでは206列を学習しない(self):
+        """2026-09-25 の切り替え。旧の本番（all_plus）の探索結果を新しい列に流用しない。"""
+        import features as F
+        old = F.columns("all_plus")
+        msg = self._run_production({F.DEFAULT_PRESET: {"_n_features": len(old),
+                                                       "_features_sig": F.signature(old)}})
         self.assertIn("探索したものではありません", msg)
 
     def test_本番の学習は同じ列なら先へ進む(self):
         """突き合わせを通れば、データセットを読みに行く（ここでは無いので落ちる）。"""
         import features as F
-        cols = F.columns("all_plus")
-        store = {"all_plus": {"_n_features": len(cols), "_features_sig": F.signature(cols)}}
+        cols = F.columns(F.DEFAULT_PRESET)
+        store = {F.DEFAULT_PRESET: {"_n_features": len(cols),
+                                    "_features_sig": F.signature(cols)}}
         import tuning
         import train_production as TP
         orig = tuning.load_params

@@ -199,10 +199,10 @@ class TestSwitch(unittest.TestCase):
             self.assertIsNone(JF.load_general_market_start(p))
         self.assertIsNone(JF.load_general_market_start(None))
 
-    def test_default_is_off_until_experiment_47(self):
-        """実験47で測る前に本番の母集団を変えない。"""
+    def test_default_is_on_from_2026_09_25(self):
+        """運用者の決定（2026-09-25）で本番の母集団に入れた。画面も同じ切り替えに従う。"""
         if os.environ.get("SWEEP_GENERAL_MARKET_START") is None:
-            self.assertFalse(B.GENERAL_MARKET_START)
+            self.assertTrue(B.GENERAL_MARKET_START)
 
     def test_json_only_lists_codes_that_were_on_tpm(self):
         with tempfile.TemporaryDirectory() as d:

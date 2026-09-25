@@ -17,8 +17,8 @@
      木が増えた列を使うことによる揺れ）を測る。B の差は P の差と比べて読む。
      手元の試運転では、乱数の4列を足しただけで LightGBM の PR-AUC が
      +0.0035 ± 0.0035（11窓中8窓で上）動いた
-共通: 本番のパラメータ（205列で探索したもの。読むだけ）、ブースティング3モデル、
-      種3つの平均、窓の切り方3通り（research/exp/ab_oof.py）
+共通: 本番のパラメータ（読むだけ。LightGBM は 205列の探索結果がまだ無く、all の151列の結果）、
+      ブースティング3モデル、種3つの平均、窓の切り方3通り（research/exp/ab_oof.py）
 
 時点整合: 報告は公表日（DiscDate）の翌営業日から使う（availability.SHORTSALE_SAME_DAY）。
 市場全体の空売り比率は当日（Date）から（availability.RULES の shortratio。当日の夜に

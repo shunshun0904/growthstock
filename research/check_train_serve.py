@@ -49,6 +49,11 @@ def compare(live: pd.DataFrame, rebuilt: pd.DataFrame, cols: List[str],
 
     before を渡すと、その日より前の行だけを比べる（今日の行は同じ入力から
     作ったばかりなので、違わないのが当たり前）。
+
+    控えに _features（その行で控えた列の組。predict_daily.save_live_features）が
+    あれば、各列はその列を控えた行だけで比べる。モデルの列が変わると、前の行には
+    新しい列が無く、ファイルの上では欠測に見えるため（比べると「予測時は欠測」の
+    食い違いが並ぶ）。_features が無い控えは全部の行で比べる。
     """
     key = ["Code", "Date"]
     lv = live.copy()
@@ -59,19 +64,30 @@ def compare(live: pd.DataFrame, rebuilt: pd.DataFrame, cols: List[str],
     if before is not None:
         lv = lv[lv["Date"] < before]
     cols = [c for c in cols if c in lv.columns and c in rb.columns]
-    m = lv[key + cols].merge(rb[key + cols], on=key, how="inner", suffixes=("_l", "_r"))
+    sets = "_features" in lv.columns
+    left = lv[key + cols + (["_features"] if sets else [])]
+    m = left.merge(rb[key + cols], on=key, how="inner", suffixes=("_l", "_r"))
+    saved = {}
+    if sets:
+        saved = {s: set(str(s).split(",")) for s in m["_features"].dropna().unique()}
     rows = []
     for c in cols:
-        a = pd.to_numeric(m[f"{c}_l"], errors="coerce").to_numpy(dtype=float)
-        b = pd.to_numeric(m[f"{c}_r"], errors="coerce").to_numpy(dtype=float)
+        if sets:
+            # _features が欠けた行（無いはずだが）は比べる側に倒す
+            use = m["_features"].map(lambda s: c in saved[s] if s in saved else True)
+            mc = m[use.to_numpy(dtype=bool)]
+        else:
+            mc = m
+        a = pd.to_numeric(mc[f"{c}_l"], errors="coerce").to_numpy(dtype=float)
+        b = pd.to_numeric(mc[f"{c}_r"], errors="coerce").to_numpy(dtype=float)
         same = np.isclose(a, b, rtol=1e-6, atol=1e-9, equal_nan=True)
-        n = int(len(m))
+        n = int(len(mc))
         bad = int((~same).sum())
         rows.append({"column": c, "n": n, "diff": bad,
                      "rate": bad / n if n else np.nan,
                      "live_nan_rebuilt_value": int((np.isnan(a) & ~np.isnan(b)).sum()),
                      "live_value_rebuilt_nan": int((~np.isnan(a) & np.isnan(b)).sum()),
-                     "dates": int(m.loc[~same, "Date"].nunique()) if bad else 0})
+                     "dates": int(mc.loc[~same, "Date"].nunique()) if bad else 0})
     out = pd.DataFrame(rows)
     if len(out):
         out = out.sort_values(["rate", "diff"], ascending=False).reset_index(drop=True)
@@ -103,6 +119,9 @@ def main(argv=None) -> int:
     print(f"[train/serve] 控え {dates.nunique()}日 / 比べた行 {n_rows}件"
           f"（{past.min().date() if len(past) else '-'}〜"
           f"{past.max().date() if len(past) else '-'}。今日 {latest.date()} の行は除く）")
+    if "_features" in live.columns and live["_features"].nunique() > 1:
+        print(f"  控えた列の組が {live['_features'].nunique()}通り（モデルの列が変わった）。"
+              "各列はその列を控えた行だけで比べる")
     if n_rows == 0:
         print("[train/serve] 比べられる過去の行がまだ無い")
         return 0

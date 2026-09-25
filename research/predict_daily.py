@@ -529,6 +529,11 @@ def save_live_features(cand: pd.DataFrame, cols: List[str], days, data_dir: str,
     """
     その日の候補に使った特徴量を控える。**最初の予測で凍結**する（予測の記録と
     同じ）: その日の控えが既にあれば書き換えない。
+
+    行ごとに、控えた列の組を _features（カンマ区切り）に残す。モデルの列が変わると
+    （例: 2026-09-27 の週次の再学習で151列 -> 206列）、前の行には新しい列が無い。ファイルは列の和で
+    保存されるので、無い列は欠測に見え、「予測時は欠測・今は値あり」の食い違いと
+    区別できなくなる（check_train_serve.compare はこの組で比べる行を絞る）。
     """
     path = os.path.join(data_dir, LIVE_FEATURES)
     latest = pd.Timestamp(days[-1])
@@ -541,6 +546,7 @@ def save_live_features(cand: pd.DataFrame, cols: List[str], days, data_dir: str,
     new["Date"] = pd.to_datetime(new["Date"])
     new["_saved_at"] = pd.Timestamp.now(tz="UTC").isoformat()
     new["_trained_at"] = str(trained_at or "")
+    new["_features"] = ",".join(keep[2:])
     old = None
     if os.path.exists(path):
         try:
@@ -548,6 +554,11 @@ def save_live_features(cand: pd.DataFrame, cols: List[str], days, data_dir: str,
             old["Date"] = pd.to_datetime(old["Date"])
         except Exception as exc:                 # noqa: BLE001
             print(f"[live] 控えを読めないので作り直す: {type(exc).__name__}")
+    if old is not None and "_features" not in old.columns:
+        # _features を残す前の控え。どの行も同じモデル（同じ列）で控えたので、
+        # いまファイルにある列がそのまま控えた列の組
+        old["_features"] = ",".join(c for c in old.columns
+                                    if c not in ("Code", "Date") and not c.startswith("_"))
     if old is not None and (old["Date"] == latest).any():
         print(f"[live] {latest.date()} の特徴量は控え済み。最初の予測のまま凍結する")
         return

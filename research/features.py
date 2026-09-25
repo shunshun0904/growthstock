@@ -325,6 +325,10 @@ PRESETS: Dict[str, List[str]] = {
     "all_plus_prog": ALL_GROUPS + EXTRA_GROUPS + ["progress_seasonal"],
     # --- 2026-09-25 の候補（実験47）。上場からの年数 --- #
     "all_plus_listing": ALL_GROUPS + EXTRA_GROUPS + ["listing"],
+    # --- 2026-09-25 から本番（運用者の決定。DEFAULT_PRESET の説明） --- #
+    # 実験46 の B（progress_vs_base の位置に progress_pct）+ 実験47 の L（listing_years）。206列
+    "all_plus_prog_listing": [("progress_seasonal_pct" if g == "progress" else g)
+                              for g in ALL_GROUPS] + EXTRA_GROUPS + ["listing"],
 
     # --- 決算を「変化」だけで組むセット --- #
     # 絶対水準（ROE 何%、営業利益率 何%）ではなく、
@@ -398,7 +402,23 @@ PRESETS: Dict[str, List[str]] = {
 #: 実収益（3モデル90以上、out-of-fold。B2 の形）
 #:   窓平均超過 +0.50pt -> +1.46pt / SE 1.20 -> 0.76
 #:   最悪の窓 -9.35pt -> -1.43pt
-DEFAULT_PRESET = "all_plus"
+#:
+#: 2026-09-25、205列（all_plus）-> 206列（all_plus_prog_listing）に切り替えた
+#: （運用者の決定）。「精度うんぬんではなく、データのいろいろなミスがあったので、
+#: 上場経過年数と進捗率は入れたほうがいい」。分離力の足切り（§7）で決めたのではない:
+#:   - progress_vs_base（進捗率 − Q×25）を progress_pct に置き換える。旧の列は
+#:     下期に利益が偏る会社をいつも「遅れ」と見て、四半期ごとの幅の違いもそろえて
+#:     いなかった。新しい列は画面の8軸と同じ定義（前年同期の進捗で割った比率の、
+#:     それより前の開示だけで付けた順位）
+#:   - listing_years（一般市場に上場してからの年数。5年で打ち止め）を足す
+#:   - 母集団も直す: TOKYO PRO MARKET の時期の空の行を78週の履歴に数えない
+#:     （build_dataset.GENERAL_MARKET_START）
+#: 実験46（ずらし0か月の窓）で PR-AUC の差（置き換え − 205列）は
+#: lgbm +0.0013 / xgb +0.0010 / cat +0.0024。3モデルとも同じ向きだが足切り 0.0048 の
+#: 内側。全部の結果は docs/MODEL_ADOPTION_RULES.md に記録する。
+#: パラメータは週次の探索（日曜）がこの206列で探し直す。探索の結果が無いあいだ、
+#: train_production.py は学習を止めて先週のモデルが残る（tuning.tuned_mismatch）
+DEFAULT_PRESET = "all_plus_prog_listing"
 
 
 #: プリセットごとに、グループから抜く列。

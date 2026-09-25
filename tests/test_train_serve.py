@@ -8,6 +8,8 @@
   - 後から作り直した値が違えば、その列を割合つきで報告する
   - 今日の行は比べない（同じ入力から作ったばかりなので必ず一致する）
   - 許容を超えた列があれば exit 1
+  - モデルの列が変わっても（例: 2026-09-27 の週次の再学習で151列 -> 206列）、前の行に無い列を
+    「予測時は欠測」の食い違いに数えない（行ごとに控えた列の組 _features で比べる）
 
   python3 tests/test_train_serve.py
 """
@@ -65,6 +67,23 @@ class LiveFeatures(unittest.TestCase):
                               [T("2026-09-18")], self.dir)
         self.assertEqual(self.saved()["Date"].nunique(), 2)
 
+    def test_records_the_saved_columns(self):
+        PD.save_live_features(cand("2026-09-18", ["1111"], [3.0]), self.cols,
+                              [T("2026-09-18")], self.dir)
+        self.assertEqual(list(self.saved()["_features"]), ["credit_ratio,vol_20d"])
+
+    def test_snapshot_from_before_the_column_sets_gets_its_own_columns(self):
+        """_features を残す前の控え（1列のモデル）に、2列のモデルの行を足す。"""
+        legacy = cand("2026-09-17", ["1111"], [3.0])[["Code", "Date", "credit_ratio"]]
+        legacy["_saved_at"] = "2026-09-17T12:00:00+00:00"
+        legacy["_trained_at"] = "2026-09-13"
+        legacy.to_parquet(os.path.join(self.dir, PD.LIVE_FEATURES), index=False)
+        PD.save_live_features(cand("2026-09-18", ["2222"], [5.0]), self.cols,
+                              [T("2026-09-18")], self.dir)
+        s = self.saved().set_index("Code")["_features"]
+        self.assertEqual(s["11110"], "credit_ratio")
+        self.assertEqual(s["22220"], "credit_ratio,vol_20d")
+
 
 class Compare(unittest.TestCase):
     def test_detects_a_value_that_changed_after_the_fact(self):
@@ -98,6 +117,32 @@ class Compare(unittest.TestCase):
         res = CTS.compare(live, rebuilt, ["credit_ratio"], before=T("2026-09-15"))
         self.assertEqual(int(res["n"].iloc[0]), 0)
 
+    def test_column_added_by_a_new_model_is_not_compared_on_older_rows(self):
+        """
+        前のモデルは credit_ratio だけ、新しいモデルは vol_20d も控えた。
+        前の行の vol_20d はファイルの上では欠測だが、控えていないだけなので数えない。
+        """
+        old = cand("2026-09-11", ["1111"], [2.0]).assign(vol_20d=np.nan,
+                                                         _features="credit_ratio")
+        new = cand("2026-09-14", ["2222"], [4.0]).assign(_features="credit_ratio,vol_20d")
+        live = pd.concat([old, new], ignore_index=True)
+        rebuilt = pd.concat([cand("2026-09-11", ["1111"], [2.0]),
+                             cand("2026-09-14", ["2222"], [4.0]),
+                             cand("2026-09-15", ["3333"], [1.0])])
+        r = CTS.compare(live, rebuilt, ["credit_ratio", "vol_20d"],
+                        before=T("2026-09-15")).set_index("column")
+        self.assertEqual(int(r.at["vol_20d", "diff"]), 0)
+        self.assertEqual(int(r.at["vol_20d", "n"]), 1)
+        self.assertEqual(int(r.at["credit_ratio", "n"]), 2)
+
+    def test_saved_column_that_was_missing_is_still_counted(self):
+        """控えた列が予測時に欠測で、後から値が入った（遅れて届いたデータ）は数える。"""
+        live = cand("2026-09-11", ["1111"], [np.nan]).assign(_features="credit_ratio,vol_20d")
+        rebuilt = cand("2026-09-11", ["1111"], [2.0])
+        r = CTS.compare(live, rebuilt, ["credit_ratio", "vol_20d"]).set_index("column")
+        self.assertEqual(int(r.at["credit_ratio", "diff"]), 1)
+        self.assertEqual(int(r.at["credit_ratio", "live_nan_rebuilt_value"]), 1)
+
 
 class Main(unittest.TestCase):
     def setUp(self):
@@ -126,6 +171,17 @@ class Main(unittest.TestCase):
         rebuilt = pd.concat([cand("2026-09-11", ["1111"], [2.0]),
                              cand("2026-09-15", ["3333"], [1.0])])
         self.assertEqual(self.run_main(live, rebuilt), 0)
+
+    def test_switching_models_is_not_an_error(self):
+        """控えた列が増えたモデルの切り替えの翌日。食い違いは無いので exit 0。"""
+        old = cand("2026-09-11", ["1111"], [2.0]).assign(vol_20d=np.nan,
+                                                         _features="credit_ratio")
+        new = cand("2026-09-14", ["2222"], [4.0]).assign(_features="credit_ratio,vol_20d")
+        rebuilt = pd.concat([cand("2026-09-11", ["1111"], [2.0]),
+                             cand("2026-09-14", ["2222"], [4.0]),
+                             cand("2026-09-15", ["3333"], [1.0])])
+        self.assertEqual(self.run_main(pd.concat([old, new], ignore_index=True), rebuilt,
+                                       max_rate=0.1), 0)
 
     def test_no_snapshot_yet_is_not_an_error(self):
         self.assertEqual(CTS.main(["--live", os.path.join(self.dir, "無い.parquet")]), 0)

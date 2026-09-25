@@ -12,8 +12,8 @@ A: J-Quants は TPM の銘柄にも日足の行を持つが値はほぼ空で、
    対照 P は同じ日の中で入れ替えるので時期の情報は残る。L − P で銘柄ごとの情報だけを読む
 
 腕
-  T  新しい母集団（GENERAL_MARKET_START=True）・本番の205列       ← 比べる基準
-  A  今の母集団（False）・本番の205列。T − A が母集団の直しの効果（行はごくわずかしか
+  T  新しい母集団（GENERAL_MARKET_START=True）・205列（all_plus）   ← 比べる基準
+  A  今の母集団（False）・205列。T − A が母集団の直しの効果（行はごくわずかしか
      変わらないので、差は種のばらつきの中に収まるはず）
   L  T + listing_years（all_plus_listing、206列）。L − T が上場年数の効果
   P  対照: L の listing_years を同じ日の銘柄どうしで入れ替えたもの（列を足しただけの幅）
@@ -25,11 +25,17 @@ A: J-Quants は TPM の銘柄にも日足の行を持つが値はほぼ空で、
 
   --shifts 0,2,4  --seeds 3  --algos lgbm,xgb,cat
   結果は research/_data/oof/e47_*。本番の設定には書かない。
+
+2026-09-25 に運用者の決定で、母集団の直し（True）と上場からの年数を本番に入れた
+（features.DEFAULT_PRESET = all_plus_prog_listing）。記録した結果は 86c7b4d で回したもの。
+回し直しても同じ比較になるよう、列は all_plus を名前で指定し、母集団は2通りとも
+フラグを明示して作る（lab.frame() の既定の母集団には頼らない）。
 """
 
 from __future__ import annotations
 
 import argparse
+import glob
 import os
 import sys
 
@@ -46,25 +52,40 @@ import ab_oof as AB  # noqa: E402
 import e27_timing_multi as E27  # noqa: E402
 from e44_shortsale import permuted  # noqa: E402
 
+#: 比べる列。実験を組んだときの本番（205列）。本番の既定が変わっても動かさない
+BASE_PRESET = "all_plus"
 LABELS = {"T": "T 新しい母集団（TPMの行を数えない）", "A": "A 今の母集団",
           "L": "L T + 上場からの年数", "P": "P 対照（上場年数を日付内で入れ替え）"}
 #: 対照の入れ替えの種（結果を見る前に決めた）
 PERM_SEED = 20260926
 
 
-def build_general_market(out_path: str) -> pd.DataFrame:
-    """同じ生データから、GENERAL_MARKET_START=True でデータセットを作る（保存済みなら読む）。"""
+def build_with(flag: bool, out_path: str) -> pd.DataFrame:
+    """同じ生データから、GENERAL_MARKET_START=flag でデータセットを作る（保存済みなら読む）。"""
     if os.path.exists(out_path):
         return pd.read_parquet(out_path)
     saved = B.GENERAL_MARKET_START
-    B.GENERAL_MARKET_START = True
-    B.SWEEP_OVERRIDES["GENERAL_MARKET_START"] = True
+    B.GENERAL_MARKET_START = flag
+    B.SWEEP_OVERRIDES["GENERAL_MARKET_START"] = flag
     try:
         B.build(lab.DATA_DIR, out_path)
     finally:
         B.GENERAL_MARKET_START = saved
         B.SWEEP_OVERRIDES.pop("GENERAL_MARKET_START", None)
     return pd.read_parquet(out_path)
+
+
+def with_outcomes(ds: pd.DataFrame, bars: pd.DataFrame) -> pd.DataFrame:
+    """lab.frame() と同じ実収益の列を付ける（同じ関数・同じ結合）。"""
+    import sweep_design as S
+
+    ds = ds.copy()
+    ds["Date"] = pd.to_datetime(ds["Date"])
+    ds["Code"] = ds["Code"].astype(str)
+    ref = S.reference_outcome(S.Panels(bars).get(B.HIGH_WINDOW))
+    out = ds.merge(ref, on=["Code", "Date"], how="left")
+    out = out.merge(lab.realized_returns(bars), on=["Code", "Date"], how="left")
+    return out.dropna(subset=["label"]).reset_index(drop=True)
 
 
 def report_rows(fa: pd.DataFrame, fb: pd.DataFrame, cols) -> None:
@@ -116,22 +137,20 @@ def main(argv=None) -> int:
     seeds = E27.SEEDS3[:args.seeds]
     algos = [a for a in args.algos.split(",") if a]
 
-    prod = F.columns(F.DEFAULT_PRESET)
+    prod = F.columns(BASE_PRESET)
     lst = F.columns("all_plus_listing")
-    fb = lab.frame()
-    fb["Date"] = pd.to_datetime(fb["Date"])
-    fb["Code"] = fb["Code"].astype(str)
-    fb = fb.dropna(subset=["label"]).reset_index(drop=True)
-    miss = [c for c in lst if c not in fb.columns]
+    paths = sorted(glob.glob(os.path.join(lab.DATA_DIR, "bars_*.parquet")))
+    if not paths:
+        raise SystemExit("bars_*.parquet がありません")
+    bars = pd.concat([pd.read_parquet(p) for p in paths], ignore_index=True)
+    fb = with_outcomes(build_with(
+        False, os.path.join(lab.DATA_DIR, "dataset_e47_tpm_rows.parquet")), bars)
+    fa = with_outcomes(build_with(
+        True, os.path.join(lab.DATA_DIR, "dataset_e47_general_market.parquet")), bars)
+    del bars
+    miss = sorted({c for d in (fa, fb) for c in lst if c not in d.columns})
     if miss:
         raise SystemExit(f"データセットに無い列: {miss[:8]}")
-    la = build_general_market(os.path.join(lab.DATA_DIR, "dataset_e47_general_market.parquet"))
-    la["Date"] = pd.to_datetime(la["Date"])
-    la["Code"] = la["Code"].astype(str)
-    la = la.dropna(subset=["label"])
-    key = ["Code", "Date"]
-    extra = [c for c in fb.columns if c not in la.columns]
-    fa = la.merge(fb[key + extra], on=key, how="inner", validate="one_to_one")
 
     print("=" * 78)
     print(f"実験47 TPM の行を数えない・上場からの年数（種{len(seeds)}つ・ずらし {shifts}か月）")

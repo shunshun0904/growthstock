@@ -15,8 +15,9 @@
   C  追加: A + progress_ratio + progress_pct（all_plus_prog、207列）
   P  対照: C の2列を**同じ日の銘柄どうしで入れ替えた**もの。列を足しただけで動く幅
      （実験44 では中身の無い4列で LightGBM の PR-AUC が +0.0022 動いた）を測る
-共通: 本番のパラメータ（205列で探索したもの。読むだけ）、ブースティング3モデル、
-      種3つの平均、窓の切り方3通り（research/exp/ab_oof.py）
+共通: 本番のパラメータ（読むだけ。e27_timing_multi.prod_params。記録した run では
+      LightGBM は 205列の探索結果がまだ無く、2026-09-20 に all の151列で探索した結果）、
+      ブースティング3モデル、種3つの平均、窓の切り方3通り（research/exp/ab_oof.py）
 
 採否（docs/MODEL_ADOPTION_RULES.md §7）: LightGBM の PR-AUC の改善が 0.0048 を超え、
 XGBoost / CatBoost も同じ向き。超えたら探索し直し（B2）でも同じ向きかを確かめてから本番へ。
@@ -28,6 +29,11 @@ XGBoost / CatBoost も同じ向き。超えたら探索し直し（B2）でも�
 
   --shifts 0,2,4  --seeds 3  --algos lgbm,xgb,cat
   結果は research/_data/oof/e46_*。本番の設定には書かない。
+
+2026-09-25 に運用者の決定で B（置き換え）と上場からの年数を本番に入れた
+（features.DEFAULT_PRESET = all_plus_prog_listing）。記録した結果は 86c7b4d までの版で
+回したもの。いまは lab.frame() の母集団も直してある（build_dataset.GENERAL_MARKET_START）
+ので、回し直すと行がわずかに変わる（実験47 の1回目では 21,867 -> 21,864行）。
 """
 
 from __future__ import annotations
