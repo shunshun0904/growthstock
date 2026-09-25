@@ -15,9 +15,10 @@ sys.path.insert(0, os.path.join(ROOT, "scripts"))
 sys.path.insert(0, os.path.join(ROOT, "research"))
 
 from jquants_data_fetcher import (  # noqa: E402
-    _one_year_before, build_milestones, credit_metrics, describe_secret, display_code,
-    fundamental_metrics, fundamentals_as_of, margin_published_on, normalize_code,
-    pct_change, price_metrics, quarterize,
+    CHART_BARS, CHART_STEP, HIGH_WINDOW_BARS, PRICE_LOOKBACK_DAYS,
+    _one_year_before, build_milestones, chart_history, chart_start, credit_metrics,
+    describe_secret, display_code, fundamental_metrics, fundamentals_as_of,
+    margin_published_on, normalize_code, pct_change, price_metrics, quarterize,
 )
 
 
@@ -514,6 +515,70 @@ class TestMilestones(unittest.TestCase):
         base = dt.date.today() - dt.timedelta(days=450)
         q = make_quotes([1000] * 400, [100000] * 400, start=base.isoformat())
         self.assertEqual(build_milestones(q, []), [])
+
+
+class TestChartPeriod(unittest.TestCase):
+    """
+    タイムマシーンの株価推移とストーリータイムラインは、目的変数と同じ78週（2026-09-26、
+    運用者の指示「目的変数の定義通り過去78週（1年半分）の表示にしてほしい」）。
+    """
+
+    def test_chart_covers_78_weeks(self):
+        self.assertEqual(HIGH_WINDOW_BARS, 368)
+        self.assertEqual(CHART_BARS, HIGH_WINDOW_BARS + 1)
+        q = make_quotes(list(range(1000, 1800)))           # 800本
+        h = chart_history(q)
+        self.assertEqual(h[0]["date"], q[-CHART_BARS]["Date"])     # 78週の最初の足から
+        self.assertEqual(h[-1]["date"], q[-1]["Date"])             # 最新の足まで
+        self.assertEqual(chart_start(q), q[-CHART_BARS]["Date"])
+        # 3本ごと（最新から数える）＋ 最初の足
+        self.assertLessEqual(len(h), (CHART_BARS - 1) // CHART_STEP + 2)
+        self.assertGreaterEqual(len(h), (CHART_BARS - 1) // CHART_STEP + 1)
+
+    def test_latest_bar_is_always_kept(self):
+        """間引きは最新の足から数える（古い側から数えると最新の足が落ちることがあった）。"""
+        for n in (369, 370, 371, 500, 801):
+            q = make_quotes([1000 + i for i in range(n)])
+            self.assertEqual(chart_history(q)[-1]["date"], q[-1]["Date"], n)
+
+    def test_short_history_is_shown_whole(self):
+        q = make_quotes([1000] * 50)
+        h = chart_history(q)
+        self.assertEqual(h[0]["date"], q[0]["Date"])
+        self.assertEqual(h[-1]["date"], q[-1]["Date"])
+
+    def test_events_cover_the_same_78_weeks(self):
+        """
+        タイムラインの出来事も株価推移と同じ期間。1年より前（78週の中）の決算は出し、
+        78週より前の決算は出さない。
+        """
+        q = make_quotes([1000] * 800, start="2023-01-02")
+        # 平日だけの日付にする（make_quotes は暦日で1日ずつ進むので、369本が1年ほどにしかならない）
+        d = dt.date(2023, 1, 2)
+        for r in q:
+            while d.weekday() >= 5:
+                d += dt.timedelta(days=1)
+            r["Date"] = d.isoformat()
+            d += dt.timedelta(days=1)
+        start = chart_start(q)
+        first = dt.date.fromisoformat(start)
+        inside = (first + dt.timedelta(days=30)).isoformat()   # 1年より前・78週の中
+        before = (first - dt.timedelta(days=30)).isoformat()   # 78週より前
+        quarters = [{"disclosedDate": inside, "period": "FY2023 2Q"},
+                    {"disclosedDate": before, "period": "FY2023 1Q"}]
+        dates = {e["date"] for e in build_milestones(q, quarters) if e["type"] == "earnings"}
+        self.assertIn(inside, dates)
+        self.assertNotIn(before, dates)
+        self.assertLess(dt.date.fromisoformat(q[-1]["Date"]) - first, dt.timedelta(days=800))
+        self.assertGreater(dt.date.fromisoformat(q[-1]["Date"]) - dt.date.fromisoformat(inside),
+                           dt.timedelta(days=365))
+
+    def test_lookback_reaches_78_weeks_before_the_chart_start(self):
+        """
+        タイムラインの最初の日でも78週高値の更新を判定できるよう、その前の368営業日まで取る
+        （368営業日 + 368営業日 ≒ 1,070暦日）。
+        """
+        self.assertGreaterEqual(PRICE_LOOKBACK_DAYS, 1070)
 
 
 class TestFieldMatching(unittest.TestCase):

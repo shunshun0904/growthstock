@@ -63,9 +63,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_WATCHLIST = os.path.join(ROOT, "scripts", "watchlist.json")
 DEFAULT_OUTPUT = os.path.join(ROOT, "public", "data", "stocks.json")
 
-#: 78週高値（368営業日 ≒ 550暦日）を「6ヶ月前時点」でも、タイムラインの直近1年の
-#: 高値更新でも出すため。550 + 365 + 余裕
-PRICE_LOOKBACK_DAYS = 950
+#: 78週高値（368営業日 ≒ 550暦日）を「6ヶ月前時点」でも、タイムラインの78週の中の
+#: 高値更新でも出すため。タイムラインの最初の日にも、その前の368営業日が要る
+#: （550 + 550 + 余裕）。2026-09-26 に 950 から延ばした（タイムラインを1年 -> 78週に）
+PRICE_LOOKBACK_DAYS = 1150
 
 #: 高値の窓。予測モデル（research/build_dataset.py の HIGH_WINDOW）と同じ 368営業日（78週）。
 #: 2026-09-25 に 52週（365暦日）から変えた（運用者の指示）。予測モデルがブレイクと
@@ -74,6 +75,12 @@ HIGH_WINDOW_BARS = 368
 #: 窓の中で高値が付いた日がこの割合に満たなければ出さない（売買停止が長い銘柄）。
 #: モデルの MIN_WINDOW_COVERAGE と同じ
 HIGH_WINDOW_COVERAGE = 0.5
+#: 画面の株価推移とストーリータイムラインの期間（日足の本数）。目的変数と同じ78週
+#: （前日までの368営業日）に当日の1本を足す。2026-09-26 に直近1年（365暦日）から変えた
+#: （運用者の指示「目的変数の定義通り過去78週（1年半分）の表示にしてほしい」）
+CHART_BARS = HIGH_WINDOW_BARS + 1
+#: 株価推移の点は3営業日ごとに間引く（stocks.json を大きくしない）。最新の足から数える
+CHART_STEP = 3
 MARGIN_LOOKBACK_DAYS = 400
 
 # 取得できなかった理由の分類
@@ -799,14 +806,42 @@ def credit_metrics(margin_rows: Sequence[dict], as_of: Optional[str] = None,
 # マイルストーン (タイムマシーン・モードのストーリータイムライン)
 # --------------------------------------------------------------------------- #
 
+def chart_start(quotes: Sequence[dict], bars: int = CHART_BARS) -> Optional[str]:
+    """株価推移とタイムラインの最初の日（直近 bars 本の日足の最初の日）。"""
+    rows = [r for r in quotes if r.get("Date")]
+    if not rows:
+        return None
+    return rows[-bars:][0]["Date"]
+
+
+def chart_history(quotes: Sequence[dict], bars: int = CHART_BARS,
+                  step: int = CHART_STEP) -> List[dict]:
+    """
+    画面の株価推移（終値）。直近 bars 本の日足を step 本ごとに間引く。
+
+    間引きは最新の足から数え、期間の最初の足も残す（78週の端から端まで描く）。以前は古い
+    側から数えていたので、最新の足が落ちることがあった（2026-09-25 の stocks.json では
+    最後の点が 9/18 で、9/25 までの足があった）。
+    """
+    rows = [{"date": r["Date"], "close": pick(r, "AdjC", "C")}
+            for r in quotes[-bars:] if r.get("Date")]
+    rows = [h for h in rows if h["close"] is not None]
+    if not rows:
+        return rows
+    kept = rows[::-1][::step][::-1]
+    return kept if kept[0] is rows[0] else [rows[0]] + kept
+
+
 def build_milestones(
-    quotes: Sequence[dict], quarters: Sequence[dict], months: int = 12,
+    quotes: Sequence[dict], quarters: Sequence[dict], since: Optional[str] = None,
     count_from: Optional[str] = None,
 ) -> List[dict]:
     """
     実データから検出できるイベントのみを時系列で列挙する。
     (定性的なストーリーを創作しない — 検出条件は各イベントの detail に明記する)
 
+    since（'YYYY-MM-DD'）より前の出来事は出さない。既定は株価推移と同じ78週の最初の日
+    （chart_start）。以前は直近12ヶ月だった。
     count_from は price_metrics と同じ（78週の履歴をその日からの行だけで数える）。
     """
     events: List[dict] = []
@@ -815,9 +850,7 @@ def build_milestones(
     first = (next((i for i, r in enumerate(quotes) if (r.get("Date") or "") >= count_from),
                   len(quotes)) if count_from else 0)
 
-    last_date = dt.date.fromisoformat(quotes[-1]["Date"])
-    since = last_date - dt.timedelta(days=30 * months)
-    since_s = since.isoformat()
+    since_s = since or chart_start(quotes) or quotes[0]["Date"]
 
     # 1) 決算発表
     for q in quarters:
@@ -990,13 +1023,8 @@ def build_stock(client: JQuantsClient, raw_code: str, note: str = "",
     ]
     sources = {f: (SRC_API if metrics.get(f) is not None else SRC_NA) for f in source_fields}
 
-    # 直近1年の終値推移 (スパークライン用に週次へ間引き)
-    year_start = (base - dt.timedelta(days=365)).isoformat()
-    history = [
-        {"date": r["Date"], "close": pick(r, "AdjC", "C")}
-        for r in quotes if r["Date"] >= year_start
-    ]
-    history = [h for h in history[::3] if h["close"] is not None]
+    # 株価推移（目的変数と同じ78週。3営業日ごとに間引く）と、同じ期間の出来事
+    history = chart_history(quotes)
 
     return {
         "code": display_code(code),
@@ -1010,7 +1038,8 @@ def build_stock(client: JQuantsClient, raw_code: str, note: str = "",
         "asOf": latest_date,
         "metrics": metrics,
         "snapshots": snapshots,
-        "milestones": build_milestones(quotes, quarters, count_from=count_from),
+        "milestones": build_milestones(quotes, quarters, since=chart_start(quotes),
+                                       count_from=count_from),
         "quarters": quarters[-9:],
         "history": history,
         "sources": sources,

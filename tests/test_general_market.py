@@ -178,11 +178,13 @@ class TestWindowCountsOnlyGeneralMarketRows(unittest.TestCase):
     def test_milestones_wait_for_the_same_history(self):
         q = self.quotes("11110")
         count_from = DAYS[MOVE].date().isoformat()
-        ev = JF.build_milestones(q, [], months=60, count_from=count_from)
+        # 期間の最初から全部を見る（既定は株価推移と同じ78週。2026-09-26 に months= から since= へ）
+        since = q[0]["Date"]
+        ev = JF.build_milestones(q, [], since=since, count_from=count_from)
         hi = [e["date"] for e in ev if e["type"] == "breakout"]
         self.assertTrue(hi)
         self.assertGreaterEqual(min(hi), DAYS[MOVE + W].date().isoformat())
-        before = [e["date"] for e in JF.build_milestones(q, [], months=60) if e["type"] == "breakout"]
+        before = [e["date"] for e in JF.build_milestones(q, [], since=since) if e["type"] == "breakout"]
         self.assertLess(min(before), DAYS[MOVE + W].date().isoformat())
 
 

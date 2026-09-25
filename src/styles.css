@@ -98,8 +98,13 @@ input, select, textarea { font: inherit; color: inherit; }
 
 .card-head {
   display: flex; align-items: center; justify-content: space-between;
+  flex-wrap: wrap;
   gap: var(--s3); margin-bottom: var(--s4);
 }
+/* 見出しの横の操作（銘柄の選択など）は、入りきらなければ次の行へ回す。
+   折り返さないと見出しが押しつぶされ、スマホ幅で「タイムマシーン・モード」が
+   1文字ずつの縦書きになっていた（390px で実測） */
+.card-head > .row { min-width: 0; max-width: 100%; }
 .card-head h2 { margin: 0; font-size: 14px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--text-dim); }
 .card-head .sub { font-size: 12px; color: var(--text-faint); }
 
@@ -146,6 +151,25 @@ input, select, textarea { font: inherit; color: inherit; }
 .card-fill { display: flex; flex-direction: column; }
 .chart-slot { flex: 1 1 auto; min-height: 380px; display: flex; flex-direction: column; }
 .chart-slot > * { flex: 1 1 auto; }
+
+/* オクタゴン（RadarPanel）。凡例は図の外に置き、図の高さを先に決める。
+   図は絶対配置で枠いっぱいに広げる（高さを 100% で渡すと、flex の中では決まらないことがある） */
+.radar-panel { display: flex; flex-direction: column; gap: 6px; min-height: 0; }
+.radar-plot { position: relative; flex: 1 1 auto; min-height: 300px; }
+.radar-plot-inner { position: absolute; inset: 0; }
+.radar-legend {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 14px;
+  font-size: 12px; line-height: 1.4;
+}
+.radar-legend li { display: inline-flex; align-items: center; gap: 6px; }
+.radar-legend i { display: inline-block; width: 16px; height: 0; border-top-width: 2px; }
+.radar-note { margin: 0; text-align: center; font-size: 11px; color: var(--text-faint); }
+
+/* 株価推移の出来事の凡例（縦の破線の色） */
+.event-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11.5px; margin: -6px 0 6px; }
+.event-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.event-legend i { display: inline-block; width: 0; height: 12px; border-left: 1.5px dashed; }
 
 .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: var(--s4); }
 
