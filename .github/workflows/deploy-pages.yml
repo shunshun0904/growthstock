@@ -8,11 +8,11 @@ on:
     paths-ignore: ['README.md', 'docs/**']
   workflow_dispatch:
   workflow_run:
-    # データ更新・予測が完了したら自動で再デプロイする。
+    # データ更新・予測・画面の銘柄データの取り直しが完了したら自動で再デプロイする。
     #
     # push で繋がないのは、GITHUB_TOKEN による push が
     # 他のワークフローを起こさないため（GitHub のループ防止）。
-    workflows: ['Fetch J-Quants Data', 'Predict Breakouts']
+    workflows: ['Fetch J-Quants Data', 'Predict Breakouts', 'Refresh Stock Details']
     types: [completed]
 
 permissions:
@@ -34,8 +34,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # workflow_run では既定でトリガー元のコミットが取られないため明示する
-          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+          # workflow_run（取得・予測・取り直しが終わったとき）は、公開ブランチの先頭を取る。
+          # それらは実行の途中でデータのコミット（chore(data): …）を積むので、起動元の
+          # github.event.workflow_run.head_sha（走り始めたときのコミット）にはデータが入って
+          # いない。以前はそれを取っていたので、予測の結果は次に誰かが push するまで画面に
+          # 出なかった（2026-09-23 の run 35902251565 は 876523d を載せ、同じ予測の実行が
+          # 積んだ 1f18614 を載せていなかった）
+          ref: ${{ github.event_name == 'workflow_run' && 'claude/jquants-browser-app-bwk19a' || github.ref }}
 
       - uses: actions/setup-node@v4
         with:

@@ -1,0 +1,93 @@
+name: Refresh Stock Details
+
+# 画面の銘柄データ（public/data/stocks.json）だけを作り直す（手動で起動する）。
+#
+# stocks.json はふだん日次予測（Predict Breakouts）の「Fetch details for today's picks」が作る。
+# 取得スクリプト（scripts/jquants_data_fetcher.py）の作りを変えたときに、次の日次予測を
+# 待たずに画面へ出すために使う（2026-09-26、株価推移とタイムラインを直近1年 -> 目的変数と
+# 同じ78週にしたとき。運用者「株価推移を直近78週（サンプル母集団の定義）で表示してほしいです」）。
+#
+# 予測はしない。predictions.json・予測の記録・スプレッドシート・Release には触れない。
+# 対象の銘柄は、公開中の predictions.json の候補から日次予測と同じ規則で選ぶ
+# （research/refresh_details.py codes）ので、直近の日次予測と同じ銘柄が並ぶ。
+# 終わると Deploy to GitHub Pages が workflow_run で起動し、画面に出る。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# 日次予測と同じ組にして、同時に stocks.json を書かない。予測が走っている間はこちらが待つ。
+# こちらが走っている間に予測が来たら、予測の側の cancel-in-progress でこちらが止まる
+# （予測が同じ取得をするので困らない）。こちらが予測を止めることは無い
+concurrency:
+  group: predict-breakouts
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/jquants-browser-app-bwk19a
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r research/requirements.txt
+
+      - name: Download raw data (release)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p research/_data
+          gh release download data-raw --dir research/_data --clobber
+          ls -lh research/_data | sed -n '1,5p'
+
+      # 日次予測と同じく、TOKYO PRO MARKET から移った銘柄の「一般市場で数え始める日」の一覧
+      # （research/_data/dataset_predict_general_market_start.json）を予測データセットの作成で書く。
+      # タイムラインの78週高値の更新を、移ってからの行だけで数えるため
+      - name: Build prediction dataset
+        run: |
+          python3 research/build_dataset.py --keep-unlabeled \
+            --out research/_data/dataset_predict.parquet 2>&1 | tail -25
+
+      - name: Pick codes (same rule as the daily run)
+        id: codes
+        run: |
+          CODES=$(python3 research/refresh_details.py codes)
+          echo "対象 $(wc -w <<< "$CODES") 銘柄: $CODES"
+          echo "codes=$CODES" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch details
+        env:
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+          CODES: ${{ steps.codes.outputs.codes }}
+        run: |
+          # shellcheck disable=SC2086
+          python3 scripts/jquants_data_fetcher.py --extra-codes $CODES \
+            --general-market-start research/_data/dataset_predict_general_market_start.json \
+            2>&1 | tail -15
+
+      # 株価推移が78週になっていない・最後の点が最新の足でない、なら赤で止めてコミットしない
+      - name: Check chart period
+        run: python3 research/refresh_details.py check | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Commit stock details
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/data/stocks.json
+          if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
+          git commit -m "chore(data): 画面の銘柄データを取り直す ($(date -u '+%Y-%m-%d %H:%M UTC'))"
+          for i in 1 2 3 4; do
+            if git push; then exit 0; fi
+            sleep $((2 ** i)); git pull --rebase
+          done
+          exit 1

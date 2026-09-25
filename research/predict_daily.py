@@ -55,6 +55,10 @@ N_CONTRIB = 8
 #: 追跡に残す、その日の上位銘柄数
 HISTORY_TOP = 5
 
+#: 詳細（スナップショット・株価履歴）を取りに行く銘柄数の上限（--top-codes の既定）。
+#: 画面の銘柄データだけを作り直すとき（research/refresh_details.py）も同じ値で選ぶ
+TOP_CODES = 120
+
 #: 追跡の保持期間（暦日）。参照ホライズン（目的変数と同じ営業日数）より
 #: 十分長く持つ。20営業日 ≒ 29暦日、60営業日 ≒ 87暦日
 HISTORY_KEEP_DAYS = 400
@@ -255,7 +259,7 @@ def main(argv=None) -> int:
     ap.add_argument("--out-dir", default=PUBLIC_DIR)
     ap.add_argument("--days", type=int, default=5,
                     help="直近何営業日ぶんを出すか（画面で日を切り替えられる）")
-    ap.add_argument("--top-codes", type=int, default=120,
+    ap.add_argument("--top-codes", type=int, default=TOP_CODES,
                     help="詳細（スナップショット・株価履歴）を取りに行く銘柄数の"
                          "上限。画面に出ている候補を新しい日・上位から順に埋める。"
                          "1銘柄あたり4リクエストなので、120で約480リクエスト")
