@@ -240,7 +240,7 @@ def main(argv=None) -> int:
     if why:
         raise SystemExit(f"パラメータ {args.params} は学習する列（{args.features}）で"
                          f"探索したものではありません: {why}")
-    # 木の本数も探索したときと同じであること（2026-09-25 に 200 -> 500）。
+    # 木の本数も探索したときと同じであること（tuning.SEARCH_N_ESTIMATORS。2026-09-25）。
     # 探索の記録には探索したときの本数が入っているので、そのまま学習すれば記録どおりの
     # 本数になるが、それだと本数を変えても前の本数のモデルが黙って作られ続ける
     if rec.get("n_estimators") != tuning.SEARCH_N_ESTIMATORS:

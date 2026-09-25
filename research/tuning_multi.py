@@ -18,8 +18,7 @@ lgbm と条件を完全に揃える
               （tuning.year_folds(scheme="year_cap_date") と同じ）
   目的関数    分割平均の PR-AUC
   試行数      50
-  木の本数    200 で固定（N_ESTIMATORS。本番の LightGBM は 2026-09-25 から 500 で、
-              こことは別の値。理由は N_ESTIMATORS の注記）
+  木の本数    200 で固定（lgbm の SEARCH_N_ESTIMATORS と同じ。N_ESTIMATORS の注記）
               early stopping で決めると検証窓のばらつきが本数に乗り、
               試行ごとに「別の大きさのモデル」を比べることになる
   探索期間    ホールドアウト（直近12ヶ月）より手前だけ
@@ -88,17 +87,17 @@ CATEGORICAL = ("s33_code", "s17_code", "mkt_code", "scalecat_code")
 #:   has_dividend 等 二値なのでそのまま
 ORDINAL_KEEP = ("cap_band",)
 
-#: 木の本数（xgb / cat / rf と、比べる用の lgbm）。200 で固定する。
+#: 木の本数（xgb / cat / rf と、比べる用の lgbm）。本番の LightGBM の探索と同じ値にする。
 #:
-#: 2026-09-25 まで本番の LightGBM の探索（tuning.SEARCH_N_ESTIMATORS）と同じ値を参照
-#: していた。本番を 500 にしたとき（運用者の指示）、ここは 200 のまま切り離した。
-#: 週次の再学習（retrain-weekly.yml）は1つのジョブで本番の探索と追加モデルの探索を
-#: 続けて回し、ジョブの上限は330分。追加モデルの探索まで500本にすると、見込みで
-#: 上限に収まらない（docs/MODEL_ADOPTION_RULES.md §12）。
+#: 2026-09-25 に本番だけ 500 にして、ここを 200 のまま切り離したことがある。追加モデル
+#: まで500本にすると週次の再学習（retrain-weekly.yml。本番の探索と追加モデルの探索を
+#: 1つのジョブで続けて回し、上限は330分）に収まらない見込みだったため。運用者の判断で
+#: 全モデル200本にそろえ、同じ値の参照に戻した（「であれば、lgbmも200のままでよいです」。
+#: docs/MODEL_ADOPTION_RULES.md §12）。
 #:
-#: 変えるときは、前の本数で探索した結果を使い回さない作りになっている
+#: 変えたときに前の本数で探索した結果を使い回さない作りになっている
 #: （e15_tune_all.why_retune・study_name・train_multi.untuned が本数を見る）。
-N_ESTIMATORS = 200
+N_ESTIMATORS = tuning.SEARCH_N_ESTIMATORS      # 200
 SEED = 0
 ALGOS = ("lgbm", "xgb", "cat", "logit", "mlp")
 #: 木の本数が結果を変えるモデル。探索の記録と study 名で本数を突き合わせる

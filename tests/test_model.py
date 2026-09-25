@@ -1117,8 +1117,8 @@ class TestYearStratifiedFolds(unittest.TestCase):
         best = tune(self._df(), ["a"], n_trials=2, n_splits=5, scheme="year",
                     verbose=False)
         self.assertEqual(best["n_estimators"], SEARCH_N_ESTIMATORS)
-        # 2026-09-25 に 200 -> 500（運用者の指示。tests/test_tree_count.py）
-        self.assertEqual(SEARCH_N_ESTIMATORS, 500)
+        # 2026-09-25 に500本を検討し、全モデル200本のままにした（tests/test_tree_count.py）
+        self.assertEqual(SEARCH_N_ESTIMATORS, 200)
 
     def test_unknown_scheme_stops(self):
         from tuning import tune
