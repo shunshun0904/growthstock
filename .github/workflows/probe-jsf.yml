@@ -25,6 +25,19 @@ on:
         description: '追加で形を見るパス（空白区切り。/ から）'
         required: false
         default: ''
+      history_codes:
+        description: '過去の CSV の取り方を確かめる証券コード（空白区切り。銘柄のページ→検索→CSV）'
+        required: false
+        default: ''
+      history_years:
+        description: '過去の CSV で求める年数'
+        required: false
+        default: '3'
+      skip_basic:
+        description: 'DATA ページと銘柄のページ（1〜5）を飛ばす'
+        type: choice
+        options: ['no', 'yes']
+        default: 'no'
 
 # すべての run を pipefail 付きの bash にする（tee で python の失敗を握り潰さない）
 defaults:
@@ -53,12 +66,18 @@ jobs:
           INPUT_CODES: ${{ inputs.codes }}
           INPUT_MAX: ${{ inputs.max_requests }}
           INPUT_EXTRA: ${{ inputs.extra_paths }}
+          INPUT_HIST: ${{ inputs.history_codes }}
+          INPUT_YEARS: ${{ inputs.history_years }}
+          INPUT_SKIP: ${{ inputs.skip_basic }}
         run: |
           # 入力はシェルに直接展開せず、環境変数から配列にして渡す
           read -ra CODES <<< "$INPUT_CODES"
           read -ra EXTRA <<< "$INPUT_EXTRA"
-          args=(--max-requests "$INPUT_MAX" --codes "${CODES[@]}")
+          read -ra HIST <<< "$INPUT_HIST"
+          args=(--max-requests "$INPUT_MAX" --codes "${CODES[@]}" --history-years "$INPUT_YEARS")
           if [ ${#EXTRA[@]} -gt 0 ]; then args+=(--extra-paths "${EXTRA[@]}"); fi
+          if [ ${#HIST[@]} -gt 0 ]; then args+=(--history-codes "${HIST[@]}"); fi
+          if [ "$INPUT_SKIP" = "yes" ]; then args+=(--skip-basic); fi
           python3 -u research/probe_jsf.py "${args[@]}" 2>&1 | tee probe.log
           exit "${PIPESTATUS[0]}"
       - name: Summary

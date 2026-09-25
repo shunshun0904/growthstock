@@ -173,5 +173,61 @@ class TestFetcher(unittest.TestCase):
         self.assertEqual(f.used, 2)
 
 
+class TestHistoryForm(unittest.TestCase):
+    HTML = """<form action="/app/stock/detail/7203/search" method="post">
+      <input type="hidden" name="csrf_test_name" value="tok-abcdef-123456">
+      <input type="text" name="mkYmdFrom" value="2026/09/17" placeholder="yyyy/mm/dd">
+      <input type="text" name="mkYmdTo" value="2026/09/25">
+      <input type="radio" name="kjnYmdDays" value="1" checked>
+      <input type="radio" name="kjnYmdDays" value="2">
+      <input type="radio" name="trjoKbn" value="0" checked>
+      <button type="submit" name="go">検索</button></form>"""
+
+    def form(self):
+        return P.parse_html(self.HTML.encode("utf-8")).forms[0]
+
+    def test_payload_keeps_hidden_and_checked_only(self):
+        pl = P.form_payload(self.form())
+        self.assertEqual(pl["csrf_test_name"], ["tok-abcdef-123456"])
+        self.assertEqual(pl["kjnYmdDays"], ["1"])      # 選ばれているものだけ
+        self.assertEqual(pl["trjoKbn"], ["0"])
+        self.assertNotIn("go", pl)                      # ボタンは送らない
+
+    def test_options_are_shown_but_hidden_values_are_not(self):
+        out = printed(P.show_form_options, self.form())
+        self.assertIn("kjnYmdDays", out)
+        self.assertIn("1*", out)
+        self.assertIn("2026/09/17", out)                # 既定の日付は出してよい
+        self.assertNotIn("tok-abcdef-123456", out)      # 合言葉は出さない
+
+    def test_date_format_follows_the_default(self):
+        self.assertEqual(P.date_format_like("2026/09/17"), "%Y/%m/%d")
+        self.assertEqual(P.date_format_like("2026-09-17"), "%Y-%m-%d")
+        self.assertEqual(P.date_format_like("20260917"), "%Y%m%d")
+        self.assertEqual(P.date_format_like(""), "%Y/%m/%d")
+
+
+class JsonOpener(FakeOpener):
+    def __init__(self, body):
+        super().__init__()
+        self.body = body
+
+    def open(self, req, timeout=30):
+        self.calls.append(req.full_url)
+        return FakeResp(self.body)
+
+
+class TestJsonInfo(unittest.TestCase):
+    def test_only_dates_and_file_names_are_printed(self):
+        body = ('{"zandaka": {"file": "zandaka.csv", "updated": "2026/09/25 12:21", '
+                '"rows": 123456}, "list": [1, 2]}').encode("utf-8")
+        f = P.Fetcher(5, 0, opener=JsonOpener(body))
+        out = printed(P.show_json_info, f, "/data/download_info.json")
+        self.assertIn("2026/09/25 12:21", out)
+        self.assertIn("zandaka.csv", out)
+        self.assertNotIn("123456", out)
+        self.assertIn("int", out)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

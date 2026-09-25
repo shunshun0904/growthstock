@@ -48,6 +48,7 @@ import urllib.parse
 import urllib.request
 import urllib.robotparser
 import zipfile
+from http.cookiejar import CookieJar
 from collections import Counter
 from html.parser import HTMLParser
 from typing import Dict, List, Optional, Tuple
@@ -129,13 +130,17 @@ class Fetcher:
         self.pause = pause
         self.robots = robots
         self.used = 0
-        self.opener = opener or urllib.request.build_opener()
+        # 銘柄ごとの過去の CSV は、画面の検索（セッションとフォームの合言葉）を経て作られる
+        self.opener = opener or urllib.request.build_opener(
+            urllib.request.HTTPCookieProcessor(CookieJar()))
 
     def allowed(self, url: str) -> bool:
         return self.robots is None or self.robots.can_fetch(UA, url)
 
-    def get(self, url: str) -> Tuple[Optional[int], Dict[str, str], bytes, str]:
-        """(HTTP の状態, 応答ヘッダ, 本文, 最後の URL)。叩かなかったときは状態が None。"""
+    def get(self, url: str, data: Optional[Dict[str, str]] = None,
+            referer: Optional[str] = None) -> Tuple[Optional[int], Dict[str, str], bytes, str]:
+        """(HTTP の状態, 応答ヘッダ, 本文, 最後の URL)。叩かなかったときは状態が None。
+        data を渡すと POST（フォームの送信）。"""
         if not self.allowed(url):
             print(f"  [robots] 許可されていないので叩かない: {url}")
             return None, {}, b"", url
@@ -145,7 +150,11 @@ class Fetcher:
         if self.used:
             time.sleep(self.pause)
         self.used += 1
-        req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Language": "ja"})
+        headers = {"User-Agent": UA, "Accept-Language": "ja"}
+        if referer:
+            headers["Referer"] = referer
+        body = urllib.parse.urlencode(data, doseq=True).encode() if data is not None else None
+        req = urllib.request.Request(url, data=body, headers=headers)
         try:
             with self.opener.open(req, timeout=30) as r:
                 return r.status, dict(r.headers), r.read(), r.geturl()
@@ -196,6 +205,10 @@ class PageParser(HTMLParser):
             self.forms.append(self._form)
         elif tag in ("input", "select", "textarea", "button") and self._form is not None:
             self._form["fields"].append((tag, (a.get("type") or "").lower(), a.get("name") or ""))
+            self._form.setdefault("detail", []).append({
+                "tag": tag, "type": (a.get("type") or "").lower(), "name": a.get("name") or "",
+                "value": a.get("value") or "", "checked": "checked" in a,
+                "placeholder": a.get("placeholder") or ""})
         elif tag == "script":
             self._in_script = True
             if a.get("src"):
@@ -344,6 +357,136 @@ def show_file(f: Fetcher, url: str) -> None:
 
 
 # ---------------------------------------------------------------------- #
+# 過去の CSV の取り方（セッション）
+# ---------------------------------------------------------------------- #
+
+#: フォームの選択肢の値として出してよい形（画面の部品の値。データではない）
+UI_VALUE = re.compile(r"^[A-Za-z0-9_\-]{0,12}$")
+DATETIME_LIKE = re.compile(r"^\d{4}[/\-]\d{1,2}[/\-]\d{1,2}([ T]\d{1,2}:\d{2}(:\d{2})?)?$")
+
+
+def form_payload(form: Dict) -> Dict[str, List[str]]:
+    """フォームの既定の中身（隠し項目・選ばれているラジオとチェック・入っている値）。"""
+    out: Dict[str, List[str]] = {}
+    for fld in form.get("detail", []):
+        n, ty = fld["name"], fld["type"]
+        if not n or fld["tag"] == "button" or ty in ("submit", "button", "reset"):
+            continue
+        if ty in ("radio", "checkbox"):
+            if fld["checked"]:
+                out.setdefault(n, []).append(fld["value"] or "on")
+            continue
+        out.setdefault(n, []).append(fld["value"])
+    return out
+
+
+def form_options(form: Dict) -> Dict[str, List[Tuple[str, bool]]]:
+    """ラジオ・チェックの選択肢（値, 既定で選ばれているか）。"""
+    opts: Dict[str, List[Tuple[str, bool]]] = {}
+    for fld in form.get("detail", []):
+        if fld["type"] in ("radio", "checkbox") and fld["name"]:
+            opts.setdefault(fld["name"], []).append((fld["value"], fld["checked"]))
+    return opts
+
+
+def show_form_options(form: Dict) -> None:
+    for n, vs in form_options(form).items():
+        shown = [(v if UI_VALUE.match(v or "") else "?") + ("*" if c else "") for v, c in vs]
+        print(f"          [選択肢] {n}: {shown}（* は既定）")
+    for fld in form.get("detail", []):
+        if fld["type"] in ("text", "date") and PERIOD_LIKE.search(fld["name"] or ""):
+            v = fld["value"]
+            shown = v if DATETIME_LIKE.match(v or "") else ("(空)" if not v else "(日付でない)")
+            print(f"          [期間の欄] {fld['name']}（{fld['type']}）: 既定 {shown} / "
+                  f"placeholder {sanitize(fld['placeholder'], 30) or '(なし)'}")
+
+
+def date_format_like(value: str) -> str:
+    """既定値と同じ書式（分からなければ YYYY/MM/DD）。"""
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value or ""):
+        return "%Y-%m-%d"
+    if re.fullmatch(r"\d{8}", value or ""):
+        return "%Y%m%d"
+    return "%Y/%m/%d"
+
+
+def session_history(f: Fetcher, code: str, years: float) -> None:
+    """銘柄のページ → 期間を入れて検索 → CSV、の順に叩き、何年ぶん返るかを見る。"""
+    detail = f"{BASE}/app/stock/detail/{code}-01"
+    st, h, body, final = f.get(detail)
+    show_status("銘柄のページ", st, h, body, final)
+    if st != 200 or not body:
+        return
+    p = parse_html(body)
+    form = next((x for x in p.forms if x["action"].rstrip("/").endswith(f"/detail/{code}/search")),
+                None)
+    if form is None:
+        print("      期間を入れる検索のフォームが無い")
+        return
+    show_form_options(form)
+    base = form_payload(form)
+    frm = next((x["value"] for x in form.get("detail", []) if x["name"] == "mkYmdFrom"), "")
+    fmt = date_format_like(frm)
+    today = dt.datetime.now(JST).date()
+    start = today - dt.timedelta(days=int(365.25 * years))
+    base["mkYmdFrom"] = [start.strftime(fmt)]
+    base["mkYmdTo"] = [today.strftime(fmt)]
+    action = urllib.parse.urljoin(final, form["action"])
+    days_opts = [v for v, _ in form_options(form).get("kjnYmdDays", [])] or [None]
+    for v in days_opts:
+        payload = {k: list(x) for k, x in base.items()}
+        if v is not None:
+            payload["kjnYmdDays"] = [v]
+        label = f"kjnYmdDays={v if (v is None or UI_VALUE.match(v)) else '?'}"
+        print(f"    [{label}] 期間 {payload['mkYmdFrom'][0]} 〜 {payload['mkYmdTo'][0]} で検索")
+        st, h, body2, final2 = f.get(action, data=payload, referer=final)
+        show_status("検索の送信", st, h, body2, final2)
+        if st != 200:
+            continue
+        rows = body2.count(b"<tr")
+        print(f"      結果の画面の表の行 {rows}")
+        st, h, body3, final3 = f.get(f"{BASE}/app/stock/detail/{code}/csv", referer=final2)
+        show_status("CSV", st, h, body3, final3)
+        if st == 200 and body3 and not body3.lstrip().startswith(b"<"):
+            text, enc = decode(body3)
+            print(f"      文字コード {enc}")
+            show_table(describe_table(text))
+        elif body3:
+            print("      CSV ではなく画面が返った")
+
+
+def show_json_info(f: Fetcher, path: str) -> None:
+    """JSON のキーと、日付・時刻の値だけを出す（ほかの値は型だけ）。"""
+    st, h, body, final = f.get(urllib.parse.urljoin(BASE, path))
+    show_status(path, st, h, body, final)
+    if st != 200 or not body:
+        return
+    import json
+    try:
+        obj = json.loads(decode(body)[0])
+    except ValueError:
+        print("      JSON として読めない")
+        return
+
+    def walk(o, key="", depth=0):
+        if depth > 4:
+            return
+        if isinstance(o, dict):
+            for k, v in list(o.items())[:40]:
+                walk(v, f"{key}.{k}" if key else str(k), depth + 1)
+        elif isinstance(o, list):
+            print(f"      {key}: 配列 {len(o)}件")
+            for i, v in enumerate(o[:3]):
+                walk(v, f"{key}[{i}]", depth + 1)
+        else:
+            v = str(o)
+            shown = v if DATETIME_LIKE.match(v) or (isinstance(o, str) and re.fullmatch(r"[a-z_./]+\.csv", v)) \
+                else type(o).__name__
+            print(f"      {key}: {shown}")
+    walk(obj)
+
+
+# ---------------------------------------------------------------------- #
 # 本体
 # ---------------------------------------------------------------------- #
 
@@ -374,6 +517,11 @@ def main(argv=None) -> int:
     ap.add_argument("--pause", type=float, default=2.0, help="リクエストの間の秒数")
     ap.add_argument("--extra-paths", nargs="*", default=[],
                     help="追加で形を見るパス（/ から。例: /search/detail/pcsl/7203）")
+    ap.add_argument("--history-codes", nargs="*", default=[],
+                    help="過去の CSV の取り方を確かめる証券コード（銘柄のページ→検索→CSV）")
+    ap.add_argument("--history-years", type=float, default=3.0)
+    ap.add_argument("--skip-basic", action="store_true",
+                    help="1〜5（DATA ページと銘柄のページ）を飛ばす")
     args = ap.parse_args(argv)
 
     print(f"[jsf] 実行時刻 {now_jst()} / 上限 {args.max_requests}回 / 間隔 {args.pause}秒")
@@ -384,6 +532,9 @@ def main(argv=None) -> int:
     if f.robots is not None and not f.allowed(f"{BASE}/download/"):
         print("[stop] DATA ページが robots.txt で許されていない。ここで止める")
         return 0
+
+    if args.skip_basic:
+        return run_history(f, args)
 
     print("\n=== 2. DATA ページ ===")
     status, headers, body, final = f.get(f"{BASE}/download/")
@@ -423,7 +574,18 @@ def main(argv=None) -> int:
         print(f"  --- {url}")
         show_file(f, url)
 
-    print(f"\n[done] 使ったリクエスト {f.used} / {args.max_requests}（{now_jst()}）")
+    return run_history(f, args)
+
+
+def run_history(f: Fetcher, args) -> int:
+    print("\n=== 6. 更新の情報（/data/download_info.json） ===")
+    show_json_info(f, "/data/download_info.json")
+    if args.history_codes:
+        print(f"\n=== 7. 過去の CSV（{args.history_years:g}年ぶんを求める） ===")
+        for c in args.history_codes:
+            print(f"  --- {c}")
+            session_history(f, c, args.history_years)
+    print(f"\n[done] 使ったリクエスト {f.used} / {f.max}（{now_jst()}）")
     return 0
 
 
