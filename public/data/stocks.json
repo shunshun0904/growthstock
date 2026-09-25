@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-09-25T19:50:43.807405+00:00",
+  "generatedAt": "2026-09-25T20:07:39.667289+00:00",
   "source": "J-Quants API V2 (https://jpx-jquants.com/)",
   "apiVersion": "v2",
   "stocks": [
@@ -938,6 +938,7 @@
           "close": 3790.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -1955,6 +1956,7 @@
           "close": 2380.5
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -2954,6 +2956,7 @@
           "close": 4410.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -3965,6 +3968,7 @@
           "close": 565.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -5000,6 +5004,7 @@
           "close": 3245.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -6017,6 +6022,7 @@
           "close": 2593.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -7070,6 +7076,7 @@
           "close": 8815.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -8099,6 +8106,7 @@
           "close": 3020.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -9128,6 +9136,7 @@
           "close": 1139.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -10187,6 +10196,7 @@
           "close": 3010.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -11192,6 +11202,7 @@
           "close": 5420.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -12191,6 +12202,7 @@
           "close": 1913.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -13190,6 +13202,7 @@
           "close": 2333.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -14183,6 +14196,7 @@
           "close": 4060.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -15170,6 +15184,7 @@
           "close": 6885.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -16151,6 +16166,7 @@
           "close": 3585.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -17132,6 +17148,7 @@
           "close": 4095.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -18143,6 +18160,7 @@
           "close": 2718.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -19130,6 +19148,7 @@
           "close": 1735.5
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -20123,6 +20142,7 @@
           "close": 4865.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -21146,6 +21166,7 @@
           "close": 2719.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -22133,6 +22154,7 @@
           "close": 715.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -23138,6 +23160,7 @@
           "close": 872.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -24167,6 +24190,7 @@
           "close": 10510.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -25160,6 +25184,7 @@
           "close": 2184.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -26177,6 +26202,7 @@
           "close": 11690.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -27164,6 +27190,7 @@
           "close": 3161.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -28175,6 +28202,7 @@
           "close": 2445.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -29180,6 +29208,7 @@
           "close": 997.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -30191,6 +30220,7 @@
           "close": 942.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -31160,6 +31190,7 @@
           "close": 418.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -32153,6 +32184,7 @@
           "close": 1408.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -33140,6 +33172,7 @@
           "close": 1701.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -34139,6 +34172,7 @@
           "close": 1519.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -35156,6 +35190,7 @@
           "close": 955.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -36149,6 +36184,7 @@
           "close": 1024.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -37154,6 +37190,7 @@
           "close": 7950.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -38159,6 +38196,7 @@
           "close": 1120.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -39158,6 +39196,7 @@
           "close": 5200.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -40175,6 +40214,7 @@
           "close": 822.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -41198,6 +41238,7 @@
           "close": 1208.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -42209,6 +42250,7 @@
           "close": 3205.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -43214,6 +43256,7 @@
           "close": 4772.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -44243,6 +44286,7 @@
           "close": 1272.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -45248,6 +45292,7 @@
           "close": 1145.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -46283,6 +46328,7 @@
           "close": 7080.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -47270,6 +47316,7 @@
           "close": 3265.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -48257,6 +48304,7 @@
           "close": 4420.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -49262,6 +49310,7 @@
           "close": 3605.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -50279,6 +50328,7 @@
           "close": 3000.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -51296,6 +51346,7 @@
           "close": 8183.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -52301,6 +52352,7 @@
           "close": 1121.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -53300,6 +53352,7 @@
           "close": 1202.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -54323,6 +54376,7 @@
           "close": 3550.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -55292,6 +55346,7 @@
           "close": 4580.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -56297,6 +56352,7 @@
           "close": 4830.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -57326,6 +57382,7 @@
           "close": 3430.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -58373,6 +58430,7 @@
           "close": 8850.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -59396,6 +59454,7 @@
           "close": 1375.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -60365,6 +60424,7 @@
           "close": 1133.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -61072,6 +61132,7 @@
           "close": 425.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -62077,6 +62138,7 @@
           "close": 1030.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -63064,6 +63126,7 @@
           "close": 2284.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -64075,6 +64138,7 @@
           "close": 1802.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -65080,6 +65144,7 @@
           "close": 2664.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
@@ -66091,6 +66156,7 @@
           "close": 4287.0
         }
       ],
+      "historyBars": 369,
       "sources": {
         "price": "jquants",
         "high52w": "jquants",
