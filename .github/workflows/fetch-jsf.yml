@@ -19,7 +19,11 @@ name: Fetch JSF
 # ログにはデータの値を出さない（件数・日付の範囲だけ）。
 on:
   schedule:
+    # 平日: daily（前営業日の確報）＋ history の続き
     - cron: '5 4 * * 1-5'
+    # 土日: history の続きだけ（DATA の CSV は金曜のまま変わらない）。過去3年がそろうまでの間、
+    # 週7回進める。そろえば何もしないで終わる
+    - cron: '5 4 * * 0,6'
   workflow_dispatch:
     inputs:
       mode:
@@ -73,13 +77,13 @@ jobs:
           ls -lh research/_data/jsf_* 2>/dev/null || true
 
       - name: Daily
-        if: github.event_name == 'schedule' || inputs.mode != 'history'
+        if: (github.event_name == 'schedule' && github.event.schedule == '5 4 * * 1-5') || (github.event_name == 'workflow_dispatch' && inputs.mode != 'history')
         run: |
           python3 -u research/jsf_fetch.py daily 2>&1 | tee jsf.log
           exit "${PIPESTATUS[0]}"
 
       - name: Upload (daily)
-        if: github.event_name == 'schedule' || inputs.mode != 'history'
+        if: (github.event_name == 'schedule' && github.event.schedule == '5 4 * * 1-5') || (github.event_name == 'workflow_dispatch' && inputs.mode != 'history')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
