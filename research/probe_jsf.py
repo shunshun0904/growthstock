@@ -207,7 +207,8 @@ class PageParser(HTMLParser):
             self._form["fields"].append((tag, (a.get("type") or "").lower(), a.get("name") or ""))
             self._form.setdefault("detail", []).append({
                 "tag": tag, "type": (a.get("type") or "").lower(), "name": a.get("name") or "",
-                "value": a.get("value") or "", "checked": "checked" in a,
+                # value が無い（None）と空（""）を分ける。ブラウザは無いときだけ "on" を送る
+                "value": a.get("value"), "checked": "checked" in a,
                 "placeholder": a.get("placeholder") or ""})
         elif tag == "script":
             self._in_script = True
@@ -374,9 +375,9 @@ def form_payload(form: Dict) -> Dict[str, List[str]]:
             continue
         if ty in ("radio", "checkbox"):
             if fld["checked"]:
-                out.setdefault(n, []).append(fld["value"] or "on")
+                out.setdefault(n, []).append("on" if fld["value"] is None else fld["value"])
             continue
-        out.setdefault(n, []).append(fld["value"])
+        out.setdefault(n, []).append(fld["value"] or "")
     return out
 
 
@@ -385,7 +386,7 @@ def form_options(form: Dict) -> Dict[str, List[Tuple[str, bool]]]:
     opts: Dict[str, List[Tuple[str, bool]]] = {}
     for fld in form.get("detail", []):
         if fld["type"] in ("radio", "checkbox") and fld["name"]:
-            opts.setdefault(fld["name"], []).append((fld["value"], fld["checked"]))
+            opts.setdefault(fld["name"], []).append((fld["value"] or "", fld["checked"]))
     return opts
 
 
@@ -395,7 +396,7 @@ def show_form_options(form: Dict) -> None:
         print(f"          [選択肢] {n}: {shown}（* は既定）")
     for fld in form.get("detail", []):
         if fld["type"] in ("text", "date") and PERIOD_LIKE.search(fld["name"] or ""):
-            v = fld["value"]
+            v = fld["value"] or ""
             shown = v if DATETIME_LIKE.match(v or "") else ("(空)" if not v else "(日付でない)")
             print(f"          [期間の欄] {fld['name']}（{fld['type']}）: 既定 {shown} / "
                   f"placeholder {sanitize(fld['placeholder'], 30) or '(なし)'}")
@@ -425,7 +426,7 @@ def session_history(f: Fetcher, code: str, years: float) -> None:
         return
     show_form_options(form)
     base = form_payload(form)
-    frm = next((x["value"] for x in form.get("detail", []) if x["name"] == "mkYmdFrom"), "")
+    frm = next((x["value"] or "" for x in form.get("detail", []) if x["name"] == "mkYmdFrom"), "")
     fmt = date_format_like(frm)
     today = dt.datetime.now(JST).date()
     start = today - dt.timedelta(days=int(365.25 * years))

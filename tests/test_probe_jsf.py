@@ -193,6 +193,15 @@ class TestHistoryForm(unittest.TestCase):
         self.assertEqual(pl["trjoKbn"], ["0"])
         self.assertNotIn("go", pl)                      # ボタンは送らない
 
+    def test_empty_value_is_sent_as_empty_and_missing_value_as_on(self):
+        """ブラウザと同じ送り方。value="" の選択肢を "on" で送ると別の期間が返りうる。"""
+        html = """<form action="/x" method="post">
+          <input type="radio" name="kjnYmdDays" value="" checked>
+          <input type="checkbox" name="flag" checked></form>"""
+        pl = P.form_payload(P.parse_html(html.encode("utf-8")).forms[0])
+        self.assertEqual(pl["kjnYmdDays"], [""])
+        self.assertEqual(pl["flag"], ["on"])
+
     def test_options_are_shown_but_hidden_values_are_not(self):
         out = printed(P.show_form_options, self.form())
         self.assertIn("kjnYmdDays", out)

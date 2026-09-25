@@ -1,0 +1,120 @@
+name: Fetch JSF
+
+# 日本証券金融（日証金、taisyaku.jp）の需給データを取り込み、Release（data-jsf）に置く
+# （research/jsf_fetch.py、docs/DATA_JSF.md）。
+#
+#   daily    DATA ページの CSV（残高・品貸料率・制限措置）。残高は前営業日の申込日の確報で、
+#            昼（実測 12:21 JST）に更新される。平日 13:05 JST に起動する（実際の起動は
+#            +4〜5.6時間遅れて 17〜19時ごろ）。夜の予測より前に積むため
+#   history  銘柄ごとの過去（3年。それより前は非公開）。1銘柄3リクエスト・間隔2秒。
+#            1回 400銘柄（約50分）ずつ、毎日の実行の続きで取る（約4,300銘柄で11回ほど）
+#
+# data-raw とは別の Release に置く。取り込み・週次学習は data-raw の全ファイルを落として
+# まとめて上げ直すので、同じ Release に置くと、その間にここで積んだ分を古い版で潰しうる。
+#
+# 掲載内容は私的利用の範囲を超えて使えない（公開・第三者への提供の禁止）。運用者の決定
+# （2026-09-25）でこのリポジトリの Release に置く（のちにリポジトリを非公開にする予定）。
+# ログにはデータの値を出さない（件数・日付の範囲だけ）。
+on:
+  schedule:
+    - cron: '5 4 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'daily: DATA の CSV / history: 銘柄ごとの過去 / both: 両方'
+        type: choice
+        options: ['both', 'daily', 'history']
+        default: 'both'
+      max_codes:
+        description: 'history で1回に取る銘柄数（1銘柄3リクエスト・間隔2秒）'
+        required: false
+        default: '400'
+
+# すべての run を pipefail 付きの bash にする（tee で python の失敗を握り潰さない）
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fetch-jsf
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: data-jsf
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r research/requirements.txt
+
+      - name: Prepare release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" --title "data-jsf" \
+              --notes "日証金（taisyaku.jp）の需給データ（research/jsf_fetch.py）。私的利用の範囲で使う。"
+          fi
+          mkdir -p research/_data
+          gh release download "$RELEASE_TAG" --dir research/_data --clobber \
+            --pattern 'jsf_*' || echo "保存済みの日証金データなし（初回）"
+          ls -lh research/_data/jsf_* 2>/dev/null || true
+
+      - name: Daily
+        if: github.event_name == 'schedule' || inputs.mode != 'history'
+        run: |
+          python3 -u research/jsf_fetch.py daily 2>&1 | tee jsf.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Upload (daily)
+        if: github.event_name == 'schedule' || inputs.mode != 'history'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          files=(research/_data/jsf_*.parquet research/_data/jsf_manifest.json)
+          if [ ${#files[@]} -eq 0 ]; then echo "アップロードなし"; exit 0; fi
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
+          echo "${#files[@]} ファイルをアップロードしました"
+
+      # 過去の取り込みが失敗しても、daily の分はもう上げてある
+      - name: History
+        if: github.event_name == 'schedule' || inputs.mode != 'daily'
+        continue-on-error: true
+        timeout-minutes: 60
+        env:
+          MAX_CODES: ${{ inputs.max_codes || '400' }}
+        run: |
+          python3 -u research/jsf_fetch.py history --max-codes "$MAX_CODES" 2>&1 | tee -a jsf.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Upload (history)
+        if: always() && (github.event_name == 'schedule' || inputs.mode != 'daily')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          files=(research/_data/jsf_*.parquet research/_data/jsf_manifest.json)
+          if [ ${#files[@]} -eq 0 ]; then echo "アップロードなし"; exit 0; fi
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
+          echo "${#files[@]} ファイルをアップロードしました"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo '## 日証金の取り込み'
+            echo '```'
+            grep -E '^\[|^  \[|取る銘柄' jsf.log 2>/dev/null || tail -20 jsf.log 2>/dev/null || echo '(出力なし)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
