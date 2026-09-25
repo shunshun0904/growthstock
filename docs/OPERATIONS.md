@@ -322,6 +322,13 @@ LightGBM の探索（`research/tune_presets.txt` の先頭）も追加4モデル
 （`predict_daily.score_others` の「特徴量が一致しないため飛ばす」）。探索の順は
 lgbm → xgb → cat → logit → mlp なので、3モデルの合議に要る xgb / cat は先に終わる。
 
+学習データの行は、2026-09-25 から **(Date, Code) の順に固定**している（運用者の了承。
+`build_dataset.canonical_order`）。学習は行を並べ替えずに使い、LightGBM・XGBoost は行を
+間引くので、並びが変わると同じ種でも結果が変わる。前は並びが結合の順しだいで、コードを
+直すたびに変わっていた（docs/MODEL_ADOPTION_RULES.md §10）。探索（`run_tuning.py`）と
+ウォークフォワード（`walkforward.py`）も同じ順に並べる。9/27 の週次実行が、この順で
+最初に探索・学習する。
+
 モデルの列が変わると、予測時の特徴量の控え（`live_features.parquet`）には前の列の
 行と新しい列の行が混ざる。行ごとに控えた列の組を `_features` に残し、学習と予測の
 一致チェック（`research/check_train_serve.py`）は各列をその列を控えた行だけで比べる

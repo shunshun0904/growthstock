@@ -17,6 +17,7 @@ Actions のキャッシュで次の実行に引き継がれるので、中身が
 
 from __future__ import annotations
 
+import hashlib
 import os
 import sys
 import time
@@ -41,9 +42,15 @@ def log(msg: str) -> None:
 
 
 def fingerprint(df: pd.DataFrame, cols: List[str]) -> str:
-    """学習に使う中身の指紋（行・ラベル・列の値）。"""
+    """
+    学習に使う中身の指紋（行・ラベル・列の値と、行の並び）。
+
+    並びも入れる: 学習は行を並べ替えずに使い、行の間引きがあるので、並びが違えば
+    同じ中身でも結果が違う。前は行ごとの値の和で並びを見ておらず、並びの違う
+    out-of-fold を読みえた（2026-09-25 に直した。docs/MODEL_ADOPTION_RULES.md §10）。
+    """
     h = pd.util.hash_pandas_object(df[["Code", "Date", "label"] + list(cols)], index=False)
-    return f"{int(h.to_numpy(dtype=np.uint64).sum(dtype=np.uint64)) & 0xFFFFFFFF:08x}"
+    return hashlib.sha1(h.to_numpy(dtype=np.uint64).tobytes()).hexdigest()[:8]
 
 
 def oof_arm(tag: str, df: pd.DataFrame, cols: List[str], arm: str, shift: int,

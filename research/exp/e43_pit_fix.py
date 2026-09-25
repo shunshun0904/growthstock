@@ -29,6 +29,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import sys
 import time
@@ -116,7 +117,8 @@ def fingerprint(df: pd.DataFrame, cols: list) -> str:
     読むことを防ぐ（research/_data/oof は Actions のキャッシュで次の実行に引き継がれる）。
     """
     h = pd.util.hash_pandas_object(df[["Code", "Date", "label"] + list(cols)], index=False)
-    return f"{int(h.to_numpy(dtype=np.uint64).sum(dtype=np.uint64)) & 0xFFFFFFFF:08x}"
+    # 行の並びも入れる（並びが違えば結果も違う。ab_oof.fingerprint と同じ）
+    return hashlib.sha1(h.to_numpy(dtype=np.uint64).tobytes()).hexdigest()[:8]
 
 
 def oof_arm(df: pd.DataFrame, cols: list, arm: str, shift: int, algos, seeds) -> dict:

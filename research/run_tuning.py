@@ -72,7 +72,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                          "ranker は --cv year_cap_date が必須")
     args = ap.parse_args(argv)
 
-    df = pd.read_parquet(args.dataset).sort_values("Date").reset_index(drop=True)
+    # 学習データと同じ (Date, Code) の順（build_dataset.canonical_order）。日付だけの
+    # 並べ替えは安定でなく、同じ日の中の並びが入力しだいで変わる
+    df = (pd.read_parquet(args.dataset)
+          .sort_values(["Date", "Code"], kind="mergesort").reset_index(drop=True))
     dates = pd.to_datetime(df["Date"])
 
     cutoff = tuning_cutoff(dates, args)

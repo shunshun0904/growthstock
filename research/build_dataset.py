@@ -1748,7 +1748,7 @@ def attach_fins(samples: pd.DataFrame, q: pd.DataFrame) -> pd.DataFrame:
     return out.drop(columns=["CurFYSt"])
 
 
-def quarterize_panel(fins: pd.DataFrame) -> pd.DataFrame:
+def quarterize_panel(fins: pd.DataFrame, data_dir: str = DATA_DIR) -> pd.DataFrame:
     """
     累計ベースの決算を単一四半期に差分展開し、前年同期比を付ける。
 
@@ -1858,7 +1858,7 @@ def quarterize_panel(fins: pd.DataFrame) -> pd.DataFrame:
     #
     # API が無い行は、これまでどおり 提供値 -> TTM の順で埋める。
     if USE_API_VALUATION.get("roe", True):
-        api_roe = api_valuation(df, "DiscDate", asof=True)["api_roe"]
+        api_roe = api_valuation(df, "DiscDate", data_dir=data_dir, asof=True)["api_roe"]
     else:
         api_roe = pd.Series(np.nan, index=range(len(df)), dtype=float)
     api_roe.index = df.index
@@ -2442,6 +2442,26 @@ def attach_credit_ratio(samples: pd.DataFrame, margin: pd.DataFrame,
     return out.drop(columns=["_avail"])
 
 
+#: 学習データの行の並び。build() はこの順に並べてから書く
+ROW_ORDER = ["Date", "Code"]
+
+
+def canonical_order(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    学習データの行を (Date, Code) の順に並べる（2026-09-25、運用者の了承）。
+
+    学習は行を並べ替えずに使い、LightGBM・XGBoost は行を間引く（subsample）ので、
+    並びが変わると同じ種でも別の行を引く。これまで並びは結合の順しだいで、
+    コードを直すたびに変わり、中身が同じでも結果が種を変えたのと同じくらい
+    動いていた（docs/MODEL_ADOPTION_RULES.md §10 実験46 の読み方 4）。
+    同じキーの行が残っても並びが決まるよう、安定な並べ替えにする。
+    """
+    key = pd.DataFrame({"d": pd.to_datetime(df["Date"]).to_numpy(),
+                        "c": df["Code"].astype(str).to_numpy()})
+    order = key.sort_values(["d", "c"], kind="mergesort").index.to_numpy()
+    return df.iloc[order].reset_index(drop=True)
+
+
 def build(data_dir: str, out_path: str) -> pd.DataFrame:
     bars = load_parts("bars", data_dir)
     fins = load_parts("fins", data_dir)
@@ -2594,7 +2614,9 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
 
     # --- 財務をマージ（開示日ベースの point-in-time） --- #
     print("\n[merge] 財務情報を開示日ベースで結合")
-    q = quarterize_panel(fins)
+    # data_dir を渡す（渡さないと既定の research/_data のバリュエーションを読み、
+    # 別の場所のデータで作ったときに API の ROE が抜けていた。2026-09-25）
+    q = quarterize_panel(fins, data_dir)
     samples = attach_fins(samples, q)
     # 決算が古すぎる（1年以上前）場合は使わない
     stale = (samples["Date"] - samples["DiscDate"]).dt.days > 365
@@ -2668,7 +2690,7 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     # うち負でも極端でもない**まともな増分が +9.1pt**）。
     # API 値はクリップされていない（実測 PER 最大 18,920）ので、
     # 自前と同じ上限を掛けてから使う。API が無い行は自前で埋める。
-    av = api_valuation(samples, "Date")
+    av = api_valuation(samples, "Date", data_dir=data_dir)
     per = np.where(samples["eps_ttm"] > 0, px / samples["eps_ttm"], np.nan)
     pbr = np.where(samples["BPS"] > 0, px / samples["BPS"], np.nan)
     for name, own, cap in (("per", per, PER_MAX), ("pbr", pbr, PBR_MAX)):
@@ -2868,6 +2890,8 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     # Int64（欠測を持てる整数）にして、学習側では notna() で弾く
     out["label"] = (out["label"].astype("Int64") if KEEP_UNLABELED
                     else out["label"].astype(int))
+    # 行の並びを固定する（canonical_order の説明）
+    out = canonical_order(out)
 
     print(f"\n[result] {len(out):,}サンプル / 特徴量{len(feature_cols)}個")
     _lab = out["label"].dropna()
