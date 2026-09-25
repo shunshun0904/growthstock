@@ -608,9 +608,11 @@ class TestRiseLabel(unittest.TestCase):
 
         vol_norm_k=None を明示するのは、既定がボラ正規化（VOL_NORM_K=1.2）に
         変わったから。ここで測りたいのは固定しきい値の側の挙動なので、
-        既定に追随させると別のものを測ることになる。
+        既定に追随させると別のものを測ることになる。entry="close" も同じ理由
+        （基準の価格の既定は 2026-09-25 に翌営業日の寄りに変えた。ここで測るのは
+        到達の仕組みで、翌営業日の寄りを基準にした挙動は tests/test_label_entry.py）。
         """
-        return RiseConfig(horizon=horizon, threshold=threshold, keep_days=0,
+        return RiseConfig(entry="close", horizon=horizon, threshold=threshold, keep_days=0,
                           end_ratio=None, require_uptrend=False, vol_norm_k=None)
 
     def test_positive_when_it_rises_enough(self):
@@ -693,7 +695,7 @@ class TestMissingBarsDoNotEraseHistory(unittest.TestCase):
         close = pd.Series([100.0] * 5 + [130.0] * (n - 5))
         holed = close.copy()
         holed.iloc[10] = np.nan
-        cfg = RiseConfig(horizon=10, threshold=0.20, keep_days=0,
+        cfg = RiseConfig(entry="close", horizon=10, threshold=0.20, keep_days=0,
                          end_ratio=None, require_uptrend=False, vol_norm_k=None)
         df = pd.DataFrame({"Code": "1", "Date": pd.bdate_range("2021-01-04", periods=n),
                            "close": holed})
@@ -722,14 +724,14 @@ class TestRiseContinuation(unittest.TestCase):
 
     def test_spike_and_hold_both_reach_the_threshold(self):
         """前提の確認。到達だけならどちらも正例になってしまう。"""
-        cfg = RiseConfig(horizon=10, threshold=0.20, keep_days=0,
+        cfg = RiseConfig(entry="close", horizon=10, threshold=0.20, keep_days=0,
                          end_ratio=None, require_uptrend=False, vol_norm_k=None)
         for closes in (self.SPIKE, self.HOLD):
             out = attach_rise_label(self._df(closes), cfg)
             self.assertTrue(bool(out["label"].iloc[0]))
 
     def test_keep_days_rejects_the_spike(self):
-        cfg = RiseConfig(horizon=10, threshold=0.20, keep_days=5,
+        cfg = RiseConfig(entry="close", horizon=10, threshold=0.20, keep_days=5,
                          end_ratio=None, require_uptrend=False, vol_norm_k=None)
         spike = attach_rise_label(self._df(self.SPIKE), cfg)
         hold = attach_rise_label(self._df(self.HOLD), cfg)
@@ -739,7 +741,7 @@ class TestRiseContinuation(unittest.TestCase):
         self.assertTrue(bool(hold["label"].iloc[0]))
 
     def test_end_level_rejects_the_spike(self):
-        cfg = RiseConfig(horizon=10, threshold=0.20, keep_days=0,
+        cfg = RiseConfig(entry="close", horizon=10, threshold=0.20, keep_days=0,
                          end_ratio=0.10, end_window=1, require_uptrend=False, vol_norm_k=None)
         spike = attach_rise_label(self._df(self.SPIKE), cfg)
         hold = attach_rise_label(self._df(self.HOLD), cfg)
@@ -753,7 +755,7 @@ class TestRiseContinuation(unittest.TestCase):
         # 上げてから、長期平均を割り込むまでじりじり下げる
         closes = ([100] * 12 + [125] * 3
                   + list(range(124, 104, -1)) + [80] * 12)
-        cfg = RiseConfig(horizon=20, threshold=0.20, keep_days=0,
+        cfg = RiseConfig(entry="close", horizon=20, threshold=0.20, keep_days=0,
                          end_ratio=None, require_uptrend=True,
                          trend_short=3, trend_long=10, vol_norm_k=None)
         out = attach_rise_label(self._df(closes), cfg)
@@ -768,7 +770,7 @@ class TestRiseContinuation(unittest.TestCase):
         終盤条件を切っているのに「終盤の値が無いから未確定」とすると、
         短い系列のラベルが理由なく消える。
         """
-        cfg = RiseConfig(horizon=2, threshold=0.20, keep_days=0,
+        cfg = RiseConfig(entry="close", horizon=2, threshold=0.20, keep_days=0,
                          end_ratio=None, require_uptrend=False, vol_norm_k=None)
         out = attach_rise_label(self._df([100, 130, 130, 130]), cfg)
         self.assertTrue(bool(out["label"].iloc[0]))
@@ -777,7 +779,7 @@ class TestRiseContinuation(unittest.TestCase):
         """銘柄をまたいで窓が漏れると、別の銘柄の値でラベルが決まる。"""
         a = self._df([100] + [125] * 11).assign(Code="1111")
         b = self._df([100] * 12).assign(Code="2222")
-        cfg = RiseConfig(horizon=10, threshold=0.20, keep_days=5,
+        cfg = RiseConfig(entry="close", horizon=10, threshold=0.20, keep_days=5,
                          end_ratio=None, require_uptrend=False, vol_norm_k=None)
         out = attach_rise_label(pd.concat([a, b], ignore_index=True), cfg)
         self.assertEqual(out["keep_days_cnt"].iloc[0], 10)     # 1111
@@ -1751,7 +1753,8 @@ class TestMetaRecordsTheLabelActuallyUsed(unittest.TestCase):
         self.assertEqual(B.POPULATION, "breakout")
         # いまの定義。変えたらこのテストも一緒に更新すること
         self.assertEqual(B.DEFAULT_RISE.name,
-                         "1ヶ月内+1.2σ / 終盤+0.50倍 / MA5>=MA20")
+                         "1ヶ月内+1.2σ / 終盤+0.50倍 / MA5>=MA20 / 翌営業日寄り基準")
+        self.assertEqual(B.DEFAULT_RISE.entry, "next_open")
         self.assertEqual(B.DEFAULT_RISE.horizon, 20)
         self.assertEqual(B.DEFAULT_RISE.vol_norm_k, 1.2)
         self.assertEqual(B.DEFAULT_RISE.keep_days, 0)
@@ -2144,7 +2147,7 @@ class TestVolNormalisedLabel(unittest.TestCase):
         同じ上昇率でも、静かな銘柄は正例・荒い銘柄は負例になること。
         逆になっていたら正規化の向きが違う。
         """
-        cfg = RiseConfig(horizon=5, vol_norm_k=1.0, keep_days=0,
+        cfg = RiseConfig(entry="close", horizon=5, vol_norm_k=1.0, keep_days=0,
                          end_ratio=None, require_uptrend=False)
         # 静かな銘柄: 30日ほぼ横ばい -> +15%
         quiet = [100 + (i % 2) * 0.05 for i in range(40)] + [115] + [115] * 5
@@ -2161,7 +2164,7 @@ class TestVolNormalisedLabel(unittest.TestCase):
 
     def test_threshold_column_equals_k_sigma(self):
         """実際に課したしきい値を列に残すこと。残さないと後段が cfg の数字を見る。"""
-        cfg = RiseConfig(horizon=9, vol_norm_k=1.5, keep_days=0,
+        cfg = RiseConfig(entry="close", horizon=9, vol_norm_k=1.5, keep_days=0,
                          end_ratio=None, require_uptrend=False)
         panel = self._panel([100 + (i % 3) - i * 0.1 for i in range(60)])
         out = attach_rise_label(panel, cfg)
@@ -2170,7 +2173,7 @@ class TestVolNormalisedLabel(unittest.TestCase):
 
     def test_end_level_scales_with_the_threshold(self):
         """終盤の水準も同じ比率で伸縮すること（+20%に対する+10% = 半分）。"""
-        cfg = RiseConfig(horizon=9, vol_norm_k=1.2, threshold=0.20,
+        cfg = RiseConfig(entry="close", horizon=9, vol_norm_k=1.2, threshold=0.20,
                          end_ratio=0.10, keep_days=0, require_uptrend=False)
         out = attach_rise_label(self._panel([100 + i * 0.3 for i in range(60)]), cfg)
         np.testing.assert_allclose(out["end_need"].to_numpy(),
@@ -2182,7 +2185,7 @@ class TestVolNormalisedLabel(unittest.TestCase):
         しきい値そのものが作れない行（上場直後）は NaN。
         False にすると「起きなかった」と混ざる。
         """
-        cfg = RiseConfig(horizon=3, vol_norm_k=1.0, keep_days=0,
+        cfg = RiseConfig(entry="close", horizon=3, vol_norm_k=1.0, keep_days=0,
                          end_ratio=None, require_uptrend=False)
         out = attach_rise_label(self._panel([100 + i for i in range(30)]), cfg)
         head = out.iloc[:14]      # vol_20d は min_periods=15 なのでまだ無い
@@ -2198,7 +2201,7 @@ class TestVolNormalisedLabel(unittest.TestCase):
         quiet = closes.copy()
         rough = closes.copy()
         rough[:30] = [100 * (1.06 if i % 2 else 0.945) for i in range(30)]
-        cfg = RiseConfig(horizon=8, vol_norm_k=1.0, keep_days=1,
+        cfg = RiseConfig(entry="close", horizon=8, vol_norm_k=1.0, keep_days=1,
                          end_ratio=None, require_uptrend=False)
         gq = attach_rise_label(self._panel(list(quiet), code="1111"), cfg)
         gr = attach_rise_label(self._panel(list(rough), code="2222"), cfg)
@@ -2225,7 +2228,7 @@ class TestVolNormalisedLabel(unittest.TestCase):
         戻せないと、過去の結果と比べる手段が無くなる。
         """
         panel = self._panel([100 + i * 0.4 for i in range(60)])
-        cfg = RiseConfig(horizon=5, threshold=0.02, keep_days=0,
+        cfg = RiseConfig(entry="close", horizon=5, threshold=0.02, keep_days=0,
                          end_ratio=None, require_uptrend=False, vol_norm_k=None)
         out = attach_rise_label(panel, cfg)
         self.assertTrue((out["rise_need"].dropna() == 0.02).all())

@@ -78,11 +78,14 @@ DATASETS = {
 #: vol_norm_k=None を明示するのは、build_dataset の既定がボラ正規化に
 #: 変わっても物差しの側は動かさないため（動くと過去の掃引と比べられなくなる）。
 REF_HORIZON = 60
+#: entry="close" を明示するのも同じ理由（目的変数の基準は 2026-09-25 に翌営業日の寄りに
+#: 変えたが、物差しは「買い = 基準日の終値」のまま動かさない）。
 REF_RISE = B.RiseConfig(horizon=REF_HORIZON, threshold=0.20, keep_days=0,
-                        end_ratio=None, require_uptrend=False, vol_norm_k=None)
+                        end_ratio=None, require_uptrend=False, vol_norm_k=None,
+                        entry="close")
 
 #: ラベル計算に要る列だけ。パネルは1,000万行規模あるので丸ごと copy しない。
-PANEL_COLS = ["Code", "Date", "close", "is_new_high", "high52w", "tv_ma20",
+PANEL_COLS = ["Code", "Date", "close", "open", "is_new_high", "high52w", "tv_ma20",
               "vol_20d"]
 
 

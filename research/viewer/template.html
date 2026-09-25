@@ -159,7 +159,7 @@ footer { margin-top: 44px; padding-top: 20px; border-top: 1px solid var(--border
     <h2>採用した定義</h2>
     <p style="margin:0 0 9px;font-size:13px;color:var(--ink-2)">
       母集団は<strong id="pop">高値を更新した日</strong>（高値ベース、連続更新は初回のみ）。
-      基準日 <code>t</code> の終値を分母に、判定期間 <code id="hz"></code> で
+      <span id="basis">基準日 <code>t</code> の終値</span>を分母に、判定期間 <code id="hz"></code> で
       以下を<strong>すべて</strong>満たせば正例。
     </p>
     <div style="overflow-x:auto">
@@ -426,6 +426,10 @@ const cls = v => v == null ? "" : (v > 0 ? " up" : v < 0 ? " down" : "");
 const D = DATA.definition;
 const C = DATA.compare || { adopted: {}, strict: {} };
 document.getElementById("hz").textContent = `[t+1, t+${D.riseHorizon}]`;
+if (D.entry === "next_open") {
+  document.getElementById("basis").innerHTML =
+    "翌営業日 <code>t+1</code> の寄り（分割調整後の始値）";
+}
 document.getElementById("pop").textContent = `${D.highWeeks ?? 52}週高値を更新した日`;
 document.getElementById("defcmp").innerHTML =
   `<thead><tr><th>条件</th><th>採用</th><th>厳しい案（不採用）</th></tr></thead><tbody>` +

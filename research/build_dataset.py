@@ -158,7 +158,8 @@ BREAKOUT_ON_HIGH = True
 BREAKOUT_COOLDOWN = _sweep_override("BREAKOUT_COOLDOWN", 20, int)
 
 # --- 目的変数（母集団が breakout のとき）--- #
-# 更新日の終値から、先 RISE_HORIZON 営業日以内に RISE_THRESHOLD 以上上昇したか。
+# 基準の価格（翌営業日の寄り。LABEL_ENTRY）から、先 RISE_HORIZON 営業日以内に
+# RISE_THRESHOLD 以上上昇したか（2026-09-25 までは更新日の終値が基準だった）。
 # 終値ベースで測る（高値ベースだと「一瞬触れただけ」を正例にしてしまう）。
 # 20営業日 ≒ 1ヶ月。60（約3ヶ月）から短くした。
 #
@@ -172,6 +173,17 @@ BREAKOUT_COOLDOWN = _sweep_override("BREAKOUT_COOLDOWN", 20, int)
 # この1行で3条件すべての基準点が t+60 から t+20 に移る。
 RISE_HORIZON = 20        # 営業日。約1ヶ月
 RISE_THRESHOLD = 0.20    # +20%。VOL_NORM_K が None のときだけ効く
+
+# --- 上昇を測る基準の価格 --- #
+# 2026-09-25 から **翌営業日の寄り付き（分割調整後の始値 AdjO[t+1]）**（運用者の決定）。
+# 前は高値を更新した日の終値（close[t]）だった。候補が分かるのは終値が出た後で、
+# 実際に買えるのは翌営業日の寄りなので、収益の計算（lab.realized_returns の ret_o1_*、
+# 買い = AdjO[t+1]）と同じ基準にそろえる。変わるのは到達・終盤（・維持日数）の比率の
+# 分母だけで、見る窓（t+1〜t+horizon の終値）、しきい値（k×σ）、トレンド条件は変えない。
+# 翌営業日に寄りが付かない行は、収益の計算と同じく判定できない（未確定）とする。
+# "close" にすると前の定義に戻る（掃引の物差し sweep_design.REF_RISE はこちらのまま）。
+LABEL_ENTRY = "next_open"
+LABEL_ENTRIES = ("next_open", "close")
 
 # --- 到達しきい値を銘柄自身のボラティリティで測る --- #
 #
@@ -202,7 +214,7 @@ VOL_NORM_K: Optional[float] = 1.2
 # 3つとも独立に効かせられる（0 / None で無効）。
 #
 #   keep_days  … +threshold の水準を通算何営業日保ったか。瞬間的なヒゲを外す
-#   end_ratio  … ホライズン終盤の水準（基準日終値比）。失速・往って来いを外す
+#   end_ratio  … ホライズン終盤の水準（基準の価格比。LABEL_ENTRY）。失速・往って来いを外す
 #   uptrend    … ホライズン終了時点で短期移動平均 >= 長期移動平均。
 #                下落トレンドに転換したものを外す
 # しきい値は8定義の比較とチャートの目視で決めた（緩い案 = 定義F）。
@@ -396,6 +408,8 @@ class RiseConfig:
     require_uptrend: bool = REQUIRE_UPTREND
     #: 到達しきい値を k×σ で測る。None なら固定の threshold（VOL_NORM_K 参照）
     vol_norm_k: Optional[float] = VOL_NORM_K
+    #: 上昇を測る基準の価格（LABEL_ENTRY 参照）。"next_open" = AdjO[t+1]、"close" = close[t]
+    entry: str = LABEL_ENTRY
 
     @property
     def normalised(self) -> bool:
@@ -418,6 +432,8 @@ class RiseConfig:
                 base += f" / 終盤+{self.end_ratio*100:.0f}%"
         if self.require_uptrend:
             base += f" / MA{self.trend_short}>=MA{self.trend_long}"
+        if self.entry == "next_open":
+            base += " / 翌営業日寄り基準"
         return base
 
 
@@ -429,7 +445,7 @@ DEFAULT_RISE = RiseConfig()
 #: 特徴量には入れない（vol_20d の単調変換で、特徴量としては冗長でもある）。
 FUTURE_COLS = ["label", "future_max_close", "future_rise",
                "keep_days_cnt", "end_level", "uptrend_end",
-               "rise_need", "end_need"]
+               "rise_need", "end_need", "entry_price"]
 
 # --- 除外条件 (docs/MODEL_DESIGN.md §2.2) --- #
 MAX_RHIGH_AT_T = 95.0   # 基準日ですでに高値圏の銘柄は対象外
@@ -678,6 +694,9 @@ def price_panel(bars: pd.DataFrame, cfg: LabelConfig = DEFAULT_LABEL,
     df = df.sort_values(["Code", "Date"]).reset_index(drop=True)
 
     close = df["AdjC"].fillna(df["C"])
+    # 始値は目的変数の基準（翌営業日の寄り、LABEL_ENTRY）にだけ使う。特徴量には使わない
+    if "O" in df.columns:
+        df["open"] = (df["AdjO"].fillna(df["O"]) if "AdjO" in df.columns else df["O"])
     high = df["AdjH"].fillna(df["H"])
     low = df["AdjL"].fillna(df["L"]) if "AdjL" in df.columns else df["L"]
     vol = df["AdjVo"].fillna(df["Vo"])
@@ -971,14 +990,15 @@ def attach_rise_label(df: pd.DataFrame, cfg: RiseConfig = DEFAULT_RISE) -> pd.Da
     「上がったか」だけでなく「続いたか」も条件にする。
 
     到達（従来）:
-        更新日の終値から、先 horizon 営業日以内に threshold 以上上昇したか。
-        終値ベースで測る。高値ベースだと「一瞬触れただけ」も正例になる。
+        基準の価格から、先 horizon 営業日以内に threshold 以上上昇したか。
+        基準は cfg.entry（既定は翌営業日の寄り AdjO[t+1]。"close" なら更新日の終値）。
+        上昇は終値で測る。高値ベースだと「一瞬触れただけ」も正例になる。
 
     継続（追加）:
         到達しても、その後すぐ下落トレンドに入るならモメンタムとは言えない。
         次の3つで「続いたこと」を要求する。どれも0/Noneで無効化できる。
           keep_days … +threshold 以上で引けた日が通算 keep_days 日以上
-          end_ratio … 終盤 end_window 日平均が基準日終値の +end_ratio 以上
+          end_ratio … 終盤 end_window 日平均が基準の価格の +end_ratio 以上
           uptrend   … t+horizon 時点で MA(trend_short) >= MA(trend_long)
 
     先の営業日が足りない末尾は NaN（判定不能）にする。False にはしない。
@@ -996,7 +1016,21 @@ def attach_rise_label(df: pd.DataFrame, cfg: RiseConfig = DEFAULT_RISE) -> pd.Da
 
     have_forward = g.cumcount(ascending=False) >= h
     df["future_max_close"] = g["close"].transform(future_max).where(have_forward)
-    ratio = df["future_max_close"] / df["close"] - 1.0
+
+    # --- 基準の価格（LABEL_ENTRY）--- #
+    if cfg.entry not in LABEL_ENTRIES:
+        raise SystemExit(f"RiseConfig.entry は {LABEL_ENTRIES} のどれか: {cfg.entry!r}")
+    if cfg.entry == "next_open":
+        if "open" not in df.columns:
+            raise SystemExit("open がありません。翌営業日の寄りを基準にするには "
+                             "price_panel の始値が要ります")
+        # 翌営業日の行の始値。収益の計算（lab.realized_returns の entry =
+        # AdjO.shift(-1)）と同じ取り方で、寄りが付かなかった日は欠測のまま
+        entry = g["open"].shift(-1)
+    else:
+        entry = df["close"]
+    df["entry_price"] = entry
+    ratio = df["future_max_close"] / entry - 1.0
     df["future_rise"] = ratio
 
     # --- 到達に必要な上昇率 --- #
@@ -1017,10 +1051,11 @@ def attach_rise_label(df: pd.DataFrame, cfg: RiseConfig = DEFAULT_RISE) -> pd.Da
     close = df["close"].to_numpy(dtype=float)
 
     # --- 維持日数 --- #
+    # _days_above は close[t] に level を掛けて比べるので、基準の価格に換算して渡す
     if cfg.keep_days:
         df["keep_days_cnt"] = _by_code(
             df, close, lambda a, lv: _days_above(a, h, lv),
-            level=(1.0 + need).to_numpy(dtype=float))
+            level=((1.0 + need) * (entry / df["close"])).to_numpy(dtype=float))
     else:
         df["keep_days_cnt"] = np.nan
 
@@ -1030,7 +1065,7 @@ def attach_rise_label(df: pd.DataFrame, cfg: RiseConfig = DEFAULT_RISE) -> pd.Da
     ma_end = g["close"].transform(
         lambda s: s.rolling(cfg.end_window, min_periods=1).mean())
     end_close = ma_end.groupby(df["Code"], sort=False).shift(-h)
-    df["end_level"] = end_close / df["close"] - 1.0
+    df["end_level"] = end_close / entry - 1.0
 
     # --- トレンド --- #
     ma_s = g["close"].transform(
@@ -1062,6 +1097,9 @@ def attach_rise_label(df: pd.DataFrame, cfg: RiseConfig = DEFAULT_RISE) -> pd.Da
     # 課していない条件の入力までは要求しない
     # （終盤条件を切っているのに終盤の値が無いから未確定、では筋が通らない）。
     determined = df["future_max_close"].notna()
+    if cfg.entry == "next_open":
+        # 翌営業日に寄りが付かなければ買えない。収益の計算と同じく判定しない
+        determined &= entry.notna()
     if cfg.normalised:
         # しきい値そのものが作れない行（上場直後などで vol_20d が欠測）は
         # 「起きなかった」ではなく「判定できない」
@@ -2876,7 +2914,9 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
                  # どの行がどちらから来たかを追えるようにしておく
                  "per_basis", "pbr_basis",
                  # 進捗の基準の物差し（前年同期 / 下限 / Q×25%。実験46）
-                 "progress_basis"]
+                 "progress_basis",
+                 # 目的変数の基準の価格（翌営業日の寄り。LABEL_ENTRY）
+                 "entry_price"]
     meta_cols = [c for c in meta_cols if c in samples.columns]
 
     # 未来から作った列が特徴量に混ざるとリークで結果が無意味になる。
@@ -2929,6 +2969,8 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
             "require_uptrend": DEFAULT_RISE.require_uptrend,
             "trend_short": DEFAULT_RISE.trend_short,
             "trend_long": DEFAULT_RISE.trend_long,
+            # 上昇を測る基準の価格（next_open = 翌営業日の寄り / close = 更新日の終値）
+            "entry": DEFAULT_RISE.entry,
             "name": DEFAULT_RISE.name,
             "forward_needed": DEFAULT_RISE.horizon,
         }

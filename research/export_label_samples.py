@@ -145,6 +145,13 @@ def build_case(panel: pd.DataFrame, code: str, t_date: pd.Timestamp,
     ma_l = g["close"].rolling(cfg.trend_long, min_periods=cfg.trend_long).mean()
 
     close_t = float(g.iloc[i]["close"])
+    # 上昇を測る基準の価格（build_dataset.LABEL_ENTRY）。翌営業日の寄りなら t+1 の始値。
+    # 線と上昇率をこの価格から引かないと、チャートと実際の判定がずれる
+    if cfg.entry == "next_open":
+        base_t = (float(g.iloc[i + 1]["open"])
+                  if i + 1 < len(g) and "open" in g.columns else float("nan"))
+    else:
+        base_t = close_t
     # しきい値はその銘柄の vol_20d から決まる（ボラ正規化）。
     # 固定値で線を引くと、チャートに出る線と実際の判定がずれる
     vol_t = float(g.iloc[i].get("vol_20d", np.nan))
@@ -165,7 +172,7 @@ def build_case(panel: pd.DataFrame, code: str, t_date: pd.Timestamp,
     hit_pos = None
     keep_days = None
     if len(fwd) and np.isfinite(need_a):
-        above = fwd.to_numpy() >= close_t * (1 + need_a)
+        above = fwd.to_numpy() >= base_t * (1 + need_a)
         keep_days = int(above.sum())
         hits = np.where(above)[0]
         if len(hits):
@@ -174,7 +181,7 @@ def build_case(panel: pd.DataFrame, code: str, t_date: pd.Timestamp,
     # 終盤の水準（判定期間の最後 end_window 日の平均）
     end_lo = max(h_lo, h_hi - cfg.end_window + 1)
     end_win = g.iloc[end_lo:h_hi + 1]["close"] if h_lo <= h_hi else pd.Series(dtype=float)
-    end_level = (float(end_win.mean()) / close_t - 1) * 100 if len(end_win) else float("nan")
+    end_level = (float(end_win.mean()) / base_t - 1) * 100 if len(end_win) else float("nan")
     uptrend = (float(ma_s.iloc[h_hi]) >= float(ma_l.iloc[h_hi])
                if h_lo <= h_hi and np.isfinite(ma_s.iloc[h_hi])
                and np.isfinite(ma_l.iloc[h_hi]) else None)
@@ -194,10 +201,13 @@ def build_case(panel: pd.DataFrame, code: str, t_date: pd.Timestamp,
         # 判定期間（ウィンドウ内の位置）
         "horizon": [t_pos + 1, t_pos + RISE_HORIZON],
         "closeAtT": r(close_t, 1),
+        # 上昇を測る基準の価格（next_open = 翌営業日の寄り / close = 基準日の終値）
+        "entryBasis": cfg.entry,
+        "entryPrice": r(base_t, 1),
         # 目標ライン。チャートに水平線として引く
-        "target": r(close_t * (1 + need_a), 1),
+        "target": r(base_t * (1 + need_a), 1),
         "thresholdPct": r(need_a * 100, 1),
-        "targetStrict": r(close_t * (1 + need_s), 1),
+        "targetStrict": r(base_t * (1 + need_s), 1),
         "thresholdPctStrict": r(need_s * 100, 1),
         # この銘柄の日次ボラ。しきい値がなぜその水準なのかを見るため
         "vol20d": r(vol_t),
@@ -208,14 +218,14 @@ def build_case(panel: pd.DataFrame, code: str, t_date: pd.Timestamp,
         "keepDaysAdopted": CFG_ADOPTED.keep_days,
         "keepDaysStrict": CFG_STRICT.keep_days,
         "endLevel": r(end_level),
-        "endLineAdopted": r(close_t * (1 + end_need_a), 1),
-        "endLineStrict": r(close_t * (1 + end_need_s), 1),
+        "endLineAdopted": r(base_t * (1 + end_need_a), 1),
+        "endLineStrict": r(base_t * (1 + end_need_s), 1),
         "endRatioAdopted": r(end_need_a * 100, 1),
         "endRatioStrict": r(end_need_s * 100, 1),
         "uptrendEnd": uptrend,
-        "maxGain": r((fwd_max / close_t - 1) * 100),
-        "maxDraw": r((fwd_min / close_t - 1) * 100),
-        "endGain": r((end_close / close_t - 1) * 100),
+        "maxGain": r((fwd_max / base_t - 1) * 100),
+        "maxDraw": r((fwd_min / base_t - 1) * 100),
+        "endGain": r((end_close / base_t - 1) * 100),
         # ブレイクの文脈（新しい特徴量が妥当かの目視確認にも使う）
         "baseLength": r(float(g.iloc[i].get("base_length", np.nan)), 0),
         "breakMargin": r(float(g.iloc[i].get("break_margin", np.nan))),
@@ -407,9 +417,13 @@ def main(argv: List[str] | None = None) -> int:
             "endWindow": DEFAULT_RISE.end_window,
             "trend": (f"MA{DEFAULT_RISE.trend_short}>=MA{DEFAULT_RISE.trend_long}"
                       if DEFAULT_RISE.require_uptrend else None),
+            # 上昇を測る基準の価格（next_open = 翌営業日の寄り / close = 基準日の終値）
+            "entry": DEFAULT_RISE.entry,
             "note": (f"母集団 = {round(HIGH_WINDOW / 245 * 52)}週高値を更新した日"
                      "（高値ベース、連続更新は初回のみ）。"
-                     f"正例 = 到達（先{RISE_HORIZON}営業日以内に終値で"
+                     + ("正例 = 到達（翌営業日の寄りを基準に、"
+                        if DEFAULT_RISE.entry == "next_open" else "正例 = 到達（基準日の終値を基準に、")
+                     + f"先{RISE_HORIZON}営業日以内に終値で"
                      + (f"その銘柄自身の{RISE_HORIZON}営業日σの"
                         f"{DEFAULT_RISE.vol_norm_k}倍以上"
                         if DEFAULT_RISE.normalised

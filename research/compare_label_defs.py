@@ -80,7 +80,7 @@ def panel_for(bars: pd.DataFrame, high_window: int) -> pd.DataFrame:
 #: ラベル計算と絞り込みに要る列だけ。
 #: パネルは1,000万行規模あり、定義ごとに丸ごと copy すると
 #: ランナーのメモリが持たない。
-NEEDED = ["Code", "Date", "close", "is_fresh_break", "high52w", "tv_ma20",
+NEEDED = ["Code", "Date", "close", "open", "is_fresh_break", "high52w", "tv_ma20",
           # ボラ正規化ラベルはしきい値を銘柄自身のσから作るので vol_20d が要る
           "vol_20d"]
 
