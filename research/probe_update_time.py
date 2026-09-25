@@ -145,6 +145,25 @@ def _hhmm(s: str) -> dt.time:
     return dt.time(int(h), int(m))
 
 
+def effective_until(until: dt.datetime, started: dt.datetime,
+                    max_minutes: Optional[float]) -> dt.datetime:
+    """
+    見る終わりの時刻。max_minutes を渡すと、起動から max_minutes 分で打ち切る。
+
+    Actions のジョブは上限（timeout-minutes）で殺されると、最後の集計を出せない。
+    2026-09-25 の run 36099557178 は 14:40 JST に起動して --until 20:30 を待ち、
+    350分の上限（20:30:43）でちょうど殺されて、何も残らなかった。
+    """
+    if max_minutes is None:
+        return until
+    return min(until, started + dt.timedelta(minutes=max_minutes))
+
+
+def sleep_seconds(now: dt.datetime, until: dt.datetime, interval: float) -> float:
+    """次に見るまでの秒数。終わりの時刻を越えて眠らない（最後の1回を終わりの時刻に見る）。"""
+    return max(0.0, min(float(interval), (until - now).total_seconds()))
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(
         description="J-Quants が当日データを出す時刻を実測する")
@@ -157,11 +176,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--interval", type=int, default=300,
                     help="ポーリング間隔（秒）。既定 300")
     ap.add_argument("--log", default=None, help="観測を追記するCSV")
+    ap.add_argument("--max-minutes", type=float, default=None,
+                    help="起動からこの分数で打ち切って集計を出す（ジョブの上限より短く）")
     args = ap.parse_args(argv)
 
     now = dt.datetime.now(JST)
     day = (dt.date.fromisoformat(args.date) if args.date else now.date())
-    until = dt.datetime.combine(day, _hhmm(args.until), tzinfo=JST)
+    until = effective_until(dt.datetime.combine(day, _hhmm(args.until), tzinfo=JST),
+                            now, args.max_minutes)
 
     key = resolve_api_key()
     if not key:
@@ -214,13 +236,13 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         if len(first_seen) == len(TARGETS) or t >= until:
             break
-        time.sleep(args.interval)
+        time.sleep(sleep_seconds(dt.datetime.now(JST), until, args.interval))
 
     print("\n=== 最初に行が返った時刻（JST） ===")
     for name, path, _, _why in TARGETS:
         when = first_seen.get(name)
         print(f"  {name:8s} {path:32s} "
-              + (f"{when:%H:%M:%S}" if when else f"{args.until} までに出ず"))
+              + (f"{when:%H:%M:%S}" if when else f"{until:%H:%M} までに出ず"))
 
     if args.log:
         os.makedirs(os.path.dirname(args.log) or ".", exist_ok=True)

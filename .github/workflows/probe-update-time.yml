@@ -66,11 +66,16 @@ jobs:
       - name: Probe
         env:
           JQUANTS_API: ${{ secrets.JQUANTS_API }}
+        # -u: tee に渡す出力を溜めない。溜めると、殺されたときに途中の観測まで消える
+        # --max-minutes: ジョブの上限（350分）より前に自分で打ち切って集計を出す。
+        # 2026-09-25（run 36099557178）は 14:40 JST 起動・--until 20:30 で、上限の
+        # 20:30:43 にちょうど殺され、途中の観測も集計も残らなかった
         run: |
-          python3 research/probe_update_time.py \
+          python3 -u research/probe_update_time.py \
             ${{ inputs.start && format('--start {0}', inputs.start) || '' }} \
             --until "${{ inputs.until }}" \
             --interval "${{ inputs.interval }}" \
+            --max-minutes 335 \
             ${{ inputs.date && format('--date {0}', inputs.date) || '' }} \
             --log "$RUNNER_TEMP/observations.csv" 2>&1 | tee probe.log
       - name: Summary

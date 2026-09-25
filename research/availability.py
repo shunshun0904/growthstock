@@ -31,7 +31,8 @@ import pandas as pd
 #: **翌週の第何営業日**に公表されるか。JPX の週次公表は翌週第2営業日。
 #: J-Quants がその日の夜の取り込みに間に合うかは research/probe_update_time.py の
 #: margin_fri で測る。9/24（連休明けの第1営業日）は 20:00 JST までに出なかった
-#: （規則どおり）。第2営業日の 9/25 に測る（結果は docs/DATA_TIMING.md）
+#: （規則どおり）。第2営業日の 9/25 の測定はジョブの上限で殺されて残らなかったので、
+#: 9/25 夜の取り込みで 9/18 ぶんが入ったかで確かめる（結果は docs/DATA_TIMING.md）
 MARGIN_PUBLISH_BD = 2
 
 #: 投資部門別（/equities/investor-types）の「使ってよい日」の列。
