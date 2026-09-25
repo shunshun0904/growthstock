@@ -55,15 +55,21 @@ def weekdays(end, n):
     return out[::-1]
 
 
-def stock(code, first, last, n=None, as_of=None, close=1000.0):
-    """first〜last を n 点（既定は78週ぶんの点の数）で結ぶ株価推移を持つ銘柄。"""
+def stock(code, first, last, n=None, bars=JF.CHART_BARS, as_of=None, close=1000.0):
+    """
+    first〜last を n 点（既定は78週ぶんの点の数）で結ぶ株価推移を持つ銘柄。bars は期間の
+    日足の本数（取得スクリプトが historyBars に書く。None なら書かない＝取り直す前のデータ）。
+    """
     n = n or R.full_points()
     a, b = dt.date.fromisoformat(first), dt.date.fromisoformat(last)
     step = (b - a) / (n - 1)
     hist = [{"date": (a + step * i).isoformat(), "close": close} for i in range(n)]
     hist[-1]["date"] = last
-    return {"code": code, "asOf": as_of or last, "history": hist,
-            "milestones": [{"date": last, "type": "breakout", "title": "78週高値を更新"}]}
+    out = {"code": code, "asOf": as_of or last, "history": hist,
+           "milestones": [{"date": last, "type": "breakout", "title": "78週高値を更新"}]}
+    if bars is not None:
+        out["historyBars"] = bars
+    return out
 
 
 class TestCodes(unittest.TestCase):
@@ -102,16 +108,31 @@ class TestCheck(unittest.TestCase):
         self.assertEqual(R.full_points(), 124)
 
     def test_78_weeks_ending_at_the_latest_bar_passes(self):
-        r = R.check({"stocks": [stock("1111", "2025-03-28", "2026-09-25")]})
+        """
+        9/26 に取り直した実データの期間（2025-03-24 〜 2026-09-25、369本）。暦では 550日 =
+        78.6週で、四捨五入すると79週。見出しは予測モデルと同じ換算で「78週」。
+        """
+        r = R.check({"stocks": [stock("1111", "2025-03-24", "2026-09-25")]})
         self.assertEqual(r["problems"], [])
-        self.assertEqual(round(r["longest"]["weeks"]), 78)
+        self.assertEqual(round(r["longest"]["weeks"]), 79)          # 暦の週数
+        self.assertEqual(r["spans"][0]["screen_weeks"], 78)          # 画面の見出し
+        self.assertIn("「直近78週」1銘柄", R.report(r))
+
+    def test_week_conversion_is_the_models(self):
+        """画面の週数は予測モデルが窓を「78週」と呼ぶのと同じ換算（245営業日 = 52週）。"""
+        import build_dataset as B
+        self.assertEqual(R.bars_to_weeks(JF.CHART_BARS), 78)
+        self.assertEqual(R.bars_to_weeks(B.HIGH_WINDOW + 1), round(B.HIGH_WINDOW / 245 * 52))
+        self.assertEqual(R.bars_to_weeks(246), 52)                   # 1年（245営業日）
+        self.assertEqual(R._round(38.5), 39)                         # JS の Math.round と同じ
 
     def test_one_year_is_rejected(self):
         """以前の取得スクリプト（直近1年）で作られた stocks.json はコミットしない。"""
-        r = R.check({"stocks": [stock("1111", "2025-09-25", "2026-09-18", n=72,
-                                      as_of="2026-09-18")]})
-        self.assertEqual(len(r["problems"]), 1)
-        self.assertIn("78週（369営業日）ぶんの株価推移がある銘柄が無い", r["problems"][0])
+        for bars in (None, 246):     # 本数を書く前のデータ / 本数が1年ぶんしか無い
+            r = R.check({"stocks": [stock("1111", "2025-09-25", "2026-09-18", n=72, bars=bars,
+                                          as_of="2026-09-18")]})
+            self.assertEqual(len(r["problems"]), 1, bars)
+            self.assertIn("78週（369本の日足）そろった銘柄が無い", r["problems"][0])
 
     def test_last_point_must_be_the_latest_bar(self):
         """9/25 の stocks.json は最後の点が 9/18 だった（間引きを古い側から数えていた）。"""
@@ -120,13 +141,26 @@ class TestCheck(unittest.TestCase):
         self.assertIn("最後の点が基準日（最新の足）でない銘柄が 1（1111）", r["problems"][0])
 
     def test_recently_listed_stocks_may_be_shorter(self):
-        r = R.check({"stocks": [stock("1111", "2025-03-28", "2026-09-25"),
-                                stock("135A", "2026-01-05", "2026-09-25", n=60)]})
+        r = R.check({"stocks": [stock("1111", "2025-03-24", "2026-09-25"),
+                                stock("135A", "2026-01-05", "2026-09-25", n=60, bars=180)]})
         self.assertEqual(r["problems"], [])
-        self.assertIn("78週に満たない銘柄（上場から日が浅いなど）: 135A 38週", R.report(r))
+        text = R.report(r)
+        self.assertIn("78週に満たない銘柄（上場から日が浅いなど）: 135A 38週（180本）", text)
+        self.assertIn("「直近78週」1銘柄・「直近38週」1銘柄", text)
+
+    def test_missing_closes_do_not_make_the_window_short(self):
+        """
+        値の付かない日（出来高ゼロ）は点にならないので点は少ないが、78週はそろっている
+        （9/26 の取り直しで 4銘柄。暦ではどれも他と同じ期間だった）。
+        """
+        r = R.check({"stocks": [stock("9265", "2025-03-24", "2026-09-25", n=110)]})
+        self.assertEqual(r["problems"], [])
+        self.assertTrue(r["spans"][0]["complete"])
+        self.assertEqual(r["spans"][0]["screen_weeks"], 78)
+        self.assertIn("点が 124 より少ない銘柄（値の付かない日がある）: 9265 110点", R.report(r))
 
     def test_stock_without_history_is_counted_not_fatal(self):
-        r = R.check({"stocks": [stock("1111", "2025-03-28", "2026-09-25"),
+        r = R.check({"stocks": [stock("1111", "2025-03-24", "2026-09-25"),
                                 {"code": "9999", "error": "日次株価データを取得できませんでした",
                                  "history": [], "milestones": []}]})
         self.assertEqual(r["problems"], [])
@@ -134,7 +168,7 @@ class TestCheck(unittest.TestCase):
 
     def test_report_has_no_price_values(self):
         """Actions のログは公開される。J-Quants の値（終値）は出さない。"""
-        r = R.check({"stocks": [stock("1111", "2025-03-28", "2026-09-25", close=12345.6)]})
+        r = R.check({"stocks": [stock("1111", "2025-03-24", "2026-09-25", close=12345.6)]})
         text = R.report(r)
         self.assertNotIn("12345", text)
         self.assertNotIn("12,345", text)
@@ -149,15 +183,16 @@ class TestCheck(unittest.TestCase):
         quotes = [{"Date": d, "AdjC": 1000.0 + i} for i, d in enumerate(dates)]
         hist = JF.chart_history(quotes)
         r = R.check({"stocks": [{"code": "1111", "asOf": dates[-1], "history": hist,
-                                 "milestones": []}]})
+                                 "historyBars": JF.chart_bars(quotes), "milestones": []}]})
         self.assertEqual(r["problems"], [])
         self.assertEqual(len(hist), R.full_points())
         self.assertEqual(hist[-1]["date"], "2026-09-25")
-        self.assertEqual(round(r["longest"]["weeks"]), 73)
+        self.assertEqual(round(r["longest"]["weeks"]), 73)          # 暦（祝日なし）
+        self.assertEqual(r["spans"][0]["screen_weeks"], 78)          # 見出しは暦によらない
 
     def test_main_exit_codes(self):
-        for s, want in ((stock("1111", "2025-03-28", "2026-09-25"), 0),
-                        (stock("1111", "2025-09-25", "2026-09-25", n=72), 1)):
+        for s, want in ((stock("1111", "2025-03-24", "2026-09-25"), 0),
+                        (stock("1111", "2025-09-25", "2026-09-25", n=72, bars=None), 1)):
             f = tempfile.NamedTemporaryFile("w", suffix=".json", delete=False, encoding="utf-8")
             json.dump({"stocks": [s]}, f)
             f.close()

@@ -814,6 +814,17 @@ def chart_start(quotes: Sequence[dict], bars: int = CHART_BARS) -> Optional[str]
     return rows[-bars:][0]["Date"]
 
 
+def chart_bars(quotes: Sequence[dict], bars: int = CHART_BARS) -> int:
+    """
+    株価推移の期間に入る日足の本数（値の付かなかった日も数える。78週そろえば CHART_BARS）。
+
+    画面は見出しの週数をこれから出す（予測モデルと同じ換算: 245営業日 = 52週。368営業日が
+    78週）。暦の日数から数えると、368営業日は約550暦日 = 78.6週で「79週」と出てしまう
+    （2026-09-26 に取り直した stocks.json で 2025-03-24 〜 2026-09-25 = 550日）。
+    """
+    return len([r for r in quotes[-bars:] if r.get("Date")])
+
+
 def chart_history(quotes: Sequence[dict], bars: int = CHART_BARS,
                   step: int = CHART_STEP) -> List[dict]:
     """
@@ -1042,6 +1053,7 @@ def build_stock(client: JQuantsClient, raw_code: str, note: str = "",
                                        count_from=count_from),
         "quarters": quarters[-9:],
         "history": history,
+        "historyBars": chart_bars(quotes),
         "sources": sources,
         "origin": "jquants",
     }

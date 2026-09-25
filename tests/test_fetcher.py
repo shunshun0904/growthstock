@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.join(ROOT, "research"))
 
 from jquants_data_fetcher import (  # noqa: E402
     CHART_BARS, CHART_STEP, HIGH_WINDOW_BARS, PRICE_LOOKBACK_DAYS,
-    _one_year_before, build_milestones, chart_history, chart_start, credit_metrics,
+    _one_year_before, build_milestones, chart_bars, chart_history, chart_start, credit_metrics,
     describe_secret, display_code, fundamental_metrics, fundamentals_as_of,
     margin_published_on, normalize_code, pct_change, price_metrics, quarterize,
 )
@@ -546,6 +546,20 @@ class TestChartPeriod(unittest.TestCase):
         h = chart_history(q)
         self.assertEqual(h[0]["date"], q[0]["Date"])
         self.assertEqual(h[-1]["date"], q[-1]["Date"])
+        self.assertEqual(chart_bars(q), 50)
+
+    def test_bars_in_the_window(self):
+        """
+        画面は見出しの週数を期間の日足の本数から出す（予測モデルと同じ換算で 369本 -> 78週）。
+        値の付かなかった日（点にはならない）も本数には数える。78週はそろっているので。
+        """
+        q = make_quotes(list(range(1000, 1800)))           # 800本
+        self.assertEqual(chart_bars(q), CHART_BARS)
+        for r in q[-100:-50]:                                # 50日ぶん値が付かなかった
+            r["C"] = r["AdjC"] = None
+        self.assertEqual(chart_bars(q), CHART_BARS)
+        self.assertLess(len(chart_history(q)), (CHART_BARS - 1) // CHART_STEP + 1)
+        self.assertEqual(chart_bars([]), 0)
 
     def test_events_cover_the_same_78_weeks(self):
         """

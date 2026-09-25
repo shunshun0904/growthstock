@@ -19,19 +19,23 @@ stocks.json はふだん日次予測（Predict Breakouts）の最後の取得が
       だけで、株価の値は出さない（Actions のログは公開される）。次のどちらかなら失敗にして、
       コミットさせない
         - 株価推移の最後の点が、その銘柄の基準日（最新の足）でない銘柄がある
-        - 78週（取得スクリプトの CHART_BARS 本の日足）ぶんの点がそろった銘柄が1つも無い
+        - 78週（取得スクリプトの CHART_BARS 本の日足）そろった銘柄が1つも無い
           （78週にしていない取得スクリプトで作られた、API から日足が足りるだけ返らなかった）
       上場から78週たっていない銘柄は短くてよい（その銘柄の取れる全期間になる）。
-      判定は暦の週数ではなく点の数で行う。368営業日が暦で何週になるかは祝日の数で変わる
-      （祝日の無い暦なら約73週、実際の取引所の暦では約78週）
+      そろったかは日足の本数（stocks.json の historyBars。無ければ点の数）で見る。暦の週数では
+      見ない: 368営業日は約550暦日 = 78.6週で、祝日の数でも変わる（祝日の無い暦なら約73週）。
+      画面の見出しの週数も、予測モデルと同じ換算（245営業日 = 52週）で日足の本数から出す
+      （src/lib/pricechart.js の barsToWeeks。ここの bars_to_weeks と同じ）
 """
 from __future__ import annotations
 
 import argparse
 import datetime as dt
 import json
+import math
 import os
 import sys
+from collections import Counter
 from typing import Dict, List, Optional, Sequence
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -44,6 +48,10 @@ PREDICTIONS_JSON = os.path.join(P.PUBLIC_DIR, "predictions.json")
 STOCKS_JSON = os.path.join(P.PUBLIC_DIR, "stocks.json")
 
 EVENT_NAMES = {"earnings": "決算発表", "breakout": "78週高値の更新", "volume_spike": "出来高急増"}
+
+#: 予測モデルが窓を「78週」と呼ぶときの換算（research/build_dataset.py の
+#: round(HIGH_WINDOW / 245 * 52)。368営業日 -> 78週）。画面の barsToWeeks と同じ
+TRADING_DAYS_PER_YEAR = 245
 
 
 def pick_codes(predictions_path: str = PREDICTIONS_JSON,
@@ -63,6 +71,21 @@ def _weeks(first: str, last: str) -> float:
     return (dt.date.fromisoformat(last) - dt.date.fromisoformat(first)).days / 7
 
 
+def _round(x: float) -> int:
+    """JS の Math.round と同じ（.5 は上へ）。Python の round は偶数へ丸める。"""
+    return int(math.floor(x + 0.5))
+
+
+def bars_to_weeks(bars: int) -> int:
+    """日足の本数を、予測モデルと同じ換算で週に直す（CHART_BARS = 369本 -> 78週）。"""
+    return _round((bars - 1) / TRADING_DAYS_PER_YEAR * 52)
+
+
+def _bars(stock: Dict) -> Optional[int]:
+    b = stock.get("historyBars")
+    return b if isinstance(b, int) and not isinstance(b, bool) else None
+
+
 def _few(items: Sequence[str], n: int = 8) -> str:
     head = ", ".join(items[:n])
     return head if len(items) <= n else f"{head} ほか {len(items) - n}"
@@ -77,14 +100,23 @@ def check(payload: Dict) -> Dict:
     problems: List[str] = []
     events: Dict[str, int] = {}
     outside = 0
+    full = full_points()
     for s in stocks:
         h = [p for p in (s.get("history") or []) if p.get("date")]
         if not h:
             no_history.append(str(s.get("code")))
             continue
         first, last = h[0]["date"], h[-1]["date"]
-        spans.append({"code": s.get("code"), "points": len(h), "first": first, "last": last,
-                      "weeks": _weeks(first, last)})
+        bars = _bars(s)
+        weeks = _weeks(first, last)
+        spans.append({
+            "code": s.get("code"), "points": len(h), "first": first, "last": last,
+            "weeks": weeks, "bars": bars,
+            # 78週そろったか。日足の本数で見る（無ければ点の数）
+            "complete": bars >= JF.CHART_BARS if bars is not None else len(h) >= full,
+            # 画面の見出しの週数（src/lib/pricechart.js の buildPriceSeries と同じ出し方）
+            "screen_weeks": bars_to_weeks(bars) if bars is not None and bars > 1 else _round(weeks),
+        })
         if s.get("asOf") and last != s["asOf"]:
             stale_last.append(str(s.get("code")))
         for m in s.get("milestones") or []:
@@ -94,11 +126,12 @@ def check(payload: Dict) -> Dict:
     if stale_last:
         problems.append(f"株価推移の最後の点が基準日（最新の足）でない銘柄が {len(stale_last)}"
                         f"（{_few(stale_last)}）")
-    full = full_points()
-    longest = max(spans, key=lambda x: (x["points"], x["weeks"])) if spans else None
-    if spans and longest["points"] < full:
-        problems.append(f"78週（{JF.CHART_BARS}営業日）ぶんの株価推移がある銘柄が無い（いちばん長くて "
-                        f"{longest['points']}点・{longest['weeks']:.1f}週。そろえば {full}点）")
+    longest = max(spans, key=lambda x: (x["bars"] or 0, x["points"], x["weeks"])) if spans else None
+    if spans and not any(x["complete"] for x in spans):
+        got = f"{longest['bars']}本・" if longest["bars"] is not None else ""
+        problems.append(f"78週（{JF.CHART_BARS}本の日足）そろった銘柄が無い（いちばん長くて "
+                        f"{got}{longest['points']}点・暦で {longest['weeks']:.1f}週。"
+                        f"そろえば {JF.CHART_BARS}本・{full}点）")
     if stocks and not spans:
         problems.append("株価推移のある銘柄が無い")
     return {"stocks": len(stocks), "failures": len(payload.get("failures") or []),
@@ -109,27 +142,33 @@ def check(payload: Dict) -> Dict:
 
 def report(r: Dict) -> str:
     spans = r["spans"]
-    full = [x for x in spans if x["points"] >= r["full_points"]]
-    short = [x for x in spans if x["points"] < r["full_points"]]
+    short = [x for x in spans if not x["complete"]]
+    sparse = [x for x in spans if x["complete"] and x["points"] < r["full_points"]]
     lines = ["## 画面の銘柄データ（stocks.json）", "",
              f"- 銘柄 {r['stocks']}（株価推移あり {len(spans)}・なし {len(r['no_history'])}）"
              f" / 取得に失敗 {r['failures']}"]
     if spans:
-        weeks = sorted(round(x["weeks"]) for x in spans)
-        lines.append(f"- 株価推移: 78週ぶん（{r['full_points']}点）{len(full)}銘柄 / それより短い "
-                     f"{len(short)}銘柄。画面の週数は 最短 {weeks[0]}週・中央 "
-                     f"{weeks[len(weeks) // 2]}週・最長 {weeks[-1]}週")
+        lines.append(f"- 株価推移: 78週そろった銘柄 {len(spans) - len(short)} / "
+                     f"78週に満たない銘柄 {len(short)}")
+        heads = Counter(x["screen_weeks"] for x in spans)
+        lines.append("- 画面の見出し: " + "・".join(
+            f"「直近{w}週」{n}銘柄" for w, n in sorted(heads.items(), key=lambda kv: -kv[0])))
         lg = r["longest"]
+        got = f"{lg['bars']}本・" if lg["bars"] is not None else ""
         lines.append(f"- いちばん長い銘柄の期間: {lg['first']} 〜 {lg['last']}"
-                     f"（{round(lg['weeks'])}週・{lg['points']}点）")
+                     f"（{got}{lg['points']}点・暦で {lg['weeks']:.1f}週）")
         lasts = sorted({x["last"] for x in spans})
         lines.append(f"- 最後の点の日付: {', '.join(lasts)}")
     if r["events"]:
         ev = " / ".join(f"{EVENT_NAMES.get(k, k)} {v}" for k, v in sorted(r["events"].items()))
         lines.append(f"- 出来事: {ev}（株価推移の期間の外 {r['outside']}）")
     if short:
-        lines.append("- 78週に満たない銘柄（上場から日が浅いなど）: "
-                     + _few([f"{x['code']} {round(x['weeks'])}週" for x in short]))
+        lines.append("- 78週に満たない銘柄（上場から日が浅いなど）: " + _few(
+            [f"{x['code']} {x['screen_weeks']}週" + (f"（{x['bars']}本）" if x["bars"] else "")
+             for x in short]))
+    if sparse:
+        lines.append(f"- 78週そろっているが点が {r['full_points']} より少ない銘柄（値の付かない日がある）: "
+                     + _few([f"{x['code']} {x['points']}点" for x in sparse]))
     for p in r["problems"]:
         lines.append(f"- ⚠ {p}")
     return "\n".join(lines)

@@ -124,7 +124,8 @@ export default function TimeMachineView({ rows, selectedId, onSelect }) {
           )}
         </div>
 
-        <PriceCard history={row.stock.history} milestones={row.stock.milestones} />
+        <PriceCard history={row.stock.history} milestones={row.stock.milestones}
+                   bars={row.stock.historyBars} />
       </div>
 
       <div className="card">
@@ -138,9 +139,9 @@ export default function TimeMachineView({ rows, selectedId, onSelect }) {
   );
 }
 
-function PriceCard({ history, milestones }) {
+function PriceCard({ history, milestones, bars }) {
   const { data, events, span } = useMemo(
-    () => buildPriceSeries(history, milestones), [history, milestones]);
+    () => buildPriceSeries(history, milestones, bars), [history, milestones, bars]);
   const counts = EVENT_ORDER
     .map((type) => [type, events.filter((e) => e.type === type).length])
     .filter(([, n]) => n > 0);

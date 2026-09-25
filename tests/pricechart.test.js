@@ -9,7 +9,9 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildPriceSeries, quarterTicks, fmtTick, toTime } from '../src/lib/pricechart.js';
+import {
+  buildPriceSeries, quarterTicks, fmtTick, toTime, barsToWeeks, TRADING_DAYS_PER_YEAR,
+} from '../src/lib/pricechart.js';
 
 /** 3営業日ごと（ここでは3暦日ごと）の終値 */
 function history(from, n, step = 3) {
@@ -26,6 +28,23 @@ test('78週ぶんの履歴なら見出しの週数は78', () => {
   assert.equal(span.weeks, 78);
   assert.equal(span.from, '2025-03-10');
   assert.equal(span.to, h[h.length - 1].date);
+});
+
+test('日足の本数があれば、予測モデルと同じ換算（245営業日 = 52週）で「78週」', () => {
+  // 2026-09-26 に取り直した実データの期間: 369本の日足が 2025-03-24 〜 2026-09-25（550暦日）。
+  // 暦の日数から数えると 78.6週で、四捨五入すると「79週」と出ていた
+  const h = [{ date: '2025-03-24', close: 1000 }, { date: '2025-12-01', close: 1100 },
+             { date: '2026-09-25', close: 1200 }];
+  assert.equal(buildPriceSeries(h, [], 369).span.weeks, 78);
+  assert.equal(buildPriceSeries(h, []).span.weeks, 79);     // 本数が無ければ暦で数える
+});
+
+test('週への換算は research/build_dataset.py の round(368 / 245 * 52) と同じ', () => {
+  assert.equal(TRADING_DAYS_PER_YEAR, 245);
+  assert.equal(barsToWeeks(369), Math.round((368 / 245) * 52));
+  assert.equal(barsToWeeks(369), 78);
+  assert.equal(barsToWeeks(246), 52);                       // 1年（245営業日）
+  assert.equal(barsToWeeks(180), 38);                       // 上場から日が浅い銘柄
 });
 
 test('出来事は期間の中のものだけを、いちばん近い点に結び付ける', () => {
