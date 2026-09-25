@@ -1596,9 +1596,13 @@ class 探索と学習の列を突き合わせる(unittest.TestCase):
     def test_追加モデルは別の列で探索したものなら学習しない(self):
         import features as F
         import train_multi as TMlt
+        import tuning_multi as TM
         cols = F.columns("all_plus")
+        # 探索の記録（tuning_multi.tune）には木の本数も入る。本数も突き合わせるので
+        # （tests/test_tree_count.py）、実際の記録と同じく入れておく
         store = {
-            "xgb": {"_cv": {"features_sig": F.signature(cols), "n_features": len(cols)}},
+            "xgb": {"_cv": {"features_sig": F.signature(cols), "n_features": len(cols),
+                            "n_estimators": TM.N_ESTIMATORS}},
             "cat": {"_cv": {"features_sig": F.signature(F.columns("all")), "n_features": 153}},
             "mlp": {"_cv": {"train_to": "2025-07-23"}},            # 列の記録なし
         }
