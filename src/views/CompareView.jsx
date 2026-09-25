@@ -186,8 +186,8 @@ function RankingTable({ rows, onSelect, selectedId }) {
             <tr>
               <th>#</th><th>銘柄</th><th className="val">総合</th>
               <th className="val">EPS</th><th className="val">売上</th><th className="val">ROE</th>
-              <th className="val">利益率</th><th className="val">テクニカル</th><th className="val">出来高</th>
-              <th className="val">需給</th><th className="val">進捗</th>
+              <th className="val">営業利益率</th><th className="val">テクニカル</th><th className="val">出来高</th>
+              <th className="val">信用倍率</th><th className="val">進捗</th>
               <th>ゾーン</th><th>機関</th>
             </tr>
           </thead>

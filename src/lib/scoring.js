@@ -87,7 +87,7 @@ export function scoreVolume(volumeTrend, institutionalLevel) {
 }
 
 /**
- * 軸7: 需給 (信用倍率 C_ratio)
+ * 軸7: 信用倍率 (C_ratio)
  *   C <= 1.0   -> 10.0
  *   C <= 3.0   -> 10.0 - (C-1.0)/2.0 * 3.0     (C=3 で 7.0)
  *   C <= 10.0  ->  7.0 - (C-3.0)/7.0 * 5.0     (C=10 で 2.0)
@@ -171,11 +171,11 @@ export const ZONE_META = {
 export const AXES = [
   { key: 'eps',       label: 'EPS成長',   full: '直近四半期EPS成長率',   unit: '%',  metric: 'epsGrowth',    rule: 'S(x, 0, 50)' },
   { key: 'sales',     label: '売上成長',  full: '直近四半期売上高成長率', unit: '%',  metric: 'salesGrowth',  rule: 'S(x, 0, 40)' },
-  { key: 'roe',       label: '収益質',    full: 'ROE (自己資本利益率)',   unit: '%',  metric: 'roe',          rule: 'S(x, 5, 25)' },
-  { key: 'margin',    label: '利益率',    full: '営業利益率',             unit: '%',  metric: 'opMargin',     rule: 'S(x, 0, 20)' },
+  { key: 'roe',       label: 'ROE',       full: 'ROE (自己資本利益率)',   unit: '%',  metric: 'roe',          rule: 'S(x, 5, 25)' },
+  { key: 'margin',    label: '営業利益率', full: '営業利益率',             unit: '%',  metric: 'opMargin',     rule: 'S(x, 0, 20)' },
   { key: 'technical', label: 'テクニカル', full: '52週高値接近率',         unit: '%',  metric: 'highRatio',    rule: '98%以上で満点' },
   { key: 'volume',    label: '出来高',    full: '出来高モメンタム',       unit: '%',  metric: 'volumeTrend',  rule: '機関参入度で減衰補正' },
-  { key: 'supply',    label: '需給',      full: '信用倍率',               unit: '倍', metric: 'creditRatio',  rule: '1.0倍以下で満点' },
+  { key: 'supply',    label: '信用倍率',  full: '信用倍率',               unit: '倍', metric: 'creditRatio',  rule: '1.0倍以下で満点' },
   { key: 'progress',  label: '進捗期待',  full: '決算進捗率 vs 経過基準', unit: '%',  metric: 'progressRate', rule: '5.0 + (進捗率 - Q×25)/2' },
 ];
 

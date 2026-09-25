@@ -39,7 +39,10 @@ export default function RadarPanel({ series, height = 420 }) {
 
   return (
     <ResponsiveContainer width="100%" height={height}>
-      <RadarChart data={data} outerRadius="72%">
+      {/* 左右の余白は軸ラベルのぶん。スマホ幅では半径が横幅で決まるので、
+          余白が無いと左の「信用倍率」が画面の外に切れる（390px で実測）。
+          PC では半径が高さで決まるので、この余白で図は小さくならない */}
+      <RadarChart data={data} outerRadius="72%" margin={{ top: 4, right: 44, bottom: 4, left: 44 }}>
         <PolarGrid stroke="var(--border)" />
         <PolarAngleAxis dataKey="axis" tick={{ fill: 'var(--text-dim)', fontSize: 11.5 }} />
         <PolarRadiusAxis
@@ -61,7 +64,9 @@ export default function RadarPanel({ series, height = 420 }) {
           />
         ))}
         <Tooltip content={renderTooltip} />
-        <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
+        {/* 凡例は左右の余白を使わず横幅いっぱいに置く。余白の内側に置くと、
+            スマホ幅で銘柄名の折り返しが増えて下の「テクニカル」に重なる（360px で実測） */}
+        <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8, left: 0, width: '100%' }} />
       </RadarChart>
     </ResponsiveContainer>
   );

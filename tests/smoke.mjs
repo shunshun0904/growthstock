@@ -131,7 +131,7 @@ check(body.includes('BREAKOUT'), 'BREAKOUT ゾーン判定が表示される');
 check(body.includes('機関熱狂') || body.includes('MEGA'), '機関投資家参入度バッジが表示される');
 const covBadges = await page.locator('.stock-card .badge').allTextContents();
 check(covBadges.includes('8/8軸'), '全軸そろった銘柄は 8/8軸');
-check(covBadges.includes('5/8軸'), '欠測のある銘柄は 5/8軸 (EPS成長・需給・進捗が欠測)');
+check(covBadges.includes('5/8軸'), '欠測のある銘柄は 5/8軸 (EPS成長・信用倍率・進捗が欠測)');
 check(covBadges.includes('CAP LOW'), '時価総額100億円未満は CAP LOW と判定される');
 check(!body.includes('NaN'), 'NaN が画面に出ていない');
 check(!body.includes('undefined'), 'undefined が画面に出ていない');
@@ -240,7 +240,7 @@ await page.getByRole('button', { name: '現在値に戻す' }).click();
 await page.waitForTimeout(300);
 check(Math.abs((await readScore()) - before) < 0.05, '「現在値に戻す」で元のスコアに復帰する');
 
-// 信用倍率を上げると需給軸が下がる
+// 信用倍率を上げると信用倍率の軸が下がる
 await page.locator('#sim-creditRatio').fill('15');
 await page.waitForTimeout(300);
 check((await readScore()) < before, '信用倍率を上げると総合スコアが下がる');
