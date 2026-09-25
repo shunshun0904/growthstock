@@ -200,6 +200,10 @@ GROUPS: Dict[str, List[str]] = {
     "progress_seasonal": ["progress_ratio", "progress_pct"],
     #: 置き換えの腕用。progress_vs_base の位置に順位だけを置く
     "progress_seasonal_pct": ["progress_pct"],
+    #: 一般市場に上場（TOKYO PRO MARKET から移行）してからの年数。3年で打ち止め。
+    #: 2016-10 より前から上場している銘柄は、2019-10 までは欠測・その後は 3
+    #: （J-Quants では上場日が見えないため。運用者の選択 ①。実験47の候補）
+    "listing": ["listing_years"],
 }
 
 #: 横断面正規化（同じ日付内でのパーセンタイル順位）を作る対象の列。
@@ -319,6 +323,8 @@ PRESETS: Dict[str, List[str]] = {
                            for g in ALL_GROUPS] + EXTRA_GROUPS,
     # 追加: 205列 + 比率と順位（207列）
     "all_plus_prog": ALL_GROUPS + EXTRA_GROUPS + ["progress_seasonal"],
+    # --- 2026-09-25 の候補（実験47）。上場からの年数 --- #
+    "all_plus_listing": ALL_GROUPS + EXTRA_GROUPS + ["listing"],
 
     # --- 決算を「変化」だけで組むセット --- #
     # 絶対水準（ROE 何%、営業利益率 何%）ではなく、

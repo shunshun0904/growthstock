@@ -370,10 +370,20 @@ def rows_upto(rows: Sequence[dict], key: str, as_of: str) -> List[dict]:
 # 指標算出 : 株価系 (仕様書 §3.2)
 # --------------------------------------------------------------------------- #
 
-def price_metrics(quotes: Sequence[dict], as_of: Optional[str] = None) -> Dict[str, Any]:
+#: 一般市場で数え始めていない銘柄（まだ TOKYO PRO MARKET にいる）に使う日付
+NEVER = "9999-12-31"
+
+
+def price_metrics(quotes: Sequence[dict], as_of: Optional[str] = None,
+                  count_from: Optional[str] = None) -> Dict[str, Any]:
     """
     指定日時点 (as_of, 省略時は最新) の株価系指標を算出する。
     未来のバーは一切参照しない (タイムマシーン・モードの point-in-time 保証)。
+
+    count_from（'YYYY-MM-DD'）を渡すと、78週高値の「368営業日の履歴」をその日からの
+    行だけで数える。TOKYO PRO MARKET から一般市場へ移った銘柄の、値のほぼ無い TPM の
+    時期の行を数えないため（予測モデルの research/build_dataset.general_market_start と
+    同じ日を --general-market-start で受け取る）。
     """
     series = rows_upto(quotes, "Date", as_of) if as_of else list(quotes)
     out: Dict[str, Any] = {
@@ -394,9 +404,11 @@ def price_metrics(quotes: Sequence[dict], as_of: Optional[str] = None) -> Dict[s
     # 履歴が 368営業日に満たない銘柄（上場から約1年半未満）と、窓の半分以上で高値が
     # 無い銘柄は出さない（モデルも高値の基準が無いとしてブレイクの母集団に入れない）。
     # 列名は画面・手入力の互換のため high52w のまま（中身は78週）
-    window = series[-HIGH_WINDOW_BARS:]
+    counted = ([r for r in series if (r.get("Date") or "") >= count_from]
+               if count_from else series)
+    window = counted[-HIGH_WINDOW_BARS:]
     highs = [h for h in (pick(r, "AdjH", "H") for r in window) if h is not None]
-    if (len(series) >= HIGH_WINDOW_BARS
+    if (len(counted) >= HIGH_WINDOW_BARS
             and len(highs) >= HIGH_WINDOW_BARS * HIGH_WINDOW_COVERAGE):
         out["high52w"] = max(highs)
         if price is not None and out["high52w"] > 0:
@@ -788,15 +800,20 @@ def credit_metrics(margin_rows: Sequence[dict], as_of: Optional[str] = None,
 # --------------------------------------------------------------------------- #
 
 def build_milestones(
-    quotes: Sequence[dict], quarters: Sequence[dict], months: int = 12
+    quotes: Sequence[dict], quarters: Sequence[dict], months: int = 12,
+    count_from: Optional[str] = None,
 ) -> List[dict]:
     """
     実データから検出できるイベントのみを時系列で列挙する。
     (定性的なストーリーを創作しない — 検出条件は各イベントの detail に明記する)
+
+    count_from は price_metrics と同じ（78週の履歴をその日からの行だけで数える）。
     """
     events: List[dict] = []
     if not quotes:
         return events
+    first = (next((i for i, r in enumerate(quotes) if (r.get("Date") or "") >= count_from),
+                  len(quotes)) if count_from else 0)
 
     last_date = dt.date.fromisoformat(quotes[-1]["Date"])
     since = last_date - dt.timedelta(days=30 * months)
@@ -833,7 +850,7 @@ def build_milestones(
         if close is None or vol is None:
             continue
 
-        window = quotes[i - HIGH_WINDOW_BARS:i] if i >= HIGH_WINDOW_BARS else []
+        window = quotes[i - HIGH_WINDOW_BARS:i] if i - first >= HIGH_WINDOW_BARS else []
         highs = [h for h in (pick(r, "AdjH", "H") for r in window) if h is not None]
         if (len(highs) >= HIGH_WINDOW_BARS * HIGH_WINDOW_COVERAGE
                 and close > max(highs)):
@@ -876,9 +893,45 @@ SNAPSHOT_OFFSETS = [("now", 0), ("m3", 91), ("m6", 183)]
 SNAPSHOT_LABELS = {"now": "現在", "m3": "3ヶ月前", "m6": "6ヶ月前"}
 
 
+def load_general_market_start(path: Optional[str]) -> Optional[Dict[str, Optional[str]]]:
+    """
+    予測モデルのデータセット作成（research/build_dataset.write_general_market_start）が
+    書いた「一般市場で数え始める日」。enabled が False のあいだ、ファイルが無いとき、
+    読めないときは None（今までどおり最初の行から数える）。
+
+    返す辞書: 5桁コード -> 'YYYY-MM-DD'（まだ TOKYO PRO MARKET にいる銘柄は None）。
+    TPM にいたことがある銘柄だけが入る。
+    """
+    if not path:
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            payload = json.load(fh)
+    except (OSError, ValueError) as exc:
+        print(f"[warn] 一般市場で数え始める日の一覧を読めない（今までどおり数える）: {exc}",
+              file=sys.stderr)
+        return None
+    if not payload.get("enabled"):
+        print("[gm] 一般市場で数え始める日: 切（モデルと同じ。research/build_dataset."
+              "GENERAL_MARKET_START）")
+        return None
+    start = {normalize_code(str(k)): v for k, v in (payload.get("start") or {}).items()}
+    print(f"[gm] 一般市場で数え始める日: 入 / TPM にいたことがある {len(start)}銘柄")
+    return start
+
+
+def count_from_for(code: str, gm_start: Optional[Dict[str, Optional[str]]]) -> Optional[str]:
+    """build_stock が使う count_from。一覧に無い銘柄は None（最初の行から数える）。"""
+    if not gm_start or code not in gm_start:
+        return None
+    return gm_start[code] or NEVER
+
+
 def build_stock(client: JQuantsClient, raw_code: str, note: str = "",
-                trading_days: Optional[Sequence[dt.date]] = None) -> Dict[str, Any]:
+                trading_days: Optional[Sequence[dt.date]] = None,
+                gm_start: Optional[Dict[str, Optional[str]]] = None) -> Dict[str, Any]:
     code = normalize_code(raw_code)
+    count_from = count_from_for(code, gm_start)
     today = dt.date.today()
     date_from = (today - dt.timedelta(days=PRICE_LOOKBACK_DAYS)).isoformat()
     date_to = today.isoformat()
@@ -908,7 +961,7 @@ def build_stock(client: JQuantsClient, raw_code: str, note: str = "",
     latest_date = quotes[-1]["Date"]
 
     def snapshot(as_of: Optional[str]) -> Dict[str, Any]:
-        pm = price_metrics(quotes, as_of)
+        pm = price_metrics(quotes, as_of, count_from)
         fm = fundamentals_as_of(statements, as_of)
         cm = credit_metrics(margins, as_of, trading_days)
         merged: Dict[str, Any] = {**pm, **fm, **cm}
@@ -957,7 +1010,7 @@ def build_stock(client: JQuantsClient, raw_code: str, note: str = "",
         "asOf": latest_date,
         "metrics": metrics,
         "snapshots": snapshots,
-        "milestones": build_milestones(quotes, quarters),
+        "milestones": build_milestones(quotes, quarters, count_from=count_from),
         "quarters": quarters[-9:],
         "history": history,
         "sources": sources,
@@ -1020,6 +1073,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                         help="ウォッチリストに足す銘柄コード。"
                              "日次予測が「その日の上位銘柄」を渡すのに使う")
     parser.add_argument("--watchlist", default=DEFAULT_WATCHLIST)
+    parser.add_argument("--general-market-start", default=None,
+                        help="予測モデルのデータセット作成が書いた「一般市場で数え始める日」の "
+                             "JSON（TOKYO PRO MARKET から移った銘柄の78週の履歴を、移ってからの"
+                             "行だけで数える。enabled が false なら今までどおり）")
     parser.add_argument("--output", default=DEFAULT_OUTPUT)
     parser.add_argument("--check-auth", action="store_true", help="認証疎通のみ確認して終了")
     parser.add_argument("--pause", type=float, default=0.25, help="API 呼び出し間隔 (秒)")
@@ -1086,13 +1143,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # 信用残の公表日を営業日で数えるための取引所カレンダー（1回だけ取る）。
     # 取れなければ平日で数える（祝日を知らないぶん公表日が早めになりうる）
     trading_days = fetch_trading_days(client)
+    gm_start = load_general_market_start(args.general_market_start)
 
     stocks: List[dict] = []
     failures: List[dict] = []
     for item in targets:
         try:
             stocks.append(build_stock(client, item["code"], item.get("note", ""),
-                                      trading_days))
+                                      trading_days, gm_start))
         except AuthError:
             raise
         except (JQuantsError, KeyError, ValueError) as exc:

@@ -241,6 +241,38 @@ REQUIRE_UPTREND = True
 # 許しすぎると長期休止銘柄の「数点だけの高値」を基準にしてしまう。
 MIN_WINDOW_COVERAGE = 0.5
 
+
+def _flag(raw: str) -> bool:
+    """「1 / true / on / yes」を True にする（環境変数からの差し替え用）。"""
+    return raw.strip().lower() in ("1", "true", "on", "yes")
+
+
+#: TOKYO PRO MARKET（プロ向け市場）の市場区分名（master_hist の MktNm）
+TPM_NAME = "TOKYO PRO MARKET"
+
+#: 78週の窓（HIGH_WINDOW 本）を、**一般市場に移ってからの行だけ**で数えるか
+#: （運用者の選択 A、2026-09-25）。
+#:
+#: J-Quants は TOKYO PRO MARKET の銘柄にも日足の行を持つが、取引がほとんど無く
+#: 値はほぼ空（いま TPM の188銘柄で、全期間 120,064行のうち値のある行は 666）。
+#: 一般市場へ移った銘柄は、その空の行も「368本」に数えられ、窓の半分以上に値が
+#: あれば通ってしまう。5537 は実際には約9か月（188日）の高値が「78週高値」として
+#: 扱われ、2026-09-24 の予測候補に入った。
+#: 「最初に値が付いた日から数える」だけでは直らない: 移った9銘柄のうち8銘柄は、
+#: TPM に上場した日などに値のある行を持っている（5537 も 2023-11-29 に1行）。
+#: そこで master_hist で最後に TPM だった月末を調べ、その後で最初に値が付いた日から
+#: 数える（general_market_start）。
+#:
+#: 学習データが変わるので、実験47で影響を測ってから True にする（それまでは既定 False。
+#: 画面の78週高値も同じ切り替えに従う: general_market_start.json の enabled）
+GENERAL_MARKET_START = _sweep_override("GENERAL_MARKET_START", False, _flag)
+
+#: 上場からの年数（listing_years、実験47の候補）の打ち止め（年）。
+#: J-Quants は 2016-10 より前が見えないので、それより前から上場している銘柄の年数は
+#: 分からない。3年で打ち止めにすれば、データの初日から3年たった 2019-10 以降は
+#: 古い銘柄も「3」と確定する（学習データの 90.1%。運用者の選択 ①）
+LISTING_CAP_YEARS = 3.0
+
 # --- 決算の完全性で母集団を絞る --- #
 # 決算の「変化」で判断させるなら、変化が作れないレコードを混ぜても
 # 欠測を学習させるだけになる。作れない行は最初から外す。
@@ -517,12 +549,123 @@ def load_parts(prefix: str, data_dir: str) -> pd.DataFrame:
 # 株価系の特徴量とラベル（銘柄ごとに時系列で算出）
 # --------------------------------------------------------------------------- #
 
-def price_panel(bars: pd.DataFrame, cfg: LabelConfig = DEFAULT_LABEL) -> pd.DataFrame:
+def load_market_segments(data_dir: str) -> Optional[pd.DataFrame]:
+    """月末ごとの市場区分（master_hist の Date / Code / MktNm）。無ければ None。"""
+    paths = sorted(glob.glob(os.path.join(data_dir, "master_hist_*.parquet")))
+    if not paths:
+        return None
+    mh = pd.concat([pd.read_parquet(x, columns=["Date", "Code", "MktNm"]) for x in paths],
+                   ignore_index=True)
+    mh["Date"] = pd.to_datetime(mh["Date"])
+    mh["Code"] = mh["Code"].astype(str)
+    return mh.dropna(subset=["Date", "Code"])
+
+
+def general_market_start(bars: pd.DataFrame, segments: Optional[pd.DataFrame]) -> pd.DataFrame:
+    """
+    銘柄ごとの「一般市場で数え始める日」と、上場日がデータの中で分かるか。
+
+    返す列（1銘柄1行）
+      Code
+      first_row  最初の日足の行の日
+      tpm        TOKYO PRO MARKET にいたことがある（segments の月末のどこかで）
+      start      一般市場で数え始める日。TPM にいたことが無い銘柄は first_row（今までどおり）。
+                 TPM から一般市場へ移った銘柄（最後に TPM だった月末より後の月末に、
+                 TPM 以外の区分で載っている）は、**最後に TPM だった月末より後で、最初に
+                 値が付いた日**。まだ TPM にいる銘柄と、TPM のまま消えた銘柄は NaT
+                 （一般市場では数え始めていない。TPM の最後の数週に約定があっても移った
+                 とはみなさない。実測で 311A・5073 がこの形）
+      known      上場日（一般市場に出た日）がデータの中にある。TPM から移った銘柄と、
+                 最初の行がデータの初日より後の銘柄（新規上場）。データの初日から
+                 行がある銘柄は、それより前から上場していて上場日は分からない
+
+    月末の区分で判定するので、移った月の途中の約定は「TPM だった月末」の後なら
+    数える（実測では移った後の最初の値は移った日そのもの。5537 は 2025-12-15）。
+    """
+    d = pd.to_datetime(bars["Date"])
+    high = bars["AdjH"].fillna(bars["H"]) if "AdjH" in bars.columns else bars["H"]
+    x = pd.DataFrame({"Code": bars["Code"].astype(str).to_numpy(), "Date": d.to_numpy(),
+                      "has": high.notna().to_numpy()})
+    first_row = x.groupby("Code")["Date"].min()
+    out = pd.DataFrame({"first_row": first_row, "tpm": False, "start": first_row})
+    if segments is not None and len(segments):
+        seg = segments.assign(Code=segments["Code"].astype(str))
+        is_tpm = seg["MktNm"].astype(str) == TPM_NAME
+        last_tpm = seg[is_tpm].groupby("Code")["Date"].max()
+        codes = out.index.intersection(last_tpm.index)
+        out.loc[codes, "tpm"] = True
+        # 最後に TPM だった月末より後に、TPM 以外の区分で載った銘柄だけが「移った」
+        later = seg[~is_tpm & seg["Code"].isin(codes)]
+        later = later[later["Date"].to_numpy() > later["Code"].map(last_tpm).to_numpy()]
+        moved = set(later["Code"])
+        px = x[x["has"] & x["Code"].isin(moved)]
+        px = px[px["Date"].to_numpy() > px["Code"].map(last_tpm).to_numpy()]
+        after = px.groupby("Code")["Date"].min()
+        out.loc[codes, "start"] = after.reindex(codes).to_numpy()
+    data_start = x["Date"].min()
+    out["known"] = ((out["tpm"] & out["start"].notna())
+                    | (~out["tpm"] & (out["first_row"] > data_start)))
+    out.index.name = "Code"
+    return out.reset_index()
+
+
+def write_general_market_start(gm: pd.DataFrame, path: str, enabled: bool) -> None:
+    """
+    画面のデータ取得（scripts/jquants_data_fetcher.py --general-market-start）が読む一覧。
+
+    TPM にいたことがある銘柄だけを書く（それ以外は今までどおり最初の行から数える）。
+    enabled は GENERAL_MARKET_START。False のあいだは画面も今までどおり（モデルと
+    同じ切り替えに従う）。
+    """
+    t = gm[gm["tpm"]]
+    payload = {
+        "enabled": bool(enabled),
+        "note": "TOKYO PRO MARKET にいたことがある銘柄の、一般市場で数え始める日"
+                "（null はまだ TPM）。research/build_dataset.general_market_start",
+        "start": {str(c): (None if pd.isna(v) else pd.Timestamp(v).date().isoformat())
+                  for c, v in zip(t["Code"], t["start"])},
+    }
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, ensure_ascii=False, indent=1, sort_keys=True)
+    print(f"[gm] 一般市場で数え始める日の一覧: TPM にいたことがある {len(t):,}銘柄"
+          f"（うち移った {int(t['start'].notna().sum()):,}）/ enabled={bool(enabled)} -> {path}")
+
+
+def listing_years(codes: pd.Series, dates: pd.Series, gm: pd.DataFrame,
+                  cap: float = LISTING_CAP_YEARS) -> np.ndarray:
+    """
+    一般市場に上場（TPM から移行）してからの年数。cap 年で打ち止め（運用者の選択 ①）。
+
+    上場日が分からない銘柄（データの初日より前から上場）は、データの初日から
+    cap 年たつまでは欠測、その後は cap。まだ TPM にいる銘柄は欠測。
+    上場日は上場したその日に分かることなので、先読みにはならない。
+    """
+    m = gm.set_index("Code")
+    data_start = pd.to_datetime(m["first_row"]).min()
+    dts = pd.to_datetime(pd.Series(dates)).reset_index(drop=True)
+    cs = pd.Series(codes).astype(str).reset_index(drop=True)
+    listed = pd.to_datetime(cs.map(m["start"].where(m["known"])))
+    yrs = (dts - listed).dt.days / 365.25
+    since_start = (dts - data_start).dt.days / 365.25
+    tpm_now = cs.map(m["tpm"] & m["start"].isna()).fillna(False).astype(bool)
+    out = np.where(listed.notna(), np.minimum(yrs, cap),
+                   np.where(since_start >= cap, cap, np.nan))
+    out = np.where(tpm_now.to_numpy(), np.nan, out)
+    # 上場前（まだ行が無い日）は作らない
+    return np.where(np.asarray(yrs.fillna(0.0)) < 0, np.nan, out).astype(float)
+
+
+def price_panel(bars: pd.DataFrame, cfg: LabelConfig = DEFAULT_LABEL,
+                start: Optional[pd.Series] = None) -> pd.DataFrame:
     """
     銘柄ごとに時系列指標を算出する。
 
     調整後（Adj*）を優先して使う。株式分割をまたぐと素の価格では
     52週高値が不連続になり、偽のブレイクを大量に生むため。
+
+    start（銘柄コード -> 数え始める日。NaT はまだ数え始めない）を渡すと、78週の窓の
+    「HIGH_WINDOW 本の履歴」をその日からの行だけで数える（GENERAL_MARKET_START）。
+    start に無い銘柄は今までどおり最初の行から数える。
     """
     df = bars.copy()
     df["Date"] = pd.to_datetime(df["Date"])
@@ -573,6 +716,13 @@ def price_panel(bars: pd.DataFrame, cfg: LabelConfig = DEFAULT_LABEL) -> pd.Data
     #   coverage       … 窓の中で実際に値がある割合（休止銘柄を弾く）
     w = cfg.high_window
     age = g.cumcount()
+    if start is not None and len(start):
+        # 一般市場で数え始める前の行（TOKYO PRO MARKET の時期）は履歴に数えない
+        listed = df["Code"].astype(str).isin(start.index)
+        s0 = pd.to_datetime(df["Code"].astype(str).map(start))
+        began = ~listed | (s0.notna() & (df["Date"] >= s0))
+        age = began.astype(int).groupby(df["Code"], sort=False).cumsum() - 1
+        age = age.where(began, -1)
     hi = g["high"].transform(lambda s: s.rolling(w, min_periods=1).max())
     cov = g["high"].transform(lambda s: s.rolling(w, min_periods=1).count())
     enough = (age >= w - 1) & (cov >= w * MIN_WINDOW_COVERAGE)
@@ -2337,8 +2487,19 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
         if bad:
             print(f"[warn] {c} の欠測が多い年: " + " ".join(bad))
 
+    # --- 一般市場で数え始める日（TOKYO PRO MARKET からの移行）と上場日 --- #
+    segments = load_market_segments(data_dir)
+    if segments is None:
+        print("[gm] master_hist が無い。TPM の判定はせず、上場日はデータの行から決める")
+    gm = general_market_start(bars, segments)
+    write_general_market_start(
+        gm, os.path.splitext(out_path)[0] + "_general_market_start.json",
+        GENERAL_MARKET_START)
+    start = (gm.loc[gm["tpm"]].set_index("Code")["start"] if GENERAL_MARKET_START else None)
+    print(f"[gm] 78週の窓を一般市場に移ってからの行で数える: {GENERAL_MARKET_START}")
+
     print("\n[panel] 株価系の指標を算出")
-    df = price_panel(bars)
+    df = price_panel(bars, start=start)
     if POPULATION == "breakout":
         print("[panel] 52週高値の更新日を判定")
         df = mark_new_highs(df)
@@ -2607,6 +2768,13 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     # 市場区分は master_hist を結合してからでないと分からないので、
     # ほかの除外条件（上の「除外条件」ブロック）とは離れてここに置く。
     samples = drop_excluded_markets(samples)
+
+    # --- 上場からの年数（実験47の候補。本番の列には入れていない） --- #
+    samples["listing_years"] = listing_years(samples["Code"], samples["Date"], gm)
+    _ly = samples["listing_years"]
+    print(f"[gm] 上場からの年数: 値あり {_ly.notna().mean()*100:.1f}% / "
+          f"打ち止め（{LISTING_CAP_YEARS:g}年）{(_ly >= LISTING_CAP_YEARS).mean()*100:.1f}% / "
+          f"{LISTING_CAP_YEARS:g}年未満 {(_ly < LISTING_CAP_YEARS).mean()*100:.1f}%")
 
     # --- 市場環境（地合い） --- #
     print("[merge] 市場環境の特徴量を結合")

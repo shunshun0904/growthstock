@@ -188,7 +188,11 @@ jobs:
           if [ -z "$CODES" ]; then
             echo "当日の候補が無いので stocks.json はそのまま"; exit 0
           fi
-          python3 scripts/jquants_data_fetcher.py --extra-codes $CODES 2>&1 | tail -15
+          # TOKYO PRO MARKET から移った銘柄の78週の履歴を、移ってからの行だけで数える
+          # （予測データセットを作ったときの一覧。モデルと同じ切り替え enabled に従う）
+          python3 scripts/jquants_data_fetcher.py --extra-codes $CODES \
+            --general-market-start research/_data/dataset_predict_general_market_start.json \
+            2>&1 | tail -15
 
       # 長期の台帳。リポジトリ側は画面用で、predictions.json は毎日上書き、
       # prediction_history.json は上位5件・400日で消えるので、
