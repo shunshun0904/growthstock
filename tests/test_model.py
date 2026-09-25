@@ -1117,7 +1117,8 @@ class TestYearStratifiedFolds(unittest.TestCase):
         best = tune(self._df(), ["a"], n_trials=2, n_splits=5, scheme="year",
                     verbose=False)
         self.assertEqual(best["n_estimators"], SEARCH_N_ESTIMATORS)
-        self.assertEqual(SEARCH_N_ESTIMATORS, 200)
+        # 2026-09-25 に 200 -> 500（運用者の指示。tests/test_tree_count.py）
+        self.assertEqual(SEARCH_N_ESTIMATORS, 500)
 
     def test_unknown_scheme_stops(self):
         from tuning import tune
@@ -1558,10 +1559,11 @@ class 探索と学習の列を突き合わせる(unittest.TestCase):
     def test_本番の学習は同じ列なら先へ進む(self):
         """突き合わせを通れば、データセットを読みに行く（ここでは無いので落ちる）。"""
         import features as F
+        import tuning
         cols = F.columns(F.DEFAULT_PRESET)
         store = {F.DEFAULT_PRESET: {"_n_features": len(cols),
-                                    "_features_sig": F.signature(cols)}}
-        import tuning
+                                    "_features_sig": F.signature(cols),
+                                    "n_estimators": tuning.SEARCH_N_ESTIMATORS}}
         import train_production as TP
         orig = tuning.load_params
         tuning.load_params = lambda path=None: store

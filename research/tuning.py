@@ -65,7 +65,29 @@ PARAMS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 #: 学習にもこの本数がそのまま使われる（fit_models は探索済みの
 #: n_estimators を読む）。本数を変えたら、以前の探索結果と混ぜて
 #: 比べないこと。木の数が違うモデルの比較になる。
-SEARCH_N_ESTIMATORS = 200
+#:
+#: 2026-09-25 に 200 -> 500。運用者の指示「どうせならn_estimatorの数を500に変更して
+#: 下さい。特徴量も増えてきたので」（列は 151 -> 206）。学習率の探索範囲も本数に
+#: 合わせて動かす（LR_TOTAL）。本番の学習（train_production.py）は、探索したときの
+#: 本数（探索の記録の n_estimators）がこの値と違えば止まる。
+#: 画面に並べる追加モデル（xgb / cat）の本数は別（tuning_multi.N_ESTIMATORS、200 のまま）。
+SEARCH_N_ESTIMATORS = 500
+
+#: 学習率の探索範囲を「学習率 × 木の本数」（1本ごとの歩幅の合計）で決める。
+#:
+#: 木200本のときの範囲 0.01〜0.2 は、歩幅の合計で 2〜40。本数を変えても同じ合計の範囲を
+#: 探すように、学習率の範囲を本数で割って決める（500本なら 0.004〜0.08）。
+#: 0.01〜0.2 のまま500本にすると、200本の探索で選ばれてきた学習率 0.016〜0.024
+#: （歩幅の合計 3.2〜4.8。lgbm_params.json と docs/MODEL_HORIZON.md の記録）に当たる
+#: 0.0063〜0.0097 が範囲の下限より下になり、探せなくなる。
+LR_TOTAL = (2.0, 40.0)
+
+
+def lr_range(n_estimators: int) -> Tuple[float, float]:
+    """木の本数に合わせた学習率の探索範囲（LR_TOTAL を本数で割る）。"""
+    n = int(n_estimators)
+    return (LR_TOTAL[0] / n, LR_TOTAL[1] / n)
+
 
 # 探索しないもの（固定）。再現性のため。
 FIXED = {
@@ -78,9 +100,10 @@ FIXED = {
 }
 
 # 探索しなかった場合に使う既定値。控えめな正則化。
+# 学習率は木200本で 0.05 だったもの（歩幅の合計 10）を、本数に合わせて保つ
 DEFAULT_PARAMS = {
     **FIXED,
-    "learning_rate": 0.05,
+    "learning_rate": 10.0 / SEARCH_N_ESTIMATORS,
     "num_leaves": 31,
     "min_child_samples": 50,
     "subsample": 0.8,
@@ -446,7 +469,8 @@ def _fit_one(params: Dict, tr: pd.DataFrame, va: pd.DataFrame,
 def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
          seed: int = 0, verbose: bool = True, n_splits: int = 5,
          embargo_days: int = 60, scheme: str = "year",
-         model: str = "classifier") -> Dict:
+         model: str = "classifier", n_estimators: Optional[int] = None,
+         lr_bounds: Optional[Tuple[float, float]] = None) -> Dict:
     """
     Optuna で探索する。df は「テスト窓より前」のデータだけを渡すこと。
 
@@ -460,11 +484,16 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
     返すのは LGBMClassifier にそのまま渡せる辞書。
     探索の記録は tune_cv() で別に取る（返り値に混ぜると、
     そのまま LGBMClassifier に渡したときに未知の引数で落ちる）。
-    n_estimators は各分割の early stopping が決めた本数の中央値。
+
+    木の本数は探索中ずっと固定する。既定は SEARCH_N_ESTIMATORS（本番の週次実行が
+    使う値）。n_estimators / lr_bounds は本数や学習率の範囲を変えて比べる実験のためで、
+    lr_bounds を渡さなければ学習率の範囲は本数に合わせる（lr_range）。
     """
     import optuna
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
+    n_trees = SEARCH_N_ESTIMATORS if n_estimators is None else int(n_estimators)
+    lr_lo, lr_hi = lr_range(n_trees) if lr_bounds is None else map(float, lr_bounds)
     if model == "ranker" and scheme != "year_cap_date":
         raise SystemExit(
             "LTR は日付単位の分割が必須です（--cv year_cap_date）。"
@@ -492,7 +521,8 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
         ja = {"year": "年で層別", "year_cap": "年×時価総額帯で層別",
               "year_cap_date": "年×時価総額帯で層別・日付単位で分割",
               "cap": "時価総額帯で層別", "timeseries": "時系列"}[scheme]
-        print(f"  [tune] {ja}{len(folds)}分割 / 木{SEARCH_N_ESTIMATORS}本固定")
+        print(f"  [tune] {ja}{len(folds)}分割 / 木{n_trees}本固定 / "
+              f"学習率 {lr_lo:g}〜{lr_hi:g}")
         print("  [tune] " + " / ".join(
             f"訓練{len(t):,}→検証{len(v):,}(正例{int(v['label'].sum())})"
             for t, v in folds))
@@ -500,7 +530,8 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
     def objective(trial):
         params = {
             **FIXED,
-            "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.2,
+            "n_estimators": n_trees,
+            "learning_rate": trial.suggest_float("learning_rate", lr_lo, lr_hi,
                                                  log=True),
             "num_leaves": trial.suggest_int("num_leaves", 7, 127, log=True),
             "min_child_samples": trial.suggest_int("min_child_samples", 10, 300,
@@ -539,11 +570,12 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
 
     best = {**FIXED, **study.best_params, "subsample_freq": 1}
     # 木の本数は探索中ずっと固定なので、そのまま採用する
-    best["n_estimators"] = SEARCH_N_ESTIMATORS
+    best["n_estimators"] = n_trees
     at = study.best_trial.user_attrs
     global LAST_CV
     LAST_CV = {"scheme": scheme, "model": model,
-               "n_estimators": SEARCH_N_ESTIMATORS,
+               "n_estimators": n_trees,
+               "lr_range": [lr_lo, lr_hi],
                "n_splits": len(folds), "mean_pr_auc": round(study.best_value, 4),
                "std": round(float(at.get("score_std", 0.0)), 4),
                "fold_scores": at.get("fold_scores", []),

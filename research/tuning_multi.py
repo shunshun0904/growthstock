@@ -18,7 +18,8 @@ lgbm と条件を完全に揃える
               （tuning.year_folds(scheme="year_cap_date") と同じ）
   目的関数    分割平均の PR-AUC
   試行数      50
-  木の本数    200 で固定（lgbm の SEARCH_N_ESTIMATORS と同じ）
+  木の本数    200 で固定（N_ESTIMATORS。本番の LightGBM は 2026-09-25 から 500 で、
+              こことは別の値。理由は N_ESTIMATORS の注記）
               early stopping で決めると検証窓のばらつきが本数に乗り、
               試行ごとに「別の大きさのモデル」を比べることになる
   探索期間    ホールドアウト（直近12ヶ月）より手前だけ
@@ -87,10 +88,21 @@ CATEGORICAL = ("s33_code", "s17_code", "mkt_code", "scalecat_code")
 #:   has_dividend 等 二値なのでそのまま
 ORDINAL_KEEP = ("cap_band",)
 
-#: 木の本数。lgbm の探索と同じ値に固定する
-N_ESTIMATORS = tuning.SEARCH_N_ESTIMATORS      # 200
+#: 木の本数（xgb / cat / rf と、比べる用の lgbm）。200 で固定する。
+#:
+#: 2026-09-25 まで本番の LightGBM の探索（tuning.SEARCH_N_ESTIMATORS）と同じ値を参照
+#: していた。本番を 500 にしたとき（運用者の指示）、ここは 200 のまま切り離した。
+#: 週次の再学習（retrain-weekly.yml）は1つのジョブで本番の探索と追加モデルの探索を
+#: 続けて回し、ジョブの上限は330分。追加モデルの探索まで500本にすると、見込みで
+#: 上限に収まらない（docs/MODEL_ADOPTION_RULES.md §12）。
+#:
+#: 変えるときは、前の本数で探索した結果を使い回さない作りになっている
+#: （e15_tune_all.why_retune・study_name・train_multi.untuned が本数を見る）。
+N_ESTIMATORS = 200
 SEED = 0
 ALGOS = ("lgbm", "xgb", "cat", "logit", "mlp")
+#: 木の本数が結果を変えるモデル。探索の記録と study 名で本数を突き合わせる
+TREE_ALGOS = ("lgbm", "xgb", "cat", "rf")
 
 
 # --------------------------------------------------------------------------- #
@@ -326,9 +338,12 @@ def fit_eval(algo: str, params: Dict, tr: pd.DataFrame, va: pd.DataFrame,
 def study_name(algo: str, n_splits: int, train_to: str, cols: List[str]) -> str:
     """
     Optuna の study 名。「解こうとしている問題」を表すものだけで作る
-    （モデル・分割数・訓練データの最終日・列）。理由は tune() の中の注記。
+    （モデル・分割数・訓練データの最終日・列、木のモデルは木の本数も）。
+    理由は tune() の中の注記。
     """
-    return f"{algo}_s{n_splits}_{train_to}_{F.signature(cols)}"
+    name = f"{algo}_s{n_splits}_{train_to}_{F.signature(cols)}"
+    # 本数を変えて同じ週に探索し直したとき、前の本数で測った試行を引き継がない
+    return name + (f"_t{N_ESTIMATORS}" if algo in TREE_ALGOS else "")
 
 
 def tune(algo: str, df: pd.DataFrame, cols: List[str], *, n_trials: int = 50,

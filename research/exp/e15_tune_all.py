@@ -58,7 +58,8 @@ from train_model import EMBARGO_DAYS, HOLDOUT_MONTHS, holdout_bounds  # noqa: E4
 N_TRIALS = 50
 
 
-def why_retune(prev: dict, train_to: str, sig: str) -> Optional[str]:
+def why_retune(prev: dict, train_to: str, sig: str,
+               trees: Optional[int] = None) -> Optional[str]:
     """
     保存済みの探索（prev = multi_params.json の _cv）を使えるか。
     使えるなら None、探索し直すなら理由を返す。
@@ -66,12 +67,18 @@ def why_retune(prev: dict, train_to: str, sig: str) -> Optional[str]:
     訓練データの最終日と、探索した列の両方が同じときだけ使う。
     列の条件が無かったころは、153列 -> 205列 に切り替えても同じ週なら
     153列で探索したパラメータを使い続けるところだった。
+
+    trees は木のモデルの本数（tuning_multi.N_ESTIMATORS）。木の無いモデルは None。
+    本数が違う探索も使わない（学習は今の本数で組むので、別の本数で選んだ
+    パラメータを当てはめることになる）。
     """
     if not prev:
         return "探索済みパラメータが無い"
     if prev.get("features_sig") != sig:
         return (f"探索した列が違う（{prev.get('n_features', '?')}列・指紋 "
                 f"{prev.get('features_sig', 'なし')} -> {sig}）")
+    if trees is not None and prev.get("n_estimators") != trees:
+        return f"探索した木の本数が違う（{prev.get('n_estimators')}本 -> {trees}本）"
     if prev.get("train_to") != train_to:
         return f"訓練最終日が {prev.get('train_to')} から {train_to} に動いた"
     return None
@@ -114,7 +121,8 @@ def main() -> int:
         # なら同じ答えになるだけで、時間だけ掛かる。
         # 日付が動いていれば母集団が変わっているので50試行やり直す
         # （通常の週次実行では5営業日ぶん進むので、必ず探索が走る）
-        why = why_retune(prev, train_to, sig)
+        why = why_retune(prev, train_to, sig,
+                         TM.N_ESTIMATORS if algo in TM.TREE_ALGOS else None)
         if why is None and not force:
             print(f"  [{algo}] 探索済みを読む "
                   f"(PR-AUC {prev['mean_pr_auc']:.4f} / 訓練最終日 {train_to})")

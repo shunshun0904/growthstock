@@ -240,6 +240,15 @@ def main(argv=None) -> int:
     if why:
         raise SystemExit(f"パラメータ {args.params} は学習する列（{args.features}）で"
                          f"探索したものではありません: {why}")
+    # 木の本数も探索したときと同じであること（2026-09-25 に 200 -> 500）。
+    # 探索の記録には探索したときの本数が入っているので、そのまま学習すれば記録どおりの
+    # 本数になるが、それだと本数を変えても前の本数のモデルが黙って作られ続ける
+    if rec.get("n_estimators") != tuning.SEARCH_N_ESTIMATORS:
+        raise SystemExit(
+            f"パラメータ {args.params} は木{rec.get('n_estimators')}本で探索したものです"
+            f"（今の本数は {tuning.SEARCH_N_ESTIMATORS}本。tuning.SEARCH_N_ESTIMATORS）。"
+            f"run_tuning.py --features {args.features} で探索し直す"
+            "（週次の再学習なら tune=yes）")
     params = tuning.params_for(args.params)
     ds = pd.read_parquet(args.dataset)
     ds["Date"] = pd.to_datetime(ds["Date"])

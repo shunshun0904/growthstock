@@ -115,6 +115,10 @@ def untuned(algos: List[str], store: Dict, cols: List[str]) -> Dict[str, str]:
             continue
         cv = store[a].get("_cv", {})
         why = tuning.tuned_mismatch(cv.get("features_sig"), cv.get("n_features"), cols)
+        # 学習は今の本数（TM.N_ESTIMATORS）で組むので、別の本数で探索したパラメータは使わない
+        if not why and a in TM.TREE_ALGOS and cv.get("n_estimators") != TM.N_ESTIMATORS:
+            why = (f"探索した木の本数 {cv.get('n_estimators')} と学習する本数 "
+                   f"{TM.N_ESTIMATORS} が違います")
         if why:
             out[a] = why
     return out
