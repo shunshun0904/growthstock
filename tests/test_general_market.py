@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 TOKYO PRO MARKET（TPM）から一般市場へ移った銘柄の「78週の履歴」と、上場からの年数
-（運用者の選択 A と ①、2026-09-25）のテスト。
+（運用者の選択 A と ②、2026-09-25）のテスト。
 
 J-Quants は TPM の銘柄にも日足の行を持つが、値はほぼ空。移った銘柄は、その空の行も
 368本の履歴に数えられ、実際には9か月ほどの高値が「78週高値」になっていた（5537）。
@@ -36,13 +36,17 @@ DAYS = pd.bdate_range("2019-01-01", periods=1000)
 MOVE = 400                        # 行 400 から一般市場（その前は TPM で値はほぼ空）
 
 
-def bars_for(code: str, priced) -> pd.DataFrame:
+def bars_for_days(days, code: str, priced) -> pd.DataFrame:
     """priced[i] が True の行だけ値がある日足（高値 = 終値 = 100 + i）。"""
-    px = np.where(priced, 100.0 + np.arange(len(DAYS)), np.nan)
-    return pd.DataFrame({"Date": DAYS, "Code": code, "O": px, "H": px, "L": px, "C": px,
+    px = np.where(priced, 100.0 + np.arange(len(days)), np.nan)
+    return pd.DataFrame({"Date": days, "Code": code, "O": px, "H": px, "L": px, "C": px,
                          "Vo": np.where(priced, 1000.0, np.nan),
                          "AdjO": px, "AdjH": px, "AdjL": px, "AdjC": px,
                          "AdjVo": np.where(priced, 1000.0, np.nan)})
+
+
+def bars_for(code: str, priced) -> pd.DataFrame:
+    return bars_for_days(DAYS, code, priced)
 
 
 def mover_priced():
@@ -211,35 +215,69 @@ class TestSwitch(unittest.TestCase):
 
 
 class TestListingYears(unittest.TestCase):
+    """
+    上場からの年数（運用者の選択 ②: 5年で打ち止め）。打ち止めの年数は
+    B.LISTING_CAP_YEARS から読み、それを超える例を必ず含める（打ち止めを外した実装が
+    素通りしないように）。
+    """
+
+    LONG = pd.bdate_range("2016-10-03", periods=2400)         # 約9.2年
+
     @classmethod
     def setUpClass(cls):
-        extra = bars_for("55550", np.r_[np.zeros(300, dtype=bool), np.ones(700, dtype=bool)])
-        extra = extra.iloc[300:]                          # データの途中で新規上場
-        early = bars_for("66660", np.ones(len(DAYS), dtype=bool)).iloc[100:]   # 3年を超える
-        cls.gm = B.general_market_start(pd.concat([all_bars(), extra, early], ignore_index=True),
-                                        segments())
+        L_ = cls.LONG
+
+        def bars(code, first, priced=None):
+            p = np.ones(len(L_), dtype=bool) if priced is None else priced
+            b = bars_for_days(L_, code, p)
+            return b.iloc[first:]
+
+        mover = np.zeros(len(L_), dtype=bool)
+        mover[0] = True
+        mover[500:] = True
+        seg_rows = []
+        for d in pd.date_range(L_[0], L_[-1], freq="BME"):
+            seg_rows.append({"Date": d, "Code": "11110",
+                             "MktNm": B.TPM_NAME if d < L_[500] else "グロース"})
+            seg_rows.append({"Date": d, "Code": "33330", "MktNm": B.TPM_NAME})
+        cls.gm = B.general_market_start(pd.concat([
+            bars("11110", 0, mover),                 # 行500で TPM から移る
+            bars("22220", 0),                        # データの初日から（上場日は不明）
+            bars("33330", 0, np.eye(1, len(L_), 0, dtype=bool)[0]),   # まだ TPM
+            bars("55550", 300),                      # 行300に新規上場
+        ], ignore_index=True), pd.DataFrame(seg_rows))
+        cls.cap = B.LISTING_CAP_YEARS
 
     def years(self, code, i):
-        return float(B.listing_years(pd.Series([code]), pd.Series([DAYS[i]]), self.gm)[0])
+        return float(B.listing_years(pd.Series([code]), pd.Series([self.LONG[i]]), self.gm)[0])
 
-    def test_new_listing_counts_from_its_first_row_and_caps_at_three(self):
-        self.assertAlmostEqual(self.years("55550", 300 + 261),
-                               (DAYS[561] - DAYS[300]).days / 365.25)
-        # 上場から3年を超えたら 3 で打ち止め（行100に上場、行999は約3.4年後）
-        self.assertGreater((DAYS[999] - DAYS[100]).days / 365.25, 3.0)
-        self.assertEqual(self.years("66660", 999), 3.0)
-        self.assertLess(self.years("66660", 500), 3.0)
+    def row_after(self, i0, years):
+        """行 i0 から years 年たった最初の行。"""
+        t = self.LONG[i0] + pd.DateOffset(days=int(np.ceil(years * 365.25)))
+        return int(np.searchsorted(self.LONG.values, t.to_datetime64()))
+
+    def test_cap_is_five_years(self):
+        self.assertEqual(self.cap, 5.0)
+
+    def test_new_listing_counts_from_its_first_row_and_caps(self):
+        self.assertAlmostEqual(self.years("55550", 561),
+                               (self.LONG[561] - self.LONG[300]).days / 365.25)
+        over = self.row_after(300, self.cap + 0.5)
+        self.assertLess(over, len(self.LONG))
+        self.assertEqual(self.years("55550", over), self.cap)
+        self.assertLess(self.years("55550", self.row_after(300, self.cap - 0.5)), self.cap)
 
     def test_mover_counts_from_the_general_market(self):
-        self.assertAlmostEqual(self.years("11110", 800), (DAYS[800] - DAYS[MOVE]).days / 365.25)
+        self.assertAlmostEqual(self.years("11110", 900),
+                               (self.LONG[900] - self.LONG[500]).days / 365.25)
 
-    def test_listing_before_the_data_is_unknown_until_three_years_pass(self):
-        three = int(np.searchsorted(DAYS.values, (DAYS[0] + pd.DateOffset(years=3)).to_datetime64()))
-        self.assertTrue(np.isnan(self.years("22220", three - 1)))
-        self.assertEqual(self.years("22220", three), 3.0)
+    def test_listing_before_the_data_is_unknown_until_the_cap_passes(self):
+        k = self.row_after(0, self.cap)
+        self.assertTrue(np.isnan(self.years("22220", k - 1)))
+        self.assertEqual(self.years("22220", k), self.cap)
 
     def test_still_tpm_is_missing(self):
-        self.assertTrue(np.isnan(self.years("33330", 999)))
+        self.assertTrue(np.isnan(self.years("33330", 2399)))
 
 
 if __name__ == "__main__":

@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
 実験47: TOKYO PRO MARKET（TPM）の時期の行を78週の履歴に数えない（運用者の選択 A）と、
-上場からの年数（運用者の選択 ①）を入れると、分離力と運用の規則での取引がどう変わるか。
+上場からの年数（運用者の選択 ②）を入れると、分離力と運用の規則での取引がどう変わるか。
 
 A: J-Quants は TPM の銘柄にも日足の行を持つが値はほぼ空で、一般市場へ移った銘柄は
    その空の行も368本の履歴に数えられていた（5537 は約9か月の高値が「78週高値」に）。
    build_dataset.GENERAL_MARKET_START=True で、最後に TPM だった月末の後の最初の値から数える。
-①: listing_years = 一般市場に上場（TPM から移行）してからの年数。3年で打ち止め。
-   2016-10 より前から上場している銘柄は 2019-10 までは欠測、その後は 3。
+②: listing_years = 一般市場に上場（TPM から移行）してからの年数。5年で打ち止め
+   （2026-09-25 に①の3年から変えた）。2016-10 より前から上場している銘柄は 2021-10 までは
+   欠測、その後は 5。欠測が 2018〜2021年に偏るので、欠測そのものが「時期」の目印になる。
+   対照 P は同じ日の中で入れ替えるので時期の情報は残る。L − P で銘柄ごとの情報だけを読む
 
 腕
   T  新しい母集団（GENERAL_MARKET_START=True）・本番の205列       ← 比べる基準
@@ -89,12 +91,15 @@ def coverage(fa: pd.DataFrame) -> None:
     ly = fa["listing_years"]
     y = fa["Date"].dt.year
     print("\n■ 2. 上場からの年数の充足（年ごと）と、帯ごとの正例率（参考）")
-    print(f"  {'年':<6}{'行':>7}{'値あり':>8}{'3年未満':>9}")
+    cap = B.LISTING_CAP_YEARS
+    print(f"  打ち止め {cap:g}年")
+    print(f"  {'年':<6}{'行':>7}{'値あり':>8}{'打ち止め未満':>12}")
     for yr, g in fa.groupby(y):
         v = g["listing_years"]
-        print(f"  {yr:<6}{len(g):>7}{v.notna().mean()*100:>7.1f}%{(v < 3).mean()*100:>8.1f}%")
-    band = pd.cut(ly, [0, 1.5, 2, 2.5, 3, 3.0001], right=False,
-                  labels=["<1.5", "1.5-2", "2-2.5", "2.5-3", "3(打ち止め)"])
+        print(f"  {yr:<6}{len(g):>7}{v.notna().mean()*100:>7.1f}%{(v < cap).mean()*100:>11.1f}%")
+    edges = sorted({e for e in (0.0, 1.5, 2.0, 3.0, 4.0) if e < cap} | {cap, cap + 1e-4})
+    names = [f"{a:g}-{b:g}" for a, b in zip(edges[:-2], edges[1:-1])] + [f"{cap:g}(打ち止め)"]
+    band = pd.cut(ly, edges, right=False, labels=names)
     t = fa.groupby(band.cat.add_categories("欠測").fillna("欠測"),
                    observed=False)["label"].agg(["size", "mean"])
     for name, r in t.iterrows():

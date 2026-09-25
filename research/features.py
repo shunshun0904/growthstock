@@ -200,9 +200,9 @@ GROUPS: Dict[str, List[str]] = {
     "progress_seasonal": ["progress_ratio", "progress_pct"],
     #: 置き換えの腕用。progress_vs_base の位置に順位だけを置く
     "progress_seasonal_pct": ["progress_pct"],
-    #: 一般市場に上場（TOKYO PRO MARKET から移行）してからの年数。3年で打ち止め。
-    #: 2016-10 より前から上場している銘柄は、2019-10 までは欠測・その後は 3
-    #: （J-Quants では上場日が見えないため。運用者の選択 ①。実験47の候補）
+    #: 一般市場に上場（TOKYO PRO MARKET から移行）してからの年数。5年で打ち止め。
+    #: 2016-10 より前から上場している銘柄は、2021-10 までは欠測・その後は 5
+    #: （J-Quants では上場日が見えないため。運用者の選択 ②。実験47の候補）
     "listing": ["listing_years"],
 }
 
