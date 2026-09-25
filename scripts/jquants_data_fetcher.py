@@ -95,7 +95,8 @@ SRC_NA = "unavailable"
 #                     ForecastProfit->FNP       ForecastEarningsPerShare->FEPS
 #                     NumberOfIssuedAndOutstandingShares...->ShOutFY
 #                     NumberOfTreasuryStock...->TrShFY
-#                     (V2 で新設) ROE ... 自己資本利益率が直接提供される
+#                     (V2 で新設) ROE ... 自己資本利益率。**小数**（0.06 = 6%）で、
+#                     本決算の行にだけ入る。% に直してから使う
 #
 #  /markets/margin-interest
 #                     LongMarginTradeVolume->LongVol
@@ -517,8 +518,54 @@ def quarterize(statements: Sequence[dict]) -> List[dict]:
     return sorted(result, key=lambda r: (r.get("disclosedDate") or "", r["fiscalYearStart"], r["quarter"]))
 
 
+def _fiscal_key(r: dict) -> tuple:
+    """会計期間の順（事業年度の開始日, 四半期）。開示日の順ではない。"""
+    return (r.get("fiscalYearStart") or "", r["quarter"])
+
+
+def _previous_fy(hist: Sequence[dict], fy: str) -> Optional[str]:
+    """hist にある事業年度のうち、fy の直前のもの。"""
+    older = [r.get("fiscalYearStart") or "" for r in hist if (r.get("fiscalYearStart") or "") < fy]
+    return max(older) if older else None
+
+
+def last_four_quarters(hist: Sequence[dict], latest: dict) -> Optional[List[dict]]:
+    """
+    latest で終わる**連続した**直近4四半期（会計期間の順）。1つでも欠けていれば None。
+
+    開示日の順で最後の4行を取ってはいけない。過去の四半期を後から出し直した
+    （訂正・再提出）銘柄では、その古い四半期が「最近の開示」として紛れ込み、
+    直近の四半期が押し出される（2026-09-25 に 9081 神奈川中央交通で実際に起きた:
+    2024年度の本決算を 2025-12-01 に再提出していて、直近4四半期に 2024年度4Q が入り、
+    2025年度2Q が抜けていた。営業利益率 5.55% が 3.91%、ROE 5.20% が 2.22% になった）。
+    """
+    by = {_fiscal_key(r): r for r in hist}
+    fy, q = latest.get("fiscalYearStart") or "", latest["quarter"]
+    seq = []
+    for i in range(4):
+        r = by.get((fy, q))
+        if r is None:
+            return None
+        seq.append(r)
+        if i == 3:
+            break
+        q -= 1
+        if q == 0:
+            fy = _previous_fy(hist, fy)
+            if fy is None:
+                return None
+            q = 4
+    return list(reversed(seq))
+
+
 def fundamental_metrics(quarters: Sequence[dict], as_of: Optional[str] = None) -> Dict[str, Any]:
-    """指定日時点で「開示済み」の決算のみを使って財務指標を算出する。"""
+    """
+    指定日時点で「開示済み」の決算のみを使って財務指標を算出する。
+
+    過去の時点（タイムマシーン）では、quarters も**その日までの開示だけで**
+    作ったもの（fundamentals_as_of）を渡すこと。後日の訂正で置き換わった
+    四半期を、訂正前の日付で見てしまわないため。
+    """
     hist = rows_upto(quarters, "disclosedDate", as_of) if as_of else list(quarters)
     out: Dict[str, Any] = {
         "epsGrowth": None, "salesGrowth": None, "roe": None, "opMargin": None,
@@ -529,7 +576,8 @@ def fundamental_metrics(quarters: Sequence[dict], as_of: Optional[str] = None) -
     if not hist:
         return out
 
-    latest = hist[-1]
+    # 最新 = 会計期間がいちばん新しい四半期（開示日がいちばん新しい行ではない）
+    latest = max(hist, key=_fiscal_key)
     out["quarter"] = latest["quarter"]
     out["fiscalPeriod"] = latest["period"]
     out["disclosedDate"] = latest["disclosedDate"]
@@ -538,33 +586,39 @@ def fundamental_metrics(quarters: Sequence[dict], as_of: Optional[str] = None) -
         shares = latest["sharesIssued"] - (latest.get("treasuryShares") or 0)
         out["sharesOutstanding"] = shares if shares > 0 else None
 
-    # --- 前年同期比 (同一四半期どうしを比較) ---
+    # --- 前年同期比 (直前の事業年度の同じ四半期と比べる) ---
+    prev_fy = _previous_fy(hist, latest.get("fiscalYearStart") or "")
     prior_year = next(
-        (r for r in reversed(hist[:-1])
-         if r["quarter"] == latest["quarter"] and r["fiscalYearStart"] < latest["fiscalYearStart"]),
+        (r for r in hist
+         if r["quarter"] == latest["quarter"] and (r.get("fiscalYearStart") or "") == prev_fy),
         None,
-    )
+    ) if prev_fy else None
     if prior_year:
         out["epsGrowth"] = pct_change(latest.get("qEps"), prior_year.get("qEps"))
         out["salesGrowth"] = pct_change(latest.get("qNetSales"), prior_year.get("qNetSales"))
 
+    four = last_four_quarters(hist, latest)
+
     # --- ROE ---
-    # V2 の /fins/summary は ROE を直接提供する。提供値があればそれを使い、
-    # 無い場合のみ「直近4四半期の純利益合計 / 自己資本」で算出する。
-    if latest.get("reportedRoe") is not None:
-        out["roe"] = latest["reportedRoe"]
+    # どの時点・どの銘柄でも同じ定義になるよう、直近4四半期の純利益合計 / 自己資本 を
+    # 優先する。J-Quants の提供値（本決算の行にだけある）は、4四半期が揃わない
+    # ときだけ使う。提供値を先にすると、本決算の直後だけ定義が変わり、タイムマシーンの
+    # 時点どうしや銘柄どうしで別の物差しを比べることになる。
+    # 提供値は**小数**（0.06 = 6%）。% に直す（2026-09-25 まで直さずに使っていて、
+    # 本決算の直後の時点では ROE が100分の1になり「収益質」がほぼ0点になっていた）
+    equity = latest.get("equity")
+    ttm_np = [r.get("qProfit") for r in four] if four else []
+    if four and all(v is not None for v in ttm_np) and equity and equity > 0:
+        out["roe"] = sum(ttm_np) / equity * 100.0
+        out["roeBasis"] = "TTM純利益 / 自己資本 で算出"
+    elif latest.get("reportedRoe") is not None:
+        out["roe"] = latest["reportedRoe"] * 100.0
         out["roeBasis"] = "J-Quants 提供値 (ROE)"
-    else:
-        ttm = [r.get("qProfit") for r in hist[-4:]]
-        equity = latest.get("equity")
-        if len(ttm) == 4 and all(v is not None for v in ttm) and equity and equity > 0:
-            out["roe"] = sum(ttm) / equity * 100.0
-            out["roeBasis"] = "TTM純利益 / 自己資本 で算出"
 
     # --- 営業利益率: 直近4四半期 (TTM) を優先、不可なら当期累計 ---
-    ttm_op = [r.get("qOperatingProfit") for r in hist[-4:]]
-    ttm_sales = [r.get("qNetSales") for r in hist[-4:]]
-    if (len(ttm_op) == 4 and all(v is not None for v in ttm_op)
+    ttm_op = [r.get("qOperatingProfit") for r in four] if four else []
+    ttm_sales = [r.get("qNetSales") for r in four] if four else []
+    if (four and all(v is not None for v in ttm_op)
             and all(v is not None for v in ttm_sales) and sum(ttm_sales) > 0):
         out["opMargin"] = sum(ttm_op) / sum(ttm_sales) * 100.0
         out["opMarginBasis"] = "TTM (直近4四半期)"
@@ -581,12 +635,64 @@ def fundamental_metrics(quarters: Sequence[dict], as_of: Optional[str] = None) -
     return out
 
 
+def fundamentals_as_of(statements: Sequence[dict], as_of: Optional[str] = None) -> Dict[str, Any]:
+    """
+    その日までに開示された決算**だけで**四半期の表を作り直してから、財務指標を出す。
+
+    先に全期間で四半期の表を作ってから日付で切ると、後日の訂正で置き換わった
+    四半期が、訂正前の時点では丸ごと消える（訂正の開示日で並ぶため）。
+    """
+    rows = rows_upto(statements, "DiscDate", as_of) if as_of else list(statements)
+    return fundamental_metrics(quarterize(rows), as_of)
+
+
 # --------------------------------------------------------------------------- #
 # 指標算出 : 需給 (信用倍率)
 # --------------------------------------------------------------------------- #
 
-def credit_metrics(margin_rows: Sequence[dict], as_of: Optional[str] = None) -> Dict[str, Any]:
-    hist = rows_upto(margin_rows, "Date", as_of) if as_of else list(margin_rows)
+#: 週次の信用残は、基準日（通常は金曜）の**翌週の第2営業日**に公表される（JPX）。
+#: 予測モデルの結合（research/availability.py の MARGIN_PUBLISH_BD）と同じ規則
+MARGIN_PUBLISH_BD = 2
+
+
+def margin_published_on(ref_date: str, trading_days: Optional[Sequence[dt.date]] = None,
+                        n: int = MARGIN_PUBLISH_BD) -> str:
+    """
+    週次の信用残の行が公表される日（'YYYY-MM-DD'）。
+
+    翌週 = 基準日の次の月曜から。営業日は取引所カレンダー（trading_days）で数え、
+    カレンダーが覆っていない日は平日で数える（祝日を知らないぶん早くなりうる）。
+    research/availability.next_week_trading_day と同じ規則。
+    """
+    d = dt.date.fromisoformat(str(ref_date)[:10])
+    monday = d + dt.timedelta(days=7 - d.weekday())
+    days = sorted(trading_days or [])
+    if days and days[0] <= monday:
+        after = [x for x in days if x >= monday]
+        if len(after) >= n:
+            return after[n - 1].isoformat()
+    cur, k = monday, 0
+    while True:
+        if cur.weekday() < 5:
+            k += 1
+            if k == n:
+                return cur.isoformat()
+        cur += dt.timedelta(days=1)
+
+
+def credit_metrics(margin_rows: Sequence[dict], as_of: Optional[str] = None,
+                   trading_days: Optional[Sequence[dt.date]] = None) -> Dict[str, Any]:
+    """
+    指定日時点で**公表済み**の週次信用残から信用倍率を出す。
+
+    基準日（Date）で切ると、基準日の金曜から翌週火曜の公表までの間、まだ出ていない
+    週の値を使ってしまう（タイムマシーンの過去時点での先読み）。公表日で切る。
+    """
+    if as_of:
+        hist = [r for r in margin_rows
+                if r.get("Date") and margin_published_on(r["Date"], trading_days) <= as_of]
+    else:
+        hist = list(margin_rows)
     out: Dict[str, Any] = {
         "creditRatio": None, "marginLong": None, "marginShort": None, "marginDate": None,
     }
@@ -694,7 +800,8 @@ SNAPSHOT_OFFSETS = [("now", 0), ("m3", 91), ("m6", 183)]
 SNAPSHOT_LABELS = {"now": "現在", "m3": "3ヶ月前", "m6": "6ヶ月前"}
 
 
-def build_stock(client: JQuantsClient, raw_code: str, note: str = "") -> Dict[str, Any]:
+def build_stock(client: JQuantsClient, raw_code: str, note: str = "",
+                trading_days: Optional[Sequence[dt.date]] = None) -> Dict[str, Any]:
     code = normalize_code(raw_code)
     today = dt.date.today()
     date_from = (today - dt.timedelta(days=PRICE_LOOKBACK_DAYS)).isoformat()
@@ -726,8 +833,8 @@ def build_stock(client: JQuantsClient, raw_code: str, note: str = "") -> Dict[st
 
     def snapshot(as_of: Optional[str]) -> Dict[str, Any]:
         pm = price_metrics(quotes, as_of)
-        fm = fundamental_metrics(quarters, as_of)
-        cm = credit_metrics(margins, as_of)
+        fm = fundamentals_as_of(statements, as_of)
+        cm = credit_metrics(margins, as_of, trading_days)
         merged: Dict[str, Any] = {**pm, **fm, **cm}
         if pm.get("price") is not None and fm.get("sharesOutstanding"):
             merged["marketCap"] = pm["price"] * fm["sharesOutstanding"] / 1e8
@@ -785,6 +892,35 @@ def build_stock(client: JQuantsClient, raw_code: str, note: str = "") -> Dict[st
 # --------------------------------------------------------------------------- #
 # エントリポイント
 # --------------------------------------------------------------------------- #
+
+#: 取引所カレンダーの営業日の区分（J-Quants の HolDiv）。"1" 営業日 / "2" 半日立会。
+#: research/trading_calendar.TRADING_DIV と同じ
+TRADING_DIV = ("1", "2")
+
+
+def fetch_trading_days(client: JQuantsClient) -> List[dt.date]:
+    """/markets/calendar の営業日。取れなければ空（呼び出し側は平日で数える）。"""
+    today = dt.date.today()
+    start = today - dt.timedelta(days=MARGIN_LOOKBACK_DAYS + 30)
+    try:
+        rows = client.get_paginated(
+            "/markets/calendar", {"from": start.isoformat(), "to": today.isoformat()})
+    except JQuantsError as exc:
+        print(f"[warn] 取引所カレンダーを取れませんでした（平日で数える）: {exc}",
+              file=sys.stderr)
+        return []
+    days = []
+    for r in rows:
+        div = next((str(r[k]) for k in ("HolDiv", "HolidayDivision", "HolidayDiv")
+                    if r.get(k) is not None), "")
+        if div in TRADING_DIV and r.get("Date"):
+            try:
+                days.append(dt.date.fromisoformat(str(r["Date"])[:10]))
+            except ValueError:
+                continue
+    print(f"[calendar] 営業日 {len(days)}日（{start} 〜 {today}）")
+    return sorted(days)
+
 
 def load_watchlist(path: str) -> List[dict]:
     if not os.path.exists(path):
@@ -871,11 +1007,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # 取得ワークフローが毎回失敗して他の更新まで止まる
         print("[warn] 対象が0件です。空の stocks.json を書き出します")
 
+    # 信用残の公表日を営業日で数えるための取引所カレンダー（1回だけ取る）。
+    # 取れなければ平日で数える（祝日を知らないぶん公表日が早めになりうる）
+    trading_days = fetch_trading_days(client)
+
     stocks: List[dict] = []
     failures: List[dict] = []
     for item in targets:
         try:
-            stocks.append(build_stock(client, item["code"], item.get("note", "")))
+            stocks.append(build_stock(client, item["code"], item.get("note", ""),
+                                      trading_days))
         except AuthError:
             raise
         except (JQuantsError, KeyError, ValueError) as exc:
@@ -897,7 +1038,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "codeNormalization": "4桁コードは末尾に'0'を付加して5桁化 (仕様書 §3.1)",
             "tradingValue": "売買代金(億円) = 終値 × 出来高 / 1e8 (仕様書 §3.2-4)。API の TurnoverValue も turnoverValue に併記",
             "missingData": "取得できなかった指標は null。0 で埋めることはしない",
-            "pointInTime": "snapshots の各時点は、その日までに開示済みのデータのみで算出 (先読みなし)",
+            "pointInTime": "snapshots の各時点は、その日までに開示・公表済みのデータのみで算出 (先読みなし)。"
+                           "決算は開示日、週次の信用残は公表日（基準日の翌週の第2営業日）で切る",
             "apiVersion": "J-Quants API V2 (x-api-key 認証 / エンドポイントと列名は V1 から変更)",
         },
     }

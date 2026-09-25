@@ -16,7 +16,8 @@ sys.path.insert(0, os.path.join(ROOT, "research"))
 
 from jquants_data_fetcher import (  # noqa: E402
     build_milestones, credit_metrics, describe_secret, display_code,
-    fundamental_metrics, normalize_code, pct_change, price_metrics, quarterize,
+    fundamental_metrics, fundamentals_as_of, margin_published_on, normalize_code,
+    pct_change, price_metrics, quarterize,
 )
 
 
@@ -149,12 +150,29 @@ class TestQuarterize(unittest.TestCase):
         self.assertAlmostEqual(fm["roe"], 4.0)
         self.assertIn("TTM", fm["roeBasis"])
 
-    def test_roe_prefers_api_reported_value(self):
-        """V2 の /fins/summary は ROE を直接返すため、提供値があればそれを使う。"""
+    def test_roe_uses_ttm_even_when_api_value_exists(self):
+        """
+        提供値（本決算の行にだけある）より、直近4四半期の計算を優先する。
+        提供値を先にすると、本決算の直後の時点だけ ROE の定義が変わり、
+        タイムマシーンの時点どうし・銘柄どうしで別の物差しを比べることになる。
+        """
         rows = list(self.rows)
         rows[3] = statement("2024-04-01", "4Q", "2025-05-12", 520, 64, 40, 40.0,
                             Eq=1000, FOP=80, ShOutFY=1_000_000, TrShFY=50_000,
-                            ROE=12.5)
+                            ROE=0.125)
+        fm = fundamental_metrics(quarterize(rows), as_of="2025-05-31")
+        self.assertAlmostEqual(fm["roe"], 4.0)              # 40 / 1000
+        self.assertIn("TTM", fm["roeBasis"])
+
+    def test_api_roe_is_a_ratio_and_only_a_fallback(self):
+        """
+        J-Quants の ROE は**小数**（0.125 = 12.5%）。実データ（9081 の本決算で 0.06、
+        research/build_dataset.py も100倍している）で確かめた。4四半期が揃わない
+        ときだけ使い、% に直す。以前はこのテスト自体が「提供値は %」という誤った
+        前提（ROE=12.5）で書かれていて、100分の1の値を通していた。
+        """
+        rows = [statement("2024-04-01", "FY", "2025-05-12", 520, 64, 40, 40.0,
+                          Eq=1000, ROE=0.125)]
         fm = fundamental_metrics(quarterize(rows), as_of="2025-05-31")
         self.assertAlmostEqual(fm["roe"], 12.5)
         self.assertIn("提供値", fm["roeBasis"])
@@ -189,6 +207,113 @@ class TestQuarterize(unittest.TestCase):
         qs = quarterize(noise)
         self.assertTrue(all(r["disclosedDate"] != "2025-09-02" for r in qs))
 
+
+
+class TestRefiledPeriods(unittest.TestCase):
+    """
+    過去の決算を後から出し直した（訂正・再提出）銘柄で、直近の四半期がずれないこと。
+
+    2026-09-25 に 9081 神奈川中央交通で実際に起きた形を小さく再現する:
+    2024年度の本決算（2025-05-12）を 2025-12-01 に同じ数字で再提出。開示日の順に
+    最後の4行を取ると、2024年度4Q が紛れ込み 2025年度2Q が抜ける。
+    """
+
+    def setUp(self):
+        self.rows = [
+            statement("2024-04-01", "1Q", "2024-08-05", 100, 10, 6, 6.0),
+            statement("2024-04-01", "2Q", "2024-11-05", 220, 24, 15, 15.0),
+            statement("2024-04-01", "3Q", "2025-02-05", 360, 42, 26, 26.0),
+            # 4Q は赤字（単期 NP = 20 - 26 = -6）
+            statement("2024-04-01", "FY", "2025-05-12", 520, 50, 20, 20.0, Eq=1000),
+            statement("2025-04-01", "1Q", "2025-08-05", 140, 16, 10, 10.0, Eq=1010),
+            statement("2025-04-01", "2Q", "2025-11-05", 300, 36, 22, 22.0, Eq=1020),
+            # 2024年度の本決算を同じ数字で再提出
+            statement("2024-04-01", "FY", "2025-12-01", 520, 50, 20, 20.0, Eq=1000),
+            statement("2025-04-01", "3Q", "2026-02-05", 470, 57, 35, 35.0, Eq=1030,
+                      FOP=80),
+            # 4Q は赤字（単期 NP = 30 - 35 = -5）
+            statement("2025-04-01", "FY", "2026-05-10", 600, 70, 30, 30.0, Eq=1040),
+            statement("2026-04-01", "1Q", "2026-08-05", 150, 18, 11, 11.0, Eq=1050,
+                      FOP=90),
+        ]
+
+    def test_ttm_is_the_last_four_fiscal_quarters(self):
+        """
+        9081 と同じ形: 再提出（2025-12-01）の後に本決算と1Q が出た時点。開示日の順の
+        最後の4行は「2024年度4Q・2025年度3Q・2025年度4Q・2026年度1Q」で、2025年度2Q が
+        抜ける（修正前のコードは純利益 13 / ROE 1.24% を返していた）。
+        """
+        fm = fundamentals_as_of(self.rows, as_of="2026-09-01")
+        # 直近4四半期 = 2025年度2Q/3Q/4Q, 2026年度1Q
+        # 純利益 12 + 13 + (-5) + 11 = 31 / 自己資本 1050
+        self.assertAlmostEqual(fm["roe"], 31 / 1050 * 100)
+        # 営業利益 20 + 21 + 13 + 18 = 72 / 売上 160 + 170 + 130 + 150 = 610
+        self.assertAlmostEqual(fm["opMargin"], 72 / 610 * 100)
+        self.assertEqual(fm["opMarginBasis"], "TTM (直近4四半期)")
+        self.assertAlmostEqual(fm["salesGrowth"], (150 - 140) / 140 * 100)
+
+    def test_latest_is_the_latest_fiscal_period_not_the_latest_filing(self):
+        """再提出の直後でも「最新の決算」は 2025年度2Q（2024年度の本決算ではない）。"""
+        fm = fundamentals_as_of(self.rows, as_of="2025-12-15")
+        self.assertEqual(fm["fiscalPeriod"], "2Q")
+        self.assertEqual(fm["quarter"], 2)
+        # 前年同期比は 2024年度2Q（単期 売上 120）と比べる: 160 / 120 - 1
+        self.assertAlmostEqual(fm["salesGrowth"], (160 - 120) / 120 * 100)
+
+    def test_ttm_right_after_the_refiling(self):
+        """再提出の直後の時点でも、4四半期は 2024年度3Q〜2025年度2Q。"""
+        fm = fundamentals_as_of(self.rows, as_of="2025-12-15")
+        # 純利益 11 + (-6) + 10 + 12 = 27 / 自己資本 1020
+        self.assertAlmostEqual(fm["roe"], 27 / 1020 * 100)
+
+    def test_past_snapshot_keeps_the_original_before_the_refiling(self):
+        """
+        再提出の前の時点では、元の開示（2025-05-12）が見えていた。後日の再提出で
+        置き換わったせいで、その時点から 2024年度の本決算が消えてはいけない。
+        """
+        fm = fundamentals_as_of(self.rows, as_of="2025-06-30")
+        self.assertEqual(fm["fiscalPeriod"], "FY")
+        self.assertEqual(fm["disclosedDate"], "2025-05-12")
+        # 2024年度 1Q〜4Q の純利益 6 + 9 + 11 + (-6) = 20 / 1000
+        self.assertAlmostEqual(fm["roe"], 20 / 1000 * 100)
+
+    def test_yoy_needs_the_immediately_previous_year(self):
+        """前年の同じ四半期が無いとき、2年前と比べない。"""
+        rows = [
+            statement("2023-04-01", "1Q", "2023-08-05", 80, 8, 5, 5.0),
+            statement("2025-04-01", "1Q", "2025-08-05", 140, 16, 10, 10.0),
+            statement("2024-04-01", "2Q", "2024-11-05", 220, 24, 15, 15.0),
+        ]
+        fm = fundamentals_as_of(rows, as_of="2025-09-01")
+        self.assertEqual(fm["fiscalPeriod"], "1Q")
+        self.assertIsNone(fm["salesGrowth"])
+
+
+class TestMarginPublication(unittest.TestCase):
+    """週次の信用残は、基準日の翌週の第2営業日に公表される（予測モデルと同じ規則）。"""
+
+    def test_friday_is_published_on_the_next_tuesday(self):
+        self.assertEqual(margin_published_on("2025-08-01"), "2025-08-05")
+
+    def test_holiday_monday_moves_it_to_wednesday(self):
+        # 2025-09-15（月）は敬老の日。カレンダーがあれば 9/17（水）
+        days = [dt.date(2025, 9, d) for d in (11, 12, 16, 17, 18, 19)]
+        self.assertEqual(margin_published_on("2025-09-12", days), "2025-09-17")
+
+    def test_uses_weekdays_outside_the_calendar(self):
+        days = [dt.date(2026, 1, 5)]           # 覆っている範囲より後の基準日
+        self.assertEqual(margin_published_on("2026-03-06", days), "2026-03-10")
+
+    def test_week_is_not_used_before_it_is_published(self):
+        rows = [
+            {"Date": "2025-08-01", "LongVol": 1000, "ShrtVol": 500},
+            {"Date": "2025-08-08", "LongVol": 900, "ShrtVol": 600},
+        ]
+        # 8/8（金）の週は 8/12（火）に公表。8/11（月）の時点ではまだ 8/1 の週
+        self.assertAlmostEqual(credit_metrics(rows, as_of="2025-08-11")["creditRatio"], 2.0)
+        self.assertAlmostEqual(credit_metrics(rows, as_of="2025-08-12")["creditRatio"], 1.5)
+        # 基準日の当日（8/8）の時点でも、その週の値は使わない
+        self.assertEqual(credit_metrics(rows, as_of="2025-08-08")["marginDate"], "2025-08-01")
 
 class TestCreditMetrics(unittest.TestCase):
     def test_ratio(self):
