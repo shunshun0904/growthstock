@@ -6,8 +6,10 @@ name: Fetch JSF
 #   daily    DATA ページの CSV（残高・品貸料率・制限措置）。残高は前営業日の申込日の確報で、
 #            昼（実測 12:21 JST）に更新される。平日 13:05 JST に起動する（実際の起動は
 #            +4〜5.6時間遅れて 17〜19時ごろ）。夜の予測より前に積むため
-#   history  銘柄ごとの過去（3年。それより前は非公開）。1銘柄3リクエスト・間隔2秒。
-#            1回 400銘柄（約50分）ずつ、毎日の実行の続きで取る（約4,300銘柄で11回ほど）
+#   history  銘柄ごとの過去（3年。それより前は非公開）。1銘柄3リクエスト・間隔2秒で、
+#            実測 1銘柄約8.4秒（2026-09-25 run 36126899236、30銘柄で4分13秒）。
+#            1回 45分（約320銘柄）ずつ、毎日の実行の続きで取る（東証の約4,250銘柄で14回ほど）。
+#            50銘柄ごとに保存するので、打ち切られてもそれまでの分は残る
 #
 # data-raw とは別の Release に置く。取り込み・週次学習は data-raw の全ファイルを落として
 # まとめて上げ直すので、同じ Release に置くと、その間にここで積んだ分を古い版で潰しうる。
@@ -95,7 +97,8 @@ jobs:
         env:
           MAX_CODES: ${{ inputs.max_codes || '400' }}
         run: |
-          python3 -u research/jsf_fetch.py history --max-codes "$MAX_CODES" 2>&1 | tee -a jsf.log
+          python3 -u research/jsf_fetch.py history --max-codes "$MAX_CODES" \
+            --time-budget 2700 2>&1 | tee -a jsf.log
           exit "${PIPESTATUS[0]}"
 
       - name: Upload (history)

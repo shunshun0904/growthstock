@@ -287,20 +287,49 @@ def fetch_one_history(f: PJ.Fetcher, code5: str, start: dt.date, end: dt.date
     return "ok", df
 
 
+def _flush(data_dir: str, m: dict, frames: List[pd.DataFrame], now: dt.datetime) -> int:
+    """取れた分を保存し、manifest も書く（途中で打ち切られても、ここまでの分は残る）。"""
+    if not frames:
+        save_manifest(data_dir, m)
+        return 0
+    new = pd.concat(frames, ignore_index=True, sort=False)
+    new["_fetched_at"] = now.isoformat()
+    allf, added = merge_store(os.path.join(data_dir, HIST["file"]), new, HIST["key"])
+    save_manifest(data_dir, m)
+    print(f"  [hist] 保存 {len(frames):,}銘柄・{len(new):,}行（{span(new['申込日'])}）/ 累計 "
+          f"{len(allf):,}行・{allf['code'].nunique():,}銘柄（+{added:,}行）")
+    frames.clear()
+    return added
+
+
 def fetch_history(f: PJ.Fetcher, data_dir: str, m: dict, codes: List[str], max_codes: int,
-                  years: float, now: Optional[dt.datetime] = None) -> Tuple[int, int]:
-    """(取りに行った銘柄数, 増えた行数)。済んだ銘柄は飛ばす。失敗は次回また試す。"""
+                  years: float, now: Optional[dt.datetime] = None,
+                  time_budget: Optional[float] = None, checkpoint: int = 50,
+                  clock: Callable[[], float] = None) -> Tuple[int, int]:
+    """
+    (取りに行った銘柄数, 増えた行数)。済んだ銘柄は飛ばす。失敗は次回また試す。
+
+    checkpoint 銘柄ごとに保存する。1銘柄に実測約8.4秒（3リクエスト）かかるので、
+    ステップの打ち切りに掛かっても、それまでの分は失わない。time_budget（秒）を過ぎたら
+    次の銘柄に進まない。
+    """
+    import time as _time
+    clock = clock or _time.monotonic
+    t0 = clock()
     now = now or dt.datetime.now(JST)
     end = now.date()
     start = end - dt.timedelta(days=int(365.25 * years))
     todo = [c for c in codes if m["hist"].get(c, {}).get("status") not in ("ok", "no_data")]
-    print(f"  取る銘柄 残り {len(todo):,} / {len(codes):,}（この実行の上限 {max_codes}）"
-          f" / 期間 {start} 〜 {end}")
+    print(f"  取る銘柄 残り {len(todo):,} / {len(codes):,}（この実行の上限 {max_codes}"
+          f"{f'・{time_budget / 60:.0f}分' if time_budget else ''}） / 期間 {start} 〜 {end}")
     frames: List[pd.DataFrame] = []
-    done = fails = 0
+    done = fails = added = 0
     for code in todo[:max_codes]:
         if f.used + 3 > f.max:
             print(f"  [stop] リクエストの上限 {f.max} に近い")
+            break
+        if time_budget is not None and clock() - t0 > time_budget:
+            print(f"  [stop] 時間の上限 {time_budget / 60:.0f}分に達した（{done}銘柄）")
             break
         status, df = fetch_one_history(f, code, start, end)
         done += 1
@@ -320,13 +349,9 @@ def fetch_history(f: PJ.Fetcher, data_dir: str, m: dict, codes: List[str], max_c
             if fails >= MAX_CONSECUTIVE_FAIL:
                 print(f"  [stop] {fails}銘柄続けて失敗（最後: {status}）。ここで止める")
                 break
-    added = 0
-    if frames:
-        new = pd.concat(frames, ignore_index=True, sort=False)
-        new["_fetched_at"] = now.isoformat()
-        allf, added = merge_store(os.path.join(data_dir, HIST["file"]), new, HIST["key"])
-        print(f"  [hist] 今回 {len(frames):,}銘柄・{len(new):,}行（{span(new['申込日'])}）/ 保存 "
-              f"{len(allf):,}行・{allf['code'].nunique():,}銘柄（+{added:,}行）")
+        if done % checkpoint == 0:
+            added += _flush(data_dir, m, frames, now)
+    added += _flush(data_dir, m, frames, now)
     st = pd.Series([v.get("status") for v in m["hist"].values()]).value_counts().to_dict()
     print(f"  [hist] 済み {st.get('ok', 0):,} / データ無し {st.get('no_data', 0):,} / "
           f"失敗（次回また試す）{st.get('error', 0):,} / 取る銘柄 {len(codes):,}")
@@ -352,6 +377,8 @@ def main(argv=None) -> int:
     ap.add_argument("--years", type=float, default=3.0, help="history で求める年数（公開は3年まで）")
     ap.add_argument("--pause", type=float, default=2.0, help="リクエストの間の秒数")
     ap.add_argument("--max-requests", type=int, default=1300)
+    ap.add_argument("--time-budget", type=float, default=None,
+                    help="history でこの秒数を過ぎたら次の銘柄に進まない（ステップの打ち切り対策）")
     args = ap.parse_args(argv)
 
     os.makedirs(args.data_dir, exist_ok=True)
@@ -372,7 +399,8 @@ def main(argv=None) -> int:
         if not codes:
             print("[stop] 取る銘柄が分からない（先に daily を回して残高の銘柄を得る）")
             return rc or 1
-        fetch_history(f, args.data_dir, m, codes, args.max_codes, args.years)
+        fetch_history(f, args.data_dir, m, codes, args.max_codes, args.years,
+                      time_budget=args.time_budget)
         save_manifest(args.data_dir, m)
     print(f"\n[done] 使ったリクエスト {f.used}（{PJ.now_jst()}）")
     return rc

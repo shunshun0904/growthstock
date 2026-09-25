@@ -279,6 +279,56 @@ class TestHistory(unittest.TestCase):
         self.assertEqual(sorted(h["code"].unique()), ["13010", "72030"])
 
 
+class TestHistoryRobustness(unittest.TestCase):
+    """打ち切られても、それまでの分を失わない（1銘柄に実測約8.4秒かかる）。"""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.codes = ["13010", "13050", "13060", "13080", "13090"]
+        self.site = history_site([c[:4] for c in self.codes])
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def test_checkpoint_keeps_what_was_fetched_before_a_kill(self):
+        real = J.fetch_one_history
+        calls = {"n": 0}
+
+        def killed_on_fifth(f, code, start, end):
+            calls["n"] += 1
+            if calls["n"] == 5:
+                raise KeyboardInterrupt        # ステップの打ち切りの代わり
+            return real(f, code, start, end)
+        J.fetch_one_history = killed_on_fifth
+        try:
+            f = PJ.Fetcher(100, 0, opener=self.site)
+            m = J.load_manifest(self.dir)
+            with self.assertRaises(KeyboardInterrupt):
+                printed(J.fetch_history, f, self.dir, m, self.codes, 10, 3.0, checkpoint=2)
+        finally:
+            J.fetch_one_history = real
+        h = pd.read_parquet(os.path.join(self.dir, "jsf_hist.parquet"))
+        self.assertEqual(sorted(h["code"].unique()), self.codes[:4])
+        with open(os.path.join(self.dir, J.MANIFEST), encoding="utf-8") as fh:
+            saved = json.load(fh)
+        self.assertEqual(sorted(saved["hist"]), self.codes[:4])     # 次回は5銘柄目から
+
+    def test_time_budget_stops_before_the_next_code(self):
+        t = {"now": 0.0}
+
+        def clock():
+            t["now"] += 10.0
+            return t["now"]
+        f = PJ.Fetcher(100, 0, opener=self.site)
+        m = J.load_manifest(self.dir)
+        (done, _), out = printed(J.fetch_history, f, self.dir, m, self.codes, 10, 3.0,
+                                 time_budget=25, clock=clock)
+        self.assertLess(done, len(self.codes))
+        self.assertIn("時間の上限", out)
+        h = pd.read_parquet(os.path.join(self.dir, "jsf_hist.parquet"))
+        self.assertEqual(h["code"].nunique(), done)
+
+
 class TestTargets(unittest.TestCase):
     def test_population_order_first(self):
         d = tempfile.mkdtemp()
