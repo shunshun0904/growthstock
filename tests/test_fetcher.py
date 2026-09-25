@@ -63,15 +63,58 @@ class TestPctChange(unittest.TestCase):
 
 
 class TestPriceMetrics(unittest.TestCase):
+    """
+    高値は78週（368営業日）。予測モデル（build_dataset.HIGH_WINDOW）と同じ窓・同じ条件:
+    その日を含む直近368本の日足の最高値、履歴が368本に満たない・窓の半分以上で高値が
+    無いときは出さない（2026-09-25 に 52週=365暦日 から変えた）。
+    make_quotes は1日1本なので、本数がそのまま営業日の数になる。
+    """
+
     def test_high_ratio_and_trading_value(self):
-        closes = list(range(1000, 1100))          # 単調上昇 -> 最終日が52週高値
-        q = make_quotes(closes, volumes=[200000] * 100)
+        closes = list(range(1000, 1400))          # 単調上昇 -> 最終日が78週高値
+        q = make_quotes(closes, volumes=[200000] * 400)
         m = price_metrics(q)
-        self.assertEqual(m["price"], 1099)
-        self.assertEqual(m["high52w"], 1099)
+        self.assertEqual(m["price"], 1399)
+        self.assertEqual(m["high52w"], 1399)      # 列名は互換のため high52w（中身は78週）
         self.assertAlmostEqual(m["highRatio"], 100.0)
-        # 売買代金 = 1099 * 200000 / 1e8 = 2.198 億円
-        self.assertAlmostEqual(m["tradingValue"], 1099 * 200000 / 1e8)
+        # 売買代金 = 1399 * 200000 / 1e8 億円
+        self.assertAlmostEqual(m["tradingValue"], 1399 * 200000 / 1e8)
+
+    def test_window_is_368_bars_not_52_weeks(self):
+        """
+        367本前の高値は窓に入り、368本前は入らない。52週（365暦日）で切ると
+        367本前（=367日前）の高値を落とすので、この2本で窓の長さを見分けられる。
+        """
+        n = 400
+        inside = [1000] * n
+        inside[n - 1 - 367] = 2000                # 367本前: 窓の中（最古の1本）
+        m = price_metrics(make_quotes(inside))
+        self.assertEqual(m["high52w"], 2000)
+        self.assertAlmostEqual(m["highRatio"], 50.0)
+        outside = [1000] * n
+        outside[n - 1 - 368] = 2000               # 368本前: 窓の外
+        m = price_metrics(make_quotes(outside))
+        self.assertEqual(m["high52w"], 1000)
+        self.assertAlmostEqual(m["highRatio"], 100.0)
+
+    def test_no_value_without_78_weeks_of_history(self):
+        """上場から368営業日に満たない銘柄は出さない（モデルもブレイクの母集団に入れない）。"""
+        m = price_metrics(make_quotes([1000] * 367))
+        self.assertIsNone(m["highRatio"])
+        self.assertIsNone(m["high52w"])
+        self.assertEqual(m["price"], 1000)        # 株価そのものは出す
+        self.assertIsNotNone(price_metrics(make_quotes([1000] * 368))["highRatio"])
+
+    def test_no_value_when_most_highs_are_missing(self):
+        """窓の半分以上で高値が無い（売買停止が長い）ときは出さない。"""
+        q = make_quotes([1000] * 400)
+        for r in q[-368:-183]:                    # 窓368本のうち185本の高値を消す
+            r["H"] = r["AdjH"] = None
+        self.assertIsNone(price_metrics(q)["highRatio"])
+        q = make_quotes([1000] * 400)
+        for r in q[-368:-184]:                    # 184本を消す（残り184本 = ちょうど半分）
+            r["H"] = r["AdjH"] = None
+        self.assertIsNotNone(price_metrics(q)["highRatio"])
 
     def test_volume_trend_excludes_latest_bar(self):
         # 直前20日が 100000、最終日が 300000 -> 300%
@@ -82,9 +125,9 @@ class TestPriceMetrics(unittest.TestCase):
         self.assertAlmostEqual(m["volumeTrend"], 300.0)
 
     def test_point_in_time_ignores_future_bars(self):
-        closes = [1000] * 50 + [2000] * 10        # 後半で急騰
+        closes = [1000] * 400 + [2000] * 10       # 後半で急騰
         q = make_quotes(closes)
-        as_of = q[49]["Date"]
+        as_of = q[399]["Date"]
         m = price_metrics(q, as_of=as_of)
         self.assertEqual(m["date"], as_of)
         self.assertEqual(m["price"], 1000)
@@ -355,18 +398,34 @@ class TestDescribeSecret(unittest.TestCase):
 
 class TestMilestones(unittest.TestCase):
     def test_detects_breakout_and_volume_spike(self):
-        base = dt.date.today() - dt.timedelta(days=80)
-        closes = [1000] * 60 + [1500]
-        vols = [100000] * 60 + [500000]
+        base = dt.date.today() - dt.timedelta(days=450)
+        closes = [1000] * 400 + [1500]
+        vols = [100000] * 400 + [500000]
         q = make_quotes(closes, vols, start=base.isoformat())
         events = build_milestones(q, [])
         kinds = {e["type"] for e in events}
         self.assertIn("breakout", kinds)
         self.assertIn("volume_spike", kinds)
+        title = next(e["title"] for e in events if e["type"] == "breakout")
+        self.assertEqual(title, "78週高値を更新")
+
+    def test_breakout_needs_78_weeks_before_it(self):
+        """前日までに368営業日の履歴が無い日の高値更新は、78週高値の更新とは言えない。"""
+        base = dt.date.today() - dt.timedelta(days=350)
+        closes = [1000] * 300 + [1500]
+        q = make_quotes(closes, [100000] * 301, start=base.isoformat())
+        self.assertNotIn("breakout", {e["type"] for e in build_milestones(q, [])})
+
+    def test_old_high_outside_the_window_does_not_block(self):
+        """369本前の高値（窓の外）は、上抜けの判定に使わない。"""
+        base = dt.date.today() - dt.timedelta(days=450)
+        closes = [3000] + [1000] * 399 + [1500]     # 先頭の 3000 は 400本前
+        q = make_quotes(closes, [100000] * 401, start=base.isoformat())
+        self.assertIn("breakout", {e["type"] for e in build_milestones(q, [])})
 
     def test_flat_series_produces_no_events(self):
-        base = dt.date.today() - dt.timedelta(days=80)
-        q = make_quotes([1000] * 60, [100000] * 60, start=base.isoformat())
+        base = dt.date.today() - dt.timedelta(days=450)
+        q = make_quotes([1000] * 400, [100000] * 400, start=base.isoformat())
         self.assertEqual(build_milestones(q, []), [])
 
 

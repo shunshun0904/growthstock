@@ -45,7 +45,9 @@ export function scoreOpMargin(opMargin) {
 }
 
 /**
- * 軸5: テクニカル (52週高値接近率 R_high)
+ * 軸5: テクニカル (78週高値接近率 R_high)
+ *   78週 = 368営業日。予測モデル（research/build_dataset.py の HIGH_WINDOW）と同じ窓。
+ *   2026-09-25 に仕様書の 52週から変えた（運用者の指示）
  *   R >= 98            -> 10.0
  *   90 <= R < 98       -> 8.0 + (R-90)/8  * 1.5
  *   80 <= R < 90       -> 6.0 + (R-80)/10 * 2.0
@@ -158,7 +160,7 @@ export function priceZone(highRatio) {
 }
 
 export const ZONE_META = {
-  BREAKOUT:   { label: 'BREAKOUT',   ja: 'ブレイクアウト', tone: 'violet', desc: '52週高値更新・青天井' },
+  BREAKOUT:   { label: 'BREAKOUT',   ja: 'ブレイクアウト', tone: 'violet', desc: '78週高値更新・青天井' },
   HANDLE:     { label: 'HANDLE',     ja: '取っ手形成',     tone: 'blue',   desc: 'Cup with Handle のハンドル形成圏' },
   BASE:       { label: 'BASE',       ja: '土台築造',       tone: 'green',  desc: 'ベース形成・底固め' },
   CORRECTION: { label: 'CORRECTION', ja: '調整中',         tone: 'amber',  desc: '深い調整・トレンド修復待ち' },
@@ -173,7 +175,7 @@ export const AXES = [
   { key: 'sales',     label: '売上成長',  full: '直近四半期売上高成長率', unit: '%',  metric: 'salesGrowth',  rule: 'S(x, 0, 40)' },
   { key: 'roe',       label: 'ROE',       full: 'ROE (自己資本利益率)',   unit: '%',  metric: 'roe',          rule: 'S(x, 5, 25)' },
   { key: 'margin',    label: '営業利益率', full: '営業利益率',             unit: '%',  metric: 'opMargin',     rule: 'S(x, 0, 20)' },
-  { key: 'technical', label: 'テクニカル', full: '52週高値接近率',         unit: '%',  metric: 'highRatio',    rule: '98%以上で満点' },
+  { key: 'technical', label: 'テクニカル', full: '78週高値接近率',         unit: '%',  metric: 'highRatio',    rule: '98%以上で満点' },
   { key: 'volume',    label: '出来高',    full: '出来高モメンタム',       unit: '%',  metric: 'volumeTrend',  rule: '機関参入度で減衰補正' },
   { key: 'supply',    label: '信用倍率',  full: '信用倍率',               unit: '倍', metric: 'creditRatio',  rule: '1.0倍以下で満点' },
   { key: 'progress',  label: '進捗期待',  full: '決算進捗率 vs 経過基準', unit: '%',  metric: 'progressRate', rule: '5.0 + (進捗率 - Q×25)/2' },

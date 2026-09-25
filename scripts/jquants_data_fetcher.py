@@ -63,7 +63,17 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_WATCHLIST = os.path.join(ROOT, "scripts", "watchlist.json")
 DEFAULT_OUTPUT = os.path.join(ROOT, "public", "data", "stocks.json")
 
-PRICE_LOOKBACK_DAYS = 640   # 52週高値を「6ヶ月前時点」でも算出するため 365 + 183 + 余裕
+#: 78週高値（368営業日 ≒ 550暦日）を「6ヶ月前時点」でも、タイムラインの直近1年の
+#: 高値更新でも出すため。550 + 365 + 余裕
+PRICE_LOOKBACK_DAYS = 950
+
+#: 高値の窓。予測モデル（research/build_dataset.py の HIGH_WINDOW）と同じ 368営業日（78週）。
+#: 2026-09-25 に 52週（365暦日）から変えた（運用者の指示）。予測モデルがブレイクと
+#: 判定するのと同じ物差しで、画面のテクニカル・ゾーン・高値更新を見るため
+HIGH_WINDOW_BARS = 368
+#: 窓の中で高値が付いた日がこの割合に満たなければ出さない（売買停止が長い銘柄）。
+#: モデルの MIN_WINDOW_COVERAGE と同じ
+HIGH_WINDOW_COVERAGE = 0.5
 MARGIN_LOOKBACK_DAYS = 400
 
 # 取得できなかった理由の分類
@@ -380,12 +390,14 @@ def price_metrics(quotes: Sequence[dict], as_of: Optional[str] = None) -> Dict[s
     price = pick(latest, "AdjC", "C")
     out["price"] = price
 
-    # 52週高値: 直近営業日から遡って 365日ぶんのバーの最高値
-    end = dt.date.fromisoformat(latest["Date"])
-    start = end - dt.timedelta(days=365)
-    window = [r for r in series if dt.date.fromisoformat(r["Date"]) >= start]
+    # 78週高値: その日を含む直近 368営業日（日足の行）の最高値。予測モデルと同じ窓・条件で、
+    # 履歴が 368営業日に満たない銘柄（上場から約1年半未満）と、窓の半分以上で高値が
+    # 無い銘柄は出さない（モデルも高値の基準が無いとしてブレイクの母集団に入れない）。
+    # 列名は画面・手入力の互換のため high52w のまま（中身は78週）
+    window = series[-HIGH_WINDOW_BARS:]
     highs = [h for h in (pick(r, "AdjH", "H") for r in window) if h is not None]
-    if highs:
+    if (len(series) >= HIGH_WINDOW_BARS
+            and len(highs) >= HIGH_WINDOW_BARS * HIGH_WINDOW_COVERAGE):
         out["high52w"] = max(highs)
         if price is not None and out["high52w"] > 0:
             out["highRatio"] = price / out["high52w"] * 100.0
@@ -745,7 +757,8 @@ def build_milestones(
             "detail": "（単一四半期換算）" + " / ".join(parts) if parts else "決算短信を開示",
         })
 
-    # 2) 52週高値更新 (BREAKOUT)
+    # 2) 78週高値更新 (BREAKOUT)。予測モデルのブレイク判定と同じく、前日までの
+    #    368営業日の最高値を終値で上抜けた日
     # 3) 出来高急増 (20日平均の2倍以上 かつ 陽線) = 機関投資家の参入痕跡候補
     prev_breakout: Optional[str] = None
     for i, row in enumerate(quotes):
@@ -758,10 +771,10 @@ def build_milestones(
         if close is None or vol is None:
             continue
 
-        start = dt.date.fromisoformat(d) - dt.timedelta(days=365)
-        window = [r for r in quotes[:i] if dt.date.fromisoformat(r["Date"]) >= start]
+        window = quotes[i - HIGH_WINDOW_BARS:i] if i >= HIGH_WINDOW_BARS else []
         highs = [h for h in (pick(r, "AdjH", "H") for r in window) if h is not None]
-        if highs and close > max(highs):
+        if (len(highs) >= HIGH_WINDOW_BARS * HIGH_WINDOW_COVERAGE
+                and close > max(highs)):
             # 直近30日以内に同種イベントがある場合はまとめる (毎日出さない)
             if prev_breakout is None or (
                 dt.date.fromisoformat(d) - dt.date.fromisoformat(prev_breakout)
@@ -769,8 +782,9 @@ def build_milestones(
                 events.append({
                     "date": d,
                     "type": "breakout",
-                    "title": "52週高値を更新",
-                    "detail": f"終値 {close:,.0f}円 が過去52週の最高値 {max(highs):,.0f}円 を上抜け",
+                    "title": "78週高値を更新",
+                    "detail": f"終値 {close:,.0f}円 が過去78週（368営業日）の最高値 "
+                              f"{max(highs):,.0f}円 を上抜け",
                 })
                 prev_breakout = d
 

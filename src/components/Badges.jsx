@@ -13,7 +13,7 @@ export function InstitutionalBadge({ level, compact = false }) {
 
 export function ZoneBadge({ zone, compact = false }) {
   const meta = ZONE_META[zone];
-  if (!meta) return <span className="chip" title="52週高値接近率が取得できていません">ゾーン —</span>;
+  if (!meta) return <span className="chip" title="78週高値接近率が取得できていません（上場から368営業日未満など）">ゾーン —</span>;
   return (
     <span className={`badge ${meta.tone}`} title={meta.desc}>
       {compact ? meta.label : `${meta.label} / ${meta.ja}`}

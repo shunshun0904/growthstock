@@ -131,8 +131,8 @@ function DetailPanel({ row }) {
           <div className="card-head"><h2>基本指標</h2></div>
           <dl style={{ margin: 0, display: 'grid', gap: 6 }}>
             <Row label="直近株価" value={m.price == null ? DASH : `${fmtInt(m.price)}円`} />
-            <Row label="52週高値" value={m.high52w == null ? DASH : `${fmtInt(m.high52w)}円`} />
-            <Row label="52週高値接近率" value={fmt(m.highRatio, 1, '%')} />
+            <Row label="78週高値" value={m.high52w == null ? DASH : `${fmtInt(m.high52w)}円`} />
+            <Row label="78週高値接近率" value={fmt(m.highRatio, 1, '%')} />
             <Row label="売買代金 (終値×出来高)" value={fmtOku(m.tradingValue)} />
             <Row label="売買代金 (API実績値)" value={fmtOku(m.turnoverValue)} />
             <Row label="時価総額" value={fmtOku(m.marketCap)} />

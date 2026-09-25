@@ -5,7 +5,7 @@ const FIELDS = [
   { key: 'name', label: '銘柄名', type: 'text', required: true, placeholder: 'レーザーテック' },
   { key: 'sector', label: '業種', type: 'text', placeholder: '電気機器' },
   { key: 'price', label: '株価', unit: '円' },
-  { key: 'highRatio', label: '52週高値接近率', unit: '%' },
+  { key: 'highRatio', label: '78週高値接近率', unit: '%' },
   { key: 'tradingValue', label: '売買代金', unit: '億円' },
   { key: 'marketCap', label: '時価総額', unit: '億円' },
   { key: 'volumeTrend', label: '出来高モメンタム', unit: '% (20日平均比)' },

@@ -50,7 +50,7 @@ export default function StockCard({ stock, result, color, visible, onToggle, onS
         <div className="metric-row"><dt>株価</dt><dd>{m.price === null || m.price === undefined ? DASH : `${fmtInt(m.price)}円`}</dd></div>
         <div className="metric-row"><dt>売買代金</dt><dd>{fmtOku(m.tradingValue)}</dd></div>
         <div className="metric-row"><dt>時価総額</dt><dd>{fmtOku(m.marketCap)}</dd></div>
-        <div className="metric-row"><dt>52週高値接近率</dt><dd>{fmt(m.highRatio, 1, '%')}</dd></div>
+        <div className="metric-row"><dt>78週高値接近率</dt><dd>{fmt(m.highRatio, 1, '%')}</dd></div>
       </dl>
 
       {stock.note && (

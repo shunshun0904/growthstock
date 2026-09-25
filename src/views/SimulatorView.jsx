@@ -11,7 +11,7 @@ const SLIDERS = [
   { key: 'salesGrowth',  label: '四半期売上成長率',  min: -30, max: 100, step: 1,    unit: '%',   fallback: 0 },
   { key: 'roe',          label: 'ROE',              min: -10, max: 50,  step: 0.5,  unit: '%',   fallback: 5 },
   { key: 'opMargin',     label: '営業利益率',        min: -20, max: 50,  step: 0.5,  unit: '%',   fallback: 0 },
-  { key: 'highRatio',    label: '52週高値接近率',    min: 30,  max: 105, step: 0.5,  unit: '%',   fallback: 80 },
+  { key: 'highRatio',    label: '78週高値接近率',    min: 30,  max: 105, step: 0.5,  unit: '%',   fallback: 80 },
   { key: 'volumeTrend',  label: '出来高モメンタム',  min: 0,   max: 400, step: 5,    unit: '%',   fallback: 100 },
   { key: 'creditRatio',  label: '信用倍率',          min: 0.1, max: 20,  step: 0.1,  unit: '倍',  fallback: 3 },
   { key: 'progressRate', label: '決算進捗率',        min: 0,   max: 150, step: 1,    unit: '%',   fallback: 50 },

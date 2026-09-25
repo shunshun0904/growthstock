@@ -212,7 +212,7 @@ await page.selectOption('#tm-stock', { label: '0001 テスト銘柄A' });
 await page.waitForTimeout(300);
 const tmBody = await page.textContent('body');
 check(tmBody.includes('6ヶ月前') && tmBody.includes('3ヶ月前'), '過去スナップショットが表示される');
-check(tmBody.includes('52週高値を更新'), 'ストーリータイムラインのイベントが表示される');
+check(tmBody.includes('78週高値を更新'), 'ストーリータイムラインのイベントが表示される');
 check(await page.locator('.recharts-line').count() >= 1, '株価推移チャートが描画される');
 await page.screenshot({ path: path.join(SHOTS, 'screenshot-timemachine.png') });
 
