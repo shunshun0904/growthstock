@@ -677,6 +677,76 @@ def listing_years(codes: pd.Series, dates: pd.Series, gm: pd.DataFrame,
     return np.where(np.asarray(yrs.fillna(0.0)) < 0, np.nan, out).astype(float)
 
 
+def add_vol_factors(df: pd.DataFrame, ret1: pd.Series) -> pd.DataFrame:
+    """
+    vol_20d を「どんな種類のボラか」に分解した列（実験51、2026-09-26 運用者の依頼）。
+
+    vol_20d は特徴量であると同時にラベルの到達しきい値（1.2σ×√20）の σ でもあるので、
+    モデルは「ボラが高い＝正例になりにくい」をほぼしきい値経由で学ぶ（実験50）。
+    水準そのものは vol_20d に任せ、ここでは比だけを持つ。
+      vol_rel_long   vol_20d ÷ vol_120d。いま異常に荒いのか、もともと荒い銘柄なのか
+      vol_rel_short  vol_5d ÷ vol_20d。ブレイク直前に膨らんだか、落ち着いてきたか
+      vol_updown     上昇日の半分散の平方根 ÷ 下落日の同じもの（20日）。上に跳ねて荒いのか、
+                     投げられて荒いのか。片方に日が無ければ欠測
+      vol_gap_ratio  寄り付きギャップの σ ÷ 日中レンジの σ（20日）。材料で飛んだのか、
+                     日中の売買で動いたのか。ギャップ = 始値 ÷ 前日終値 − 1、
+                     日中レンジ = log(高値 ÷ 安値)
+    市場・業種との比（vol_rel_mkt / vol_rel_sector）は指数を結合した後で作る
+    （attach_vol_vs_market）。すべて当日までの値だけで作る（先読みなし）。
+    """
+    codes = df["Code"]
+    gr = ret1.groupby(codes, sort=False)
+    vol_120 = gr.transform(lambda s: s.rolling(120, min_periods=90).std()) * 100.0
+    vol_5 = gr.transform(lambda s: s.rolling(5, min_periods=4).std()) * 100.0
+    df["vol_rel_long"] = _safe_ratio(df["vol_20d"], vol_120)
+    df["vol_rel_short"] = _safe_ratio(vol_5, df["vol_20d"])
+
+    up = ret1.clip(lower=0.0) ** 2
+    dn = ret1.clip(upper=0.0) ** 2
+    up_sd = np.sqrt(up.groupby(codes, sort=False).transform(
+        lambda s: s.rolling(20, min_periods=15).mean()))
+    dn_sd = np.sqrt(dn.groupby(codes, sort=False).transform(
+        lambda s: s.rolling(20, min_periods=15).mean()))
+    df["vol_updown"] = _safe_ratio(up_sd, dn_sd)
+
+    prev_close = df.groupby("Code", sort=False)["close"].shift(1)
+    if "open" not in df.columns:
+        # 始値の無い足（テストの合成データなど）ではギャップは作れない。欠測にする
+        df["vol_gap_ratio"] = np.nan
+        return df
+    gap = df["open"] / prev_close - 1.0
+    hl = df["high"].to_numpy(dtype=float), df["low"].to_numpy(dtype=float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        rng = np.log(np.where((hl[0] > 0) & (hl[1] > 0), hl[0] / hl[1], np.nan))
+    rng = pd.Series(rng, index=df.index)
+    gap_sd = gap.groupby(codes, sort=False).transform(lambda s: s.rolling(20, min_periods=15).std())
+    rng_sd = rng.groupby(codes, sort=False).transform(lambda s: s.rolling(20, min_periods=15).std())
+    df["vol_gap_ratio"] = _safe_ratio(gap_sd, rng_sd)
+    return df
+
+
+def _safe_ratio(a: pd.Series, b: pd.Series) -> pd.Series:
+    """a ÷ b。分母が 0・欠測なら欠測（0 で割った無限大を残さない）。"""
+    a = pd.to_numeric(a, errors="coerce")
+    b = pd.to_numeric(b, errors="coerce")
+    out = a / b.where(b > 0)
+    return out.replace([np.inf, -np.inf], np.nan)
+
+
+def attach_vol_vs_market(samples: pd.DataFrame) -> pd.DataFrame:
+    """
+    vol_20d を市場・業種のボラで割った比（実験51）。市場環境と業種指数を結合した後に呼ぶ。
+      vol_rel_mkt     vol_20d ÷ topix_vol_20
+      vol_rel_sector  vol_20d ÷ sector_vol_20（業種指数の20日ボラ。無ければ欠測）
+    """
+    samples["vol_rel_mkt"] = _safe_ratio(samples["vol_20d"], samples.get("topix_vol_20"))
+    sec = samples["sector_vol_20"] if "sector_vol_20" in samples.columns else np.nan
+    samples["vol_rel_sector"] = _safe_ratio(samples["vol_20d"], pd.Series(sec, index=samples.index))
+    for c in ("vol_rel_mkt", "vol_rel_sector"):
+        print(f"[merge] {c}: 欠測 {samples[c].isna().mean()*100:.1f}%")
+    return samples
+
+
 def price_panel(bars: pd.DataFrame, cfg: LabelConfig = DEFAULT_LABEL,
                 start: Optional[pd.Series] = None) -> pd.DataFrame:
     """
@@ -724,6 +794,7 @@ def price_panel(bars: pd.DataFrame, cfg: LabelConfig = DEFAULT_LABEL,
     _ret1 = df["close"] / g["close"].shift(1) - 1.0
     df["vol_20d"] = _ret1.groupby(df["Code"], sort=False).transform(
         lambda s: s.rolling(20, min_periods=15).std()) * 100.0
+    df = add_vol_factors(df, _ret1)
 
     # --- 52週高値（当日を含む / 含まない の2種類が要る） --- #
     # 含む  : 基準日時点の高値接近率 R_high の分母
@@ -2380,6 +2451,8 @@ def sector_index_returns(indices: pd.DataFrame) -> pd.DataFrame:
         col = wide[ix]
         out[(s33, 20)] = col.pct_change(20, fill_method=None) * 100
         out[(s33, 120)] = col.pct_change(120, fill_method=None) * 100
+        # 業種指数の20日ボラ（%）。銘柄のボラを業種で割る比（実験51）に使う
+        out[(s33, "vol20")] = col.pct_change(fill_method=None).rolling(20, min_periods=15).std() * 100
     if not out:
         return pd.DataFrame(index=wide.index)
     res = pd.DataFrame(out)
@@ -2401,7 +2474,8 @@ def attach_sector_index(samples: pd.DataFrame, indices: pd.DataFrame) -> pd.Data
     **日付内で銘柄ごとに値が変わる**。同じ日でも業種が違えば違う値になり、
     日付内の順位付けに効く。
     """
-    cols = ["sector_ret_20", "sector_ret_120", "rel_sector_20", "sector_vs_topix_20"]
+    cols = ["sector_ret_20", "sector_ret_120", "rel_sector_20", "sector_vs_topix_20",
+            "sector_vol_20"]
     if indices is None or indices.empty or "S33" not in samples.columns:
         if "S33" not in samples.columns:
             print("[warn] S33 が無いので業種指数は付与しない")
@@ -2420,7 +2494,7 @@ def attach_sector_index(samples: pd.DataFrame, indices: pd.DataFrame) -> pd.Data
     # ずれた場合は欠測になり、下の欠測率で気づける
     s33 = samples["S33"].astype(str).str.strip()
     dates = pd.to_datetime(samples["Date"])
-    for win in (20, 120):
+    for win, name in ((20, "sector_ret_20"), (120, "sector_ret_120"), ("vol20", "sector_vol_20")):
         sub = ret.xs(win, axis=1, level="win")
         idx = sub.index.get_indexer(dates)
         vals = np.full(len(samples), np.nan)
@@ -2430,7 +2504,7 @@ def attach_sector_index(samples: pd.DataFrame, indices: pd.DataFrame) -> pd.Data
         ok = (idx >= 0) & pd.notna(cpos)
         if ok.any():
             vals[ok] = arr[idx[ok], cpos[ok].astype(int)]
-        samples[f"sector_ret_{win}"] = vals
+        samples[name] = vals
 
     # 銘柄自身のリターンから業種ぶんを引く。
     # 木は特徴量どうしの引き算ができないので、差は明示的に列にする
@@ -2858,6 +2932,7 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     # sector_vs_topix_20 は topix_ret_20 を使うので、両方が揃ってからでないと作れない
     print("[merge] 業種指数を結合")
     samples = attach_sector_index(samples, indices)
+    samples = attach_vol_vs_market(samples)
 
     # --- 最終的な特徴量セット --- #
     samples["log_trading_value"] = np.log1p(samples["tv_ma20"])

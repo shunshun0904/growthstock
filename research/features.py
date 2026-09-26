@@ -204,6 +204,14 @@ GROUPS: Dict[str, List[str]] = {
     #: 2016-10 より前から上場している銘柄は、2021-10 までは欠測・その後は 5
     #: （J-Quants では上場日が見えないため。運用者の選択 ②。実験47の候補）
     "listing": ["listing_years"],
+    # --- ボラの分解（実験51、2026-09-26 運用者の依頼）---
+    # vol_20d は特徴量であると同時にラベルの到達しきい値の σ でもあるので、モデルは
+    # 「ボラが高い＝正例になりにくい」をほぼしきい値経由で学ぶ（実験50）。
+    # 水準は vol_20d に任せ、ここは「どんな種類のボラか」の比だけ。
+    #   ① 自分の平常との比 ② 市場・業種との比 ③ 上方÷下方 ④ 直前5日÷20日 ⑤ ギャップ÷日中
+    # 採否が決まるまで本番のプリセットには入れない（docs/MODEL_ADOPTION_RULES.md §7）
+    "vol_factors": ["vol_rel_long", "vol_rel_mkt", "vol_rel_sector", "vol_updown",
+                    "vol_rel_short", "vol_gap_ratio"],
 }
 
 #: 横断面正規化（同じ日付内でのパーセンタイル順位）を作る対象の列。
@@ -327,6 +335,9 @@ PRESETS: Dict[str, List[str]] = {
     "all_plus_listing": ALL_GROUPS + EXTRA_GROUPS + ["listing"],
     # --- 2026-09-25 から本番（運用者の決定。DEFAULT_PRESET の説明） --- #
     # 実験46 の B（progress_vs_base の位置に progress_pct）+ 実験47 の L（listing_years）。206列
+    # --- 2026-09-26 の候補（実験51）。本番の206列 + ボラの分解6列 --- #
+    "all_plus_prog_listing_vol": [("progress_seasonal_pct" if g == "progress" else g)
+                                  for g in ALL_GROUPS] + EXTRA_GROUPS + ["listing", "vol_factors"],
     "all_plus_prog_listing": [("progress_seasonal_pct" if g == "progress" else g)
                               for g in ALL_GROUPS] + EXTRA_GROUPS + ["listing"],
 
