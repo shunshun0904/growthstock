@@ -22,10 +22,13 @@ k=1.2 で正例率が変わらなかった。σ120 の正例率はここで出�
      −10% 未満・ボラの帯）と、参考の PR-AUC（自分のラベルで測ったものも並べる）
   2. xgb / cat: 窓の中の上位10%（件数そろえ）の平均収益と −10% 未満、L0 との窓ごとの差
   3. 運用規則: lgbm95 / 3モデル90 の選定（ops_rule）と、live_track の取引（ab_oof.rule_trades）
-     を B1 の組（lgbm B1 + xgb + cat）と B2 の組（lgbm B2 + xgb + cat）で
+     を B1 の組（lgbm B1 + xgb + cat）と B2 の組（lgbm B2 + xgb + cat）で。
+     --consensus 90,95,98 で 3モデル合議の百分位を変えたときも出す（運用者の問い 2026-09-26
+     「σ60でも、3モデル合議にするとどうなりますか？（3モデルとも95,98で）」）
 
   python3 research/exp/e55_label_sigma_full.py [--trials 50] [--shifts 0,2,4] [--seeds 3]
                                                [--arms L0,L1,L4] [--algos lgbm,xgb,cat] [--skip-tune]
+                                               [--consensus 90,95,98]
   結果は research/_data/oof/e55_*。探索の結果は e55_params.json（本番の設定には書かない）。
 """
 from __future__ import annotations
@@ -117,6 +120,21 @@ def oof(df: pd.DataFrame, cols: List[str], arm: str, fit: str, algo: str, shift:
     return o
 
 
+def rule_trades_at(oofs: Dict[str, pd.DataFrame], bars: pd.DataFrame, bar_days, agree: float) -> pd.DataFrame:
+    """ab_oof.rule_trades と同じ取引を、3モデル合議の百分位 agree を変えて取る。"""
+    base = None
+    for a in L.BOOST:
+        o = oofs[a][["Code", "Date", "fold", "label", "score"]].rename(columns={"score": f"s_{a}"})
+        o[f"p_{a}"] = L.pct_of(o[f"s_{a}"].to_numpy(), o[f"s_{a}"].to_numpy())
+        base = o if base is None else base.merge(o.drop(columns=["label", "fold"]),
+                                                 on=["Code", "Date"], how="inner")
+    base["score"] = base["s_lgbm"]
+    _, _, picks = L.decide(base, agree=agree)
+    pf = L.forward(bars, picks)
+    sim = L.simulate(pf, bar_days)
+    return sim[sim["taken"] == L.TAKEN].copy()
+
+
 def with_base_label(o: pd.DataFrame, df: pd.DataFrame) -> pd.DataFrame:
     """評価用: label を現行ラベル（y_L0）に置き換え、vol_20d を付ける。自分のラベルは own_label。"""
     m = o.rename(columns={"label": "own_label"}).merge(
@@ -136,7 +154,9 @@ def main(argv=None) -> int:
     ap.add_argument("--arms", default=",".join(ARMS))
     ap.add_argument("--algos", default=",".join(L.BOOST))
     ap.add_argument("--skip-tune", action="store_true", help="e55_params.json を読むだけ")
+    ap.add_argument("--consensus", default="90", help="3モデル合議の百分位（例 90,95,98）")
     args = ap.parse_args(argv)
+    pcts = [float(x) for x in args.consensus.split(",") if x.strip()]
     shifts = [int(x) for x in args.shifts.split(",") if x.strip()]
     seeds = E27.SEEDS3[:args.seeds]
     arms = [a for a in args.arms.split(",") if a]
@@ -291,21 +311,26 @@ def main(argv=None) -> int:
                     f"{i} {r['share']*100:.0f}% {r['ret']*100:+.1f}% {r['pos']*100:.0f}%" for i, r in t.iterrows()))
         if bars is not None:
             for fit in FITS:
-                print(f"  ◆ 運用規則（lgbm {fit} + xgb + cat）")
+                print(f"  ◆ 運用規則（lgbm {fit} + xgb + cat）。3モデル合議の百分位 {pcts}")
                 for a in arms:
                     oofs = {"lgbm": ev[a][f"lgbm_{fit}"], "xgb": ev[a]["xgb"], "cat": ev[a]["cat"]}
                     OR.report(oofs, label=f"    {LABELS[a]} / {FIT_JA[fit]}")
-                    t = AB.rule_trades(oofs, bars, bar_days)
                     lg = oofs["lgbm"]
                     n_days = sum(1 for d in bar_days if lg["Date"].min() <= d <= lg["Date"].max())
-                    st = L.trade_stats(t, n_days)
-                    per = t.groupby("fold")["ret"].mean() if len(t) else pd.Series(dtype=float)
-                    print(f"      live_track: 取引 {st['n']} / 1取引 {st['mean']:+.2f}% / 勝率 {st['win']:.0f}% / "
-                          f"月あたり {st['monthly']:+.2f}% / 窓の平均の最小 {(per.min() if len(per) else np.nan):+.2f}% / "
-                          f"平均が正の窓 {int((per > 0).sum())}/{len(per)}")
-                    trades.append({"shift": sh, "arm": a, "fit": fit, **{k: st[k] for k in ("n", "mean", "win", "monthly")},
-                                   "worst_fold": float(per.min()) if len(per) else np.nan,
-                                   "pos_folds": int((per > 0).sum()), "folds": int(len(per))})
+                    for pct in pcts:
+                        if pct != 90.0:
+                            c = OR.consensus(oofs, pct, models=L.BOOST)
+                            print(OR.fmt(f"3モデル {pct:g}以上", c))
+                        t = rule_trades_at(oofs, bars, bar_days, agree=pct)
+                        st = L.trade_stats(t, n_days)
+                        per = t.groupby("fold")["ret"].mean() if len(t) else pd.Series(dtype=float)
+                        print(f"      live_track（合議 {pct:g}）: 取引 {st['n']} / 1取引 {st['mean']:+.2f}% / 勝率 {st['win']:.0f}% / "
+                              f"月あたり {st['monthly']:+.2f}% / 窓の平均の最小 {(per.min() if len(per) else np.nan):+.2f}% / "
+                              f"平均が正の窓 {int((per > 0).sum())}/{len(per)}")
+                        trades.append({"shift": sh, "arm": a, "fit": fit, "agree": pct,
+                                       **{k: st[k] for k in ("n", "mean", "win", "monthly")},
+                                       "worst_fold": float(per.min()) if len(per) else np.nan,
+                                       "pos_folds": int((per > 0).sum()), "folds": int(len(per))})
 
     ed = pd.DataFrame(edges)
     ed.to_csv(os.path.join(OOF_DIR, "e55_edges.csv"), index=False)
@@ -327,13 +352,15 @@ def main(argv=None) -> int:
                           + f"（平均 {g[col].mean():+.2f}{unit}）/ {g['bad'].mean()*100:.1f}%")
         if trades:
             t = pd.DataFrame(trades)
-            print("  live_track の取引（切り方ごとの 1取引の平均 / 月あたり / 平均が正の窓）")
-            for fit in FITS:
-                for a in arms:
-                    g = t[(t["arm"] == a) & (t["fit"] == fit)]
-                    print(f"    {fit:<8}{LABELS[a]:<20}" + " / ".join(
-                        f"{r['mean']:+.2f}% {r['monthly']:+.2f}% {r['pos_folds']}/{r['folds']}" for _, r in g.iterrows())
-                        + f"（1取引の平均 {g['mean'].mean():+.2f}% / 月 {g['monthly'].mean():+.2f}%）")
+            for pct in pcts:
+                print(f"  live_track の取引（3モデル合議 {pct:g}。切り方ごとの 取引数 1取引の平均 / 月あたり / 平均が正の窓）")
+                for fit in FITS:
+                    for a in arms:
+                        g = t[(t["arm"] == a) & (t["fit"] == fit) & (t["agree"] == pct)]
+                        print(f"    {fit:<8}{LABELS[a]:<20}" + " / ".join(
+                            f"{int(r['n'])}件 {r['mean']:+.2f}% {r['monthly']:+.2f}% {r['pos_folds']}/{r['folds']}"
+                            for _, r in g.iterrows())
+                            + f"（取引 {int(g['n'].sum())} / 1取引の平均 {g['mean'].mean():+.2f}% / 月 {g['monthly'].mean():+.2f}%）")
     log(f"記録: {OOF_DIR}/e55_*")
     return 0
 
