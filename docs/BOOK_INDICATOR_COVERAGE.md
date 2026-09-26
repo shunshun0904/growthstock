@@ -223,3 +223,10 @@ J-Quants にも EDINET DB にも**経済統計は一つも無い**。この章�
   流動比率・固定比率・ギアリング・EBITDA・EV/EBITDA・シラーPER）は **案A: EDINET DB を今の枠
   （日100 / 月900）で貯め続ける**。すぐには足せない。母集団に多い順（`research/edinet_targets.txt`）で
   取っているので、母集団の行の半分を覆った時点で実験28（`research/edinet_features.py`）を回す
+
+## 実験56 の結果（2026-09-26）
+
+○ の12指標（27列）を本番の206列に足して §7 の手順で測った結果は `docs/MODEL_ADOPTION_RULES.md` §19。
+LightGBM の PR-AUC は改善せず（−0.0005）、xgb / cat は改善（+0.0027 / +0.0044）。**採用しない**。
+列は `features.GROUPS["fund_book"]` に残っており、対応表の ○ は「特徴量として作った（本番には
+入れていない）」に読み替える。
