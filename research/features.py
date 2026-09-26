@@ -213,10 +213,16 @@ GROUPS: Dict[str, List[str]] = {
     "vol_factors": ["vol_rel_long", "vol_rel_mkt", "vol_rel_sector", "vol_updown",
                     "vol_rel_short", "vol_gap_ratio"],
     # 本（ファンダメンタルズ分析の目次）の第2・3章で、取得済みの J-Quants から作れるのに
-    # 特徴量にしていなかった12列（docs/BOOK_INDICATOR_COVERAGE.md の ○。実験56）
-    "fund_book": ["cash_mcap", "cfi_mcap", "cff_mcap", "cfo_yoy_sym", "fcf_yoy_sym",
-                  "sustainable_growth", "equity_turnover", "div_growth_sym", "div_up",
-                  "bps_yoy", "shares_yoy", "acct_ifrs"],
+    # 特徴量にしていなかった12指標（docs/BOOK_INDICATOR_COVERAGE.md の ○。実験56）
+    # 各指標に 水準・直近の変化・その前の変化 の3つ（運用者の指示 2026-09-26）。27列
+    "fund_book": ["cash_mcap", "cash_chg1_sym", "cash_chg2_sym",
+                  "cfi_mcap", "cff_mcap",
+                  "cfo_yoy_sym", "cfo_yoy_sym_p1", "fcf_yoy_sym", "fcf_yoy_sym_p1",
+                  "cfi_yoy_sym", "cfi_yoy_sym_p1", "cff_yoy_sym", "cff_yoy_sym_p1",
+                  "sustainable_growth", "sustainable_growth_chg1", "sustainable_growth_chg2",
+                  "equity_turnover", "equity_turnover_chg1", "equity_turnover_chg2",
+                  "div_growth_sym", "div_growth_sym_p1", "div_up",
+                  "bps_yoy", "bps_yoy_p1", "shares_yoy", "shares_yoy_p1", "acct_ifrs"],
 }
 
 #: 横断面正規化（同じ日付内でのパーセンタイル順位）を作る対象の列。
@@ -343,7 +349,7 @@ PRESETS: Dict[str, List[str]] = {
     # --- 2026-09-26 の候補（実験51）。本番の206列 + ボラの分解6列 --- #
     "all_plus_prog_listing_vol": [("progress_seasonal_pct" if g == "progress" else g)
                                   for g in ALL_GROUPS] + EXTRA_GROUPS + ["listing", "vol_factors"],
-    # --- 2026-09-26 の候補（実験56）。本番の206列 + 本の第2・3章の抜け12列 --- #
+    # --- 2026-09-26 の候補（実験56）。本番の206列 + 本の第2・3章の抜け27列（12指標 × 水準・変化・その前の変化） --- #
     "all_plus_prog_listing_book": [("progress_seasonal_pct" if g == "progress" else g)
                                    for g in ALL_GROUPS] + EXTRA_GROUPS + ["listing", "fund_book"],
     "all_plus_prog_listing": [("progress_seasonal_pct" if g == "progress" else g)

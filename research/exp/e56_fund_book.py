@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 実験56: 本（ファンダメンタルズ分析の目次）の第2・3章で、取得済みの J-Quants から作れるのに
-特徴量にしていなかった12列（features.GROUPS["fund_book"]）を本番の206列に足して比べる。
+特徴量にしていなかった12指標（features.GROUPS["fund_book"]、27列）を本番の206列に足して比べる。
 
 運用者の指示（2026-09-26）「4章5章の優先は低くてよいです。2章と3章がほぼ全部網羅したいです」。
 対応表は docs/BOOK_INDICATOR_COVERAGE.md（○ の項目）。列の定義は build_dataset.add_book_ratios。
@@ -13,11 +13,14 @@
   div_growth_sym / div_up           増配率・増配フラグ
   bps_yoy / shares_yoy              BPS・株数の前年同期比（増資・自社株買い）
   acct_ifrs                         会計基準（IFRS/US なら1）
+運用者の追加指示（2026-09-26）で各指標に「水準・直近の変化・その前の変化」の3つを持たせた
+（_chg1 / _chg2 は前回開示との差、_p1 は1年前の前年同期比、cash_chg*_sym は開示された現金の
+対称変化率）。合わせて27列。
 
 腕（実験51 と同じ形。ab_oof.compare）
   T  本番の206列
-  B  T + 12列（218列）
-  P  対照: 同じ12列を日付内で入れ替えたもの（列の情報を壊して列数だけそろえる）
+  B  T + 27列（233列）
+  P  対照: 同じ27列を日付内で入れ替えたもの（列の情報を壊して列数だけそろえる）
 3モデル（lgbm / xgb / cat）× 種3つ × ずらし 0/2/4か月。判定は §7（LightGBM の PR-AUC が
 0.0048 超、xgb / cat も同じ向き）。実収益は運用の規則で記録。
 
@@ -44,14 +47,14 @@ from e44_shortsale import permuted  # noqa: E402
 BASE_PRESET = F.DEFAULT_PRESET
 BOOK_PRESET = "all_plus_prog_listing_book"
 NEW_COLS = list(F.GROUPS["fund_book"])
-LABELS = {"T": "T 本番の206列", "B": "B T + 本の12列", "P": "P 対照（12列を日付内で入れ替え）"}
+LABELS = {"T": "T 本番の206列", "B": "B T + 本の27列", "P": "P 対照（27列を日付内で入れ替え）"}
 PERM_SEED = 20260928
 OUT_COL = lab.OUTCOME
 
 
 def coverage(df: pd.DataFrame) -> None:
-    """12列の充足（年ごと）、既存の列との相関、正例率の5等分。"""
-    print("\n■ 1. 12列の充足（年ごと、値ありの割合）")
+    """27列の充足（年ごと）、既存の列との相関、正例率の5等分。"""
+    print("\n■ 1. 27列の充足（年ごと、値ありの割合）")
     yr = pd.to_datetime(df["Date"]).dt.year
     tab = df[NEW_COLS].notna().groupby(yr).mean() * 100
     print("  " + f"{'年':<6}" + "".join(f"{c:>18}" for c in NEW_COLS))
@@ -82,7 +85,7 @@ def coverage(df: pd.DataFrame) -> None:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="実験56: 本の第2・3章の抜け12列")
+    ap = argparse.ArgumentParser(description="実験56: 本の第2・3章の抜け27列")
     ap.add_argument("--shifts", default="0,2,4")
     ap.add_argument("--seeds", type=int, default=3)
     ap.add_argument("--algos", default=",".join(L.BOOST))
@@ -93,7 +96,7 @@ def main(argv=None) -> int:
 
     base = F.columns(BASE_PRESET)
     book = F.columns(BOOK_PRESET)
-    assert book == base + NEW_COLS, "B は T の後ろに12列を足しただけの並びにする"
+    assert book == base + NEW_COLS, "B は T の後ろに27列を足しただけの並びにする"
     df = lab.frame()
     df = df[df["label"].notna()].reset_index(drop=True)
     miss = [c for c in book if c not in df.columns]
@@ -101,7 +104,7 @@ def main(argv=None) -> int:
         raise SystemExit(f"データセットに無い列: {miss}。research/build_dataset.py を回し直してください")
 
     print("=" * 78)
-    print(f"実験56 本の第2・3章の抜け12列（種{len(seeds)}つ・ずらし {shifts}か月）: {len(df):,}件")
+    print(f"実験56 本の第2・3章の抜け27列（種{len(seeds)}つ・ずらし {shifts}か月）: {len(df):,}件")
     for arm, cols in (("T", base), ("B", book), ("P", book)):
         print(f"  {LABELS[arm]:<32}{len(cols)}列  指紋 {F.signature(cols)}")
     print("=" * 78)

@@ -51,7 +51,7 @@ class TestBookRatios(unittest.TestCase):
             self.assertIn(c, self.df.columns, c)
         self.assertEqual(set(F.GROUPS["fund_book"]),
                          {"cash_mcap", "cfi_mcap", "cff_mcap"} | (set(B.BOOK_COLS) - {"cash_eq_last", "cfi_cum", "cff_cum"}))
-        self.assertEqual(len(F.columns("all_plus_prog_listing_book")), 206 + 12)
+        self.assertEqual(len(F.columns("all_plus_prog_listing_book")), 206 + 27)
         for c in F.GROUPS["fund_book"]:
             self.assertIn(c, FD.COL_JA, c)
 
@@ -89,6 +89,42 @@ class TestBookRatios(unittest.TestCase):
         self.assertTrue((fy23["div_up"] == 1.0).all())
         self.assertTrue(np.allclose(fy23["bps_yoy"], 20.0))
         self.assertTrue(np.allclose(fy23["shares_yoy"], 10.0, atol=1e-9))
+
+    def test_lags_and_previous_year(self):
+        """3年度ぶんで、_p1（1年前の前年同期比）と _chg1/_chg2（前回開示との差）を確かめる。"""
+        rows = []
+        for fy, base, roe in ((2021, 80.0, 8.0), (2022, 100.0, 10.0), (2023, 120.0, 12.0)):
+            for q in (1, 2, 3, 4):
+                rows.append({"Code": "10000", "CurFYSt": pd.Timestamp(f"{fy}-04-01"), "quarter": q,
+                             "DiscDate": pd.Timestamp(f"{fy}-04-01") + pd.DateOffset(months=3 * q + 1),
+                             "DocType": "1QFinancialStatements_Consolidated_JP",
+                             "ROE": roe, "payout_ratio": 50.0, "sales_ttm": 1000.0, "Eq": base * 5,
+                             "dps": base / 10.0, "BPS": base, "shares_out": 1000.0,
+                             "CashEq": (base * 3 if q in (2, 4) else np.nan),
+                             "CFO": base * q, "CFI": -base * q / 2, "CFF": -base})
+        df = pd.DataFrame(rows).sort_values(["Code", "DiscDate"]).reset_index(drop=True)
+        out = B.add_book_ratios(df)
+        fy23 = out[out["CurFYSt"] == pd.Timestamp("2023-04-01")].set_index("quarter")
+        # 1年前の前年同期比: FY2022 の 1Q vs FY2021 の 1Q（CFO 100 vs 80 → 20/180）
+        self.assertAlmostEqual(fy23.loc[1, "cfo_yoy_sym_p1"], 20 / 180 * 100, places=6)
+        self.assertAlmostEqual(fy23.loc[1, "cfo_yoy_sym"], 20 / 220 * 100, places=6)
+        self.assertAlmostEqual(fy23.loc[1, "cff_yoy_sym"], (-120 + 100) / 220 * 100, places=6)
+        self.assertAlmostEqual(fy23.loc[1, "bps_yoy_p1"], 25.0, places=6)
+        self.assertAlmostEqual(fy23.loc[1, "div_growth_sym_p1"], 2 / 18 * 100, places=6)
+        self.assertAlmostEqual(fy23.loc[1, "shares_yoy_p1"], 0.0, places=9)
+        # 前回開示との差: FY2023 1Q の持続可能成長率 6.0、前回（FY2022 4Q）5.0、2回前 5.0
+        self.assertAlmostEqual(fy23.loc[1, "sustainable_growth_chg1"], 1.0, places=9)
+        self.assertAlmostEqual(fy23.loc[1, "sustainable_growth_chg2"], 0.0, places=9)
+        # 株主資本回転率 1000/600=1.667 vs 1000/500=2.0 → chg1 = −0.333
+        self.assertAlmostEqual(fy23.loc[1, "equity_turnover_chg1"], 1000 / 600 - 2.0, places=9)
+        # 現金: FY2023 2Q で開示 360、1回前 300（FY2022 4Q）、2回前 300（FY2022 2Q）
+        self.assertAlmostEqual(fy23.loc[2, "cash_chg1_sym"], 60 / 660 * 100, places=6)
+        self.assertAlmostEqual(fy23.loc[2, "cash_chg2_sym"], 0.0, places=9)
+        # 開示の無い 3Q は 2Q の組を引き継ぐ
+        self.assertAlmostEqual(fy23.loc[3, "cash_chg1_sym"], 60 / 660 * 100, places=6)
+        # 最初の年度は前が無い
+        fy21 = out[out["CurFYSt"] == pd.Timestamp("2021-04-01")]
+        self.assertTrue(fy21["cfo_yoy_sym_p1"].isna().all())
 
     def test_sym_change_edges(self):
         cur = pd.Series([1.0, -1.0, 0.0, np.nan])

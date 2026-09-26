@@ -1860,9 +1860,18 @@ def attach_fins(samples: pd.DataFrame, q: pd.DataFrame) -> pd.DataFrame:
 #: 本（ファンダメンタルズ分析の目次）の第2・3章で、取得済みの J-Quants の項目から作れるのに
 #: 特徴量にしていなかったもの（docs/BOOK_INDICATOR_COVERAGE.md の ○）。運用者の指示
 #: （2026-09-26「2章と3章がほぼ全部網羅したい」）。features.GROUPS["fund_book"]
-BOOK_COLS = ["cash_eq_last", "cfi_cum", "cff_cum", "cfo_yoy_sym", "fcf_yoy_sym",
-             "sustainable_growth", "equity_turnover", "div_growth_sym", "div_up",
-             "bps_yoy", "shares_yoy", "acct_ifrs"]
+#: 運用者の追加指示（2026-09-26「直近と1期前、1期前と2期前の増減率も」）: 各指標に
+#: 水準・直近の変化・その前の変化の3つを持たせる。水準が「開示ごと」の比率（持続可能成長率・
+#: 株主資本回転率）は前回開示との差（fund_* の chg1 / chg2 と同じ）、金額（現金）は対称変化率、
+#: 年次比較のもの（CF・配当・BPS・株数の前年同期比）は「1年前の前年同期比」（_p1）
+BOOK_COLS = ["cash_eq_last", "cash_chg1_sym", "cash_chg2_sym",
+             "cfi_cum", "cff_cum",
+             "cfo_yoy_sym", "cfo_yoy_sym_p1", "fcf_yoy_sym", "fcf_yoy_sym_p1",
+             "cfi_yoy_sym", "cfi_yoy_sym_p1", "cff_yoy_sym", "cff_yoy_sym_p1",
+             "sustainable_growth", "sustainable_growth_chg1", "sustainable_growth_chg2",
+             "equity_turnover", "equity_turnover_chg1", "equity_turnover_chg2",
+             "div_growth_sym", "div_growth_sym_p1", "div_up",
+             "bps_yoy", "bps_yoy_p1", "shares_yoy", "shares_yoy_p1", "acct_ifrs"]
 
 
 def _sym_change(cur: pd.Series, prev: pd.Series) -> pd.Series:
@@ -1903,10 +1912,20 @@ def add_book_ratios(df: pd.DataFrame, adj: Optional[pd.DataFrame] = None) -> pd.
                 else pd.Series(np.nan, index=df.index))
 
     if "CashEq" in df.columns:
-        df["cash_eq_last"] = g_code["CashEq"].transform(
-            lambda s: pd.to_numeric(s, errors="coerce").ffill(limit=3))
+        cash = pd.to_numeric(df["CashEq"], errors="coerce")
+        df["cash_eq_last"] = cash.groupby(df["Code"], sort=False).transform(
+            lambda s: s.ffill(limit=3))
+        # 1回前・2回前に「開示された」現金（開示の無い行には直近の組をそのまま引き継ぐ）
+        def known_shift(s: pd.Series, k: int) -> pd.Series:
+            v = s.dropna()
+            return v.shift(k).reindex(s.index).ffill(limit=3)
+        c1 = cash.groupby(df["Code"], sort=False).transform(lambda s: known_shift(s, 1))
+        c2 = cash.groupby(df["Code"], sort=False).transform(lambda s: known_shift(s, 2))
+        df["cash_chg1_sym"] = _sym_change(df["cash_eq_last"], c1)
+        df["cash_chg2_sym"] = _sym_change(c1, c2)
     else:
-        df["cash_eq_last"] = np.nan
+        for c in ("cash_eq_last", "cash_chg1_sym", "cash_chg2_sym"):
+            df[c] = np.nan
     df["cfi_cum"] = col("CFI")
     df["cff_cum"] = col("CFF")
 
@@ -1918,6 +1937,13 @@ def add_book_ratios(df: pd.DataFrame, adj: Optional[pd.DataFrame] = None) -> pd.
     eq = col("Eq")
     df["equity_turnover"] = clip_divergent(
         col("sales_ttm") / eq.where(eq > 0), 0.0, 100.0, "equity_turnover")
+    # 前回開示との差（fund_* の chg1 / chg2 と同じ取り方。df は Code / DiscDate 順）
+    for name in ("sustainable_growth", "equity_turnover"):
+        q0 = df[name]
+        q1 = g_code[name].shift(1)
+        q2 = g_code[name].shift(2)
+        df[f"{name}_chg1"] = q0 - q1
+        df[f"{name}_chg2"] = q1 - q2
 
     if "DocType" in df.columns:
         std = df["DocType"].astype(str).str.extract(r"_(JP|IFRS|US|Foreign)$")[0]
@@ -1928,7 +1954,7 @@ def add_book_ratios(df: pd.DataFrame, adj: Optional[pd.DataFrame] = None) -> pd.
     # 前年同期比: 同じ四半期の1つ前の事業年度（sales_growth と同じ並べ方）。
     # 並べ替えた写しで shift し、index で元の並びに戻す
     tmp = df.sort_values(["Code", "quarter", "CurFYSt"], kind="mergesort")
-    for name in ("CFO", "CFI", "dps", "BPS", "shares_out"):
+    for name in ("CFO", "CFI", "CFF", "dps", "BPS", "shares_out"):
         tmp[name] = (pd.to_numeric(tmp[name], errors="coerce") if name in tmp.columns
                      else np.nan)
     tmp["_fcf"] = tmp["CFO"] + tmp["CFI"]
@@ -1953,21 +1979,31 @@ def add_book_ratios(df: pd.DataFrame, adj: Optional[pd.DataFrame] = None) -> pd.
     tmp["BPS"] = tmp["BPS"] / tmp["_adj"]
     by_cq = tmp.groupby(["Code", "quarter"], sort=False)
 
-    def prev_of(name: str) -> pd.Series:
-        return by_cq[name].shift(1).reindex(df.index)
+    def prev_of(name: str, k: int = 1) -> pd.Series:
+        return by_cq[name].shift(k).reindex(df.index)
 
-    df["cfo_yoy_sym"] = _sym_change(col("CFO"), prev_of("CFO"))
-    df["fcf_yoy_sym"] = _sym_change(col("CFO") + col("CFI"), prev_of("_fcf"))
-    dps, dps_prev = col("dps"), prev_of("dps")
+    # 前年同期比（_yoy）と、1年前の前年同期比（_p1。2年前 → 1年前）
+    for src, dst in (("CFO", "cfo"), ("_fcf", "fcf"), ("CFI", "cfi"), ("CFF", "cff")):
+        cur = tmp[src].reindex(df.index)
+        df[f"{dst}_yoy_sym"] = _sym_change(cur, prev_of(src, 1))
+        df[f"{dst}_yoy_sym_p1"] = _sym_change(prev_of(src, 1), prev_of(src, 2))
+    dps, dps_prev, dps_prev2 = col("dps"), prev_of("dps", 1), prev_of("dps", 2)
     df["div_growth_sym"] = _sym_change(dps, dps_prev)
+    df["div_growth_sym_p1"] = _sym_change(dps_prev, dps_prev2)
     df["div_up"] = np.where(dps.notna() & dps_prev.notna(), (dps > dps_prev).astype(float), np.nan)
+
+    def pct_change(cur: pd.Series, prev: pd.Series) -> pd.Series:
+        return (cur - prev) / prev.where(prev > 0) * 100.0
+
     # 今の値も調整後（tmp 側）で比べる
-    bps, bps_prev = tmp["BPS"].reindex(df.index), prev_of("BPS")
-    df["bps_yoy"] = clip_divergent((bps - bps_prev) / bps_prev.where(bps_prev > 0) * 100.0,
-                                   -100.0, 300.0, "bps_yoy")
-    sh, sh_prev = tmp["shares_out"].reindex(df.index), prev_of("shares_out")
-    df["shares_yoy"] = clip_divergent((sh - sh_prev) / sh_prev.where(sh_prev > 0) * 100.0,
-                                      -50.0, 200.0, "shares_yoy")
+    bps = tmp["BPS"].reindex(df.index)
+    df["bps_yoy"] = clip_divergent(pct_change(bps, prev_of("BPS", 1)), -100.0, 300.0, "bps_yoy")
+    df["bps_yoy_p1"] = clip_divergent(pct_change(prev_of("BPS", 1), prev_of("BPS", 2)),
+                                      -100.0, 300.0, "bps_yoy_p1")
+    sh = tmp["shares_out"].reindex(df.index)
+    df["shares_yoy"] = clip_divergent(pct_change(sh, prev_of("shares_out", 1)), -50.0, 200.0, "shares_yoy")
+    df["shares_yoy_p1"] = clip_divergent(pct_change(prev_of("shares_out", 1), prev_of("shares_out", 2)),
+                                         -50.0, 200.0, "shares_yoy_p1")
     return df
 
 
