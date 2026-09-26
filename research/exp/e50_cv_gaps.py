@@ -265,6 +265,35 @@ def feature_diff(X: np.ndarray, a: np.ndarray, b: np.ndarray, cols: Sequence[str
     return out
 
 
+def stratified_diff(X: np.ndarray, a: np.ndarray, b: np.ndarray, cols: Sequence[str],
+                    strata: np.ndarray, min_n: int = 10) -> pd.DataFrame:
+    """
+    帯（strata）の中だけで比べた順位の差。帯ごとの AUC を、帯の小さいほうの群の件数で
+    重み付けして平均する。帯の効き目（例: ボラの高低）を除いた違いを見るため。
+    same = 全体と同じ向きだった帯の数 / 使えた帯の数。
+    """
+    rows = []
+    for j, c in enumerate(cols):
+        aucs, ws = [], []
+        for s_ in np.unique(strata[~pd.isna(strata)]):
+            m = strata == s_
+            xa, xb = X[a & m, j], X[b & m, j]
+            na, nb = int((~np.isnan(xa)).sum()), int((~np.isnan(xb)).sum())
+            if min(na, nb) < min_n:
+                continue
+            aucs.append(rank_auc(xa, xb))
+            ws.append(min(na, nb))
+        if not aucs:
+            rows.append({"col": c, "auc": np.nan, "same": 0, "n_strata": 0})
+            continue
+        auc = float(np.average(aucs, weights=ws))
+        same = sum((x > 0.5) == (auc > 0.5) for x in aucs)
+        rows.append({"col": c, "auc": auc, "same": same, "n_strata": len(aucs)})
+    out = pd.DataFrame(rows)
+    out["effect"] = (out["auc"] - 0.5).abs()
+    return out
+
+
 def col_family(cols: Sequence[str]) -> Dict[str, str]:
     """列 -> 大区分（画面の寄与と同じ名前）。"""
     g_of: Dict[str, str] = {}
@@ -526,13 +555,86 @@ def show_outcomes(sub, grp_by):
             f"{np.nanmean(r[g[k]] < 0)*100:.0f}%" for k in GROUPS if g[k].any()))
 
 
+def vol_bins(sub) -> pd.Series:
+    return pd.qcut(sub["vol_20d"], 5, duplicates="drop")
+
+
+def show_vol_bands(sub, ranks, grp_by):
+    """ボラ正規化ラベル（到達しきい値 = 1.2σ）とスコアの関係を、ボラの5等分で見る。"""
+    print("\n■ 9. 自分のボラ（vol_20d。直近20営業日の日次リターンの標準偏差）の5等分ごと")
+    print("  到達しきい値は 1.2σ × √20 なので、ボラが高いほど正例になるのに要る上昇が大きい")
+    y = sub["label"].to_numpy(dtype=int)
+    r = sub[OUTCOME].to_numpy(dtype=float)
+    need, _ = B.rise_thresholds(sub["vol_20d"], B.DEFAULT_RISE)
+    t = pd.DataFrame({"bin": vol_bins(sub), "y": y, "r": r, "need": need.to_numpy(),
+                      **{f"rk_{a}": ranks[a] for a in ALGOS},
+                      **{f"fn_{a}": grp_by[a]["FN_ext"] for a in ALGOS},
+                      **{f"fp_{a}": grp_by[a]["FP_ext"] for a in ALGOS}})
+    for b, g in t.groupby("bin", observed=True):
+        pos = g["y"] == 1
+        print(f"  ボラ {b.left:.2f}〜{b.right:.2f}%（必要な上昇の中央値 {g['need'].median()*100:.0f}%）: "
+              f"{len(g):,}件 / 正例率 {g['y'].mean()*100:.1f}% / 正例の実収益の中央値 "
+              f"{np.nanmedian(g.loc[pos, 'r'])*100:+.1f}% / 平均順位 "
+              + " ".join(f"{a} {g[f'rk_{a}'].mean():.2f}" for a in ALGOS)
+              + " / 正例なのに下位10% " + "・".join(str(int(g[f"fn_{a}"].sum())) for a in ALGOS)
+              + " / 負例なのに上位5% " + "・".join(str(int(g[f"fp_{a}"].sum())) for a in ALGOS)
+              + "（lgbm・xgb・cat）")
+
+
+def show_years(sub, X, grp_by):
+    print("\n■ 10. 年ごと（件数・正例率・行の欠損の中央値・上位5%に入った件数と的中率・正例なのに下位10%の件数）")
+    d = pd.to_datetime(sub["Date"]).dt.year.to_numpy()
+    y = sub["label"].to_numpy(dtype=int)
+    mf = row_missing(X)
+    for yr in np.unique(d):
+        m = d == yr
+        prec = []
+        for a in ALGOS:
+            g = grp_by[a]
+            top = (g["TP_top"] | g["FP_ext"]) & m
+            prec.append(f"{a} {int(top.sum())}件 {g['TP_top'][m].sum() / top.sum() * 100:.0f}%"
+                        if top.sum() else f"{a} —")
+        print(f"  {yr}: {int(m.sum()):,}件 / 正例率 {y[m].mean()*100:.1f}% / 欠損 {np.median(mf[m])*100:.1f}% / "
+              f"上位5% " + " ".join(prec) + " / 正例なのに下位10% "
+              + "・".join(str(int(grp_by[a]["FN_ext"][m].sum())) for a in ALGOS))
+
+
+def show_within_vol(sub, X, cols, grp_by, top: int = 8):
+    print("\n■ 11. 同じボラの帯の中で比べた違い（ボラの効き目を除く。帯ごとの AUC を件数で重み付け。"
+          "両方の群が10件以上ある帯だけ使い、2帯以上で比べられた列だけ出す。"
+          "（a/b）= 使えた b 帯のうち全体と同じ向きだった数）")
+    strata = vol_bins(sub).astype(str).to_numpy()
+    pairs = (("FP_ext", "TP_top", "高スコア帯で外れた負例 vs 当たった正例"),
+             ("FN_ext", "TN_bot", "低スコア帯で見逃した正例 vs 正しく外した負例"))
+    for a_key, b_key, title in pairs:
+        print(f"  ◆ {title}")
+        per = []
+        for algo in ALGOS:
+            g = grp_by[algo]
+            d = stratified_diff(X, g[a_key], g[b_key], cols, strata)
+            d.loc[d["n_strata"] < 2, ["auc", "effect"]] = np.nan   # 1帯だけの比べは読まない
+            per.append(d.set_index("col"))
+            dd = d.dropna(subset=["auc"]).sort_values("effect", ascending=False).head(top)
+            print(f"    [{algo}] " + " / ".join(
+                f"{r['col']} {r['auc']:.2f}（{int(r['same'])}/{int(r['n_strata'])}）"
+                for _, r in dd.iterrows()))
+        both = pd.concat([p_["auc"] for p_ in per], axis=1)
+        sgn = np.sign(both - 0.5)
+        ok = (both.sub(0.5).abs() >= 0.07).all(axis=1) & (sgn.nunique(axis=1) == 1)
+        common = both[ok].mean(axis=1).sort_values(key=lambda v: -(v - 0.5).abs())
+        print("    3モデル共通（|AUC−0.5| ≥ 0.07・同じ向き）: " + (" / ".join(
+            f"{_ja(c, 14)} {v:.2f}" for c, v in common.head(10).items()) or "なし"))
+
+
 def show_composition(sub, fold, grp_by):
     print("\n■ 8. 構成（群の中の割合 − 全体の割合、pt）。年・時価総額帯・上場年数")
     d = pd.to_datetime(sub["Date"])
     keys = {"年": d.dt.year.astype(str),
             "時価総額帯": sub["cap_band"].astype("Int64").astype(str),
+            # 欠損は「データの初日（2016-10）より前から上場で、初日から5年たつまで」= 2021-10 まで
             "上場年数": pd.cut(sub["listing_years"], [-0.01, 1, 2, 3, 4.99, 5.01],
-                            labels=["〜1年", "1〜2年", "2〜3年", "3〜5年", "5年以上"]).astype(str)}
+                            labels=["〜1年", "1〜2年", "2〜3年", "3〜5年", "5年以上"])
+                         .astype(str).replace("nan", "不明（2021-10まで・古くからの上場）")}
     for algo in ALGOS:
         g = grp_by[algo]
         print(f"  [{algo}]")
@@ -548,8 +650,10 @@ def show_composition(sub, fold, grp_by):
                 parts.append(f"{GROUP_JA[gk]}: " + (", ".join(
                     f"{i} {v:+.0f}pt" for i, v in big.items()) or "4pt 以上の偏りなし"))
             print(f"    {name}: " + " | ".join(parts))
-    # 月の偏り（3モデル共通の大外れで、多い月）
+    # 月の偏り（3モデル共通の大外れで、多い月）。上位5%は月で件数が違うので、
+    # 「その月に3モデルとも上位5%に入った件数」と、そのうちの負例の割合も出す
     ym = d.dt.to_period("M").astype(str)
+    top3 = np.logical_and.reduce([grp_by[a]["TP_top"] | grp_by[a]["FP_ext"] for a in ALGOS])
     for gk in ("FN_ext", "FP_ext"):
         m = np.logical_and.reduce([grp_by[a][gk] for a in ALGOS])
         if not m.any():
@@ -557,8 +661,11 @@ def show_composition(sub, fold, grp_by):
         exp = ym.value_counts(normalize=True) * m.sum()
         got = ym[m].value_counts()
         ex = (got - exp.reindex(got.index)).sort_values(ascending=False).head(6)
+        extra = ""
         print(f"  3モデルとも{GROUP_JA[gk]}（{int(m.sum())}件）が多い月: " + " / ".join(
-            f"{i} {int(got[i])}件（期待 {exp[i]:.1f}）" for i in ex.index))
+            f"{i} {int(got[i])}件（期待 {exp[i]:.1f}"
+            + (f"・その月に3モデルとも上位5% {int(top3[ym == i].sum())}件" if gk == "FP_ext" else "")
+            + "）" for i in ex.index) + extra)
 
 
 # --------------------------------------------------------------------------- #
@@ -607,6 +714,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     show_label_parts(parts, sub, grp_by)
     show_outcomes(sub, grp_by)
     show_composition(sub, fold, grp_by)
+    show_vol_bands(sub, ranks, grp_by)
+    show_years(sub, X, grp_by)
+    show_within_vol(sub, X, cols, grp_by)
 
     # 銘柄ごとの一覧（手元で読む。ログには出さない）
     out = sub[["Date", "Code", "label", OUTCOME, "cap_band", "listing_years"]].copy()

@@ -113,6 +113,25 @@ class TestComparisons(unittest.TestCase):
         self.assertTrue(np.isnan(d.loc["x1", "auc"]))
         self.assertAlmostEqual(d.loc["x2", "miss_diff"], 0.5)
 
+    def test_stratified_diff_removes_a_difference_made_by_the_band(self):
+        """
+        群が高い帯に偏っているだけで、帯の中では差の無い列。全体では差があるように見えるが、
+        帯の中で比べると 0.5 近くになる（ボラの効き目を除いて比べる §11 のため）。
+        """
+        rng = np.random.default_rng(4)
+        n = 3000
+        band = rng.integers(0, 5, n)
+        a = rng.random(n) < (0.05 + 0.1 * band)          # 高い帯ほど群に入りやすい
+        x = band + rng.normal(0, 0.3, n)                 # 帯で決まる列
+        z = np.where(a, 1.0, 0.0) + rng.normal(0, 1, n)  # 帯の中でも群で違う列
+        X = np.c_[x, z]
+        overall = E.feature_diff(X, a, ~a, ["x", "z"]).set_index("col")
+        within = E.stratified_diff(X, a, ~a, ["x", "z"], band.astype(str)).set_index("col")
+        self.assertGreater(overall.loc["x", "auc"], 0.65)
+        self.assertLess(abs(within.loc["x", "auc"] - 0.5), 0.05)
+        self.assertGreater(within.loc["z", "auc"], 0.7)
+        self.assertEqual(within.loc["z", "same"], within.loc["z", "n_strata"])
+
     def test_every_feature_has_a_family(self):
         cols = F.columns(F.DEFAULT_PRESET)
         fam = E.col_family(cols)
