@@ -27,8 +27,10 @@
 どれも本番と同じ窓（36/6/6か月・エンバーゴ20営業日）を 0/2/4か月ずらした3通り × 種3つの
 平均で、窓ごとに出す。
 
-  --shifts 0,2,4  --seeds 3  --arms C,R,Q,L
-  結果は research/_data/oof/e52_*。本番の設定には書かない。
+  --shifts 0,2,4  --seeds 3  --arms C,R,Q,L  [--preset all_plus_prog_listing_vol]
+  結果は research/_data/oof/e52_*（--preset を変えたときは e52_<列の指紋>_*）。
+  本番の設定には書かない。212列（実験51 の6列を足したもの）は e52b_return_objective_vol.py から
+  同じ台本を呼ぶ（Actions の同時実行の組が実験名ごとなので、別名にして並行して回す）。
 """
 from __future__ import annotations
 
@@ -141,14 +143,15 @@ def fit_predict(arm: str, tr: pd.DataFrame, te: pd.DataFrame, cols: List[str], s
     raise ValueError(arm)
 
 
-def oof_arm(df: pd.DataFrame, cols: List[str], arm: str, shift: int, seeds) -> pd.DataFrame:
-    """腕・切り方ごとの out-of-fold（種の平均）。保存済みなら読む。"""
+def oof_arm(df: pd.DataFrame, cols: List[str], arm: str, shift: int, seeds,
+            tag: str = "") -> pd.DataFrame:
+    """腕・切り方ごとの out-of-fold（種の平均）。保存済みなら読む。tag は列の違い。"""
     folds = E41.folds_for(df["Date"], shift)
     d = pd.to_datetime(df["Date"])
     keep = ["Code", "Date", "label", OUTCOME, "ret_o1_40", "vol_20d"]
     parts = []
     for sd in seeds:
-        path = os.path.join(OOF_DIR, f"e52_{arm}_sh{shift}_s{sd}.parquet")
+        path = os.path.join(OOF_DIR, f"e52{tag}_{arm}_sh{shift}_s{sd}.parquet")
         if os.path.exists(path):
             parts.append(pd.read_parquet(path))
             continue
@@ -234,18 +237,26 @@ def main(argv=None) -> int:
     ap.add_argument("--shifts", default="0,2,4")
     ap.add_argument("--seeds", type=int, default=3)
     ap.add_argument("--arms", default=",".join(ARMS))
+    ap.add_argument("--preset", default=F.DEFAULT_PRESET,
+                    help="列のプリセット。既定は本番の206列。実験51 の6列を足すなら all_plus_prog_listing_vol")
     args = ap.parse_args(argv)
     shifts = [int(x) for x in args.shifts.split(",") if x.strip()]
     seeds = E27.SEEDS3[:args.seeds]
     arms = [a for a in args.arms.split(",") if a]
 
-    cols = F.columns(F.DEFAULT_PRESET)
+    cols = F.columns(args.preset)
+    # 本番の列以外は、保存する名前に列の指紋を入れて混ざらないようにする
+    tag = "" if args.preset == F.DEFAULT_PRESET else f"_{F.signature(cols)}"
     df = lab.frame()
+    miss = [c for c in cols if c not in df.columns]
+    if miss:
+        raise SystemExit(f"データセットに無い列: {miss[:6]}。research/build_dataset.py を回し直してください")
     df = df[df["label"].notna()].reset_index(drop=True)
     df["Date"] = pd.to_datetime(df["Date"])
     os.makedirs(OOF_DIR, exist_ok=True)
     print("=" * 78)
-    print(f"実験52 目的を確率から収益に変える（{len(df):,}件 / {F.DEFAULT_PRESET} {len(cols)}列 / "
+    print(f"実験52 目的を確率から収益に変える（{len(df):,}件 / {args.preset} {len(cols)}列"
+          f"（指紋 {F.signature(cols)}） / "
           f"種{len(seeds)}つ / ずらし {shifts}か月）")
     print(f"  目的の収益: {OUTCOME}（翌営業日の寄りで買い、20営業日後の終値で売る）。"
           f"回帰は訓練側の {CLIP_Q[0]*100:.0f}〜{CLIP_Q[1]*100:.0f}% で刈り込み / LTR の段階は日付内の{N_GRADES}分位")
@@ -259,7 +270,7 @@ def main(argv=None) -> int:
 
     rows, edges = [], []
     for sh in shifts:
-        res = {arm: oof_arm(df, cols, arm, sh, seeds) for arm in arms}
+        res = {arm: oof_arm(df, cols, arm, sh, seeds, tag) for arm in arms}
         print(f"\n■ ずらし{sh}か月")
         for pct in (95, 90):
             print(f"  ◆ 上位{100-pct}%（スコアが前の窓の分布の上位{100-pct}%なら買う）: "
@@ -315,9 +326,9 @@ def main(argv=None) -> int:
                           "thr_lift": np.nan, "thr_fold_mean": cur["ret"].mean() * 100,
                           "thr_n": int(cur["n"].sum())})
 
-    pd.DataFrame(rows).to_csv(os.path.join(OOF_DIR, "e52_within_date.csv"), index=False)
+    pd.DataFrame(rows).to_csv(os.path.join(OOF_DIR, f"e52{tag}_within_date.csv"), index=False)
     ed = pd.DataFrame(edges)
-    ed.to_csv(os.path.join(OOF_DIR, "e52_edges.csv"), index=False)
+    ed.to_csv(os.path.join(OOF_DIR, f"e52{tag}_edges.csv"), index=False)
     if len(shifts) > 1 and len(ed):
         print(f"\n■ 切り方{len(shifts)}通りをまとめて")
         for pct in (95, 90):
@@ -333,7 +344,7 @@ def main(argv=None) -> int:
         r = pd.DataFrame(rows)
         print("  日付内の1位の平均収益（切り方の平均）: " + " / ".join(
             f"{LABELS[a]} {r[r['arm'] == a]['top1'].mean():+.2f}%" for a in arms))
-    log(f"記録: {OOF_DIR}/e52_*")
+    log(f"記録: {OOF_DIR}/e52{tag}_*")
     return 0
 
 
