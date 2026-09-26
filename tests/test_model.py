@@ -1430,15 +1430,20 @@ class 本番のプリセット(unittest.TestCase):
     進捗期待を新しい定義（progress_vs_base -> progress_pct）にし、上場からの年数を足す。
     """
 
-    def test_本番は_all_plus_prog_listing(self):
+    def test_本番は_all_plus_prog_listing_vol_book(self):
+        """2026-09-26、206列 -> 239列（ボラの分解6列 + 本の27列）。運用者の決定（§20）。"""
         import features as F
-        self.assertEqual(F.DEFAULT_PRESET, "all_plus_prog_listing")
-        self.assertEqual(len(F.columns(F.DEFAULT_PRESET)), 206)
+        self.assertEqual(F.DEFAULT_PRESET, "all_plus_prog_listing_vol_book")
+        self.assertEqual(len(F.columns(F.DEFAULT_PRESET)), 239)
+        base = F.columns("all_plus_prog_listing")
+        self.assertEqual(F.columns(F.DEFAULT_PRESET),
+                         base + F.GROUPS["vol_factors"] + F.GROUPS["fund_book"])
+        self.assertEqual(len(base), 206)
 
     def test_本番の列は205列の進捗期待を置き換えて上場年数を足したもの(self):
-        """旧の進捗（進捗率 − Q×25）は外し、新しい定義の順位と上場からの年数を入れる。"""
+        """旧の進捗（進捗率 − Q×25）は外し、新しい定義の順位と上場からの年数を入れる（206列の部分）。"""
         import features as F
-        old, new = F.columns("all_plus"), F.columns(F.DEFAULT_PRESET)
+        old, new = F.columns("all_plus"), F.columns("all_plus_prog_listing")
         self.assertEqual(sorted(set(old) - set(new)), ["progress_vs_base"])
         self.assertEqual(sorted(set(new) - set(old)), ["listing_years", "progress_pct"])
         # 置き換えた列は同じ位置（ほかの列の並びは205列のまま）

@@ -352,6 +352,11 @@ PRESETS: Dict[str, List[str]] = {
     # --- 2026-09-26 の候補（実験56）。本番の206列 + 本の第2・3章の抜け27列（12指標 × 水準・変化・その前の変化） --- #
     "all_plus_prog_listing_book": [("progress_seasonal_pct" if g == "progress" else g)
                                    for g in ALL_GROUPS] + EXTRA_GROUPS + ["listing", "fund_book"],
+    # --- 2026-09-26 から本番（運用者の決定。DEFAULT_PRESET の説明） --- #
+    # 206列 + ボラの分解6列（実験51）+ 本の27列（実験56）。239列
+    "all_plus_prog_listing_vol_book": [("progress_seasonal_pct" if g == "progress" else g)
+                                       for g in ALL_GROUPS] + EXTRA_GROUPS
+                                      + ["listing", "vol_factors", "fund_book"],
     "all_plus_prog_listing": [("progress_seasonal_pct" if g == "progress" else g)
                               for g in ALL_GROUPS] + EXTRA_GROUPS + ["listing"],
 
@@ -443,7 +448,16 @@ PRESETS: Dict[str, List[str]] = {
 #: 内側。全部の結果は docs/MODEL_ADOPTION_RULES.md に記録する。
 #: パラメータは週次の探索（日曜）がこの206列で探し直す。探索の結果が無いあいだ、
 #: train_production.py は学習を止めて先週のモデルが残る（tuning.tuned_mismatch）
-DEFAULT_PRESET = "all_plus_prog_listing"
+#:
+#: 2026-09-26、206列（all_plus_prog_listing）-> 239列（all_plus_prog_listing_vol_book）に切り替えた
+#: （運用者の決定。docs/MODEL_ADOPTION_RULES.md §20）。§7 の採否基準を「LightGBM 単独」から
+#: 「3モデルのうち2つ以上で PR-AUC の改善が正（対照を上回り、上の窓が過半）」に改めた。
+#:   - ボラの分解6列（実験51 §14）: lgbm +0.0010 / xgb +0.0036 / cat +0.0049
+#:   - 本の第2・3章の抜け27列（実験56 §19）: lgbm −0.0005 / xgb +0.0027 / cat +0.0044
+#: どちらも LightGBM は改善せず、xgb / cat は対照（列を日付内で入れ替えたもの）を上回った。
+#: 運用の選定は3モデルの合議なので、2モデルの改善で採用する。239列の探索は 2026-09-27（日曜）の
+#: 定時の週次実行が初めて（research/tune_presets.txt の先頭）。
+DEFAULT_PRESET = "all_plus_prog_listing_vol_book"
 
 
 #: プリセットごとに、グループから抜く列。

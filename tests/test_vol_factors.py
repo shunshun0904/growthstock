@@ -19,6 +19,7 @@ import pandas as pd
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "research"))
+sys.path.insert(0, os.path.join(ROOT, "research", "exp"))
 sys.path.insert(0, os.path.join(ROOT, "scripts"))
 
 import build_dataset as B  # noqa: E402
@@ -122,9 +123,11 @@ class TestVsMarket(unittest.TestCase):
 class TestRegistration(unittest.TestCase):
     def test_group_preset_and_dictionary(self):
         self.assertEqual(F.GROUPS["vol_factors"], NEW)
-        base = F.columns(F.DEFAULT_PRESET)
+        base = F.columns("all_plus_prog_listing")
         for c in NEW:
-            self.assertNotIn(c, base, "採否が決まるまで本番には入れない")
+            self.assertNotIn(c, base, "206列のプリセットには入れない")
+            # 2026-09-26 に運用者の決定で本番（239列）に入れた（docs/MODEL_ADOPTION_RULES.md §20）
+            self.assertIn(c, F.columns(F.DEFAULT_PRESET))
         self.assertEqual(F.columns("all_plus_prog_listing_vol"), base + NEW)
         self.assertEqual(len(F.columns("all_plus_prog_listing_vol")), 212)
         for c in NEW:
