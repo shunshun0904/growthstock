@@ -108,11 +108,21 @@ def tree_params(seed: int) -> Dict:
     return p
 
 
-def fit_predict(arm: str, tr: pd.DataFrame, te: pd.DataFrame, cols: List[str], seed: int
-                ) -> np.ndarray:
+def fit_predict(arm: str, tr: pd.DataFrame, te: pd.DataFrame, cols: List[str], seed: int,
+                params: Dict | None = None) -> np.ndarray:
+    """
+    腕ごとに学習して te のスコアを返す。params を渡すとその木の形を使う（実験53 の腕ごとの
+    探索結果。objective / scale_pos_weight は腕が決めるので、渡されても外す）。
+    """
     import lightgbm as lgb
 
-    p = tree_params(seed)
+    if params is None:
+        p = tree_params(seed)
+    else:
+        p = {k: v for k, v in params.items()
+             if not k.startswith("_") and k not in ("objective", "scale_pos_weight")}
+        p["random_state"] = seed
+        p["verbose"] = -1
     Xtr = tr[cols].to_numpy(dtype=float)
     Xte = te[cols].to_numpy(dtype=float)
     r = tr[OUTCOME].to_numpy(dtype=float)
@@ -144,14 +154,19 @@ def fit_predict(arm: str, tr: pd.DataFrame, te: pd.DataFrame, cols: List[str], s
 
 
 def oof_arm(df: pd.DataFrame, cols: List[str], arm: str, shift: int, seeds,
-            tag: str = "") -> pd.DataFrame:
-    """腕・切り方ごとの out-of-fold（種の平均）。保存済みなら読む。tag は列の違い。"""
+            tag: str = "", params: Dict | None = None, name: str | None = None,
+            prefix: str = "e52") -> pd.DataFrame:
+    """
+    腕・切り方ごとの out-of-fold（種の平均）。保存済みなら読む。tag は列の違い。
+    params / name は実験53（腕ごとに探索した木の形で同じ腕を回す。保存名は name）。
+    """
+    name = name or arm
     folds = E41.folds_for(df["Date"], shift)
     d = pd.to_datetime(df["Date"])
     keep = ["Code", "Date", "label", OUTCOME, "ret_o1_40", "vol_20d"]
     parts = []
     for sd in seeds:
-        path = os.path.join(OOF_DIR, f"e52{tag}_{arm}_sh{shift}_s{sd}.parquet")
+        path = os.path.join(OOF_DIR, f"{prefix}{tag}_{name}_sh{shift}_s{sd}.parquet")
         if os.path.exists(path):
             parts.append(pd.read_parquet(path))
             continue
@@ -164,13 +179,13 @@ def oof_arm(df: pd.DataFrame, cols: List[str], arm: str, shift: int, seeds,
             if len(te) < 200 or len(tr) < 1000:
                 continue
             part = te[keep].copy()
-            part["score"] = fit_predict(arm, tr, te, cols, sd)
+            part["score"] = fit_predict(arm, tr, te, cols, sd, params)
             part["fold"] = f.index
             rows.append(part)
         o = pd.concat(rows, ignore_index=True)
         o.to_parquet(path, index=False)
         parts.append(o)
-        log(f"  腕{arm} ずらし{shift}か月 種{sd}: {len(o):,}件 {time.time()-t0:.0f}秒")
+        log(f"  腕{name} ずらし{shift}か月 種{sd}: {len(o):,}件 {time.time()-t0:.0f}秒")
     o = parts[0].copy()
     o["score"] = np.mean([x["score"].to_numpy(dtype=float) for x in parts], axis=0)
     o["Date"] = pd.to_datetime(o["Date"])
