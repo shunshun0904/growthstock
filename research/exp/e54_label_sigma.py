@@ -67,9 +67,9 @@ ARMS: Dict[str, Tuple[str | None, bool]] = {
     "L2": ("sigma_shrink", False), "L2m": ("sigma_shrink", True), "L3m": (None, True)}
 LABELS = {"L0": "L0 1.2σ20（現行）", "L1": "L1 1.2σ60", "L1m": "L1m kσ60（正例率そろえ）",
           "L2": "L2 1.2√(σ20·中央値)", "L2m": "L2m k√(σ20·中央値)（そろえ）", "L3m": "L3m 固定%（そろえ）"}
-VOL_WINDOWS = (20, 60)
-#: 窓 n のσは n×0.75 本から作る（price_panel の 20/15 と同じ比率）
-MIN_PERIODS = {20: 15, 60: 45}
+VOL_WINDOWS = (20, 60, 120)
+#: 窓 n のσは n×0.75 本から作る（price_panel の 20/15 と同じ比率）。120日は実験55 が使う
+MIN_PERIODS = {20: 15, 60: 45, 120: 90}
 
 
 def log(msg: str) -> None:
