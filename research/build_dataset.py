@@ -1857,7 +1857,122 @@ def attach_fins(samples: pd.DataFrame, q: pd.DataFrame) -> pd.DataFrame:
     return out.drop(columns=["CurFYSt"])
 
 
-def quarterize_panel(fins: pd.DataFrame, data_dir: str = DATA_DIR) -> pd.DataFrame:
+#: 本（ファンダメンタルズ分析の目次）の第2・3章で、取得済みの J-Quants の項目から作れるのに
+#: 特徴量にしていなかったもの（docs/BOOK_INDICATOR_COVERAGE.md の ○）。運用者の指示
+#: （2026-09-26「2章と3章がほぼ全部網羅したい」）。features.GROUPS["fund_book"]
+BOOK_COLS = ["cash_eq_last", "cfi_cum", "cff_cum", "cfo_yoy_sym", "fcf_yoy_sym",
+             "sustainable_growth", "equity_turnover", "div_growth_sym", "div_up",
+             "bps_yoy", "shares_yoy", "acct_ifrs"]
+
+
+def _sym_change(cur: pd.Series, prev: pd.Series) -> pd.Series:
+    """対称変化率（−100〜100）。分母は |今|+|前|。どちらかが欠測なら欠測。"""
+    denom = cur.abs() + prev.abs()
+    out = (cur - prev) / denom.where(denom > 0) * 100.0
+    return out.where(cur.notna() & prev.notna())
+
+
+def add_book_ratios(df: pd.DataFrame, adj: Optional[pd.DataFrame] = None) -> pd.DataFrame:
+    """
+    四半期パネル（quarterize_panel の途中。Code / quarter / CurFYSt / DiscDate と、ROE・
+    payout_ratio・sales_ttm・Eq・dps・BPS・shares_out・CashEq・CFO・CFI・CFF・DocType）に
+    BOOK_COLS を足す。
+
+    - cash_eq_last   直近に開示された現金同等物（円）。CashEq は 2Q・通期にしか無いので、
+                     銘柄の中で直近3開示まで前に埋める（残高は水準なので「最後に分かった値」で
+                     よい）。時価総額で割るのは build() 側（cash_mcap）
+    - cfi_cum / cff_cum   投資CF・財務CFの開示時点の累計（円）。cfo_cum と同じ扱い
+    - cfo_yoy_sym / fcf_yoy_sym   営業CF・フリーCFの累計の前年同期比（対称、−100〜100）
+    - sustainable_growth   ROE × (1 − 配当性向)（%）。サスティナブル成長率
+    - equity_turnover      売上TTM ÷ 自己資本。株主資本回転率
+    - div_growth_sym / div_up   1株配当（予想優先）の前年同期比（対称）と、増配なら1
+    - bps_yoy              BPS の前年同期比（%）
+    - shares_yoy           自己株控除後の株数の前年同期比（%）。増資なら正、自社株買いなら負
+    - acct_ifrs            DocType の会計基準が IFRS / US / Foreign なら1、JP なら0
+    前年同期比は sales_growth と同じく「同じ四半期の1つ前の事業年度」を比べる。
+
+    **株数と BPS は分割で跳ぶ**（開示時点のまま。1:2 の分割で株数は +100%、BPS は −50%）。
+    adj（Code / Date / close_raw / close の日次パネル）を渡すと、開示日時点の
+    close_raw ÷ close（= その後の分割の累積倍率）で株数を今の株数の単位に、BPS を今の株価の
+    単位にそろえてから前年同期比を取る。渡さなければ未調整（テスト用）。
+    """
+    g_code = df.groupby("Code", sort=False)
+
+    def col(name: str) -> pd.Series:
+        return (pd.to_numeric(df[name], errors="coerce") if name in df.columns
+                else pd.Series(np.nan, index=df.index))
+
+    if "CashEq" in df.columns:
+        df["cash_eq_last"] = g_code["CashEq"].transform(
+            lambda s: pd.to_numeric(s, errors="coerce").ffill(limit=3))
+    else:
+        df["cash_eq_last"] = np.nan
+    df["cfi_cum"] = col("CFI")
+    df["cff_cum"] = col("CFF")
+
+    payout = col("payout_ratio")
+    roe = col("ROE")
+    df["sustainable_growth"] = clip_divergent(
+        (roe * (1.0 - payout / 100.0)).where(roe.notna() & payout.notna()),
+        -500.0, 500.0, "sustainable_growth")
+    eq = col("Eq")
+    df["equity_turnover"] = clip_divergent(
+        col("sales_ttm") / eq.where(eq > 0), 0.0, 100.0, "equity_turnover")
+
+    if "DocType" in df.columns:
+        std = df["DocType"].astype(str).str.extract(r"_(JP|IFRS|US|Foreign)$")[0]
+        df["acct_ifrs"] = np.where(std.isna(), np.nan, (std != "JP").astype(float))
+    else:
+        df["acct_ifrs"] = np.nan
+
+    # 前年同期比: 同じ四半期の1つ前の事業年度（sales_growth と同じ並べ方）。
+    # 並べ替えた写しで shift し、index で元の並びに戻す
+    tmp = df.sort_values(["Code", "quarter", "CurFYSt"], kind="mergesort")
+    for name in ("CFO", "CFI", "dps", "BPS", "shares_out"):
+        tmp[name] = (pd.to_numeric(tmp[name], errors="coerce") if name in tmp.columns
+                     else np.nan)
+    tmp["_fcf"] = tmp["CFO"] + tmp["CFI"]
+    # 分割調整の倍率（開示日時点の close_raw ÷ close）。無ければ 1
+    tmp["_adj"] = 1.0
+    if adj is not None and len(adj):
+        a = adj[["Code", "Date", "close_raw", "close"]].copy()
+        a["Code"] = a["Code"].astype(str)
+        a["Date"] = pd.to_datetime(a["Date"])
+        a["_adj"] = (pd.to_numeric(a["close_raw"], errors="coerce")
+                     / pd.to_numeric(a["close"], errors="coerce"))
+        a = a.dropna(subset=["_adj"]).sort_values("Date", kind="mergesort")
+        key = tmp[["Code", "DiscDate"]].copy()
+        key["Code"] = key["Code"].astype(str)
+        key["DiscDate"] = pd.to_datetime(key["DiscDate"])
+        key["_i"] = np.arange(len(key))
+        m = pd.merge_asof(key.sort_values("DiscDate", kind="mergesort"), a[["Code", "Date", "_adj"]],
+                          left_on="DiscDate", right_on="Date", by="Code", direction="backward")
+        m = m.sort_values("_i")
+        tmp["_adj"] = m["_adj"].fillna(1.0).to_numpy()
+    tmp["shares_out"] = tmp["shares_out"] * tmp["_adj"]
+    tmp["BPS"] = tmp["BPS"] / tmp["_adj"]
+    by_cq = tmp.groupby(["Code", "quarter"], sort=False)
+
+    def prev_of(name: str) -> pd.Series:
+        return by_cq[name].shift(1).reindex(df.index)
+
+    df["cfo_yoy_sym"] = _sym_change(col("CFO"), prev_of("CFO"))
+    df["fcf_yoy_sym"] = _sym_change(col("CFO") + col("CFI"), prev_of("_fcf"))
+    dps, dps_prev = col("dps"), prev_of("dps")
+    df["div_growth_sym"] = _sym_change(dps, dps_prev)
+    df["div_up"] = np.where(dps.notna() & dps_prev.notna(), (dps > dps_prev).astype(float), np.nan)
+    # 今の値も調整後（tmp 側）で比べる
+    bps, bps_prev = tmp["BPS"].reindex(df.index), prev_of("BPS")
+    df["bps_yoy"] = clip_divergent((bps - bps_prev) / bps_prev.where(bps_prev > 0) * 100.0,
+                                   -100.0, 300.0, "bps_yoy")
+    sh, sh_prev = tmp["shares_out"].reindex(df.index), prev_of("shares_out")
+    df["shares_yoy"] = clip_divergent((sh - sh_prev) / sh_prev.where(sh_prev > 0) * 100.0,
+                                      -50.0, 200.0, "shares_yoy")
+    return df
+
+
+def quarterize_panel(fins: pd.DataFrame, data_dir: str = DATA_DIR,
+                     adj: Optional[pd.DataFrame] = None) -> pd.DataFrame:
     """
     累計ベースの決算を単一四半期に差分展開し、前年同期比を付ける。
 
@@ -2091,6 +2206,10 @@ def quarterize_panel(fins: pd.DataFrame, data_dir: str = DATA_DIR) -> pd.DataFra
                                     pd.Series(payout_calc, index=df.index)),
         -100.0, 1000.0, "payout_ratio")
 
+    # --- 本の第2・3章の抜け（現金・投資CF・財務CF・CFの増減・持続可能成長率・株主資本回転率・
+    #     増配・BPS の変化・株数の変化・会計基準）。BOOK_COLS / add_book_ratios --- #
+    df = add_book_ratios(df, adj)
+
     # --- 会社予想（今期の伸び見通し）--- #
     # 予想営業利益 / 直前に終わった事業年度の実績。1を超えれば増益見通し。
     #
@@ -2216,7 +2335,7 @@ def quarterize_panel(fins: pd.DataFrame, data_dir: str = DATA_DIR) -> pd.DataFra
              "dps", "has_dividend", "payout_ratio",
              "sales_ttm", "cfo_cum", "fcf_cum", "cfo_to_op", "accruals",
              "net_margin", "ordinary_margin", "asset_turnover",
-             "guidance_op_growth", "guidance_revision"]
+             "guidance_op_growth", "guidance_revision"] + BOOK_COLS
             + [c for c in ("EPS", "eps_ttm") if c in df.columns]
             + [c for a in axes for c in (
                 f"{a}_q0", f"{a}_q1", f"{a}_q2", f"{a}_q3",
@@ -2728,7 +2847,8 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     print("\n[merge] 財務情報を開示日ベースで結合")
     # data_dir を渡す（渡さないと既定の research/_data のバリュエーションを読み、
     # 別の場所のデータで作ったときに API の ROE が抜けていた。2026-09-25）
-    q = quarterize_panel(fins, data_dir)
+    # 株数・BPS の前年同期比を分割で跳ばせないために、株価パネルの調整倍率を渡す
+    q = quarterize_panel(fins, data_dir, adj=df[["Code", "Date", "close_raw", "close"]])
     samples = attach_fins(samples, q)
     # 決算が古すぎる（1年以上前）場合は使わない
     stale = (samples["Date"] - samples["DiscDate"]).dt.days > 365
@@ -2794,6 +2914,14 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
                   index=samples.index), -500.0, 500.0, "fcf_yield")
     # 配当利回り
     samples["div_yield"] = np.where(px > 0, samples["dps"] / px * 100.0, np.nan)
+    # 本の第2章: 現金同等物・投資CF・財務CF を時価総額で割る（%。円→億円）
+    for src, dst, lo, hi in (("cash_eq_last", "cash_mcap", 0.0, 500.0),
+                             ("cfi_cum", "cfi_mcap", -500.0, 500.0),
+                             ("cff_cum", "cff_mcap", -500.0, 500.0)):
+        v = pd.to_numeric(samples[src], errors="coerce") if src in samples.columns else np.nan
+        samples[dst] = clip_divergent(
+            pd.Series(np.where(mc > 0, v / 1e8 / mc * 100.0, np.nan), index=samples.index),
+            lo, hi, dst)
 
     # --- PER / PBR の出どころを API に寄せる（運用者の判断・実験38）--- #
     #

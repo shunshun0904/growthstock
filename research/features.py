@@ -212,6 +212,11 @@ GROUPS: Dict[str, List[str]] = {
     # 採否が決まるまで本番のプリセットには入れない（docs/MODEL_ADOPTION_RULES.md §7）
     "vol_factors": ["vol_rel_long", "vol_rel_mkt", "vol_rel_sector", "vol_updown",
                     "vol_rel_short", "vol_gap_ratio"],
+    # 本（ファンダメンタルズ分析の目次）の第2・3章で、取得済みの J-Quants から作れるのに
+    # 特徴量にしていなかった12列（docs/BOOK_INDICATOR_COVERAGE.md の ○。実験56）
+    "fund_book": ["cash_mcap", "cfi_mcap", "cff_mcap", "cfo_yoy_sym", "fcf_yoy_sym",
+                  "sustainable_growth", "equity_turnover", "div_growth_sym", "div_up",
+                  "bps_yoy", "shares_yoy", "acct_ifrs"],
 }
 
 #: 横断面正規化（同じ日付内でのパーセンタイル順位）を作る対象の列。
@@ -338,6 +343,9 @@ PRESETS: Dict[str, List[str]] = {
     # --- 2026-09-26 の候補（実験51）。本番の206列 + ボラの分解6列 --- #
     "all_plus_prog_listing_vol": [("progress_seasonal_pct" if g == "progress" else g)
                                   for g in ALL_GROUPS] + EXTRA_GROUPS + ["listing", "vol_factors"],
+    # --- 2026-09-26 の候補（実験56）。本番の206列 + 本の第2・3章の抜け12列 --- #
+    "all_plus_prog_listing_book": [("progress_seasonal_pct" if g == "progress" else g)
+                                   for g in ALL_GROUPS] + EXTRA_GROUPS + ["listing", "fund_book"],
     "all_plus_prog_listing": [("progress_seasonal_pct" if g == "progress" else g)
                               for g in ALL_GROUPS] + EXTRA_GROUPS + ["listing"],
 
