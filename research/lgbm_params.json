@@ -58,50 +58,56 @@
     "random_state": 0,
     "n_jobs": -1,
     "verbose": -1,
-    "learning_rate": 0.022242884496197907,
-    "num_leaves": 99,
-    "min_child_samples": 128,
-    "subsample": 0.8922981031199985,
-    "colsample_bytree": 0.8627430166473027,
-    "reg_alpha": 0.1645880099544123,
-    "reg_lambda": 4.866637166185249e-05,
+    "learning_rate": 0.013198797912133617,
+    "num_leaves": 49,
+    "min_child_samples": 207,
+    "subsample": 0.8987029703662867,
+    "colsample_bytree": 0.8145395156630691,
+    "reg_alpha": 0.20282245968026813,
+    "reg_lambda": 0.3321645808962299,
     "subsample_freq": 1,
     "_cv": {
       "scheme": "year_cap_date",
       "model": "classifier",
       "n_estimators": 200,
+      "lr_range": [
+        0.01,
+        0.2
+      ],
       "n_splits": 5,
-      "mean_pr_auc": 0.3131,
-      "std": 0.0137,
+      "mean_pr_auc": 0.3256,
+      "std": 0.016,
       "fold_scores": [
-        0.3208,
-        0.3228,
-        0.2865,
-        0.3133,
-        0.3222
+        0.3363,
+        0.3428,
+        0.3333,
+        0.2984,
+        0.317
       ],
-      "mean_roc_auc": 0.6749,
-      "roc_std": 0.0106,
+      "mean_roc_auc": 0.6927,
+      "roc_std": 0.0098,
       "fold_roc": [
-        0.6804,
-        0.6855,
-        0.6604,
-        0.6638,
-        0.6844
+        0.7091,
+        0.6875,
+        0.6873,
+        0.6815,
+        0.698
       ],
-      "base_rate": 0.164,
+      "base_rate": 0.1586,
       "fold_pos_rate": [
-        0.1641,
-        0.1726,
-        0.1586,
-        0.1643,
-        0.1605
+        0.1546,
+        0.1609,
+        0.1637,
+        0.1576,
+        0.1562
       ],
-      "fold_pos_rate_spread": 0.014,
-      "fold_cap_spread_pt": 1.832,
+      "fold_pos_rate_spread": 0.0091,
+      "fold_cap_spread_pt": 2.185,
       "n_trials": 50
     },
-    "_n_features": 147
+    "_n_features": 149,
+    "_features_sig": "19eb69f13b01",
+    "_preset": "all_no_sector_index"
   },
   "all_no_market": {
     "objective": "binary",
@@ -110,50 +116,56 @@
     "random_state": 0,
     "n_jobs": -1,
     "verbose": -1,
-    "learning_rate": 0.020411832735968773,
-    "num_leaves": 24,
-    "min_child_samples": 13,
-    "subsample": 0.9144270317327796,
-    "colsample_bytree": 0.7336572111263977,
-    "reg_alpha": 0.0045039504840466114,
-    "reg_lambda": 0.6323469426062769,
+    "learning_rate": 0.02707263751369758,
+    "num_leaves": 43,
+    "min_child_samples": 33,
+    "subsample": 0.8829970814092569,
+    "colsample_bytree": 0.6970192031635911,
+    "reg_alpha": 0.09283143321842217,
+    "reg_lambda": 0.2346800484722999,
     "subsample_freq": 1,
     "_cv": {
       "scheme": "year_cap_date",
       "model": "classifier",
       "n_estimators": 200,
+      "lr_range": [
+        0.01,
+        0.2
+      ],
       "n_splits": 5,
-      "mean_pr_auc": 0.2733,
-      "std": 0.0137,
+      "mean_pr_auc": 0.2903,
+      "std": 0.0101,
       "fold_scores": [
-        0.2765,
-        0.2863,
-        0.2468,
-        0.2788,
-        0.2782
+        0.2975,
+        0.299,
+        0.2892,
+        0.2943,
+        0.2713
       ],
-      "mean_roc_auc": 0.6476,
-      "roc_std": 0.0072,
+      "mean_roc_auc": 0.6733,
+      "roc_std": 0.0137,
       "fold_roc": [
-        0.6527,
-        0.6472,
-        0.6358,
-        0.6452,
-        0.657
+        0.6986,
+        0.6688,
+        0.6593,
+        0.6756,
+        0.6644
       ],
-      "base_rate": 0.164,
+      "base_rate": 0.1586,
       "fold_pos_rate": [
-        0.1641,
-        0.1726,
-        0.1586,
-        0.1643,
-        0.1605
+        0.1546,
+        0.1609,
+        0.1637,
+        0.1576,
+        0.1562
       ],
-      "fold_pos_rate_spread": 0.014,
-      "fold_cap_spread_pt": 1.832,
+      "fold_pos_rate_spread": 0.0091,
+      "fold_cap_spread_pt": 2.185,
       "n_trials": 50
     },
-    "_n_features": 140
+    "_n_features": 142,
+    "_features_sig": "72e21352143b",
+    "_preset": "all_no_market"
   },
   "all__ltr": {
     "objective": "binary",
@@ -310,5 +322,63 @@
       "n_trials": 50
     },
     "_n_features": 140
+  },
+  "all_plus_prog_listing_vol_book": {
+    "objective": "binary",
+    "boosting_type": "gbdt",
+    "n_estimators": 200,
+    "random_state": 0,
+    "n_jobs": -1,
+    "verbose": -1,
+    "learning_rate": 0.033682142165051304,
+    "num_leaves": 65,
+    "min_child_samples": 202,
+    "subsample": 0.9714795068732671,
+    "colsample_bytree": 0.7350728762122123,
+    "reg_alpha": 0.0977205484962672,
+    "reg_lambda": 6.23459767927053e-05,
+    "subsample_freq": 1,
+    "_cv": {
+      "scheme": "year_cap_date",
+      "model": "classifier",
+      "n_estimators": 200,
+      "lr_range": [
+        0.01,
+        0.2
+      ],
+      "n_splits": 5,
+      "mean_pr_auc": 0.3353,
+      "std": 0.0177,
+      "fold_scores": [
+        0.3487,
+        0.3449,
+        0.3533,
+        0.3072,
+        0.3222
+      ],
+      "mean_roc_auc": 0.7103,
+      "roc_std": 0.009,
+      "fold_roc": [
+        0.7238,
+        0.7017,
+        0.7093,
+        0.7,
+        0.7165
+      ],
+      "base_rate": 0.1586,
+      "fold_pos_rate": [
+        0.1546,
+        0.1609,
+        0.1637,
+        0.1576,
+        0.1562
+      ],
+      "fold_pos_rate_spread": 0.0091,
+      "fold_cap_spread_pt": 2.185,
+      "n_trials": 50
+    },
+    "_n_features": 239,
+    "_features_sig": "2cf1283a9de5",
+    "_preset": "all_plus_prog_listing_vol_book"
   }
 }
