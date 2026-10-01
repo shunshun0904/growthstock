@@ -101,13 +101,14 @@ jobs:
           fi
 
       - name: Download stored data
+        id: download
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p research/_data
-          # 初回はアセットが無いので失敗を許容する
-          gh release download "$RELEASE_TAG" --dir research/_data --clobber || \
-            echo "保存済みデータなし（初回実行）"
+          # 初回（Release に何も無い）は取り出しの手順が見分けて進む。一部だけ取れた状態では
+          # 止める（2026-10-01、500 で1ファイル欠けたまま「初回」として続いた。run 36882172803）
+          bash scripts/gh_release_download.sh "$RELEASE_TAG" research/_data
           ls -lh research/_data || true
 
       # master は master.parquet として1ファイルで持つ。
@@ -265,7 +266,8 @@ jobs:
       # 取得ステップが種別ごとに書き戻しているので、ここは取りこぼしの
       # 受け皿。失敗して抜けたときも、取れたところまでは残す
       - name: Upload to release
-        if: always()
+        # 取り出しが一部だけで止まったときは上げない（欠けた・短いファイルで Release を上書きしない）
+        if: always() && steps.download.outcome == 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

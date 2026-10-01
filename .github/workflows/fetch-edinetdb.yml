@@ -63,12 +63,13 @@ jobs:
       - run: pip install -r research/requirements.txt
 
       - name: Download stored EDINET data
+        id: download
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p research/_data
-          gh release download "$RELEASE_TAG" --dir research/_data --clobber \
-            --pattern 'edinet_*' || echo "保存済みの EDINET データなし（初回）"
+          # 一部だけ取れた状態では止める（積み上げた edinet_fin.parquet を上書きしないため）
+          bash scripts/gh_release_download.sh "$RELEASE_TAG" research/_data 'edinet_*'
           ls -lh research/_data/edinet_* 2>/dev/null || true
 
       - name: Fetch
@@ -81,7 +82,8 @@ jobs:
           exit "${PIPESTATUS[0]}"
 
       - name: Upload to release
-        if: always()
+        # 取り出しが一部だけで止まったときは上げない（欠けた・短いファイルで Release を上書きしない）
+        if: always() && steps.download.outcome == 'success'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

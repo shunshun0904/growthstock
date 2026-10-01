@@ -94,7 +94,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p research/_data
-          gh release download data-raw --dir research/_data --clobber
+          bash scripts/gh_release_download.sh data-raw research/_data
           # Optuna の試行 DB が降りてきたら、前週までの試行を引き継げる
           ls -la research/_data/optuna_multi.db 2>/dev/null \
             && echo "探索の試行 DB あり（引き継ぐ）" \

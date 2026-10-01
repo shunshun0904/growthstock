@@ -59,7 +59,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p research/_data
-          gh release download data-raw --dir research/_data --clobber
+          bash scripts/gh_release_download.sh data-raw research/_data
           # head -5 は使わない。pipefail の下では head が5行で先に閉じると ls が
           # Broken pipe（終了コード2）で落ち、ダウンロードは済んでいるのにこの段が
           # 失敗扱いになる（2026-09-22〜23 に4回連続: run 35871378011 など）。
@@ -99,8 +99,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p research/model
-          if gh release download data-raw --dir research/model --clobber \
-               --pattern 'model.txt' --pattern 'oof.parquet' 2>/dev/null; then
+          if bash scripts/gh_release_download.sh data-raw research/model 'model.txt' 'oof.parquet'; then
             echo "Release のモデルを使う"
           else
             echo "Release にモデルが無いので、リポジトリ内の版を使う"
@@ -113,8 +112,7 @@ jobs:
           # meta.json は git 側（週次学習がコミットする）から来る。
           # 片方だけ揃っていない場合は models.load が (None, None) を返し、
           # そのモデルだけ画面から外れる。日次予測は止まらない。
-          if gh release download data-raw --dir /tmp/extra --clobber \
-               --pattern '*_model.joblib' --pattern '*_oof.parquet' 2>/dev/null; then
+          if bash scripts/gh_release_download.sh data-raw /tmp/extra '*_model.joblib' '*_oof.parquet'; then
             shopt -s nullglob
             for f in /tmp/extra/*_model.joblib; do
               a=$(basename "$f" _model.joblib)

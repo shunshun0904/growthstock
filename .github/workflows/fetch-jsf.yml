@@ -64,6 +64,7 @@ jobs:
       - run: pip install -r research/requirements.txt
 
       - name: Prepare release
+        id: prepare
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -72,8 +73,8 @@ jobs:
               --notes "日証金（taisyaku.jp）の需給データ（research/jsf_fetch.py）。私的利用の範囲で使う。"
           fi
           mkdir -p research/_data
-          gh release download "$RELEASE_TAG" --dir research/_data --clobber \
-            --pattern 'jsf_*' || echo "保存済みの日証金データなし（初回）"
+          # 一部だけ取れた状態では止める（積み上げた jsf_hist.parquet を上書きしないため）
+          bash scripts/gh_release_download.sh "$RELEASE_TAG" research/_data 'jsf_*'
           ls -lh research/_data/jsf_* 2>/dev/null || true
 
       - name: Daily
@@ -106,7 +107,8 @@ jobs:
           exit "${PIPESTATUS[0]}"
 
       - name: Upload (history)
-        if: always() && (github.event_name == 'schedule' || inputs.mode != 'daily')
+        # 取り出しが一部だけで止まったときは上げない（欠けた・短いファイルで Release を上書きしない）
+        if: always() && steps.prepare.outcome == 'success' && (github.event_name == 'schedule' || inputs.mode != 'daily')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
