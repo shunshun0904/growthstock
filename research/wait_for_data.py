@@ -57,6 +57,19 @@ from jquants_data_fetcher import (  # noqa: E402
 
 JST = dt.timezone(dt.timedelta(hours=9))
 
+#: 当日データはこの時刻（取引終了）より前には出ない。起動がこれより前なら、それは
+#: 0時を過ぎて始まった**前日ぶん**の予約（16:05 JST の予約が8時間以上遅れた日）で、
+#: 前の営業日のデータはとうに出ている。ここで「今日」を待つと翌日の締切まで出ず、
+#: 取り込みの上限（330分）に当たって何も取らずに落ちる
+#: （2026-09-28 の予約 run 36442731228 で実際に起きた。docs/OPERATIONS.md）
+MARKET_CLOSE_JST = dt.time(15, 30)
+
+
+def now_jst() -> dt.datetime:
+    """いまの JST。テストで差し替える。"""
+    return dt.datetime.now(JST)
+
+
 #: 待てる対象。名前 -> (パス, パラメータの形, 何に使うか)
 #: パスとパラメータの形は research/probe_update_time.py と同じにしてある
 #: （実測したのと違う叩き方で待つと、測った時刻が当てにならない）。
@@ -131,12 +144,20 @@ def main(argv: Optional[List[str]] = None) -> int:
               f"(選べるのは {', '.join(FEEDS)})")
         return 2
 
-    now = dt.datetime.now(JST)
+    now = now_jst()
     day = dt.date.fromisoformat(args.date) if args.date else now.date()
     deadline = dt.datetime.combine(day, _hhmm(args.deadline), tzinfo=JST)
 
     if day.weekday() >= 5:
         print(f"[skip] {day} は土日なので待たない")
+        return 0
+    if day == now.date() and now.time() < MARKET_CLOSE_JST:
+        # 0時を過ぎて始まった前日ぶんの予約。前の営業日のデータは出ているので待たない
+        # （取り込みは date -u の日までを取る＝前の営業日まで）。待つと翌日の締切まで
+        # 出ず、上限に当たって何も取らずに落ちる
+        print(f"[skip] いま {now:%H:%M} JST。{day} の当日データは取引終了"
+              f"（{MARKET_CLOSE_JST:%H:%M}）より前には出ない。0時を過ぎて始まった"
+              "予約の取り込みなので、前の営業日ぶんを取りに進む")
         return 0
 
     try:
@@ -156,7 +177,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     ready: Dict[str, dt.datetime] = {}
     while True:
-        t = dt.datetime.now(JST)
+        t = now_jst()
         for f in [x for x in feeds if x not in ready]:
             n = count_rows(client, f, day)
             print(f"  {t:%H:%M:%S} JST  {f:8s} "

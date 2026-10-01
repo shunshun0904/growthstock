@@ -694,6 +694,7 @@ class TestWaitForData(unittest.TestCase):
         self._client = W.JQuantsClient
         self._resolve = W.resolve_api_key
         self._sleep = W.time.sleep
+        self._now = W.now_jst
         self.slept = []
         W.resolve_api_key = lambda: "dummy-key"
 
@@ -710,6 +711,30 @@ class TestWaitForData(unittest.TestCase):
         self.W.JQuantsClient = self._client
         self.W.resolve_api_key = self._resolve
         self.W.time.sleep = self._sleep
+        self.W.now_jst = self._now
+
+    def test_after_midnight_start_does_not_wait_for_today(self):
+        """
+        16:05 JST の予約が8時間以上遅れて 0時を過ぎてから始まると、「今日」は翌日になる。
+        その日足は夕方まで出ないので、待つと取り込みの上限（330分）に当たって何も取らずに
+        落ちる（2026-09-28 の予約 run 36442731228）。前の営業日ぶんは出ているので待たずに進む。
+        """
+        import datetime as _dt
+        self.W.now_jst = lambda: _dt.datetime(2026, 9, 29, 0, 19, tzinfo=self.W.JST)  # 火曜
+        calls = self._client_returning([[{"Code": "13010", "C": 1000}]])
+        rc = self.W.main(["--feeds", "bars", "--deadline", "18:00", "--interval", "1"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(calls, [])          # API を1度も叩かない
+        self.assertEqual(self.slept, [])     # 眠らない
+
+    def test_evening_start_still_waits_for_today(self):
+        """定刻どおり夕方に始まった日は、これまでどおり当日データを見に行く。"""
+        import datetime as _dt
+        self.W.now_jst = lambda: _dt.datetime(2026, 9, 29, 16, 5, tzinfo=self.W.JST)
+        calls = self._client_returning([[{"Code": "13010", "C": 1000}]])
+        rc = self.W.main(["--feeds", "bars", "--deadline", "18:00", "--interval", "1"])
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(calls), 1)
 
     def _client_returning(self, pages):
         """呼ばれるたびに pages を順に返す偽クライアント。"""

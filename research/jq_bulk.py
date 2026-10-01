@@ -21,7 +21,7 @@ import os
 import re
 import sys
 import time
-from typing import Callable, Iterable, List, Optional
+from typing import Callable, Iterable, List, Optional, Tuple
 
 import pandas as pd
 
@@ -158,6 +158,41 @@ DAY_PARAM = {
 BULK_KINDS = {
     "investor": ("/equities/investor-types", "PubDate", "投資部門別売買"),
 }
+
+
+def merge_bulk(path: str, fresh: pd.DataFrame, date_col: str) -> Tuple[pd.DataFrame, int]:
+    """
+    毎回まるごと取り直す種別（BULK_KINDS）の保存で、**契約の範囲から外れた古い行を残す**。
+
+    J-Quants は契約の範囲（今日の10年前から。毎日1日ずつ後ろへずれる）の行しか返さない。
+    取り直した行で保存済みの parquet を単純に上書きすると、範囲から外れた週が毎週消えていく。
+    実測: 9/26 の写し 2,377行（公表日 2016-09-26〜）が、10/1 の取り込み後に 2,375行
+    （2016-10-06〜）になり、2016-09-26・09-29 公表の10行が消えた。範囲より前なので
+    二度と取り直せない（docs/OPERATIONS.md）。
+
+    取り直した行の最古の日付より**前**の保存済みの行はそのまま残し、それ以降は取り直した
+    行で置き換える（範囲の中は J-Quants の応答が正。訂正や取り下げもそのまま反映する）。
+    返り値は (保存する表, 残した古い行の数)。保存済みが無い・読めないなら取り直した行だけ。
+    """
+    if date_col not in fresh.columns or not os.path.exists(path):
+        return fresh, 0
+    try:
+        old = pd.read_parquet(path)
+    except Exception as exc:                                 # noqa: BLE001
+        print(f"[warn] {os.path.basename(path)} を読めないので、取り直した行だけで作り直す: "
+              f"{type(exc).__name__}", file=sys.stderr)
+        return fresh, 0
+    if date_col not in old.columns or not len(old):
+        return fresh, 0
+    first = pd.to_datetime(fresh[date_col], errors="coerce").min()
+    if pd.isna(first):
+        return fresh, 0
+    before = old[pd.to_datetime(old[date_col], errors="coerce") < first]
+    if not len(before):
+        return fresh, 0
+    merged = pd.concat([before, fresh], ignore_index=True)
+    merged = merged.sort_values(date_col, kind="mergesort").reset_index(drop=True)
+    return merged, int(len(before))
 
 
 # --------------------------------------------------------------------------- #
@@ -901,13 +936,16 @@ def _run_incremental(client: JQuantsClient, days: List[dt.date],
                 print(f"[{name}] 0件。保存しない")
                 continue
             out = os.path.join(args.out_dir, f"{name}.parquet")
+            # 契約の範囲から外れた古い行は、応答に無くても消さない（merge_bulk）
+            df, kept = merge_bulk(out, df, date_col)
             df.to_parquet(out, index=False, compression="zstd")
-            manifest[name] = {"rows": int(len(df)),
+            manifest[name] = {"rows": int(len(df)), "kept_before_window": kept,
                               "as_of": _today_jst().isoformat()}
             rng = ""
             if date_col in df.columns:
                 rng = f" / {df[date_col].min()} 〜 {df[date_col].max()}"
-            print(f"[{name}] {len(df):,}行 -> {os.path.basename(out)}{rng}")
+            note = f"（うち契約の範囲より前の保存済み {kept:,}行を残した）" if kept else ""
+            print(f"[{name}] {len(df):,}行 -> {os.path.basename(out)}{rng}{note}")
         except JQuantsError as exc:
             # 1種別の失敗で取り込み全体を落とさない。次回また取りに行く
             print(f"[warn] {name} を取得できませんでした（続行する）: "
