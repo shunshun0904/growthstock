@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import os
+import re
 import sys
 import time
 from typing import Callable, Iterable, List, Optional
@@ -32,8 +33,44 @@ import data_store  # noqa: E402
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "research", "_data")
 
-# 契約がカバーする最古の日付（research/probe_boundary.py で実測）
+# 契約がカバーする最古の日付（research/probe_boundary.py で 2026-09 に実測）。
+# **固定ではない。** Standard プランは「今日の10年前から」で、毎日1日ずつ後ろへずれる
+# （subscription_start）。ここは保存済みのデータが始まる日として残す
 EARLIEST_DATE = dt.date(2016, 10, 1)
+
+#: 契約で遡れる年数。2026-10-02 0:00 JST から /markets/calendar?from=2016-10-01 が
+#: HTTP 400（"Your subscription covers the following dates: 2016-10-02 ~"）を返し、
+#: 取り込みが全種別で落ちた（run 36879424717）。固定の開始日で叩くと毎日どこかで当たる
+SUBSCRIPTION_YEARS = 10
+JST = dt.timezone(dt.timedelta(hours=9))
+_COVERS = re.compile(r"covers the following dates:\s*(\d{4}-\d{2}-\d{2})")
+
+
+def subscription_start(today: Optional[dt.date] = None, margin_days: int = 1) -> dt.date:
+    """
+    いま J-Quants に問い合わせてよい最も古い日（JST の今日の10年前 + margin_days）。
+
+    1日の余裕は、J-Quants の日付の切り替わりとこちらの時計が数分ずれても当たらないため。
+    最も古い1日はとうに取得済みなので、取りこぼしにはならない。2/29 は 3/1 に寄せる。
+    """
+    t = today or dt.datetime.now(JST).date()
+    try:
+        d = t.replace(year=t.year - SUBSCRIPTION_YEARS)
+    except ValueError:                       # 2/29 の10年前は無い
+        d = dt.date(t.year - SUBSCRIPTION_YEARS, 3, 1)
+    return d + dt.timedelta(days=margin_days)
+
+
+def covered_from(exc: BaseException) -> Optional[dt.date]:
+    """契約範囲外で 400 が返ったときの「この日から」を応答から読む。読めなければ None。"""
+    m = _COVERS.search(str(exc))
+    return dt.date.fromisoformat(m.group(1)) if m else None
+
+
+def clamp_start(start: dt.date, today: Optional[dt.date] = None) -> dt.date:
+    """問い合わせの開始日を契約の範囲に切り上げる。保存済みの古い日はそのまま残る。"""
+    floor = max(EARLIEST_DATE, subscription_start(today))
+    return floor if start < floor else start
 
 # 保持する列（全列を持つとサイズが数倍になるため、必要なものだけ）
 BAR_COLS = ["Date", "Code", "O", "H", "L", "C", "Vo", "Va", "AdjO", "AdjH", "AdjL", "AdjC", "AdjVo"]
@@ -144,9 +181,20 @@ def trading_days(client: JQuantsClient, start: dt.date, end: dt.date,
     日次ループに返すのは end までの営業日だけ。先の日を取りに行かせない。
     """
     fetch_to = end + dt.timedelta(days=CALENDAR_LOOKAHEAD_DAYS)
-    rows = client.get_paginated(
-        "/markets/calendar", {"from": start.isoformat(), "to": fetch_to.isoformat()}
-    )
+    try:
+        rows = client.get_paginated(
+            "/markets/calendar", {"from": start.isoformat(), "to": fetch_to.isoformat()}
+        )
+    except JQuantsError as exc:
+        # 契約の範囲より前を叩いた（範囲は毎日ずれる）。応答が言う日から取り直す
+        cf = covered_from(exc)
+        if cf is None or cf <= start:
+            raise
+        print(f"[calendar] 契約の範囲は {cf} から（J-Quants の応答）。{cf} から取り直す")
+        start = cf
+        rows = client.get_paginated(
+            "/markets/calendar", {"from": start.isoformat(), "to": fetch_to.isoformat()}
+        )
     # V2 の列名は HolDiv（V1 は HolidayDivision）。実レスポンスで確認済み。
     # 値: "0" = 非営業日, "1" = 営業日, "2" = 東証半日立会
     div_keys = ("HolDiv", "HolidayDivision", "HolidayDiv")
@@ -524,9 +572,11 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     start = dt.date.fromisoformat(args.date_from)
     end = dt.date.fromisoformat(args.date_to)
-    if start < EARLIEST_DATE:
-        print(f"[warn] {start} は契約範囲外です。{EARLIEST_DATE} に切り上げます", file=sys.stderr)
-        start = EARLIEST_DATE
+    clamped = clamp_start(start)
+    if clamped != start:
+        print(f"[calendar] {start} は契約の範囲（今日の{SUBSCRIPTION_YEARS}年前から）より前なので "
+              f"{clamped} から問い合わせる（それより前の保存済みのデータはそのまま）")
+        start = clamped
 
     os.makedirs(args.out_dir, exist_ok=True)
     client = JQuantsClient(resolve_api_key(), pause=args.pause)
@@ -672,6 +722,10 @@ def _run_incremental(client: JQuantsClient, days: List[dt.date],
     manifest = data_store.load_manifest(args.out_dir)
 
     for kind in args.reset:
+        # reset は保存済みの parquet を消す。契約の範囲より前の日は J-Quants から
+        # 取り直せない（毎日1日ずつ取れなくなる）ので、その分は消えたまま戻らない
+        print(f"[reset] 注意: {kind} の {subscription_start()} より前の行は取り直せない。"
+              f"消えたまま戻らない")
         removed = data_store.reset_kind(args.out_dir, manifest, kind)
         print(f"[reset] {kind}: parquet {len(removed)}件と取得記録を削除 "
               f"-> 全期間を取り直す")
