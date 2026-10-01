@@ -88,7 +88,7 @@ jobs:
           shopt -s nullglob
           files=(research/_data/edinet_*.parquet research/_data/edinet_manifest.json)
           if [ ${#files[@]} -eq 0 ]; then echo "アップロードなし"; exit 0; fi
-          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
+          bash scripts/gh_release_upload.sh "$RELEASE_TAG" "${files[@]}"
           echo "${#files[@]} ファイルをアップロードしました"
 
       - name: Summary

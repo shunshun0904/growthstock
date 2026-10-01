@@ -90,7 +90,7 @@ jobs:
           shopt -s nullglob
           files=(research/_data/jsf_*.parquet research/_data/jsf_manifest.json)
           if [ ${#files[@]} -eq 0 ]; then echo "アップロードなし"; exit 0; fi
-          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
+          bash scripts/gh_release_upload.sh "$RELEASE_TAG" "${files[@]}"
           echo "${#files[@]} ファイルをアップロードしました"
 
       # 過去の取り込みが失敗しても、daily の分はもう上げてある
@@ -113,7 +113,7 @@ jobs:
           shopt -s nullglob
           files=(research/_data/jsf_*.parquet research/_data/jsf_manifest.json)
           if [ ${#files[@]} -eq 0 ]; then echo "アップロードなし"; exit 0; fi
-          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
+          bash scripts/gh_release_upload.sh "$RELEASE_TAG" "${files[@]}"
           echo "${#files[@]} ファイルをアップロードしました"
 
       - name: Summary

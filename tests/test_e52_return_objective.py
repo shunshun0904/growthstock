@@ -63,17 +63,25 @@ def frame(n_dates=60, per_day=10, seed=0):
     return pd.DataFrame(rows)
 
 
+#: テスト用の小さな木。本番の探索結果（research/lgbm_params.json）に頼らない。
+#: 2026-09-27 の週次の再学習で本番の葉の最小が 202 になり、400行の合成データでは
+#: 分岐できずに C が定数を返して、このテストが落ちた（本番の値はテストの前提ではない）
+SMALL_TREE = {"n_estimators": 50, "learning_rate": 0.1, "num_leaves": 15,
+              "min_child_samples": 10, "subsample": 1.0, "subsample_freq": 0,
+              "colsample_bytree": 1.0}
+
+
 class TestArms(unittest.TestCase):
     def test_all_arms_fit_and_predict(self):
         df = frame()
         tr, te = df.iloc[:400], df.iloc[400:]
         for arm in E.ARMS:
-            s = E.fit_predict(arm, tr, te, ["x1", "x2"], seed=0)
+            s = E.fit_predict(arm, tr, te, ["x1", "x2"], seed=0, params=SMALL_TREE)
             self.assertEqual(len(s), len(te), arm)
             self.assertTrue(np.isfinite(s).all(), arm)
             # 目的が x1 で決まる作りなので、どの腕も x1 と正の相関を持つ
             self.assertGreater(np.corrcoef(s, te["x1"])[0, 1], 0.3, arm)
-        c = E.fit_predict("C", tr, te, ["x1", "x2"], seed=0)
+        c = E.fit_predict("C", tr, te, ["x1", "x2"], seed=0, params=SMALL_TREE)
         self.assertTrue(((c >= 0) & (c <= 1)).all())
 
     def test_ltr_keeps_group_order(self):
@@ -81,8 +89,8 @@ class TestArms(unittest.TestCase):
         df = frame(n_dates=30)
         shuffled = df.sample(frac=1.0, random_state=1).reset_index(drop=True)
         te = df.iloc[:50]
-        a = E.fit_predict("L", df, te, ["x1", "x2"], seed=0)
-        b = E.fit_predict("L", shuffled, te, ["x1", "x2"], seed=0)
+        a = E.fit_predict("L", df, te, ["x1", "x2"], seed=0, params=SMALL_TREE)
+        b = E.fit_predict("L", shuffled, te, ["x1", "x2"], seed=0, params=SMALL_TREE)
         np.testing.assert_allclose(a, b, rtol=1e-6, atol=1e-8)
 
 

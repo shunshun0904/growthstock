@@ -166,7 +166,7 @@ jobs:
         run: |
           f=research/_data/live_features.parquet
           if [ -f "$f" ]; then
-            gh release upload data-raw "$f" --clobber
+            bash scripts/gh_release_upload.sh data-raw "$f"
             echo "控えを上げた: $(du -h "$f" | cut -f1)"
           else
             echo "控えが無い（候補が無かった日）"

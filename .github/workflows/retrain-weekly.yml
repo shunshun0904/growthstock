@@ -130,7 +130,7 @@ jobs:
           done
           files=("${keep[@]}")
           if [ ${#files[@]} -eq 0 ]; then echo "アップロードなし"; exit 0; fi
-          gh release upload data-raw "${files[@]}" --clobber
+          bash scripts/gh_release_upload.sh data-raw "${files[@]}"
 
       # 学習用。ラベル未確定の行は入れない（--keep-unlabeled を付けない）
       - name: Build dataset
@@ -210,8 +210,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload data-raw research/model/model.txt \
-            research/model/oof.parquet --clobber
+          bash scripts/gh_release_upload.sh data-raw research/model/model.txt research/model/oof.parquet
           # 5モデルぶん。ファイル名が algo ごとに衝突するので、
           # Release のアセット名に algo を入れて上げ直す
           shopt -s nullglob
@@ -220,12 +219,12 @@ jobs:
             for f in model.joblib oof.parquet; do
               [ -f "$d$f" ] || continue
               cp "$d$f" "/tmp/${a}_${f}"
-              gh release upload data-raw "/tmp/${a}_${f}" --clobber
+              bash scripts/gh_release_upload.sh data-raw "/tmp/${a}_${f}"
             done
           done
           # Optuna の試行 DB も上げる。来週これを降ろして試行を引き継ぐ
           if [ -f research/_data/optuna_multi.db ]; then
-            gh release upload data-raw research/_data/optuna_multi.db --clobber
+            bash scripts/gh_release_upload.sh data-raw research/_data/optuna_multi.db
           fi
 
       - name: Commit model metadata

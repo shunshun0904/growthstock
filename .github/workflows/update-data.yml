@@ -224,7 +224,7 @@ jobs:
               echo "  （書き戻すファイルなし）"; return 0
             fi
             # shellcheck disable=SC2086
-            gh release upload "$RELEASE_TAG" $changed --clobber
+            bash scripts/gh_release_upload.sh "$RELEASE_TAG" $changed
             echo "  書き戻した: $(echo "$changed" | wc -l)ファイル"
             touch "$MARK"
           }
@@ -282,7 +282,7 @@ jobs:
           if [ ${#files[@]} -eq 0 ]; then
             echo "アップロードするファイルがありません"; exit 1
           fi
-          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
+          bash scripts/gh_release_upload.sh "$RELEASE_TAG" "${files[@]}"
           echo "${#files[@]} ファイルをアップロードしました"
 
       - name: Summary
