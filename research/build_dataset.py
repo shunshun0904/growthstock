@@ -20,7 +20,7 @@ import json
 import os
 import sys
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Dict, Iterable, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -1779,7 +1779,8 @@ def seasonal_progress(df: pd.DataFrame, raw: pd.DataFrame) -> pd.DataFrame:
 
 
 def progress_percentile(dates, quarter, basis, ratio,
-                        min_history: int = PROGRESS_PCT_MIN_HISTORY) -> np.ndarray:
+                        min_history: int = PROGRESS_PCT_MIN_HISTORY,
+                        keys: Optional[Iterable] = None) -> np.ndarray:
     """
     進捗の比率の順位（0〜100）。同じ四半期・同じ物差し（前年同期 / Q×25%）の、
     **その開示日より前の**開示の中で数える。同じ日の開示は数えず、同順位は半分ずつ数える。
@@ -1788,51 +1789,126 @@ def progress_percentile(dates, quarter, basis, ratio,
     固定の表で順位を付ける。学習に使う列でそれをすると、過去の行を未来の分布で
     順位付けることになる（未来の情報の混入）ので、ここではその日までの開示だけを使う。
     それより前の開示が min_history 件に満たないうちは欠測。
+
+    keys を渡すと（行ごとの期の鍵。例: (Code, CurFYSt, quarter)）、同じ鍵の行は**同じ期の版**
+    として扱う。後の版が来た日に母集団の中の値を差し替える（それまでは前の版が入っている。
+    比率の無い版が来たら外す）。母集団の件数は期の数で数える。渡さなければ行ごとに別の期
+    （差し替え無し）で、以前と同じ値になる。
+
+    2026-10-02 まで、版を潰した表（期ごとに最後の版）で数えていた。出し直し（訂正）が来ると
+    元の版が母集団から消え、それより後に開示された行の順位が、予測の時点と学習とで
+    食い違っていた（2026-10-01 の一致チェック。docs/DATA_TIMING.md）。
     """
     ratio = np.asarray(ratio, dtype=float)
     quarter = np.asarray(quarter)
     table = np.where(np.isin(np.asarray(basis, dtype=object), ["seasonal", "floor"]),
                      "seasonal", "linear")
     days = pd.to_datetime(pd.Series(dates)).to_numpy()
+    n_rows = len(ratio)
     ok = np.isfinite(ratio) & np.isin(quarter, (1, 2, 3))
-    out = np.full(len(ratio), np.nan)
+    out = np.full(n_rows, np.nan)
+    keys = list(range(n_rows)) if keys is None else list(keys)
+    if len(keys) != n_rows:
+        raise ValueError(f"keys の長さ {len(keys)} が行数 {n_rows} と違う")
+
+    # 母集団（四半期 × 物差し）ごとに Fenwick 木（値の順位ごとの件数）を持つ。
+    # 値の順位は母集団ごとに np.unique で付ける
+    pools: Dict[tuple, dict] = {}
+    pos = np.zeros(n_rows, dtype=np.int64)
+    bucket: List[Optional[tuple]] = [None] * n_rows
     for qq in (1, 2, 3):
         for t in ("seasonal", "linear"):
             idx = np.where(ok & (quarter == qq) & (table == t))[0]
             if not len(idx):
                 continue
             vals, rank = np.unique(ratio[idx], return_inverse=True)
-            n = len(vals)
-            tree = np.zeros(n + 1, dtype=np.int64)       # 値の順位ごとの件数（Fenwick 木）
+            pools[(qq, t)] = {"tree": np.zeros(len(vals) + 1, dtype=np.int64),
+                              "n": len(vals), "total": 0}
+            pos[idx] = rank
+            for r in idx.tolist():
+                bucket[r] = (qq, t)
 
-            def below(k: int) -> int:                    # 順位 k 未満の件数
-                s = 0
-                while k > 0:
-                    s += tree[k]
-                    k -= k & -k
-                return int(s)
+    def add(p: dict, k: int, delta: int) -> None:
+        k += 1
+        while k <= p["n"]:
+            p["tree"][k] += delta
+            k += k & -k
 
-            seq = idx[np.argsort(days[idx], kind="mergesort")]
-            pos = {int(i): int(rk) for i, rk in zip(idx, rank)}
-            total, i = 0, 0
-            while i < len(seq):
-                j = i
-                while j < len(seq) and days[seq[j]] == days[seq[i]]:
-                    j += 1
-                if total >= min_history:                 # 同じ日の開示どうしは数えない
-                    for s_ in seq[i:j]:
-                        k = pos[int(s_)]
-                        less = below(k)
-                        eq = below(k + 1) - less
-                        out[s_] = (less + 0.5 * eq) / total * 100.0
-                for s_ in seq[i:j]:
-                    k = pos[int(s_)] + 1
-                    while k <= n:
-                        tree[k] += 1
-                        k += k & -k
-                total += j - i
-                i = j
+    def below(p: dict, k: int) -> int:                   # 順位 k 未満の件数
+        s = 0
+        tree = p["tree"]
+        while k > 0:
+            s += tree[k]
+            k -= k & -k
+        return int(s)
+
+    # 日付順に処理する。同じ日の行は「その日より前」の母集団で順位を付けてから、まとめて入れる
+    order = np.argsort(days, kind="mergesort")
+    cur: Dict[object, tuple] = {}                        # 鍵 -> (母集団, 値の順位)
+    i = 0
+    while i < n_rows:
+        j = i
+        while j < n_rows and days[order[j]] == days[order[i]]:
+            j += 1
+        for r in order[i:j].tolist():
+            b = bucket[r]
+            if b is None:
+                continue
+            p = pools[b]
+            if p["total"] >= min_history:
+                k = int(pos[r])
+                less = below(p, k)
+                eq = below(p, k + 1) - less
+                out[r] = (less + 0.5 * eq) / p["total"] * 100.0
+        for r in order[i:j].tolist():
+            prev = cur.pop(keys[r], None)
+            if prev is not None:                         # 同じ期の前の版を外す
+                add(prev[0], prev[1], -1)
+                prev[0]["total"] -= 1
+            b = bucket[r]
+            if b is not None:
+                p = pools[b]
+                k = int(pos[r])
+                add(p, k, +1)
+                p["total"] += 1
+                cur[keys[r]] = (p, k)
+        i = j
     return out
+
+
+def progress_pct_point_in_time(df: pd.DataFrame, raw_ver: Optional[pd.DataFrame],
+                               raw_op: pd.DataFrame) -> np.ndarray:
+    """
+    重複を除いた決算 df の各行に、進捗の比率の順位（progress_percentile）を付ける。
+
+    順位の母集団は**版をすべて残した表（raw_ver）**で作る。同じ期の出し直し（訂正）が来たら、
+    その日に母集団の中の値を差し替える（それまでは元の版が入っている）。df の行（その期の
+    最後の版）の順位は、その版の開示日より前の母集団で数えた値。
+
+    df だけで数えると（2026-10-02 まで）、出し直しが来た期は元の版が母集団から消え、
+    それより後に開示された行の順位が、予測の時点と学習とで食い違った
+    （2026-10-01 の一致チェック。docs/DATA_TIMING.md）。raw_ver が無い（FOP が無い）ときは
+    以前どおり df だけで数える。
+    """
+    if raw_ver is None or not len(raw_ver) or "FOP" not in raw_ver.columns:
+        return progress_percentile(df["DiscDate"], df["quarter"].to_numpy(),
+                                   df["progress_basis"].to_numpy(),
+                                   df["progress_ratio"].to_numpy())
+    key = ["Code", "CurFYSt", "quarter"]
+    order = key + ["DiscDate"] + (["DiscTime"] if "DiscTime" in raw_ver.columns else [])
+    ver = raw_ver.sort_values(order, kind="mergesort").reset_index(drop=True)
+    ver["OP"] = pd.to_numeric(ver["OP"], errors="coerce")
+    ver["FOP"] = pd.to_numeric(ver["FOP"], errors="coerce")
+    ver["progress_rate"] = np.where((ver["FOP"] > 0) & ver["OP"].notna(),
+                                    ver["OP"] / ver["FOP"] * 100.0, np.nan)
+    sp = seasonal_progress(ver, raw_op)
+    pct = progress_percentile(ver["DiscDate"], ver["quarter"].to_numpy(),
+                              sp["progress_basis"].to_numpy(), sp["progress_ratio"].to_numpy(),
+                              keys=list(zip(ver["Code"], ver["CurFYSt"], ver["quarter"])))
+    last = ver.assign(_pct=pct).drop_duplicates(key, keep="last")
+    table = dict(zip(zip(last["Code"], last["CurFYSt"], last["quarter"]), last["_pct"]))
+    return np.array([table.get(k, np.nan)
+                     for k in zip(df["Code"], df["CurFYSt"], df["quarter"])], dtype=float)
 
 
 def attach_fins(samples: pd.DataFrame, q: pd.DataFrame) -> pd.DataFrame:
@@ -2026,6 +2102,10 @@ def quarterize_panel(fins: pd.DataFrame, data_dir: str = DATA_DIR,
     # 重複を除く前の開示。進捗の基準（前年同期）を「その日までに出ていた版」で引くため
     raw_op = df[[c for c in ("Code", "CurFYSt", "quarter", "DiscDate", "DiscTime", "OP")
                  if c in df.columns]].copy()
+    # 版をすべて残した表。進捗の順位（progress_pct_point_in_time）の母集団を「その日までに
+    # 出ていた各期の最新の版」で持つため。FOP はその版の通期予想
+    raw_ver = df[[c for c in ("Code", "CurFYSt", "quarter", "DiscDate", "DiscTime", "OP", "FOP")
+                  if c in df.columns]].copy()
 
     # 同一(銘柄, 会計年度, 四半期)の重複開示は最後の開示を採用（訂正を反映）
     df = (df.sort_values(["Code", "CurFYSt", "quarter", "DiscDate", "DiscTime"])
@@ -2355,10 +2435,9 @@ def quarterize_panel(fins: pd.DataFrame, data_dir: str = DATA_DIR,
         pos = pd.concat([(s > 0) & s.notna() for s in levels], axis=1).sum(axis=1)
         df[f"{a}_pos_ratio"] = (pos / avail.where(avail > 0)).where(enough)
 
-    # 比率の順位（その開示日より前の開示だけで数える）。行の並びに依らない
-    df["progress_pct"] = progress_percentile(df["DiscDate"], df["quarter"].to_numpy(),
-                                             df["progress_basis"].to_numpy(),
-                                             df["progress_ratio"].to_numpy())
+    # 比率の順位。母集団は「その開示日より前に出ていた、各期の最新の版」（出し直しは
+    # その日に差し替える。版の扱いは docs/DATA_TIMING.md）。行の並びに依らない
+    df["progress_pct"] = progress_pct_point_in_time(df, raw_ver, raw_op)
     print(f"[progress] 前年同期の基準 {int(df['progress_basis'].isin(['seasonal', 'floor']).sum()):,}行"
           f"（うち下限 {int((df['progress_basis'] == 'floor').sum()):,}）/ Q×25% "
           f"{int((df['progress_basis'] == 'linear').sum()):,}行 / 順位あり "

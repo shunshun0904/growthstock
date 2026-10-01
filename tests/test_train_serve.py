@@ -97,6 +97,30 @@ class Compare(unittest.TestCase):
         self.assertAlmostEqual(r.at["credit_ratio", "rate"], 0.5)
         self.assertEqual(r.at["vol_20d", "diff"], 0)
 
+    def test_redefined_column_is_compared_only_from_its_date(self):
+        """
+        値の定義を変えた列（features.REDEFINED）は、その日より前に控えた行では比べない。
+        2026-10-02 に progress_pct の順位の母集団を変えたので、それより前の控え（旧定義）と
+        作り直した値（新定義）は一致しないのが当たり前で、食い違いの検出にならない。
+        """
+        def frame(values):
+            return pd.DataFrame({"Code": ["11110", "22220"],
+                                 "Date": [T("2026-09-28"), T("2026-10-02")],
+                                 "progress_pct": values, "credit_ratio": [2.0, 3.0]})
+        live = frame([40.0, 60.0])
+        rebuilt = frame([40.3, 60.0])              # 旧定義の行だけが（少し）違う
+        r = CTS.compare(live, rebuilt, ["progress_pct", "credit_ratio"],
+                        redefined={"progress_pct": "2026-10-02"}).set_index("column")
+        self.assertEqual(r.at["progress_pct", "n"], 1)        # 10/2 の行だけ
+        self.assertEqual(r.at["progress_pct", "diff"], 0)
+        self.assertEqual(r.at["credit_ratio", "n"], 2)        # ほかの列はこれまでどおり
+        # 渡さなければ比べる（既定の挙動は変えない）
+        r2 = CTS.compare(live, rebuilt, ["progress_pct"]).set_index("column")
+        self.assertEqual(r2.at["progress_pct", "diff"], 1)
+        # 本番の表に progress_pct が入っていること（main が使う）
+        import features as F
+        self.assertEqual(F.REDEFINED.get("progress_pct"), "2026-10-02")
+
     def test_nan_on_both_sides_is_a_match(self):
         live = cand("2026-09-11", ["1111"], [np.nan])
         rebuilt = cand("2026-09-11", ["1111"], [np.nan])

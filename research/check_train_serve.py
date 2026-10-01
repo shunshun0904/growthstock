@@ -26,12 +26,14 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from typing import List
+from typing import Dict, List
 
 import numpy as np
 import pandas as pd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import features as F  # noqa: E402
 DATA_DIR = os.path.join(HERE, "_data")
 LIVE = os.path.join(DATA_DIR, "live_features.parquet")
 REBUILT = os.path.join(DATA_DIR, "dataset_predict.parquet")
@@ -43,7 +45,8 @@ MAX_RATE = 0.01
 
 
 def compare(live: pd.DataFrame, rebuilt: pd.DataFrame, cols: List[str],
-            before: pd.Timestamp | None = None) -> pd.DataFrame:
+            before: pd.Timestamp | None = None,
+            redefined: Dict[str, str] | None = None) -> pd.DataFrame:
     """
     列ごとの食い違いの割合。行は (Code, Date) で突き合わせる。
 
@@ -54,6 +57,10 @@ def compare(live: pd.DataFrame, rebuilt: pd.DataFrame, cols: List[str],
     あれば、各列はその列を控えた行だけで比べる。モデルの列が変わると、前の行には
     新しい列が無く、ファイルの上では欠測に見えるため（比べると「予測時は欠測」の
     食い違いが並ぶ）。_features が無い控えは全部の行で比べる。
+
+    redefined（列 -> 日付。features.REDEFINED）にある列は、その日以降の行だけで比べる。
+    値の定義を変えると、前の定義で控えた値と新しい定義で作り直した値は一致しないのが
+    当たり前で、食い違いの検出にならないため。
     """
     key = ["Code", "Date"]
     lv = live.copy()
@@ -78,6 +85,8 @@ def compare(live: pd.DataFrame, rebuilt: pd.DataFrame, cols: List[str],
             mc = m[use.to_numpy(dtype=bool)]
         else:
             mc = m
+        if redefined and c in redefined:
+            mc = mc[mc["Date"] >= pd.Timestamp(redefined[c])]
         a = pd.to_numeric(mc[f"{c}_l"], errors="coerce").to_numpy(dtype=float)
         b = pd.to_numeric(mc[f"{c}_r"], errors="coerce").to_numpy(dtype=float)
         same = np.isclose(a, b, rtol=1e-6, atol=1e-9, equal_nan=True)
@@ -112,13 +121,17 @@ def main(argv=None) -> int:
     rebuilt = pd.read_parquet(args.rebuilt)
     latest = pd.to_datetime(rebuilt["Date"]).max()
     cols = [c for c in live.columns if c not in ("Code", "Date") and not c.startswith("_")]
-    res = compare(live, rebuilt, cols, before=latest)
+    res = compare(live, rebuilt, cols, before=latest, redefined=F.REDEFINED)
     n_rows = int(res["n"].max()) if len(res) else 0
     dates = pd.to_datetime(live["Date"])
     past = dates[dates < latest]
     print(f"[train/serve] 控え {dates.nunique()}日 / 比べた行 {n_rows}件"
           f"（{past.min().date() if len(past) else '-'}〜"
           f"{past.max().date() if len(past) else '-'}。今日 {latest.date()} の行は除く）")
+    changed = {c: d for c, d in F.REDEFINED.items() if c in cols}
+    if changed:
+        print("  定義を変えた列は、その日からの行だけで比べる: "
+              + ", ".join(f"{c}（{d}〜）" for c, d in changed.items()))
     if "_features" in live.columns and live["_features"].nunique() > 1:
         print(f"  控えた列の組が {live['_features'].nunique()}通り（モデルの列が変わった）。"
               "各列はその列を控えた行だけで比べる")

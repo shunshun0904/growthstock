@@ -19,6 +19,10 @@ progress_pct が時点どおり（その日に見えていた版だけで計算�
   (2) 学習が一つ前の期を見ている 260行（1.19%）。差は中央値 12.7 点、最大 73 点、
       片方だけ欠測 192行。学習が見ている期は、予測が見ていた期より中央値 92日古い
 
+2026-10-02 に B（順位の母集団を版ごとに差し替える）を本番に入れた。入れた後は (1) が 0 行になる
+（(2) は残る）。学習側の作り直しが dataset.parquet と一致しない行は、その差のぶん
+（dataset.parquet は作った時点のコードの値）。
+
   python3 research/probe_progress_pit.py
 """
 import os
@@ -59,68 +63,10 @@ print(f"versions: {len(v):,} rows | periods: {v.groupby(key).ngroups:,} "
       f"| later versions: {len(v) - v.groupby(key).ngroups:,} ({time.time() - t0:.0f}s)")
 
 
-def pit_percentile(v: pd.DataFrame, min_history: int = B.PROGRESS_PCT_MIN_HISTORY):
-    """版をすべて残した表で、その日までの最新の版だけを母集団にして順位を付ける。"""
-    ratio = v["progress_ratio"].to_numpy(dtype=float)
-    quarter = v["quarter"].to_numpy()
-    table = np.where(v["progress_basis"].isin(["seasonal", "floor"]).to_numpy(), "seasonal", "linear")
-    days = v["DiscDate"].to_numpy()
-    keys = list(zip(v["Code"], v["CurFYSt"], v["quarter"]))
-    ok = np.isfinite(ratio) & np.isin(quarter, (1, 2, 3))
-    out = np.full(len(v), np.nan)
-    tot = np.full(len(v), np.nan)
-    for qq in (1, 2, 3):
-        for t in ("seasonal", "linear"):
-            idx = np.where(ok & (quarter == qq) & (table == t))[0]
-            if not len(idx):
-                continue
-            vals, rank = np.unique(ratio[idx], return_inverse=True)
-            n = len(vals)
-            tree = np.zeros(n + 1, dtype=np.int64)
-
-            def add(k: int, delta: int) -> None:
-                k += 1
-                while k <= n:
-                    tree[k] += delta
-                    k += k & -k
-
-            def below(k: int) -> int:
-                s = 0
-                while k > 0:
-                    s += tree[k]
-                    k -= k & -k
-                return int(s)
-
-            seq = idx[np.argsort(days[idx], kind="mergesort")]
-            pos = {int(i): int(r) for i, r in zip(idx, rank)}
-            cur = {}
-            total = 0
-            i = 0
-            while i < len(seq):
-                j = i
-                while j < len(seq) and days[seq[j]] == days[seq[i]]:
-                    j += 1
-                if total >= min_history:
-                    for s_ in seq[i:j]:
-                        k = pos[int(s_)]
-                        less = below(k)
-                        eq = below(k + 1) - less
-                        out[s_] = (less + 0.5 * eq) / total * 100.0
-                        tot[s_] = total
-                for s_ in seq[i:j]:
-                    kk = keys[s_]
-                    k = pos[int(s_)]
-                    if kk in cur:
-                        add(cur[kk], -1)          # 古い版を母集団から外して差し替える
-                    else:
-                        total += 1
-                    cur[kk] = k
-                    add(k, +1)
-                i = j
-    return out, tot
-
-
-v["pct_pit"], v["tot_pit"] = pit_percentile(v)
+# 本番と同じ関数で、版をすべて残した表に期の鍵を渡す（2026-10-02 からの本番の計算そのもの）
+v["pct_pit"] = B.progress_percentile(v["DiscDate"], v["quarter"].to_numpy(),
+                                     v["progress_basis"].to_numpy(), v["progress_ratio"].to_numpy(),
+                                     keys=list(zip(v["Code"], v["CurFYSt"], v["quarter"])))
 
 # 版ごとに「この版が出た時点での、最新の期の最新の版」の行番号
 v["_po"] = list(zip(pd.to_datetime(v["CurFYSt"], errors="coerce").astype("int64"), v["quarter"]))
