@@ -187,11 +187,12 @@
 前者は `/fins/details`・`/fins/dividend`・`/markets/breakdown` の3本。
 つまり **BS/PL/CF明細・配当明細・売買内訳はプレミアムで取れる**。
 
-### 2026-10-03 運用者の決定: BS/PL/CF の明細は J-Quants プレミアムの `/fins/details` で取る（案 B）
+### 2026-10-03 運用者の決定: 案 B（プレミアムの `/fins/details`）は**見送り**。案 A（EDINET DB の日次取得）を継続
 
-EDINET DB（年次・日100件の枠）ではなく、四半期・開示日つき・全銘柄の `/fins/details` を使う
-（docs/BOOK_INDICATOR_COVERAGE.md の案 A/B/C の B）。契約をプレミアムに変えるのは運用者の操作。
-変えた後の手順:
+BS/PL/CF の明細を四半期で取るには J-Quants の契約をプレミアムに変える必要がある（現在の鍵は 403）。
+運用者は契約を変えない判断をし、案 B は取り下げた。EDINET DB の日次取得（年次・日100件の枠。
+docs/DATA_EDINETDB.md）はそのまま続ける。もし将来プレミアムに変えるなら、下の手順がそのまま使える
+（プローブとワークフローは残してある）。
 
 1. `Probe Fins Details`（`.github/workflows/probe-fins-details.yml`、手動）を回す。
    `research/probe_fins_details.py` が 14日ぶん叩いて、列名・入れ子・鍵の列（開示番号など）・
