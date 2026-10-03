@@ -1,0 +1,74 @@
+name: Probe Fins Details
+
+# J-Quants プレミアムの /fins/details（BS/PL/CF の明細）の疎通・形・量を測る。
+#
+# 運用者の決定（2026-10-03）で、財務諸表の明細はこのエンドポイントで取る。契約を
+# プレミアムに変えた後に手動で回し、取り込み（jq_bulk の種別）を書くのに要る事実
+# （列名・入れ子・鍵の列・1日の量・遡れる範囲）を測る。スタンダードの鍵なら
+# 「PLAN」と出て止まる。
+#
+# 公開リポジトリ・公開ログ: 値は印字しない（列名・件数・バイト数・日付だけ）。
+# 鍵は x-api-key ヘッダにしか載らない。
+on:
+  workflow_dispatch:
+    inputs:
+      dates:
+        description: '叩く日をカンマ区切りで（空なら既定の14日）'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Probe
+        env:
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+          DATES: ${{ inputs.dates }}
+        run: |
+          python3 research/probe_fins_details.py --dates "$DATES" 2>&1 | tee probe_fins_details.log
+
+      - name: Commit
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A research/probe_fins_details.json
+          if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
+          git commit -m "chore(research): /fins/details の疎通・形・量の実測を更新"
+          for i in 1 2 3 4; do
+            if git push; then exit 0; fi
+            sleep $((2 ** i)); git pull --rebase
+          done
+          exit 1
+
+      - name: Summary
+        if: always()
+        run: |
+          { echo '## /fins/details の疎通・形・量'
+            echo '```'
+            tail -150 probe_fins_details.log 2>/dev/null || echo '(実行せず)'
+            echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: probe-fins-details
+          path: |
+            research/probe_fins_details.json
+            probe_fins_details.log
+          if-no-files-found: warn

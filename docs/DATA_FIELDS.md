@@ -187,6 +187,20 @@
 前者は `/fins/details`・`/fins/dividend`・`/markets/breakdown` の3本。
 つまり **BS/PL/CF明細・配当明細・売買内訳はプレミアムで取れる**。
 
+### 2026-10-03 運用者の決定: BS/PL/CF の明細は J-Quants プレミアムの `/fins/details` で取る（案 B）
+
+EDINET DB（年次・日100件の枠）ではなく、四半期・開示日つき・全銘柄の `/fins/details` を使う
+（docs/BOOK_INDICATOR_COVERAGE.md の案 A/B/C の B）。契約をプレミアムに変えるのは運用者の操作。
+変えた後の手順:
+
+1. `Probe Fins Details`（`.github/workflows/probe-fins-details.yml`、手動）を回す。
+   `research/probe_fins_details.py` が 14日ぶん叩いて、列名・入れ子・鍵の列（開示番号など）・
+   1日の行数とバイト数・2016年より前に遡れるかを測り、`research/probe_fins_details.json` に
+   列名と件数だけを残す（値は印字も保存もしない）。スタンダードの鍵なら「PLAN」で止まる
+2. その形に合わせて `jq_bulk.py` の種別（日付ループ・年ごとの parquet・行の鍵）を書き、
+   全期間を取り直す（量と時間は 1 の見積もりで決める。330分の上限に当たれば種別ごとの書き戻しで続きから）
+3. 明細から特徴量を作り、§7 の手順（3モデル・全窓）で採否を決める
+
 ### 適時開示・アナリスト予想・株主構成は取れるか（2026-09-22）
 
 運用者の問いに答えるために候補10本を叩いた。**全部 NG、しかも全部が
