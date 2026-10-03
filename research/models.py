@@ -107,15 +107,16 @@ def sub_dir(algo: str, root: str = MODEL_DIR) -> str:
 
 
 def fit(algo: str, X: np.ndarray, y: np.ndarray, cols: List[str],
-        params: Optional[Dict] = None):
+        params: Optional[Dict] = None, prep: Optional[str] = None):
     """
     探索済みパラメータで学習する。
 
     モデルの定義は tuning_multi.build に置いてある。探索と本番で同じ
     ものを使うため、ここでは組み立てを委ねる（食わせる形がずれない）。
+    prep は線形・MLP の前処理の版（無ければ tuning_multi.PREPROCESS）。
     """
     p = TM.params_for(algo) if params is None else params
-    m = TM.build(algo, p, y, cols)
+    m = TM.build(algo, p, y, cols, prep=prep)
     m.fit(X, y)
     return m
 
