@@ -15,6 +15,10 @@ Actions で動かす。取得するのは下の 5 ページまでで、10 秒に
 
 使い方（Actions の run-experiment で）
     python3 research/exp/probe_maonline.py
+
+結果（2026-10-03、run 37111877377、docs/DATA_MA.md）: robots.txt は /db/ を一般のクローラに禁じていないが、
+利用規約 第16条(5) がスクレイピング・クローリング等の自動化された手段によるアクセスを禁じている（事前の書面による
+承諾がある場合を除く）→ クローリングはしない。代わりに公式の EDINET API（公開買付届出書など）を提案した。
 """
 from __future__ import annotations
 
