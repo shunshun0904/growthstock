@@ -81,10 +81,24 @@ STUDY_DB = os.path.join(os.path.dirname(os.path.abspath(__file__)),
 #:       「唯一 t>=2 を超えた」という結果は不利な条件下のもの。
 CATEGORICAL = ("s33_code", "s17_code", "mkt_code", "scalecat_code")
 
-#: 線形・MLP の前処理の版。"v1" = preprocess（中央値補完 + 指示子 + 標準化 + one-hot）、
+#: 線形・MLP の前処理の版の既定。"v1" = preprocess（中央値補完 + 指示子 + 標準化 + one-hot）、
 #: "v2" = linear_preprocess.preprocess_v2（列の型ごとに切る / asinh / log1p、欠損を意味で埋める。
-#: docs/MODEL_LINEAR_PREPROCESSING.md）。実験58 で比べる。本番は採用が決まるまで v1
+#: docs/MODEL_LINEAR_PREPROCESSING.md）
 PREPROCESS = "v1"
+#: モデルごとの版（既定より優先）。実験58（docs/MODEL_ADOPTION_RULES.md §22）で v2 はロジスティック回帰
+#: では OOF と32窓の過半で上、MLP では決め手にならなかった → 運用者の決定（2026-10-03）で
+#: **ロジスティック回帰だけ v2**。MLP は v1 のまま。2026-10-04 の日曜の再学習から入る
+PREPROCESS_BY_ALGO = {"logit": "v2"}
+
+
+def preprocess_version(algo: str, prep: Optional[str] = None) -> str:
+    """
+    線形・MLP の前処理の版。引数 prep > モデルごとの設定（PREPROCESS_BY_ALGO）> 既定（PREPROCESS）。
+    木のモデルは前処理を持たないので ""。
+    """
+    if algo in TREE_ALGOS:
+        return ""
+    return prep or PREPROCESS_BY_ALGO.get(algo) or PREPROCESS
 
 #: 整数列だが順序に意味があるので one-hot にしない
 #:   cap_band        時価総額帯 0〜4。大小に意味がある
@@ -245,7 +259,7 @@ def preprocess(cols: List[str]):
 
 
 def _preprocess(cols: List[str], prep: Optional[str] = None):
-    """線形・MLP の前処理。prep が無ければモジュールの PREPROCESS（既定 v1）。"""
+    """線形・MLP の前処理。prep が無ければモジュールの既定 PREPROCESS（v1）。版の解決は preprocess_version。"""
     prep = prep or PREPROCESS
     if prep == "v1":
         return preprocess(cols)
@@ -262,7 +276,8 @@ def build(algo: str, params: Dict, y: np.ndarray,
     モデルの定義はここ1箇所に置く。
 
     cols は線形・MLP の one-hot に要る（どの列がカテゴリかを知るため）。
-    木には不要。prep は線形・MLP の前処理の版（無ければ PREPROCESS）。
+    木には不要。prep は線形・MLP の前処理の版（無ければ preprocess_version(algo) =
+    モデルごとの設定 PREPROCESS_BY_ALGO、無ければ既定 PREPROCESS）。
     """
     spw = tuning.scale_pos_weight(y)
     p = dict(params)
@@ -304,7 +319,7 @@ def build(algo: str, params: Dict, y: np.ndarray,
         # l1 は liblinear/saga のみ。saga は収束が遅いので liblinear にする
         solver = "liblinear" if p.get("penalty") == "l1" else "lbfgs"
         return make_pipeline(
-            _preprocess(cols or [], prep),
+            _preprocess(cols or [], preprocess_version(algo, prep)),
             LogisticRegression(max_iter=3000, class_weight="balanced",
                                random_state=SEED, solver=solver, **p))
 
@@ -324,7 +339,7 @@ def build(algo: str, params: Dict, y: np.ndarray,
             two = bool(p.pop("two_layers", False))
             p["hidden_layer_sizes"] = (n1, max(8, n1 // 2)) if two else (n1,)
         return make_pipeline(
-            _preprocess(cols or [], prep),
+            _preprocess(cols or [], preprocess_version(algo, prep)),
             MLPClassifier(max_iter=200, early_stopping=True,
                           n_iter_no_change=10, validation_fraction=0.15,
                           random_state=SEED, **p))
@@ -360,8 +375,9 @@ def study_name(algo: str, n_splits: int, train_to: str, cols: List[str]) -> str:
     # 本数を変えて同じ週に探索し直したとき、前の本数で測った試行を引き継がない
     name += f"_t{N_ESTIMATORS}" if algo in TREE_ALGOS else ""
     # 線形・MLP は前処理の版も入れる（v1 以外）。版が違えば別の問題なので、前の版の試行を引き継がない
-    if algo not in TREE_ALGOS and PREPROCESS != "v1":
-        name += f"_{PREPROCESS}"
+    version = preprocess_version(algo)
+    if version and version != "v1":
+        name += f"_{version}"
     return name
 
 

@@ -3,7 +3,7 @@
 実験58（research/exp/e58_linear_prep.py）の骨組みのテスト。重い計算は回さない。
 
 - 腕は P（v1）と V（v2）で、前処理の版の対応が固定されている
-- prep() は tuning_multi.PREPROCESS を一時的に切り替え、例外が出ても必ず戻す
+- prep() は tuning_multi.PREPROCESS（とモデルごとの設定）を一時的に切り替え、例外が出ても必ず戻す
 - width() は v1 / v2 の前処理後の列数を返す（one-hot と指示子を含む）
 - pair_line() の差・SE・勝ち数の数え方
 
@@ -36,13 +36,20 @@ class TestArms(unittest.TestCase):
 
     def test_prep_restores_the_module_setting(self):
         self.assertEqual(TM.PREPROCESS, "v1")
+        by = dict(TM.PREPROCESS_BY_ALGO)
         with E.prep("v2"):
             self.assertEqual(TM.PREPROCESS, "v2")
+            self.assertEqual(TM.PREPROCESS_BY_ALGO, {})          # 腕の版を両モデルに強制する
+            self.assertEqual(TM.preprocess_version("mlp"), "v2")
+        with E.prep("v1"):
+            self.assertEqual(TM.preprocess_version("logit"), "v1")  # 本番の logit=v2 を外す
         self.assertEqual(TM.PREPROCESS, "v1")
+        self.assertEqual(TM.PREPROCESS_BY_ALGO, by)
         with self.assertRaises(RuntimeError):
             with E.prep("v2"):
                 raise RuntimeError("途中で落ちる")
         self.assertEqual(TM.PREPROCESS, "v1")
+        self.assertEqual(TM.PREPROCESS_BY_ALGO, by)
 
     def test_width_counts_onehot_and_indicators(self):
         cols = ["s33_code", "ROE_q0", "has_dividend", "alert_slratio"]

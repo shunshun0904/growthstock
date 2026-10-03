@@ -21,7 +21,7 @@ year_cap_date、ホールドアウトより前で打ち切り、種0。列は本
 3. 窓ごと: 窓の境界を 0/2/4か月ずらした3通り（計32窓）。logit は種1つ（決定的）、mlp は種3つの平均。
    V−P の平均・SE・V が上の窓の数。採否は §7 に準じ「OOF と窓の過半で上回る」
 
-本番の設定（research/multi_params.json、tuning_multi.PREPROCESS）には書かない。
+本番の設定（research/multi_params.json、tuning_multi.PREPROCESS / PREPROCESS_BY_ALGO）には書かない。
 記録は research/_data/oof/e58_*（探索の study は e58_optuna_{P,V}.db。途中で止まっても引き継ぐ）。
 
 使い方
@@ -69,13 +69,19 @@ def log(msg: str) -> None:
 
 @contextlib.contextmanager
 def prep(version: str):
-    """tuning_multi.build が組む前処理の版を一時的に切り替える（戻し忘れを防ぐ）。"""
+    """
+    tuning_multi.build が組む前処理の版を一時的に切り替える（戻し忘れを防ぐ）。
+    モデルごとの設定（PREPROCESS_BY_ALGO。本番は logit だけ v2）も外して、腕の版を両モデルに強制する。
+    """
     old = TM.PREPROCESS
+    old_by = TM.PREPROCESS_BY_ALGO
     TM.PREPROCESS = version
+    TM.PREPROCESS_BY_ALGO = {}
     try:
         yield
     finally:
         TM.PREPROCESS = old
+        TM.PREPROCESS_BY_ALGO = old_by
 
 
 def width(cols: list, version: str, X: np.ndarray) -> int:

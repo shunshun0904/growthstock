@@ -1478,8 +1478,11 @@ V（v2: 列の型ごとに 分位点で切る → asinh / log1p → 標準化、
 - **logit**: OOF の4指標すべてと、窓の 27/32・26/32 で v2 が上。§7 の条件を満たす
 - **mlp**: 窓の PR は 21/32 で上だが ROC は 15/32、種1つの OOF では下がる。条件を満たさない。
   MLP は種で ±0.01 動くので、決めるなら種3つ以上の OOF で測り直す
-- 提案: **ロジスティック回帰だけ v2 に切り替え、MLP は v1 のまま**（`tuning_multi.PREPROCESS` をモデルごとの設定に
-  する）。運用者の決定待ち。詳細は `docs/MODEL_LINEAR_PREPROCESSING.md` §6
+- **運用者の決定（2026-10-03）「提案どおり、ロジスティック回帰だけ v2 で」** → 本番に入れた。
+  `tuning_multi.PREPROCESS_BY_ALGO = {"logit": "v2"}`（MLP は既定の v1 のまま）、版の解決は
+  `tuning_multi.preprocess_version(algo)`。2026-10-04 の日曜の再学習から効く（logit の探索は study 名に
+  `_v2` が付くので 50試行をやり直す。約 25分）。各モデルの `meta.json` に `preprocess` を残す。
+  列は変わらないので画面・学習と予測の一致チェック・控えはそのまま。詳細は `docs/MODEL_LINEAR_PREPROCESSING.md` §6
 - 注意（害は無い）: ログに scikit-learn の `OptimizeWarning: Unknown solver options: iprint` が多数出る。
   scikit-learn 1.6.0 と SciPy 1.18.1 の組み合わせで lbfgs に渡す古い引数名への注意で、結果には影響しない。
   `Skipping features without any observed values: [155 156 157]` は §21 と同じ（窓1の `lvs_*` 3列）

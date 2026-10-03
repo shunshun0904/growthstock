@@ -7,7 +7,8 @@
   - 統計（分位点・四分位範囲・中央値・最大）は fit に渡した訓練側だけで決まる
   - 切る / asinh / log1p は NaN を素通しし、単調
   - 欠損の埋め方: 意味で 0 / 上限 / 最頻値 / 中央値。指示子は訓練側に欠損があった列だけ
-  - tuning_multi.build は既定で v1 のまま。prep="v2" か PREPROCESS="v2" で v2 になる
+  - tuning_multi.build の既定は、モデルごとの設定（PREPROCESS_BY_ALGO: logit だけ v2。運用者の決定
+    2026-10-03）、無ければ PREPROCESS（v1）。prep= の引数が最優先
   - v2 で logit / mlp が学習・採点でき、確率が 0〜1 で有限
 
   python3 tests/test_linear_preprocess.py
@@ -177,11 +178,31 @@ class TestPipeline(unittest.TestCase):
         b = ct.transform(Xbad)
         np.testing.assert_allclose(a[1:], b[1:])
 
-    def test_default_build_is_still_v1(self):
+    def test_production_versions(self):
+        # 運用者の決定（2026-10-03、実験58）: ロジスティック回帰だけ v2、MLP は v1 のまま
         self.assertEqual(TM.PREPROCESS, "v1")
+        self.assertEqual(TM.PREPROCESS_BY_ALGO, {"logit": "v2"})
+        self.assertEqual(TM.preprocess_version("logit"), "v2")
+        self.assertEqual(TM.preprocess_version("mlp"), "v1")
+        self.assertEqual(TM.preprocess_version("lgbm"), "")           # 木は前処理を持たない
+        self.assertEqual(TM.preprocess_version("logit", "v1"), "v1")  # 引数が最優先
         m = TM.build("logit", {"C": 1.0, "penalty": "l2"}, self.y, self.cols)
-        names = [n for n, _, _ in m.steps[0][1].transformers]
-        self.assertEqual(names, ["cat", "num"])
+        self.assertIn("signed_heavy", [n for n, _, _ in m.steps[0][1].transformers])
+        m = TM.build("mlp", {"h1": 16, "alpha": 0.1}, self.y, self.cols)
+        self.assertEqual([n for n, _, _ in m.steps[0][1].transformers], ["cat", "num"])
+        # study 名: logit は既定で v2 が付き、mlp は付かない
+        self.assertTrue(TM.study_name("logit", 5, "2026-09-26", self.cols).endswith("_v2"))
+        self.assertFalse(TM.study_name("mlp", 5, "2026-09-26", self.cols).endswith("_v2"))
+
+    def test_default_build_without_per_model_setting_is_v1(self):
+        old = TM.PREPROCESS_BY_ALGO
+        try:
+            TM.PREPROCESS_BY_ALGO = {}
+            m = TM.build("logit", {"C": 1.0, "penalty": "l2"}, self.y, self.cols)
+            names = [n for n, _, _ in m.steps[0][1].transformers]
+            self.assertEqual(names, ["cat", "num"])
+        finally:
+            TM.PREPROCESS_BY_ALGO = old
 
     def test_prep_argument_switches_to_v2(self):
         m = TM.build("logit", {"C": 1.0, "penalty": "l2"}, self.y, self.cols, prep="v2")
@@ -193,18 +214,20 @@ class TestPipeline(unittest.TestCase):
     def test_module_switch_and_study_name(self):
         old = TM.PREPROCESS
         try:
+            # 既定を v2 にすると、モデルごとの設定が無い mlp も v2 になる
             TM.PREPROCESS = "v2"
             m = TM.build("mlp", {"h1": 16, "alpha": 0.1}, self.y, self.cols)
             self.assertIn("signed_heavy", [n for n, _, _ in m.steps[0][1].transformers])
-            v2 = TM.study_name("logit", 5, "2026-09-26", self.cols)
+            v2 = TM.study_name("mlp", 5, "2026-09-26", self.cols)
             TM.PREPROCESS = "v1"
-            v1 = TM.study_name("logit", 5, "2026-09-26", self.cols)
+            v1 = TM.study_name("mlp", 5, "2026-09-26", self.cols)
             self.assertNotEqual(v1, v2)
             self.assertTrue(v2.endswith("_v2"))
+            self.assertFalse(v1.endswith("_v2"))
             # 木の study 名は前処理の版に依らない
+            lgbm_v1 = TM.study_name("lgbm", 5, "2026-09-26", self.cols)
             TM.PREPROCESS = "v2"
-            self.assertEqual(TM.study_name("lgbm", 5, "2026-09-26", self.cols),
-                             TM.study_name("lgbm", 5, "2026-09-26", self.cols))
+            self.assertEqual(TM.study_name("lgbm", 5, "2026-09-26", self.cols), lgbm_v1)
         finally:
             TM.PREPROCESS = old
 

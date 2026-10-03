@@ -145,6 +145,8 @@ def train_one(algo: str, ds: pd.DataFrame, cols: List[str],
         "trainedAt": pd.Timestamp.utcnow().isoformat(),
         "label": B.DEFAULT_RISE.name,
         "preset": preset,
+        # 線形・MLP の前処理の版（木は ""）。学習時の tuning_multi.preprocess_version
+        "preprocess": TM.preprocess_version(algo),
         "features": cols,
         "params": params,
         "nTrain": int(len(ds)),
