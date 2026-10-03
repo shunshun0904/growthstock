@@ -210,35 +210,3 @@ export function exitPlan(close, s = STRATEGY) {
     holdDays: s.holdDays,
   };
 }
-
-/* ------------------------------------------------------------ 最も当たる型 */
-
-/**
- * 実験60（docs/MODEL_TENDENCIES.md §5）で、5モデルの上位10% を5つの型に分けたとき最も当たった型:
- * 小型・78週高値の近く・終値が高値側・PBR 低め（OOF の正例率 33%。最も外れる型は 20%）。
- * 判定は予測側（research/best_type.py）が「同じ日の候補の中での位置」で行い、
- * candidate.bestType に {small, nearHigh, closeHigh, lowPbr, n, total, nInDay, pct} で載せる。
- * 画面はそれを読むだけ。順と説明はここが正本。
- */
-export const BEST_TYPE = [
-  { key: 'small', label: '小型', desc: '20日平均売買代金が、その日の候補の中央値より少ない' },
-  { key: 'nearHigh', label: '高値圏', desc: '78週高値に対する終値の位置が、その日の候補の中央値より上' },
-  { key: 'closeHigh', label: '高値引け', desc: 'その日の値幅の中の終値の位置が、候補の中央値より上' },
-  { key: 'lowPbr', label: 'PBR低め', desc: 'PBR の逆数が、その日の候補の中央値より上' },
-];
-
-/**
- * 候補が型にどれだけ当てはまるか。判定できない（候補が少ない・値が無い・古い payload）なら null。
- * 戻り値: { n, total, tone, label, nInDay, items: [{ key, label, desc, ok, pct }] }
- */
-export function bestType(candidate) {
-  const b = candidate?.bestType;
-  if (!b || b.n == null) return null;
-  const total = b.total ?? BEST_TYPE.length;
-  const items = BEST_TYPE.map((t) => ({
-    ...t, ok: b[t.key] ?? null, pct: b.pct?.[t.key] ?? null,
-  }));
-  const tone = b.n >= total ? 'green' : b.n >= total - 1 ? 'amber' : 'slate';
-  return { n: b.n, total, tone, label: `型 ${b.n}/${total}`, nInDay: b.nInDay ?? null, items };
-}
-

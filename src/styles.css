@@ -566,17 +566,3 @@ input[type='range']::-moz-range-thumb {
 }
 .strat-fund-down { color: var(--red); }
 .strat-fund-up { color: var(--green); }
-
-/* ---------------------------------------------------------------- 最も当たる型（実験60） */
-.pred-type { margin-left: 6px; }
-.pred-type-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-.pred-type-list li { display: grid; grid-template-columns: 1.4em auto 1fr auto; gap: 8px; align-items: baseline; }
-.pred-type-list li.sum { grid-template-columns: auto 1fr; margin-top: 4px; }
-.pred-type-list .mark { font-weight: 700; text-align: center; }
-.pred-type-list .mark.ok { color: var(--green); }
-.pred-type-list .mark.ng { color: var(--red); }
-.pred-type-list .mark.na { color: var(--text-faint); }
-.pred-type-list .k { font-weight: 600; }
-.pred-type-list .sub { font-size: 11px; color: var(--text-faint); }
-.pred-type-list .v { color: var(--text-faint); }
-
