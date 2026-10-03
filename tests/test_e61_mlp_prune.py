@@ -73,10 +73,27 @@ class Select(unittest.TestCase):
         self.assertEqual(int(table["unused"].sum()), 3)
 
     def test_labels_and_constants(self):
-        self.assertEqual(E.ARMS, ("P", "A", "B", "C"))
+        self.assertEqual(E.ARMS, ("P", "A", "B", "C", "At", "Ct"))
+        self.assertEqual(E.TUNE_SELECT, {"At": "A", "Ct": "C"})
+        self.assertTrue(set(E.LABELS) == set(E.ARMS))
         self.assertEqual(E.ALGO, "mlp")
         self.assertEqual(E.PREP, "v1")
         self.assertEqual(TM.preprocess_version("mlp"), "v1")
+
+    def test_fit_mlp_is_usable_for_selection_and_reproducible(self):
+        import pandas as pd
+        df = pd.DataFrame(self.X, columns=self.cols)
+        df["label"] = self.y
+        params = {"h1": 8, "two_layers": False, "alpha": 0.01, "learning_rate_init": 1e-2, "batch_size": 64}
+        m1 = E.fit_mlp(df, self.cols, params, seed=42)
+        m2 = E.fit_mlp(df, self.cols, params, seed=42)
+        self.assertEqual(TM.SEED, 0)                        # 学習のあと種を戻す
+        p1 = m1.predict_proba(self.X)[:, 1]
+        p2 = m2.predict_proba(self.X)[:, 1]
+        np.testing.assert_allclose(p1, p2)                  # 同じ種なら同じモデル
+        arms, table = E.select(self.cols, self.X, self.y, m1, top_n=3)
+        self.assertEqual(len(arms["C"]), 3)
+        self.assertTrue({"ROE_q0", "mom_20d"} <= set(arms["C"]))
 
 
 if __name__ == "__main__":

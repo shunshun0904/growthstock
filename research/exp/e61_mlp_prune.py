@@ -15,6 +15,9 @@
   B  単独で効かない列を全部外す: 単独の ROC-AUC が 0.48〜0.52 の列（探索に使う期間で 182列 → 残り 57列）。
      決算の変化・水準・連続改善の列はほぼ全部ここに入る（単独では効かず、組み合わせで効いている列）
   C  MLP が使っていない列を外す: 本番 MLP の列ごとの置換の崩れ（1 − 順位相関）が小さい下位半分（約120列）
+  At / Ct  A / C と同じ決め方を、本番 MLP の代わりに「探索に使う期間だけで学習した MLP」（P のパラメータ・種42）
+     で行う。本番 MLP は評価する期間（OOF・窓の検証側）も学習に含むので、A / C の列の選び方には先読みが混じる
+     （ラベルは使わないが、モデルが評価期間を見ている）。At / Ct はそれが無い。採用の判断は Ct で行う
 評価は実験58 と同じ作り（e25_auc_noise.metrics、ab_oof.auc_by_window）。種は窓では3つ（42, 7, 123）、
 本番と同じ OOF は 42。記録は research/_data/oof/e61_*（列の一覧は e61_cols_{腕}.json）。
 本番の設定（research/multi_params.json、features の preset）には書かない。
@@ -42,6 +45,7 @@ import lab  # noqa: E402
 import train_model as T  # noqa: E402
 import tuning_multi as TM  # noqa: E402
 import ab_oof as AB  # noqa: E402
+import models as M  # noqa: E402
 import e41_stop_loss as E41  # noqa: E402
 import e27_timing_multi as E27  # noqa: E402
 import e60_model_tendency as E60  # noqa: E402
@@ -51,9 +55,13 @@ OOF_DIR = os.path.join(lab.DATA_DIR, "oof")
 ALGO = "mlp"
 PREP = "v1"
 N_SPLITS = 5
-ARMS = ("P", "A", "B", "C")
+ARMS = ("P", "A", "B", "C", "At", "Ct")
 LABELS = {"P": "P 全239列", "A": "A 過大評価の列を外す", "B": "B 単独で効かない列を全部外す",
-          "C": "C MLP が使っていない下位半分を外す"}
+          "C": "C MLP が使っていない下位半分を外す",
+          "At": "At 過大評価の列を外す（探索期間だけで学習した MLP で選ぶ）",
+          "Ct": "Ct MLP が使っていない下位半分を外す（探索期間だけで学習した MLP で選ぶ）"}
+#: 本番 MLP ではなく、探索に使う期間だけで学習した MLP で列を選ぶ腕 → 選び方の元になる腕
+TUNE_SELECT = {"At": "A", "Ct": "C"}
 WEAK_AUC = 0.02
 TOP_N = 30
 PROD_SEED = 42
@@ -99,6 +107,17 @@ def select(cols, X: np.ndarray, y: np.ndarray, model, *, top_n: int = TOP_N, see
                           "weak": [c in weak_set for c in cols], "over": [c in set(over) for c in cols],
                           "unused": [c in set(unused) for c in cols]})
     return out, table
+
+
+def fit_mlp(df: pd.DataFrame, cols: list, params: dict, seed: int = PROD_SEED):
+    """探索に使う期間の行だけで MLP を1つ学習する（列の選び方に先読みを入れないため）。本番と同じ組み方・前処理。"""
+    X = df[cols].to_numpy(dtype=float)
+    y = df["label"].to_numpy(dtype=int)
+    TM.SEED = seed                              # build() が random_state に使う（e41.oof_folds と同じ）
+    try:
+        return M.fit(ALGO, X, y, cols, params=params, prep=PREP)
+    finally:
+        TM.SEED = 0
 
 
 # ---------------------------------------------------------------- #
@@ -196,18 +215,33 @@ def main(argv=None) -> int:
     yt = tune_df["label"].to_numpy(dtype=int)
     arm_cols, table = select(cols, Xt, yt, mlp_model)
     table.to_csv(os.path.join(OOF_DIR, "e61_selection.csv"), index=False)
-    for a in ARMS:
+    if any(a in TUNE_SELECT for a in arms):
+        # 先読みの無い選び方: 探索に使う期間だけで学習した MLP（P のパラメータ・種42）で A / C と同じ決め方
+        rec_p = tune_arm("P", tune_df, cols, args.n_trials)
+        t0 = time.time()
+        model_t = fit_mlp(tune_df, cols, rec_p["params"])
+        arm_t, table_t = select(cols, Xt, yt, model_t)
+        table_t.to_csv(os.path.join(OOF_DIR, "e61_selection_t.csv"), index=False)
+        for a, src in TUNE_SELECT.items():
+            arm_cols[a] = arm_t[src]
+        log(f"  探索期間だけで学習した MLP で列を選び直した（{time.time() - t0:.0f}秒）: "
+            + " / ".join(f"{a} と {src} の重なり {len(set(arm_cols[a]) & set(arm_cols[src]))}列"
+                         f"（{a} {len(arm_cols[a])}列・{src} {len(arm_cols[src])}列）"
+                         for a, src in TUNE_SELECT.items()))
+    for a in arms:
         with open(os.path.join(OOF_DIR, f"e61_cols_{a}.json"), "w", encoding="utf-8") as fh:
             json.dump(arm_cols[a], fh, ensure_ascii=False, indent=0)
     g_of = F.column_groups()
-    print("\n■ 0. 腕ごとの列（探索に使う期間の単独 AUC と、本番 MLP の寄与・置換で決めた）")
-    for a in ARMS:
+    print("\n■ 0. 腕ごとの列（探索に使う期間の単独 AUC と、MLP の寄与・置換で決めた）")
+    for a in arms:
         dropped = [c for c in cols if c not in set(arm_cols[a])]
         fam = pd.Series([E60.FAMILY_OF.get(g_of.get(c, ""), "その他") for c in dropped]).value_counts()
         print(f"  {LABELS[a]}: 残す {len(arm_cols[a])}列 / 外す {len(dropped)}列"
               + (f"（外した大区分: " + " / ".join(f"{k} {v}" for k, v in fam.head(6).items()) + "）" if dropped else ""))
-        if 0 < len(dropped) <= 20:
+        # 列名だけなので公開ログに出してよい（値は出さない）。採用するときはこの一覧を preset に固定する
+        if dropped:
             print("     外す列: " + ", ".join(dropped))
+            print("     残す列: " + ", ".join(arm_cols[a]))
     log(f"  前処理後の入力の列数: " + " / ".join(
         f"{a} {int(TM._preprocess(arm_cols[a], PREP).fit_transform(tune_df[arm_cols[a]].to_numpy(dtype=float)).shape[1])}"
         for a in arms))
@@ -229,7 +263,7 @@ def main(argv=None) -> int:
     log(f"データ {len(df):,}件 / 正例率 {df['label'].mean() * 100:.2f}% / "
         f"{df['Date'].min().date()} 〜 {df['Date'].max().date()}")
 
-    summary = {"cols": {a: len(arm_cols[a]) for a in ARMS},
+    summary = {"cols": {a: len(arm_cols[a]) for a in arms},
                "tuning": {a: recs[a]["_cv"] | {"params": recs[a]["params"]} for a in arms},
                "production_oof": {}}
     print("\n■ 2. 本番と同じ作りの out-of-fold（ずらし0・種42）")
