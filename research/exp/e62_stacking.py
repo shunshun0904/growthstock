@@ -31,6 +31,10 @@
 meta が学習できる窓（学習行 MIN_META 以上）だけで比べる。単体も同じ窓で測る。
 記録は research/_data/oof/e62_*。本番の設定には何も書かない。
 
+結果（2026-10-03、run 37105947657、docs/MODEL_ADOPTION_RULES.md §24）: 学習した meta は窓ごとに LightGBM 単体を
+PR +0.002〜0.003 上回る（17/26窓）が、本番と同じ OOF では下回り、「全5モデル 95以上」に発火数をそろえた差は
+ノイズの範囲（正例率 +2.9pt / ret20 +0.9pt、SE 程度）→ 採用を勧めない。
+
 使い方
     python3 research/exp/e62_stacking.py
     python3 research/exp/e62_stacking.py --shifts 0 --seeds 1      # 試運転
