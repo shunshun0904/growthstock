@@ -64,7 +64,9 @@ class Stacking(unittest.TestCase):
 
     def test_stack_scores_nan_until_enough_history(self):
         X, names = E.features(self.fr, "logit")
-        sc, n_train, w = E.stack_scores(self.fr, X, names, "lr", self.train_end, min_train=400)
+        sc, q, n_train, w = E.stack_scores(self.fr, X, names, "lr", self.train_end, min_train=400)
+        self.assertTrue(((q[np.isfinite(q)] >= 0) & (q[np.isfinite(q)] <= 100)).all())
+        self.assertTrue(np.isnan(q[self.fr["fold"].to_numpy() <= 2]).all())
         f = self.fr["fold"].to_numpy()
         # 窓1 は学習行 0、窓2 は約 300行 → NaN。窓3 以降（≥ 400行）は 0〜1
         self.assertTrue(np.isnan(sc[f == 1]).all())
@@ -84,6 +86,9 @@ class Stacking(unittest.TestCase):
             self.assertIn(f"m_{key}", fr.columns)
             if learner:
                 self.assertTrue(np.isfinite(fr.loc[fr["fold"] >= 3, f"m_{key}"]).all())
+                self.assertTrue(np.isfinite(fr.loc[fr["fold"] >= 3, f"q_{key}"]).all())
+        st = E.rule_stats(fr[fr["fold"] >= 3])
+        self.assertAlmostEqual(st["ret20"], float(fr.loc[fr["fold"] >= 3, "ret_o1_20"].mean() * 100))
         # 順位平均は学習なしなので全窓にある
         self.assertTrue(np.isfinite(fr["m_rank_avg"]).all())
         # 学習した meta は、信号のある toy では LightGBM 単体より ROC が高い（窓3以降）

@@ -197,11 +197,14 @@ def stack_scores(frame: pd.DataFrame, X: np.ndarray, names: List[str], learner: 
                  train_end: Dict[int, pd.Timestamp], *, min_train: int = MIN_META, seed: int = 0):
     """
     窓ごとに時間順で meta を学習して採点する。
-    戻り値: (スコア。学習できない窓は NaN, {窓: 学習行数}, {窓: 重み})
+    戻り値: (スコア。学習できない窓は NaN, 同じ meta を学習行に当てた分布での百分位（0〜100）,
+             {窓: 学習行数}, {窓: 重み})
+    百分位は「本番で meta を毎週学習し直し、その meta の OOF（学習行）の分布でその日のスコアの位置を出す」形。
     """
     y_all = frame["label"].to_numpy(dtype=float)
     f = frame["fold"].to_numpy()
     out = np.full(len(frame), np.nan)
+    pct_same = np.full(len(frame), np.nan)
     n_train: Dict[int, int] = {}
     weights: Dict[int, Dict[str, float]] = {}
     ok_row = np.isfinite(X).all(axis=1)
@@ -214,8 +217,10 @@ def stack_scores(frame: pd.DataFrame, X: np.ndarray, names: List[str], learner: 
         m = fit_meta(learner, X[tr], y_all[tr].astype(int), seed)
         te = (f == k) & ok_row
         out[te] = np.asarray(m.predict_proba(X[te]), dtype=float)[:, 1]
+        hist = np.asarray(m.predict_proba(X[tr]), dtype=float)[:, 1]
+        pct_same[te] = L.pct_of(out[te], hist)
         weights[k] = meta_weights(learner, m, names)
-    return out, n_train, weights
+    return out, pct_same, n_train, weights
 
 
 def rank_average(frame: pd.DataFrame) -> np.ndarray:
@@ -237,8 +242,9 @@ def add_stacks(frame: pd.DataFrame, train_end: Dict[int, pd.Timestamp], *, seed:
         if kind not in cache:
             cache[kind] = features(frame, kind)
         X, names = cache[kind]
-        sc, nt, w = stack_scores(frame, X, names, learner, train_end, min_train=min_train, seed=seed)
+        sc, q, nt, w = stack_scores(frame, X, names, learner, train_end, min_train=min_train, seed=seed)
         frame[f"m_{key}"] = sc
+        frame[f"q_{key}"] = q                          # 同じ meta の学習行の分布での百分位
         n_train[key] = nt
         weights[key] = w
     return frame, n_train, weights
@@ -258,7 +264,7 @@ def average_frames(frames: List[pd.DataFrame]) -> pd.DataFrame:
         if not (fr["Code"].to_numpy() == base["Code"].to_numpy()).all() or \
            not (fr["Date"].to_numpy() == base["Date"].to_numpy()).all():
             raise SystemExit("種ごとの OOF の行が揃っていません")
-    for c in [c for c in base.columns if c.startswith("s_") or c.startswith("m_")]:
+    for c in [c for c in base.columns if c[:2] in ("s_", "m_", "q_")]:
         base[c] = np.mean([fr[c].to_numpy(dtype=float) for fr in frames], axis=0)
     return base
 
@@ -286,6 +292,8 @@ def pct_cols(frame: pd.DataFrame, cols: Sequence[str]) -> pd.DataFrame:
     out = frame.copy()
     for c in cols:
         out[f"p_{c[2:]}"] = E59.pct_expanding(out["Date"], out[c].to_numpy(dtype=float))
+        if f"q_{c[2:]}" in out.columns:
+            out[f"p_{c[2:]}_same"] = out[f"q_{c[2:]}"].to_numpy(dtype=float)
     out["score"] = out["s_lgbm"]
     return out
 
@@ -300,7 +308,7 @@ def rule_stats(rows: pd.DataFrame) -> dict:
     if len(rows) == 0:
         return {"n": 0, "pos": float("nan"), "ret20": float("nan"), "med20": float("nan")}
     return {"n": int(len(rows)), "pos": float(rows["label"].mean() * 100),
-            "ret20": float(rows["ret_o1_20"].mean()), "med20": float(rows["ret_o1_20"].median())}
+            "ret20": float(rows["ret_o1_20"].mean() * 100), "med20": float(rows["ret_o1_20"].median() * 100)}
 
 
 def matched(base: pd.DataFrame, pcol: str, n_by_fold: Dict[int, int]) -> pd.DataFrame:
@@ -467,7 +475,7 @@ def main(argv=None) -> int:
         print(f"  {L._l(NAME[key], 22)}" + " / ".join(parts))
 
     # ---------------- §3 運用の規則 ---------------- #
-    print(f"\n■ 3. 運用の規則（過去分布の百分位 {RULE_PCT:.0f} 以上・1日1件。meta のある窓だけ。切り方3通りを合算）")
+    print(f"\n■ 3. 運用の規則（百分位 {RULE_PCT:.0f} 以上・1日1件。meta のある窓だけ。切り方3通りの行を合算）")
     rule_rows = []
     pooled: Dict[str, List[pd.DataFrame]] = {}
     for sh in shifts:
@@ -477,26 +485,43 @@ def main(argv=None) -> int:
         rows_a, picks_a = rule_picks(base, ALGOS)
         n_rows = rows_a.groupby("fold").size().to_dict()
         n_picks = picks_a.groupby("fold").size().to_dict()
-        sets = {"全5モデル 95以上（1日1件）": picks_a,
-                "GBDT3 95以上（1日1件）": rule_picks(base, BOOST)[1],
-                "LightGBM 95以上（1日1件）": rule_picks(base, ("lgbm",))[1]}
-        for key, name, _, _ in METHODS:
-            sets[f"{name} 95以上（1日1件）"] = rule_picks(base, (key,))[1]
-            sets[f"{name} 件数そろえ（行）"] = matched(base, f"p_{key}", n_rows)
-            sets[f"{name} 件数そろえ（1日1件）"] = matched_picks(rule_picks(base, (key,))[1], f"p_{key}", n_picks)
+        sets = {"全5モデル 95以上": picks_a,
+                "GBDT3 95以上": rule_picks(base, BOOST)[1],
+                "LightGBM 95以上": rule_picks(base, ("lgbm",))[1]}
+        for key, name, _, learner in METHODS:
+            picks_m = rule_picks(base, (key,))[1]
+            sets[f"{name}|past"] = picks_m
+            if learner:
+                sets[f"{name}|same"] = rule_picks(base, (f"{key}_same",))[1]
+            sets[f"{name}|rows"] = matched(base, f"p_{key}", n_rows)
+            sets[f"{name}|picks"] = matched_picks(picks_m, f"p_{key}", n_picks)
         for name, rows_ in sets.items():
             pooled.setdefault(name, []).append(rows_)
-            s = rule_stats(rows_)
-            rule_rows.append({"shift": sh, "rule": name, **s})
+            rule_rows.append({"shift": sh, "rule": name, **rule_stats(rows_)})
     pd.DataFrame(rule_rows).to_csv(os.path.join(OOF_DIR, "e62_rules.csv"), index=False)
-    summary["rules"] = {}
-    ref = rule_stats(pd.concat(pooled["全5モデル 95以上（1日1件）"]))
-    for name, parts in pooled.items():
-        s = rule_stats(pd.concat(parts))
-        summary["rules"][name] = s
-        print(fmt_rule(name, s, None if name.startswith("全5モデル") else ref))
-    print("  （「件数そろえ（行）」は窓ごとに全5モデル 95以上を満たした行数と同じ数を、その方法の百分位の高い順に取る。"
-          "「件数そろえ（1日1件）」は 1日1件の買いの数をそろえる）")
+    stats = {name: rule_stats(pd.concat(parts)) for name, parts in pooled.items()}
+    summary["rules"] = stats
+    ref = stats["全5モデル 95以上"]
+
+    def cell(name: str, with_n: bool = True) -> str:
+        st = stats.get(name)
+        if st is None or st["n"] == 0:
+            return f"{'—':>22}" if with_n else f"{'—':>16}"
+        body = f"{st['pos']:>5.1f}% {st['ret20']:>+6.2f}%"
+        return (f"{st['n']:>6}件 " if with_n else "  ") + body
+    print("  基準（1日1件）                       件数  正例率  ret20平均")
+    for name in ("全5モデル 95以上", "GBDT3 95以上", "LightGBM 95以上"):
+        st = stats[name]
+        print(f"  {L._l(name, 34)}{st['n']:>6}件  {st['pos']:>5.1f}%  {st['ret20']:>+6.2f}%")
+    print(f"  {L._l('方法', 22)}{'過去分布 95以上・1日1件':>24}{'同じmeta分布 95以上・1日1件':>26}"
+          f"{'件数そろえ(行)':>16}{'件数そろえ(1日1件)':>18}")
+    for key, name, _, learner in METHODS:
+        print(f"  {L._l(name, 22)}{cell(f'{name}|past'):>24}{cell(f'{name}|same') if learner else '—':>26}"
+              f"{cell(f'{name}|rows', False):>16}{cell(f'{name}|picks', False):>18}")
+    print(f"  （基準の全5モデル 95以上: 正例率 {ref['pos']:.1f}% / ret20 {ref['ret20']:+.2f}%。"
+          "「過去分布」はその日より前の OOF 分布での百分位、「同じmeta分布」はその窓の meta を学習行に当てた分布での百分位。"
+          "「件数そろえ(行)」は窓ごとに全5モデル 95以上を満たした行数と同じ数を百分位の高い順に取る。"
+          "「件数そろえ(1日1件)」は 1日1件の買いの数をそろえる。ret20 は翌営業日の寄りで買い 20営業日の収益 %）")
 
     # ---------------- §4 meta の中身 ---------------- #
     print("\n■ 4. meta の重み（meta のある窓・種の平均。LR は標準化した入力への係数、LGBM は gain の割合）")
