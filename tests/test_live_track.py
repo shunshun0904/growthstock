@@ -108,6 +108,23 @@ class Decide(unittest.TestCase):
         _, _, picks = L.decide(rows)
         self.assertEqual(len(picks), 1)
 
+    def test_default_models_are_the_three_boosters(self):
+        # 既定の合議は BOOST の3つ。判定できない日の文言も「3モデル」のまま（画面と同じ）
+        rows = cands("2026-09-17", [(99, NAN, 99)] + [(50, 50, 50)] * 8)
+        rows["p_logit"] = 10.0                                 # 余計な列があっても見ない
+        _, days, picks = L.decide(rows)
+        self.assertTrue(picks.empty)
+        self.assertIn("3モデルの百分位が無い", days.iloc[0]["verdict"])
+        # models を5つにすると、logit の 10 で全件が落ちる
+        rows["p_logit"] = 10.0
+        rows["p_mlp"] = 99.0
+        rows.loc[0, "p_xgb"] = 99.0
+        _, _, p5 = L.decide(rows, models=L.ALL5)
+        self.assertTrue(p5.empty)
+        rows["p_logit"] = 99.0
+        _, _, p5 = L.decide(rows, models=L.ALL5)
+        self.assertEqual(len(p5), 1)
+
 
 class Forward(unittest.TestCase):
     def keys(self, bars, i=0):
@@ -168,6 +185,22 @@ class Forward(unittest.TestCase):
         o = [100.0, NAN, 100.0, 100.0]
         b = make_bars("11110", "2026-01-05", o, [100.0] * 4, [100.0] * 4)
         self.assertEqual(L.forward(b, self.keys(b)).iloc[0]["status"], "寄り付かず")
+
+
+class Bars(unittest.TestCase):
+    def test_load_bars_extra_columns(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            b = make_bars("11110", "2026-01-05", [100.0, 101.0], [102.0, 103.0], [100.0, 102.0])
+            b["O"] = [500.0, 505.0]                            # 調整前の始値（後の分割で 1/5 になった想定）
+            b["AdjL"] = [99.0, 100.0]
+            b.to_parquet(os.path.join(d, "bars_2026.parquet"), index=False)
+            got = L.load_bars(d)
+            self.assertEqual(list(got.columns), ["Date", "Code", "AdjO", "AdjH", "AdjC"])
+            got2 = L.load_bars(d, extra=("O", "AdjO"))         # 重複は増やさない
+            self.assertEqual(list(got2.columns), ["Date", "Code", "AdjO", "AdjH", "AdjC", "O"])
+            self.assertEqual(got2["O"].tolist(), [500.0, 505.0])
+            self.assertEqual(got2["Code"].dtype, object)
 
 
 class Slots(unittest.TestCase):

@@ -73,6 +73,8 @@ PRED_PATH = "public/data/predictions.json"
 
 #: 合議に使う3モデル（線形・MLP は入れない）。画面の BOOST と同じ
 BOOST = ("lgbm", "xgb", "cat")
+#: 画面に並ぶ5モデル全部（実験59 の「全5モデル」の選び方で使う。規則の既定は BOOST）
+ALL5 = ("lgbm", "xgb", "cat", "logit", "mlp")
 
 # --- 運用の規則。src/lib/strategy.js の STRATEGY と同じ値 --- #
 AGREE_PCT = 90.0      # agreePct: 3モデルすべてがこの百分位以上
@@ -204,17 +206,20 @@ def live_rows(versions: Sequence[dict], days: Sequence[dt.date]) -> pd.DataFrame
 # ---------------------------------------------------------------- #
 
 def decide(rows: pd.DataFrame, *, agree: float = AGREE_PCT,
-           min_break: int = SKIP_BREAKS, top_k: int = TOP_K):
+           min_break: int = SKIP_BREAKS, top_k: int = TOP_K,
+           models: Sequence[str] = BOOST):
     """
     画面の strategySignal と同じ判断を、日ごとにまとめて出す。
 
     rows: 1行 = その日の候補1件（Date, Code, score, p_lgbm, p_xgb, p_cat）。
           発火数はその日の行数（画面と同じ数え方）。
+    models: 合議に使うモデル（既定は画面と同じ BOOST の3つ。実験59 は ALL5 の5つでも呼ぶ）。
+          p_min はこのモデルの百分位の最小。並べ替えの同点は LightGBM のスコア順のまま。
     戻り値: (rows に p_min / n_break / passed / rank を足したもの,
              1日1行の判断, 買う銘柄)
     """
     r = rows.copy()
-    pc = [f"p_{a}" for a in BOOST]
+    pc = [f"p_{a}" for a in models]
     # 1つでも欠けていれば NaN（欠けたまま「満たした」としない。画面と同じ）
     r["p_min"] = r[pc].min(axis=1, skipna=False)
     r["n_break"] = r.groupby("Date")["Code"].transform("size")
@@ -236,7 +241,7 @@ def decide(rows: pd.DataFrame, *, agree: float = AGREE_PCT,
         if n < min_break:
             verdict = f"見送り（発火{n}件）"
         elif n_missing:
-            verdict = "判定できない（3モデルの百分位が無い）"
+            verdict = f"判定できない（{len(models)}モデルの百分位が無い）"
         elif not n_pass:
             verdict = "買わない（基準を満たす銘柄なし）"
         else:
@@ -252,8 +257,12 @@ def decide(rows: pd.DataFrame, *, agree: float = AGREE_PCT,
 # 値動き: 買値・+20% 到達・満了
 # ---------------------------------------------------------------- #
 
-def load_bars(data_dir: str, start: Optional[pd.Timestamp] = None) -> pd.DataFrame:
-    """日足（分割調整後の始値・高値・終値）。start の年より前のファイルは読まない。"""
+def load_bars(data_dir: str, start: Optional[pd.Timestamp] = None,
+              extra: Sequence[str] = ()) -> pd.DataFrame:
+    """
+    日足（分割調整後の始値・高値・終値）。start の年より前のファイルは読まない。
+    extra に列名を足すと、その列も読む（実験59 は調整前の始値 O を 1単元の買付額に使う）。
+    """
     paths = sorted(glob.glob(os.path.join(data_dir, "bars_*.parquet")))
     if start is not None:
         paths = [p for p in paths
@@ -261,8 +270,9 @@ def load_bars(data_dir: str, start: Optional[pd.Timestamp] = None) -> pd.DataFra
                  and int(os.path.basename(p)[5:9]) >= start.year]
     if not paths:
         raise SystemExit(f"日足（bars_*.parquet）がありません: {data_dir}")
-    b = pd.concat([pd.read_parquet(p, columns=["Date", "Code", "AdjO", "AdjH", "AdjC"])
-                   for p in paths], ignore_index=True)
+    cols = ["Date", "Code", "AdjO", "AdjH", "AdjC"] + [c for c in extra if c not in
+                                                        ("Date", "Code", "AdjO", "AdjH", "AdjC")]
+    b = pd.concat([pd.read_parquet(p, columns=cols) for p in paths], ignore_index=True)
     b["Date"] = pd.to_datetime(b["Date"])
     b["Code"] = b["Code"].astype(str)
     return b
@@ -434,17 +444,22 @@ def find_oof(algo: str, oof_dir: str, model_dir: str) -> Optional[str]:
     return next((p for p in cands if os.path.exists(p)), None)
 
 
-def oof_rows(oof_dir: str, model_dir: str) -> pd.DataFrame:
-    """3モデルの OOF を (Code, Date) で揃え、画面と同じ百分位を付ける。"""
+def oof_rows(oof_dir: str, model_dir: str, algos: Sequence[str] = BOOST) -> pd.DataFrame:
+    """
+    モデルの OOF を (Code, Date) で揃え、画面と同じ百分位を付ける。
+    algos の既定は規則の3モデル。実験59 は ALL5（5モデル）で呼ぶ。label / ret_o1_20 は
+    LightGBM の OOF から持つ（他のモデルの OOF にも同じ値が入っている）。
+    """
     base = None
-    for a in BOOST:
+    for a in algos:
         path = find_oof(a, oof_dir, model_dir)
         if path is None:
             raise SystemExit(f"{a} の OOF が見つかりません（{oof_dir} / {model_dir}）")
         o = pd.read_parquet(path)
         o["Date"] = pd.to_datetime(o["Date"])
         o["Code"] = o["Code"].astype(str)
-        keep = ["Code", "Date", "score"] + (["label"] if a == "lgbm" and "label" in o else [])
+        keep = ["Code", "Date", "score"] + ([c for c in ("label", "ret_o1_20") if c in o]
+                                            if a == "lgbm" else [])
         o = o[keep].rename(columns={"score": f"s_{a}"})
         o[f"p_{a}"] = pct_of(o[f"s_{a}"].to_numpy(), o[f"s_{a}"].to_numpy())
         base = o if base is None else base.merge(o, on=["Code", "Date"], how="inner")
