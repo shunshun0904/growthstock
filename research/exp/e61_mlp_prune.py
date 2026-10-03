@@ -251,6 +251,28 @@ def main(argv=None) -> int:
         print(f"  {a}−P {m['pr_auc'] - mp['pr_auc']:>+9.4f}{'':>7}{m['roc_auc'] - mp['roc_auc']:>+9.4f}"
               f"{m['day_auc'] - mp['day_auc']:>+8.4f}")
 
+    # MLP は種で ±0.01 動く（実験58）。本番と同じ作りの OOF を種3つの平均でも出す（ずらし0の窓の計算を共用）
+    if len(seeds) > 1:
+        print(f"\n■ 2b. 本番と同じ作りの out-of-fold（ずらし0・種{seeds} の平均）")
+        print(f"  {'腕':<4}{'PR-AUC':>9}{'リフト':>7}{'ROC':>9}{'日内':>8}{'上位10%超過':>12}{'勝窓':>7}{'最悪':>9}")
+        prod3 = {}
+        summary["production_oof_3seeds"] = {}
+        for a in arms:
+            o = oof_arm(a, df, arm_cols[a], recs[a]["params"], 0, seeds)
+            prod3[a] = o
+            m = metrics(o)
+            summary["production_oof_3seeds"][a] = {k: float(v) for k, v in m.items()}
+            print(f"  {a:<4}{m['pr_auc']:>9.4f}{m['lift']:>6.2f}x{m['roc_auc']:>9.4f}"
+                  f"{m['day_auc']:>8.4f}{m['ret_o1_20_mean']:>+10.2f}pt"
+                  f"{int(m['ret_o1_20_won']):>4}/{int(m['ret_o1_20_n']):<2}{m['ret_o1_20_worst']:>+8.2f}pt")
+        mp3 = metrics(prod3["P"])
+        for a in arms:
+            if a == "P":
+                continue
+            m = metrics(prod3[a])
+            print(f"  {a}−P {m['pr_auc'] - mp3['pr_auc']:>+9.4f}{'':>7}{m['roc_auc'] - mp3['roc_auc']:>+9.4f}"
+                  f"{m['day_auc'] - mp3['day_auc']:>+8.4f}")
+
     rows = []
     for sh in shifts:
         print(f"\n■ 3. 分離力（窓ごと。ずらし{sh}か月）")
