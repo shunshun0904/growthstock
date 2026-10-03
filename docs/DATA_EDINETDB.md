@@ -28,7 +28,7 @@ J-Quants スタンダードでは BS/PL/CF の明細（販管費・研究開発�
 | 網羅性 | 上場 3,983 社のうち財務データがあるのは **3,770 社**（screener の `total`）。新規上場は無い（一覧1社目 E39493 GAIA は `404 No financial data`） |
 | 有利子負債・のれん | **ある。** `ibd_current` / `ibd_noncurrent`、`bonds_payable`、`short_term_bonds_payable`、`commercial_papers`、`lease_liabilities_cl` / `_ncl`、`goodwill`、`impairment_loss` |
 | 項目の有無 | **値が無い項目は応答から省かれる。** 会計基準（`accounting_standard` = JP / IFRS）や業態（銀行）で入る項目が違う。欠測を前提に設計する |
-| 利用枠 | **日 100 / 月 900**（応答ヘッダ `x-ratelimit-limit: 100`, `x-ratelimit-monthly-limit: 900`）。月の上限が実質の制約 |
+| 利用枠 | **日 100 / 月 900**（応答ヘッダ `x-ratelimit-limit: 100`, `x-ratelimit-monthly-limit: 900`）。月の上限が実質の制約。**追記（2026-10-03）: 10月の応答ヘッダの月次の残数は 3,015 → 2,930 → 2,845 と毎日 85 ずつ減っており、月の上限は 3,100 と分かった**（9月の 900 は初回利用分の差で合って見えていた）。`research/edinet_fetch.py` の `MONTHLY_BUDGET = 850` は実際より低く、毎月 1〜10 日で止まる（残り約 2,800社がそろうのは 2027年1月上旬）。予算を 2,600/月 に上げる案（約 33 日でそろう）を出したが、**運用者の決定（2026-10-03）「取得頻度は今のままで良い」→ 850/月 のまま** |
 
 ## 叩いたエンドポイントと応答
 
