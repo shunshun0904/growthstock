@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   BOOST, STRATEGY, boostPcts, minPct, passesAgree, dayVerdict, strategySignal, exitPlan,
-  freeSlots, pctSpread, laggard, nearMisses, fundContrib,
+  freeSlots, pctSpread, laggard, nearMisses, fundContrib, frozenNote,
 } from '../src/lib/strategy.js';
 
 const cand = (code, pcts, score = 0.5) => ({
@@ -190,3 +190,17 @@ test('fundContrib: 決算の寄与（水準＋変化）を足す', () => {
   // 片方しか無くても足せる
   assert.equal(fundContrib({ contrib: { groups: { '決算（変化）': 0.25 } } }), 0.25);
 });
+
+test('frozenNote: 直近20日の日次ボラが frozenVol 未満のときだけ「値動きなし」の注意を返す', () => {
+  assert.equal(frozenNote({ vol20d: 0.08 }), '値動きなし（20日ボラ 0.08%。TOB 中の可能性）');
+  assert.equal(frozenNote({ vol20d: 0.29 }), '値動きなし（20日ボラ 0.29%。TOB 中の可能性）');
+  assert.equal(frozenNote({ vol20d: 0.3 }), null);       // ちょうどは出さない
+  assert.equal(frozenNote({ vol20d: 1.2 }), null);
+  assert.equal(frozenNote({}), null);                   // 値が無ければ出さない
+  assert.equal(frozenNote({ vol20d: null }), null);
+  assert.equal(frozenNote(undefined), null);
+  assert.equal(frozenNote({ vol20d: 0.5 }, { ...STRATEGY, frozenVol: 0.6 }),
+    '値動きなし（20日ボラ 0.50%。TOB 中の可能性）');
+  assert.equal(STRATEGY.frozenVol, 0.3);
+});
+

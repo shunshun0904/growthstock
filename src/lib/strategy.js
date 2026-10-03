@@ -58,7 +58,24 @@ export const STRATEGY = {
   holdDays: 20,      // 届かなければ何営業日で手仕舞いするか
   maxSlots: 3,       // 同時に持てる銘柄数。埋まっていたら見送る
   nearLo: 85,        // 「惜しい候補」として画面に出す下限
+  frozenVol: 0.3,    // 直近20日の日次ボラ（%）がこれ未満なら「値動きが止まっている」注意を出す（TOB 中の可能性。実験63）
 };
+
+/**
+ * 「値動きが止まっている」注意。直近20日の日次ボラ（candidate.vol20d、%）が s.frozenVol 未満なら文言を返す。
+ *
+ * TOB の公表後は株価が買付価格に張り付き、日々の値動きがほぼ 0 になる。そのまま「78週高値の更新」として
+ * 候補に入り、5モデルは「静かな高値更新」を最高評価するので最上位に来る。実験63（docs/MODEL_SELECTION_EDA.md §8）で
+ * 全5モデル 95以上を満たした 97件のうち 20日ボラ 0.3% 未満は 2件あり、どちらも TOB 中で外れた（上がりようがない）。
+ * 値が無ければ null（注意を出さない）。選定の規則（strategySignal）は変えない。注意だけ出す。
+ */
+export function frozenNote(candidate, s = STRATEGY) {
+  const raw = candidate?.vol20d;
+  if (raw === null || raw === undefined || raw === '') return null;   // 値が無い（Number(null) は 0 になるので先に弾く）
+  const v = Number(raw);
+  if (!Number.isFinite(v) || v >= s.frozenVol) return null;
+  return `値動きなし（20日ボラ ${v.toFixed(2)}%。TOB 中の可能性）`;
+}
 
 /**
  * 空いている枠の数。手で入れた保有数から出す。

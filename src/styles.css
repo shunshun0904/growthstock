@@ -363,6 +363,9 @@ input[type='range']::-moz-range-thumb {
 .pred-id { display: flex; flex-direction: column; line-height: 1.35; min-width: 0; }
 .pred-id strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pred-id .sub, .pred-cell .lab { font-size: 11px; color: var(--text-faint); }
+/* 「値動きなし（TOB 中の可能性）」の注意。銘柄名の下に1行で出す（グリッドの列には入れない。
+   8つ目の子にすると 32px の先頭列に落ちて縦書きになる） */
+.pred-id .pred-warn { align-self: flex-start; white-space: nowrap; margin-top: 3px; }
 
 .pred-bar { position: relative; display: flex; align-items: center; gap: 6px; }
 .pred-bar i {

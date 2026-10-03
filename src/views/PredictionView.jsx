@@ -3,7 +3,8 @@ import { fmt, fmtInt, fmtSigned, fmtOku, fmtDate, fmtDateTime, DASH } from '../l
 import { bandColor, bandLabel, pctColor, modelRows, MODEL_SHORT, MODEL_FAMILY,
   FAMILY_JA, marketTone, candidateToStock } from '../lib/predictions.js';
 import { STRATEGY, BOOST, strategySignal, exitPlan, nearMisses,
-         MODEL_JA, fundContrib } from '../lib/strategy.js';
+         MODEL_JA, fundContrib, frozenNote,
+} from '../lib/strategy.js';
 
 /**
  * ブレイク予測タブ。
@@ -322,6 +323,13 @@ function Row({ c, models, open, onToggle, onSend, sent }) {
           <strong>{c.name || c.code}</strong>
           <span className="sub num">{c.code}</span>
           {c.sector && <span className="sub">{c.sector}</span>}
+          {frozenNote(c) && (
+            <span className="badge red pred-warn"
+                  title={`${frozenNote(c)}。直近20日の日々の値動きがほぼ無い銘柄は、TOB 等で価格が固定されている可能性があります。`
+                         + '実験63では該当した2件がどちらも外れました（上がりようがない）'}>
+              値動きなし
+            </span>
+          )}
         </span>
         {mr.length > 0 ? (
           <ModelStrip rows={mr} agree={c.agree90} n={c.nModels} />
