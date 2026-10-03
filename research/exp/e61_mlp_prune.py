@@ -18,6 +18,8 @@
   At / Ct  A / C と同じ決め方を、本番 MLP の代わりに「探索に使う期間だけで学習した MLP」（P のパラメータ・種42）
      で行う。本番 MLP は評価する期間（OOF・窓の検証側）も学習に含むので、A / C の列の選び方には先読みが混じる
      （ラベルは使わないが、モデルが評価期間を見ている）。At / Ct はそれが無い。採用の判断は Ct で行う
+結果（2026-10-03、docs/MODEL_ADOPTION_RULES.md §23）: C は 32窓で PR 25/32・ROC 29/32 と上がって見えたが、先読みを
+除いた Ct では PR 17/32（+0.0013）・ROC 19/32（+0.0030）で P と区別がつかない → 採用しない（239列のまま）。
 評価は実験58 と同じ作り（e25_auc_noise.metrics、ab_oof.auc_by_window）。種は窓では3つ（42, 7, 123）、
 本番と同じ OOF は 42。記録は research/_data/oof/e61_*（列の一覧は e61_cols_{腕}.json）。
 本番の設定（research/multi_params.json、features の preset）には書かない。
