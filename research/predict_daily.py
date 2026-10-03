@@ -367,6 +367,12 @@ def main(argv=None) -> int:
             # --- 内部挙動 --- #
             "contrib": contrib[i],
         })
+    # --- 最も当たる型（実験60 §5: 小型・78週高値の近く・終値が高値側・PBR 低め）に当てはまるか --- #
+    # 同じ日の候補の中での位置で4条件を ○× にする（research/best_type.py）。候補3件未満の日は判定しない
+    import best_type as BT
+    for x, prof in zip(rows, BT.profiles(cand)):
+        x["bestType"] = prof
+
     # --- 他モデルの採点を各候補に載せる --- #
     # アンサンブルはしない。並べるだけ。買うかの判断は人間が統合的に行う
     others, model_info = score_others(cand, cols, args.model_dir)

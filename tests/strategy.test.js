@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   BOOST, STRATEGY, boostPcts, minPct, passesAgree, dayVerdict, strategySignal, exitPlan,
-  freeSlots, pctSpread, laggard, nearMisses, fundContrib,
+  freeSlots, pctSpread, laggard, nearMisses, fundContrib, BEST_TYPE, bestType,
 } from '../src/lib/strategy.js';
 
 const cand = (code, pcts, score = 0.5) => ({
@@ -190,3 +190,29 @@ test('fundContrib: 決算の寄与（水準＋変化）を足す', () => {
   // 片方しか無くても足せる
   assert.equal(fundContrib({ contrib: { groups: { '決算（変化）': 0.25 } } }), 0.25);
 });
+
+/* ------------------------------------------------ 最も当たる型 */
+
+test('bestType: 4条件の○×と数を読み、色は 4/4 緑・3/4 琥珀・それ以下は灰', () => {
+  const full = bestType({ bestType: { small: true, nearHigh: true, closeHigh: true, lowPbr: true,
+                                      n: 4, total: 4, nInDay: 12, pct: { small: 0.1, nearHigh: 0.9 } } });
+  assert.equal(full.label, '型 4/4');
+  assert.equal(full.tone, 'green');
+  assert.equal(full.nInDay, 12);
+  assert.deepEqual(full.items.map((t) => t.key), BEST_TYPE.map((t) => t.key));
+  assert.equal(full.items[0].pct, 0.1);
+  assert.equal(full.items[2].pct, null);
+  const three = bestType({ bestType: { small: true, nearHigh: true, closeHigh: false, lowPbr: true, n: 3, total: 4 } });
+  assert.equal(three.tone, 'amber');
+  assert.equal(three.items[2].ok, false);
+  const one = bestType({ bestType: { small: false, nearHigh: null, closeHigh: false, lowPbr: true, n: 1, total: 4 } });
+  assert.equal(one.tone, 'slate');
+  assert.equal(one.items[1].ok, null);
+});
+
+test('bestType: 判定できない候補と古い payload は null', () => {
+  assert.equal(bestType({ bestType: { small: null, nearHigh: null, closeHigh: null, lowPbr: null, n: null, nInDay: 2 } }), null);
+  assert.equal(bestType({ code: 'A' }), null);
+  assert.equal(bestType(null), null);
+});
+

@@ -3,7 +3,7 @@ import { fmt, fmtInt, fmtSigned, fmtOku, fmtDate, fmtDateTime, DASH } from '../l
 import { bandColor, bandLabel, pctColor, modelRows, MODEL_SHORT, MODEL_FAMILY,
   FAMILY_JA, marketTone, candidateToStock } from '../lib/predictions.js';
 import { STRATEGY, BOOST, strategySignal, exitPlan, nearMisses,
-         MODEL_JA, fundContrib } from '../lib/strategy.js';
+         MODEL_JA, fundContrib, bestType } from '../lib/strategy.js';
 
 /**
  * ブレイク予測タブ。
@@ -309,11 +309,44 @@ function PickCard({ c, n, onSend, sent }) {
   );
 }
 
+/* ------------------------------------------------------------------ 最も当たる型 */
+
+function typeMark(ok) {
+  return ok === true ? '○' : ok === false ? '×' : '－';
+}
+
+function TypeBadge({ bt }) {
+  const title = bt.items.map((t) => `${typeMark(t.ok)} ${t.label}: ${t.desc}`).join('\n')
+    + `\n（その日の候補 ${bt.nInDay ?? '?'}件の中での位置）`;
+  return <span className={`badge ${bt.tone} pred-type`} title={title}>{bt.label}</span>;
+}
+
+function TypeList({ bt }) {
+  if (!bt) return <p className="sub">候補が少ない日か、判定に要る値が無いため、判定していません。</p>;
+  return (
+    <ul className="pred-type-list">
+      {bt.items.map((t) => (
+        <li key={t.key} title={t.desc}>
+          <span className={`mark ${t.ok === true ? 'ok' : t.ok === false ? 'ng' : 'na'}`}>{typeMark(t.ok)}</span>
+          <span className="k">{t.label}</span>
+          <span className="sub">{t.desc}</span>
+          <span className="v num">{t.pct == null ? DASH : `${Math.round(t.pct * 100)}%`}</span>
+        </li>
+      ))}
+      <li className="sum">
+        <span className={`badge ${bt.tone}`}>{bt.label}</span>
+        <span className="sub">右の % は、その日の候補 {bt.nInDay ?? '?'}件の中での位置（50% が中央値）</span>
+      </li>
+    </ul>
+  );
+}
+
 /* ------------------------------------------------------------------ 候補1件 */
 
 function Row({ c, models, open, onToggle, onSend, sent }) {
   const color = bandColor(c.band);
   const mr = modelRows(c, models);
+  const bt = bestType(c);
   return (
     <div className={`pred-row${open ? ' open' : ''}`}>
       <button className="pred-main" onClick={onToggle} aria-expanded={open}>
@@ -322,6 +355,7 @@ function Row({ c, models, open, onToggle, onSend, sent }) {
           <strong>{c.name || c.code}</strong>
           <span className="sub num">{c.code}</span>
           {c.sector && <span className="sub">{c.sector}</span>}
+          {bt && <TypeBadge bt={bt} />}
         </span>
         {mr.length > 0 ? (
           <ModelStrip rows={mr} agree={c.agree90} n={c.nModels} />
@@ -425,6 +459,7 @@ const NUMS = [
 ];
 
 function Detail({ c, models, onSend, sent }) {
+  const bt = bestType(c);
   const g = c.contrib?.groups || {};
   const maxAbs = Math.max(...Object.values(g).map(Math.abs), 0.001);
   const top = (c.contrib?.top || []).slice(0, 10);
@@ -532,6 +567,16 @@ function Detail({ c, models, onSend, sent }) {
               </div>
             ))}
           </div>
+        </div>
+
+        <div>
+          <h4>最も当たる型に当てはまるか</h4>
+          <p className="sub">
+            5モデルの上位10% を5つの型に分けたとき、最も当たった型
+            「小型・78週高値の近く・終値が高値側・PBR 低め」（実験60。正例率 33%、最も外れる型は 20%）。
+            <b>同じ日の候補の中</b>での位置で判定します（候補3件未満の日は判定しない）。
+          </p>
+          <TypeList bt={bt} />
         </div>
 
         <div>
