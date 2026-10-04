@@ -2,164 +2,164 @@
   "cat": {
     "_cv": {
       "algo": "cat",
-      "base_rate": 0.1586,
+      "base_rate": 0.1612,
       "features_sig": "2cf1283a9de5",
       "fold_scores": [
-        0.3255,
-        0.3337,
-        0.3303,
-        0.2971,
-        0.3322
+        0.331,
+        0.3386,
+        0.3474,
+        0.3344,
+        0.3418
       ],
-      "mean_pr_auc": 0.3237,
-      "mean_roc_auc": 0.6967,
+      "mean_pr_auc": 0.3386,
+      "mean_roc_auc": 0.7029,
       "n_estimators": 200,
       "n_features": 239,
       "n_splits": 5,
       "n_trials": 50,
       "preset": "all_plus_prog_listing_vol_book",
       "scheme": "year_cap_date",
-      "std": 0.0136,
-      "train_rows": 17451,
-      "train_to": "2025-07-25"
+      "std": 0.0057,
+      "train_rows": 17589,
+      "train_to": "2025-08-01"
     },
     "params": {
-      "bagging_temperature": 0.2169166148050688,
-      "border_count": 128,
+      "bagging_temperature": 1.5514615409429413,
+      "border_count": 64,
       "depth": 8,
-      "l2_leaf_reg": 2.0142355140717187,
-      "learning_rate": 0.025614693733515093,
-      "random_strength": 0.005036130595516884
+      "l2_leaf_reg": 6.113967364244884,
+      "learning_rate": 0.03880439929779662,
+      "random_strength": 0.035220371708224
     }
   },
   "lgbm": {
     "_cv": {
       "algo": "lgbm",
-      "base_rate": 0.1586,
+      "base_rate": 0.1612,
       "features_sig": "2cf1283a9de5",
       "fold_scores": [
-        0.3487,
-        0.3449,
-        0.3533,
-        0.3072,
-        0.3222
+        0.3517,
+        0.3552,
+        0.3411,
+        0.3307,
+        0.3463
       ],
-      "mean_pr_auc": 0.3353,
-      "mean_roc_auc": 0.7103,
+      "mean_pr_auc": 0.345,
+      "mean_roc_auc": 0.7111,
       "n_estimators": 200,
       "n_features": 239,
       "n_splits": 5,
       "n_trials": 50,
       "preset": "all_plus_prog_listing_vol_book",
       "scheme": "year_cap_date",
-      "std": 0.0177,
-      "train_rows": 17451,
-      "train_to": "2025-07-25"
+      "std": 0.0086,
+      "train_rows": 17589,
+      "train_to": "2025-08-01"
     },
     "params": {
-      "colsample_bytree": 0.7350728762122123,
-      "learning_rate": 0.033682142165051304,
-      "min_child_samples": 202,
-      "num_leaves": 65,
-      "reg_alpha": 0.0977205484962672,
-      "reg_lambda": 6.23459767927053e-05,
-      "subsample": 0.9714795068732671
+      "colsample_bytree": 0.3714313675236196,
+      "learning_rate": 0.029730254214469846,
+      "min_child_samples": 43,
+      "num_leaves": 35,
+      "reg_alpha": 7.583868689982382e-07,
+      "reg_lambda": 2.829994952731329e-07,
+      "subsample": 0.9941869190296131
     }
   },
   "logit": {
     "_cv": {
       "algo": "logit",
-      "base_rate": 0.1586,
+      "base_rate": 0.1612,
       "features_sig": "2cf1283a9de5",
       "fold_scores": [
-        0.3039,
-        0.2636,
-        0.2724,
-        0.2641,
-        0.2412
+        0.3052,
+        0.2825,
+        0.2736,
+        0.2894,
+        0.2541
       ],
-      "mean_pr_auc": 0.2691,
-      "mean_roc_auc": 0.6542,
+      "mean_pr_auc": 0.281,
+      "mean_roc_auc": 0.6584,
       "n_estimators": 200,
       "n_features": 239,
       "n_splits": 5,
       "n_trials": 50,
       "preset": "all_plus_prog_listing_vol_book",
       "scheme": "year_cap_date",
-      "std": 0.0203,
-      "train_rows": 17451,
-      "train_to": "2025-07-25"
+      "std": 0.017,
+      "train_rows": 17589,
+      "train_to": "2025-08-01"
     },
     "params": {
-      "C": 0.00027267573880087313,
+      "C": 0.00018432851485417323,
       "penalty": "l2"
     }
   },
   "mlp": {
     "_cv": {
       "algo": "mlp",
-      "base_rate": 0.1586,
+      "base_rate": 0.1612,
       "features_sig": "2cf1283a9de5",
       "fold_scores": [
-        0.2831,
-        0.2527,
-        0.2765,
-        0.2544,
-        0.2541
+        0.3044,
+        0.2838,
+        0.2754,
+        0.2987,
+        0.2369
       ],
-      "mean_pr_auc": 0.2642,
-      "mean_roc_auc": 0.6455,
+      "mean_pr_auc": 0.2799,
+      "mean_roc_auc": 0.6518,
       "n_estimators": 200,
       "n_features": 239,
       "n_splits": 5,
       "n_trials": 50,
       "preset": "all_plus_prog_listing_vol_book",
       "scheme": "year_cap_date",
-      "std": 0.0129,
-      "train_rows": 17451,
-      "train_to": "2025-07-25"
+      "std": 0.0238,
+      "train_rows": 17589,
+      "train_to": "2025-08-01"
     },
     "params": {
-      "alpha": 0.005527024898906696,
-      "batch_size": 512,
+      "alpha": 1.3192781010855834,
+      "batch_size": 128,
       "h1": 32,
-      "learning_rate_init": 0.008068165599849766,
+      "learning_rate_init": 0.0007634737138767036,
       "two_layers": false
     }
   },
   "xgb": {
     "_cv": {
       "algo": "xgb",
-      "base_rate": 0.1586,
+      "base_rate": 0.1612,
       "features_sig": "2cf1283a9de5",
       "fold_scores": [
-        0.3425,
-        0.3445,
-        0.3491,
-        0.3029,
-        0.3315
+        0.3571,
+        0.3534,
+        0.3464,
+        0.3418,
+        0.3367
       ],
-      "mean_pr_auc": 0.3341,
-      "mean_roc_auc": 0.7064,
+      "mean_pr_auc": 0.3471,
+      "mean_roc_auc": 0.711,
       "n_estimators": 200,
       "n_features": 239,
       "n_splits": 5,
       "n_trials": 50,
       "preset": "all_plus_prog_listing_vol_book",
       "scheme": "year_cap_date",
-      "std": 0.0166,
-      "train_rows": 17451,
-      "train_to": "2025-07-25"
+      "std": 0.0074,
+      "train_rows": 17589,
+      "train_to": "2025-08-01"
     },
     "params": {
-      "colsample_bytree": 0.773013685707001,
-      "gamma": 0.0021743624741119715,
-      "learning_rate": 0.029108066937684418,
-      "max_depth": 10,
-      "min_child_weight": 25.360376391895425,
-      "reg_alpha": 2.8706300789634793e-07,
-      "reg_lambda": 0.7103946238931748,
-      "subsample": 0.9689891122954075
+      "colsample_bytree": 0.6946174472238835,
+      "gamma": 0.11219047512014421,
+      "learning_rate": 0.027776600406653168,
+      "max_depth": 7,
+      "min_child_weight": 39.09929433002544,
+      "reg_alpha": 1.5862731944260205e-08,
+      "reg_lambda": 7.103278883118358,
+      "subsample": 0.7901277991770254
     }
   }
 }
