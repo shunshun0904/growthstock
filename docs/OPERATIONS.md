@@ -12,13 +12,13 @@
 | モデル本体（基準） | `model.txt` / `oof.parquet` | **GitHub Release（`data-raw`）** | 日曜の朝 | 2.7MB のバイナリを毎週コミットすると差分圧縮が効かず年138MB 膨らむ |
 | モデル本体（追加4つ） | `<algo>_model.joblib` / `<algo>_oof.parquet` | **GitHub Release（`data-raw`）** | 日曜の朝 | 同上。合計2.7MB。meta.json だけ git に残す |
 | モデルの素性 | `research/model/meta.json`（9KB） | git | 日曜の朝 | 過去のモデルが「どういうものだったか」を追えるようにする |
-| 生データ | 日次バー・財務・信用残ほか | GitHub Release（`data-raw`） | 平日16:05 起動 | 全期間の取得に2.5時間かかるため、差分だけ取って書き戻す |
-| 有報の年次財務 | `edinet_fin.parquet` / `edinet_companies.parquet` / `edinet_manifest.json` | GitHub Release（`data-raw`） | 毎日 10:05 起動 | EDINET DB は 100/日・900/月の枠しか無いので、毎日 85社ずつ差分で貯める（`docs/DATA_EDINETDB.md`）。**まだ研究用で、本番の特徴量には入っていない** |
+| 生データ | 日次バー・財務・信用残ほか | GitHub Release（`data-raw`） | 平日 16:10 JST に Routine が起動 | 全期間の取得に2.5時間かかるため、差分だけ取って書き戻す |
+| 有報の年次財務 | `edinet_fin.parquet` / `edinet_companies.parquet` / `edinet_manifest.json` | GitHub Release（`data-raw`） | 毎日 10:10 JST に Routine が起動 | EDINET DB は 100/日・900/月の枠しか無いので、毎日 85社ずつ差分で貯める（`docs/DATA_EDINETDB.md`）。**まだ研究用で、本番の特徴量には入っていない** |
 
 ## 動く順番
 
 ```
-平日 16:05 JST  Update Data Store    当日の四本値・指数・TOPIX が出るまで待つ
+平日 16:10 JST  Update Data Store    当日の四本値・指数・TOPIX が出るまで待つ
                                      （締切18:00）
                                      → J-Quants から差分取得 → Release へ
       ↓ 完了で起動
@@ -29,14 +29,25 @@
                                      → スプレッドシートへ追記
                                      → コミット → Pages 再デプロイ
 
-毎日 10:05 JST  Fetch EDINET DB      EDINET DB から年次財務を 85社ぶん取って
+平日 13:10 JST  Fetch JSF            日証金の前営業日の確報（daily）と、銘柄ごとの
+土日 10:20 JST                       過去3年の続き（history）を Release（data-jsf）へ。
+                                     土日は history だけ
+
+毎日 10:10 JST  Fetch EDINET DB      EDINET DB から年次財務を 85社ぶん取って
                                      Release へ（1社1リクエスト。月 850 で止まる）
 
-日曜 09:05 JST  Retrain Weekly       J-Quants から差分取得（日曜は取り込みが
+日曜 09:10 JST  Retrain Weekly       J-Quants から差分取得（日曜は取り込みが
                                      走らないので自分で取りに行く）
                                      → 鮮度チェック（2営業日より古ければ停止）
                                      → Release へ書き戻し → 学習
                                      → モデルを Release へ、meta.json を git へ
+
+土曜 10:40 JST  Check Data Store     保存データ（data-raw）を API の応答と突き合わせる
+                                     （種別ごとに数日ぶんを叩き直す）
+
+月〜土 07:40 JST 朝の確認（Routine だけ） 前日の取り込み・予測・日証金・EDINET DB の run の
+                                     結論を確かめる。取り込みが無ければ Update Data Store を
+                                     起動し直す。月曜は日曜の学習と土曜の検査を見る
 
 手動            Refresh Stock Details  画面の銘柄データ（stocks.json）だけを作り直す。
                                      予測はしない。対象は公開中の predictions.json から
@@ -54,29 +65,59 @@
 の注記。`tests/test_refresh_details.py` で、`public/data` を積むワークフローが全部デプロイに
 繋がっていることと合わせて確かめる）。
 
-**cron の時刻に起動はしない。** GitHub のスケジュール起動は実測で
-+4時間01分 〜 +5時間37分 遅れる（下表）。実際はこうなる。
+### 起動のしかた（2026-10-05 から Claude の Routine。GitHub の cron はやめた）
 
-| | cron | 実際の起動 | 完了の見込み |
-|---|---|---|---|
-| Update Data Store | 平日 16:05 JST | 平日 20:06〜21:42 JST | 数分（実測1分35秒） |
-| Retrain Weekly | 日曜 09:05 JST | **日曜 13:06〜14:42 JST** | 日曜 16:00〜19:45 JST |
-| Fetch EDINET DB | 毎日 10:05 JST | 毎日 14:06〜15:42 JST（見込み） | 1〜2分（初回実測 1分10秒） |
+**ワークフローに予約の起動（`schedule:` の cron）は無い。** 2026-10-05 に全部外した。
+代わりに Claude の Routine（claude.ai の「ルーチン」。時刻は JST で指定できる）が、決めた時刻に
+`workflow_dispatch` で起動する。起動する側が変わっただけで、ワークフローの中身は同じ。
 
-学習は探索込みで3〜5時間かかる。**日曜の朝9時に見て「まだ始まっていない」のは
-異常ではない** —— 実際に動き出すのは昼過ぎになる。
+| Routine | 起動 (JST) | 起動するワークフロー | 入力 | Routine の ID |
+|---|---|---|---|---|
+| 取り込み | 平日 16:10 | Update Data Store | `wait=yes`（当日データを待つ） | `trig_01PcyrPdxPQCGwU9wM8tGQF5` |
+| 日証金（平日） | 平日 13:10 | Fetch JSF | `mode=both` | `trig_01YVxFuxKhDjAiKNzLwVNQoa` |
+| 日証金（土日） | 土日 10:20 | Fetch JSF | `mode=history` | `trig_01Xi3LD1WnnVcqn2zH4C3Gjv` |
+| EDINET DB | 毎日 10:10 | Fetch EDINET DB | 既定（85社・対応表は auto） | `trig_01HSCLjDeTaaZG53XP3aEd7s` |
+| 週次学習 | 日曜 09:10 | Retrain Weekly | `tune=yes` | `trig_01Qw9wTJzS6F1SKF9EPtsCha` |
+| 保存データの検査 | 土曜 10:40 | Check Data Store | 既定（5日） | `trig_01FUf3ZCyQJCYmWej3t3rvgP` |
+| 朝の確認 | 月〜土 07:40 | （確かめるだけ） | 前日の run の結論を見る。取り込みの run が無ければ Update Data Store を起動し直す。取り込みは済んで予測だけ無ければ Predict Breakouts を起動する。月曜は日曜の学習と土曜の検査を見る | `trig_01839KhP7tXcZvvupmthNRNU` |
 
-`Retrain Weekly` は 2026-09-19 に 21:00 JST から 09:05 JST へ12時間前倒しした。
-遅延込みで完了が月曜の朝にずれ込んでいたため。使うのは金曜引けまでのデータで
-土日に増えるものは無く、鮮度チェックも営業日で数えるので、朝でも夜でも判定は
-同じ。月曜の予測までの余裕はむしろ増える。
+Routine は起動のたびに新しいセッションで動き（人は見ていない前提で書いてある）、起動した run の ID と結論、
+件数だけを報告する。Secrets や銘柄ごとのデータの値は出さない。起動は GitHub API の workflow_dispatch
+（`gh api` または `curl`。GitHub MCP が使えればそれ）で、起動後に run が現れたことと完了を確かめる。
+失敗したときは落ちた step を読んで、一時的な原因（ネットワーク・GitHub の 5xx・Release の入出力）なら
+1回だけ失敗した job を再実行し、それ以外は再実行せずに報告する。
+
+Predict Breakouts は Routine からは起動しない。取り込みの完了で `workflow_run` が繋ぐ（上の図）。
+Routine が起動した run は、Actions の一覧では `workflow_dispatch` として見える（以前の予約の起動は
+`schedule`）。Routine が走った記録（起動した run の ID と結論、件数）は claude.ai のそのセッションに残る。
+
+なぜ cron をやめたか: GitHub の予約の起動は実測で +4時間01分〜+7時間19分遅れ（下の
+「起動時刻を 21:30 から 16:05 に前倒しした」の表）、10/5（月）は 07:05 UTC の予約が 14:33 UTC
+（23:33 JST）になっても来なかった（運用者の了承で手動起動。run 37325682385）。遅れが翌日にかかると、
+翌日の取り込みが2日ぶんを取って予測は最新の日だけを記録するので、その日の予測が抜ける。
+時刻を指定して起動すれば、公開時刻を決めるのは取り込みの前の待ち（四本値 16:00・指数と TOPIX
+16:30。締切 18:00）だけになる。見込みは 16:45 ごろの公開（待ちの確認は5分おき。取り込み 4〜5分・
+予測 5〜6分は 10/5 の手動起動の実測。Routine での実測は下に追記する）。
+
+学習は探索込みで3〜5時間かかるので、日曜 09:10 に始めて昼過ぎに終わる見込み。
+
+- **止めたいとき**: claude.ai で Routine を無効にする（ワークフローは触らない）。
+- **手で起動したいとき**: Actions の画面の `Run workflow` で同じ入力を渡せば、Routine と同じになる。
+  Routine の時刻（上の表）と重ねない。
+- **戻したいとき**: 各ワークフローの `on:` に `schedule:` を戻す。外した cron（UTC）は
+  Update Data Store `5 7 * * 1-5`、Predict Breakouts `0 14 * * 1-5`（保険）、Fetch JSF `5 4 * * 1-5` と
+  `5 4 * * 0,6`、Fetch EDINET DB `5 1 * * *`、Retrain Weekly `5 0 * * 0`、Check Data Store `5 1 * * 6`。
+  `github.event_name == 'schedule'` で分けていた条件（取り込みの待ちは `inputs.wait`、日証金の
+  daily/history は `inputs.mode`、学習の探索は `inputs.tune` に置き換えた）も戻す。
+  `tests/test_refresh_details.py` の `TestWorkflows` が「cron が無いこと」を固定しているので、戻すときは
+  テストも直す。
 
 鮮度チェックを入れてあるのは、取り込みが失敗した日に黙って昨日と同じ候補を出したり、
 先週のデータで学習し直したりするほうが害が大きいため。気づけないことが一番よくない。
 
 ### 休場日はどうなるか
 
-cron は平日に起動するので、祝日でもワークフローは動く。
+Routine は平日に起動する（祝日カレンダーは持たない）ので、祝日でもワークフローは動く。
 
 | | 休場日の挙動 |
 |---|---|
@@ -164,6 +205,8 @@ Predict Breakouts   research/trading_day_gate.py がそれを読むだけ
 | 09-29（火） | 13:59 | +6h54m |
 | 09-30（水） | 13:36 | +6h31m |
 | 10-01（木） | 14:24 | +7h19m。14:19 に手動で起動済みだったので、順番待ちの予約の起動は取り消した |
+| 10-02（金） | 13:47 | +6h42m |
+| 10-05（月） | 14:33 の時点で未起動（+7h28m） | 運用者の了承で手動起動（run 37325682385）。この日に予約の起動（cron）をやめた |
 
 月曜は遅れが大きい（2回とも +6h53m 以上）。**予約の起動が来ないまま夜遅くなった日は、
 `Update Data Store` を手動で起動してよい**（2026-09-28 運用者の了承。run 36434063085、
@@ -186,7 +229,13 @@ Predict Breakouts   research/trading_day_gate.py がそれを読むだけ
 **手動で起動するときは、予約の起動との重なりに注意する。** `Predict Breakouts` は
 `cancel-in-progress: true` なので、二つ目の取り込みが終わって二つ目の予測が始まると、
 走っている一つ目の予測が取り消される。手動で起動した後に予約の起動が順番待ちに来たら、
-予約の起動を取り消す（中身は同じ）。
+予約の起動を取り消す（中身は同じ）。2026-10-05 に予約の起動をやめたので、この重なりは
+もう起きない。手で起動するなら Routine の時刻（平日 16:10 JST）と重ねない。
+
+**2026-10-05 に予約の起動（cron）そのものをやめた。** 10/5（月）は 07:05 UTC の予約が 14:33 UTC
+（23:33 JST）になっても来ず（+7h28m 超）、運用者の了承で手動起動した（run 37325682385。予測 run
+37326163279、23:43 JST に公開）。遅れが翌日にかかる日が出てきたので、cron を外し、Claude の Routine が
+時刻を指定して起動する形にした（上の「起動のしかた」）。
 
 ### 2026-10-01: GitHub の 502 で、Release の過去データが2ファイル消えた
 
@@ -291,7 +340,10 @@ Standard プランで遡れるのは**今日（JST）の10年前から**で、�
 ### 当日データが出るまで待つ
 
 **定刻に起動してしまった日のために待つ**。前倒しすると、たまたま遅延が
-小さかった日に「まだ当日データが無い」状態で走ることになる。
+小さかった日に「まだ当日データが無い」状態で走ることになる。2026-10-05 からは
+Routine が 16:10 JST に起動するので、**毎回ここで待つ**（四本値は 16:00 までに出ているが、
+指数・TOPIX は 16:30）。`wait=no` で起動したとき（過去分の取り直し）と、大引け前の起動
+（翌朝の確認の Routine が前日ぶんを起動し直したとき）は待たない。
 `research/wait_for_data.py` を取り込みの前に挟み、**四本値・業種別指数・
 TOPIX** が出るまで待つ（締切 18:00 JST。実測 16:30 に対して1時間半の余裕）。
 
@@ -331,7 +383,7 @@ TOPIX** が出るまで待つ（締切 18:00 JST。実測 16:30 に対して1時
 | 四本値・指数・TOPIX・財務・マスタ履歴 | 当日のみ | 同じ日のうちに出る |
 | 信用残 | 10日 | 週次。金曜ぶんが翌週に出る |
 
-この仕組みがあるので、16:05 起動で財務を待たなくてもデータは失われない
+この仕組みがあるので、16:10 起動で財務を待たなくてもデータは失われない
 （1営業日遅れて入るだけ）。
 
 ### 信用残の穴を数え直した（2026-09-18）

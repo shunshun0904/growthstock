@@ -9,7 +9,7 @@
 
 ### **https://shunshun0904.github.io/growthstock/**
 
-GitHub Pages で公開しています。平日 21:00 JST のデータ更新後に自動で再デプロイされます。
+GitHub Pages で公開しています。平日の大引け後（16:10 JST に始まるデータ更新と予測の後、夕方）に自動で再デプロイされます。
 
 ![8軸オクタゴン比較](docs/screenshot-compare.png)
 

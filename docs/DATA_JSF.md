@@ -77,8 +77,8 @@
 
 | 動き | 中身 | 保存（Release `data-jsf`） |
 |---|---|---|
-| daily | DATA ページの残高・品貸料率・制限措置の3本。平日 13:05 JST 起動（実際は 17〜19時ごろ） | `jsf_balance.parquet`（申込日×銘柄×取引所区分）、`jsf_lending.parquet`、`jsf_restrict.parquet`（その日の写し） |
-| history | 銘柄ごとの過去3年。1回45分（約320銘柄、1銘柄3リクエスト・間隔2秒）ずつ、母集団に多く出る銘柄から | `jsf_hist.parquet`（申込日×銘柄、東証） |
+| daily | DATA ページの残高・品貸料率・制限措置の3本。Claude の Routine が平日 13:10 JST に起動（2026-10-05 から。それまでは GitHub の cron で、実際は 17〜19時ごろだった。`docs/OPERATIONS.md`） | `jsf_balance.parquet`（申込日×銘柄×取引所区分）、`jsf_lending.parquet`、`jsf_restrict.parquet`（その日の写し） |
+| history | 銘柄ごとの過去3年。1回45分（約320銘柄、1銘柄3リクエスト・間隔2秒）ずつ、母集団に多く出る銘柄から。平日は daily に続けて、土日は 10:20 JST に history だけ | `jsf_hist.parquet`（申込日×銘柄、東証） |
 
 - 取り込み・週次学習は data-raw の全ファイルを落としてまとめて上げ直すので、同じ Release に
   置くと、その間に積んだ分を古い版で潰しうる。そのため別の Release（`data-jsf`）に置く

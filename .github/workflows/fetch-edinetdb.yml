@@ -11,11 +11,9 @@ name: Fetch EDINET DB
 # 取り込み（Update Data Store）と同じ concurrency グループにして、
 # Release への書き戻しが重ならないようにする。
 on:
-  schedule:
-    # 毎日 10:05 JST (= 01:05 UTC)。日次の取り込み（07:05 UTC）や
-    # 週次学習（日曜 00:05 UTC）と時間帯をずらしてある。実際の起動は
-    # +4〜5.6時間遅れる（docs/OPERATIONS.md）
-    - cron: '5 1 * * *'
+  # 予約の起動（cron）は 2026-10-05 にやめた。Claude の Routine が毎日 10:10 JST に
+  # workflow_dispatch で起動する（docs/OPERATIONS.md「起動のしかた」）。日次の取り込み
+  # （平日 16:10 JST）や週次学習（日曜 09:10 JST）と時間帯をずらしてある
   workflow_dispatch:
     inputs:
       fetch:

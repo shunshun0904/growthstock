@@ -30,22 +30,20 @@ on:
         description: 'forget の開始日 (YYYY-MM-DD)。省略すると全期間'
         required: false
         default: ''
-  schedule:
-    # 平日 16:05 JST (= 07:05 UTC)。大引け(15:30 JST)の直後に置く。
-    #
-    # 以前は 21:30 JST だった。前倒しした理由は J-Quants ではなく
-    # GitHub 側にある。スケジュール起動の実績（2026-09-11〜16）:
-    #
-    #   予定 12:30 UTC -> 実際 16:38 / 18:07 / 17:10 / 17:10 UTC
-    #   遅れ            +4h08m / +5h37m / +4h40m / +4h40m
-    #
-    # 4時間を切ったことが一度も無い。つまり cron を早く置いた時間だけ
-    # 実際の公開も早くなる。21:30 起動では画面の更新が翌日2時台になっていた。
-    #
-    # 定刻どおりに起動してしまった日のために、取り込みの前に
-    # research/wait_for_data.py で当日データが出るまで待つ。
-    # :00 / :30 は世界中の cron が集中して遅延が大きくなるので :05 に置く。
-    - cron: '5 7 * * 1-5'
+      wait:
+        description: '当日の四本値・指数・TOPIX が出るまで待ってから取る（Routine の平日 16:10 JST の起動は yes。過去分の取り直しなど、待つ必要が無いときは no）'
+        required: false
+        type: choice
+        options: ['yes', 'no']
+        default: 'yes'
+  # 予約の起動（cron）は 2026-10-05 にやめた。いまは Claude の Routine が平日 16:10 JST に
+  # workflow_dispatch（wait=yes）で起動する（docs/OPERATIONS.md「起動のしかた」）。
+  #
+  # cron をやめた理由は GitHub 側にある。予約の起動は実測で +4時間01分〜+7時間19分遅れ
+  # （2026-09-11〜10-01、docs/OPERATIONS.md）、10/5（月）は 07:05 UTC の予約が 14:33 UTC
+  # （23:33 JST）になっても来なかった。時刻を指定して起動すれば、公開時刻を決めるのは
+  # 取り込みの前の待ち（research/wait_for_data.py。四本値 16:00・指数と TOPIX 16:30 を
+  # 18:00 まで待つ）だけになる。
   # workflow_dispatch はデフォルトブランチにファイルが無いと呼べない。
   # 調査用ブランチからは、このファイルを更新して起動する。
   # 1行目に --reset に渡す種別を書く（空なら通常の差分取得）
@@ -132,9 +130,12 @@ jobs:
               echo "  (Release 側には無し)"
           done
 
-      # 定刻に起動した日は、まだ当日のデータが出ていないことがある。
+      # Routine は大引け直後の 16:10 JST に起動するので、まだ当日のデータが出ていない。
       # 待てば済む話なので待つ。締切を過ぎても止めずに先へ進む（祝日は
-      # そもそも当日データが無い）。手動起動や過去日の取り直しでは待たない。
+      # そもそも当日データが無い）。大引け（15:30 JST）より前の起動（翌朝の確認の
+      # Routine が前日ぶんを起動し直したとき）は、前日のデータはとうに出ているので
+      # 待たずに進む（wait_for_data.py 側で判定）。過去日の取り直しは wait=no で起動する。
+      # push 起動（refetch_request.txt）は inputs が無いので待たない。
       #
       # 四本値だけでは足りない。実測（2026-09-18）で四本値 16:00 に対して
       # 業種別指数・TOPIX は 16:30 で、これらは merge_asof(backward) で
@@ -143,7 +144,7 @@ jobs:
       # 締切 18:00 は実測 16:30 に対して1時間半の余裕。観測は1日ぶんしか
       # 無いので、狭くしすぎない。
       - name: Wait for today's data
-        if: github.event_name == 'schedule'
+        if: github.event_name == 'workflow_dispatch' && inputs.wait != 'no'
         env:
           JQUANTS_API: ${{ secrets.JQUANTS_API }}
         run: |

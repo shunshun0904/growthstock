@@ -5,9 +5,9 @@ name: Check Data Store
 # 2026-09-24 に、取り込みが同じ日・同じ銘柄の行を1行に潰していたのが見つかった。
 # EDA が保存データを数えていたので気づけなかった。API の応答を正として数える。
 on:
-  schedule:
-    # 土曜 10:05 JST（= 01:05 UTC）。取り込み（平日）と学習（日曜）のどちらとも重ならない
-    - cron: '5 1 * * 6'
+  # 予約の起動（cron）は 2026-10-05 にやめた。Claude の Routine が土曜 10:40 JST に
+  # workflow_dispatch で起動する（docs/OPERATIONS.md「起動のしかた」）。
+  # 取り込み（平日）と学習（日曜）のどちらとも重ならない
   workflow_dispatch:
     inputs:
       days:

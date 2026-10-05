@@ -211,6 +211,34 @@ class TestWorkflows(unittest.TestCase):
         self.assertNotIn("predict_daily.py", text)             # 予測はしない
         self.assertNotIn("release upload", text)                # Release に触れない
 
+    PRODUCTION = ("update-data.yml", "predict.yml", "fetch-jsf.yml", "fetch-edinetdb.yml",
+                  "retrain-weekly.yml", "check-store.yml")
+
+    def test_production_workflows_are_started_by_routines_not_cron(self):
+        """2026-10-05 から予約の起動（cron）をやめ、Claude の Routine が workflow_dispatch で起動する（docs/OPERATIONS.md「起動のしかた」）。
+
+        GitHub の cron は実測で +4〜7時間遅れ、10/5 は来なかった。戻すときはこのテストも直す。
+        """
+        for name in self.PRODUCTION:
+            text = read_wf(name)
+            self.assertNotIn("schedule:", text, name)
+            self.assertNotIn("github.event_name == 'schedule'", text, name)
+            self.assertNotIn("github.event.schedule", text, name)
+            self.assertIn("workflow_dispatch", text, name)
+        # 取り込みは起動のしかたで待つかを選ぶ（Routine の 16:10 JST は待つ。過去分の取り直しは待たない）
+        upd = read_wf("update-data.yml")
+        self.assertIn("if: github.event_name == 'workflow_dispatch' && inputs.wait != 'no'", upd)
+        self.assertRegex(upd, r"wait:\n\s+description:.*\n\s+required: false\n\s+type: choice\n\s+options: \['yes', 'no'\]\n\s+default: 'yes'")
+        # 日証金は mode だけで daily / history を選ぶ
+        jsf = read_wf("fetch-jsf.yml")
+        self.assertEqual(jsf.count("if: inputs.mode != 'history'"), 2)        # Daily / Upload (daily)
+        self.assertIn("if: inputs.mode != 'daily'", jsf)                       # History
+        self.assertIn("steps.prepare.outcome == 'success' && inputs.mode != 'daily'", jsf)  # Upload (history)
+        # 週次学習の探索は tune=yes のときだけ（Routine は tune=yes を渡す。既定も yes）
+        rt = read_wf("retrain-weekly.yml")
+        self.assertEqual(rt.count("if: inputs.tune == 'yes'"), 2)
+        self.assertIn("default: 'yes'", rt)
+
     def test_refresh_fetches_like_the_daily_run(self):
         """取得スクリプトへの渡し方（TOKYO PRO MARKET の数え始めの一覧）が日次予測と同じ。"""
         want = ("--general-market-start "

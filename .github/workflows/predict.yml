@@ -2,7 +2,7 @@ name: Predict Breakouts
 
 # その日の新規ブレイクを採点して、ダッシュボードが読む JSON を書く（日次）。
 #
-# 生データの取り込み（Update Data Store, 平日16:05 JST 起動）が終わってから走らせる。
+# 生データの取り込み（Update Data Store。Claude の Routine が平日 16:10 JST に起動）が終わってから走らせる。
 # 固定時刻で待つのではなく workflow_run で繋ぐ。取得が遅れた日に
 # 古いデータで予測してしまうのを防ぐため。
 on:
@@ -16,11 +16,11 @@ on:
         required: false
         type: boolean
         default: false
-  # 取り込みの連鎖が起動しなかった日の保険。平日 23:00 JST (= 14:00 UTC)。
-  # 予測済みの日しか無ければ何もしない（ゲートが飛ばす）。その時刻に当日の
-  # 日足が無ければ赤で止まるので、取り込みの失敗に気づける
-  schedule:
-    - cron: '0 14 * * 1-5'
+  # 保険の予約の起動（平日 23:00 JST の cron）は 2026-10-05 にやめた（GitHub の cron は
+  # 実測で +4〜7時間遅れ、保険として当てにならない。docs/OPERATIONS.md）。連鎖が起動
+  # しなかった日は、翌朝の Routine（月〜土 07:40 JST）が前日の run を確かめ、無ければ
+  # Update Data Store から起動し直す。予測済みの日しか無ければゲートが飛ばすので、
+  # 起動し直しても二重に記録されることはない
 
 permissions:
   contents: write

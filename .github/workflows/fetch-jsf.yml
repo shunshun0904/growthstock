@@ -4,8 +4,9 @@ name: Fetch JSF
 # （research/jsf_fetch.py、docs/DATA_JSF.md）。
 #
 #   daily    DATA ページの CSV（残高・品貸料率・制限措置）。残高は前営業日の申込日の確報で、
-#            昼（実測 12:21 JST）に更新される。平日 13:05 JST に起動する（実際の起動は
-#            +4〜5.6時間遅れて 17〜19時ごろ）。夜の予測より前に積むため
+#            昼（実測 12:21 JST）に更新される。Claude の Routine が平日 13:10 JST に起動する
+#            （2026-10-05 から。それまでは GitHub の cron で、実際の起動が +4〜5.6時間遅れて
+#            17〜19時ごろだった）。夜の予測より前に積むため
 #   history  銘柄ごとの過去（3年。それより前は非公開）。1銘柄3リクエスト・間隔2秒で、
 #            実測 1銘柄約8.4秒（2026-09-25 run 36126899236、30銘柄で4分13秒）。
 #            1回 45分（約320銘柄）ずつ、毎日の実行の続きで取る（東証の約4,250銘柄で14回ほど）。
@@ -18,12 +19,11 @@ name: Fetch JSF
 # （2026-09-25）でこのリポジトリの Release に置く（のちにリポジトリを非公開にする予定）。
 # ログにはデータの値を出さない（件数・日付の範囲だけ）。
 on:
-  schedule:
-    # 平日: daily（前営業日の確報）＋ history の続き
-    - cron: '5 4 * * 1-5'
-    # 土日: history の続きだけ（DATA の CSV は金曜のまま変わらない）。過去3年がそろうまでの間、
-    # 週7回進める。そろえば何もしないで終わる
-    - cron: '5 4 * * 0,6'
+  # 予約の起動（cron）は 2026-10-05 にやめた。Claude の Routine が workflow_dispatch で起動する
+  # （docs/OPERATIONS.md「起動のしかた」）:
+  #   平日 13:10 JST  mode=both     daily（前営業日の確報）＋ history の続き
+  #   土日 10:20 JST  mode=history  history の続きだけ（DATA の CSV は金曜のまま変わらない）。
+  #                                 過去3年がそろうまでの間、週7回進める。そろえば何もしないで終わる
   workflow_dispatch:
     inputs:
       mode:
@@ -78,13 +78,13 @@ jobs:
           ls -lh research/_data/jsf_* 2>/dev/null || true
 
       - name: Daily
-        if: (github.event_name == 'schedule' && github.event.schedule == '5 4 * * 1-5') || (github.event_name == 'workflow_dispatch' && inputs.mode != 'history')
+        if: inputs.mode != 'history'
         run: |
           python3 -u research/jsf_fetch.py daily 2>&1 | tee jsf.log
           exit "${PIPESTATUS[0]}"
 
       - name: Upload (daily)
-        if: (github.event_name == 'schedule' && github.event.schedule == '5 4 * * 1-5') || (github.event_name == 'workflow_dispatch' && inputs.mode != 'history')
+        if: inputs.mode != 'history'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -96,7 +96,7 @@ jobs:
 
       # 過去の取り込みが失敗しても、daily の分はもう上げてある
       - name: History
-        if: github.event_name == 'schedule' || inputs.mode != 'daily'
+        if: inputs.mode != 'daily'
         continue-on-error: true
         timeout-minutes: 60
         env:
@@ -108,7 +108,7 @@ jobs:
 
       - name: Upload (history)
         # 取り出しが一部だけで止まったときは上げない（欠けた・短いファイルで Release を上書きしない）
-        if: always() && steps.prepare.outcome == 'success' && (github.event_name == 'schedule' || inputs.mode != 'daily')
+        if: always() && steps.prepare.outcome == 'success' && inputs.mode != 'daily'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
