@@ -73,19 +73,27 @@
 
 | Routine | 起動 (JST) | 起動するワークフロー | 入力 | Routine の ID |
 |---|---|---|---|---|
-| 取り込み | 平日 16:10 | Update Data Store | `wait=yes`（当日データを待つ） | `trig_01PcyrPdxPQCGwU9wM8tGQF5` |
-| 日証金（平日） | 平日 13:10 | Fetch JSF | `mode=both` | `trig_01YVxFuxKhDjAiKNzLwVNQoa` |
-| 日証金（土日） | 土日 10:20 | Fetch JSF | `mode=history` | `trig_01Xi3LD1WnnVcqn2zH4C3Gjv` |
-| EDINET DB | 毎日 10:10 | Fetch EDINET DB | 既定（85社・対応表は auto） | `trig_01HSCLjDeTaaZG53XP3aEd7s` |
-| 週次学習 | 日曜 09:10 | Retrain Weekly | `tune=yes` | `trig_01Qw9wTJzS6F1SKF9EPtsCha` |
-| 保存データの検査 | 土曜 10:40 | Check Data Store | 既定（5日） | `trig_01FUf3ZCyQJCYmWej3t3rvgP` |
-| 朝の確認 | 月〜土 07:40 | （確かめるだけ） | 前日の run の結論を見る。取り込みの run が無ければ Update Data Store を起動し直す。取り込みは済んで予測だけ無ければ Predict Breakouts を起動する。月曜は日曜の学習と土曜の検査を見る | `trig_01839KhP7tXcZvvupmthNRNU` |
+| 取り込み | 平日 16:10 | Update Data Store | `wait=yes`（当日データを待つ） | `trig_01M9v8tkNfW2K7W5cNcnfyCa` |
+| 日証金（平日） | 平日 13:10 | Fetch JSF | `mode=both` | `trig_0123KKDZgbRthzbicWPBnr1k` |
+| 日証金（土日） | 土日 10:20 | Fetch JSF | `mode=history` | `trig_01VF9LEPhar2yRaZSzpfZmsX` |
+| EDINET DB | 毎日 10:10 | Fetch EDINET DB | 既定（85社・対応表は auto） | `trig_018mSPXUBa4PBFsHpK5BzNpK` |
+| 週次学習 | 日曜 09:10 | Retrain Weekly | `tune=yes` | `trig_01MQSVtn55Vmy7HmKjs9mJ6p` |
+| 保存データの検査 | 土曜 10:40 | Check Data Store | 既定（5日） | `trig_01G4KY6RJMAsFgY7t57khocW` |
+| 朝の確認 | 月〜土 07:40 | （確かめるだけ） | 前日の run の結論を見る。取り込みの run が無ければ Update Data Store を起動し直す。取り込みは済んで予測だけ無ければ Predict Breakouts を起動する。月曜は日曜の学習と土曜の検査を見る | `trig_01Pscq9oSei7otJrCjgfxgEc` |
 
-Routine は起動のたびに新しいセッションで動き（人は見ていない前提で書いてある）、起動した run の ID と結論、
-件数だけを報告する。Secrets や銘柄ごとのデータの値は出さない。起動は GitHub API の workflow_dispatch
-（`gh api` または `curl`。GitHub MCP が使えればそれ）で、起動後に run が現れたことと完了を確かめる。
+Routine はすべて、この運用を続けている Claude のセッション（`session_01HavkjgQwRz5mTV8cGj4KJp`、
+claude.ai の「jquants APIブラウザアプリ」）に届き、そのセッションが `curl` で workflow_dispatch を送る
+（`Authorization: Bearer $GITHUB_TOKEN`。このセッションにはリポジトリの GitHub 認証がある）。起動後に run が
+現れたことと完了を確かめ、run の ID と結論、件数だけを報告する。Secrets や銘柄ごとのデータの値は出さない。
 失敗したときは落ちた step を読んで、一時的な原因（ネットワーク・GitHub の 5xx・Release の入出力）なら
 1回だけ失敗した job を再実行し、それ以外は再実行せずに報告する。
+
+**新しいセッションで動かす形（起動のたびに別セッション）は使えなかった。** 2026-10-05 に試した
+（ドライランを4回）ところ、Routine が作る新しいセッションにはリポジトリが無く、GitHub API は 403
+（"GitHub access to this repository is not enabled for this session"）、GitHub の MCP ツールも無い。
+raw.githubusercontent.com は読める。そのため Routine は既存のセッションに紐づけてある。
+**このセッションをアーカイブすると Routine は止まる**。そのときは、リポジトリの GitHub 認証を持つセッション
+から Routine を作り直すか、claude.ai の Routine の画面でリポジトリを付けて作り直す。
 
 Predict Breakouts は Routine からは起動しない。取り込みの完了で `workflow_run` が繋ぐ（上の図）。
 Routine が起動した run は、Actions の一覧では `workflow_dispatch` として見える（以前の予約の起動は
