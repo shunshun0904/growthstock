@@ -19,6 +19,16 @@ run-experiment の snapshot 入力で research/_data/snapshot/<タグ>/ に置�
 
 ログに出すのは日付・種別・件数だけ。銘柄コード・社名・予想の値・修正の向きは出さない。
 
+1回目（2026-10-05、run 37367494496）の結果: 該当の銘柄は 2026-07-22 に業績予想の修正を**同じ日に2件**
+出していて（取り直す前の写しでは1行に潰れていた）、同じ事業年度の最初の予想がその2件目なので、
+1件目は「前の予想なし」で欠測、2件目は「1件目との比」で値あり。forecast_revisions は修正の行を
+`sort_values("DiscDate")`（1列・quicksort = 安定でない）で並べてから merge_asof（backward）で
+**同じ日の最後の行**を取るので、同じ日の2行のどちらが最後になるかは並べ替えの偶然で決まり、
+日によって値あり・欠測が入れ替わる。2回目はそれを確かめる:
+  - 同じ (Code, DiscDate) に修正が2行以上ある日の数と、予想の値が違うか（件数だけ）
+  - 学習用データセットで、直近の修正がそういう日に当たる行の数
+  - fins の行の順番を変えるだけで、該当行の rev_pct が 有⇄欠測 に入れ替わること
+
   Actions: run-experiment.yml  exp=probe_rev_mismatch.py  snapshot=pre-dedupe-20260924
 """
 from __future__ import annotations
@@ -143,7 +153,63 @@ def diagnose(sub: pd.DataFrame, fins: pd.DataFrame, fins_snap: Optional[pd.DataF
             days = sorted({str(x.date()) for x in cur["DiscDate"]} | ({str(imp_live)} if imp_live else set()))
             print("  取得記録（fins の fetched_days）: "
                   + ", ".join(f"{d}:{'済' if d in fetched else '未'}" for d in days))
+        # 同じ日の修正が2行以上なら、その行どうしで違う列の名前だけを出す（値は出さない）
+        if imp_now is not None:
+            same_day = f[(f["Code"] == code) & (f["DiscDate"] == pd.Timestamp(imp_now))
+                         & f["DocType"].astype(str).str.contains("EarnForecastRevision", na=False)]
+            if len(same_day) >= 2:
+                cols = [c for c in same_day.columns if not c.startswith("_")]
+                differ = [c for c in cols if same_day[c].astype(str).nunique() > 1]
+                print(f"  {imp_now} の修正は {len(same_day)}行。行どうしで違う列: {differ}")
+        order_flip(sub.iloc[[i]][["Code", "Date"]], fins)
     return n_bad
+
+
+def same_day_duplicates(f: pd.DataFrame) -> pd.DataFrame:
+    """(Code, DiscDate) で業績予想の修正（EarnForecastRevision）が2行以上ある日。FOP の値が何通りかも数える。"""
+    rev = f[f["DocType"].astype(str).str.contains("EarnForecastRevision", na=False)].copy()
+    rev["_fop"] = pd.to_numeric(rev["FOP"], errors="coerce") if "FOP" in rev.columns else np.nan
+    g = rev.groupby(["Code", "DiscDate"]).agg(n=("DiscDate", "size"), n_fop=("_fop", "nunique"))
+    return g[g["n"] >= 2]
+
+
+def population(f: pd.DataFrame, dataset_path: str) -> None:
+    """同じ日に2件以上の修正がある日の数と、学習用データセットでそれに当たる行の数（件数だけ）。"""
+    rev = f[f["DocType"].astype(str).str.contains("EarnForecastRevision", na=False)]
+    dup = same_day_duplicates(f)
+    print(f"\n[population] 修正の行 {len(rev):,} / (銘柄, 開示日) {rev.groupby(['Code', 'DiscDate']).ngroups:,}"
+          f" / 同じ日に2行以上 {len(dup):,}（うち FOP の値が違う {int((dup['n_fop'] >= 2).sum()):,}、"
+          f"同じか欠測 {int((dup['n_fop'] < 2).sum()):,}）")
+    if len(dup):
+        by_year = dup.reset_index()["DiscDate"].dt.year.value_counts().sort_index()
+        print("  年別: " + ", ".join(f"{y}:{n}" for y, n in by_year.items()))
+    if not os.path.exists(dataset_path):
+        print(f"  学習用データセットが無い: {dataset_path}")
+        return
+    ds = pd.read_parquet(dataset_path, columns=["Code", "Date", "days_since_rev", "rev_pct"])
+    ds["Code"] = ds["Code"].astype(str)
+    ds["Date"] = pd.to_datetime(ds["Date"])
+    has = ds["days_since_rev"].notna() & (ds["days_since_rev"] < B.REV_CLIP)
+    d = ds[has].copy()
+    d["_rev_d"] = d["Date"] - pd.to_timedelta(d["days_since_rev"].astype(int), unit="D")
+    keys = set(map(tuple, dup.reset_index()[["Code", "DiscDate"]].astype({"Code": str}).itertuples(index=False)))
+    hit = np.fromiter(((c, dd) in keys for c, dd in zip(d["Code"], d["_rev_d"])), dtype=bool, count=len(d))
+    nan_rate_hit = float(d.loc[hit, "rev_pct"].isna().mean()) if hit.any() else float("nan")
+    nan_rate_other = float(d.loc[~hit, "rev_pct"].isna().mean()) if (~hit).any() else float("nan")
+    print(f"  学習用データセット {len(ds):,}行 / 直近の修正がある行 {len(d):,} / そのうち修正が同じ日に2行以上の日に当たる行 "
+          f"{int(hit.sum()):,}（{hit.mean()*100:.2f}%）。rev_pct の欠測率: 当たる行 {nan_rate_hit*100:.1f}% / それ以外 {nan_rate_other*100:.1f}%")
+
+
+def order_flip(sample: pd.DataFrame, fins: pd.DataFrame, n_shuffle: int = 5) -> None:
+    """fins の行の順番を変えるだけで rev_pct の有無が入れ替わるかを見る（同じ行・同じデータ）。"""
+    def ok(fr):
+        r = B.forecast_revisions(sample.reset_index(drop=True), fr)
+        return bool(np.isfinite(float(r["rev_pct"].iloc[0])))
+    base = ok(fins)
+    rev_order = ok(fins.iloc[::-1].reset_index(drop=True))
+    shuffled = [ok(fins.sample(frac=1.0, random_state=k).reset_index(drop=True)) for k in range(n_shuffle)]
+    print(f"  行の順番を変えて作り直す: そのまま {'有' if base else '欠測'} / 逆順 {'有' if rev_order else '欠測'} / "
+          f"無作為 {n_shuffle}通り → 有 {sum(shuffled)}回・欠測 {n_shuffle - sum(shuffled)}回")
 
 
 def main() -> int:
@@ -169,6 +235,7 @@ def main() -> int:
             fetched = set(json.load(fh).get("fins", {}).get("fetched_days", []))
         print(f"[manifest] fins の取得記録 {len(fetched)}日")
     diagnose(sub, fins, fins_snap, fetched)
+    population(rev_pct_by_row(fins), os.path.join(DATA, "dataset.parquet"))
     return 0
 
 

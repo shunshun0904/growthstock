@@ -50,6 +50,28 @@ class Probe(unittest.TestCase):
         self.assertNotIn("1001", out.split("[compare]")[-1])   # 銘柄コードは出さない
         self.assertNotIn("120", out)                             # 予想の値は出さない
 
+    def test_same_day_duplicates_and_order_flip(self):
+        f = fins(True)
+        # 同じ日に2件目の修正（FOP が違う）。1件目は前の予想が無いので欠測、2件目は1件目との比
+        f = pd.concat([f, pd.DataFrame([{"Code": "2002", "DiscDate": "2026-08-01", "DocType": "EarnForecastRevision",
+                                         "CurFYSt": "2026-04-01", "FOP": 60.0, "DiscNo": "d"}])], ignore_index=True)
+        dup = P.same_day_duplicates(P.rev_pct_by_row(f))
+        self.assertEqual(len(dup), 1)
+        self.assertEqual(int(dup["n_fop"].iloc[0]), 2)
+        # 同じ日の2行は、先に並んだ方が「前の予想なし」で欠測、後の方が「同じ日の1件目との比」で値あり。
+        # どちらが merge_asof で取られる「その日の最後の行」になるかは並び順しだい（小さな配列では
+        # numpy の quicksort が安定なので、ここでは入れ替わらない。実データでの入れ替わりは Actions で見る）
+        g = P.rev_pct_by_row(f)
+        two = g[(g["Code"] == "2002") & (g["DiscDate"] == pd.Timestamp("2026-08-01"))]
+        self.assertEqual(len(two), 2)
+        self.assertEqual(sorted(np.isfinite(two["_rev_pct"].to_numpy(dtype=float)).tolist()), [False, True])
+        sample = pd.DataFrame({"Code": ["2002"], "Date": pd.to_datetime(["2026-09-30"])})
+        self.assertIn("rev_pct", P.B.forecast_revisions(sample, f).columns)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            P.order_flip(sample, f, n_shuffle=3)
+        self.assertIn("行の順番を変えて作り直す", buf.getvalue())
+
     def test_listing_marks_latest_revision(self):
         f = P.rev_pct_by_row(fins(True))
         lst = P.listing(f, "1001", pd.Timestamp("2026-09-30"))
