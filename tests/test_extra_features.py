@@ -291,6 +291,79 @@ class TestForecastRevisions(unittest.TestCase):
         self.assertEqual(list(out.columns), F.GROUPS["revision"])
         self.assertTrue(out.isna().all().all(), "0 で埋めている")
 
+    def same_day(self, times=("15:00:00", "15:30:00"), nos=("20260722500001", "20260722500002"),
+                 fops=(100.0, 110.0)):
+        """同じ事業年度の最初の予想が、同じ日の2件の修正（2026-10-05 の一致チェックで出た形）。"""
+        return pd.DataFrame({
+            "Code": ["13010"] * 2,
+            "DiscDate": [D("2026-07-22")] * 2,
+            "DiscTime": list(times),
+            "DiscNo": list(nos),
+            "DocType": ["EarnForecastRevision"] * 2,
+            "CurFYSt": [D("2026-04-01")] * 2,
+            "FOP": list(fops)})
+
+    def test_同じ日の修正はその日の最後の開示が付く(self):
+        # 1件目（15:00）は前の予想が無いので欠測、2件目（15:30）は1件目との比で +10%。
+        # その日の最後の開示（時刻の遅いほう）が付く。2026-10-06 まではどちらが付くかが並びまかせだった
+        s = samples(["2026-10-02"])
+        out = self.B.forecast_revisions(s, self.same_day())
+        self.assertAlmostEqual(out["rev_pct"].iloc[0], 10.0, places=6)
+        self.assertEqual(out["rev_up"].iloc[0], 1.0)
+        self.assertEqual(out["days_since_rev"].iloc[0], 72)
+        self.assertEqual(out["rev_n_250"].iloc[0], 2)        # 件数は行ごと（2件）
+        self.assertEqual(out["rev_up_n_250"].iloc[0], 1)     # 向きがあるのは2件目だけ
+        # 入力の行の順を逆にしても同じ（並びは開示日・時刻・番号で決まる）
+        rev = self.B.forecast_revisions(s, self.same_day().iloc[::-1].reset_index(drop=True))
+        pd.testing.assert_frame_equal(rev, out)
+
+    def test_時刻が同じなら開示番号の順(self):
+        # 番号の小さいほう（FOP 100）が先、大きいほう（FOP 90）が後 → 後のほうの −10% が付く
+        f = self.same_day(times=("15:00:00", "15:00:00"), nos=("20260722500002", "20260722500001"),
+                          fops=(90.0, 100.0))
+        out = self.B.forecast_revisions(samples(["2026-10-02"]), f)
+        self.assertAlmostEqual(out["rev_pct"].iloc[0], -10.0, places=6)
+        self.assertEqual(out["rev_up"].iloc[0], 0.0)
+        self.assertEqual(out["rev_dn_n_250"].iloc[0], 1)
+
+    def test_時刻が無い日は番号で並べる(self):
+        # 欠けた時刻は最後に置く。時刻が両方無ければ番号の順
+        f = self.same_day(times=(None, None), nos=("20260722500002", "20260722500001"),
+                          fops=(90.0, 100.0))
+        out = self.B.forecast_revisions(samples(["2026-10-02"]), f)
+        self.assertAlmostEqual(out["rev_pct"].iloc[0], -10.0, places=6)
+
+    def test_入力の並びを変えても値は同じ(self):
+        # 3銘柄 × (1Q の予想、同じ日の修正2件、配当の修正) を、行の順をいろいろ変えて作り直す
+        rows = []
+        for i, code in enumerate(["13010", "13020", "13030"]):
+            rows += [
+                {"Code": code, "DiscDate": D("2024-08-05"), "DiscTime": "15:00:00",
+                 "DiscNo": f"2024080510{i}001", "DocType": "1QFinancialStatements_Consolidated_JP",
+                 "CurFYSt": D("2024-04-01"), "FOP": 1000.0 + 10 * i},
+                {"Code": code, "DiscDate": D("2024-09-20"), "DiscTime": "15:00:00",
+                 "DiscNo": f"2024092010{i}001", "DocType": "EarnForecastRevision",
+                 "CurFYSt": D("2024-04-01"), "FOP": 1200.0},
+                {"Code": code, "DiscDate": D("2024-09-20"), "DiscTime": "16:00:00",
+                 "DiscNo": f"2024092010{i}002", "DocType": "EarnForecastRevision",
+                 "CurFYSt": D("2024-04-01"), "FOP": 900.0 + 100 * i},
+                {"Code": code, "DiscDate": D("2024-09-20"), "DiscTime": "16:00:00",
+                 "DiscNo": f"2024092010{i}003", "DocType": "DividendForecastRevision",
+                 "CurFYSt": D("2024-04-01"), "FOP": np.nan},
+            ]
+        f = pd.DataFrame(rows)
+        s = pd.concat([samples(["2024-09-19", "2024-09-20", "2024-10-01", "2025-03-01"], code=c)
+                       for c in ["13010", "13020", "13030"]], ignore_index=True)
+        want = self.B.forecast_revisions(s, f)
+        # 16:00 の修正（1,200 との比）が付く: 900 → −25%、1,000 → −16.7%、1,100 → −8.3%
+        got = want.loc[s["Date"] == D("2024-10-01"), "rev_pct"].round(3).tolist()
+        self.assertEqual(got, [-25.0, -16.667, -8.333])
+        rng = np.random.default_rng(0)
+        for k in range(20):
+            perm = f.iloc[rng.permutation(len(f))].reset_index(drop=True)
+            pd.testing.assert_frame_equal(self.B.forecast_revisions(s, perm), want,
+                                          obj=f"並べ替え {k}")
+
     def test_配当修正が無くても列は出る(self):
         f = self.fins()
         f = f[f["DocType"] != "DividendForecastRevision"]

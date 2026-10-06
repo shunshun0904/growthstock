@@ -30,6 +30,9 @@ run-experiment の snapshot 入力で research/_data/snapshot/<タグ>/ に置�
   - fins の行の順番を変えるだけで、該当行の rev_pct が 有⇄欠測 に入れ替わること
 
   Actions: run-experiment.yml  exp=probe_rev_mismatch.py  snapshot=pre-dedupe-20260924
+
+2026-10-06 に直した（運用者の決定で案 1: 開示日・開示時刻・開示番号の安定な並べ替え。
+build_dataset.forecast_revisions の DISC_ORDER）。いま回すと order_flip は入れ替わらない。
 """
 from __future__ import annotations
 

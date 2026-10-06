@@ -1554,6 +1554,9 @@ TIMING_CLIP_FY = 800
 REV_CLIP = 400
 #: 予想修正の件数を数える窓（暦日）
 REV_WINDOWS = (60, 250)
+#: 同じ日の開示の並び（開示日 → 開示時刻 → 開示番号）。開示番号は fins の行の鍵
+#: （data_store.ROW_KEYS）なので、この順で行の順番が一意に決まる
+DISC_ORDER = ("DiscDate", "DiscTime", "DiscNo")
 
 
 def forecast_revisions(samples: pd.DataFrame, fins: pd.DataFrame) -> pd.DataFrame:
@@ -1586,6 +1589,16 @@ def forecast_revisions(samples: pd.DataFrame, fins: pd.DataFrame) -> pd.DataFram
     ----------
     修正行の FOP を、同じ事業年度（CurFYSt）の**直前の開示**の FOP と比べる。
     上方修正なら正、下方修正なら負。前の予想が無ければ欠測（0 にしない）。
+
+    同じ日の並び
+    ----------
+    同じ銘柄が同じ日に修正を2件以上出すことがある（2016〜2026年で131日、修正の
+    (銘柄, 開示日) の 0.47%）。行を (開示日, 開示時刻, 開示番号)（DISC_ORDER）で
+    安定に並べ、「直前の開示」はこの並びで1つ前、各行に付く修正はその日の**最後の
+    開示**にする。2026-10-06 まで、修正の行を開示日だけで並べていて（安定でない
+    並べ替え）、同じ日のどちらが付くかが並びまかせだった（学習と予測の一致チェックで
+    見つかった。docs/DATA_TIMING.md「2026-10-05 の一致チェックで出た rev_pct /
+    rev_up の欠測」）。無い列（古い取り込み・テストの表）は並びに使わない。
     """
     # 列構成は取り込みの状況で変えない。features.all_columns() が要求する
     # 列が欠けると build_dataset ごと落ちる（SystemExit）
@@ -1595,7 +1608,15 @@ def forecast_revisions(samples: pd.DataFrame, fins: pd.DataFrame) -> pd.DataFram
         return out
     f = fins.copy()
     f["DiscDate"] = pd.to_datetime(f["DiscDate"], errors="coerce")
-    f = f.dropna(subset=["DiscDate", "Code"]).sort_values(["Code", "DiscDate"])
+    f = f.dropna(subset=["DiscDate", "Code"])
+    # 時刻・番号は文字列にそろえて並べる（年のファイルで型が混ざっても比べられるように）。
+    # 欠けた値は最後に置く
+    order = ["Code", "DiscDate"]
+    for c in DISC_ORDER[1:]:
+        if c in f.columns:
+            f[f"_ord_{c}"] = f[c].astype("string")
+            order.append(f"_ord_{c}")
+    f = f.sort_values(order, kind="mergesort", na_position="last").reset_index(drop=True)
     dt_ = f["DocType"].astype(str)
     is_earn = dt_.str.contains("EarnForecastRevision", na=False)
     is_div = dt_.str.contains("DividendForecastRevision", na=False)
@@ -1615,7 +1636,9 @@ def forecast_revisions(samples: pd.DataFrame, fins: pd.DataFrame) -> pd.DataFram
     left = left.sort_values("Date")
 
     for flag, prefix in ((is_earn, "rev"), (is_div, "divrev")):
-        ev = f.loc[flag, ["Code", "DiscDate", "_rev_pct"]].sort_values("DiscDate")
+        # 開示日だけで安定に並べ直す。同じ日の中は上の並び（時刻・番号の順）のままなので、
+        # merge_asof（backward）はその日の最後の開示を取る
+        ev = f.loc[flag, ["Code", "DiscDate", "_rev_pct"]].sort_values("DiscDate", kind="mergesort")
         if not len(ev):
             continue
         ev = ev.rename(columns={"DiscDate": f"_{prefix}_d",
