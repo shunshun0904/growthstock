@@ -42,6 +42,10 @@ research/_data/oof/e64_* に置き、以降の回はそれを使う（その間�
 
 試運転:
     python3 research/exp/e64_rev_order.py --algos logit --n-trials 2 --shifts 0
+
+結果（2026-10-06、run 37448509715 / 37449833791 / 37457395389、docs/MODEL_ADOPTION_RULES.md §25）: 値が変わるのは
+31行（0.14%）。データだけの差（C−A）は5モデルとも 32窓で ±1.6 SE 以内。探索し直し（B−C）の揺れのほうが大きく、
+向きはそろわない → 直しは日曜の再学習にそのまま入れる。
 """
 from __future__ import annotations
 
