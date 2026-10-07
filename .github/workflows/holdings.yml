@@ -1,10 +1,14 @@
 name: Update Holdings Sheet
 
-# 予測ログで赤く塗った行（保有の印）の損益の推移を、スプレッドシートの別タブ「保有の推移」に
-# 書く。日付ごとの表とグラフつき（research/holdings_sheet.py、docs/OPERATIONS.md）。
+# チャットで報告した取引（research/trades_inbox.jsonl に暗号化して置く）を復号して
+# スプレッドシートの「取引の記録」タブに写し、売りのルールで損益の推移を別タブ「保有の推移」に
+# 書く（日付ごとの表とグラフつき）。予測ログの行は、保有中を赤・売却済みを黄色に塗る
+# （research/holdings_sheet.py、docs/OPERATIONS.md）。
 #
 # 毎晩の予測（Predict Breakouts）が終わったら workflow_run で続けて走る。予測が休場日で
 # 飛んだ日も走る（同じ中身で作り直すだけ）。手でも起動できる（Actions の Run workflow）。
+# mode=pubkey は、受け皿の暗号化に使う公開鍵（サービスアカウントの鍵の公開側。公開してよい）を
+# ログに出すだけ（鍵を作り直したときに research/trades_pubkey.pem を取り直す）。
 #
 # ログは公開なので、件数と最新日だけを出す（銘柄名・株価・損益の値は出さない）。
 on:
@@ -12,6 +16,12 @@ on:
     workflows: ['Predict Breakouts']
     types: [completed]
   workflow_dispatch:
+    inputs:
+      mode:
+        description: 'update: シートを作り直す / pubkey: 受け皿の公開鍵をログに出す'
+        type: choice
+        options: [update, pubkey]
+        default: update
 
 permissions:
   contents: read
@@ -43,13 +53,21 @@ jobs:
 
       # 日足と営業日カレンダーだけ取り出す（全アセットは要らない）
       - name: Download daily bars (release)
+        if: github.event_name != 'workflow_dispatch' || inputs.mode != 'pubkey'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p research/_data
           bash scripts/gh_release_download.sh data-raw research/_data 'bars_*' 'calendar*'
 
+      - name: Print the inbox public key
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'pubkey'
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: python3 research/trades_inbox.py pubkey
+
       - name: Update holdings tab
+        if: github.event_name != 'workflow_dispatch' || inputs.mode != 'pubkey'
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
           GSHEET_ID: ${{ secrets.GSHEET_ID }}
