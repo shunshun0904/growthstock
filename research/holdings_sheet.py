@@ -81,8 +81,11 @@ TOTAL_STYLE = ("#86b6ef", 6)
 #: 使わない）。先頭の青・橙・緑は色覚の差の検査に全組み合わせで通る（2026-10-08 に
 #: validate_palette で確認）
 SERIES_COLORS = ["#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
-SUMMARY_HEADER = ["銘柄", "コード", "予測日", "買った日", "建値", "株数", "20日目", "売った日",
-                  "売値", "売りの理由", "最新日", "最新終値", "損益(円)", "損益%", "状態"]
+#: 「+10%の値」は売りの指値（建値×1.10）、「20日目までの高値」はルールで見た日中の高値の最大
+#: （売った日まで）。保有中のものがどこまで近づいたかを見るため
+SUMMARY_HEADER = ["銘柄", "コード", "予測日", "買った日", "建値", "株数", "+10%の値", "20日目",
+                  "20日目までの高値", "高値の日", "売った日", "売値", "売りの理由", "最新日", "最新終値",
+                  "損益(円)", "損益%", "状態"]
 
 
 @dataclass
@@ -105,6 +108,9 @@ class Position:
     day20: Optional[pd.Timestamp] = None
     exit_day: Optional[pd.Timestamp] = None
     exit_price: Optional[float] = None
+    target: Optional[float] = None             # 売りの指値（建値×1.10）
+    peak: Optional[float] = None               # 20日目まで（売った日まで）の日中の高値の最大
+    peak_day: Optional[pd.Timestamp] = None
 
     @property
     def jq_code(self) -> str:
@@ -342,6 +348,7 @@ def simulate(p: Position, bars: pd.DataFrame, cal=None) -> Optional[pd.DataFrame
     """
     p.state = p.reason = p.issue = ""
     p.entry_day = p.entry = p.day20 = p.exit_day = p.exit_price = None
+    p.target = p.peak = p.peak_day = None
     b = bars[bars["Code"] == p.jq_code].sort_values("Date").reset_index(drop=True)
     if b.empty:
         p.state = "株価なし"
@@ -378,7 +385,7 @@ def simulate(p: Position, bars: pd.DataFrame, cal=None) -> Optional[pd.DataFrame
     exit_i: Optional[int] = None
     exit_px: Optional[float] = None
     reason = ""
-    target = entry * TARGET
+    target = p.target = entry * TARGET
     window = after.index if p.day20 is None else after.index[after["Date"] <= p.day20]
     for i in window:
         h = high.iloc[i]
@@ -411,6 +418,12 @@ def simulate(p: Position, bars: pd.DataFrame, cal=None) -> Optional[pd.DataFrame
             exit_i, extra, exit_px, reason, carried = None, sell, float(p.sell_price), "報告", False
         else:                             # 値段の報告が無く、その日の日足もまだ無い
             exit_i, exit_px, reason = None, None, "売りの報告あり（その日の終値待ち）"
+
+    seen = [i for i in window if exit_i is None or i <= exit_i]
+    highs = high.iloc[seen].dropna()
+    if len(highs):
+        p.peak = float(highs.max())
+        p.peak_day = pd.Timestamp(after.loc[highs.idxmax(), "Date"])
 
     path = pd.DataFrame({"Date": after["Date"], "close": close})
     if exit_i is not None:
@@ -539,7 +552,7 @@ def summary_rows(positions: List[Position], paths: Dict[int, pd.DataFrame]) -> L
         path = paths.get(k)
         if path is None or path.empty:
             rows.append([p.name, p.code, p.pick_date or "", _ymd(p.buy_date),
-                         p.entry_price or "", p.shares, "", "", "", p.reason,
+                         p.entry_price or "", p.shares, "", "", "", "", "", "", p.reason,
                          "", "", "", "", p.state])
             continue
         last = path.iloc[-1]
@@ -549,7 +562,8 @@ def summary_rows(positions: List[Position], paths: Dict[int, pd.DataFrame]) -> L
             tot[key] += yen
             cost[key] += float(p.entry) * p.shares
         rows.append([p.name, p.code, p.pick_date or "", _ymd(p.entry_day), round(float(p.entry), 1),
-                     p.shares, _ymd(p.day20), _ymd(p.exit_day),
+                     p.shares, round(float(p.target), 1), _ymd(p.day20),
+                     "" if p.peak is None else round(p.peak, 1), _ymd(p.peak_day), _ymd(p.exit_day),
                      "" if p.exit_price is None else round(float(p.exit_price), 1), p.reason,
                      _ymd(last["Date"]), "" if p.state == SOLD else round(float(last["close"]), 1),
                      round(yen), round(float(last["pnl_pct"]), 2), p.state])
@@ -693,8 +707,8 @@ def format_requests(sheet_id: int, lay: Layout) -> List[Dict]:
     s0 = 3                                    # 銘柄ごとの表の見出し
     bold(s0)
     s1 = s0 + 1 + lay.summary_rows
-    for name, pattern in (("建値", price), ("売値", price), ("最新終値", price),
-                          ("損益(円)", yen), ("損益%", pct)):
+    for name, pattern in (("建値", price), ("+10%の値", price), ("20日目までの高値", price),
+                          ("売値", price), ("最新終値", price), ("損益(円)", yen), ("損益%", pct)):
         num(s0 + 1, s1, SUMMARY_HEADER.index(name), pattern)
     for r in range(s1 - 3, s1):               # 合計・うち確定・うち含み
         bold(r)

@@ -224,6 +224,8 @@ class Simulate(unittest.TestCase):
         self.assertEqual(p.exit_day, DAYS[5])
         self.assertAlmostEqual(p.exit_price, 1100.0)
         self.assertEqual(path["Date"].iloc[-1], DAYS[5])        # 売った日で終わる
+        self.assertAlmostEqual(p.target, 1100.0)
+        self.assertEqual((p.peak, p.peak_day), (1100.0, DAYS[5]))
         self.assertAlmostEqual(path["pnl_yen"].iloc[-1], 10000.0)
         self.assertAlmostEqual(path["pnl_pct"].iloc[-1], 10.0)
 
@@ -260,6 +262,7 @@ class Simulate(unittest.TestCase):
         self.assertEqual((p.state, p.reason), ("持ち越し中", "20日目に含み損で持ち越し"))
         self.assertIsNone(p.exit_day)
         self.assertEqual(path["Date"].iloc[-1], DAYS[-1])       # 最新日まで持つ
+        self.assertEqual(p.peak, 1000.0)                        # 20日目のあとの高値 1200 は見ない
         self.assertEqual(path["pnl_yen"].iloc[20 - 1], -5000.0)
 
     def test_day_20_waits_for_its_data(self):
@@ -278,6 +281,7 @@ class Simulate(unittest.TestCase):
         self.assertEqual((p.state, p.reason, p.exit_day, p.exit_price),
                          (H.SOLD, "報告", DAYS[3], 1030.0))
         self.assertEqual(path["pnl_yen"].iloc[-1], 3000.0)
+        self.assertEqual(p.peak, 1000.0)                        # 売った日のあとの高値は見ない
 
     def test_reported_sell_without_price_uses_that_days_close(self):
         c = with_value(self.N, 1000, {20: 950, 23: 970})
@@ -411,6 +415,10 @@ class Daily(unittest.TestCase):
         self.assertAlmostEqual(a["売値"], 1100.0)
         self.assertEqual((c["状態"], c["買った日"], c["建値"], c["20日目"], c["損益(円)"]),
                          ("保有中", "2026-09-29", 500.0, f"{DAYS[22]:%Y-%m-%d}", 4000))
+        self.assertEqual((c["+10%の値"], c["20日目までの高値"], c["高値の日"]),
+                         (550.0, 540.0, "2026-10-07"))
+        self.assertEqual((a["+10%の値"], a["20日目までの高値"], a["高値の日"]),
+                         (1100.0, 1100.0, "2026-09-29"))
         total, sold, held = rows[-3:]
         i = head.index("損益(円)")
         self.assertEqual([(r[0], r[i]) for r in (total, sold, held)],
