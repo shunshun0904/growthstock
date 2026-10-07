@@ -410,18 +410,35 @@ class RiseConfig:
     vol_norm_k: Optional[float] = VOL_NORM_K
     #: 上昇を測る基準の価格（LABEL_ENTRY 参照）。"next_open" = AdjO[t+1]、"close" = close[t]
     entry: str = LABEL_ENTRY
+    #: 到達を測る窓の始まり（t から何営業日目か）。到達は t+start 〜 t+horizon の終値の最大で
+    #: 測る。既定の 1 が今の定義（t+1 〜 t+horizon）。終盤とトレンドは start によらず窓の終わり
+    #: t+horizon で見る。実験65 は start=21・horizon=40 で「21〜40営業日目の上昇」を当てる
+    start: int = 1
+    #: しきい値の σ を何営業日ぶんで測るか（σ = vol_20d/100 × √sigma_days）。None なら horizon
+    #: （今の定義）。窓を後ろにずらしても必要な上昇幅を今と同じにするなら 20 を渡す
+    #: （実験65、運用者の選択 2026-10-07）
+    sigma_days: Optional[int] = None
 
     @property
     def normalised(self) -> bool:
         return self.vol_norm_k is not None
 
     @property
+    def sigma_horizon(self) -> int:
+        """しきい値の σ に掛ける √ の営業日数（sigma_days が無ければ horizon）。"""
+        return self.horizon if self.sigma_days is None else int(self.sigma_days)
+
+    @property
     def name(self) -> str:
         m = round(self.horizon / 20)
+        # 窓をずらした定義（start > 1）だけ名前の頭を変える。既定の名前は変えない
+        span = f"{m}ヶ月内" if self.start == 1 else f"{self.start}〜{self.horizon}営業日目"
         if self.normalised:
-            base = f"{m}ヶ月内+{self.vol_norm_k:.1f}σ"
+            base = f"{span}+{self.vol_norm_k:.1f}σ"
+            if self.sigma_horizon != self.horizon:
+                base += f"（σは{self.sigma_horizon}営業日）"
         else:
-            base = f"{m}ヶ月内+{self.threshold*100:.0f}%"
+            base = f"{span}+{self.threshold*100:.0f}%"
         if self.keep_days:
             base += f" / 維持{self.keep_days}日"
         if self.end_ratio is not None:
@@ -1044,7 +1061,7 @@ def rise_thresholds(vol_20d, cfg: RiseConfig = DEFAULT_RISE):
     """
     vol = pd.to_numeric(pd.Series(vol_20d), errors="coerce")
     if cfg.normalised:
-        need = cfg.vol_norm_k * vol / 100.0 * np.sqrt(cfg.horizon)
+        need = cfg.vol_norm_k * vol / 100.0 * np.sqrt(cfg.sigma_horizon)
     else:
         need = pd.Series(float(cfg.threshold), index=vol.index)
     if cfg.end_ratio is None:
@@ -1064,11 +1081,12 @@ def attach_rise_label(df: pd.DataFrame, cfg: RiseConfig = DEFAULT_RISE) -> pd.Da
         基準の価格から、先 horizon 営業日以内に threshold 以上上昇したか。
         基準は cfg.entry（既定は翌営業日の寄り AdjO[t+1]。"close" なら更新日の終値）。
         上昇は終値で測る。高値ベースだと「一瞬触れただけ」も正例になる。
+        見る窓は t+start 〜 t+horizon（既定の start=1 なら t+1 〜 t+horizon）。
 
     継続（追加）:
         到達しても、その後すぐ下落トレンドに入るならモメンタムとは言えない。
         次の3つで「続いたこと」を要求する。どれも0/Noneで無効化できる。
-          keep_days … +threshold 以上で引けた日が通算 keep_days 日以上
+          keep_days … +threshold 以上で引けた日が通算 keep_days 日以上（start=1 のときだけ）
           end_ratio … 終盤 end_window 日平均が基準の価格の +end_ratio 以上
           uptrend   … t+horizon 時点で MA(trend_short) >= MA(trend_long)
 
@@ -1077,13 +1095,20 @@ def attach_rise_label(df: pd.DataFrame, cfg: RiseConfig = DEFAULT_RISE) -> pd.Da
     """
     g = df.groupby("Code", sort=False)
     h = cfg.horizon
+    s0 = int(cfg.start)
+    if not 1 <= s0 <= h:
+        raise SystemExit(f"RiseConfig.start は 1〜horizon（{h}）: {s0}")
+    if cfg.keep_days and s0 != 1:
+        # 維持日数（_days_above）は t+1 〜 t+horizon で数える作り。窓をずらした定義では使わない
+        raise SystemExit("RiseConfig.keep_days は start=1 のときだけ使える")
+    span = h - s0 + 1
 
     # 高値窓と同じ理由で min_periods は 1 にする。
     # 先の窓に売買不成立の日が1つあるだけでラベルが未確定になっていた。
     # 「先 h 営業日ぶんの行があるか」は末尾からの位置で別に判定する。
     def future_max(s: pd.Series) -> pd.Series:
-        # t+1 〜 t+horizon の終値の最大
-        return s[::-1].rolling(h, min_periods=1).max()[::-1].shift(-1)
+        # t+start 〜 t+horizon の終値の最大（既定の start=1 なら t+1 〜 t+horizon）
+        return s[::-1].rolling(span, min_periods=1).max()[::-1].shift(-s0)
 
     have_forward = g.cumcount(ascending=False) >= h
     df["future_max_close"] = g["close"].transform(future_max).where(have_forward)
@@ -3312,6 +3337,9 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
             "trend_long": DEFAULT_RISE.trend_long,
             # 上昇を測る基準の価格（next_open = 翌営業日の寄り / close = 更新日の終値）
             "entry": DEFAULT_RISE.entry,
+            # 到達を測る窓の始まり（t+start 〜 t+horizon）と、しきい値の σ の日数
+            "start": DEFAULT_RISE.start,
+            "sigma_days": DEFAULT_RISE.sigma_horizon,
             "name": DEFAULT_RISE.name,
             "forward_needed": DEFAULT_RISE.horizon,
         }

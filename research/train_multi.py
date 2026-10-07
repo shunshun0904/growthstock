@@ -50,7 +50,7 @@ import json
 import os
 import sys
 import time
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -69,13 +69,18 @@ from train_production import (  # noqa: E402
 )
 
 
-def oof_scores(algo: str, ds: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
+def oof_scores(algo: str, ds: pd.DataFrame, cols: List[str],
+               params: Optional[Dict] = None,
+               embargo_days: Optional[int] = None) -> pd.DataFrame:
     """
     各行を「その行より前のデータだけで学習したモデル」で採点する。
 
     分割は train_production.oof_scores と同じ（36ヶ月 / 6ヶ月 / 6ヶ月、
     エンバーゴ = ラベル確定に要る営業日数）。ここをモデルごとに変えると、
     画面に並べたときの pctHistorical が互いに比較できなくなる。
+
+    params を渡さなければ multi_params.json の探索済みパラメータ、embargo_days を
+    渡さなければ B.RISE_HORIZON。別の定義のラベルで作るとき（実験65）だけ両方を渡す。
     """
     import walkforward as WF
 
@@ -83,7 +88,8 @@ def oof_scores(algo: str, ds: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
                           min_train_months=OOF_MIN_TRAIN_MONTHS,
                           test_months=OOF_TEST_MONTHS,
                           step_months=OOF_STEP_MONTHS,
-                          embargo_days=B.RISE_HORIZON)
+                          embargo_days=(B.RISE_HORIZON if embargo_days is None
+                                        else int(embargo_days)))
     d = pd.to_datetime(ds["Date"])
     parts = []
     for f in folds:
@@ -93,7 +99,7 @@ def oof_scores(algo: str, ds: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
         if len(te) < 200 or len(tr) < 1000:
             continue
         m = M.fit(algo, tr[cols].to_numpy(dtype=float),
-                  tr["label"].to_numpy(dtype=int), cols)
+                  tr["label"].to_numpy(dtype=int), cols, params=params)
         part = te[["Code", "Date", "label", "ref_end", "ref_rise",
                    OUTCOME_COL]].copy()
         part["score"] = M.predict(m, te[cols].to_numpy(dtype=float))

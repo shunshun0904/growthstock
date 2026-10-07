@@ -36,7 +36,7 @@ import glob
 import json
 import os
 import sys
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -68,12 +68,16 @@ OOF_TEST_MONTHS = 6
 OOF_STEP_MONTHS = 6
 
 
-def oof_scores(ds: pd.DataFrame, cols: List[str], params: Dict) -> pd.DataFrame:
+def oof_scores(ds: pd.DataFrame, cols: List[str], params: Dict,
+               embargo_days: Optional[int] = None) -> pd.DataFrame:
     """
     各行を「その行より前のデータだけで学習したモデル」で採点する。
 
     較正表とスコア帯統計はこれで作る。全期間で学習したモデルの
     自己採点を使うと、訓練データを当てているだけの楽観的な表になる。
+
+    embargo_days は既定でラベル確定に要る営業日数（B.RISE_HORIZON）。
+    別の定義のラベルで作るとき（実験65 の 21〜40営業日目なら 40）に渡す。
     """
     import lightgbm as lgb
     import walkforward as WF
@@ -81,7 +85,8 @@ def oof_scores(ds: pd.DataFrame, cols: List[str], params: Dict) -> pd.DataFrame:
     folds = WF.make_folds(pd.to_datetime(ds["Date"]),
                           min_train_months=OOF_MIN_TRAIN_MONTHS,
                           test_months=OOF_TEST_MONTHS, step_months=OOF_STEP_MONTHS,
-                          embargo_days=B.RISE_HORIZON)
+                          embargo_days=(B.RISE_HORIZON if embargo_days is None
+                                        else int(embargo_days)))
     d = pd.to_datetime(ds["Date"])
     parts = []
     for f in folds:
