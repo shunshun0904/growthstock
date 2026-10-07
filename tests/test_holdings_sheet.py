@@ -439,7 +439,8 @@ class Daily(unittest.TestCase):
                                   ("C社(7713) 損益(円)", "#1baf7a", 2)])
         lay = H.build_layout("2026-10-07", H.summary_rows(self.ps, self.paths), self.daily,
                              len(self.ps), series)
-        self.assertEqual(lay.values[3], H.SUMMARY_HEADER)
+        self.assertEqual(lay.values[3], [H._cell(h) for h in H.SUMMARY_HEADER])
+        self.assertIn("'+10%の値", lay.values[3])
         self.assertEqual(lay.values[lay.daily_header_row][0], "日付")
         self.assertEqual(lay.values[lay.daily_header_row + 1][0], "2026-09-25")
         self.assertEqual([c for c, _, _ in lay.series], [1, 4, 5])
@@ -457,6 +458,19 @@ class Daily(unittest.TestCase):
         fmts = H.format_requests(123, lay)
         self.assertTrue(any("numberFormat" in r["repeatCell"]["cell"]["userEnteredFormat"]
                             for r in fmts))
+
+    def test_text_that_looks_like_a_formula_stays_text(self):
+        """USER_ENTERED で = + - @ から始まる文字を書くと式になる（「+10%の値」が #ERROR! になった）。"""
+        self.assertEqual(H._cell("+10%の値"), "'+10%の値")
+        self.assertEqual(H._cell("+10%に到達"), "'+10%に到達")
+        self.assertEqual([H._cell(v) for v in ("=SUM(A1)", "-x", "@a")], ["'=SUM(A1)", "'-x", "'@a"])
+        self.assertEqual([H._cell(v) for v in (-5.0, 3, "A社", "")], [-5.0, 3, "A社", ""])
+        self.ps[0].reason = "+10%に到達"
+        lay = H.build_layout("2026-10-07", H.summary_rows(self.ps, self.paths), self.daily, 2, [])
+        for row in lay.values:
+            for v in row:
+                if isinstance(v, str) and v:
+                    self.assertFalse(v[0] in "=+-@", v)
 
     def test_no_positions(self):
         lay = H.build_layout("2026-10-08", [], pd.DataFrame(), 0, [])

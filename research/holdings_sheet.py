@@ -595,8 +595,12 @@ class Layout:
 
 
 def _cell(v):
+    """シートに USER_ENTERED で書く値。= + - @ で始まる文字は式と読まれる（「+10%の値」が #ERROR! に
+    なった。2026-10-08）ので、先頭に ' を付けて文字のまま書く（' はシートには出ない）。"""
     if v is None:
         return ""
+    if isinstance(v, str) and v[:1] in ("=", "+", "-", "@"):
+        return "'" + v
     if isinstance(v, float) and not math.isfinite(v):
         return ""
     if isinstance(v, (pd.Timestamp, np.datetime64)):
@@ -617,18 +621,18 @@ def build_layout(as_of: str, summary: List[List], daily: pd.DataFrame, n_positio
             "売り（含み損なら売らずに持ち越し、売りの報告まで持つ）。報告の売りはルールより優先。グラフは"
             "合計と、保有中・売ってから20営業日以内の銘柄。毎晩の予測のあとに作り直します（このタブに手で"
             "書いた内容は消えます）")
-    values: List[List] = [[f"保有の推移（{as_of} まで）"], [note]]
+    values: List[List] = [[_cell(f"保有の推移（{as_of} まで）")], [_cell(note)]]
     if n_positions == 0:
         values.append(["取引の記録がありません"])
         return Layout(values, daily_header_row=-1, daily_rows=0, daily_cols=0,
                       series=[], summary_rows=0, width=1)
     values.append([])
-    values.append(list(SUMMARY_HEADER))
+    values.append([_cell(h) for h in SUMMARY_HEADER])
     values.extend([[_cell(v) for v in r] for r in summary])
     values.append([])
     header_row = len(values)
     cols = list(daily.columns)
-    values.append(cols)
+    values.append([_cell(c) for c in cols])
     for rec in daily.itertuples(index=False):
         values.append([_cell(v) for v in rec])
     where = {c: i for i, c in enumerate(cols)}
