@@ -577,6 +577,23 @@ def zdiff(a: Dict, b: Dict) -> float:
     return (a["mean"] - b["mean"]) / se if se and np.isfinite(se) and se > 0 else float("nan")
 
 
+def pmins(c: pd.DataFrame):
+    """現行5モデル・新5モデルそれぞれの百分位の最小（1つでも欠ければ NaN）。"""
+    return (c[[f"p_{k}" for k in CUR]].min(axis=1, skipna=False),
+            c[[f"p_{k}" for k in NEW]].min(axis=1, skipna=False))
+
+
+def matched_threshold(p_min: pd.Series, n: int) -> float:
+    """
+    p_min >= x の件数が n 件以上になる最大の x（発火数を「両方」にそろえた対照の線）。
+    百分位は小数1桁なので、同点で n をわずかに超えることがある（実際の件数は別に数える）。
+    """
+    s = pd.to_numeric(p_min, errors="coerce").dropna().sort_values(ascending=False).to_numpy()
+    if n <= 0 or not len(s):
+        return float("nan")
+    return float(s[min(n, len(s)) - 1])
+
+
 def candidate_groups(c: pd.DataFrame, agree: float) -> Dict[str, pd.DataFrame]:
     """候補単位の組。基準は合議の百分位の最小（1つでも欠ければ満たさない）。"""
     pc = c[[f"p_{k}" for k in CUR]].min(axis=1, skipna=False)
@@ -743,6 +760,72 @@ def sim_stage(data_dir: str, out_dir: str, min_hist: int = U.MIN_HIST, shift: in
                   f"{both['mean'] - st[keys[1]]['mean']:+.2f}pt")
         print("  （SE は同じ日の候補をまとめた値。z = 差 ÷ √(SE₁² + SE₂²)。足切りは |z| > 2）")
 
+    # --- 発火数をそろえた対照: 新モデルの合意は「現行の線を上げる」以上のものか --- #
+    pc, pn = pmins(cc)
+    matched = []
+    print("\n■ 発火数をそろえた対照（両方の件数に合わせて、現行だけ・新だけの線を上げる。候補単位・枠なし）")
+    print(f"  {'組':<34}{'件数':>7}{'+20%/20日':>11}{'SE':>7}{'勝率':>7}{'+20%/40日':>11}{'SE':>7}{'勝率':>7}")
+    for agree in AGREES:
+        both = (pc >= agree) & (pn >= agree)
+        n_both = int(both.sum())
+        x_cur, x_new = matched_threshold(pc, n_both), matched_threshold(pn, n_both)
+        groups = ((f"両方 {agree:.0f}以上", both),
+                  (f"現行だけで線を上げる（{x_cur:.1f}以上）", (pc >= x_cur).fillna(False)),
+                  (f"新だけで線を上げる（{x_new:.1f}以上）", (pn >= x_new).fillna(False)))
+        for name, mask in groups:
+            s20, s40 = group_stats(cc[mask], 20), group_stats(cc[mask], 40)
+            matched.append({"agree": agree, "group": name, "x_cur": x_cur, "x_new": x_new,
+                            "n": int(mask.sum()), "mean20": s20["mean"], "se20": s20["se"], "win20": s20["win"],
+                            "mean40": s40["mean"], "se40": s40["se"], "win40": s40["win"]})
+            print(f"  {L._l(name, 34)}{int(mask.sum()):>7,}{U._pct(s20['mean']):>11}{U._pct(s20['se'], '{:.2f}'):>7}"
+                  f"{U._pct(s20['win'], '{:.0f}%'):>7}{U._pct(s40['mean']):>11}{U._pct(s40['se'], '{:.2f}'):>7}"
+                  f"{U._pct(s40['win'], '{:.0f}%'):>7}")
+    print("  （「両方」と対照は行が重なるので z は出さない。両方が対照を上回れば、新モデルの合意は現行の線を上げるのとは"
+          "別の情報を持っている）")
+
+    # 枠つきの模擬でも、現行だけの線を「両方」の件数に合わせた対照を回す
+    for agree in AGREES:
+        x_cur = next(m["x_cur"] for m in matched if m["agree"] == agree)
+        r, _, picks = L.decide(c, agree=x_cur, min_break=0, top_k=1, models=CUR)
+        name = f"対照 現行 全5モデル{x_cur:.1f}以上（両方{agree:.0f}と件数をそろえる）"
+        for hold in HOLDS:
+            t, counts, _ = U.simulate_arm(picks, px, arm="A", slots=SLOTS, hold=hold, target=TARGET, unit=UNIT)
+            done = t[t["status"].isin(U.DONE)].copy() if len(t) else U.empty_trades()
+            curve = U.capital_curve(done, bar_days) if len(done) else pd.Series(dtype=float)
+            st = U.stats(done, curve, lo, hi, slots=SLOTS, counts=counts, n_pass=int(r["passed"].sum()))
+            summary.append({"hold": hold, "pattern": name, **st})
+    print("\n■ 枠3・1日1件の模擬: 両方 と、件数をそろえた対照（現行だけで線を上げる）")
+    print(U.HEAD)
+    for hold in HOLDS:
+        for row in summary:
+            if row["hold"] == hold and (row["pattern"].startswith("両方") or row["pattern"].startswith("対照")
+                                        or row["pattern"].startswith("現行")):
+                print(U.line(f"{row['pattern'][:30]}（{hold}日）", row))
+
+    # --- 年ごと（候補単位）: 効果がどの年から来ているか --- #
+    print("\n■ 年ごと（候補単位・枠なし）: 現行N以上 / 両方 / 現行だけ の件数と平均（%）")
+    yearly = []
+    for agree in AGREES:
+        for hold in HOLDS:
+            print(f"  ▼ {agree:.0f}以上・+{TARGET:.0f}% / {hold}営業日")
+            gs = candidate_groups(cc, agree)
+            keys = list(gs)
+            for y in sorted(cc["Date"].dt.year.unique()):
+                cells = []
+                for k in (keys[1], keys[2], keys[3]):
+                    g = gs[k]
+                    st = group_stats(g[g["Date"].dt.year == y], hold)
+                    cells.append(f"{k.strip().split('（')[0]} {st['n']:>3}件 {U._pct(st['mean']):>7}")
+                    yearly.append({"agree": agree, "hold": hold, "year": int(y), "group": k.strip(), **st})
+                print(f"    {y}: " + " / ".join(cells))
+            # 2025年を除く（両方の候補が 2025年に偏るため）
+            ex = {k: group_stats(v[v["Date"].dt.year != 2025], hold) for k, v in gs.items()}
+            b, o = ex[keys[2]], ex[keys[3]]
+            print(f"    2025年を除く: 両方 {b['n']}件 {U._pct(b['mean'])} / 現行だけ {o['n']}件 {U._pct(o['mean'])} / "
+                  f"差 {b['mean'] - o['mean']:+.2f}pt（z = {zdiff(b, o):+.2f}）")
+            yearly.append({"agree": agree, "hold": hold, "year": -2025, "group": "両方（2025年を除く）", **b})
+            yearly.append({"agree": agree, "hold": hold, "year": -2025, "group": "現行だけ（2025年を除く）", **o})
+
     os.makedirs(out_dir, exist_ok=True)
     sfx = f"_sh{shift}" if shift else ""
     pd.DataFrame(summary).drop(columns=["full_days"], errors="ignore").to_csv(
@@ -751,8 +834,11 @@ def sim_stage(data_dir: str, out_dir: str, min_hist: int = U.MIN_HIST, shift: in
     pd.DataFrame(cand_rows).to_csv(os.path.join(out_dir, f"candidates{sfx}.csv"), index=False)
     if trades:
         pd.concat(trades, ignore_index=True).to_csv(os.path.join(out_dir, f"trades{sfx}.csv"), index=False)
-    log(f"書いた: {out_dir}/summary{sfx}.csv / by_year{sfx}.csv / candidates{sfx}.csv / trades{sfx}.csv")
-    return {"lo": lo, "hi": hi, "summary": summary, "cands": cand_rows}
+    pd.DataFrame(matched).to_csv(os.path.join(out_dir, f"matched{sfx}.csv"), index=False)
+    pd.DataFrame(yearly).to_csv(os.path.join(out_dir, f"cand_by_year{sfx}.csv"), index=False)
+    log(f"書いた: {out_dir}/summary{sfx}.csv / by_year{sfx}.csv / candidates{sfx}.csv / trades{sfx}.csv / "
+        f"matched{sfx}.csv / cand_by_year{sfx}.csv")
+    return {"lo": lo, "hi": hi, "summary": summary, "cands": cand_rows, "matched": matched, "yearly": yearly}
 
 
 def robust_stage(data_dir: str, out_dir: str, shifts: Sequence[int], min_hist: int = U.MIN_HIST) -> None:
@@ -785,6 +871,18 @@ def robust_stage(data_dir: str, out_dir: str, shifts: Sequence[int], min_hist: i
                 print(f"    ずらし{sh}: 現行 {allc['n']:>4}件 {U._pct(allc['mean'])}% / 両方 {both['n']:>4}件 "
                       f"{U._pct(both['mean'])}% / 現行だけ {only['n']:>4}件 {U._pct(only['mean'])}% / "
                       f"差 {both['mean'] - only['mean']:+.2f}pt（z = {zdiff(both, only):+.2f}）")
+            print(f"  候補単位: 発火数をそろえた対照（現行だけで線を上げる）と、2025年を除いた 両方 − 現行だけ")
+            key = "mean20" if hold == 20 else "mean40"
+            for sh in shifts:
+                m = [x for x in res[sh]["matched"] if x["agree"] == agree]
+                b, cx = m[0], m[1]
+                ex = {x["group"]: x for x in res[sh]["yearly"]
+                      if x["agree"] == agree and x["hold"] == hold and x["year"] == -2025}
+                eb, eo = ex["両方（2025年を除く）"], ex["現行だけ（2025年を除く）"]
+                print(f"    ずらし{sh}: 両方 {b['n']:>4}件 {U._pct(b[key])}% / {cx['group']} {cx['n']:>4}件 "
+                      f"{U._pct(cx[key])}% / 差 {b[key] - cx[key]:+.2f}pt ‖ 2025年を除く: 両方 {eb['n']}件 "
+                      f"{U._pct(eb['mean'])}% − 現行だけ {eo['n']}件 {U._pct(eo['mean'])}% = "
+                      f"{eb['mean'] - eo['mean']:+.2f}pt（z = {zdiff(eb, eo):+.2f}）")
 
 
 # ---------------------------------------------------------------- #

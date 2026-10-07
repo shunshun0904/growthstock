@@ -302,6 +302,21 @@ class TestCandidates(unittest.TestCase):
         self.assertEqual(rc, {"days": 3, "multi": 2, "diff": 1})
         self.assertEqual(E.ranking_check(pd.DataFrame(rows).iloc[:0]), {"days": 0, "multi": 0, "diff": 0})
 
+    def test_matched_threshold(self):
+        """発火数をそろえた対照の線: p_min >= x が n 件以上になる最大の x。"""
+        p = pd.Series([99.5, 98.0, 97.0, 97.0, 96.0, np.nan])
+        self.assertEqual(E.matched_threshold(p, 1), 99.5)
+        self.assertEqual(E.matched_threshold(p, 3), 97.0)
+        self.assertEqual(int((p >= E.matched_threshold(p, 3)).sum()), 4)   # 同点で n を超える
+        self.assertEqual(E.matched_threshold(p, 99), 96.0)                 # 件数が足りなければ最小
+        self.assertTrue(np.isnan(E.matched_threshold(p, 0)))
+
+    def test_pmins(self):
+        c = self._cands()
+        pc, pn = E.pmins(c)
+        self.assertEqual(list(pc), [99, 99, 96, 50, 99])
+        self.assertTrue(np.isnan(pn.iloc[4]))
+
     def test_zdiff(self):
         a = {"mean": 3.0, "se": 1.0}
         b = {"mean": 1.0, "se": 1.0}
