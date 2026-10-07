@@ -17,6 +17,8 @@ Release の live_features.parquet）。日次予測は毎回、全期間のデ�
   - 予測の時刻より後に届いたデータ（決算の遅れなど。予測の時刻か結合の日を直す）
   - データの後からの訂正（J-Quants 側の書き換え。記録して様子を見る）
 
+予測の時刻を直す前に、その日の公表より前に予測した日（EARLY_RUN_DAYS）は比べない。
+
   python3 research/check_train_serve.py                  # 比べて表示
   python3 research/check_train_serve.py --max-rate 0.01  # この割合を超えた列があれば exit 1
 """
@@ -26,7 +28,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from typing import Dict, List
+from typing import Dict, Iterable, List
 
 import numpy as np
 import pandas as pd
@@ -43,15 +45,30 @@ MIN_ROWS = 30
 #: 既定の許容割合。これを超えた列があれば exit 1（--max-rate で変える）
 MAX_RATE = 0.01
 
+#: 予測が、その日のデータの公表より前に走った日（予測日 -> 理由）。この日に控えた行は
+#: どの列でも比べない。学習の行は後から作り直すのでその日の公表ぶんが入り、予測の行には
+#: 入っていない。違って当然で、結合の誤りの検出にならない（控えは400日残るので、外さないと
+#: ずっと許容を超える）。経緯は docs/DATA_TIMING.md
+EARLY_RUN_DAYS: Dict[str, str] = {
+    # Routine が取り込みを 16:10 JST に起動し、予測が 16:21 ごろに終わった2日。その日の
+    # 空売り比率（16:30 ごろ）・大量保有報告書（17:31 まで増える）・決算（18:00 ごろ）が
+    # 予測に間に合わなかった。2026-10-08 から取り込みは 18:40 JST に起動する
+    "2026-10-06": "取り込みを 16:10 JST に起動（その日の空売り比率・大量保有・決算の公表前）",
+    "2026-10-07": "取り込みを 16:10 JST に起動（同上）",
+}
+
 
 def compare(live: pd.DataFrame, rebuilt: pd.DataFrame, cols: List[str],
             before: pd.Timestamp | None = None,
-            redefined: Dict[str, str] | None = None) -> pd.DataFrame:
+            redefined: Dict[str, str] | None = None,
+            skip_dates: Iterable[str] | None = None) -> pd.DataFrame:
     """
     列ごとの食い違いの割合。行は (Code, Date) で突き合わせる。
 
     before を渡すと、その日より前の行だけを比べる（今日の行は同じ入力から
     作ったばかりなので、違わないのが当たり前）。
+
+    skip_dates（予測日。EARLY_RUN_DAYS）の行は、どの列でも比べない。
 
     控えに _features（その行で控えた列の組。predict_daily.save_live_features）が
     あれば、各列はその列を控えた行だけで比べる。モデルの列が変わると、前の行には
@@ -70,6 +87,8 @@ def compare(live: pd.DataFrame, rebuilt: pd.DataFrame, cols: List[str],
         d["Date"] = pd.to_datetime(d["Date"])
     if before is not None:
         lv = lv[lv["Date"] < before]
+    if skip_dates:
+        lv = lv[~lv["Date"].isin(pd.to_datetime(list(skip_dates)))]
     cols = [c for c in cols if c in lv.columns and c in rb.columns]
     sets = "_features" in lv.columns
     left = lv[key + cols + (["_features"] if sets else [])]
@@ -121,13 +140,18 @@ def main(argv=None) -> int:
     rebuilt = pd.read_parquet(args.rebuilt)
     latest = pd.to_datetime(rebuilt["Date"]).max()
     cols = [c for c in live.columns if c not in ("Code", "Date") and not c.startswith("_")]
-    res = compare(live, rebuilt, cols, before=latest, redefined=F.REDEFINED)
+    res = compare(live, rebuilt, cols, before=latest, redefined=F.REDEFINED,
+                  skip_dates=EARLY_RUN_DAYS)
     n_rows = int(res["n"].max()) if len(res) else 0
     dates = pd.to_datetime(live["Date"])
     past = dates[dates < latest]
     print(f"[train/serve] 控え {dates.nunique()}日 / 比べた行 {n_rows}件"
           f"（{past.min().date() if len(past) else '-'}〜"
           f"{past.max().date() if len(past) else '-'}。今日 {latest.date()} の行は除く）")
+    early = sorted({str(d.date()) for d in past} & set(EARLY_RUN_DAYS))
+    if early:
+        print("  予測がその日の公表より前に走った日は比べない: " + ", ".join(early)
+              + "（EARLY_RUN_DAYS）")
     changed = {c: d for c, d in F.REDEFINED.items() if c in cols}
     if changed:
         print("  定義を変えた列は、その日からの行だけで比べる: "

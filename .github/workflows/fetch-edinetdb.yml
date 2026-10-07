@@ -13,7 +13,7 @@ name: Fetch EDINET DB
 on:
   # 予約の起動（cron）は 2026-10-05 にやめた。Claude の Routine が毎日 10:10 JST に
   # workflow_dispatch で起動する（docs/OPERATIONS.md「起動のしかた」）。日次の取り込み
-  # （平日 16:10 JST）や週次学習（日曜 09:10 JST）と時間帯をずらしてある
+  # （平日 18:40 JST）や週次学習（日曜 09:10 JST）と時間帯をずらしてある
   workflow_dispatch:
     inputs:
       fetch:

@@ -225,7 +225,7 @@ class TestWorkflows(unittest.TestCase):
             self.assertNotIn("github.event_name == 'schedule'", text, name)
             self.assertNotIn("github.event.schedule", text, name)
             self.assertIn("workflow_dispatch", text, name)
-        # 取り込みは起動のしかたで待つかを選ぶ（Routine の 16:10 JST は待つ。過去分の取り直しは待たない）
+        # 取り込みは起動のしかたで待つかを選ぶ（Routine の 18:40 JST は wait=yes。過去分の取り直しは待たない）
         upd = read_wf("update-data.yml")
         self.assertIn("if: github.event_name == 'workflow_dispatch' && inputs.wait != 'no'", upd)
         self.assertRegex(upd, r"wait:\n\s+description:.*\n\s+required: false\n\s+type: choice\n\s+options: \['yes', 'no'\]\n\s+default: 'yes'")

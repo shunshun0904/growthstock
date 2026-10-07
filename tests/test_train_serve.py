@@ -121,6 +121,27 @@ class Compare(unittest.TestCase):
         import features as F
         self.assertEqual(F.REDEFINED.get("progress_pct"), "2026-10-02")
 
+    def test_early_run_day_is_not_compared(self):
+        """
+        予測がその日の公表より前に走った日（EARLY_RUN_DAYS）の行は、どの列でも比べない。
+        2026-10-06 は取り込みを 16:10 JST に起動し、その日の空売り比率（16:30 ごろ）が
+        予測に間に合わなかった。後から作り直した学習の行には入るので、違って当然。
+        """
+        live = pd.concat([cand("2026-10-05", ["1111"], [2.0]),
+                          cand("2026-10-06", ["2222", "3333"], [4.0, 5.0])])
+        rebuilt = pd.concat([cand("2026-10-05", ["1111"], [2.0]),
+                             cand("2026-10-06", ["2222", "3333"], [9.0, 9.0])])
+        r = CTS.compare(live, rebuilt, ["credit_ratio", "vol_20d"],
+                        skip_dates=["2026-10-06"]).set_index("column")
+        self.assertEqual(r.at["credit_ratio", "n"], 1)          # 10/5 の行だけ
+        self.assertEqual(r.at["credit_ratio", "diff"], 0)
+        self.assertEqual(r.at["vol_20d", "n"], 1)               # どの列でも外す
+        # 渡さなければ比べる（既定の挙動は変えない）
+        r2 = CTS.compare(live, rebuilt, ["credit_ratio"]).set_index("column")
+        self.assertEqual(r2.at["credit_ratio", "diff"], 2)
+        # 本番の表（main が使う）。16:10 JST に起動していた2日
+        self.assertEqual(sorted(CTS.EARLY_RUN_DAYS), ["2026-10-06", "2026-10-07"])
+
     def test_nan_on_both_sides_is_a_match(self):
         live = cand("2026-09-11", ["1111"], [np.nan])
         rebuilt = cand("2026-09-11", ["1111"], [np.nan])
@@ -206,6 +227,22 @@ class Main(unittest.TestCase):
                              cand("2026-09-15", ["3333"], [1.0])])
         self.assertEqual(self.run_main(pd.concat([old, new], ignore_index=True), rebuilt,
                                        max_rate=0.1), 0)
+
+    def test_early_run_days_do_not_fail_the_check(self):
+        """
+        2026-10-06・07（16:10 JST 起動）の行の食い違いでは落ちない。18:40 起動に移した
+        後の日の行が違えば、これまでどおり落ちる。
+        """
+        live = pd.concat([cand("2026-10-06", ["1111"], [2.0]),
+                          cand("2026-10-07", ["2222"], [3.0]),
+                          cand("2026-10-08", ["3333"], [4.0])], ignore_index=True)
+        rebuilt = pd.concat([cand("2026-10-06", ["1111"], [9.0]),
+                             cand("2026-10-07", ["2222"], [9.0]),
+                             cand("2026-10-08", ["3333"], [4.0]),
+                             cand("2026-10-09", ["4444"], [1.0])], ignore_index=True)
+        self.assertEqual(self.run_main(live, rebuilt, max_rate=0.1), 0)
+        rebuilt.loc[rebuilt["Date"] == T("2026-10-08"), "credit_ratio"] = 9.0
+        self.assertEqual(self.run_main(live, rebuilt, max_rate=0.1), 1)
 
     def test_no_snapshot_yet_is_not_an_error(self):
         self.assertEqual(CTS.main(["--live", os.path.join(self.dir, "無い.parquet")]), 0)
