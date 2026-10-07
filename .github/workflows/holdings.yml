@@ -1,0 +1,68 @@
+name: Update Holdings Sheet
+
+# 予測ログで赤く塗った行（保有の印）の損益の推移を、スプレッドシートの別タブ「保有の推移」に
+# 書く。日付ごとの表とグラフつき（research/holdings_sheet.py、docs/OPERATIONS.md）。
+#
+# 毎晩の予測（Predict Breakouts）が終わったら workflow_run で続けて走る。予測が休場日で
+# 飛んだ日も走る（同じ中身で作り直すだけ）。手でも起動できる（Actions の Run workflow）。
+#
+# ログは公開なので、件数と最新日だけを出す（銘柄名・株価・損益の値は出さない）。
+on:
+  workflow_run:
+    workflows: ['Predict Breakouts']
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: holdings
+  cancel-in-progress: false
+
+# python が落ちたら段も落ちるように pipefail を付ける（tee の終了コードで判定させない）
+defaults:
+  run:
+    shell: bash -e -o pipefail {0}
+
+jobs:
+  holdings:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      # 予測と同じものを入れる。holdings_sheet.py が使う export_sheets.py は models.py を
+      # 読み込み、そこから scikit-learn まで要る（表とシートのライブラリだけでは import で落ちる）
+      - name: Install
+        run: pip install -r research/requirements.txt
+
+      # 日足と営業日カレンダーだけ取り出す（全アセットは要らない）
+      - name: Download daily bars (release)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p research/_data
+          bash scripts/gh_release_download.sh data-raw research/_data 'bars_*' 'calendar*'
+
+      - name: Update holdings tab
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GSHEET_ID: ${{ secrets.GSHEET_ID }}
+        run: |
+          if [ -z "$GOOGLE_SERVICE_ACCOUNT_JSON" ] || [ -z "$GSHEET_ID" ]; then
+            echo "GOOGLE_SERVICE_ACCOUNT_JSON / GSHEET_ID が未設定のため飛ばします"
+            exit 0
+          fi
+          python3 research/holdings_sheet.py 2>&1 | tee holdings.log
+
+      - name: Summary
+        if: always()
+        run: |
+          { echo '## 保有の推移'; echo '```'
+            if [ -f holdings.log ]; then cat holdings.log; else echo "(実行せず)"; fi
+            echo '```'; } >> "$GITHUB_STEP_SUMMARY"
