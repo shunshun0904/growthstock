@@ -44,10 +44,13 @@ import trading_calendar as TC  # noqa: E402
 TAB = "保有の推移"
 DEFAULT_SHARES = 100
 CHART_TITLE = "保有の損益の推移（円）"
-#: 系列の色。合計が1番目、保有銘柄は買った順に2番目から（dataviz の参照パレットの並び。
-#: 先頭3色は色覚の差の検査に全組み合わせで通る。2026-10-08 に validate_palette で確認）
-SERIES_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100",
-                 "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
+#: 合計の線。保有が1銘柄の間は銘柄の線と同じ値で重なるので、青の明るい段の太い帯にして下に敷く
+#: （銘柄の 2px の線が上に重なって見える）
+TOTAL_STYLE = ("#86b6ef", 6)
+#: 保有銘柄の線の色。買った順に、dataviz の参照パレットの2番目から（1番目の青は合計の帯と同じ
+#: 色相なので使わない）。先頭の青・橙・緑は色覚の差の検査に全組み合わせで通る（2026-10-08 に
+#: validate_palette で確認）
+SERIES_COLORS = ["#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
 SUMMARY_HEADER = ["銘柄", "コード", "予測日", "買った日", "建値", "株数",
                   "最新日", "最新終値", "損益(円)", "損益%", "状態"]
 
@@ -394,10 +397,12 @@ def chart_request(sheet_id: int, lay: Layout) -> Optional[Dict]:
 
     series = []
     for k, c in enumerate(lay.yen_series_cols):
-        color = SERIES_COLORS[k % len(SERIES_COLORS)]
+        # 先頭が合計（帯）。あとは買った順の銘柄。系列は後ろほど上に描かれる
+        color, width = (TOTAL_STYLE if k == 0
+                        else (SERIES_COLORS[(k - 1) % len(SERIES_COLORS)], 2))
         series.append({"series": src(c), "targetAxis": "LEFT_AXIS",
                        "colorStyle": {"rgbColor": _rgb(color)},
-                       "lineStyle": {"width": 2}})
+                       "lineStyle": {"width": width}})
     return {"addChart": {"chart": {
         "spec": {
             "title": CHART_TITLE,

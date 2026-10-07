@@ -8,7 +8,7 @@
   - 買いは予測日の次の営業日の寄り付き。分割をまたいでも損益が合う
   - 手仕舞い日のあとは確定した損益のまま
   - 日付ごとの表: 買う前は空、合計と元手に対する%、保有数
-  - グラフは「損益(円)」の列だけ（軸は1本）。色は合計が1番目、保有は買った順
+  - グラフは「損益(円)」の列だけ（軸は1本）。合計は淡い青の太い帯、保有は買った順に橙・緑…の線
   - 公開ログに銘柄名・株価・損益の値を出さない
 
   python3 tests/test_holdings_sheet.py
@@ -208,8 +208,13 @@ class Daily(unittest.TestCase):
         self.assertEqual(spec["chartType"], "LINE")
         self.assertEqual(len(spec["series"]), 3)                  # 合計 + 2銘柄
         self.assertEqual({s["targetAxis"] for s in spec["series"]}, {"LEFT_AXIS"})  # 軸は1本
-        first = spec["series"][0]["colorStyle"]["rgbColor"]
-        self.assertAlmostEqual(first["red"], 0x2a / 255)
+        # 合計は青の明るい段の太い帯（下に敷く）、銘柄は買った順に橙・緑の 2px
+        first, second, third = spec["series"]
+        self.assertAlmostEqual(first["colorStyle"]["rgbColor"]["red"], 0x86 / 255)
+        self.assertEqual(first["lineStyle"]["width"], 6)
+        self.assertAlmostEqual(second["colorStyle"]["rgbColor"]["red"], 0xeb / 255)
+        self.assertAlmostEqual(third["colorStyle"]["rgbColor"]["green"], 0xaf / 255)
+        self.assertEqual({second["lineStyle"]["width"], third["lineStyle"]["width"]}, {2})
         rng = spec["domains"][0]["domain"]["sourceRange"]["sources"][0]
         self.assertEqual(rng["startRowIndex"], lay.daily_header_row)
         self.assertEqual(rng["endRowIndex"], lay.daily_header_row + 1 + len(self.daily))
