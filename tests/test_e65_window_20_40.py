@@ -284,6 +284,24 @@ class TestCandidates(unittest.TestCase):
         same = pd.Series(pd.to_datetime(["2021-01-04", "2021-01-04", "2021-01-06", "2021-01-06"]))
         self.assertGreater(E.cluster_se(x, same), E.cluster_se(x, d))
 
+    def test_ranking_check(self):
+        """1日1件の並べ方: 10モデルの最小と現行5モデルの最小で1位が変わる日を数える。"""
+        d1, d2, d3 = (pd.Timestamp(x) for x in ("2021-01-04", "2021-01-05", "2021-01-06"))
+        rows = []
+        # d1: 2件。10モデルの最小は B（96）が上、現行5モデルの最小は A（99）が上 → 変わる
+        for code, pc, pn, date in (("A", 99, 95, d1), ("B", 96, 98, d1),
+                                   # d2: 2件。どちらで並べても C が上 → 変わらない
+                                   ("C", 99, 99, d2), ("D", 96, 97, d2),
+                                   # d3: 1件だけ
+                                   ("E", 97, 97, d3)):
+            r = {"Code": code, "Date": date, "score": 0.5, "p_min": min(pc, pn)}
+            r.update({f"p_{k}": pc for k in E.CUR})
+            r.update({f"p_{k}": pn for k in E.NEW})
+            rows.append(r)
+        rc = E.ranking_check(pd.DataFrame(rows))
+        self.assertEqual(rc, {"days": 3, "multi": 2, "diff": 1})
+        self.assertEqual(E.ranking_check(pd.DataFrame(rows).iloc[:0]), {"days": 0, "multi": 0, "diff": 0})
+
     def test_zdiff(self):
         a = {"mean": 3.0, "se": 1.0}
         b = {"mean": 1.0, "se": 1.0}

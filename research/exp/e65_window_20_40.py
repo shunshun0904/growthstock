@@ -591,6 +591,27 @@ def candidate_groups(c: pd.DataFrame, agree: float) -> Dict[str, pd.DataFrame]:
             f"  新だけ（現行は {agree:.0f}未満）": c[b & ~a]}
 
 
+def ranking_check(passed: pd.DataFrame) -> Dict[str, int]:
+    """
+    「両方」の基準を満たした候補について、1日1件の並べ方を確かめる。本命は 10モデルの百分位の最小
+    （実験59 の「合議の最小」をそのまま10モデルに広げたもの）。現行5モデルの最小で並べた場合と
+    1位が変わる日が何日あるか（同点はどちらも現行 LightGBM のスコア順）。
+    """
+    if not len(passed):
+        return {"days": 0, "multi": 0, "diff": 0}
+    p = passed.copy()
+    p["p_min_cur"] = p[[f"p_{k}" for k in CUR]].min(axis=1)
+    diff = multi = 0
+    for _, g in p.groupby("Date"):
+        if len(g) < 2:
+            continue
+        multi += 1
+        a = g.sort_values(["p_min", "score"], ascending=False).iloc[0]["Code"]
+        b = g.sort_values(["p_min_cur", "score"], ascending=False).iloc[0]["Code"]
+        diff += int(a != b)
+    return {"days": int(p["Date"].nunique()), "multi": multi, "diff": diff}
+
+
 def separation(oofs: Dict[str, pd.DataFrame], base: pd.DataFrame) -> List[str]:
     """分離力（自分のラベルで、OOF 全体）と、期間内の共通の行での現行・新の重なり。"""
     from sklearn.metrics import roc_auc_score
@@ -681,6 +702,11 @@ def sim_stage(data_dir: str, out_dir: str, min_hist: int = U.MIN_HIST, shift: in
                 tt.insert(0, "hold", hold)
                 trades.append(tt)
         print(f"  （列は実験59 と同じ。年間 = 取引 ÷ {years:.2f}年。1取引% の SE は取引どうしを独立と見た値）")
+    for name, passed, _ in sels:
+        if name.startswith("両方"):
+            rc = ranking_check(passed)
+            print(f"  {name}: 基準を満たした日 {rc['days']}日、うち2件以上の日 {rc['multi']}日、"
+                  f"並べ方（10モデルの最小 / 現行5モデルの最小）で1位が変わる日 {rc['diff']}日")
 
     for hold in HOLDS:
         print(f"\n■ 年ごと（+{TARGET:.0f}% / {hold}営業日、買った日の年。候補 = 基準を満たした件数）")
