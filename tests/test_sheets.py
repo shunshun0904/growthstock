@@ -419,6 +419,52 @@ class TestNextOpen(unittest.TestCase):
         self.assertEqual(ws.appended[0][header.index("翌営業日始値")], "")
 
 
+class TestCodeFixes(unittest.TestCase):
+    """
+    5桁コードの先頭4桁を表示用にしていた頃（〜2026-10-08）に、優先株（25935）が普通株と同じ
+    「2593」で入った行を直す。予測から外れた過去の行は「コード + "0"」で日足を引くので、
+    直さないと普通株（25930）の値動きを追ってしまう。
+    """
+    HEADER = (ES.OWNED_COLS + ES.MODEL_COLS + ES.SCORE_COLS + [ES.AGREE_COL]
+              + ES.ENTRY_COLS + ES.TRACK_COLS + ES.USER_COLS)
+    CLOSES = pd.Series({"25935": 2000.0, "25930": 3000.0})
+
+    def _sheet(self, *rows):
+        p = {h: i for i, h in enumerate(self.HEADER)}
+        lines = []
+        for d, code, name in rows:
+            line = [""] * len(self.HEADER)
+            line[p["予測日"]], line[p["コード"]], line[p["銘柄名"]] = d, code, name
+            line[p["予測時株価"]] = "1910"
+            line[p["翌営業日始値"]] = "1900"
+            lines.append(line)
+        return FakeWorksheet([list(self.HEADER)] + lines)
+
+    def _written(self, ws):
+        out = {}
+        for u in ws.batches:
+            row, col = a1_to_rc(u["range"])
+            out[(row, self.HEADER[col - 1])] = u["values"][0][0]
+        return out
+
+    def test_the_preferred_row_gets_its_own_code_and_prices(self):
+        ws = self._sheet(("2026-10-08", "2593", "伊藤園（優先株式）"),
+                         ("2026-10-08", "2593", "伊藤園"))      # 普通株の行は直さない
+        ES.sync(ws, [], self.CLOSES, pd.Timestamp("2026-10-09"))
+        w = self._written(ws)
+        self.assertEqual(w[(2, "コード")], "25935")
+        self.assertNotIn((3, "コード"), w)
+        self.assertEqual(w[(2, "現在値")], 2000.0)             # 優先株の終値
+        self.assertEqual(w[(3, "現在値")], 3000.0)             # 普通株の終値
+
+    def test_nothing_to_fix_once_fixed(self):
+        ws = self._sheet(("2026-10-08", "25935", "伊藤園（優先株式）"))
+        ES.sync(ws, [], self.CLOSES, pd.Timestamp("2026-10-09"))
+        w = self._written(ws)
+        self.assertNotIn((2, "コード"), w)
+        self.assertEqual(w[(2, "現在値")], 2000.0)
+
+
 class TestSheetExport(unittest.TestCase):
     """
     スプレッドシートは利用者が手で書き込む台帳でもある。

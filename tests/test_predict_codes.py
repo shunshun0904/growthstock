@@ -27,6 +27,25 @@ def rows(*spec):
     return [{"date": d, "rankInDay": r, "code": c} for d, r, c in spec]
 
 
+class TestDisplayCode(unittest.TestCase):
+    """
+    画面と予測ログに出すコード。普通株（5桁の末尾が 0）は4桁、それ以外は5桁のまま。
+    先頭4桁にしていた頃（〜2026-10-08）は、伊藤園の優先株式 25935 が普通株と同じ「2593」になり、
+    画面の詳細が普通株のデータになっていた。
+    """
+
+    def test_rule(self):
+        self.assertEqual(P.JF.display_code("25930"), "2593")
+        self.assertEqual(P.JF.display_code("130A0"), "130A")
+        self.assertEqual(P.JF.display_code("25935"), "25935")
+
+    def test_predict_rows_use_the_rule(self):
+        import inspect
+        src = inspect.getsource(P.main)
+        self.assertIn('"code": JF.display_code(jq)', src)
+        self.assertNotIn('"code": jq[:4]', src)
+
+
 class TestDetailCodes(unittest.TestCase):
     def test_画面に出ている候補を全部取る(self):
         r = rows(("2026-09-18", 1, "A"), ("2026-09-18", 2, "B"),

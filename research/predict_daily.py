@@ -315,7 +315,7 @@ def main(argv=None) -> int:
         jq = str(s["Code"])
         pf = prog.get((jq, pd.Timestamp(s["Date"]).date().isoformat()), {})
         rows.append({
-            "code": jq[:4], "jqCode": jq,
+            "code": JF.display_code(jq), "jqCode": jq,   # 普通株以外は5桁のまま（25935 など）
             "name": s.get("CoName") or None,
             "sector": s.get("S33Nm") or None,
             "market": s.get("MktNm") or None,

@@ -107,6 +107,13 @@ USER_COLS = ["建値", "株数", "手仕舞い日", "手仕舞い値", "損益",
 
 KEY_COLS = ("予測日", "コード")
 
+#: 予測ログに違うコードで書いた行の直し（一度だけ効く）。キーは (予測日, 書いたコード, 銘柄名)、
+#: 値は正しいコード。2026-10-08 まで predict_daily が5桁コードの先頭4桁を表示用にしていたので、
+#: 伊藤園の優先株式（25935）が普通株と同じ「2593」で入った。予測から外れた過去の行は
+#: 「コード + "0"」で日足を引くので、このままだと普通株の値動きを追ってしまう。
+#: 直したあとは一致する行が無くなり、何もしない。
+CODE_FIXES = {("2026-10-08", "2593", "伊藤園（優先株式）"): "25935"}
+
 
 def rows_from_predictions(pred: Dict) -> List[Dict]:
     """
@@ -465,12 +472,22 @@ def sync(ws, rows: List[Dict], closes, as_of, dry_run: bool = False,
     if missing:
         raise SystemExit(f"見出しに必要な列がありません: {missing}")
 
-    # 既存行の位置。キーは (予測日, コード)
+    # 既存行の位置。キーは (予測日, コード)。CODE_FIXES に当たる行はコードを直してから数える
     seen = {}
+    fixes = []
+    name_i = pos.get("銘柄名")
     for r, line in enumerate(values[1:], start=2):
         if len(line) <= max(pos[KEY_COLS[0]], pos[KEY_COLS[1]]):
             continue
-        seen[(line[pos[KEY_COLS[0]]], line[pos[KEY_COLS[1]]])] = r
+        d, code = line[pos[KEY_COLS[0]]], line[pos[KEY_COLS[1]]]
+        name = line[name_i] if name_i is not None and len(line) > name_i else ""
+        fixed = CODE_FIXES.get((str(d).strip(), str(code).strip(), str(name).strip()))
+        if fixed:
+            fixes.append({"range": a1(pos[KEY_COLS[1]] + 1, r), "values": [[fixed]]})
+            code = fixed
+        seen[(d, code)] = r
+    if fixes:
+        print(f"[fix] 予測ログのコードを直す行 {len(fixes)}（CODE_FIXES）")
 
     by_key = {(x["予測日"], x["コード"]): x for x in rows}
 
@@ -511,7 +528,7 @@ def sync(ws, rows: List[Dict], closes, as_of, dry_run: bool = False,
         appended.append(line)
 
     # --- 既存行を更新する（追跡列と、空のままのモデル別列・翌営業日始値だけ） --- #
-    updates = []
+    updates = list(fixes)
     # 列が増えた直後は、直近5営業日ぶんの既存行にモデル別の値が入っていない。
     # 空のセルにだけ入れる。既に値があるセルは触らない（利用者が手で
     # 上書きしている可能性がある。この台帳は手書きと同居する前提）

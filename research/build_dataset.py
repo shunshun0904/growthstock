@@ -511,6 +511,15 @@ def _mkt_codes(raw: str) -> tuple:
 # 値幅を取りにいく運用とは噛み合わないので母集団から外す。
 EXCLUDE_MKT_CODES = _sweep_override("EXCLUDE_MKT_CODES", (109,), _mkt_codes)
 
+# 普通株以外（優先株など）を母集団から外す（運用者の決定。2026-10-08）。
+#
+# J-Quants の5桁コードは末尾が普通株なら 0 で、それ以外の種類の株は別の数字になる
+# （伊藤園の第1種優先株式は 25935。普通株は 25930）。優先株は普通株と同じ会社が出す別の
+# 銘柄で、配当（普通株の125%・下限15円）で値が決まりやすく、議決権が原則無い。決算は会社
+# （普通株のコード）に付くので、優先株の行は決算の特徴量がすべて欠損のまま採点されていた
+# （10/8 の候補で12項目が空）。運用者の判断（「トリッキーすぎる」）で学習・予測の両方から外す。
+EXCLUDE_NON_COMMON = True
+
 # 時価総額の帯（億円）。フラグ列 cap_band の境界。
 #
 # 端は固定値にする。分位点で切ると全期間の分布を見ることになり、
@@ -1512,6 +1521,23 @@ def drop_excluded_markets(samples: pd.DataFrame,
           f"{before:,} -> {len(out):,}")
     if n_unknown:
         print(f"[filter] 市場区分が付かなかった {n_unknown:,}件は残した")
+    return out
+
+
+def drop_non_common_shares(samples: pd.DataFrame) -> pd.DataFrame:
+    """
+    普通株以外（5桁コードの末尾が 0 でないもの。優先株など）を母集団から外す。
+
+    理由は EXCLUDE_NON_COMMON のコメントに書いた。4桁で来たコードは普通株として扱う。
+    横断面の順位（add_cross_sectional_ranks）より後で呼ぶ（build の呼び出し側のコメント）。
+    """
+    if not EXCLUDE_NON_COMMON:
+        return samples
+    code = samples["Code"].astype(str).str.strip()
+    drop = (code.str.len() == 5) & ~code.str.endswith("0")
+    out = samples[~drop]
+    print(f"[filter] 普通株以外（コードの末尾が0でない。優先株など）を除外: "
+          f"{len(samples):,} -> {len(out):,}（{code[drop].nunique()}銘柄）")
     return out
 
 
@@ -3232,6 +3258,10 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
 
     print("\n[rank] 横断面正規化（同一日付内のパーセンタイル順位）")
     samples = add_cross_sectional_ranks(samples, features.RAW_FOR_RANK)
+    # 優先株などは順位を付けたあとで外す。先に外すと、同じ日のほかの銘柄の順位（*_r）が
+    # 分母が1つ減るぶんだけ全部ずれ、外す前に控えた予測時の値と一致しなくなる
+    # （学習と予測の一致チェックが全行で食い違いを出す）。1銘柄が順位に混ざる影響は無視できる
+    samples = drop_non_common_shares(samples)
 
     # 特徴量の一覧は features.py が持つ。データセットには全部作っておき、
     # どれを使うかは学習時にプリセットで選ぶ（特徴量の実験を回しやすくするため）。
@@ -3345,6 +3375,7 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
         "cooldown": BREAKOUT_COOLDOWN,
         "minTradingValue": MIN_TRADING_VALUE,
         "excludeMktCodes": list(EXCLUDE_MKT_CODES),
+        "excludeNonCommon": bool(EXCLUDE_NON_COMMON),
     }
     meta_path = os.path.splitext(out_path)[0] + "_meta.json"
     with open(meta_path, "w", encoding="utf-8") as fh:
