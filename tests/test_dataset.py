@@ -337,40 +337,40 @@ class TestCrossSectionalRank(unittest.TestCase):
 
 class TestNonCommonShares(unittest.TestCase):
     """
-    普通株以外（5桁コードの末尾が 0 でない。伊藤園の優先株式 25935 など）を母集団から外す
-    （運用者の決定 2026-10-08）。順位を付けたあとで外すので、ほかの銘柄の順位は変わらない。
+    普通株以外（5桁コードの末尾が 0 でない。伊藤園の優先株式 25935 など）を母集団から外す仕組み。
+    運用者の方針（2026-10-08）は「学習データ・推論データからそもそも外す」。本番は実験65 の検証が
+    終わるまで外さない（EXCLUDE_NON_COMMON = False）。外すときは ETF・REIT と同じく順位を付ける前。
     """
 
-    def test_drops_only_codes_not_ending_in_zero(self):
+    def setUp(self):
         import build_dataset as B
+        self.B = B
+        self.old = B.EXCLUDE_NON_COMMON
+
+    def tearDown(self):
+        self.B.EXCLUDE_NON_COMMON = self.old
+
+    def test_production_keeps_them_until_the_check_is_done(self):
+        self.assertFalse(self.old)
+        df = pd.DataFrame({"Code": ["25935", "25930"]})
+        self.assertEqual(len(self.B.drop_non_common_shares(df)), 2)
+
+    def test_drops_only_codes_not_ending_in_zero(self):
+        self.B.EXCLUDE_NON_COMMON = True
         df = pd.DataFrame({"Code": ["25935", "25930", "130A0", "1301", "72030"],
                            "x": range(5)})
-        out = B.drop_non_common_shares(df)
+        out = self.B.drop_non_common_shares(df)
         self.assertEqual(list(out["Code"]), ["25930", "130A0", "1301", "72030"])
 
-    def test_can_be_switched_off(self):
-        import build_dataset as B
-        df = pd.DataFrame({"Code": ["25935", "25930"]})
-        old = B.EXCLUDE_NON_COMMON
-        try:
-            B.EXCLUDE_NON_COMMON = False
-            self.assertEqual(len(B.drop_non_common_shares(df)), 2)
-        finally:
-            B.EXCLUDE_NON_COMMON = old
-
-    def test_dropped_after_the_cross_sectional_ranks(self):
-        """先に外すと同じ日のほかの銘柄の順位（*_r）が全部ずれ、予測時に控えた値と合わなくなる。"""
+    def test_dropped_before_the_cross_sectional_ranks(self):
+        """そもそも母集団に入れない: ETF・REIT の除外のすぐ後、順位を付ける前に外す。"""
         import inspect
-        import build_dataset as B
-        src = inspect.getsource(B.build)
-        self.assertLess(src.index("add_cross_sectional_ranks(samples"),
-                        src.index("drop_non_common_shares(samples)"))
-        # 順位を付けたあとで外せば、残る銘柄の順位は外す前と同じ
-        df = pd.DataFrame({"Date": ["2026-10-08"] * 3, "Code": ["11110", "25935", "22220"],
-                           "v": [1.0, 2.0, 3.0]})
-        ranked = B.add_cross_sectional_ranks(df, ["v"])
-        kept = B.drop_non_common_shares(ranked)
-        self.assertEqual(list(kept["v_r"]), list(ranked.loc[[0, 2], "v_r"]))
+        src = inspect.getsource(self.B.build)
+        i_mkt = src.index("drop_excluded_markets(samples)")
+        i_nc = src.index("drop_non_common_shares(samples)")
+        i_rank = src.index("add_cross_sectional_ranks(samples")
+        self.assertLess(i_mkt, i_nc)
+        self.assertLess(i_nc, i_rank)
 
 
 class TestFeaturePresets(unittest.TestCase):
