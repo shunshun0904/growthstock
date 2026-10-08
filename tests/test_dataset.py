@@ -338,8 +338,8 @@ class TestCrossSectionalRank(unittest.TestCase):
 class TestNonCommonShares(unittest.TestCase):
     """
     普通株以外（5桁コードの末尾が 0 でない。伊藤園の優先株式 25935 など）を母集団から外す仕組み。
-    運用者の方針（2026-10-08）は「学習データ・推論データからそもそも外す」。本番は実験65 の検証が
-    終わるまで外さない（EXCLUDE_NON_COMMON = False）。外すときは ETF・REIT と同じく順位を付ける前。
+    運用者の方針（2026-10-08）は「学習データ・推論データからそもそも外す」。実験65（MODEL_ADOPTION_RULES
+    §26）で確かめて、本番は外す（EXCLUDE_NON_COMMON = True）。外す場所は ETF・REIT と同じく順位を付ける前。
     """
 
     def setUp(self):
@@ -350,8 +350,13 @@ class TestNonCommonShares(unittest.TestCase):
     def tearDown(self):
         self.B.EXCLUDE_NON_COMMON = self.old
 
-    def test_production_keeps_them_until_the_check_is_done(self):
-        self.assertFalse(self.old)
+    def test_production_excludes_them(self):
+        self.assertTrue(self.old)
+        df = pd.DataFrame({"Code": ["25935", "25930"]})
+        self.assertEqual(list(self.B.drop_non_common_shares(df)["Code"]), ["25930"])
+
+    def test_switch_off_keeps_them(self):
+        self.B.EXCLUDE_NON_COMMON = False
         df = pd.DataFrame({"Code": ["25935", "25930"]})
         self.assertEqual(len(self.B.drop_non_common_shares(df)), 2)
 
