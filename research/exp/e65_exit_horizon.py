@@ -283,6 +283,60 @@ def path_stats(P: dict, sel: pd.DataFrame, k_max: int) -> List[dict]:
     return rows
 
 
+def after_hit_stats(P: dict, tp: float = TP, decide: int = DECIDE) -> dict:
+    """
+    decide 日以内に高値が 買値×(1+tp) に届いた玉が、その後どこまで行ったか（運用者の問い 2026-10-08
+    「+10% に到達しても放置していれば +15% に届く可能性が高いということか」への答え）。
+      reach{X}_{N}  届いた日から N 日目までに高値が +X% に届いた割合
+      end20_ge15 / end20_ge10 / end20_0_10 / end20_lt0  20日目の終値の位置（買値比）
+      diff20  「+tp で売った」と「20日目の終値」の差（放置 − 売却）の平均 pt、win20 は放置が勝った割合
+      pull_*  届いた日から20日目までの安値の最小（買値比）
+    """
+    e = P["entry"]
+    H, C, Lo = P["H"], P["C"], P["L"]
+    with np.errstate(invalid="ignore", divide="ignore"):
+        touched = H[:, :decide] >= e[:, None] * (1.0 + tp)
+        hit = touched.any(axis=1) & np.isfinite(e)
+        day = np.where(hit, touched.argmax(axis=1) + 1, np.nan)
+        idx = np.where(hit)[0]
+        amax20 = np.full(len(e), np.nan)
+        amax40 = np.full(len(e), np.nan)
+        amin20 = np.full(len(e), np.nan)
+        for i in idx:
+            d = int(day[i]) - 1
+            amax20[i] = np.nanmax(H[i, d:decide]) / e[i] - 1.0
+            amax40[i] = np.nanmax(H[i, d:40]) / e[i] - 1.0
+            amin20[i] = np.nanmin(Lo[i, d:decide]) / e[i] - 1.0
+        c20 = C[:, decide - 1] / e - 1.0
+        c40 = C[:, 39] / e - 1.0
+    g = hit
+    n = int(g.sum())
+    if not n:
+        return {"n": 0}
+    pc = lambda m: float(np.nanmean(m[g]) * 100)
+    out = {"n": n, "share": float(n / np.isfinite(e).sum() * 100), "day_med": float(np.nanmedian(day[g])),
+           "reach15_20": pc(amax20 >= 0.15), "reach20_20": pc(amax20 >= 0.20),
+           "reach15_40": pc(amax40 >= 0.15), "reach20_40": pc(amax40 >= 0.20), "reach30_40": pc(amax40 >= 0.30),
+           "end20_ge15": pc(c20 >= 0.15), "end20_ge10": pc(c20 >= tp), "end20_0_10": pc((c20 >= 0) & (c20 < tp)),
+           "end20_lt0": pc(c20 < 0), "end20_mean": pc(c20), "end20_med": float(np.nanmedian(c20[g]) * 100),
+           "end20_p10": float(np.nanquantile(c20[g], 0.1) * 100), "end20_worst": float(np.nanmin(c20[g]) * 100),
+           "diff20": float(np.nanmean(c20[g] - tp) * 100), "win20": pc(c20 >= tp),
+           "end40_ge15": pc(c40 >= 0.15), "end40_ge10": pc(c40 >= tp), "end40_lt0": pc(c40 < 0),
+           "end40_mean": pc(c40), "end40_med": float(np.nanmedian(c40[g]) * 100),
+           "end40_p10": float(np.nanquantile(c40[g], 0.1) * 100),
+           "pull_med": float(np.nanmedian(amin20[g]) * 100), "pull_p25": float(np.nanquantile(amin20[g], 0.25) * 100),
+           "pull_p10": float(np.nanquantile(amin20[g], 0.1) * 100),
+           "pull_lt5": pc(amin20 < 0.05), "pull_lt0": pc(amin20 < 0.0)}
+    for lab, m in (("early", g & (day <= 10)), ("late", g & (day > 10))):
+        out[f"{lab}_n"] = int(m.sum())
+        if m.sum():
+            out[f"{lab}_end20"] = float(np.nanmean(c20[m]) * 100)
+            out[f"{lab}_ge10"] = float(np.mean(c20[m] >= tp) * 100)
+            out[f"{lab}_reach15_20"] = float(np.mean(amax20[m] >= 0.15) * 100)
+            out[f"{lab}_end40"] = float(np.nanmean(c40[m]) * 100)
+    return out
+
+
 def by_year(ret: np.ndarray, dates: pd.Series) -> Dict[int, Tuple[int, float]]:
     y = pd.to_datetime(pd.Series(dates)).dt.year.to_numpy()
     out = {}
@@ -387,7 +441,7 @@ def main(argv=None) -> int:
     print(f"  1取引ごとの表は、上限の日（{k_max}日）まで値動きが揃う取引だけ（全出口で同じ取引）。")
     print(f"  差・対SE・勝ち窓・窓差・最悪窓は「{BASE}」と比べたもの（同じ取引の差。窓は本番の OOF と同じ切り方）。")
 
-    arms_out, folds_out, years_out, slots_out, paths_out = [], [], [], [], []
+    arms_out, folds_out, years_out, slots_out, paths_out, after_out = [], [], [], [], [], []
     for name, models, pct, top_k, (mb, tk) in SELECTIONS:
         sel = select(base, models, pct, top_k)
         if not len(sel):
@@ -430,6 +484,24 @@ def main(argv=None) -> int:
             paths_out.append({"selection": name, **r})
         print("  （20→40 = 20日目から40日目までの追加分の平均と、その勝率。+10%/20 = 20日以内に高値が +10% に届いた割合、"
               "+20%/40 = 40日以内に +20%、+30%/40 = 40日以内に +30%、+30%/60 = 60日以内に +30%）")
+
+        a = after_hit_stats(Pf)
+        after_out.append({"selection": name, **a})
+        if a["n"]:
+            print(f"\n  --- 20日以内に +{TP*100:.0f}% に届いた {a['n']}件（{a['share']:.1f}%、届いた日の中央値 {a['day_med']:.0f}日目）のその後 ---")
+            print(f"  届いた後さらに: +15% に20日以内 {a['reach15_20']:.1f}% / +20% に20日以内 {a['reach20_20']:.1f}% / "
+                  f"+15% に40日以内 {a['reach15_40']:.1f}% / +20% に40日以内 {a['reach20_40']:.1f}% / +30% に40日以内 {a['reach30_40']:.1f}%")
+            print(f"  20日目の終値: +15%以上 {a['end20_ge15']:.1f}% / +10%以上 {a['end20_ge10']:.1f}% / 0〜+10% {a['end20_0_10']:.1f}% / "
+                  f"マイナス {a['end20_lt0']:.1f}%。平均 {a['end20_mean']:+.1f}% 中央値 {a['end20_med']:+.1f}% 下位10% {a['end20_p10']:+.1f}% 最悪 {a['end20_worst']:+.1f}%")
+            print(f"  放置 − +10%で売却（20日目）: 平均 {a['diff20']:+.1f}pt、放置が勝った割合 {a['win20']:.0f}%")
+            print(f"  40日目の終値: +15%以上 {a['end40_ge15']:.1f}% / +10%以上 {a['end40_ge10']:.1f}% / マイナス {a['end40_lt0']:.1f}%。"
+                  f"平均 {a['end40_mean']:+.1f}% 中央値 {a['end40_med']:+.1f}% 下位10% {a['end40_p10']:+.1f}%")
+            print(f"  届いた後の押し（安値の最小、買値比）: 中央値 {a['pull_med']:+.1f}% / 下位25% {a['pull_p25']:+.1f}% / 下位10% {a['pull_p10']:+.1f}%。"
+                  f"+5% を割る {a['pull_lt5']:.1f}% / 買値を割る {a['pull_lt0']:.1f}%")
+            for lab, ja in (("early", "10日目までに届いた"), ("late", "11〜20日目に届いた")):
+                if a.get(f"{lab}_n"):
+                    print(f"  {ja} {a[f'{lab}_n']}件: 20日目 平均 {a[f'{lab}_end20']:+.1f}%、+10%以上で終える {a[f'{lab}_ge10']:.0f}%、"
+                          f"+15% に20日以内 {a[f'{lab}_reach15_20']:.0f}%、40日目 平均 {a[f'{lab}_end40']:+.1f}%")
 
         # 年ごと（主な出口）
         main_rules = [BASE, "+10%指値・20日目", CURRENT,
@@ -475,7 +547,8 @@ def main(argv=None) -> int:
     pd.DataFrame(years_out).to_csv(os.path.join(OOF_DIR, f"{args.prefix}_years.csv"), index=False)
     pd.DataFrame(slots_out).to_csv(os.path.join(OOF_DIR, f"{args.prefix}_slots.csv"), index=False)
     pd.DataFrame(paths_out).to_csv(os.path.join(OOF_DIR, f"{args.prefix}_paths.csv"), index=False)
-    log(f"書いた: {OOF_DIR}/{args.prefix}_arms.csv / _folds.csv / _years.csv / _slots.csv / _paths.csv")
+    pd.DataFrame(after_out).to_csv(os.path.join(OOF_DIR, f"{args.prefix}_after10.csv"), index=False)
+    log(f"書いた: {OOF_DIR}/{args.prefix}_arms.csv / _folds.csv / _years.csv / _slots.csv / _paths.csv / _after10.csv")
     return 0
 
 
