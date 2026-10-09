@@ -79,6 +79,8 @@ jobs:
           # GitHub が1アセットだけ 500 を返すことがある（2026-10-01、2026-10-03 run 37096442506）。
           # 足りないものだけ取り直して、全部そろわなければ止める（scripts/gh_release_download.sh）
           bash scripts/gh_release_download.sh data-raw research/_data
+          # 日証金（Release data-jsf。無ければ初回として飛ばす。実験66 以降の jsf_* の特徴量に使う）
+          bash scripts/gh_release_download.sh data-jsf research/_data 'jsf_*'
           ls -lh research/_data | tail -5
           echo "ファイル数: $(ls research/_data | wc -l)"
 
