@@ -25,6 +25,7 @@
   python3 research/exp/e66_nonlinear_screen.py --stage ab --algos lgbm,xgb,cat --seeds 3 --shifts 0,2,4
   python3 research/exp/e66_nonlinear_screen.py --stage ab --n-estimators 1000   # 木の本数だけ変えた A/B
   python3 research/exp/e66_nonlinear_screen.py --stage trees --n-estimators 1000  # 200本と1000本の比較表
+  python3 research/exp/e66_nonlinear_screen.py --stage tune --n-estimators 1000   # 1000本で Optuna 探索し直し + OOF
   結果は research/_data/oof/e66_*（木の本数が 200 以外なら e66t<本数>_*）。本番の設定には書かない。
 
 木の本数（運用者の依頼 2026-10-09「特徴量数やサンプル数に対して n_estimator が小さすぎるということはないか。
@@ -32,15 +33,25 @@
 n_estimators を、XGBoost / CatBoost は tuning_multi.N_ESTIMATORS（build が読む）を差し替える。学習率などほかの
 パラメータは本番のまま（探索し直さない。歩幅の合計 = 学習率 × 本数 が 5 倍になる）。T / V / P の3腕とも同じ本数。
 
+探索し直し（運用者の依頼 2026-10-09「optuna でチューニングはしてほしい。過学習すると思う」。確認で LightGBM だけ・
+学習率の範囲は本数に合わせる、を選択）: --stage tune で T（本番239列）と V（+32列）をそれぞれ Optuna で探索し直す。
+作りは本番の週次（run_tuning.py / 実験49）と同じ: 50試行 × 5分割（年×時価総額帯で層別・日付単位）、ホールドアウトより
+前のデータだけ、木の本数は固定、学習率の範囲は tuning.lr_range(本数)（1000本なら 0.002〜0.04。歩幅の合計を 200本と
+同じ 2〜40 に保つ）。対照 P は V の探索結果を流用する。OOF は e66u<本数>_* に保存し、200本（e66）と探索なしの
+同じ本数（e66t<本数>）の両方と窓ごとに突き合わせる。xgb / cat の探索し直しは未対応（tuning_multi の探索空間の学習率を
+本数に合わせる作りが要る）。
+
 32列は research/_data/nonlinear_features.parquet に置く（無ければここで計算する。4コアで数分）。
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import sys
 import time
-from typing import Dict, List, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -52,8 +63,12 @@ import features as F  # noqa: E402
 import lab  # noqa: E402
 import nonlinear_features as NL  # noqa: E402
 import walkforward as WF  # noqa: E402
+import train_model as T  # noqa: E402
+import tuning  # noqa: E402
 import ab_oof as AB  # noqa: E402
 import e27_timing_multi as E27  # noqa: E402
+import e41_stop_loss as E41  # noqa: E402
+from e25_auc_noise import average  # noqa: E402
 from e23_dimension_screen import screen_both  # noqa: E402
 from e44_shortsale import permuted  # noqa: E402
 from train_production import (  # noqa: E402
@@ -304,50 +319,223 @@ def with_trees(n_estimators: int):
     return restore
 
 
-def trees_summary(n_estimators: int) -> pd.DataFrame:
+def compare_tags(tag_a: str, tag_b: str, label_a: str, label_b: str) -> pd.DataFrame:
     """
-    木 PROD_TREES 本の A/B（e66）と n_estimators 本の A/B（e66t<n>）を窓ごとに突き合わせる。
+    2つの A/B（タグ a と b）を同じ窓で突き合わせる。どちらも {tag}_auc_by_window.csv
+    （shift / arm / algo / fold / pr_base / pr_arm / roc_base / roc_arm。pr_base = T）を読む。
 
     見るもの（PR-AUC / ROC-AUC、切り方3通りの全窓）
-      T(n) − T(200)  本数を増やすだけで本番の239列の分離力が動くか
-      V(n) − V(200)  32列を足した腕で同じこと
-      V(n) − T(n)    本数を増やしたときの 32列の増分（採否はこちら。§7 の基準）
+      T(b) − T(a)   設定 b にするだけで本番の239列の分離力が動くか
+      腕(b) − 腕(a) 32列を足した腕（または対照）で同じこと
+      腕 − T @b     設定 b での 32列の増分（採否はこちら。§7 の基準）
+      腕 − T @a     参考: 設定 a での増分
     """
-    a = os.path.join(OOF_DIR, f"{tag_for(PROD_TREES)}_auc_by_window.csv")
-    b = os.path.join(OOF_DIR, f"{tag_for(n_estimators)}_auc_by_window.csv")
-    if not (os.path.exists(a) and os.path.exists(b)):
-        print(f"\n[trees] 比べる CSV が揃っていない: {a} / {b}")
+    fa = os.path.join(OOF_DIR, f"{tag_a}_auc_by_window.csv")
+    fb = os.path.join(OOF_DIR, f"{tag_b}_auc_by_window.csv")
+    if not (os.path.exists(fa) and os.path.exists(fb)):
+        print(f"\n[compare] 比べる CSV が揃っていない: {fa} / {fb}")
         return pd.DataFrame()
-    da, db = pd.read_csv(a), pd.read_csv(b)
+    da, db = pd.read_csv(fa), pd.read_csv(fb)
     keys = ["shift", "algo", "fold"]
     rows = []
     for arm in ("V", "P"):
-        m = da[da["arm"] == arm].merge(db[db["arm"] == arm], on=keys, suffixes=("_200", f"_{n_estimators}"))
+        m = da[da["arm"] == arm].merge(db[db["arm"] == arm], on=keys, suffixes=("_a", "_b"))
+        if not len(m):
+            continue
         for algo, g in m.groupby("algo"):
             for metric in ("pr", "roc"):
-                t_d = g[f"{metric}_base_{n_estimators}"] - g[f"{metric}_base_200"]
-                v_d = g[f"{metric}_arm_{n_estimators}"] - g[f"{metric}_arm_200"]
-                inc = g[f"{metric}_arm_{n_estimators}"] - g[f"{metric}_base_{n_estimators}"]
-                inc0 = g[f"{metric}_arm_200"] - g[f"{metric}_base_200"]
+                t_d = g[f"{metric}_base_b"] - g[f"{metric}_base_a"]
+                v_d = g[f"{metric}_arm_b"] - g[f"{metric}_arm_a"]
+                inc = g[f"{metric}_arm_b"] - g[f"{metric}_base_b"]
+                inc0 = g[f"{metric}_arm_a"] - g[f"{metric}_base_a"]
+                se = lambda x: x.std(ddof=1) / np.sqrt(len(x)) if len(x) > 1 else np.nan  # noqa: E731
                 rows.append({"arm": arm, "algo": algo, "metric": metric, "n_win": len(g),
-                             "T_n-T_200": t_d.mean(), "T_se": t_d.std(ddof=1) / np.sqrt(len(g)), "T_up": int((t_d > 0).sum()),
-                             "V_n-V_200": v_d.mean(), "V_se": v_d.std(ddof=1) / np.sqrt(len(g)), "V_up": int((v_d > 0).sum()),
-                             "V-T@n": inc.mean(), "inc_se": inc.std(ddof=1) / np.sqrt(len(g)), "inc_up": int((inc > 0).sum()),
-                             "V-T@200": inc0.mean(), "inc0_up": int((inc0 > 0).sum())})
+                             "T_b-T_a": t_d.mean(), "T_se": se(t_d), "T_up": int((t_d > 0).sum()),
+                             "arm_b-arm_a": v_d.mean(), "arm_se": se(v_d), "arm_up": int((v_d > 0).sum()),
+                             "inc_b": inc.mean(), "inc_se": se(inc), "inc_up": int((inc > 0).sum()),
+                             "inc_a": inc0.mean(), "inc_a_up": int((inc0 > 0).sum())})
     res = pd.DataFrame(rows)
-    res.to_csv(os.path.join(OOF_DIR, f"{tag_for(n_estimators)}_vs_{PROD_TREES}.csv"), index=False)
-    n = n_estimators
-    for arm, label in (("V", LABELS["V"]), ("P", LABELS["P"])):
-        print(f"\n■ 木 {PROD_TREES}本 → {n}本（腕 {label}、切り方3通りの全窓）")
-        print(f"  {'':<14}{'窓':>4}{'T(n)−T(200)':>14}{'SE':>8}{'上':>7}{'腕(n)−腕(200)':>16}{'SE':>8}{'上':>7}"
-              f"{'腕−T @n':>12}{'SE':>8}{'上':>7}{'腕−T @200':>12}{'上':>7}")
-        for _, r in res[res["arm"] == arm].iterrows():
-            print(f"  {r['algo'] + ' ' + r['metric'].upper() + '-AUC':<14}{int(r['n_win']):>4}"
-                  f"{r['T_n-T_200']:>+14.4f}{r['T_se']:>8.4f}{int(r['T_up']):>4}/{int(r['n_win']):<3}"
-                  f"{r['V_n-V_200']:>+16.4f}{r['V_se']:>8.4f}{int(r['V_up']):>4}/{int(r['n_win']):<3}"
-                  f"{r['V-T@n']:>+12.4f}{r['inc_se']:>8.4f}{int(r['inc_up']):>4}/{int(r['n_win']):<3}"
-                  f"{r['V-T@200']:>+12.4f}{int(r['inc0_up']):>4}/{int(r['n_win']):<3}")
+    if not len(res):
+        print(f"\n[compare] 共通の窓が無い: {tag_a} / {tag_b}")
+        return res
+    res.to_csv(os.path.join(OOF_DIR, f"{tag_b}_vs_{tag_a}.csv"), index=False)
+    for arm in ("V", "P"):
+        part = res[res["arm"] == arm]
+        if not len(part):
+            continue
+        print(f"\n■ {label_a} → {label_b}（腕 {LABELS[arm]}、切り方3通りの全窓）")
+        print(f"  {'':<14}{'窓':>4}{'T(b)−T(a)':>12}{'SE':>8}{'上':>7}{'腕(b)−腕(a)':>14}{'SE':>8}{'上':>7}"
+              f"{'腕−T @b':>12}{'SE':>8}{'上':>7}{'腕−T @a':>12}{'上':>7}")
+        for _, r in part.iterrows():
+            nw = int(r["n_win"])
+            print(f"  {r['algo'] + ' ' + r['metric'].upper() + '-AUC':<14}{nw:>4}"
+                  f"{r['T_b-T_a']:>+12.4f}{r['T_se']:>8.4f}{int(r['T_up']):>4}/{nw:<3}"
+                  f"{r['arm_b-arm_a']:>+14.4f}{r['arm_se']:>8.4f}{int(r['arm_up']):>4}/{nw:<3}"
+                  f"{r['inc_b']:>+12.4f}{r['inc_se']:>8.4f}{int(r['inc_up']):>4}/{nw:<3}"
+                  f"{r['inc_a']:>+12.4f}{int(r['inc_a_up']):>4}/{nw:<3}")
     return res
+
+
+def trees_summary(n_estimators: int) -> pd.DataFrame:
+    """木 PROD_TREES 本（e66）と n_estimators 本・探索なし（e66t<n>）を突き合わせる。"""
+    return compare_tags(tag_for(PROD_TREES), tag_for(n_estimators),
+                        f"木 {PROD_TREES}本（本番のパラメータ）", f"木 {int(n_estimators)}本（本番のパラメータのまま）")
+
+
+# --------------------------------------------------------------------------- #
+# 6. 探索し直し（Optuna）。木の本数を変えたときに、学習率などを本数に合わせて選び直す
+# --------------------------------------------------------------------------- #
+
+N_TRIALS = 50
+N_SPLITS = 5
+CV_SCHEME = "year_cap_date"          # 本番の retrain-weekly.yml / run_tuning.py と同じ
+
+
+def tuned_tag(n_estimators: int) -> str:
+    """探索し直した腕の保存名（u = tuned）。探索なしの e66t<n> とは別にする。"""
+    return f"e66u{int(n_estimators)}"
+
+
+def params_hash(params: dict) -> str:
+    return hashlib.sha1(json.dumps(params, sort_keys=True, default=str).encode()).hexdigest()[:8]
+
+
+def cache_matches(rec: Optional[dict], want: dict) -> bool:
+    """保存済みの探索結果が、いま求めている条件（列・試行数・本数・打ち切り日・学習率の範囲）と同じか。"""
+    if not isinstance(rec, dict) or "params" not in rec:
+        return False
+    return all(rec.get(k) == v for k, v in want.items())
+
+
+def tune_arm(algo: str, arm: str, sub: pd.DataFrame, cols: List[str], n_estimators: int,
+             lr_bounds: Tuple[float, float], cutoff, n_trials: int = N_TRIALS,
+             n_splits: int = N_SPLITS) -> dict:
+    """
+    run_tuning.py / 実験49 と同じ関数で探索する。本数と学習率の範囲だけを変える。
+    sub はホールドアウトより前の行だけ。保存済み（条件が同じ）なら読む。
+    """
+    if algo != "lgbm":
+        raise SystemExit(f"{algo} の探索し直しは未対応（tuning_multi の探索空間の学習率を本数に合わせる作りが要る）")
+    n = int(n_estimators)
+    path = os.path.join(OOF_DIR, f"{tuned_tag(n)}_params_{arm}_{algo}.json")
+    want = {"_features_sig": F.signature(cols), "_n_trials": int(n_trials), "_n_estimators": n,
+            "_cutoff": str(pd.Timestamp(cutoff).date()), "_lr_range": [float(lr_bounds[0]), float(lr_bounds[1])],
+            "_n_splits": int(n_splits)}
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as fh:
+            rec = json.load(fh)
+        if cache_matches(rec, want):
+            log(f"  [{arm} {algo}] 探索済みを読む（{path}）")
+            return rec
+        log(f"  [{arm} {algo}] 保存済みの探索は条件が違うので探索し直す")
+    log(f"  [{arm} {algo}] 探索: 木{n}本・学習率 {lr_bounds[0]:g}〜{lr_bounds[1]:g} / {n_trials}試行 × {n_splits}分割 "
+        f"/ {len(cols)}列 / 〜{want['_cutoff']} {len(sub):,}件")
+    t0 = time.time()
+    params = tuning.tune(sub, cols, n_trials=n_trials, n_splits=n_splits,
+                         embargo_days=T.EMBARGO_DAYS, scheme=CV_SCHEME, model="classifier",
+                         n_estimators=n, lr_bounds=lr_bounds, verbose=False)
+    rec = {"params": dict(params), "_cv": dict(tuning.LAST_CV), **want,
+           "_n_features": len(cols), "_minutes": round((time.time() - t0) / 60, 1)}
+    os.makedirs(OOF_DIR, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(rec, fh, ensure_ascii=False, indent=1, default=float)
+    log(f"  [{arm} {algo}] 探索 {rec['_minutes']}分 / CV PR-AUC {rec['_cv'].get('mean_pr_auc')}")
+    return rec
+
+
+def show_tuned(recs: Dict[str, dict], n_estimators: int) -> None:
+    print(f"\n■ 探索し直し（木 {int(n_estimators)}本。層別{N_SPLITS}分割の CV は楽観側に出る。パラメータ選び用）")
+    keys = ["learning_rate", "num_leaves", "min_child_samples", "subsample", "colsample_bytree",
+            "reg_alpha", "reg_lambda"]
+    for arm, rec in recs.items():
+        p, cv = rec["params"], rec.get("_cv", {})
+        lo, hi = rec.get("_lr_range", [np.nan, np.nan])
+        lr = float(p["learning_rate"])
+        pos = (np.log(lr) - np.log(lo)) / (np.log(hi) - np.log(lo)) if lo and hi else np.nan
+        print(f"  {LABELS[arm]}: 所要 {rec.get('_minutes')}分 / CV PR-AUC {cv.get('mean_pr_auc')} ± {cv.get('std')} "
+              f"/ ROC {cv.get('mean_roc_auc')} / 正例率 {cv.get('base_rate')}")
+        print("    " + " / ".join(f"{k} {p[k]:.4g}" if isinstance(p.get(k), float) else f"{k} {p.get(k)}"
+                                 for k in keys if k in p))
+        print(f"    学習率 {lr:.5f}（範囲 {lo:g}〜{hi:g} の中の位置 {pos:.2f}。0 が下限、1 が上限）/ "
+              f"歩幅の合計（学習率 × 本数）{lr * p['n_estimators']:.2f}")
+
+
+def oof_arm_params(tag: str, df: pd.DataFrame, cols: List[str], arm: str, shift: int,
+                   algo: str, seeds, params: dict) -> pd.DataFrame:
+    """ab_oof.oof_arm と同じ作りで、パラメータを明示して out-of-fold を作る（種の平均。保存済みなら読む）。"""
+    folds = E41.folds_for(df["Date"], shift)
+    fp = AB.fingerprint(df, cols)
+    ph = params_hash(params)
+    parts = []
+    for sd in seeds:
+        path = os.path.join(OOF_DIR, f"{tag}_{arm}_{fp}_{algo}_{ph}_sh{shift}_s{sd}.parquet")
+        if os.path.exists(path):
+            parts.append(pd.read_parquet(path))
+            continue
+        t0 = time.time()
+        o = E41.oof_folds(algo, df, cols, params, sd, folds)
+        o.to_parquet(path, index=False)
+        parts.append(o)
+        log(f"  腕{arm} {algo} ずらし{shift}か月 種{sd}: {len(o):,}件 {time.time()-t0:.0f}秒")
+    out = average(parts)
+    out["Date"] = pd.to_datetime(out["Date"])
+    out["Code"] = out["Code"].astype(str)
+    return out
+
+
+def run_tuned(df: pd.DataFrame, shifts: List[int], seeds, algos: List[str], n_estimators: int,
+              lr_bounds: Tuple[float, float], n_trials: int = N_TRIALS) -> pd.DataFrame:
+    """T と V を探索し直して OOF を取り、V−T / P−T と、200本・探索なしの同じ本数との差を出す。"""
+    n = int(n_estimators)
+    tag = tuned_tag(n)
+    base = F.columns(F.DEFAULT_PRESET)
+    v = base + NEW_COLS
+    d = pd.to_datetime(df["Date"])
+    train_end, _, _ = T.holdout_bounds(d, T.HOLDOUT_MONTHS, T.EMBARGO_DAYS)
+    sub = df[(d <= train_end) & df["label"].notna()]
+    print("=" * 78)
+    print(f"実験66 探索し直し（木 {n}本・学習率 {lr_bounds[0]:g}〜{lr_bounds[1]:g}・{n_trials}試行 × {N_SPLITS}分割・"
+          f"種{len(seeds)}つ・ずらし {shifts}か月・{algos}・タグ {tag}）: {len(df):,}件 / 探索は 〜{train_end.date()} {len(sub):,}件")
+    for arm, cols in (("T", base), ("V", v), ("P", v)):
+        print(f"  {LABELS[arm]:<30}{len(cols)}列  指紋 {F.signature(cols)}")
+    print("=" * 78)
+    os.makedirs(OOF_DIR, exist_ok=True)
+    fp_df = permuted(df, NEW_COLS, seed=PERM_SEED)
+    summary = []
+    for algo in algos:
+        recs = {"T": tune_arm(algo, "T", sub, base, n, lr_bounds, train_end, n_trials),
+                "V": tune_arm(algo, "V", sub, v, n, lr_bounds, train_end, n_trials)}
+        show_tuned(recs, n)
+        arms = {"T": (df, base, recs["T"]["params"]), "V": (df, v, recs["V"]["params"]),
+                "P": (fp_df, v, recs["V"]["params"])}
+        for sh in shifts:
+            res = {arm: oof_arm_params(tag, fr, cols, arm, sh, algo, seeds, par)
+                   for arm, (fr, cols, par) in arms.items()}
+            for arm in ("V", "P"):
+                print(f"\n■ 分離力（窓ごと。ずらし{sh}か月・木{n}本・探索し直し）: {LABELS[arm]} − {LABELS['T']}")
+                print(f"  {'':<18}{'T':>9}{arm:>9}{'差':>10}{'SE':>9}{'上の窓':>9}")
+                wa, wb = AB.auc_by_window(res["T"]), AB.auc_by_window(res[arm])
+                m = wa.merge(wb, on="fold", suffixes=("_a", "_b"))
+                print(AB.pair_line(f"{algo} PR-AUC", m["pr_a"].to_numpy(), m["pr_b"].to_numpy()))
+                print(AB.pair_line(f"{algo} ROC-AUC", m["roc_a"].to_numpy(), m["roc_b"].to_numpy()))
+                for _, r in m.iterrows():
+                    summary.append({"shift": sh, "arm": arm, "algo": algo, "fold": int(r["fold"]),
+                                    "pr_base": r["pr_a"], "pr_arm": r["pr_b"],
+                                    "roc_base": r["roc_a"], "roc_arm": r["roc_b"]})
+    out = pd.DataFrame(summary)
+    out.to_csv(os.path.join(OOF_DIR, f"{tag}_auc_by_window.csv"), index=False)
+    if len(out):
+        print(f"\n■ 切り方3通りをまとめた窓ごとの差（PR-AUC、木{n}本・探索し直し）")
+        print(f"  {'':<24}{'窓の数':>7}{'差の平均':>10}{'SE':>9}{'上の窓':>9}")
+        for (arm, a), g in out.groupby(["arm", "algo"]):
+            dd = (g["pr_arm"] - g["pr_base"]).to_numpy()
+            se = dd.std(ddof=1) / np.sqrt(len(dd)) if len(dd) > 1 else np.nan
+            print(f"  {LABELS[arm] + ' ' + a:<24}{len(dd):>7}{dd.mean():>+10.4f}{se:>9.4f}{(dd > 0).sum():>5}/{len(dd)}")
+    compare_tags(tag_for(PROD_TREES), tag, f"木 {PROD_TREES}本（本番のパラメータ）", f"木 {n}本（探索し直し）")
+    if os.path.exists(os.path.join(OOF_DIR, f"{tag_for(n)}_auc_by_window.csv")):
+        compare_tags(tag_for(n), tag, f"木 {n}本（本番のパラメータのまま）", f"木 {n}本（探索し直し）")
+    log(f"記録: {OOF_DIR}/{tag}_*")
+    return out
 
 
 def run_ab(df: pd.DataFrame, shifts: List[int], seeds, algos: List[str],
@@ -377,16 +565,23 @@ def run_ab(df: pd.DataFrame, shifts: List[int], seeds, algos: List[str],
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="実験66: 非線形時系列解析の特徴量")
-    ap.add_argument("--stage", default="screen", choices=("screen", "ab", "all", "trees"))
+    ap.add_argument("--stage", default="screen", choices=("screen", "ab", "all", "trees", "tune"))
     ap.add_argument("--shifts", default="0,2,4")
     ap.add_argument("--seeds", type=int, default=3)
     ap.add_argument("--algos", default="lgbm,xgb,cat")
     ap.add_argument("--n-estimators", type=int, default=PROD_TREES,
                     help=f"3モデルの木の本数（既定 {PROD_TREES} = 本番）。変えると保存名が e66t<本数> になる")
+    ap.add_argument("--n-trials", type=int, default=N_TRIALS, help="--stage tune の試行数（本番の週次は 50）")
+    ap.add_argument("--lr", default="scaled", choices=("scaled", "fixed"),
+                    help="--stage tune の学習率の範囲。scaled = tuning.lr_range(本数)（既定）、fixed = 0.01〜0.2")
     args = ap.parse_args(argv)
     os.makedirs(OOF_DIR, exist_ok=True)
     if args.stage == "trees":
         trees_summary(args.n_estimators)
+        compare_tags(tag_for(PROD_TREES), tuned_tag(args.n_estimators),
+                     f"木 {PROD_TREES}本（本番のパラメータ）", f"木 {args.n_estimators}本（探索し直し）")
+        compare_tags(tag_for(args.n_estimators), tuned_tag(args.n_estimators),
+                     f"木 {args.n_estimators}本（本番のパラメータのまま）", f"木 {args.n_estimators}本（探索し直し）")
         return 0
 
     df = load_frame()
@@ -429,6 +624,14 @@ def main(argv=None) -> int:
         algos = [a for a in args.algos.split(",") if a]
         run_ab(df.drop(columns=[c for c in df.columns if c.startswith("_")]), shifts, seeds, algos,
                n_estimators=args.n_estimators)
+
+    if args.stage == "tune":
+        shifts = [int(x) for x in args.shifts.split(",") if x.strip()]
+        seeds = E27.SEEDS3[:args.seeds]
+        algos = [a for a in args.algos.split(",") if a]
+        lr = tuning.lr_range(args.n_estimators) if args.lr == "scaled" else (0.01, 0.2)
+        run_tuned(df.drop(columns=[c for c in df.columns if c.startswith("_")]), shifts, seeds, algos,
+                  args.n_estimators, lr, n_trials=args.n_trials)
     return 0
 
 
