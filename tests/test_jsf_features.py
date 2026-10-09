@@ -27,7 +27,8 @@ def hist_rows(code, dates, loan, stock, fee=None, restrict=None):
                      "貸株新規（株）": 5.0, "貸株返済（株）": (5.0 - (stock[i] - stock[i - 1])) if i else np.nan,
                      "貸株残高（株）": float(stock[i]), "差引残高（株）": float(loan[i] - stock[i]),
                      "貸借値段（円）": 1000.0, "品貸料率（品貸日数分/円）": np.nan, "品貸日数": np.nan,
-                     "品貸料率（年率換算/％）": (fee[i] if fee[i] else np.nan), "制限措置": restrict[i]})
+                     "品貸料率（年率換算/％）": (fee[i] if fee[i] else np.nan), "制限措置": restrict[i],
+                     "貸借区分": "貸借"})
     return pd.DataFrame(rows)
 
 
@@ -38,6 +39,11 @@ class TestRestrictLevel(unittest.TestCase):
         self.assertEqual(out[:6], [0.0, 0.0, 1.0, 2.0, 3.0, 2.0])
         self.assertTrue(np.isnan(out[6]))
 
+    def test_lendable(self):
+        out = JF.lendable_flag(pd.Series(["貸借", "貸借融資", "非貸借", "", "？"])).tolist()
+        self.assertEqual(out[:3], [1.0, 0.0, 0.0])
+        self.assertTrue(np.isnan(out[3]) and np.isnan(out[4]))
+
 
 class TestPanel(unittest.TestCase):
     def test_daily_wins_and_hist_fills_fee_and_restrict(self):
@@ -47,12 +53,13 @@ class TestPanel(unittest.TestCase):
         # load_hist と同じ共通の列にそろえる
         hh = pd.DataFrame({"app_date": h["申込日"], "Code": h["code"]})
         for k, c in JF.HIST_COLS.items():
-            hh[k] = JF.restrict_level(h[c]) if k == "restrict" else pd.to_numeric(h[c], errors="coerce")
+            hh[k] = (JF.restrict_level(h[c]) if k == "restrict" else JF.lendable_flag(h[c]) if k == "lendable"
+                     else pd.to_numeric(h[c], errors="coerce"))
         hh["source"] = "hist"
         d = pd.DataFrame({"app_date": [dates[-1]], "Code": ["72030"], "loan_new": [1.0], "loan_ret": [0.0],
                           "loan_bal": [999.0], "stock_new": [0.0], "stock_ret": [0.0], "stock_bal": [60.0],
                           "net_bal": [939.0], "price": [np.nan], "fee_yen": [np.nan], "fee_days": [np.nan],
-                          "fee_ann": [np.nan], "restrict": [np.nan], "source": ["daily"]})
+                          "fee_ann": [np.nan], "restrict": [np.nan], "lendable": [np.nan], "source": ["daily"]})
         p = JF.panel(hh, d)
         self.assertEqual(len(p), 4)
         last = p[p["app_date"] == dates[-1]].iloc[0]
@@ -61,6 +68,20 @@ class TestPanel(unittest.TestCase):
         self.assertEqual(last["restrict"], 1.0)              # 制限措置は hist から補う
         self.assertAlmostEqual(last["fee_ann"], 0.73)
         self.assertEqual(p[p["app_date"] == dates[0]].iloc[0]["fee_ann"], 0.0)   # 逆日歩なし = 0
+        self.assertEqual(last["lendable"], 1.0)              # 貸借区分も hist から
+
+    def test_lendable_is_carried_to_daily_only_days(self):
+        dates = pd.bdate_range("2026-09-21", periods=3)
+        hh = pd.DataFrame({"app_date": dates[:2], "Code": "72030", "loan_bal": [1.0, 2.0], "stock_bal": [0.0, 0.0],
+                           "loan_new": 0.0, "loan_ret": 0.0, "stock_new": 0.0, "stock_ret": 0.0, "net_bal": 1.0,
+                           "price": 100.0, "fee_yen": np.nan, "fee_days": np.nan, "fee_ann": np.nan,
+                           "restrict": 0.0, "lendable": [0.0, 0.0], "source": "hist"})
+        d = hh.iloc[[1]].copy()
+        d["app_date"] = dates[2]
+        d[["lendable", "restrict", "source"]] = [np.nan, np.nan, "daily"]
+        p = JF.panel(hh, d)
+        self.assertEqual(p["lendable"].tolist(), [0.0, 0.0, 0.0])
+        self.assertTrue(np.isnan(p["restrict"].iloc[-1]))       # 制限措置は引き継がない
 
 
 class TestFeatures(unittest.TestCase):
@@ -72,7 +93,8 @@ class TestFeatures(unittest.TestCase):
         h = hist_rows("72030", self.dates, loan, stock, fee=fee)
         self.p = pd.DataFrame({"app_date": h["申込日"], "Code": h["code"]})
         for k, c in JF.HIST_COLS.items():
-            self.p[k] = JF.restrict_level(h[c]) if k == "restrict" else pd.to_numeric(h[c], errors="coerce")
+            self.p[k] = (JF.restrict_level(h[c]) if k == "restrict" else JF.lendable_flag(h[c]) if k == "lendable"
+                         else pd.to_numeric(h[c], errors="coerce"))
         self.p["source"] = "hist"
         self.p["fee_ann"] = self.p["fee_ann"].fillna(0.0)
         self.vol = pd.DataFrame({"Date": self.dates, "Code": "72030", "avg_vol": 100.0})
@@ -93,6 +115,7 @@ class TestFeatures(unittest.TestCase):
         self.assertAlmostEqual(last["jsf_fee_days20"], 10.0)
         self.assertAlmostEqual(last["jsf_fee_max20"], 1.0)
         self.assertEqual(last["jsf_restrict"], 0.0)
+        self.assertEqual(last["jsf_lendable"], 1.0)
         self.assertTrue(np.isnan(f.iloc[3]["jsf_ratio_chg5"]))     # 5日前が無い
 
     def test_no_volume_gives_nan_for_scaled_columns(self):

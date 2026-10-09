@@ -102,20 +102,34 @@ def auc(y: np.ndarray, x: np.ndarray):
 
 
 def deciles(x: pd.Series, y: pd.Series, k: int = 10) -> list:
-    """十分位ごとの件数・正例率（値の重なりで区切りが減ることがある）。"""
+    """
+    十分位ごとの件数・正例率。同じ値が多い列（逆日歩 0 など）は、いちばん多い値を1つの区分にし、残りを
+    値で区切る（順位で機械的に切ると、同じ値の行が並びの順＝日付の順で分かれ、期間の正例率を見てしまう）。
+    """
     ok = np.isfinite(x) & np.isfinite(y)
-    xs, ys = x[ok], y[ok]
+    xs, ys = x[ok].to_numpy(dtype=float), y[ok].to_numpy(dtype=float)
     if len(xs) < 200:
         return []
-    try:
-        bins = pd.qcut(xs.rank(method="first"), k, labels=False)
-    except ValueError:
-        return []
+    vals, counts = np.unique(xs, return_counts=True)
+    top = vals[counts.argmax()]
     out = []
-    for b in sorted(pd.unique(bins)):
-        m = bins == b
-        out.append({"bin": int(b), "n": int(m.sum()), "pos": r(ys[m].mean()),
-                    "lo": r(xs[m].min()), "hi": r(xs[m].max())})
+    if counts.max() / len(xs) > 0.15:
+        m = xs == top
+        out.append({"bin": 0, "n": int(m.sum()), "pos": r(ys[m].mean()), "lo": r(top), "hi": r(top), "tie": True})
+        xs2, ys2 = xs[~m], ys[~m]
+        start = 1
+    else:
+        xs2, ys2, start = xs, ys, 0
+    if len(xs2) >= 100:
+        try:
+            bins = pd.qcut(xs2, min(k - start, max(2, len(np.unique(xs2)) // 20 or 2)), labels=False, duplicates="drop")
+        except ValueError:
+            bins = None
+        if bins is not None:
+            for b in sorted(pd.unique(bins)):
+                m = bins == b
+                out.append({"bin": int(b) + start, "n": int(m.sum()), "pos": r(ys2[m].mean()),
+                            "lo": r(xs2[m].min()), "hi": r(xs2[m].max())})
     return out
 
 
@@ -188,11 +202,30 @@ def main(argv=None) -> int:
                             "rel_diff_median": r(((a[ok] - b[ok]).abs() / (b[ok].abs() + 1)).median()),
                             "rel_diff_q95": r(((a[ok] - b[ok]).abs() / (b[ok].abs() + 1)).quantile(0.95))}
             return o
+        fee_ok = np.isfinite(both["fee_ann_h"]) & np.isfinite(both["fee_ann_d"]) & ~both["_last"]
+        fh, fd = both.loc[fee_ok, "fee_ann_h"], both.loc[fee_ok, "fee_ann_d"]
+        pos = (fh > 0) | (fd > 0)
+        sec1["fee_hist_vs_daily(確報の日)"] = {
+            "n": int(fee_ok.sum()), "either_positive": int(pos.sum()),
+            "both_positive_share": r(((fh > 0) & (fd > 0))[pos].mean()) if pos.any() else None,
+            "hist_only_positive": int(((fh > 0) & ~(fd > 0)).sum()), "daily_only_positive": int(((fd > 0) & ~(fh > 0)).sum()),
+            "ratio_daily_over_hist_quantiles(both>0)": quantiles((fd / fh)[(fh > 0) & (fd > 0)]),
+        }
         sec1["hist_vs_daily"] = {"overlap_rows": int(len(both)),
                                  "overlap_dates": int(both["app_date"].nunique()),
                                  "all": agree(both),
                                  "hist_last_day(速報)": agree(both[both["_last"]]),
                                  "hist_not_last(確報)": agree(both[~both["_last"]])}
+    if daily is not None and os.path.exists(len_path):
+        ln = pd.read_parquet(len_path)
+        ln = ln[ln["取引所区分"].astype("string").fillna("").str.contains("東証", na=False)] if "取引所区分" in ln.columns else ln
+        lr = pd.DataFrame({"app_date": pd.to_datetime(ln["貸借申込日"]), "Code": ln["code"].astype(str),
+                           "lim": ln["制限"].astype("string").fillna("").str.strip() if "制限" in ln.columns else ""})
+        lr = lr.drop_duplicates(["app_date", "Code"]).merge(hist[["app_date", "Code", "restrict"]], on=["app_date", "Code"])
+        sec1["lending_restrict_vs_hist"] = {
+            "n": int(len(lr)),
+            "crosstab": {str(k): {str(int(kk)) if np.isfinite(kk) else "nan": int(v) for kk, v in g["restrict"].value_counts(dropna=False).items()}
+                         for k, g in lr.groupby(lr["lim"].where(~lr["lim"].isin(["", "－", "-"]), "(空)"))}}
     # 恒等式（hist）
     h = hist.sort_values(["Code", "app_date"])
     prev = h.groupby("Code")[["loan_bal", "stock_bal"]].shift(1)
@@ -272,7 +305,10 @@ def main(argv=None) -> int:
             "missing_share_on_covered": {c: r(sub[c].isna().mean()) for c in cols},
             "fee_share": r((sub["jsf_fee"] > 0).mean()),
             "restrict_levels": {str(int(k)) if np.isfinite(k) else "nan": int(v)
-                                for k, v in sub["jsf_restrict"].value_counts(dropna=False).items()}}
+                                for k, v in sub["jsf_restrict"].value_counts(dropna=False).items()},
+            "lendable": {str(int(k)) if np.isfinite(k) else "nan": int(v)
+                         for k, v in sub["jsf_lendable"].value_counts(dropna=False).items()},
+            "label_rate_by_lendable": {str(int(k)): r(g["label"].mean()) for k, g in sub.groupby("jsf_lendable")}}
     comp = [c for c in COMPARE_WITH if c in sub.columns]
     corr = {}
     for c in cols:

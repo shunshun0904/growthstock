@@ -28,6 +28,7 @@
   jsf_fee_days20     直近20申込日のうち逆日歩が付いた日数
   jsf_fee_max20      直近20申込日の品貸料率（年率換算 %）の最大
   jsf_restrict       制限措置の段階（0 なし / 1 注意喚起 / 2 申込制限 / 3 申込停止。hist の文言から）
+  jsf_lendable       貸借銘柄なら 1（制度信用の売りができる）、融資銘柄（買いだけ）なら 0。hist の「貸借区分」から
   jsf_lag            使った申込日から T までの暦日（確認用。原則 1〜4）
 
 20日平均出来高は J-Quants の日足（bars_*.parquet の Vo）を、申込日と同じ日まで（T より前）で取る。
@@ -58,7 +59,7 @@ HIST_COLS = {"loan_new": "融資新規（株）", "loan_ret": "融資返済（�
              "stock_new": "貸株新規（株）", "stock_ret": "貸株返済（株）", "stock_bal": "貸株残高（株）",
              "net_bal": "差引残高（株）", "price": "貸借値段（円）",
              "fee_yen": "品貸料率（品貸日数分/円）", "fee_days": "品貸日数",
-             "fee_ann": "品貸料率（年率換算/％）", "restrict": "制限措置"}
+             "fee_ann": "品貸料率（年率換算/％）", "restrict": "制限措置", "lendable": "貸借区分"}
 DAILY_COLS = {"loan_new": "融資新規株数", "loan_ret": "融資返済株数", "loan_bal": "融資残高株数",
               "stock_new": "貸株新規株数", "stock_ret": "貸株返済株数", "stock_bal": "貸株残高株数",
               "net_bal": "差引残高株数"}
@@ -71,7 +72,7 @@ BASE_COLS = ["jsf_ratio", "jsf_ratio_chg5", "jsf_ratio_chg20",
              "jsf_loan_v", "jsf_stock_v", "jsf_net_v",
              "jsf_loan_chg5_v", "jsf_loan_chg20_v", "jsf_stock_chg5_v", "jsf_stock_chg20_v",
              "jsf_long_new5_v", "jsf_short_new5_v",
-             "jsf_fee", "jsf_fee_days20", "jsf_fee_max20", "jsf_restrict"]
+             "jsf_fee", "jsf_fee_days20", "jsf_fee_max20", "jsf_restrict", "jsf_lendable"]
 CHECK_COLS = ["jsf_lag"]
 
 
@@ -106,6 +107,15 @@ def restrict_level(text: pd.Series) -> pd.Series:
     return out
 
 
+def lendable_flag(text: pd.Series) -> pd.Series:
+    """貸借区分の文言 -> 1（貸借: 融資も貸株もできる）/ 0（貸借融資: 融資だけ、非貸借）。空は欠測。"""
+    t = text.astype("string").fillna("").str.strip()
+    out = pd.Series(np.nan, index=text.index, dtype=float)
+    out[t == "貸借"] = 1.0
+    out[t.isin(["貸借融資", "非貸借", "融資"])] = 0.0
+    return out
+
+
 def _tse(df: pd.DataFrame, col: str) -> pd.DataFrame:
     """取引所区分の列があれば東証の行だけ（無ければそのまま）。"""
     if col in df.columns:
@@ -123,7 +133,8 @@ def load_hist(path: str = HIST) -> pd.DataFrame:
     for k, c in HIST_COLS.items():
         if c not in h.columns:
             raise KeyError(f"jsf_hist に列が無い: {c}（ある列: {list(h.columns)[:30]}）")
-        out[k] = restrict_level(h[c]) if k == "restrict" else _num(h[c])
+        out[k] = (restrict_level(h[c]) if k == "restrict" else lendable_flag(h[c]) if k == "lendable"
+                  else _num(h[c]))
     out["source"] = "hist"
     return out.dropna(subset=["app_date"]).reset_index(drop=True)
 
@@ -140,6 +151,7 @@ def load_daily(balance: str = BALANCE, lending: str = LENDING) -> pd.DataFrame:
     for k in ("price", "fee_yen", "fee_days", "fee_ann"):
         out[k] = np.nan
     out["restrict"] = np.nan                      # daily には日ごとの制限措置の列が無い
+    out["lendable"] = np.nan                      # 貸借区分も無い（panel で hist の値を引き継ぐ）
     if lending and os.path.exists(lending):
         ln = _tse(pd.read_parquet(lending), "取引所区分")
         ld = pd.DataFrame({"app_date": pd.to_datetime(ln["貸借申込日"]), "Code": ln["code"].astype(str)})
@@ -173,14 +185,17 @@ def panel(hist: Optional[pd.DataFrame] = None, daily: Optional[pd.DataFrame] = N
     allp = allp.sort_values(["Code", "app_date", "source"])      # daily < hist の順 → keep="first" で daily
     # daily の行に hist の制限措置・年率換算を補う（同じ申込日・銘柄）
     if hist is not None and daily is not None and len(hist) and len(daily):
-        fill = hist[["app_date", "Code", "restrict", "fee_ann"]].drop_duplicates(["app_date", "Code"])
-        allp = allp.merge(fill.rename(columns={"restrict": "_r", "fee_ann": "_f"}),
+        fill = hist[["app_date", "Code", "restrict", "fee_ann", "lendable"]].drop_duplicates(["app_date", "Code"])
+        allp = allp.merge(fill.rename(columns={"restrict": "_r", "fee_ann": "_f", "lendable": "_l"}),
                           on=["app_date", "Code"], how="left")
         allp["restrict"] = allp["restrict"].fillna(allp["_r"])
         allp["fee_ann"] = allp["fee_ann"].fillna(allp["_f"])
-        allp = allp.drop(columns=["_r", "_f"])
+        allp["lendable"] = allp["lendable"].fillna(allp["_l"])
+        allp = allp.drop(columns=["_r", "_f", "_l"])
     out = allp.drop_duplicates(["Code", "app_date"], keep="first").reset_index(drop=True)
     out["fee_ann"] = out["fee_ann"].fillna(0.0)
+    # 貸借区分は滅多に変わらないので、hist の無い日（daily だけの日）は銘柄ごとに前の値を引き継ぐ
+    out["lendable"] = out.groupby("Code", sort=False)["lendable"].ffill()
     return out
 
 
@@ -252,6 +267,7 @@ def features_on_panel(p: pd.DataFrame, vol: Optional[pd.DataFrame] = None) -> pd
     out["jsf_fee_max20"] = fee.groupby(p["Code"], sort=False).transform(
         lambda s: s.rolling(20, min_periods=10).max())
     out["jsf_restrict"] = p["restrict"]
+    out["jsf_lendable"] = p["lendable"]
     return out
 
 
