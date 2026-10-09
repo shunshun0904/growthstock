@@ -29,7 +29,10 @@ research/_data/oof/<tag>_* に置き、以降の回はそれを使う。
 
 最初の回（run 37878860125、lgbm・logit・mlp。列は変換なし）は、logit・mlp の OOF が −0.02〜−0.04 落ちた。
 裾の重い列（出来高比・逆日歩）が標準化した値に効いたためとみて、jsf_features.py で asinh / log1p に変え、
---rebuild で表を作り直して回し直した（木のモデルは単調変換に不変）。
+--rebuild で表を作り直して回し直した（run 37888145360）。**回し直しても logit・mlp は同じだけ落ちた**
+（logit の OOF C−A −0.0216 → −0.0217、mlp −0.0191 → −0.0176）ので、裾は原因ではなかった。lgbm は単調変換に
+不変で同じ結果。logit・mlp は同日の運用者の決定で画面と実験から外したので、この落ち方の原因は追わない。
+変換は木に影響せず、列としては有界なほうが扱いやすいので定義はそのまま残す。
 
 公開ログには件数・割合・日付・精度だけを出す（日証金の値は出さない。docs/DATA_JSF.md の利用条件）。
 本番の設定（research/lgbm_params.json、research/multi_params.json、features.py）には書かない。
