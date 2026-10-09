@@ -19,7 +19,8 @@
   - ルールで売ったものも売却済みとして確定する
   営業日は取引所のカレンダーで数える（無ければその銘柄の日足の日付）。
 
-色: 予測ログで、保有中（持ち越し・買い待ちを含む）の行を赤、売却済みの行を黄色に塗る。取り消した
+色: 予測ログで、保有中（持ち越し・買い待ちを含む）の行を赤、売却済みの行を青に塗る（2026-10-09 まで黄色。
+運用者「黄色だと文字が見えない」→ 黒い文字が読める明るさの青 #4a86e8 にした）。取り消した
 買いの行は塗りを外す。取引の記録にある行だけで、ほかの行の色には触らない。あわせて、その行の
 「建値」「株数」「手仕舞い日」「手仕舞い値」「損益」を毎晩書き直す（取り消した行は空にする）。
 
@@ -69,7 +70,9 @@ DEFAULT_SHARES = 100
 TARGET = 1.10                     # 買値の +10% で売る
 HORIZON = 20                      # 買った日を1日目として 20 営業日
 RED = {"red": 1.0, "green": 0.0, "blue": 0.0}
-YELLOW = {"red": 1.0, "green": 1.0, "blue": 0.0}
+#: 売却済み。純粋な青（0, 0, 1）は黒い文字が読めないので、明るめの青 #4a86e8（黒い文字との
+#: コントラスト比 約6:1。赤 #ff0000 の 5.3:1 と同程度）
+BLUE = {"red": 0.29, "green": 0.525, "blue": 0.91}
 SOLD = "売却済み"
 #: 予測ログで、取引の記録がある行に書く列（利用者の記入欄だったもの。記録がある行だけ書く）
 USER_WRITE_COLS = ["建値", "株数", "手仕舞い日", "手仕舞い値", "損益"]
@@ -729,7 +732,7 @@ def format_requests(sheet_id: int, lay: Layout) -> List[Dict]:
 
 def color_requests(sheet_id: int, positions: List[Position], n_cols: int,
                    cleared: Sequence[int] = ()) -> List[Dict]:
-    """予測ログの、取引の記録がある行を塗る（保有中は赤、売却済みは黄色。取り消した行は塗りを外す）。"""
+    """予測ログの、取引の記録がある行を塗る（保有中は赤、売却済みは青。取り消した行は塗りを外す）。"""
     def paint(row, fmt):
         return {"repeatCell": {
             "range": {"sheetId": sheet_id, "startRowIndex": row - 1, "endRowIndex": row,
@@ -737,7 +740,7 @@ def color_requests(sheet_id: int, positions: List[Position], n_cols: int,
             "cell": {"userEnteredFormat": fmt},
             "fields": "userEnteredFormat.backgroundColor"}}
 
-    reqs = [paint(p.row, {"backgroundColor": YELLOW if p.state == SOLD else RED})
+    reqs = [paint(p.row, {"backgroundColor": BLUE if p.state == SOLD else RED})
             for p in positions if p.row is not None]
     reqs += [paint(r, {}) for r in sorted(cleared)]    # 項目だけ指定して値を渡さないと既定に戻る
     return reqs

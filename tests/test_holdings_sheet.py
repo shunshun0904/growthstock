@@ -12,7 +12,7 @@
   - 日付ごとの表: 銘柄の列は売った日まで、合計には確定した損益が残る
   - グラフは「損益(円)」の列だけ（軸は1本）。合計は淡い青の太い帯。銘柄は保有中と売って
     20 営業日以内のもの。期間の重なる銘柄どうしは違う色で、あとから買っても色が変わらない
-  - 予測ログは保有中を赤、売却済みを黄色、取り消した行は塗りを外す
+  - 予測ログは保有中を赤、売却済みを青（黄色は文字が見えない。2026-10-09）、取り消した行は塗りを外す
   - 公開ログに銘柄名・株価・損益の値を出さない
 
   python3 tests/test_holdings_sheet.py
@@ -528,7 +528,7 @@ class SheetRequests(unittest.TestCase):
         reqs = H.color_requests(0, self.ps, 9, cleared=[4])
         fmt = [(r["repeatCell"]["range"]["startRowIndex"], r["repeatCell"]["cell"]["userEnteredFormat"],
                 r["repeatCell"]["fields"]) for r in reqs]
-        self.assertEqual(fmt, [(1, {"backgroundColor": H.YELLOW}, "userEnteredFormat.backgroundColor"),
+        self.assertEqual(fmt, [(1, {"backgroundColor": H.BLUE}, "userEnteredFormat.backgroundColor"),
                                (5, {"backgroundColor": H.RED}, "userEnteredFormat.backgroundColor"),
                                (3, {}, "userEnteredFormat.backgroundColor")])
         self.assertEqual(reqs[0]["repeatCell"]["range"]["endColumnIndex"], 9)
@@ -672,7 +672,7 @@ class EndToEnd(unittest.TestCase):
                 if r.get("repeatCell", {}).get("range", {}).get("sheetId") == 0]
         self.assertEqual([(r["range"]["startRowIndex"] + 1, r["cell"]["userEnteredFormat"])
                           for r in pred],
-                         [(2, {"backgroundColor": H.YELLOW}), (4, {"backgroundColor": H.RED}),
+                         [(2, {"backgroundColor": H.BLUE}), (4, {"backgroundColor": H.RED}),
                           (3, {})])
         cells = {c["range"]: c["values"][0][0] for c in book.tabs[H.ES.SHEET_TITLE].cells}
         self.assertEqual((cells["F2"], cells["H2"], cells["F4"], cells["H4"], cells["D3"]),
@@ -688,11 +688,11 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(len(log.appends), 1)
         self.assertIn("取引の記録に足した 0件", out)
         cells = {c["range"]: c["values"][0][0] for c in book.tabs[H.ES.SHEET_TITLE].cells}
-        # 買値 480 の +10% は 528。最後の日の高値 540 で届くので、528 で売って黄色になる
+        # 買値 480 の +10% は 528。最後の日の高値 540 で届くので、528 で売って青になる
         self.assertEqual((cells["D4"], cells["G4"], cells["H4"]), (480.0, 528.0, 4800))
         last = [r["repeatCell"] for r in book.requests
                 if r.get("repeatCell", {}).get("range", {}).get("sheetId") == 0][-3:]
-        self.assertEqual(last[1]["cell"]["userEnteredFormat"], {"backgroundColor": H.YELLOW})
+        self.assertEqual(last[1]["cell"]["userEnteredFormat"], {"backgroundColor": H.BLUE})
 
     def test_dry_run_writes_nothing(self):
         book = FakeBook(self.PRED)
