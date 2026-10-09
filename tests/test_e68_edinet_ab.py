@@ -55,6 +55,15 @@ class TestColumnSets(unittest.TestCase):
             E.column_set("screened")
 
 
+class TestLineup(unittest.TestCase):
+    def test_logit_is_compared_but_not_a_vote(self):
+        self.assertEqual(E.ALGOS, ("lgbm", "xgb", "cat", "logit"))       # 2026-10-09 夜: 実験にもロジスティックを含める
+        self.assertEqual(E.JUDGE_ALGOS, ("lgbm", "xgb", "cat"))          # §7 の票は木3つ
+        self.assertEqual(set(E.SEEDS), set(E.ALGOS))
+        self.assertEqual(E.SEEDS["logit"], (42,))                        # 決定的なので種1つ
+        self.assertTrue(all(len(E.SEEDS[a]) == 3 for a in E.JUDGE_ALGOS))
+
+
 class TestJudge7(unittest.TestCase):
     def test_pass_when_positive_beats_placebo_and_majority(self):
         d_ca = np.array([0.01] * 20 + [-0.005] * 12)          # 20/32 が上

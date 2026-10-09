@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-実験68: EDINET DB の年次特徴量（research/edinet_features.py）を本番の239列に足すと、ツリー系3モデルの
+実験68: EDINET DB の年次特徴量（research/edinet_features.py）を本番の239列に足すと、木3モデル + ロジスティック回帰の
 探索（5分割 CV）・本番と同じ作りの out-of-fold・32窓がどう変わるか（実験67 と同じ手順。腕は「列」の違い）。
 
 運用者の計画（2026-10-09）「EDINET はいま取れている行で A/B を先に1回回し、12月にそろった時点で確かめ直す」。
-実験28（2026-09、本番153列・5モデル・B1/B2 の腕）の台本を、239列・ツリー系3モデル（docs/MODEL_ADOPTION_RULES.md
-§27）・実験67 と同じ A/B/C の手順に作り直したもの。候補の列の中身と充足は docs/FEATURE_IDEAS_EDINET.md、
+実験28（2026-09、本番153列・5モデル・B1/B2 の腕）の台本を、239列・木3モデル + ロジスティック回帰（運用者の指示
+2026-10-09 夜「実験にもロジスティックを含めてください」。MLP は外したまま）・実験67 と同じ A/B/C の手順に作り直したもの。候補の列の中身と充足は docs/FEATURE_IDEAS_EDINET.md、
 取得の仕組みと制約は docs/DATA_EDINETDB.md。
 
 腕（データは同じ1本。列だけが違う）
@@ -30,12 +30,13 @@
   core+mcap  core + 時価総額との組み合わせ 7列（実験28 の既定）
   unique     core を除く 483列（J-Quants に無い明細・資本政策・人的資本・比率・時価総額の組み合わせ）
 
-判定は docs/MODEL_ADOPTION_RULES.md §7（2026-09-26 改訂）: 3モデルのうち2つ以上で、窓ごとの PR-AUC の差 C−A の
-平均が正で、対照 P−A の平均を上回り、C が上の窓が過半（32窓なら 17以上）。B は「日曜がやること」の参考として
+判定は docs/MODEL_ADOPTION_RULES.md §7（2026-09-26 改訂）: 木3モデル（lgbm / xgb / cat。運用の合議と同じ）のうち
+2つ以上で、窓ごとの PR-AUC の差 C−A の平均が正で、対照 P−A の平均を上回り、C が上の窓が過半（32窓なら 17以上）。
+ロジスティック回帰は同じ表に並べる（§7 の票には入れず参考。決定的なので種は1つ）。B は「日曜がやること」の参考として
 並べる（探索し直しの条件は §7 で外した）。
 
 探索・評価は実験67 と同じ（50試行 × 5分割 year_cap_date・本番と同じ OOF（36/6/6か月・エンバーゴ20営業日・
-種42）・窓のずらし 0/2/4か月 × 種3つの平均）。
+種42）・窓のずらし 0/2/4か月 × 種3つの平均。logit は種1つ）。
 
 Actions の1回の上限（330分）に収まるよう、モデルを分けて回す。表（ed_* を付けた frame）は1回目に作って
 research/_data/oof/<tag>_* に置き、以降の回はそれを使う。列が多いので --budget-min（既定 290分）を過ぎたら
@@ -44,6 +45,7 @@ actions/cache は job が成功したときだけ保存されるので、上限�
     exp=e68_edinet_ab.py args="--algos lgbm"
     exp=e68_edinet_ab.py args="--algos xgb"
     exp=e68_edinet_ab.py args="--algos cat"
+    exp=e68_edinet_ab.py args="--algos logit"
 充足だけ見る: exp=e68_edinet_ab.py args="--dry"
 試運転:       exp=e68_edinet_ab.py args="--tag e68smoke --algos lgbm --n-trials 2 --shifts 0"
 
@@ -78,8 +80,12 @@ from e44_shortsale import permuted  # noqa: E402
 OOF_DIR = os.path.join(lab.DATA_DIR, "oof")
 N_SPLITS = 5
 CV_SCHEME = "year_cap_date"          # 本番の retrain-weekly.yml と同じ
-ALGOS = ("lgbm", "xgb", "cat")        # §27: 実験はツリー系3種だけ
-SEEDS = (42, 7, 123)
+#: 2026-10-09 夜の運用者の指示「実験にもロジスティックを含める」（MLP は外したまま）
+ALGOS = ("lgbm", "xgb", "cat", "logit")
+#: §7 の票は木3モデル（運用の合議と同じ）。logit は同じ表に並べて参考にする
+JUDGE_ALGOS = ("lgbm", "xgb", "cat")
+#: logit は決定的なので種は1つ
+SEEDS = {"lgbm": (42, 7, 123), "xgb": (42, 7, 123), "cat": (42, 7, 123), "logit": (42,)}
 PROD_SEED = 42
 ARMS = ("A", "B", "C", "P")
 COLS_OF = {"A": "base", "B": "ed", "C": "ed", "P": "perm"}     # どの列の組（perm は ed と同じ列・値を入れ替え）
@@ -356,7 +362,7 @@ def run(algo: str, frames: dict, keysets: dict, colsets: dict, cutoff, n_trials:
     for sh in shifts:
         for arm in ARMS:
             cs = COLS_OF[arm]
-            o = oof(algo, cs, frames[cs], colsets[cs], params[arm], sh, SEEDS, compute)
+            o = oof(algo, cs, frames[cs], colsets[cs], params[arm], sh, SEEDS[algo], compute)
             if o is None:
                 return None
             for rs, keys in keysets.items():
@@ -436,7 +442,7 @@ def report(results: dict, shifts: list, stamp: dict, keysets: dict, cover: dict,
         s.to_csv(path(f"auc_by_window_{rs}.csv"), index=False)
         note = f"・{MIN_WINDOW_ROWS}件以上の窓" if keysets[rs] is not None else ""
         print(f"\n■ 3{sec[rs]}. 窓ごと（境界を {'/'.join(map(str, shifts))}か月ずらした{len(shifts)}通り。"
-              f"種3つの平均。{titles[rs]}{note}）")
+              f"logit は種1つ、ほかは種3つの平均。{titles[rs]}{note}）")
         print(f"  {'':<24}{'前':>9}{'後':>9}{'差の平均':>10}{'SE':>9}{'上の窓':>9}{'同じ':>6}")
         for a in algos:
             g = s[s["algo"] == a]
@@ -447,19 +453,22 @@ def report(results: dict, shifts: list, stamp: dict, keysets: dict, cover: dict,
                     summary["windows"][f"{a}_{met}_{y}-{x}_{rs}"] = st
         print(f"\n■ 4{sec[rs]}. §7（2026-09-26 改訂）の判定（窓の PR-AUC。{titles[rs]}）: "
               "平均 C−A が正 / 対照 P−A を上回る / C が上の窓が過半")
-        passed = 0
         for a in algos:
             g = s[s["algo"] == a]
             j = judge7((g["pr_C"] - g["pr_A"]).to_numpy(), (g["pr_P"] - g["pr_A"]).to_numpy())
             summary["judge7"][f"{a}_{rs}"] = j
-            passed += int(j["pass"])
+            ref = "" if a in JUDGE_ALGOS else "（参考。§7 の票には入れない）"
             print(f"  {a:<7}C−A {j['mean_ca']:>+8.4f} {'○' if j['positive'] else '×'} / "
                   f"P−A {j['mean_pa']:>+8.4f} {'○' if j['beats_placebo'] else '×'} / "
                   f"上の窓 {j['wins']}/{j['n']}（{j['need']} 以上）{'○' if j['majority'] else '×'} "
-                  f"→ {'満たす' if j['pass'] else '満たさない'}")
-        verdict = ("満たす（2モデル以上）" if passed >= 2 else "満たさない") if len(algos) == len(ALGOS) else \
-            f"{passed}/{len(algos)} モデルが満たす（3モデルそろってから判定）"
-        summary["judge7"][f"verdict_{rs}"] = {"passed": passed, "of": len(algos), "complete": len(algos) == len(ALGOS)}
+                  f"→ {'満たす' if j['pass'] else '満たさない'}{ref}")
+        judged = [a for a in algos if a in JUDGE_ALGOS]
+        passed = sum(int(summary["judge7"][f"{a}_{rs}"]["pass"]) for a in judged)
+        complete = all(a in algos for a in JUDGE_ALGOS)
+        verdict = (("満たす（木3モデル中2つ以上）" if passed >= 2 else "満たさない（木3モデル中2つ未満）") if complete
+                   else f"{passed}/{len(judged)} モデルが満たす（木3モデルがそろってから判定）")
+        summary["judge7"][f"verdict_{rs}"] = {"passed": passed, "of": len(judged), "complete": complete,
+                                              "reference": [a for a in algos if a not in JUDGE_ALGOS]}
         print(f"  → §7: {verdict}")
     with open(path("summary.json"), "w", encoding="utf-8") as fh:
         json.dump(summary, fh, ensure_ascii=False, indent=1, default=float)
