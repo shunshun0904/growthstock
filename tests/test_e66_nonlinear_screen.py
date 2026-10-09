@@ -57,6 +57,35 @@ class TestWithinWindowPct(unittest.TestCase):
         self.assertTrue(np.isnan(p[0]))
 
 
+class TestTrees(unittest.TestCase):
+    def test_tag_separates_tree_counts(self):
+        self.assertEqual(E66.tag_for(200), "e66")
+        self.assertEqual(E66.tag_for(1000), "e66t1000")
+        self.assertNotEqual(E66.tag_for(500), E66.tag_for(200))
+
+    def test_with_trees_changes_all_three_models_and_restores(self):
+        import e27_timing_multi as E27
+        import tuning_multi as TM
+        before_lgbm = E27.prod_params("lgbm")["params"]["n_estimators"]
+        before_n = TM.N_ESTIMATORS
+        restore = E66.with_trees(1000)
+        try:
+            self.assertEqual(E27.prod_params("lgbm")["params"]["n_estimators"], 1000)
+            self.assertEqual(TM.N_ESTIMATORS, 1000)
+            # 学習率などは触らない
+            lr = E27.prod_params("lgbm")["params"]["learning_rate"]
+            self.assertGreater(lr, 0)
+            # xgb / cat の学習器が実際に 1000 本で組まれる
+            y = np.array([0, 1] * 20)
+            self.assertEqual(TM.build("xgb", E27.prod_params("xgb")["params"], y).get_params()["n_estimators"], 1000)
+            self.assertEqual(TM.build("cat", E27.prod_params("cat")["params"], y).get_params()["iterations"], 1000)
+        finally:
+            restore()
+        self.assertEqual(E27.prod_params("lgbm")["params"]["n_estimators"], before_lgbm)
+        self.assertEqual(TM.N_ESTIMATORS, before_n)
+        self.assertEqual(before_lgbm, E66.PROD_TREES)
+
+
 class TestColumnsAgree(unittest.TestCase):
     def test_new_cols_match_module(self):
         self.assertEqual(E66.NEW_COLS, list(NL.NL_COLS))

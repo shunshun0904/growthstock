@@ -23,7 +23,14 @@
 
   python3 research/exp/e66_nonlinear_screen.py --stage screen
   python3 research/exp/e66_nonlinear_screen.py --stage ab --algos lgbm,xgb,cat --seeds 3 --shifts 0,2,4
-  結果は research/_data/oof/e66_*。本番の設定には書かない。
+  python3 research/exp/e66_nonlinear_screen.py --stage ab --n-estimators 1000   # 木の本数だけ変えた A/B
+  python3 research/exp/e66_nonlinear_screen.py --stage trees --n-estimators 1000  # 200本と1000本の比較表
+  結果は research/_data/oof/e66_*（木の本数が 200 以外なら e66t<本数>_*）。本番の設定には書かない。
+
+木の本数（運用者の依頼 2026-10-09「特徴量数やサンプル数に対して n_estimator が小さすぎるということはないか。
+1000 にして試してほしい」）: --n-estimators N で3モデルとも木を N 本にする。LightGBM は本番のパラメータの
+n_estimators を、XGBoost / CatBoost は tuning_multi.N_ESTIMATORS（build が読む）を差し替える。学習率などほかの
+パラメータは本番のまま（探索し直さない。歩幅の合計 = 学習率 × 本数 が 5 倍になる）。T / V / P の3腕とも同じ本数。
 
 32列は research/_data/nonlinear_features.parquet に置く（無ければここで計算する。4コアで数分）。
 """
@@ -259,28 +266,128 @@ def band_analysis(df: pd.DataFrame, windows: Sequence[tuple], top_pct: float = 0
 # 5. A/B（ab_oof）
 # --------------------------------------------------------------------------- #
 
-def run_ab(df: pd.DataFrame, shifts: List[int], seeds, algos: List[str]) -> None:
+#: 本番の木の本数（lgbm_params.json / tuning.SEARCH_N_ESTIMATORS）。これ以外なら別のタグに保存する
+PROD_TREES = 200
+
+
+def tag_for(n_estimators: int) -> str:
+    """out-of-fold の保存名。本数が本番と違えば別の名前にして、保存済みと混ざらないようにする。"""
+    return "e66" if int(n_estimators) == PROD_TREES else f"e66t{int(n_estimators)}"
+
+
+def with_trees(n_estimators: int):
+    """
+    3モデルの木の本数だけを n_estimators にする。元に戻す関数を返す。
+
+    LightGBM は E27.prod_params が返す本番パラメータの n_estimators を書き換える（E41.oof_folds が
+    **params で LGBMClassifier に渡す）。XGBoost / CatBoost は tuning_multi.build が
+    モジュール変数 N_ESTIMATORS を読むので、それを差し替える。学習率などは触らない。
+    """
+    import tuning_multi as TM
+
+    n = int(n_estimators)
+    orig_prod, orig_n = E27.prod_params, TM.N_ESTIMATORS
+
+    def prod_params(algo: str) -> dict:
+        rec = orig_prod(algo)
+        if algo == "lgbm":
+            rec["params"] = {**rec["params"], "n_estimators": n}
+        return rec
+
+    E27.prod_params = prod_params
+    TM.N_ESTIMATORS = n
+
+    def restore() -> None:
+        E27.prod_params = orig_prod
+        TM.N_ESTIMATORS = orig_n
+
+    return restore
+
+
+def trees_summary(n_estimators: int) -> pd.DataFrame:
+    """
+    木 PROD_TREES 本の A/B（e66）と n_estimators 本の A/B（e66t<n>）を窓ごとに突き合わせる。
+
+    見るもの（PR-AUC / ROC-AUC、切り方3通りの全窓）
+      T(n) − T(200)  本数を増やすだけで本番の239列の分離力が動くか
+      V(n) − V(200)  32列を足した腕で同じこと
+      V(n) − T(n)    本数を増やしたときの 32列の増分（採否はこちら。§7 の基準）
+    """
+    a = os.path.join(OOF_DIR, f"{tag_for(PROD_TREES)}_auc_by_window.csv")
+    b = os.path.join(OOF_DIR, f"{tag_for(n_estimators)}_auc_by_window.csv")
+    if not (os.path.exists(a) and os.path.exists(b)):
+        print(f"\n[trees] 比べる CSV が揃っていない: {a} / {b}")
+        return pd.DataFrame()
+    da, db = pd.read_csv(a), pd.read_csv(b)
+    keys = ["shift", "algo", "fold"]
+    rows = []
+    for arm in ("V", "P"):
+        m = da[da["arm"] == arm].merge(db[db["arm"] == arm], on=keys, suffixes=("_200", f"_{n_estimators}"))
+        for algo, g in m.groupby("algo"):
+            for metric in ("pr", "roc"):
+                t_d = g[f"{metric}_base_{n_estimators}"] - g[f"{metric}_base_200"]
+                v_d = g[f"{metric}_arm_{n_estimators}"] - g[f"{metric}_arm_200"]
+                inc = g[f"{metric}_arm_{n_estimators}"] - g[f"{metric}_base_{n_estimators}"]
+                inc0 = g[f"{metric}_arm_200"] - g[f"{metric}_base_200"]
+                rows.append({"arm": arm, "algo": algo, "metric": metric, "n_win": len(g),
+                             "T_n-T_200": t_d.mean(), "T_se": t_d.std(ddof=1) / np.sqrt(len(g)), "T_up": int((t_d > 0).sum()),
+                             "V_n-V_200": v_d.mean(), "V_se": v_d.std(ddof=1) / np.sqrt(len(g)), "V_up": int((v_d > 0).sum()),
+                             "V-T@n": inc.mean(), "inc_se": inc.std(ddof=1) / np.sqrt(len(g)), "inc_up": int((inc > 0).sum()),
+                             "V-T@200": inc0.mean(), "inc0_up": int((inc0 > 0).sum())})
+    res = pd.DataFrame(rows)
+    res.to_csv(os.path.join(OOF_DIR, f"{tag_for(n_estimators)}_vs_{PROD_TREES}.csv"), index=False)
+    n = n_estimators
+    for arm, label in (("V", LABELS["V"]), ("P", LABELS["P"])):
+        print(f"\n■ 木 {PROD_TREES}本 → {n}本（腕 {label}、切り方3通りの全窓）")
+        print(f"  {'':<14}{'窓':>4}{'T(n)−T(200)':>14}{'SE':>8}{'上':>7}{'腕(n)−腕(200)':>16}{'SE':>8}{'上':>7}"
+              f"{'腕−T @n':>12}{'SE':>8}{'上':>7}{'腕−T @200':>12}{'上':>7}")
+        for _, r in res[res["arm"] == arm].iterrows():
+            print(f"  {r['algo'] + ' ' + r['metric'].upper() + '-AUC':<14}{int(r['n_win']):>4}"
+                  f"{r['T_n-T_200']:>+14.4f}{r['T_se']:>8.4f}{int(r['T_up']):>4}/{int(r['n_win']):<3}"
+                  f"{r['V_n-V_200']:>+16.4f}{r['V_se']:>8.4f}{int(r['V_up']):>4}/{int(r['n_win']):<3}"
+                  f"{r['V-T@n']:>+12.4f}{r['inc_se']:>8.4f}{int(r['inc_up']):>4}/{int(r['n_win']):<3}"
+                  f"{r['V-T@200']:>+12.4f}{int(r['inc0_up']):>4}/{int(r['n_win']):<3}")
+    return res
+
+
+def run_ab(df: pd.DataFrame, shifts: List[int], seeds, algos: List[str],
+           n_estimators: int = PROD_TREES) -> None:
     base = F.columns(F.DEFAULT_PRESET)
     v = base + NEW_COLS
     assert len(set(v)) == len(v)
+    tag = tag_for(n_estimators)
     print("=" * 78)
-    print(f"実験66 A/B（種{len(seeds)}つ・ずらし {shifts}か月・{algos}）: {len(df):,}件")
+    print(f"実験66 A/B（種{len(seeds)}つ・ずらし {shifts}か月・{algos}・木 {int(n_estimators)}本・タグ {tag}）: {len(df):,}件")
     for arm, cols in (("T", base), ("V", v), ("P", v)):
         print(f"  {LABELS[arm]:<30}{len(cols)}列  指紋 {F.signature(cols)}")
     print("=" * 78)
     fp = permuted(df, NEW_COLS, seed=PERM_SEED)
     arms = {"T": (df, base), "V": (df, v), "P": (fp, v)}
-    AB.compare("e66", arms, "T", LABELS, shifts, seeds, algos)
+    restore = with_trees(n_estimators)
+    try:
+        for a in algos:
+            par = E27.prod_params(a)["params"]
+            print(f"  [{a}] 木 {par.get('n_estimators', n_estimators)}本 / 学習率 {par.get('learning_rate')}")
+        AB.compare(tag, arms, "T", LABELS, shifts, seeds, algos)
+    finally:
+        restore()
+    if int(n_estimators) != PROD_TREES:
+        trees_summary(n_estimators)
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="実験66: 非線形時系列解析の特徴量")
-    ap.add_argument("--stage", default="screen", choices=("screen", "ab", "all"))
+    ap.add_argument("--stage", default="screen", choices=("screen", "ab", "all", "trees"))
     ap.add_argument("--shifts", default="0,2,4")
     ap.add_argument("--seeds", type=int, default=3)
     ap.add_argument("--algos", default="lgbm,xgb,cat")
+    ap.add_argument("--n-estimators", type=int, default=PROD_TREES,
+                    help=f"3モデルの木の本数（既定 {PROD_TREES} = 本番）。変えると保存名が e66t<本数> になる")
     args = ap.parse_args(argv)
     os.makedirs(OOF_DIR, exist_ok=True)
+    if args.stage == "trees":
+        trees_summary(args.n_estimators)
+        return 0
 
     df = load_frame()
     windows = windows_for(df)
@@ -320,7 +427,8 @@ def main(argv=None) -> int:
         shifts = [int(x) for x in args.shifts.split(",") if x.strip()]
         seeds = E27.SEEDS3[:args.seeds]
         algos = [a for a in args.algos.split(",") if a]
-        run_ab(df.drop(columns=[c for c in df.columns if c.startswith("_")]), shifts, seeds, algos)
+        run_ab(df.drop(columns=[c for c in df.columns if c.startswith("_")]), shifts, seeds, algos,
+               n_estimators=args.n_estimators)
     return 0
 
 
