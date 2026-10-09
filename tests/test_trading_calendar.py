@@ -521,5 +521,49 @@ class TestEarnDateColumn(unittest.TestCase):
         self.assertEqual(jq_bulk.DAILY_KINDS["earndate"][1], "PubDate")
 
 
+class TestSanitizeIds(unittest.TestCase):
+    """
+    識別子の列（Code / *Code / DocId）は数字だけでも数値にしない。
+
+    実測（2026-10-08〜09）: 大株主が 11行・33行、政策保有が 1行の日は Code が全部数字だけで
+    数値列になり、文字列で保存済みの年別 parquet と混ざって書けなかった（ArrowTypeError）。
+    """
+
+    def test_数字だけのコードも文字列のまま(self):
+        d = pd.DataFrame({"Code": ["72030", "13010"], "SubDate": ["2026-10-09", "2026-10-09"],
+                          "Ratio": ["1.5", "2.0"]})
+        out = jq_bulk._sanitize(d, "mjrshld")
+        self.assertEqual(str(out["Code"].dtype), "string")
+        self.assertEqual(out["Code"].tolist(), ["72030", "13010"])
+        self.assertEqual(str(out["Ratio"].dtype), "float64")          # ほかの列は今までどおり数値に
+
+    def test_数値で来たコードも文字列にそろえる(self):
+        d = pd.DataFrame({"Code": [72030, 13010], "DocId": ["S100AAAA", "S100BBBB"],
+                          "Sector33Code": ["0050", "3050"]})
+        out = jq_bulk._sanitize(d)
+        self.assertEqual(out["Code"].tolist(), ["72030", "13010"])
+        self.assertEqual(out["Sector33Code"].tolist(), ["0050", "3050"])
+        self.assertEqual(str(out["DocId"].dtype), "string")
+
+    def test_識別子の欠測記号は欠測に(self):
+        d = pd.DataFrame({"Code": ["72030", "-", ""]})
+        out = jq_bulk._sanitize(d)
+        self.assertEqual(out["Code"].iloc[0], "72030")
+        self.assertTrue(pd.isna(out["Code"].iloc[1]) and pd.isna(out["Code"].iloc[2]))
+
+    def test_文字列の保存済みと混ぜて書ける(self):
+        # 以前の作り（数値列になった Code）と同じ状況を data_store 側でも吸収する
+        d = tempfile.mkdtemp()
+        try:
+            old = pd.DataFrame({"SubDate": ["2026-10-02"], "DocId": ["S1"], "Code": ["130A0"], "V": [1.0]})
+            jq_bulk.data_store.merge_into_years(d, "mjrshld", old, "SubDate")
+            new = pd.DataFrame({"SubDate": ["2026-10-09"], "DocId": ["S2"], "Code": [72030], "V": [2.0]})
+            written = jq_bulk.data_store.merge_into_years(d, "mjrshld", new, "SubDate")
+            got = pd.read_parquet(written[0])
+            self.assertEqual(sorted(got["Code"].astype(str)), ["130A0", "72030"])
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

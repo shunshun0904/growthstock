@@ -241,6 +241,47 @@ def _comparable(df):
     return out
 
 
+def _is_id_column(name: str) -> bool:
+    """識別子の列（Code / *Code / DocId）。jq_bulk._is_id_column と同じ決め方。"""
+    return name == "DocId" or name.endswith("Code")
+
+
+def _as_id_str(s):
+    """識別子を文字列にそろえる。数値で来た "72030" は小数点なしの "72030" に（72030.0 にしない）。"""
+    import numpy as np
+    import pandas as pd
+
+    def one(x):
+        if x is None or (isinstance(x, float) and np.isnan(x)) or x is pd.NA:
+            return None
+        if isinstance(x, (bool, np.bool_)):
+            return str(x)
+        if isinstance(x, (int, np.integer)):
+            return str(int(x))
+        if isinstance(x, (float, np.floating)) and float(x).is_integer():
+            return str(int(x))
+        return str(x)
+    return s.map(one).astype("string")
+
+
+def align_id_columns(old, new):
+    """
+    保存済み（old）と今回（new）で識別子の列の型が違えば、両方とも文字列にそろえる。
+
+    実測（2026-10-08〜09）: 大株主・政策保有の Code が、行数の少ない日に数値列で来て
+    （jq_bulk._sanitize が直す前の作り）、文字列の保存済みと concat した列に str と int が
+    混ざり parquet が書けなかった。取り込み側で直したうえで、ここでも型をそろえておく
+    （どちらかが数値のまま保存されていても、次の取り込みで壊れない）。
+    """
+    for c in new.columns:
+        if c in old.columns and _is_id_column(c) and str(old[c].dtype) != str(new[c].dtype):
+            old = old.copy()
+            new = new.copy()
+            old[c] = _as_id_str(old[c])
+            new[c] = _as_id_str(new[c])
+    return old, new
+
+
 def row_key(kind: str, df) -> List[str]:
     """その種別の行のキー（列名の並び）。登録が無い・列が無いなら例外。"""
     if kind not in ROW_KEYS:
@@ -290,6 +331,7 @@ def merge_into_years(data_dir: str, kind: str, new_df, date_col: str = "Date") -
         if os.path.exists(p):
             old = pd.read_parquet(p)
             old[date_col] = pd.to_datetime(old[date_col])
+            old, part = align_id_columns(old, part)
             part = pd.concat([old, part], ignore_index=True)
         # 同じキーの行は後勝ち（訂正を反映）
         cmp = _comparable(part)

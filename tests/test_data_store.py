@@ -734,5 +734,49 @@ class TestTradingDayGate(unittest.TestCase):
             shutil.rmtree(empty, ignore_errors=True)
 
 
+class TestAlignIdColumns(unittest.TestCase):
+    """識別子の列の型が保存済みと違っても、文字列にそろえて書ける（2026-10-08〜09 の ArrowTypeError）。"""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def test_int_code_merges_into_stored_strings(self):
+        data_store.merge_into_years(self.dir, "xhold",
+                                    pd.DataFrame({"SubDate": ["2026-10-01"], "DocId": ["S1"],
+                                                  "Code": ["72030"], "Ratio": [0.1]}), "SubDate")
+        written = data_store.merge_into_years(self.dir, "xhold",
+                                              pd.DataFrame({"SubDate": ["2026-10-09"], "DocId": ["S2"],
+                                                            "Code": [99840], "Ratio": [0.2]}), "SubDate")
+        got = pd.read_parquet(written[0]).sort_values("SubDate")
+        self.assertEqual(got["Code"].astype(str).tolist(), ["72030", "99840"])
+        self.assertEqual(len(got), 2)
+
+    def test_stored_ints_and_new_strings(self):
+        data_store.merge_into_years(self.dir, "xhold",
+                                    pd.DataFrame({"SubDate": ["2026-10-01"], "DocId": ["S1"],
+                                                  "Code": [72030], "Ratio": [0.1]}), "SubDate")
+        written = data_store.merge_into_years(self.dir, "xhold",
+                                              pd.DataFrame({"SubDate": ["2026-10-09"], "DocId": ["S2"],
+                                                            "Code": ["130A0"], "Ratio": [0.2]}), "SubDate")
+        got = pd.read_parquet(written[0]).sort_values("SubDate")
+        self.assertEqual(got["Code"].astype(str).tolist(), ["72030", "130A0"])
+
+    def test_same_dtype_is_left_alone(self):
+        old = pd.DataFrame({"Code": ["1"], "V": [1]})
+        new = pd.DataFrame({"Code": ["2"], "V": [2]})
+        o, n = data_store.align_id_columns(old, new)
+        self.assertIs(o, old)
+        self.assertIs(n, new)
+
+    def test_float_codes_have_no_decimal_point(self):
+        s = data_store._as_id_str(pd.Series([72030.0, None, "130A0"], dtype=object))
+        self.assertEqual(s.iloc[0], "72030")
+        self.assertTrue(pd.isna(s.iloc[1]))
+        self.assertEqual(s.iloc[2], "130A0")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -504,6 +504,20 @@ def fetch_indices(client: JQuantsClient, days: List[dt.date]) -> pd.DataFrame:
 NULL_MARKERS = {"-", "－", "—", "ー", "N/A", "n/a", ""}
 
 
+def _is_id_column(name: str) -> bool:
+    """
+    識別子の列か（Code / *Code / DocId）。値が数字だけでも数値にしない。
+
+    実測（2026-10-08〜09、run 37758353503 / 37912912669）: 大株主（mjrshld）が 11行・33行、
+    政策保有（xhold）が 1行だけの日は、Code が全部数字だけ（"72030" など）だったので
+    _sanitize が数値列にし、保存済みの年別 parquet（Code は文字列）と concat した列に
+    str と int が混ざって parquet が書けなかった
+      ArrowTypeError: Expected bytes, got a 'int' object（column Code）
+    行数の多い種別は "130A0" のような英字入りのコードが毎日混ざるので数値にならず、気づかなかった。
+    """
+    return name == "DocId" or name.endswith("Code")
+
+
 def _sanitize(df: pd.DataFrame, label: str = "") -> pd.DataFrame:
     """
     欠測記号を NaN にし、数値になる列は数値にする。
@@ -516,6 +530,13 @@ def _sanitize(df: pd.DataFrame, label: str = "") -> pd.DataFrame:
         return df
     out = df.copy()
     for c in out.columns:
+        if _is_id_column(c):
+            # 識別子は型にかかわらず文字列にそろえる（欠測記号だけ欠測に）
+            v = out[c]
+            if v.dtype == object:
+                v = v.where(~v.map(lambda x: isinstance(x, str) and x.strip() in NULL_MARKERS))
+            out[c] = v.astype("string")
+            continue
         if out[c].dtype != object:
             continue
         v = out[c]
