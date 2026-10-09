@@ -49,6 +49,13 @@ actions/cache は job が成功したときだけ保存されるので、上限�
 充足だけ見る: exp=e68_edinet_ab.py args="--dry"
 試運転:       exp=e68_edinet_ab.py args="--tag e68smoke --algos lgbm --n-trials 2 --shifts 0"
 
+結果（2026-10-09、run 37913419095 lgbm 63分 / 37913461491 xgb 202分 / 37920515264 cat 103分 / 37943266657 logit 57分、
+docs/MODEL_ADOPTION_RULES.md §29）: 付いた行 14,816（67.6%）で、列を足した C−A は 32窓の PR-AUC で lgbm −0.0049 ± 0.0025・
+xgb −0.0056 ± 0.0028・cat +0.0003 ± 0.0034・logit −0.0263 ± 0.0037 と、どれも対照 P（値を日付内で入れ替え）と区別がつかない
+（C−P は全部 ±1.5 SE 以内）。探索し直し（B）は列を足して下がったぶんを戻すだけ（B−A +0.0003〜+0.0034、15〜19/32）。
+logit の大きな落ち方は P でも同じで、239列で選んだ正則化が 762列では効きすぎる列数の効果（探索し直すと戻る）。
+§7 の票は木3モデル中 0 → 採用しない。12月に母集団がそろったら --rows all と、小さな組（--set core+mcap / unique）で確かめ直す。
+
 公開ログには件数・割合・日付・精度だけを出す（財務の値は出さない）。本番の設定（research/lgbm_params.json、
 research/multi_params.json、features.py）には書かない。
 """
