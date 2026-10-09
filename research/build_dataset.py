@@ -692,6 +692,82 @@ def listing_years(codes: pd.Series, dates: pd.Series, gm: pd.DataFrame,
     return np.where(np.asarray(yrs.fillna(0.0)) < 0, np.nan, out).astype(float)
 
 
+#: 時間反転非対称性の窓（営業日）と、値のある足の最小本数（8割）
+TRA_WINDOW = 120
+TRA_MIN = 96
+#: 百分位の参照（その日より前の高値更新日）がこれより少なければ欠測
+TRA_PCT_MIN_PRIOR = 500
+
+
+def add_time_reversal(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    時間反転非対称性 nl_tra1_120（実験66〜68・71。docs/FEATURE_IDEAS_NONLINEAR.md）。
+
+      E[r(t)² r(t−1) − r(t) r(t−1)²] / σ³、r は分割調整後終値のログリターン、直近 TRA_WINDOW 本、
+      値のある足が TRA_MIN 本以上。0 から離れるほど上げ下げが時間反転で変わる（非可逆）。
+
+    research/nonlinear_features.time_reversal_asymmetry と同じ定義（欠測の無い窓では値が一致する。
+    tests/test_dataset.py で固定）。**モデルの特徴量ではない。** 画面の目印（attach_tra1_pct の百分位）に
+    使うだけで、features.GROUPS には入れない。欠測の足のリターンは欠測、欠測の翌日は欠測をまたいだ変化。
+    """
+    codes = df["Code"]
+    close = pd.to_numeric(df["close"], errors="coerce")
+    lc = np.log(close.where(close > 0))
+    lc_ff = lc.groupby(codes, sort=False).ffill()
+    r = lc_ff.groupby(codes, sort=False).diff().where(lc.notna())
+    r_prev = r.groupby(codes, sort=False).shift(1)
+    u = r * r_prev * (r - r_prev)          # r(t)² r(t−1) − r(t) r(t−1)²
+    # 対は窓の中の TRA_WINDOW 本のリターンどうし（TRA_WINDOW − 1 組）。σ は TRA_WINDOW 本で取る
+    num = u.groupby(codes, sort=False).transform(
+        lambda x: x.rolling(TRA_WINDOW - 1, min_periods=TRA_MIN - 1).mean())
+    sd = r.groupby(codes, sort=False).transform(
+        lambda x: x.rolling(TRA_WINDOW, min_periods=TRA_MIN).std())
+    df["nl_tra1_120"] = _safe_ratio(num, sd ** 3)
+    return df
+
+
+def attach_tra1_pct(samples: pd.DataFrame) -> pd.DataFrame:
+    """
+    nl_tra1_120 の「その日より前の高値更新日（この母集団の全行）の中での百分位」tra1_pct（0〜100）。
+
+    画面の目印用（実験68 の除外規則と同じく、しきい値に先の値は使わない。50 以上が「上半分」）。
+    その日より前の行が TRA_PCT_MIN_PRIOR 未満なら欠測。同じ日の行どうしは互いの参照にならない。
+    母集団は除外（ETF・普通株以外・流動性）を掛けたあとの行で、予測用（ラベル未確定）の行も同じ扱い。
+    なお実験71 で、列を前の窓だけで選び直すとこの除外規則は効かなかった。表示は記録のためで、
+    効いた証拠にはならない（docs/FEATURE_IDEAS_NONLINEAR.md 実験71）。
+    """
+    import bisect
+
+    if "nl_tra1_120" not in samples.columns:
+        samples["tra1_pct"] = np.nan
+        return samples
+    dates = pd.to_datetime(samples["Date"]).to_numpy()
+    vals = pd.to_numeric(samples["nl_tra1_120"], errors="coerce").to_numpy(dtype=float)
+    order = np.argsort(dates, kind="mergesort")
+    out = np.full(len(samples), np.nan)
+    prior: list = []
+    i, n = 0, len(order)
+    while i < n:
+        j = i
+        while j < n and dates[order[j]] == dates[order[i]]:
+            j += 1
+        if len(prior) >= TRA_PCT_MIN_PRIOR:
+            arr = np.asarray(prior)
+            for k in range(i, j):
+                v = vals[order[k]]
+                if np.isfinite(v):
+                    out[order[k]] = np.searchsorted(arr, v, side="right") / len(arr) * 100.0
+        for k in range(i, j):
+            v = vals[order[k]]
+            if np.isfinite(v):
+                bisect.insort(prior, v)
+        i = j
+    samples["tra1_pct"] = out
+    print(f"[tra1] 百分位あり {np.isfinite(out).mean()*100:.1f}% / 上半分（50以上） "
+          f"{(out[np.isfinite(out)] >= 50).mean()*100 if np.isfinite(out).any() else float('nan'):.1f}%")
+    return samples
+
+
 def add_vol_factors(df: pd.DataFrame, ret1: pd.Series) -> pd.DataFrame:
     """
     vol_20d を「どんな種類のボラか」に分解した列（実験51、2026-09-26 運用者の依頼）。
@@ -810,6 +886,7 @@ def price_panel(bars: pd.DataFrame, cfg: LabelConfig = DEFAULT_LABEL,
     df["vol_20d"] = _ret1.groupby(df["Code"], sort=False).transform(
         lambda s: s.rolling(20, min_periods=15).std()) * 100.0
     df = add_vol_factors(df, _ret1)
+    df = add_time_reversal(df)
 
     # --- 52週高値（当日を含む / 含まない の2種類が要る） --- #
     # 含む  : 基準日時点の高値接近率 R_high の分母
@@ -3208,6 +3285,7 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     # ほかの除外条件（上の「除外条件」ブロック）とは離れてここに置く。
     samples = drop_excluded_markets(samples)
     samples = drop_non_common_shares(samples)
+    samples = attach_tra1_pct(samples)
 
     # --- 上場からの年数（実験47の候補。本番の列には入れていない） --- #
     samples["listing_years"] = listing_years(samples["Code"], samples["Date"], gm)
@@ -3291,7 +3369,10 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
                  # 進捗の基準の物差し（前年同期 / 下限 / Q×25%。実験46）
                  "progress_basis",
                  # 目的変数の基準の価格（翌営業日の寄り。LABEL_ENTRY）
-                 "entry_price"]
+                 "entry_price",
+                 # 画面の目印（特徴量ではない。実験68・71）: 時間反転非対称性と、その日より前の
+                 # 高値更新日の中での百分位
+                 "nl_tra1_120", "tra1_pct"]
     meta_cols = [c for c in meta_cols if c in samples.columns]
 
     # 未来から作った列が特徴量に混ざるとリークで結果が無意味になる。

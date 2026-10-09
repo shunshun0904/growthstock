@@ -2336,3 +2336,76 @@ class TestDisclosureTiming(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+import build_dataset as B  # noqa: E402
+import features as F  # noqa: E402
+
+
+class TestTimeReversal(unittest.TestCase):
+    """画面の目印 nl_tra1_120 / tra1_pct（特徴量ではない。実験68・71）。"""
+
+    def _bars(self, n_days=300, seed=3):
+        rng = np.random.default_rng(seed)
+        dates = pd.bdate_range("2022-01-04", periods=n_days)
+        rows = []
+        for code in ("10000", "20000"):
+            px = 1000.0 * np.exp(np.cumsum(rng.normal(0.0, 0.02, n_days)))
+            vo = rng.integers(1000, 50000, n_days).astype(float)
+            rows.append(pd.DataFrame({"Date": dates, "Code": code, "O": px, "H": px * 1.01, "L": px * 0.99,
+                                      "C": px, "Vo": vo, "AdjO": px, "AdjH": px * 1.01, "AdjL": px * 0.99,
+                                      "AdjC": px, "AdjVo": vo}))
+        return pd.concat(rows, ignore_index=True)
+
+    def test_matches_the_research_definition_without_gaps(self):
+        sys.path.insert(0, os.path.join(ROOT, "research"))
+        import nonlinear_features as NL
+        bars = self._bars()
+        panel = B.price_panel(bars)
+        self.assertIn("nl_tra1_120", panel.columns)
+        g = panel[panel["Code"] == "10000"].reset_index(drop=True)
+        for pos in (150, 220, len(g) - 1):
+            win = g.iloc[:pos + 1]
+            want = NL.features_for_window(win["close"].to_numpy(), (win["close"] * win["vol"]).to_numpy())["nl_tra1_120"]
+            self.assertAlmostEqual(float(g.loc[pos, "nl_tra1_120"]), float(want), places=9)
+
+    def test_missing_until_enough_history(self):
+        panel = B.price_panel(self._bars())
+        g = panel[panel["Code"] == "10000"].reset_index(drop=True)
+        self.assertTrue(g.loc[:B.TRA_MIN - 2, "nl_tra1_120"].isna().all())
+        self.assertTrue(g.loc[B.TRA_WINDOW:, "nl_tra1_120"].notna().all())
+
+    def test_percentile_uses_only_earlier_dates(self):
+        n = B.TRA_PCT_MIN_PRIOR + 40
+        dates = pd.bdate_range("2020-01-06", periods=n)
+        s = pd.DataFrame({"Date": dates, "Code": "10000", "nl_tra1_120": np.arange(n, dtype=float)})
+        out = B.attach_tra1_pct(s.copy())
+        # 前の行が TRA_PCT_MIN_PRIOR 未満の間は欠測
+        self.assertTrue(out.loc[:B.TRA_PCT_MIN_PRIOR - 1, "tra1_pct"].isna().all())
+        # それ以降は、その日より前の値はすべて自分より小さい → 100
+        self.assertTrue((out.loc[B.TRA_PCT_MIN_PRIOR:, "tra1_pct"] == 100.0).all())
+        # 中央の値を当日に差し込むと 50 付近
+        s2 = s.copy()
+        s2.loc[n - 1, "nl_tra1_120"] = float(np.median(np.arange(n - 1)))
+        out2 = B.attach_tra1_pct(s2)
+        self.assertAlmostEqual(float(out2.loc[n - 1, "tra1_pct"]), 50.0, delta=0.5)
+
+    def test_same_day_rows_do_not_see_each_other_and_future_does_not_change_past(self):
+        n = B.TRA_PCT_MIN_PRIOR + 10
+        dates = list(pd.bdate_range("2020-01-06", periods=n))
+        s = pd.DataFrame({"Date": dates + [dates[-1]] * 3, "Code": "10000",
+                          "nl_tra1_120": list(np.arange(n, dtype=float)) + [1e6, -1e6, 0.0]})
+        out = B.attach_tra1_pct(s.copy())
+        last = out[out["Date"] == dates[-1]]
+        # 同じ日の 3行は互いを参照しない: 1e6 → 100、−1e6 → 0
+        self.assertEqual(float(last.loc[last["nl_tra1_120"] == 1e6, "tra1_pct"].iloc[0]), 100.0)
+        self.assertEqual(float(last.loc[last["nl_tra1_120"] == -1e6, "tra1_pct"].iloc[0]), 0.0)
+        # 未来の行を足しても過去の百分位は変わらない
+        more = pd.concat([s, pd.DataFrame({"Date": [dates[-1] + pd.Timedelta(days=7)] * 5, "Code": "10000",
+                                           "nl_tra1_120": [5e5] * 5})], ignore_index=True)
+        out3 = B.attach_tra1_pct(more)
+        pd.testing.assert_series_equal(out3.loc[:len(s) - 1, "tra1_pct"], out["tra1_pct"], check_names=False)
+
+    def test_tra1_columns_are_not_features(self):
+        self.assertNotIn("nl_tra1_120", F.all_columns())
+        self.assertNotIn("tra1_pct", F.all_columns())

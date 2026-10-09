@@ -358,6 +358,11 @@ def main(argv=None) -> int:
             "roe": r(s.get("ROE_q0")),
             "opMargin": r(s.get("op_margin_q0")),
             "volumeTrend": r(s.get("volume_trend")),
+            # 時間反転非対称性と、その日より前の高値更新日の中での百分位（0〜100）。画面の目印で、
+            # モデルの特徴量ではない。実験68 では上半分を外すと残りの平均が上がったが、実験71 で
+            # 列を前の窓だけで選び直すと効かなかった（docs/FEATURE_IDEAS_NONLINEAR.md）。記録のために出す
+            "tra1": r(s.get("nl_tra1_120"), 3),
+            "tra1Pct": r(s.get("tra1_pct"), 0),
             # 画面の「進捗期待」。データ取得と同じ関数で出す（progress_fields）
             "progressRate": r(pf.get("progressRate")),
             "quarter": pf.get("quarter"),

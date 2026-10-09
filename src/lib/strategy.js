@@ -59,6 +59,7 @@ export const STRATEGY = {
   maxSlots: 3,       // 同時に持てる銘柄数。埋まっていたら見送る
   nearLo: 85,        // 「惜しい候補」として画面に出す下限
   frozenVol: 0.3,    // 直近20日の日次ボラ（%）がこれ未満なら「値動きが止まっている」注意を出す（TOB 中の可能性。実験63）
+  tra1High: 50,      // 時間反転非対称性の百分位（その日より前の高値更新日の中で）がこれ以上なら「上半分」の目印を出す（実験68・71）
 };
 
 /**
@@ -75,6 +76,22 @@ export function frozenNote(candidate, s = STRATEGY) {
   const v = Number(raw);
   if (!Number.isFinite(v) || v >= s.frozenVol) return null;
   return `値動きなし（20日ボラ ${v.toFixed(2)}%。TOB 中の可能性）`;
+}
+
+/**
+ * 「時間反転非対称性が上半分」の目印。candidate.tra1Pct（nl_tra1_120 の、その日より前の高値更新日の中での百分位、
+ * 0〜100）が s.tra1High 以上なら文言を返す。
+ *
+ * 実験68（docs/FEATURE_IDEAS_NONLINEAR.md）: 選んだ後にこの上半分を外すと残りの平均収益が +0.5〜0.7pt 上がったが、
+ * 実験71 で列を前の窓だけで選び直すと効かなかった（列の選び方に先読み）。だから選定の規則にはせず、
+ * 目印として出して、その後の記録で確かめる（運用者の決定 2026-10-09）。値が無ければ null。
+ */
+export function tra1Note(candidate, s = STRATEGY) {
+  const raw = candidate?.tra1Pct;
+  if (raw === null || raw === undefined || raw === '') return null;
+  const p = Number(raw);
+  if (!Number.isFinite(p) || p < s.tra1High) return null;
+  return `時間反転非対称性が上半分（百分位 ${Math.round(p)}）`;
 }
 
 /**

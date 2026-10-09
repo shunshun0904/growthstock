@@ -57,6 +57,9 @@ OWNED_COLS = [
     "スコア", "帯", "較正確率%", "帯の正例率%", "帯の実収益%", "帯の勝率%",
     "必要上昇率%", "予測時株価", "時価総額(億)", "売買代金(億/日)",
     "日次ボラ%", "20日リターン%", "地合い寄与", "銘柄固有寄与", "PER", "PBR",
+    # 時間反転非対称性の百分位（その日より前の高値更新日の中で、0〜100。2026-10-09）。
+    # 画面のバッジと同じ値。モデルの特徴量ではない。既存のシートでは右端に足される
+    "非対称性百分位",
 ]
 
 # 注: 順位・帯・スコア・較正確率はすべて基準モデル（LightGBM）のもの。
@@ -154,6 +157,7 @@ def rows_from_predictions(pred: Dict) -> List[Dict]:
             "地合い寄与": ct.get("marketContrib"),
             "銘柄固有寄与": ct.get("stockContrib"),
             "PER": c.get("per"), "PBR": c.get("pbr"),
+            "非対称性百分位": c.get("tra1Pct"),
             **by_model,
             AGREE_COL: (f"{c['agree90']}/{c['nModels']}"
                         if c.get("nModels") else None),

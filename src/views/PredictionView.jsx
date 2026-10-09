@@ -3,7 +3,7 @@ import { fmt, fmtInt, fmtSigned, fmtOku, fmtDate, fmtDateTime, DASH } from '../l
 import { bandColor, bandLabel, pctColor, modelRows, MODEL_SHORT, MODEL_FAMILY,
   FAMILY_JA, marketTone, candidateToStock } from '../lib/predictions.js';
 import { STRATEGY, BOOST, strategySignal, exitPlan, nearMisses,
-         MODEL_JA, fundContrib, frozenNote,
+         MODEL_JA, fundContrib, frozenNote, tra1Note,
 } from '../lib/strategy.js';
 
 /**
@@ -330,6 +330,15 @@ function Row({ c, models, open, onToggle, onSend, sent }) {
               値動きなし
             </span>
           )}
+          {tra1Note(c) && (
+            <span className="badge amber pred-warn"
+                  title={`${tra1Note(c)}。直近120日の上げ下げが「小さく上げて大きく下げる」型に偏った銘柄。`
+                         + '実験68では、選んだ後にこの上半分を外すと残りの平均収益が +0.5〜0.7pt 上がりましたが、'
+                         + '列を前の窓だけで選び直す確認（実験71）では効きませんでした。選定の規則は変えていません。'
+                         + '記録のための目印です'}>
+              非対称 上半分
+            </span>
+          )}
         </span>
         {mr.length > 0 ? (
           <ModelStrip rows={mr} agree={c.agree90} n={c.nModels} />
@@ -420,6 +429,7 @@ const NUMS = [
   ['売買代金(20日平均)', (c) => fmt(c.tradingValue, 2, '億円/日')],
   ['日次ボラ', (c) => fmt(c.vol20d, 2, '%')],
   ['必要上昇率', (c) => fmt(c.needPct, 1, '%')],
+  ['非対称性の百分位', (c) => fmt(c.tra1Pct, 0)],
   ['20日リターン', (c) => fmtSigned(c.ret20d, 1)],
   ['高値からの位置', (c) => fmt(c.rHigh, 1, '%')],
   ['抜けた幅', (c) => fmtSigned(c.breakMargin, 2)],

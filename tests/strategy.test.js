@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   BOOST, STRATEGY, boostPcts, minPct, passesAgree, dayVerdict, strategySignal, exitPlan,
-  freeSlots, pctSpread, laggard, nearMisses, fundContrib, frozenNote,
+  freeSlots, pctSpread, laggard, nearMisses, fundContrib, frozenNote, tra1Note,
 } from '../src/lib/strategy.js';
 
 const cand = (code, pcts, score = 0.5) => ({
@@ -204,3 +204,24 @@ test('frozenNote: 直近20日の日次ボラが frozenVol 未満のときだけ�
   assert.equal(STRATEGY.frozenVol, 0.3);
 });
 
+/* ------------------------------------------------ 時間反転非対称性の目印 */
+
+test('tra1Note: 百分位が tra1High 以上のときだけ「上半分」の目印を返す', () => {
+  assert.equal(tra1Note({ tra1Pct: 83 }), '時間反転非対称性が上半分（百分位 83）');
+  assert.equal(tra1Note({ tra1Pct: 50 }), '時間反転非対称性が上半分（百分位 50）');   // ちょうどは出す（上半分 = 中央値以上）
+  assert.equal(tra1Note({ tra1Pct: 49.6 }), null);
+  assert.equal(tra1Note({ tra1Pct: 12 }), null);
+});
+
+test('tra1Note: 値が無い・数でない候補には出さない', () => {
+  assert.equal(tra1Note({}), null);
+  assert.equal(tra1Note({ tra1Pct: null }), null);
+  assert.equal(tra1Note({ tra1Pct: '' }), null);
+  assert.equal(tra1Note({ tra1Pct: 'abc' }), null);
+  assert.equal(tra1Note(null), null);
+});
+
+test('tra1Note: しきい値は STRATEGY.tra1High から取る', () => {
+  assert.equal(tra1Note({ tra1Pct: 60 }, { ...STRATEGY, tra1High: 70 }), null);
+  assert.equal(tra1Note({ tra1Pct: 60 }, { ...STRATEGY, tra1High: 60 }), '時間反転非対称性が上半分（百分位 60）');
+});
