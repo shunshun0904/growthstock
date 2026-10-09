@@ -11,7 +11,7 @@ import {
   PROGRESS_TABLE, PROGRESS_PCTS, percentileOf, progressBenchmark, progressDetail,
 } from '../src/lib/scoring.js';
 import {
-  candidateToStock, marketTone, bandLabel, bandColor,
+  candidateToStock, marketTone, bandLabel, bandColor, pctColor, TOP_PCT,
 } from '../src/lib/predictions.js';
 import { mergeStocks, dropOldPredictionProgress } from '../src/lib/store.js';
 
@@ -403,6 +403,19 @@ test('marketTone は地合い寄与の中央値で向きを決める', () => {
   assert.equal(marketTone([]), null);
   // 寄与が取れていない候補は無視する（0 として数えない）
   assert.equal(marketTone([mk(null), mk(-0.3), mk(-0.2), mk(-0.25)]).label, '向かい風');
+});
+
+test('pctColor は 95 以上を別の色にし、それ未満は帯の色に揃える', () => {
+  // 運用の選定基準（lgbm 単体 95以上 = 上位5%）が紫の中に埋もれないように（2026-10-09）
+  assert.equal(TOP_PCT, 95);
+  assert.equal(pctColor(95), 'var(--cyan)');
+  assert.equal(pctColor(99.9), 'var(--cyan)');
+  assert.equal(pctColor(94.9), bandColor(10));           // 紫のまま
+  assert.equal(pctColor(80), bandColor(9));
+  assert.equal(pctColor(60), bandColor(7));
+  assert.equal(pctColor(29.9), bandColor(3));
+  assert.notEqual(pctColor(95), pctColor(90));
+  assert.equal(pctColor(null), 'var(--text-faint)');
 });
 
 test('bandLabel / bandColor は帯が無いとき落ちない', () => {

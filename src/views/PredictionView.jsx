@@ -390,6 +390,10 @@ function ModelStrip({ rows, agree, n }) {
             が上位10%
           </>
         )}
+        <span className="pred-ms-legend"
+              title="色の区分: 95以上（上位5%。運用の選定基準）はシアン / 80以上は紫 / 60以上は緑 / 30以上は黄 / それ未満は赤">
+          <i style={{ background: 'var(--cyan)' }} aria-hidden="true" />95+
+        </span>
       </span>
       <span className="pred-ms-row">
         {rows.map((r, i) => (

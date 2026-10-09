@@ -66,15 +66,20 @@ export function bandColor(band) {
   return 'var(--red)';
 }
 
+/** この百分位以上は別の色（上位5%。運用の選定「lgbm 単体 95以上」の線）。 */
+export const TOP_PCT = 95;
+
 /**
- * パーセンタイル（過去スコア分布での位置）を帯の色に揃える。
+ * パーセンタイル（過去スコア分布での位置）の色。
  *
- * 帯は out-of-fold スコアの10分位なので、パーセンタイル p の行は
- * おおよそ帯 floor(p/10)+1 に入る。別の色関数を作ると同じ水準が
+ * 95 以上はシアン（運用者の指摘 2026-10-09: 選定の基準は上位5% なのに、紫（80以上 = 帯 9〜10）の
+ * 中に埋もれて見分けられなかった）。それ未満は帯の色に揃える: 帯は out-of-fold スコアの10分位
+ * なので、パーセンタイル p の行はおおよそ帯 floor(p/10)+1 に入る。別の色関数を作ると同じ水準が
  * 場所によって違う色になるので、bandColor に寄せる。
  */
 export function pctColor(pct) {
   if (!Number.isFinite(pct)) return 'var(--text-faint)';
+  if (pct >= TOP_PCT) return 'var(--cyan)';
   return bandColor(Math.floor(pct / 10) + 1);
 }
 

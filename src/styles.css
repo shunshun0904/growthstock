@@ -19,6 +19,7 @@
   --accent-dim:  #2a4d8f;
 
   --violet:      #a78bfa;
+  --cyan:        #22d3ee;   /* 百分位 95 以上（上位5%。運用の選定基準） */
   --blue:        #60a5fa;
   --green:       #34d399;
   --amber:       #fbbf24;
@@ -381,6 +382,9 @@ input[type='range']::-moz-range-thumb {
 .pred-ms { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .pred-ms > .lab { display: flex; align-items: baseline; gap: 2px; white-space: nowrap; }
 .pred-ms > .lab .sep { margin: 0 3px; }
+.pred-ms-legend { margin-left: auto; display: inline-flex; align-items: center; gap: 3px;
+                  font-size: 9px; color: var(--text-faint); }
+.pred-ms-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; }
 .pred-ms-row { display: flex; align-items: flex-end; gap: 4px; }
 .pred-ms-i { display: flex; flex-direction: column; align-items: center;
   gap: 1px; flex: 1 1 0; min-width: 0; }
