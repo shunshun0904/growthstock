@@ -16,7 +16,7 @@ research/model/{model.txt, meta.json, oof.parquet} を作っている。そこ�
 
 基準モデルはここで作り直さない
 ---------------------------
-既定の対象は models.EXTRA（xgb / cat / logit / mlp）で、lgbm は入らない。
+既定の対象は models.EXTRA（xgb / cat。2026-10-09 に logit / mlp を外した）で、lgbm は入らない。
 同じ LightGBM を別のパラメータで当てはめると、内側検証の PR-AUC はほぼ
 同じ（0.4016 対 0.4029）のに上位10%の重複が 52.8% しかなく、画面に
 「LightGBM」が2本並んで最大62pt ずれる。順位・帯・較正・SHAP の基準は

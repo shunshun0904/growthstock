@@ -149,7 +149,7 @@ jobs:
       - name: Train production model
         run: python3 research/train_production.py 2>&1 | tee retrain.log
 
-      # 画面に並べる追加4モデル（xgb / cat / logit / mlp）の探索。
+      # 画面に並べる追加モデル（xgb / cat。2026-10-09 に運用者の決定で logit / mlp を外した）の探索。
       # 基準モデルと完全に同じ条件（年×時価総額帯で層別・日付単位で分割・
       # 5分割 / PR-AUC / 50試行 / 木200本固定 / ホールドアウトより手前だけ）。
       #
@@ -169,12 +169,13 @@ jobs:
         # 150分だと余裕が23分しかなく、データが増えれば足りなくなる。
         # 2026-09-20 は117分（151列）。206列では約2時間半の見込み。
         # 打ち切られても完了済みの試行は DB に残り、同じ週の再実行で続く
-        timeout-minutes: 240
+        # 2026-10-09 から xgb / cat の2つ（logit が最長だったので、所要は 1時間以内の見込み）
+        timeout-minutes: 150
         continue-on-error: true
         run: |
           python3 research/exp/e15_tune_all.py 2>&1 | tail -25
 
-      # 5モデルを学習して research/model/models/<algo>/ に置く。
+      # 追加モデル（models.EXTRA）を学習して research/model/models/<algo>/ に置く。
       # train_production.py（基準モデル）とは別のスクリプトなので、
       # ここが丸ごと失敗しても日次予測は動き続ける。
       - name: Train extra models

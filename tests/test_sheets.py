@@ -105,27 +105,22 @@ PRED = {
     "asOf": "2026-09-10",
     "dates": ["2026-09-09", "2026-09-10"],
     "models": [{"algo": a, "short": s} for a, s in
-               (("lgbm", "LGB"), ("xgb", "XGB"), ("cat", "CAT"),
-                ("logit", "LR"), ("mlp", "NN"))],
+               (("lgbm", "LGB"), ("xgb", "XGB"), ("cat", "CAT"))],   # 2026-10-09 からツリー系3つ
     "candidates": [
         {"date": "2026-09-10", "code": "1234", "jqCode": "12340",
          "name": "テスト銘柄", "sector": "情報・通信業",
          "rankInDay": 1, "nInDay": 2, "score": 0.42, "band": 9,
-         "close": 1000.0, "agree90": 3, "nModels": 5,
+         "close": 1000.0, "agree90": 3, "nModels": 3,
          "byModel": {"lgbm": {"score": .42, "pctHistorical": 95.1},
                      "xgb": {"score": .33, "pctHistorical": 91.0},
-                     "cat": {"score": .51, "pctHistorical": 93.2},
-                     "logit": {"score": .20, "pctHistorical": 40.5},
-                     "mlp": {"score": .28, "pctHistorical": 55.0}}},
+                     "cat": {"score": .51, "pctHistorical": 93.2}}},
         {"date": "2026-09-10", "code": "5678", "jqCode": "56780",
          "name": "別の銘柄", "sector": "陸運業",
          "rankInDay": 2, "nInDay": 2, "score": 0.11, "band": 3,
-         "close": 500.0, "agree90": 0, "nModels": 5,
+         "close": 500.0, "agree90": 0, "nModels": 3,
          "byModel": {"lgbm": {"score": .11, "pctHistorical": 20.0},
                      "xgb": {"score": .09, "pctHistorical": 18.0},
-                     "cat": {"score": .12, "pctHistorical": 22.0},
-                     "logit": {"score": .05, "pctHistorical": 8.0},
-                     "mlp": {"score": .07, "pctHistorical": 12.0}}},
+                     "cat": {"score": .12, "pctHistorical": 22.0}}},
     ],
 }
 
@@ -135,8 +130,8 @@ class TestRows(unittest.TestCase):
         rows = ES.rows_from_predictions(PRED)
         r = rows[0]
         self.assertEqual(r["LGB%"], 95.1)
-        self.assertEqual(r["LR%"], 40.5)
-        self.assertEqual(r[ES.AGREE_COL], "3/5")
+        self.assertEqual(r["CAT%"], 93.2)
+        self.assertEqual(r[ES.AGREE_COL], "3/3")
 
     def test_raw_scores_are_written_too(self):
         """
@@ -145,7 +140,7 @@ class TestRows(unittest.TestCase):
         """
         r = ES.rows_from_predictions(PRED)[0]
         self.assertEqual(r["LGBスコア"], 0.42)
-        self.assertEqual(r["LRスコア"], 0.20)
+        self.assertEqual(r["CATスコア"], 0.51)
         # 位置と生スコアが取り違えられていないこと
         self.assertEqual(r["LGB%"], 95.1)
         self.assertNotEqual(r["LGB%"], r["LGBスコア"])
@@ -223,7 +218,7 @@ class TestSync(unittest.TestCase):
             if row == 2:
                 wrote[header[col - 1]] = u["values"][0][0]
         self.assertEqual(wrote.get("LGB%"), 95.1)
-        self.assertEqual(wrote.get(ES.AGREE_COL), "3/5")
+        self.assertEqual(wrote.get(ES.AGREE_COL), "3/3")
         # 記入済みのセルは候補に入らない
         self.assertNotIn("建値", wrote)
 
@@ -254,10 +249,10 @@ class TestSync(unittest.TestCase):
         got = row_dict(header, ws.appended[0])
         self.assertEqual(got["コード"], "5678")
         self.assertEqual(got["LGB%"], 20.0)
-        self.assertEqual(got["NN%"], 12.0)
+        self.assertEqual(got["CAT%"], 22.0)
         self.assertEqual(got["LGBスコア"], 0.11)
-        self.assertEqual(got["NNスコア"], 0.07)
-        self.assertEqual(got[ES.AGREE_COL], "0/5")
+        self.assertEqual(got["CATスコア"], 0.12)
+        self.assertEqual(got[ES.AGREE_COL], "0/3")
 
     def test_user_reordered_columns_still_work(self):
         """利用者が列をドラッグして動かしても、名前で探すので正しく入る。"""

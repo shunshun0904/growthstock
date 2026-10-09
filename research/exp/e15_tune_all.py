@@ -52,6 +52,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import features as F  # noqa: E402
 import lab  # noqa: E402
+import models as M  # noqa: E402
 import tuning_multi as TM  # noqa: E402
 from train_model import EMBARGO_DAYS, HOLDOUT_MONTHS, holdout_bounds  # noqa: E402
 
@@ -87,7 +88,7 @@ def why_retune(prev: dict, train_to: str, sig: str,
 def main() -> int:
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
     force = "--force" in sys.argv
-    algos = args or list(TM.ALGOS)
+    algos = args or [a for a in TM.ALGOS if a not in M.RETIRED]   # 2026-10-09 に外した logit / mlp は探索しない
     df = lab.frame()
     preset = F.DEFAULT_PRESET
     cols = F.columns(preset)

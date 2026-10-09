@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-実験67: 日証金の特徴量（research/jsf_features.py、16列）を本番の239列に足すと、5モデルの探索（5分割 CV）・
+実験67: 日証金の特徴量（research/jsf_features.py、17列）を本番の239列に足すと、ツリー系3モデルの探索（5分割 CV）・
 本番と同じ作りの out-of-fold・32窓がどう変わるか（実験65 と同じ手順。腕は「列」の違い）。
+2026-10-09 の運用者の決定で、実験はツリー系3種（lgbm / xgb / cat）だけにした（logit / mlp は画面からも外した）。
 
 運用者の指示（2026-10-09）「先に日証金（データが完全で、20営業日の目的変数に近い日次の需給）」。
 EDA は実験66（research/exp/e66_jsf_eda.py）。
@@ -21,7 +22,7 @@ jsf の付いた行だけ（2023年10月以降の貸借銘柄。列の効果が�
 
 Actions の1回の上限（330分）に収まるよう、モデルを分けて回す。表（jsf を付けた frame）は1回目に作って
 research/_data/oof/<tag>_* に置き、以降の回はそれを使う。
-    exp=e67_jsf_ab.py args="--algos lgbm,logit,mlp"
+    exp=e67_jsf_ab.py args="--algos lgbm"
     exp=e67_jsf_ab.py args="--algos xgb"
     exp=e67_jsf_ab.py args="--algos cat"
 試運転: exp=e67_jsf_ab.py args="--tag e67smoke --algos logit --n-trials 2 --shifts 0"
@@ -60,7 +61,7 @@ from e25_auc_noise import average, metrics  # noqa: E402
 OOF_DIR = os.path.join(lab.DATA_DIR, "oof")
 N_SPLITS = 5
 CV_SCHEME = "year_cap_date"          # 本番の retrain-weekly.yml と同じ
-ALGOS = ("lgbm", "xgb", "cat", "logit", "mlp")
+ALGOS = ("lgbm", "xgb", "cat")        # 2026-10-09 運用者の決定: 実験はツリー系3種だけ（logit / mlp は外した）
 SEEDS = {"lgbm": (42, 7, 123), "xgb": (42, 7, 123), "cat": (42, 7, 123),
          "logit": (42,), "mlp": (42, 7, 123)}
 PROD_SEED = 42

@@ -73,7 +73,8 @@ PRED_PATH = "public/data/predictions.json"
 
 #: 合議に使う3モデル（線形・MLP は入れない）。画面の BOOST と同じ
 BOOST = ("lgbm", "xgb", "cat")
-#: 画面に並ぶ5モデル全部（実験59 の「全5モデル」の選び方で使う。規則の既定は BOOST）
+#: 以前画面に並んでいた5モデル（実験59・62 の「全5モデル」の選び方の記録用。規則の既定は BOOST）。
+#: 2026-10-09 に logit / mlp を画面から外したので、新しい予測ファイルには3モデルしか無い
 ALL5 = ("lgbm", "xgb", "cat", "logit", "mlp")
 
 # --- 運用の規則。src/lib/strategy.js の STRATEGY と同じ値 --- #
