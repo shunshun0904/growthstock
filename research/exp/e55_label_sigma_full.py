@@ -61,6 +61,7 @@ from train_model import EMBARGO_DAYS, HOLDOUT_MONTHS, holdout_bounds  # noqa: E4
 
 OOF_DIR = os.path.join(lab.DATA_DIR, "oof")
 PARAMS_PATH = os.path.join(OOF_DIR, "e55_params.json")
+CSV_PREFIX = "e55"  # 集計 CSV の接頭辞（実験70 のように流用する側が差し替える）
 OUTCOME = lab.OUTCOME
 N_SPLITS = 5
 N_TRIALS = 50
@@ -333,10 +334,10 @@ def main(argv=None) -> int:
                                        "pos_folds": int((per > 0).sum()), "folds": int(len(per))})
 
     ed = pd.DataFrame(edges)
-    ed.to_csv(os.path.join(OOF_DIR, "e55_edges.csv"), index=False)
-    pd.DataFrame(rows).to_csv(os.path.join(OOF_DIR, "e55_within_date.csv"), index=False)
+    ed.to_csv(os.path.join(OOF_DIR, f"{CSV_PREFIX}_edges.csv"), index=False)
+    pd.DataFrame(rows).to_csv(os.path.join(OOF_DIR, f"{CSV_PREFIX}_within_date.csv"), index=False)
     if trades:
-        pd.DataFrame(trades).to_csv(os.path.join(OOF_DIR, "e55_trades.csv"), index=False)
+        pd.DataFrame(trades).to_csv(os.path.join(OOF_DIR, f"{CSV_PREFIX}_trades.csv"), index=False)
     if len(shifts) > 1 and len(ed):
         print(f"\n■ 切り方{len(shifts)}通りをまとめて（切り方ごと / 平均）")
         for kind, ja in (("thr95", "上位5%（閾値）全体との差 pt"), ("thr90", "上位10%（閾値）全体との差 pt"),
@@ -361,7 +362,7 @@ def main(argv=None) -> int:
                             f"{int(r['n'])}件 {r['mean']:+.2f}% {r['monthly']:+.2f}% {r['pos_folds']}/{r['folds']}"
                             for _, r in g.iterrows())
                             + f"（取引 {int(g['n'].sum())} / 1取引の平均 {g['mean'].mean():+.2f}% / 月 {g['monthly'].mean():+.2f}%）")
-    log(f"記録: {OOF_DIR}/e55_*")
+    log(f"記録: {OOF_DIR}/{CSV_PREFIX}_*")
     return 0
 
 
