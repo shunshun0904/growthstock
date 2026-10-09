@@ -104,16 +104,16 @@ class TestFeatures(unittest.TestCase):
         last = f.iloc[-1]
         self.assertAlmostEqual(last["jsf_ratio"], np.log((1290 + 1) / (500 + 1)))
         self.assertAlmostEqual(last["jsf_ratio_chg5"], np.log(1291 / 501) - np.log(1241 / 501))
-        self.assertAlmostEqual(last["jsf_loan_v"], 12.9)
-        self.assertAlmostEqual(last["jsf_stock_v"], 5.0)
-        self.assertAlmostEqual(last["jsf_net_v"], 7.9)
-        self.assertAlmostEqual(last["jsf_loan_chg5_v"], 0.5)
-        self.assertAlmostEqual(last["jsf_loan_chg20_v"], 2.0)
+        self.assertAlmostEqual(last["jsf_loan_v"], np.arcsinh(12.9))     # 裾が重いので asinh
+        self.assertAlmostEqual(last["jsf_stock_v"], np.arcsinh(5.0))
+        self.assertAlmostEqual(last["jsf_net_v"], np.arcsinh(7.9))
+        self.assertAlmostEqual(last["jsf_loan_chg5_v"], np.arcsinh(0.5))
+        self.assertAlmostEqual(last["jsf_loan_chg20_v"], np.arcsinh(2.0))
         self.assertAlmostEqual(last["jsf_stock_chg20_v"], 0.0)
-        self.assertAlmostEqual(last["jsf_long_new5_v"], 0.5)      # 新規 10 × 5日 ÷ 100
-        self.assertAlmostEqual(last["jsf_fee"], 1.0)
+        self.assertAlmostEqual(last["jsf_long_new5_v"], np.arcsinh(0.5))      # 新規 10 × 5日 ÷ 100
+        self.assertAlmostEqual(last["jsf_fee"], np.log1p(1.0))             # 逆日歩は log1p
         self.assertAlmostEqual(last["jsf_fee_days20"], 10.0)
-        self.assertAlmostEqual(last["jsf_fee_max20"], 1.0)
+        self.assertAlmostEqual(last["jsf_fee_max20"], np.log1p(1.0))
         self.assertEqual(last["jsf_restrict"], 0.0)
         self.assertEqual(last["jsf_lendable"], 1.0)
         self.assertTrue(np.isnan(f.iloc[3]["jsf_ratio_chg5"]))     # 5日前が無い

@@ -26,6 +26,10 @@ research/_data/oof/<tag>_* に置き、以降の回はそれを使う。
     exp=e67_jsf_ab.py args="--algos cat"
 試運転: exp=e67_jsf_ab.py args="--tag e67smoke --algos logit --n-trials 2 --shifts 0"
 
+最初の回（run 37878860125、lgbm・logit・mlp。列は変換なし）は、logit・mlp の OOF が −0.02〜−0.04 落ちた。
+裾の重い列（出来高比・逆日歩）が標準化した値に効いたためとみて、jsf_features.py で asinh / log1p に変え、
+--rebuild で表を作り直して回し直した（木のモデルは単調変換に不変）。
+
 公開ログには件数・割合・日付・精度だけを出す（日証金の値は出さない。docs/DATA_JSF.md の利用条件）。
 本番の設定（research/lgbm_params.json、research/multi_params.json、features.py）には書かない。
 """
@@ -171,7 +175,7 @@ def tune(algo: str, arm: str, frame: pd.DataFrame, cols: list, cutoff, n_trials:
 def oof(algo: str, colset: str, frame: pd.DataFrame, cols: list, params: dict, shift: int, seeds,
         compute: bool = True):
     """列の組（base / jsf）× パラメータ × ずらし × 種の out-of-fold（種の平均）。保存済みなら読む。"""
-    ph = params_hash(params)
+    ph = params_hash(params) + "_d" + hashlib.sha1(str(frame.attrs.get("built_utc", "")).encode()).hexdigest()[:6]
     files = [path(f"{algo}_c{colset}_{ph}_sh{shift}_s{sd}.parquet") for sd in seeds]
     if not compute and not all(os.path.exists(f) for f in files):
         return None
@@ -362,6 +366,7 @@ def main(argv=None) -> int:
     frame, stamp = prepare(args.rebuild)
     frame["Date"] = pd.to_datetime(frame["Date"])
     frame["Code"] = frame["Code"].astype(str)
+    frame.attrs["built_utc"] = stamp["built_utc"]      # out-of-fold の名前に表の版を入れる（作り直しの前の結果を混ぜない）
     miss = [c for c in colsets["jsf"] if c not in frame.columns]
     if miss:
         raise SystemExit(f"表に無い列: {miss[:8]}")

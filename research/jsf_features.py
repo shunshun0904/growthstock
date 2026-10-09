@@ -17,16 +17,21 @@
 列（prefix jsf_。値の無い銘柄＝貸借銘柄でない・2023年秋より前は欠測のまま）
   jsf_ratio          貸借倍率の対数 log((融資残高+1)/(貸株残高+1))。週次の信用倍率（credit_ratio）の日次・制度信用版
   jsf_ratio_chg5/20  jsf_ratio の 5 / 20 申込日の変化
-  jsf_loan_v         融資残高 ÷ 20日平均出来高（何日ぶんの出来高か）
-  jsf_stock_v        貸株残高 ÷ 20日平均出来高
-  jsf_net_v          （融資残高 − 貸株残高）÷ 20日平均出来高（差引残高）
-  jsf_loan_chg5/20_v  融資残高の 5 / 20 申込日の増減 ÷ 20日平均出来高（買い方の積み増し）
-  jsf_stock_chg5/20_v 貸株残高の 5 / 20 申込日の増減 ÷ 20日平均出来高（売り方の積み増し）
-  jsf_long_new5_v    直近5申込日の融資新規の合計 ÷ 20日平均出来高
-  jsf_short_new5_v   直近5申込日の貸株新規の合計 ÷ 20日平均出来高
-  jsf_fee            品貸料率（年率換算 %）。貸借銘柄で逆日歩が無い日は 0
+  jsf_loan_v         asinh(融資残高 ÷ 20日平均出来高)（何日ぶんの出来高か）
+  jsf_stock_v        asinh(貸株残高 ÷ 20日平均出来高)
+  jsf_net_v          asinh((融資残高 − 貸株残高) ÷ 20日平均出来高)（差引残高）
+  jsf_loan_chg5/20_v  asinh(融資残高の 5 / 20 申込日の増減 ÷ 20日平均出来高)（買い方の積み増し）
+  jsf_stock_chg5/20_v asinh(貸株残高の 5 / 20 申込日の増減 ÷ 20日平均出来高)（売り方の積み増し）
+  jsf_long_new5_v    asinh(直近5申込日の融資新規の合計 ÷ 20日平均出来高)
+  jsf_short_new5_v   asinh(直近5申込日の貸株新規の合計 ÷ 20日平均出来高)
+  jsf_fee            log1p(品貸料率（年率換算 %）)。貸借銘柄で逆日歩が無い日は 0
   jsf_fee_days20     直近20申込日のうち逆日歩が付いた日数
-  jsf_fee_max20      直近20申込日の品貸料率（年率換算 %）の最大
+  jsf_fee_max20      log1p(直近20申込日の品貸料率（年率換算 %）の最大)
+
+出来高比と逆日歩は裾が重い（実験66: 出来高比の最大 185、逆日歩の最大 867%。中央値は 0.09 と 0）。
+木のモデルは単調変換に不変だが、線形・MLP は標準化した値に裾がそのまま効くので、asinh / log1p で
+押さえる（既存の log_trading_value・log_market_cap と同じ扱い）。実験67 の最初の回（変換なし）で
+logit・mlp の OOF が −0.02〜−0.04 落ちたのがきっかけ。
   jsf_restrict       制限措置の段階（0 なし / 1 注意喚起 / 2 申込制限 / 3 申込停止。hist の文言から）
   jsf_lendable       貸借銘柄なら 1（制度信用の売りができる）、融資銘柄（買いだけ）なら 0。hist の「貸借区分」から
   jsf_lag            使った申込日から T までの暦日（確認用。原則 1〜4）
@@ -252,20 +257,20 @@ def features_on_panel(p: pd.DataFrame, vol: Optional[pd.DataFrame] = None) -> pd
         av = pv["avg_vol"].where(pv["avg_vol"] > 0)
     else:
         av = pd.Series(np.nan, index=p.index)
-    out["jsf_loan_v"] = p["loan_bal"] / av
-    out["jsf_stock_v"] = p["stock_bal"] / av
-    out["jsf_net_v"] = (p["loan_bal"] - p["stock_bal"]) / av
+    out["jsf_loan_v"] = np.arcsinh(p["loan_bal"] / av)
+    out["jsf_stock_v"] = np.arcsinh(p["stock_bal"] / av)
+    out["jsf_net_v"] = np.arcsinh((p["loan_bal"] - p["stock_bal"]) / av)
     for n in (5, 20):
-        out[f"jsf_loan_chg{n}_v"] = (p["loan_bal"] - g["loan_bal"].shift(n)) / av
-        out[f"jsf_stock_chg{n}_v"] = (p["stock_bal"] - g["stock_bal"].shift(n)) / av
-    out["jsf_long_new5_v"] = g["loan_new"].transform(lambda s: s.rolling(5, min_periods=3).sum()) / av
-    out["jsf_short_new5_v"] = g["stock_new"].transform(lambda s: s.rolling(5, min_periods=3).sum()) / av
-    fee = p["fee_ann"].fillna(0.0)
-    out["jsf_fee"] = fee
+        out[f"jsf_loan_chg{n}_v"] = np.arcsinh((p["loan_bal"] - g["loan_bal"].shift(n)) / av)
+        out[f"jsf_stock_chg{n}_v"] = np.arcsinh((p["stock_bal"] - g["stock_bal"].shift(n)) / av)
+    out["jsf_long_new5_v"] = np.arcsinh(g["loan_new"].transform(lambda s: s.rolling(5, min_periods=3).sum()) / av)
+    out["jsf_short_new5_v"] = np.arcsinh(g["stock_new"].transform(lambda s: s.rolling(5, min_periods=3).sum()) / av)
+    fee = p["fee_ann"].fillna(0.0).clip(lower=0.0)
+    out["jsf_fee"] = np.log1p(fee)
     out["jsf_fee_days20"] = (fee > 0).astype(float).groupby(p["Code"], sort=False).transform(
         lambda s: s.rolling(20, min_periods=10).sum())
-    out["jsf_fee_max20"] = fee.groupby(p["Code"], sort=False).transform(
-        lambda s: s.rolling(20, min_periods=10).max())
+    out["jsf_fee_max20"] = np.log1p(fee.groupby(p["Code"], sort=False).transform(
+        lambda s: s.rolling(20, min_periods=10).max()))
     out["jsf_restrict"] = p["restrict"]
     out["jsf_lendable"] = p["lendable"]
     return out
