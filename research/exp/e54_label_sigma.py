@@ -185,6 +185,132 @@ def pos_by_vol(y: pd.Series, vol: pd.Series) -> pd.Series:
 # 本体
 # --------------------------------------------------------------------------- #
 
+def report_labels(df: pd.DataFrame, tab: pd.DataFrame, arms: List[str],
+                  labels: Dict[str, str] = LABELS, prefix: str = "e54") -> pd.DataFrame:
+    """腕ごとのラベルの表を出し、全腕で確定している行に絞った df を返す（実験69 も使う）。"""
+    ycols = [f"y_{a}" for a in arms]
+    keep = df[ycols].notna().all(axis=1)
+    df = df[keep].reset_index(drop=True)
+    print(f"\n■ ラベル（全腕で確定している {len(df):,}件。正例率の目標 {tab.loc[0, 'pos_rate']*100:.2f}%）")
+    print(f"  {'腕':<30}{'k / X':>8}{'正例率':>8}{'しきい値の中央値':>12}  ボラの帯ごとの正例率（低→高）  L0 と違う行")
+    for _, r in tab.iterrows():
+        a = r["arm"]
+        pv = pos_by_vol(df[f"y_{a}"], df["vol_20d"])
+        ch = float((df[f"y_{a}"] != df["y_L0"]).mean())
+        print(f"  {labels[a]:<30}{r['k_or_x']:>8.3f}{df[f'y_{a}'].mean()*100:>7.2f}%"
+              f"{df[f'need_{a}'].median()*100:>+11.1f}%  "
+              + " / ".join(f"{v*100:.1f}%" for v in pv) + f"  {ch*100:>5.1f}%")
+    tab.to_csv(os.path.join(OOF_DIR, f"{prefix}_labels.csv"), index=False)
+
+    # 各腕の正例の実収益（中央値）: しきい値がボラに比例しなくなると、正例の中身がどう変わるか
+    print("  正例の実収益（ret_o1_20）の中央値 / 平均: " + " / ".join(
+        f"{a} {df.loc[df[f'y_{a}'] == 1, OUTCOME].median()*100:+.1f}% "
+        f"{df.loc[df[f'y_{a}'] == 1, OUTCOME].mean()*100:+.1f}%" for a in arms))
+
+    return df
+
+
+def evaluate(df: pd.DataFrame, arms: List[str], cols: List[str], shifts: List[int], seeds,
+             labels: Dict[str, str] = LABELS, prefix: str = "e54"):
+    """切り方ごとに各腕の out-of-fold を取り、実収益の表を出す。(edges, within_date) を返す。"""
+    edges, rows = [], []
+    for sh in shifts:
+        res = {}
+        for a in arms:
+            d = df.copy()
+            d["label"] = d[f"y_{a}"]
+            o = E52.oof_arm(d, cols, "C", sh, seeds, "", name=a, prefix=prefix)
+            # 評価の正例率は現行のラベル（L0）でそろえて見る
+            o = o.drop(columns=["label"]).merge(df[["Code", "Date", "y_L0"]], on=["Code", "Date"],
+                                                 how="left").rename(columns={"y_L0": "label"})
+            res[a] = o
+        print(f"\n■ ずらし{sh}か月")
+        for pct in (95, 90):
+            print(f"  ◆ 上位{100-pct}%（前の窓の分布の閾値）: 件数 / 平均 / 全体との差 / "
+                  f"窓ごとの差 ± SE（上の窓 / 最悪） / −10%未満")
+            for a in arms:
+                e = lab.threshold_edge(res[a], pct=pct, outcome=OUTCOME)
+                pf = E52._per_fold(res[a], pct, within=False)
+                bad = float((pf["bad"] * pf["n"]).sum() / pf["n"].sum()) if pf["n"].sum() else np.nan
+                se = e["thr_fold_sd"] / np.sqrt(max(1, e["thr_folds"]))
+                print(f"    {labels[a]:<30}{e['thr_n']:>6}件 {e['thr_end']:>+7.2f}% {e['thr_lift']:>+7.2f}pt "
+                      f" {e['thr_fold_mean']:>+6.2f} ± {se:.2f}（{e['thr_folds_won']}/{e['thr_folds']} / "
+                      f"{e['thr_worst']:+.2f}） {bad*100:>5.1f}%")
+                edges.append({"shift": sh, "arm": a, "kind": f"thr{pct}", "bad": bad, **e})
+            counts = E53.threshold_counts(res["L0"], pct)
+            base = E53.matched_picks(res["L0"], counts)
+            print(f"  ◆ 発火数を L0 にそろえる（L0 の上位{100-pct}% と同じ件数を各窓で上から取る）: "
+                  f"件数 / 平均収益 / −10%未満 / 正例率(L0) ｜ L0 との差（窓ごと、pt）")
+            for a in arms:
+                cur = E53.matched_picks(res[a], counts)
+                n = int(cur["n"].sum())
+                ret = float((cur["ret"] * cur["n"]).sum() / n) if n else np.nan
+                bd = float((cur["bad"] * cur["n"]).sum() / n) if n else np.nan
+                pos = float((cur["pos"] * cur["n"]).sum() / n) if n else np.nan
+                line = f"    {labels[a]:<30}{n:>6}件 {ret*100:>+7.2f}% {bd*100:>5.1f}% {pos*100:>4.0f}%"
+                if a != "L0":
+                    line += E53._diff_line(base, cur)
+                print(line)
+                edges.append({"shift": sh, "arm": a, "kind": f"match{pct}", "bad": bd,
+                              "thr_n": n, "thr_end": ret * 100, "thr_fold_mean": cur["ret"].mean() * 100})
+        print("  ◆ 窓の中の上位10%（件数をそろえる）: 平均収益 / −10%未満 / 正例率(L0) ｜ L0 との差（窓ごと、pt）")
+        base = E52._per_fold(res["L0"], 90, within=True)
+        for a in arms:
+            cur = E52._per_fold(res[a], 90, within=True)
+            line = (f"    {labels[a]:<30}{cur['ret'].mean()*100:>+6.2f}% {cur['bad'].mean()*100:>5.1f}% "
+                    f"{cur['pos'].mean()*100:>4.0f}%")
+            if a != "L0":
+                line += E53._diff_line(base, cur)
+            print(line)
+            edges.append({"shift": sh, "arm": a, "kind": "top10_within", "bad": cur["bad"].mean(),
+                          "thr_fold_mean": cur["ret"].mean() * 100, "thr_n": int(cur["n"].sum())})
+        print(f"  ◆ 日付内（発火{E52.MIN_BREAKS}件以上の日）: 1位の平均収益 / 上位2件の平均 / 順位相関 / 日数"
+              " ｜ 参考 PR-AUC / ROC-AUC（現行ラベル L0 で測る）")
+        for a in arms:
+            w = E52.within_date_metrics(res[a])
+            m = E52.label_metrics(res[a])
+            print(f"    {labels[a]:<30}{w['top1']:>+7.2f}% {w['top2']:>+7.2f}% {w['rho']:>+6.3f} "
+                  f"{w['days']:>5}日 ｜ {m['pr']:.4f} {m['roc']:.4f}")
+            rows.append({"shift": sh, "arm": a, **w, **m})
+        print("  ◆ 上位10% の中身（ボラの帯ごと: 割合 / 平均収益 / 正例率(L0)）")
+        for a in arms:
+            t = E52.picks_by_vol(res[a], 90)
+            if len(t):
+                print(f"    {labels[a]:<30}" + " | ".join(
+                    f"{i} {r['share']*100:.0f}% {r['ret']*100:+.1f}% {r['pos']*100:.0f}%"
+                    for i, r in t.iterrows()))
+
+    ed = pd.DataFrame(edges)
+    ed.to_csv(os.path.join(OOF_DIR, f"{prefix}_edges.csv"), index=False)
+    pd.DataFrame(rows).to_csv(os.path.join(OOF_DIR, f"{prefix}_within_date.csv"), index=False)
+    return ed, pd.DataFrame(rows)
+
+
+def summarize(ed: pd.DataFrame, rows, arms: List[str], shifts: List[int],
+              labels: Dict[str, str] = LABELS) -> None:
+    """切り方をまとめた表。"""
+    if len(shifts) > 1 and len(ed):
+        print(f"\n■ 切り方{len(shifts)}通りをまとめて（切り方ごと / 平均）")
+        for kind, ja in (("thr95", "上位5%（閾値）全体との差 pt"), ("thr90", "上位10%（閾値）全体との差 pt")):
+            print(f"  {ja} / −10%未満")
+            for a in arms:
+                g = ed[(ed["arm"] == a) & (ed["kind"] == kind)]
+                print(f"    {labels[a]:<30}" + " / ".join(f"{v:+.2f}" for v in g["thr_lift"])
+                      + f"（平均 {g['thr_lift'].mean():+.2f}）/ {g['bad'].mean()*100:.1f}%")
+        for kind, ja in (("match95", "発火数を L0 の上位5% にそろえた平均収益"),
+                         ("match90", "発火数を L0 の上位10% にそろえた平均収益"),
+                         ("top10_within", "窓の中の上位10%（件数をそろえる）の平均収益")):
+            g = ed[ed["kind"] == kind]
+            print(f"  {ja} / −10%未満")
+            for a in arms:
+                h = g[g["arm"] == a]
+                print(f"    {labels[a]:<30}" + " / ".join(f"{v:+.2f}%" for v in h["thr_fold_mean"])
+                      + f"（平均 {h['thr_fold_mean'].mean():+.2f}%）/ {h['bad'].mean()*100:.1f}%")
+        r = pd.DataFrame(rows)
+        print("  日付内の1位の平均収益（切り方の平均）: " + " / ".join(
+            f"{labels[a]} {r[r['arm'] == a]['top1'].mean():+.2f}%" for a in arms))
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="実験54: ラベルの σ を見直す")
     ap.add_argument("--shifts", default="0,2,4")
@@ -234,115 +360,9 @@ def main(argv=None) -> int:
     log(f"L0 の引き直しは本番のラベルと全 {len(df):,}件一致")
 
     df, tab = build_labels(df, arms)
-    ycols = [f"y_{a}" for a in arms]
-    keep = df[ycols].notna().all(axis=1)
-    df = df[keep].reset_index(drop=True)
-    print(f"\n■ ラベル（全腕で確定している {len(df):,}件。正例率の目標 {tab.loc[0, 'pos_rate']*100:.2f}%）")
-    print(f"  {'腕':<30}{'k / X':>8}{'正例率':>8}{'しきい値の中央値':>12}  ボラの帯ごとの正例率（低→高）  L0 と違う行")
-    for _, r in tab.iterrows():
-        a = r["arm"]
-        pv = pos_by_vol(df[f"y_{a}"], df["vol_20d"])
-        ch = float((df[f"y_{a}"] != df["y_L0"]).mean())
-        print(f"  {LABELS[a]:<30}{r['k_or_x']:>8.3f}{df[f'y_{a}'].mean()*100:>7.2f}%"
-              f"{df[f'need_{a}'].median()*100:>+11.1f}%  "
-              + " / ".join(f"{v*100:.1f}%" for v in pv) + f"  {ch*100:>5.1f}%")
-    tab.to_csv(os.path.join(OOF_DIR, "e54_labels.csv"), index=False)
-
-    # 各腕の正例の実収益（中央値）: しきい値がボラに比例しなくなると、正例の中身がどう変わるか
-    print("  正例の実収益（ret_o1_20）の中央値 / 平均: " + " / ".join(
-        f"{a} {df.loc[df[f'y_{a}'] == 1, OUTCOME].median()*100:+.1f}% "
-        f"{df.loc[df[f'y_{a}'] == 1, OUTCOME].mean()*100:+.1f}%" for a in arms))
-
-    edges, rows = [], []
-    for sh in shifts:
-        res = {}
-        for a in arms:
-            d = df.copy()
-            d["label"] = d[f"y_{a}"]
-            o = E52.oof_arm(d, cols, "C", sh, seeds, "", name=a, prefix="e54")
-            # 評価の正例率は現行のラベル（L0）でそろえて見る
-            o = o.drop(columns=["label"]).merge(df[["Code", "Date", "y_L0"]], on=["Code", "Date"],
-                                                 how="left").rename(columns={"y_L0": "label"})
-            res[a] = o
-        print(f"\n■ ずらし{sh}か月")
-        for pct in (95, 90):
-            print(f"  ◆ 上位{100-pct}%（前の窓の分布の閾値）: 件数 / 平均 / 全体との差 / "
-                  f"窓ごとの差 ± SE（上の窓 / 最悪） / −10%未満")
-            for a in arms:
-                e = lab.threshold_edge(res[a], pct=pct, outcome=OUTCOME)
-                pf = E52._per_fold(res[a], pct, within=False)
-                bad = float((pf["bad"] * pf["n"]).sum() / pf["n"].sum()) if pf["n"].sum() else np.nan
-                se = e["thr_fold_sd"] / np.sqrt(max(1, e["thr_folds"]))
-                print(f"    {LABELS[a]:<30}{e['thr_n']:>6}件 {e['thr_end']:>+7.2f}% {e['thr_lift']:>+7.2f}pt "
-                      f" {e['thr_fold_mean']:>+6.2f} ± {se:.2f}（{e['thr_folds_won']}/{e['thr_folds']} / "
-                      f"{e['thr_worst']:+.2f}） {bad*100:>5.1f}%")
-                edges.append({"shift": sh, "arm": a, "kind": f"thr{pct}", "bad": bad, **e})
-            counts = E53.threshold_counts(res["L0"], pct)
-            base = E53.matched_picks(res["L0"], counts)
-            print(f"  ◆ 発火数を L0 にそろえる（L0 の上位{100-pct}% と同じ件数を各窓で上から取る）: "
-                  f"件数 / 平均収益 / −10%未満 / 正例率(L0) ｜ L0 との差（窓ごと、pt）")
-            for a in arms:
-                cur = E53.matched_picks(res[a], counts)
-                n = int(cur["n"].sum())
-                ret = float((cur["ret"] * cur["n"]).sum() / n) if n else np.nan
-                bd = float((cur["bad"] * cur["n"]).sum() / n) if n else np.nan
-                pos = float((cur["pos"] * cur["n"]).sum() / n) if n else np.nan
-                line = f"    {LABELS[a]:<30}{n:>6}件 {ret*100:>+7.2f}% {bd*100:>5.1f}% {pos*100:>4.0f}%"
-                if a != "L0":
-                    line += E53._diff_line(base, cur)
-                print(line)
-                edges.append({"shift": sh, "arm": a, "kind": f"match{pct}", "bad": bd,
-                              "thr_n": n, "thr_end": ret * 100, "thr_fold_mean": cur["ret"].mean() * 100})
-        print("  ◆ 窓の中の上位10%（件数をそろえる）: 平均収益 / −10%未満 / 正例率(L0) ｜ L0 との差（窓ごと、pt）")
-        base = E52._per_fold(res["L0"], 90, within=True)
-        for a in arms:
-            cur = E52._per_fold(res[a], 90, within=True)
-            line = (f"    {LABELS[a]:<30}{cur['ret'].mean()*100:>+6.2f}% {cur['bad'].mean()*100:>5.1f}% "
-                    f"{cur['pos'].mean()*100:>4.0f}%")
-            if a != "L0":
-                line += E53._diff_line(base, cur)
-            print(line)
-            edges.append({"shift": sh, "arm": a, "kind": "top10_within", "bad": cur["bad"].mean(),
-                          "thr_fold_mean": cur["ret"].mean() * 100, "thr_n": int(cur["n"].sum())})
-        print(f"  ◆ 日付内（発火{E52.MIN_BREAKS}件以上の日）: 1位の平均収益 / 上位2件の平均 / 順位相関 / 日数"
-              " ｜ 参考 PR-AUC / ROC-AUC（現行ラベル L0 で測る）")
-        for a in arms:
-            w = E52.within_date_metrics(res[a])
-            m = E52.label_metrics(res[a])
-            print(f"    {LABELS[a]:<30}{w['top1']:>+7.2f}% {w['top2']:>+7.2f}% {w['rho']:>+6.3f} "
-                  f"{w['days']:>5}日 ｜ {m['pr']:.4f} {m['roc']:.4f}")
-            rows.append({"shift": sh, "arm": a, **w, **m})
-        print("  ◆ 上位10% の中身（ボラの帯ごと: 割合 / 平均収益 / 正例率(L0)）")
-        for a in arms:
-            t = E52.picks_by_vol(res[a], 90)
-            if len(t):
-                print(f"    {LABELS[a]:<30}" + " | ".join(
-                    f"{i} {r['share']*100:.0f}% {r['ret']*100:+.1f}% {r['pos']*100:.0f}%"
-                    for i, r in t.iterrows()))
-
-    ed = pd.DataFrame(edges)
-    ed.to_csv(os.path.join(OOF_DIR, "e54_edges.csv"), index=False)
-    pd.DataFrame(rows).to_csv(os.path.join(OOF_DIR, "e54_within_date.csv"), index=False)
-    if len(shifts) > 1 and len(ed):
-        print(f"\n■ 切り方{len(shifts)}通りをまとめて（切り方ごと / 平均）")
-        for kind, ja in (("thr95", "上位5%（閾値）全体との差 pt"), ("thr90", "上位10%（閾値）全体との差 pt")):
-            print(f"  {ja} / −10%未満")
-            for a in arms:
-                g = ed[(ed["arm"] == a) & (ed["kind"] == kind)]
-                print(f"    {LABELS[a]:<30}" + " / ".join(f"{v:+.2f}" for v in g["thr_lift"])
-                      + f"（平均 {g['thr_lift'].mean():+.2f}）/ {g['bad'].mean()*100:.1f}%")
-        for kind, ja in (("match95", "発火数を L0 の上位5% にそろえた平均収益"),
-                         ("match90", "発火数を L0 の上位10% にそろえた平均収益"),
-                         ("top10_within", "窓の中の上位10%（件数をそろえる）の平均収益")):
-            g = ed[ed["kind"] == kind]
-            print(f"  {ja} / −10%未満")
-            for a in arms:
-                h = g[g["arm"] == a]
-                print(f"    {LABELS[a]:<30}" + " / ".join(f"{v:+.2f}%" for v in h["thr_fold_mean"])
-                      + f"（平均 {h['thr_fold_mean'].mean():+.2f}%）/ {h['bad'].mean()*100:.1f}%")
-        r = pd.DataFrame(rows)
-        print("  日付内の1位の平均収益（切り方の平均）: " + " / ".join(
-            f"{LABELS[a]} {r[r['arm'] == a]['top1'].mean():+.2f}%" for a in arms))
+    df = report_labels(df, tab, arms)
+    ed, rows = evaluate(df, arms, cols, shifts, seeds)
+    summarize(ed, rows, arms, shifts)
     log(f"記録: {OOF_DIR}/e54_*")
     return 0
 
