@@ -105,6 +105,7 @@ def deciles(x: pd.Series, y: pd.Series, k: int = 10) -> list:
     """
     十分位ごとの件数・正例率。同じ値が多い列（逆日歩 0 など）は、いちばん多い値を1つの区分にし、残りを
     値で区切る（順位で機械的に切ると、同じ値の行が並びの順＝日付の順で分かれ、期間の正例率を見てしまう）。
+    残りの値が1種類しかない列（0/1 の旗）は、その値も1つの区分にする。
     """
     ok = np.isfinite(x) & np.isfinite(y)
     xs, ys = x[ok].to_numpy(dtype=float), y[ok].to_numpy(dtype=float)
@@ -120,16 +121,21 @@ def deciles(x: pd.Series, y: pd.Series, k: int = 10) -> list:
         start = 1
     else:
         xs2, ys2, start = xs, ys, 0
-    if len(xs2) >= 100:
-        try:
-            bins = pd.qcut(xs2, min(k - start, max(2, len(np.unique(xs2)) // 20 or 2)), labels=False, duplicates="drop")
-        except ValueError:
-            bins = None
-        if bins is not None:
-            for b in sorted(pd.unique(bins)):
-                m = bins == b
-                out.append({"bin": int(b) + start, "n": int(m.sum()), "pos": r(ys2[m].mean()),
-                            "lo": r(xs2[m].min()), "hi": r(xs2[m].max())})
+    if len(xs2) < 50:
+        return out
+    uniq = np.unique(xs2)
+    if len(uniq) < 2:
+        out.append({"bin": start, "n": int(len(xs2)), "pos": r(ys2.mean()), "lo": r(uniq[0]), "hi": r(uniq[0]), "tie": True})
+        return out
+    nb = max(2, min(k - start, len(uniq) // 20 or 2))
+    try:
+        bins = np.asarray(pd.qcut(xs2, nb, labels=False, duplicates="drop"), dtype=float)
+    except ValueError:
+        return out
+    for b in sorted(set(bins[np.isfinite(bins)].astype(int).tolist())):
+        m = bins == b
+        out.append({"bin": int(b) + start, "n": int(m.sum()), "pos": r(ys2[m].mean()),
+                    "lo": r(xs2[m].min()), "hi": r(xs2[m].max())})
     return out
 
 
