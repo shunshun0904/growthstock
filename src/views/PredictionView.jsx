@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { fmt, fmtInt, fmtSigned, fmtOku, fmtDate, fmtDateTime, DASH } from '../lib/format.js';
-import { bandColor, bandLabel, pctColor, modelRows, MODEL_SHORT, MODEL_FAMILY,
+import { bandColor, bandLabel, pctColor, PCT_LEGEND, modelRows, MODEL_SHORT, MODEL_FAMILY,
   FAMILY_JA, marketTone, candidateToStock } from '../lib/predictions.js';
 import { STRATEGY, BOOST, strategySignal, exitPlan, nearMisses,
          MODEL_JA, fundContrib, frozenNote,
@@ -283,7 +283,8 @@ function PickCard({ c, n, onSend, sent }) {
       <div className="strat-pick-body">
         <div className="strat-metric">
           <span className="lab">3モデルの最小</span>
-          <strong className="num" style={{ color: pctColor(c.minPct) }}>
+          <strong className="num">
+            <i className="pct-sw" style={{ background: pctColor(c.minPct) }} aria-hidden="true" />
             {fmt(c.minPct, 0)}
           </strong>
           <span className="sub">百分位</span>
@@ -383,16 +384,20 @@ function ModelStrip({ rows, agree, n }) {
         {Number.isFinite(agree) && total > 0 && (
           <>
             <span className="sep">/</span>
-            {/* 色は「何割のモデルが上位10%と見たか」。棒と同じ尺度に乗せる */}
-            <b className="num" style={{ color: pctColor((agree / total) * 100) }}>
+            {/* 四角の色は「何割のモデルが上位10%と見たか」。棒と同じ尺度に乗せる */}
+            <b className="num">
+              <i className="pct-sw" style={{ background: pctColor((agree / total) * 100) }} aria-hidden="true" />
               {agree}/{total}
             </b>
             が上位10%
           </>
         )}
         <span className="pred-ms-legend"
-              title="色の区分: 95以上（上位5%。運用の選定基準）はピンク / 80以上は紫 / 60以上は緑 / 30以上は黄 / それ未満は赤">
-          <i style={{ background: 'var(--pink)' }} aria-hidden="true" />95+
+              title="色の区分（濃いほど上）: 95以上（上位5%。運用の選定の線）/ 90以上（3モデルの線）/ 80以上 / 60以上 / 30以上 / それ未満">
+          {PCT_LEGEND.map((t) => (
+            <i key={t} style={{ background: pctColor(t) }} aria-hidden="true" />
+          ))}
+          95+
         </span>
       </span>
       <span className="pred-ms-row">

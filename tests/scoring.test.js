@@ -11,7 +11,7 @@ import {
   PROGRESS_TABLE, PROGRESS_PCTS, percentileOf, progressBenchmark, progressDetail,
 } from '../src/lib/scoring.js';
 import {
-  candidateToStock, marketTone, bandLabel, bandColor, pctColor, TOP_PCT,
+  candidateToStock, marketTone, bandLabel, bandColor, pctColor, pctTier, PCT_TIERS, PCT_LEGEND, TOP_PCT,
 } from '../src/lib/predictions.js';
 import { mergeStocks, dropOldPredictionProgress } from '../src/lib/store.js';
 
@@ -405,18 +405,27 @@ test('marketTone は地合い寄与の中央値で向きを決める', () => {
   assert.equal(marketTone([mk(null), mk(-0.3), mk(-0.2), mk(-0.25)]).label, '向かい風');
 });
 
-test('pctColor は 95 以上を別の色にし、それ未満は帯の色に揃える', () => {
-  // 運用の選定基準（lgbm 単体 95以上 = 上位5%）が紫の中に埋もれないように（2026-10-09）
+test('pctColor は 30 / 60 / 80 / 90 / 95 の区分を濃淡で塗る', () => {
+  // 運用者の指示（2026-10-09）: 区分は 30 以上・60 以上・80 以上・90 以上・95 以上、色は濃淡
+  assert.deepEqual(PCT_TIERS, [95, 90, 80, 60, 30]);
+  assert.deepEqual(PCT_LEGEND, [0, 30, 60, 80, 90, 95]);
   assert.equal(TOP_PCT, 95);
-  assert.equal(pctColor(95), 'var(--pink)');
-  assert.equal(pctColor(99.9), 'var(--pink)');
-  assert.equal(pctColor(94.9), bandColor(10));           // 紫のまま
-  assert.equal(pctColor(80), bandColor(9));
-  assert.equal(pctColor(60), bandColor(7));
-  assert.equal(pctColor(29.9), bandColor(3));
-  assert.notEqual(pctColor(95), pctColor(90));
-  assert.notEqual(pctColor(95), pctColor(60));          // 緑と見分けづらいシアンはやめた（2026-10-09）
-  assert.equal(pctColor(null), 'var(--text-faint)');
+  assert.equal(pctTier(95), 95);
+  assert.equal(pctTier(94.9), 90);
+  assert.equal(pctTier(90), 90);
+  assert.equal(pctTier(89.9), 80);
+  assert.equal(pctTier(60), 60);
+  assert.equal(pctTier(30), 30);
+  assert.equal(pctTier(29.9), 0);
+  assert.equal(pctTier(null), null);
+  assert.equal(pctColor(97), 'var(--pct-95)');
+  assert.equal(pctColor(92), 'var(--pct-90)');
+  assert.equal(pctColor(85), 'var(--pct-80)');
+  assert.equal(pctColor(70), 'var(--pct-60)');
+  assert.equal(pctColor(45), 'var(--pct-30)');
+  assert.equal(pctColor(10), 'var(--pct-0)');
+  assert.equal(new Set(PCT_LEGEND.map(pctColor)).size, 6);     // 6区分がすべて別の色
+  assert.equal(pctColor(undefined), 'var(--text-faint)');
 });
 
 test('bandLabel / bandColor は帯が無いとき落ちない', () => {

@@ -66,22 +66,34 @@ export function bandColor(band) {
   return 'var(--red)';
 }
 
-/** この百分位以上は別の色（上位5%。運用の選定「lgbm 単体 95以上」の線）。 */
-export const TOP_PCT = 95;
+/**
+ * 百分位の区分（上から順）。運用者の指示（2026-10-09）: 30 / 60 / 80 / 90 / 95 で分ける。
+ * 95 は運用の選定「lgbm 単体 95以上」（上位5%）、90 は「3モデル 90以上」の線。
+ */
+export const PCT_TIERS = [95, 90, 80, 60, 30];
+/** 凡例に並べる代表値（薄い順）。 */
+export const PCT_LEGEND = [0, 30, 60, 80, 90, 95];
+/** 上位5% の線（後方互換）。 */
+export const TOP_PCT = PCT_TIERS[0];
+
+/** 百分位が入る区分の下限（95 / 90 / 80 / 60 / 30 / 0）。値が無ければ null。 */
+export function pctTier(pct) {
+  if (!Number.isFinite(pct)) return null;
+  for (const t of PCT_TIERS) if (pct >= t) return t;
+  return 0;
+}
 
 /**
  * パーセンタイル（過去スコア分布での位置）の色。
  *
- * 95 以上はピンク（運用者の指摘 2026-10-09: 選定の基準は上位5% なのに、紫（80以上 = 帯 9〜10）の
- * 中に埋もれて見分けられなかった。最初はシアンにしたが「緑と見分けづらい」と同日に指摘され、
- * 使っている色相（赤 0°・黄 45°・緑 160°・紫 258°）から最も離れたピンク（330°）にした）。それ未満は帯の色に揃える: 帯は out-of-fold スコアの10分位
- * なので、パーセンタイル p の行はおおよそ帯 floor(p/10)+1 に入る。別の色関数を作ると同じ水準が
- * 場所によって違う色になるので、bandColor に寄せる。
+ * 1つの色相（青）の濃淡で、区分（PCT_TIERS）が上がるほど明るく鮮やか（暗い画面なので
+ * 「濃い」= 明るい）。運用者の指示（2026-10-09）: 色相で分けると見分けづらい組（シアンと緑）が
+ * 出るので濃淡にし、区分は 30 / 60 / 80 / 90 / 95。帯（10分位）の色（bandColor）とは別。
+ * 文字に使うときは、低い区分が暗くて読めないので、文字を塗らずに四角（.pct-sw）を添える。
  */
 export function pctColor(pct) {
-  if (!Number.isFinite(pct)) return 'var(--text-faint)';
-  if (pct >= TOP_PCT) return 'var(--pink)';
-  return bandColor(Math.floor(pct / 10) + 1);
+  const t = pctTier(pct);
+  return t === null ? 'var(--text-faint)' : `var(--pct-${t})`;
 }
 
 /**
