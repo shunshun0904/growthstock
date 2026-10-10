@@ -174,6 +174,37 @@ class TestReportAndAsk(unittest.TestCase):
         json.dumps(res, ensure_ascii=False,
                    default=lambda x: None if x is None or (isinstance(x, float) and not np.isfinite(x)) else float(x))
 
+    def test_report_precision_runs_and_has_the_decided_pieces(self):
+        import contextlib
+        import io
+        d = self.make_d(n=600, seed=1)
+        d.loc[:60, ["hp_lgbm", "hp_xgb", "hp_cat"]] = 96.0          # 運用者の線の上に 61行つくる
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            res = E.report_precision(d, ["prod", "anon"])
+        out = buf.getvalue()
+        self.assertIn("=== 6.", out)
+        names = [n for n, _ in E.selections(d)]
+        self.assertEqual(names[:2], ["3モデルとも90以上（画面の線）", "3モデルとも95以上（運用者の線）"])
+        r = res["prod"]["母集団"]
+        self.assertEqual(r["total"]["n"], 600)
+        self.assertEqual(set(r["gap"]), {"hit10", "label"})
+        self.assertTrue(np.isfinite(r["gap"]["hit10"]["d"]))
+        self.assertIn("vol_20d", r["auc"]["hit10"])
+        self.assertEqual(len(r["terciles"]), 3)
+        self.assertEqual(sum(t["n"] for t in r["terciles"]), 600)
+        self.assertEqual(set(r["gates"]), {"30", "50", "70"})
+        g = r["gates"]["50"]
+        self.assertEqual(g["ge"]["n"] + g["lt"]["n"], 600)
+        self.assertTrue(res["prod"]["3モデルとも95以上（運用者の線）"]["total"]["n"] >= 61)
+
+    def test_tp_fp_gap(self):
+        sub = pd.DataFrame({"Code": list("abcdef"), "jev": [80, 70, 60, 30, 20, 10],
+                            "hit10": [True, True, True, False, False, False]})
+        g = E.tp_fp_gap(sub, "jev", "hit10")
+        self.assertEqual((g["tp"], g["fp"], g["tp_n"], g["fp_n"]), (70.0, 20.0, 3, 3))
+        self.assertAlmostEqual(g["d"], 50.0)
+
     def test_report_without_all_trees_skips_shapes(self):
         import contextlib
         import io

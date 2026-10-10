@@ -34,6 +34,12 @@ state: 本番（research/jev_predict.build_state）と同じ作り。百分位�
 追記（2026-10-10、全体の結果 run 38078175856 を見てから足した読み解きの補助。採否の基準には使わない）:
   2 と 4 に素朴な基準（日次ボラ vol_20d・20日リターン ret_20d）の AUC と、Jev との相関を並べる。
   Jev の「+10% 到達」の確率がボラの言い換えになっていないかを見るため。
+運用者の問い（2026-10-10、結果を見たあと）: 「Jev の確率の大小と Precision に相関があればよい。偽陽性になりがちな
+  サンプルの Jev は低く、真陽性の Jev は高い、という傾向が見えればよい」→ 6. モデルが陽性と見た候補の中での Jev。
+  先に決めること: 選定の集合は 3モデル90以上 / 3モデル95以上 / LightGBM 95以上 / LightGBM 90以上 / 母集団。
+  陽性の定義は hit10（Jev に問うたもの）とモデルの正例の両方。見るのは (a) 真陽性と偽陽性の Jev の平均の差（SE は
+  銘柄ごと）(b) 集合の中での ROC-AUC（Jev・日次ボラ・20日リターン）(c) 集合の中の Jev の3分位ごとの Precision と
+  +10%指値 (d) Jev ≥ 30 / 50 / 70 をゲートにしたときの件数・Precision・+10%指値。答えは控えから読む（課金なし）。
 
   exp=e73_jev_oof.py  args="--dry-run"     # 件数と state の例（匿名の腕）、文字数だけ。通信しない
   exp=e73_jev_oof.py  args="--arms prod --limit 200"   # 本番と同じ腕を新しい方から200件だけ（費用の確かめ）
@@ -499,6 +505,139 @@ def report(d: pd.DataFrame, algos: Sequence[str], arms: Sequence[str], usage: Di
     return res
 
 
+# ---------------------------------------------------------------------- #
+# 6. モデルが陽性と見た候補の中での Jev（運用者の問い: Precision との相関）
+# ---------------------------------------------------------------------- #
+
+#: 選定の集合。百分位は前の窓の分布（hp_*）。木3つがそろわないときは LightGBM の行だけ
+def selections(d: pd.DataFrame) -> List[Tuple[str, pd.Series]]:
+    out = []
+    trees = [f"hp_{a}" for a in E70.TREES if f"hp_{a}" in d.columns]
+    if len(trees) == len(E70.TREES):
+        out.append(("3モデルとも90以上（画面の線）", (d[trees] >= 90).all(axis=1)))
+        out.append(("3モデルとも95以上（運用者の線）", (d[trees] >= 95).all(axis=1)))
+    if "hp_lgbm" in d.columns:
+        out.append(("LightGBM 95以上（単体）", d["hp_lgbm"] >= 95))
+        out.append(("LightGBM 90以上（単体）", d["hp_lgbm"] >= 90))
+    out.append(("母集団", pd.Series(True, index=d.index)))
+    return out
+
+
+JEV_GATES = (30.0, 50.0, 70.0)
+MIN_ROWS = 10        # これ未満の集合は数字を出さない（E70.line と同じ）
+MIN_TERCILE = 30     # 3分位に割るのに要る行
+
+
+def _mean_se(x: pd.Series, codes: pd.Series) -> Tuple[float, float, int]:
+    v = pd.to_numeric(x, errors="coerce")
+    ok = v.notna()
+    if ok.sum() == 0:
+        return np.nan, np.nan, 0
+    return float(v[ok].mean()), E70.cluster_se(v[ok], codes[ok]), int(ok.sum())
+
+
+def tp_fp_gap(sub: pd.DataFrame, col: str, truth: str) -> Dict:
+    """真陽性（truth が真）と偽陽性（偽）の col の平均と差。SE は銘柄ごとにまとめる（両群は独立とみなす）。"""
+    y = sub[truth].astype(bool)
+    m_tp, se_tp, n_tp = _mean_se(sub.loc[y, col], sub.loc[y, "Code"])
+    m_fp, se_fp, n_fp = _mean_se(sub.loc[~y, col], sub.loc[~y, "Code"])
+    dv = m_tp - m_fp
+    se = float(np.sqrt(se_tp ** 2 + se_fp ** 2)) if np.isfinite(se_tp) and np.isfinite(se_fp) else np.nan
+    return {"tp": m_tp, "tp_n": n_tp, "fp": m_fp, "fp_n": n_fp, "d": dv, "se": se,
+            "z": dv / se if np.isfinite(se) and se > 0 else np.nan}
+
+
+def precision_of(sub: pd.DataFrame) -> Dict:
+    """集合の Precision（hit10 / モデルの正例）と +10%指値の平均。"""
+    if len(sub) == 0:
+        return {"n": 0}
+    return {"n": int(len(sub)), "codes": int(sub["Code"].nunique()),
+            "prec_hit": float(sub["hit10"].mean() * 100), "prec_hit_se": E70.cluster_se(sub["hit10"].astype(float) * 100, sub["Code"]),
+            "prec_label": float(pd.to_numeric(sub["label"], errors="coerce").mean() * 100),
+            "tp10": float(sub["tp10"].mean()), "tp10_se": E70.cluster_se(sub["tp10"], sub["Code"]),
+            "hold": float(sub["r"].mean())}
+
+
+def _pline(name: str, p: Dict) -> str:
+    if not p.get("n"):
+        return f"  {name:<34}{0:>6}"
+    if p["n"] < MIN_ROWS:
+        return f"  {name:<34}{p['n']:>6}   （件数が少なすぎる）"
+    return (f"  {name:<34}{p['n']:>6}{p['codes']:>6}{p['prec_hit']:>8.1f}%{p['prec_hit_se']:>5.1f}"
+            f"{p['prec_label']:>8.1f}%{p['tp10']:>+8.2f}%{p['tp10_se']:>6.2f}{p['hold']:>+8.2f}%")
+
+
+PHEAD = (f"  {'':<34}{'件数':>6}{'銘柄':>6}{'Prec(+10%)':>9}{'SE':>5}{'Prec(正例)':>9}{'+10%指値':>9}{'SE':>6}{'持ち切り':>9}")
+
+
+def report_precision(d: pd.DataFrame, arms: Sequence[str]) -> Dict:
+    """運用者の問い: モデルが陽性と見た候補の中で、Jev の確率は真陽性と偽陽性を分けるか。"""
+    res: Dict[str, Dict] = {}
+    naive = [c for c in ("vol_20d", "ret_20d") if c in d.columns]
+    print("\n=== 6. モデルが陽性と見た候補の中での Jev（運用者の問い: Precision との相関）===")
+    print("  陽性の定義は2つ: +10% 到達（hit10。Jev に問うたもの）と モデルの正例（+1.2σ）。真陽性 = 選ばれて当たった行")
+    for arm in arms:
+        col = f"jev_{arm}"
+        res[arm] = {}
+        for name, mask in selections(d):
+            sub = d[mask & d[col].notna()].copy()
+            out: Dict[str, object] = {"total": precision_of(sub)}
+            print(f"\n  --- [{arm}] {name}: {len(sub):,}行 ---")
+            if len(sub) < MIN_ROWS:
+                print("    件数が少なすぎる（10件未満）")
+                res[arm][name] = out
+                continue
+            # (a) 真陽性と偽陽性の Jev の平均
+            out["gap"] = {}
+            for truth, lab in (("hit10", "+10% 到達"), ("label", "モデルの正例")):
+                g = tp_fp_gap(sub, col, truth)
+                out["gap"][truth] = g
+                print(f"    (a) {lab:<8}: 真陽性 {g['tp_n']:>5}件の Jev 平均 {g['tp']:5.1f}% / 偽陽性 {g['fp_n']:>5}件 {g['fp']:5.1f}%"
+                      f" / 差 {g['d']:+5.1f}pt ± {g['se']:.1f}（z {g['z']:+.2f}）")
+            # (b) 集合の中での AUC（Jev と素朴な基準）
+            out["auc"] = {}
+            for truth, lab in (("hit10", "+10% 到達"), ("label", "モデルの正例")):
+                y = sub[truth].astype(bool)
+                a = {"jev": roc_auc(y, sub[col])}
+                for c in naive:
+                    a[c] = roc_auc(y, sub[c])
+                out["auc"][truth] = a
+                extra = "".join(f" / {c} {a[c]:.3f}" for c in naive)
+                print(f"    (b) 集合の中の ROC-AUC（{lab}）: Jev {a['jev']:.3f}{extra}")
+            # (c) Jev の3分位
+            out["terciles"] = []
+            if len(sub) >= MIN_TERCILE:
+                try:
+                    q = pd.qcut(sub[col], 3, labels=False, duplicates="drop")
+                except ValueError:
+                    q = None
+                if q is not None and q.nunique() >= 2:
+                    print("    (c) Jev の3分位（集合の中で低い / 中 / 高い）")
+                    print("  " + PHEAD)
+                    for k in sorted(q.dropna().unique()):
+                        g = sub[q == k]
+                        p = precision_of(g)
+                        p["jev_lo"] = float(g[col].min())
+                        p["jev_hi"] = float(g[col].max())
+                        out["terciles"].append(p)
+                        print("  " + _pline(f"Jev {p['jev_lo']:.0f}〜{p['jev_hi']:.0f}%", p))
+            # (d) ゲート
+            out["gates"] = {}
+            print(f"    (d) Jev をゲートにしたとき（Jev ≥ t を買う / < t を見送る）")
+            print("  " + PHEAD)
+            print("  " + _pline("ゲート無し（集合の全部）", out["total"]))
+            for t in JEV_GATES:
+                hi = precision_of(sub[sub[col] >= t])
+                lo = precision_of(sub[sub[col] < t])
+                out["gates"][str(int(t))] = {"ge": hi, "lt": lo, "diff": E70.diff(hi, lo, "tp10")}
+                print("  " + _pline(f"Jev ≥ {t:.0f}", hi))
+                print("  " + _pline(f"Jev < {t:.0f}", lo))
+            out["rho_tp10"] = spearman(sub[col], sub["tp10"])
+            print(f"    Jev と +10%指値の収益の Spearman: {out['rho_tp10']:+.3f}")
+            res[arm][name] = out
+    return res
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="実験73: 直近1年の OOF 候補に Jev を当てる")
     ap.add_argument("--days", type=int, default=365, help="最新日から何暦日ぶんを対象にするか")
@@ -564,6 +703,7 @@ def main(argv=None) -> int:
         usage[arm] = u
         d[f"jev_{arm}"] = [probs.get((c["jqCode"], c["date"]), np.nan) for c in cands]
     res = report(d, algos, arms, usage)
+    res["precision"] = report_precision(d, arms)
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w", encoding="utf-8") as fh:
         json.dump(res, fh, ensure_ascii=False, indent=1,
