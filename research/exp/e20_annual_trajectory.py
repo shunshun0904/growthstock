@@ -143,6 +143,23 @@ def features(df: pd.DataFrame) -> Dict[str, pd.Series]:
     return out
 
 
+def chance_hits(res: pd.DataFrame, z: float = 2.0) -> tuple:
+    """
+    偶然で |z| > z を超える本数の見込み（列の数 × t 分布の両側確率）。
+
+    z は「窓ごとの超過の平均 / 窓の SE」なので、窓が n 本なら自由度 n−1 の t 分布に従う。
+    正規分布の 5% で数えると、窓が少ないとき過小になる（窓11本では 7.3%。2026-10-10 に
+    EDINET の 523列で「5% ≈ 26本」と出したが、t 分布では 38本で、実際の 38本と同じだった）。
+    戻り値は (見込みの本数, 両側確率, 窓の本数の中央値)。
+    """
+    from scipy import stats
+
+    nw = res["n_win"].dropna() if "n_win" in res else pd.Series(dtype=float)
+    n_win = int(nw.median()) if len(nw) else 0
+    p = float(2 * stats.t.sf(z, n_win - 1)) if n_win > 1 else 0.05
+    return len(res) * p, p, n_win
+
+
 def screen(frame: pd.DataFrame, feats: List[str], windows: List[tuple]) -> pd.DataFrame:
     from sklearn.metrics import roc_auc_score
 
@@ -240,7 +257,8 @@ def main() -> int:
               f"{r['edge_pt']:>+8.2f}{r['edge_se']:>6.2f}{r['edge_z']:>+7.2f}"
               f"{r['edge_win_pos']:>4}/{r['n_win']:<2}")
     hits = res[res["abs_z"] > 2]
-    print(f"\n|z|>2: {len(hits)}本 / {len(res)}本（偶然でも 5% ≈ {len(res)*0.05:.1f}本は超える）")
+    exp_n, p, n_win = chance_hits(res)
+    print(f"\n|z|>2: {len(hits)}本 / {len(res)}本（偶然でも窓 {n_win}本の t 分布で {p*100:.1f}% ≈ {exp_n:.1f}本は超える）")
     print(f"ノイズ床（実験11、モデルの種を振ったときの窓平均レンジ）: 0.143pt")
     print(f"記録: {OUT}")
     return 0

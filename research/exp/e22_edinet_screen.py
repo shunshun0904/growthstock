@@ -25,7 +25,7 @@ import build_dataset as B  # noqa: E402
 import edinet_features as EF  # noqa: E402
 import lab  # noqa: E402
 import walkforward as WF  # noqa: E402
-from e20_annual_trajectory import OUTCOME, screen  # noqa: E402
+from e20_annual_trajectory import OUTCOME, chance_hits, screen  # noqa: E402
 from train_production import (  # noqa: E402
     OOF_MIN_TRAIN_MONTHS, OOF_STEP_MONTHS, OOF_TEST_MONTHS)
 
@@ -79,7 +79,10 @@ def main(argv=None) -> int:
     if short:
         print(f"  （件数不足で測れない列 {short}本）")
     hits = res[res["abs_z"] > 2]
-    print(f"\n|z|>2: {len(hits)}本 / {len(res)}本（偶然でも 5% ≈ {len(res)*0.05:.1f}本は超える）")
+    exp_n, p, n_win = chance_hits(res)
+    exp3, p3, _ = chance_hits(res, 3.0)
+    print(f"\n|z|>2: {len(hits)}本 / {len(res)}本（偶然でも窓 {n_win}本の t 分布で {p*100:.1f}% ≈ {exp_n:.1f}本は超える）")
+    print(f"|z|>3: {int((res['abs_z'] > 3).sum())}本（偶然の見込み {exp3:.1f}本）")
     print(f"記録: {OUT}")
     return 0
 
