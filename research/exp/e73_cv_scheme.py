@@ -2,12 +2,13 @@
 """
 実験73: 探索の分割を層別（year_cap_date）から前進分割（walkforward）に変えると、lgbm の精度はどう変わるか。
 
-運用者（2026-10-10）: 探索の 5分割 CV を「本番の窓と同じ前進分割」に変えた（docs/MODEL_ADOPTION_RULES.md §32）うえで
-「まずは lgbm だけで精度はどう変わるか見たい」。
+運用者（2026-10-10）: 探索の 5分割 CV を「時系列の層別 k 分割」にしたい → 形は「本番の窓と同じ前進分割」
+（docs/MODEL_ADOPTION_RULES.md §32）。「まずは lgbm だけで精度はどう変わるか見たい」「いきなり変えるよりも、
+まずは検証してほしい。本番導入するかはその結果次第」。本番は層別（year_cap_date）のまま、これはその検証。
 
 腕（列は本番の239列で同じ。データも同じ。**パラメータだけ**が違う）
-  S  層別（year_cap_date。2026-10-10 までの本番）で 50試行 × 5分割
-  W  前進分割（walkforward。2026-10-10 からの本番）で 50試行 × 5分割（検証窓は打ち切り日から遡って 6か月 × 5本）
+  S  層別（year_cap_date。今の本番）で 50試行 × 5分割
+  W  前進分割（walkforward。候補）で 50試行 × 5分割（検証窓は打ち切り日から遡って 6か月 × 5本）
 探索はどちらもホールドアウトより前（同じ打ち切り日）。Optuna の種も同じ。
 
 物差し（実験67・68・72 と同じ。本番と同じ OOF（36/6/6か月・エンバーゴ20営業日・種42）と、境界を 0/2/4か月ずらした
@@ -52,8 +53,8 @@ from e72_jsf_edinet_only import safe_metrics, windows_on  # noqa: E402
 ALGO = "lgbm"
 ARMS = ("S", "W")
 SCHEME_OF = {"S": "year_cap_date", "W": "walkforward"}
-LABELS = {"S": "S 層別（year_cap_date。2026-10-10 までの本番）で探索",
-          "W": "W 前進分割（walkforward。2026-10-10 からの本番）で探索"}
+LABELS = {"S": "S 層別（year_cap_date。今の本番）で探索",
+          "W": "W 前進分割（walkforward。候補）で探索"}
 TAG = "e73"
 log = E68.log
 

@@ -32,7 +32,7 @@ class TestArms(unittest.TestCase):
         self.assertEqual(E.ARMS, ("S", "W"))
         self.assertEqual(E.SCHEME_OF, {"S": "year_cap_date", "W": "walkforward"})
         import tuning
-        self.assertEqual(E.SCHEME_OF["W"], tuning.PRODUCTION_CV)
+        self.assertEqual(E.SCHEME_OF["S"], tuning.PRODUCTION_CV)                # S が今の本番、W が候補
 
     def test_tune_arm_switches_scheme_and_restores(self):
         seen = []

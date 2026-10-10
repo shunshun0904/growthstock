@@ -14,9 +14,8 @@ lgbm と条件を完全に揃える
 アルゴリズムを比べるのに片方だけ探索済みだと、差が手法の差なのか
 探索労力の差なのか分からない。以下を全モデルで共通にする。
 
-  分割        本番と同じ（tuning.PRODUCTION_CV。2026-10-10 から walkforward＝本番の窓と同じ
-              前進分割。それまでは年 × 時価総額帯で層別・日付単位の5分割 year_cap_date。
-              tuning.cv_folds で作る）
+  分割        本番と同じ（tuning.PRODUCTION_CV＝年 × 時価総額帯で層別・日付単位の5分割
+              year_cap_date。前進分割 walkforward は候補で実験73 で検証中。tuning.cv_folds で作る）
   目的関数    分割平均の PR-AUC
   試行数      50
   木の本数    200 で固定（lgbm の SEARCH_N_ESTIMATORS と同じ。N_ESTIMATORS の注記）
@@ -372,8 +371,7 @@ def study_name(algo: str, n_splits: int, train_to: str, cols: List[str],
     Optuna の study 名。「解こうとしている問題」を表すものだけで作る
     （モデル・分割数・訓練データの最終日・列、木のモデルは木の本数、分割方式も）。
     理由は tune() の中の注記。分割方式が違えば別の問題なので、year_cap_date 以外は
-    名前に入れる（2026-10-10 に本番を walkforward に変えたとき、前の分割で測った
-    試行を引き継がないため）。
+    名前に入れる（別の分割で測った試行を引き継がないため）。
     """
     name = f"{algo}_s{n_splits}_{train_to}_{F.signature(cols)}"
     if scheme != "year_cap_date":
@@ -393,8 +391,8 @@ def tune(algo: str, df: pd.DataFrame, cols: List[str], *, n_trials: int = 50,
     """
     1アルゴリズムを探索する。df はホールドアウトより手前だけを渡すこと。
 
-    分割は tuning.cv_folds（既定は本番と同じ tuning.PRODUCTION_CV。2026-10-10 から
-    walkforward＝本番の窓と同じ前進分割）。どの方式も日付単位で切る。同じ日の銘柄は
+    分割は tuning.cv_folds（既定は本番と同じ tuning.PRODUCTION_CV。実験で別の方式を
+    試すときは scheme で渡す）。どの方式も日付単位で切る。同じ日の銘柄は
     地合いを共有するので、行単位で切ると同じ日が訓練と検証に分かれ、検証が楽になる。
     """
     import optuna

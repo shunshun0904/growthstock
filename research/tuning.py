@@ -13,21 +13,22 @@ LightGBM のハイパーパラメータを Optuna で探索する。
                             ↑
                      ここより後は一切見ない
 
-## 分割は「本番の窓と同じ前進分割」（2026-10-10 から。PRODUCTION_CV）
-
-運用者の指示（2026-10-10）で、本番の探索の分割を層別 k 分割（year_cap_date）から
-本番の out-of-fold と同じ形の前進分割（walkforward）に変えた。検証窓は探索データの
-最終日から遡って 6か月 × 5本、訓練はその窓より前の全部（エンバーゴ 20営業日）。
-訓練側に検証より後の期間が入らないので CV の値は楽観側に出ず、本番の OOF と同じ
-物差しになる。引き換えに検証は直近 2.5年に偏り、窓ごとの正例率はそろわない
-（LAST_CV の fold_pos_rate / fold_windows に残す）。docs/MODEL_ADOPTION_RULES.md §32。
-
-## （2026-10-10 まで）分割は「年の束 × ラベル」で層別していた
+## 分割は「年の束 × ラベル」で層別する（本番。PRODUCTION_CV = year_cap_date）
 
 時系列分割はこの規模では推定が安定しなかった（実測で分割ごとの
 PR-AUC が 0.036〜0.230 と6倍以上ばらついた。件数で等分する timeseries の形で、
 最初の窓の訓練が短かった）。年で層別すれば局面の当たり外れがフォールド間で
-相殺される。層別の分割（year / year_cap / year_cap_date）は実験用に残してある。
+相殺される。
+
+## 候補: 「本番の窓と同じ前進分割」（walkforward。検証中、docs/MODEL_ADOPTION_RULES.md §32）
+
+運用者の指示（2026-10-10）「探索の分割を時系列の層別 k 分割に」を受けて作った。検証窓は
+探索データの最終日から遡って 6か月 × 5本、訓練はその窓より前の全部（エンバーゴ 20営業日）。
+訓練側に検証より後の期間が入らないので CV の値は楽観側に出ず、本番の OOF と同じ物差しに
+なる。引き換えに検証は直近 2.5年に偏り、窓ごとの正例率はそろわない（LAST_CV の
+fold_pos_rate / fold_windows に残す）。**本番に入れるかは実験73（research/exp/e73_cv_scheme.py）
+の結果を見て運用者が決める**（同日の指示「いきなり変えるよりも、まずは検証してほしい」）。
+それまで PRODUCTION_CV は year_cap_date のまま。
 
 層にラベルも入れる理由: PR-AUC の下限は正例率そのものなので、
 フォールド間で正例率がずれると、スコアの差が実力の差なのか
@@ -130,9 +131,10 @@ DEFAULT_PARAMS = {
 
 
 #: 本番の探索の分割（run_tuning.py の既定・tuning_multi.tune の既定・retrain-weekly.yml が渡す値）。
-#: 2026-10-10 の運用者の指示で層別 k 分割（year_cap_date）から前進分割に変えた
-#: （docs/MODEL_ADOPTION_RULES.md §32）
-PRODUCTION_CV = "walkforward"
+#: 層別 k 分割（year_cap_date）。前進分割（walkforward）は候補で、実験73 の結果を見て運用者が
+#: 決める（docs/MODEL_ADOPTION_RULES.md §32。2026-10-10「まずは検証してほしい。本番導入するかは
+#: その結果次第」）。ここを変えるときは §32 に記録し、retrain-weekly.yml の --cv も合わせる
+PRODUCTION_CV = "year_cap_date"
 #: walkforward の検証窓の長さ（か月）と、最初の窓に要る訓練の長さ（か月）。本番の out-of-fold
 #: （train_production.OOF_TEST_MONTHS / OOF_MIN_TRAIN_MONTHS）と同じ値にする
 #: （tests/test_tuning_walkforward.py で照合する。ここから train_production は読めない。循環する）
@@ -438,7 +440,7 @@ def walkforward_folds(df: pd.DataFrame, n_splits: int = 5,
                       min_train_months: int = WALKFORWARD_MIN_TRAIN_MONTHS
                       ) -> List[Tuple[pd.DataFrame, pd.DataFrame]]:
     """
-    本番の out-of-fold と同じ形の前進分割（2026-10-10 から本番の探索はこれ）。
+    本番の out-of-fold と同じ形の前進分割（本番の候補。実験73 で検証中。§32）。
 
     検証窓は探索データの最終日から遡って test_months か月 × n_splits 本。訓練はその窓より
     前の全部（expanding）で、訓練の最終日と検証の初日の間にエンバーゴ embargo_days 営業日を

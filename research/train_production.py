@@ -164,9 +164,9 @@ def oof_metrics(oof: pd.DataFrame) -> Dict:
     out-of-fold の分離力。毎週の記録として meta に残す。
 
     **`tuning` の中の mean_pr_auc / mean_roc_auc とは別物**。あちらは
-    ハイパーパラメータ探索の CV の値。2026-10-10 までは層別 k 分割で、フォールドの
-    訓練側に将来のデータが入り必ず高く出た（tuning.year_folds）。2026-10-10 からは
-    本番の窓と同じ前進分割（tuning.PRODUCTION_CV）だが、検証は直近 2.5年に偏る。
+    ハイパーパラメータ探索の CV の値。本番の分割（tuning.PRODUCTION_CV）は層別 k 分割で、
+    フォールドの訓練側に将来のデータが入り必ず高く出る（tuning.year_folds）。候補の
+    前進分割（walkforward。§32）なら楽観側ではないが、検証が直近 2.5年に偏る。
     こちらは「その行より前のデータだけで学習したモデル」の全期間の窓の採点。
     実力の推定値として読めるのはこちら。
 

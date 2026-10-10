@@ -7,7 +7,8 @@
 - 同じ日の行は必ず同じ側（日付で切る）
 - 訓練が 36か月に満たない窓は落とす（データが短ければ分割の数が減る）
 - 窓の長さ・最初の訓練の長さは本番の out-of-fold（train_production）と同じ値
-- cv_folds は名前で方式を選ぶ。本番の既定（PRODUCTION_CV）は walkforward で、run_tuning / tuning_multi の既定も同じ
+- cv_folds は名前で方式を選ぶ。本番の既定（PRODUCTION_CV）は層別 year_cap_date のまま（walkforward は候補。実験73 の
+  結果を見て運用者が決める）で、tuning_multi の既定も同じ
 - tuning_multi の study 名は分割方式が year_cap_date 以外なら名前に入る（前の分割の試行を引き継がない）
 - e15_tune_all.why_retune は分割方式が違えば探索し直す
 
@@ -100,7 +101,7 @@ class TestWalkforward(unittest.TestCase):
 
 class TestSchemes(unittest.TestCase):
     def test_production_default(self):
-        self.assertEqual(tuning.PRODUCTION_CV, "walkforward")
+        self.assertEqual(tuning.PRODUCTION_CV, "year_cap_date")                 # 本番は層別のまま（§32。検証してから）
         self.assertIn("walkforward", tuning.SCHEMES)
         self.assertEqual(set(tuning.SCHEME_JA), set(tuning.SCHEMES))
         import inspect

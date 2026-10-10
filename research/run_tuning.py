@@ -58,10 +58,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--n-splits", type=int, default=5,
                     help="探索の評価に使う分割の数")
     ap.add_argument("--cv", choices=list(tuning.SCHEMES), default=tuning.PRODUCTION_CV,
-                    help="分割方式。walkforward=本番の窓と同じ前進分割（既定・本番。"
-                         "2026-10-10 から） / year_cap_date=年×時価総額帯で層別・日付単位で分割"
-                         "（2026-10-10 までの本番） / year=年で層別 / year_cap=年×時価総額帯 / "
-                         "cap=時価総額帯のみ / timeseries=時系列（件数で等分）")
+                    help="分割方式。year_cap_date=年×時価総額帯で層別・日付単位で分割（既定・本番） / "
+                         "walkforward=本番の窓と同じ前進分割（候補。実験73 で検証中） / "
+                         "year=年で層別 / year_cap=年×時価総額帯 / cap=時価総額帯のみ / "
+                         "timeseries=時系列（件数で等分）")
     ap.add_argument("--model", choices=["classifier", "ranker"],
                     default="classifier",
                     help="classifier=pointwise（既定） / ranker=LTR（lambdarank）。"

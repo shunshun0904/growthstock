@@ -68,7 +68,7 @@ from e25_auc_noise import average, metrics  # noqa: E402
 
 OOF_DIR = os.path.join(lab.DATA_DIR, "oof")
 N_SPLITS = 5
-CV_SCHEME = tuning.PRODUCTION_CV     # 本番の retrain-weekly.yml と同じ（2026-10-10 までの回は year_cap_date）
+CV_SCHEME = tuning.PRODUCTION_CV     # 本番の retrain-weekly.yml と同じ（year_cap_date。前進分割は実験73 で検証中）
 ALGOS = ("lgbm", "xgb", "cat")        # 2026-10-09 運用者の決定: 実験はツリー系3種だけ（logit / mlp は外した）
 SEEDS = {"lgbm": (42, 7, 123), "xgb": (42, 7, 123), "cat": (42, 7, 123),
          "logit": (42,), "mlp": (42, 7, 123)}

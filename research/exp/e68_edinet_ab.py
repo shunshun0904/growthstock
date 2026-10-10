@@ -86,7 +86,7 @@ from e44_shortsale import permuted  # noqa: E402
 
 OOF_DIR = os.path.join(lab.DATA_DIR, "oof")
 N_SPLITS = 5
-CV_SCHEME = tuning.PRODUCTION_CV     # 本番の retrain-weekly.yml と同じ（2026-10-10 までの回は year_cap_date）
+CV_SCHEME = tuning.PRODUCTION_CV     # 本番の retrain-weekly.yml と同じ（year_cap_date。前進分割は実験73 で検証中）
 #: 2026-10-09 夜の運用者の指示「実験にもロジスティックを含める」（MLP は外したまま）
 ALGOS = ("lgbm", "xgb", "cat", "logit")
 #: §7 の票は木3モデル（運用の合議と同じ）。logit は同じ表に並べて参考にする
