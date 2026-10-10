@@ -149,9 +149,11 @@ jobs:
             # 同じ日の銘柄は地合いを共有するので、分けると検証が楽になり
             # CV が楽観側に出る（LTR では答えの一部を訓練で見ることになる）。
             # 引き換えに層の揃いは緩くなる（年構成 0.06pt -> 1.7pt）。
-            # 日付をまたげない以上これが下限で、リークを残すよりよい
+            # 日付をまたげない以上これが下限で、リークを残すよりよい。
+            # 2026-10-10 から分割は本番の窓と同じ前進分割（walkforward。§32）。層別の
+            # 注記は year_cap_date のころのもの
             PRESETS=$(grep -v '^#' research/tune_presets.txt | tr '\n' ' ')
-            python3 research/run_tuning.py --n-trials 50 --cv year_cap_date \
+            python3 research/run_tuning.py --n-trials 50 --cv walkforward \
               --features $PRESETS --n-splits 5 2>&1 | tee tune.log
             # LTR は目的関数が違うので別に探索する（鍵も __ltr で分ける）。
             # 探索の指標は pointwise と同じ PR-AUC にしてある。
@@ -159,7 +161,7 @@ jobs:
             # 「別の指標で選んだから良くなった」のか分からなくなる
             LTR=$(grep -v '^#' research/ltr_request.txt 2>/dev/null | head -1 | tr -d '[:space:]' || true)
             if [ "$LTR" = "yes" ]; then
-              python3 research/run_tuning.py --n-trials 50 --cv year_cap_date \
+              python3 research/run_tuning.py --n-trials 50 --cv walkforward \
                 --model ranker --features $PRESETS --n-splits 5 2>&1 | tee -a tune.log
             fi
           else

@@ -68,7 +68,7 @@ from e25_auc_noise import average, metrics  # noqa: E402
 
 OOF_DIR = os.path.join(lab.DATA_DIR, "oof")
 N_SPLITS = 5
-CV_SCHEME = "year_cap_date"          # 本番の retrain-weekly.yml と同じ
+CV_SCHEME = tuning.PRODUCTION_CV     # 本番の retrain-weekly.yml と同じ（2026-10-10 までの回は year_cap_date）
 ALGOS = ("lgbm", "xgb", "cat")        # 2026-10-09 運用者の決定: 実験はツリー系3種だけ（logit / mlp は外した）
 SEEDS = {"lgbm": (42, 7, 123), "xgb": (42, 7, 123), "cat": (42, 7, 123),
          "logit": (42,), "mlp": (42, 7, 123)}
@@ -165,7 +165,7 @@ def tune(algo: str, arm: str, frame: pd.DataFrame, cols: list, cutoff, n_trials:
         log(f"  [{algo} {arm}] 探索（tuning_multi.tune・{n_trials}試行 × {N_SPLITS}分割・{len(sub):,}件・{len(cols)}列・"
             f"前処理 {TM.preprocess_version(algo) or 'なし'}）")
         TM.STUDY_DB = path(f"optuna_{arm}.db")
-        rec = TM.tune(algo, sub, cols, n_trials=n_trials, n_splits=N_SPLITS, verbose=False)
+        rec = TM.tune(algo, sub, cols, n_trials=n_trials, n_splits=N_SPLITS, verbose=False, scheme=CV_SCHEME)
     rec["_seconds"] = round(time.time() - t0)
     rec["_n_trials"] = n_trials
     rec["_cutoff"] = str(cutoff.date())

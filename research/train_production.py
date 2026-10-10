@@ -164,10 +164,11 @@ def oof_metrics(oof: pd.DataFrame) -> Dict:
     out-of-fold の分離力。毎週の記録として meta に残す。
 
     **`tuning` の中の mean_pr_auc / mean_roc_auc とは別物**。あちらは
-    ハイパーパラメータ探索に使った層別 k 分割の値で、フォールドの訓練側に
-    将来のデータが入る（tuning.year_folds は時系列分割ではない）。
-    こちらは「その行より前のデータだけで学習したモデル」の採点なので、
-    必ず低く出る。実力の推定値として読めるのはこちら。
+    ハイパーパラメータ探索の CV の値。2026-10-10 までは層別 k 分割で、フォールドの
+    訓練側に将来のデータが入り必ず高く出た（tuning.year_folds）。2026-10-10 からは
+    本番の窓と同じ前進分割（tuning.PRODUCTION_CV）だが、検証は直近 2.5年に偏る。
+    こちらは「その行より前のデータだけで学習したモデル」の全期間の窓の採点。
+    実力の推定値として読めるのはこちら。
 
     PR-AUC は下限が正例率そのものなので、正例率が動く週をまたいで
     生値を並べても比較にならない。正例率で割った値も一緒に残す。
@@ -189,7 +190,7 @@ def oof_metrics(oof: pd.DataFrame) -> Dict:
         # 同じ日の候補どうしの順位付け。運用の決定にいちばん近い
         "aucInDay": round(float(L.auc_in_day(oof)), 4),
         "note": ("その行より前のデータだけで学習したモデルの採点。"
-                 "tuning の mean_pr_auc（層別k分割）とは別物で、必ず低く出る"),
+                 "tuning の mean_pr_auc（探索の CV。分割は tuning.PRODUCTION_CV）とは別物"),
     }
 
 
@@ -249,6 +250,12 @@ def main(argv=None) -> int:
             f"（今の本数は {tuning.SEARCH_N_ESTIMATORS}本。tuning.SEARCH_N_ESTIMATORS）。"
             f"run_tuning.py --features {args.features} で探索し直す"
             "（週次の再学習なら tune=yes）")
+    # 探索の分割が今の本番（tuning.PRODUCTION_CV）と違えば知らせる（止めない。週次の再学習
+    # （tune=yes）は探索してから学習するので、次の週次で直る）
+    cv_scheme = (rec.get("_cv") or {}).get("scheme")
+    if cv_scheme and cv_scheme != tuning.PRODUCTION_CV:
+        print(f"[warn] パラメータ {args.params} は分割 {cv_scheme} で探索したものです"
+              f"（今の本番は {tuning.PRODUCTION_CV}）。週次の再学習（tune=yes）で探索し直す")
     params = tuning.params_for(args.params)
     ds = pd.read_parquet(args.dataset)
     ds["Date"] = pd.to_datetime(ds["Date"])

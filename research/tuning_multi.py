@@ -14,8 +14,9 @@ lgbm と条件を完全に揃える
 アルゴリズムを比べるのに片方だけ探索済みだと、差が手法の差なのか
 探索労力の差なのか分からない。以下を全モデルで共通にする。
 
-  分割        年 × 時価総額帯で層別・日付単位で分割・5分割
-              （tuning.year_folds(scheme="year_cap_date") と同じ）
+  分割        本番と同じ（tuning.PRODUCTION_CV。2026-10-10 から walkforward＝本番の窓と同じ
+              前進分割。それまでは年 × 時価総額帯で層別・日付単位の5分割 year_cap_date。
+              tuning.cv_folds で作る）
   目的関数    分割平均の PR-AUC
   試行数      50
   木の本数    200 で固定（lgbm の SEARCH_N_ESTIMATORS と同じ。N_ESTIMATORS の注記）
@@ -365,13 +366,18 @@ def fit_eval(algo: str, params: Dict, tr: pd.DataFrame, va: pd.DataFrame,
 # 探索
 # --------------------------------------------------------------------------- #
 
-def study_name(algo: str, n_splits: int, train_to: str, cols: List[str]) -> str:
+def study_name(algo: str, n_splits: int, train_to: str, cols: List[str],
+               scheme: str = "year_cap_date") -> str:
     """
     Optuna の study 名。「解こうとしている問題」を表すものだけで作る
-    （モデル・分割数・訓練データの最終日・列、木のモデルは木の本数も）。
-    理由は tune() の中の注記。
+    （モデル・分割数・訓練データの最終日・列、木のモデルは木の本数、分割方式も）。
+    理由は tune() の中の注記。分割方式が違えば別の問題なので、year_cap_date 以外は
+    名前に入れる（2026-10-10 に本番を walkforward に変えたとき、前の分割で測った
+    試行を引き継がないため）。
     """
     name = f"{algo}_s{n_splits}_{train_to}_{F.signature(cols)}"
+    if scheme != "year_cap_date":
+        name += f"_{scheme}"
     # 本数を変えて同じ週に探索し直したとき、前の本数で測った試行を引き継がない
     name += f"_t{N_ESTIMATORS}" if algo in TREE_ALGOS else ""
     # 線形・MLP は前処理の版も入れる（v1 以外）。版が違えば別の問題なので、前の版の試行を引き継がない
@@ -382,27 +388,31 @@ def study_name(algo: str, n_splits: int, train_to: str, cols: List[str]) -> str:
 
 
 def tune(algo: str, df: pd.DataFrame, cols: List[str], *, n_trials: int = 50,
-         n_splits: int = 5, seed: int = SEED, verbose: bool = True) -> Dict:
+         n_splits: int = 5, seed: int = SEED, verbose: bool = True,
+         scheme: str = tuning.PRODUCTION_CV) -> Dict:
     """
     1アルゴリズムを探索する。df はホールドアウトより手前だけを渡すこと。
 
-    分割は tuning.year_folds の year_cap_date（年×時価総額帯で層別・
-    日付単位で分割）。日付単位にするのは、同じ日の銘柄が地合いを共有する
-    ため。行単位で切ると同じ日が訓練と検証に分かれ、検証が楽になる。
+    分割は tuning.cv_folds（既定は本番と同じ tuning.PRODUCTION_CV。2026-10-10 から
+    walkforward＝本番の窓と同じ前進分割）。どの方式も日付単位で切る。同じ日の銘柄は
+    地合いを共有するので、行単位で切ると同じ日が訓練と検証に分かれ、検証が楽になる。
     """
     import optuna
+    from train_model import EMBARGO_DAYS
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
-    folds = tuning.year_folds(df, n_splits=n_splits, seed=seed,
-                              by_year=True, by_cap=True, group_by_date=True)
+    folds = tuning.cv_folds(df, scheme, n_splits=n_splits, seed=seed, embargo_days=EMBARGO_DAYS)
     if not folds:
         raise SystemExit("分割を作れません")
     if verbose:
-        print(f"  [{algo}] {len(folds)}分割 / 木{N_ESTIMATORS}本固定 / "
+        print(f"  [{algo}] {tuning.SCHEME_JA[scheme]}{len(folds)}分割 / 木{N_ESTIMATORS}本固定 / "
               f"{n_trials}試行")
         print("  " + " / ".join(
             f"訓練{len(t):,}→検証{len(v):,}(正例{int(v['label'].sum())})"
             for t, v in folds))
+        if scheme in ("walkforward", "timeseries"):
+            print("  検証窓: " + " / ".join(
+                f"{w['valid_from']}〜{w['valid_to']}（訓練〜{w['train_to']}）" for w in tuning.fold_windows(folds)))
 
     def objective(trial):
         params = SPACES[algo](trial)
@@ -440,7 +450,7 @@ def tune(algo: str, df: pd.DataFrame, cols: List[str], *, n_trials: int = 50,
         # 別の列で測った50試行を「完了済み」として引き継ぎ、1試行もせずに
         # 旧い列の最良値を返す（153列 -> 205列 に切り替えた 2026-09-23 に
         # この穴に気づいた）
-        study_name=study_name(algo, n_splits, train_to, cols),
+        study_name=study_name(algo, n_splits, train_to, cols, scheme),
         load_if_exists=True,
     )
     done = len([t for t in study.trials
@@ -454,7 +464,8 @@ def tune(algo: str, df: pd.DataFrame, cols: List[str], *, n_trials: int = 50,
     out = {
         "params": dict(study.best_params),
         "_cv": {
-            "algo": algo, "scheme": "year_cap_date", "n_splits": len(folds),
+            "algo": algo, "scheme": scheme, "n_splits": len(folds),
+            "fold_windows": tuning.fold_windows(folds),
             "n_trials": n_trials, "n_estimators": N_ESTIMATORS,
             "mean_pr_auc": round(study.best_value, 4),
             "std": round(float(at.get("score_std", 0.0)), 4),

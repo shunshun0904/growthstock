@@ -143,15 +143,17 @@ jobs:
         if: inputs.tune == 'yes'
         run: |
           PRESETS=$(grep -v '^#' research/tune_presets.txt | tr '\n' ' ')
-          python3 research/run_tuning.py --n-trials 50 --cv year_cap_date \
+          # 分割は本番の窓と同じ前進分割（walkforward。2026-10-10 の運用者の指示で
+          # 層別 k 分割 year_cap_date から変えた。docs/MODEL_ADOPTION_RULES.md §32）
+          python3 research/run_tuning.py --n-trials 50 --cv walkforward \
             --features $PRESETS --n-splits 5 2>&1 | tail -30
 
       - name: Train production model
         run: python3 research/train_production.py 2>&1 | tee retrain.log
 
       # 画面に並べる追加モデル（xgb / cat。2026-10-09 に運用者の決定で logit / mlp を外した）の探索。
-      # 基準モデルと完全に同じ条件（年×時価総額帯で層別・日付単位で分割・
-      # 5分割 / PR-AUC / 50試行 / 木200本固定 / ホールドアウトより手前だけ）。
+      # 基準モデルと完全に同じ条件（本番と同じ分割 tuning.PRODUCTION_CV＝2026-10-10 から
+      # 前進分割 walkforward / 5分割 / PR-AUC / 50試行 / 木200本固定 / ホールドアウトより手前だけ）。
       #
       # 毎週やり直す。営業日が積まれれば母集団が変わるため。判定は
       # multi_params.json の _cv.train_to（訓練データの最終日）が動いたか。

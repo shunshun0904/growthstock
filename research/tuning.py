@@ -13,11 +13,21 @@ LightGBM のハイパーパラメータを Optuna で探索する。
                             ↑
                      ここより後は一切見ない
 
-## 分割は「年の束 × ラベル」で層別する
+## 分割は「本番の窓と同じ前進分割」（2026-10-10 から。PRODUCTION_CV）
+
+運用者の指示（2026-10-10）で、本番の探索の分割を層別 k 分割（year_cap_date）から
+本番の out-of-fold と同じ形の前進分割（walkforward）に変えた。検証窓は探索データの
+最終日から遡って 6か月 × 5本、訓練はその窓より前の全部（エンバーゴ 20営業日）。
+訓練側に検証より後の期間が入らないので CV の値は楽観側に出ず、本番の OOF と同じ
+物差しになる。引き換えに検証は直近 2.5年に偏り、窓ごとの正例率はそろわない
+（LAST_CV の fold_pos_rate / fold_windows に残す）。docs/MODEL_ADOPTION_RULES.md §32。
+
+## （2026-10-10 まで）分割は「年の束 × ラベル」で層別していた
 
 時系列分割はこの規模では推定が安定しなかった（実測で分割ごとの
-PR-AUC が 0.036〜0.230 と6倍以上ばらついた）。年で層別すれば
-局面の当たり外れがフォールド間で相殺される。
+PR-AUC が 0.036〜0.230 と6倍以上ばらついた。件数で等分する timeseries の形で、
+最初の窓の訓練が短かった）。年で層別すれば局面の当たり外れがフォールド間で
+相殺される。層別の分割（year / year_cap / year_cap_date）は実験用に残してある。
 
 層にラベルも入れる理由: PR-AUC の下限は正例率そのものなので、
 フォールド間で正例率がずれると、スコアの差が実力の差なのか
@@ -117,6 +127,22 @@ DEFAULT_PARAMS = {
     "reg_alpha": 0.0,
     "reg_lambda": 1.0,
 }
+
+
+#: 本番の探索の分割（run_tuning.py の既定・tuning_multi.tune の既定・retrain-weekly.yml が渡す値）。
+#: 2026-10-10 の運用者の指示で層別 k 分割（year_cap_date）から前進分割に変えた
+#: （docs/MODEL_ADOPTION_RULES.md §32）
+PRODUCTION_CV = "walkforward"
+#: walkforward の検証窓の長さ（か月）と、最初の窓に要る訓練の長さ（か月）。本番の out-of-fold
+#: （train_production.OOF_TEST_MONTHS / OOF_MIN_TRAIN_MONTHS）と同じ値にする
+#: （tests/test_tuning_walkforward.py で照合する。ここから train_production は読めない。循環する）
+WALKFORWARD_TEST_MONTHS = 6
+WALKFORWARD_MIN_TRAIN_MONTHS = 36
+SCHEMES = ("year", "year_cap", "year_cap_date", "cap", "timeseries", "walkforward")
+SCHEME_JA = {"year": "年で層別", "year_cap": "年×時価総額帯で層別",
+             "year_cap_date": "年×時価総額帯で層別・日付単位で分割",
+             "cap": "時価総額帯で層別", "timeseries": "時系列（件数で等分）",
+             "walkforward": "本番の窓と同じ前進分割（直近 6か月 × 5本・訓練はその前の全部）"}
 
 
 def chronological_split(df: pd.DataFrame, valid_frac: float = 0.25
@@ -406,6 +432,74 @@ def time_series_folds(df: pd.DataFrame, n_splits: int = 5,
     return out
 
 
+def walkforward_folds(df: pd.DataFrame, n_splits: int = 5,
+                      test_months: int = WALKFORWARD_TEST_MONTHS,
+                      embargo_days: int = 20,
+                      min_train_months: int = WALKFORWARD_MIN_TRAIN_MONTHS
+                      ) -> List[Tuple[pd.DataFrame, pd.DataFrame]]:
+    """
+    本番の out-of-fold と同じ形の前進分割（2026-10-10 から本番の探索はこれ）。
+
+    検証窓は探索データの最終日から遡って test_months か月 × n_splits 本。訓練はその窓より
+    前の全部（expanding）で、訓練の最終日と検証の初日の間にエンバーゴ embargo_days 営業日を
+    置く（ラベルが先 embargo_days 営業日の情報を含むため）。古い窓が先。
+
+    日付で切るので、同じ日の行は必ず同じ側に入る（LTR でも使える）。
+    訓練が min_train_months に満たない窓と、どちらかの側に両クラスが無い窓は落とす
+    （分割の数が減る。LAST_CV の n_splits / fold_windows で分かる）。
+
+    層別はしない（時系列では構成をそろえられない）。窓ごとの正例率が違うぶんは
+    PR-AUC の水準の違いとして出るので、LAST_CV の fold_pos_rate と並べて読む。
+    """
+    from train_model import TRADING_TO_CALENDAR
+
+    d = pd.to_datetime(df["Date"])
+    d0, dmax = pd.Timestamp(d.min()), pd.Timestamp(d.max())
+    embargo = pd.Timedelta(days=int(round(embargo_days * TRADING_TO_CALENDAR)))
+    out: List[Tuple[pd.DataFrame, pd.DataFrame]] = []
+    for k in range(n_splits, 0, -1):
+        va_lo = dmax - pd.DateOffset(months=test_months * k)
+        va_hi = dmax - pd.DateOffset(months=test_months * (k - 1))
+        train_end = va_lo - embargo
+        if train_end < d0 + pd.DateOffset(months=min_train_months):
+            continue
+        tr = df[d <= train_end]
+        va = df[(d > va_lo) & (d <= va_hi)]
+        if len(tr) == 0 or len(va) == 0:
+            continue
+        if tr["label"].nunique() < 2 or va["label"].nunique() < 2:
+            continue
+        out.append((tr, va))
+    return out
+
+
+def cv_folds(df: pd.DataFrame, scheme: str, n_splits: int = 5, seed: int = 0,
+             embargo_days: int = 60) -> List[Tuple[pd.DataFrame, pd.DataFrame]]:
+    """分割方式の名前（SCHEMES）から (訓練, 検証) の列。tune() と tuning_multi.tune() が共通に使う。"""
+    if scheme in ("year", "year_cap", "cap", "year_cap_date"):
+        return year_folds(df, n_splits=n_splits, seed=seed,
+                          by_year=scheme in ("year", "year_cap", "year_cap_date"),
+                          by_cap=scheme in ("year_cap", "cap", "year_cap_date"),
+                          group_by_date=scheme == "year_cap_date")
+    if scheme == "timeseries":
+        return time_series_folds(df, n_splits=n_splits, embargo_days=embargo_days)
+    if scheme == "walkforward":
+        return walkforward_folds(df, n_splits=n_splits, embargo_days=embargo_days)
+    raise SystemExit(f"未知の分割方式: {scheme}（{' / '.join(SCHEMES)}）")
+
+
+def fold_windows(folds) -> List[Dict]:
+    """分割ごとの検証窓（初日・最終日）と件数。記録用（LAST_CV / multi_params.json の _cv）。"""
+    out = []
+    for tr, va in folds:
+        vd = pd.to_datetime(va["Date"])
+        out.append({"valid_from": str(vd.min().date()), "valid_to": str(vd.max().date()),
+                    "train_to": str(pd.to_datetime(tr["Date"]).max().date()),
+                    "n_train": int(len(tr)), "n_valid": int(len(va)),
+                    "pos_rate": round(float(va["label"].mean()), 4)})
+    return out
+
+
 def scale_pos_weight(y: np.ndarray) -> float:
     pos = max(1, int(np.sum(y)))
     return float((len(y) - pos) / pos)
@@ -499,38 +593,26 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
     optuna.logging.set_verbosity(optuna.logging.WARNING)
     n_trees = SEARCH_N_ESTIMATORS if n_estimators is None else int(n_estimators)
     lr_lo, lr_hi = lr_range(n_trees) if lr_bounds is None else map(float, lr_bounds)
-    if model == "ranker" and scheme != "year_cap_date":
+    if model == "ranker" and scheme not in ("year_cap_date", "walkforward"):
         raise SystemExit(
-            "LTR は日付単位の分割が必須です（--cv year_cap_date）。"
+            "LTR は日付単位の分割が必須です（--cv year_cap_date か walkforward）。"
             f"指定: {scheme}。同じ日が訓練と検証に分かれると、"
             "その日の答えの一部を訓練で見ることになります")
-    if scheme in ("year", "year_cap", "cap", "year_cap_date"):
-        folds = year_folds(df, n_splits=n_splits, seed=seed,
-                           by_year=scheme in ("year", "year_cap",
-                                              "year_cap_date"),
-                           by_cap=scheme in ("year_cap", "cap",
-                                             "year_cap_date"),
-                           group_by_date=scheme == "year_cap_date")
-    elif scheme == "timeseries":
-        folds = time_series_folds(df, n_splits=n_splits,
-                                  embargo_days=embargo_days)
-    else:
-        raise SystemExit(
-            f"未知の分割方式: {scheme}"
-            "（year / year_cap / year_cap_date / cap / timeseries）")
+    folds = cv_folds(df, scheme, n_splits=n_splits, seed=seed, embargo_days=embargo_days)
     if not folds:
         if verbose:
             print("  [tune] 分割を作れないため既定値を使う")
         return dict(DEFAULT_PARAMS)
     if verbose:
-        ja = {"year": "年で層別", "year_cap": "年×時価総額帯で層別",
-              "year_cap_date": "年×時価総額帯で層別・日付単位で分割",
-              "cap": "時価総額帯で層別", "timeseries": "時系列"}[scheme]
+        ja = SCHEME_JA[scheme]
         print(f"  [tune] {ja}{len(folds)}分割 / 木{n_trees}本固定 / "
               f"学習率 {lr_lo:g}〜{lr_hi:g}")
         print("  [tune] " + " / ".join(
             f"訓練{len(t):,}→検証{len(v):,}(正例{int(v['label'].sum())})"
             for t, v in folds))
+        if scheme in ("walkforward", "timeseries"):
+            print("  [tune] 検証窓: " + " / ".join(
+                f"{w['valid_from']}〜{w['valid_to']}（訓練〜{w['train_to']}）" for w in fold_windows(folds)))
 
     def objective(trial):
         params = {
@@ -604,7 +686,9 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
                # 実データで確認する手段が無かった。ここに残せば毎回検証できる。
                "fold_cap_spread_pt": round(_composition_spread(
                    [v for _, v in folds], _cap_bands(df)) * 100, 3),
-               "n_trials": n_trials}
+               "n_trials": n_trials,
+               # 分割ごとの検証窓と件数（前進分割では窓の期間がそのまま結果の読み方になる）
+               "fold_windows": fold_windows(folds)}
     if verbose:
         pr_txt = " ".join(f"{x:.4f}" for x in at.get("fold_scores", []))
         roc_txt = " ".join(f"{x:.4f}" for x in at.get("fold_roc", []))

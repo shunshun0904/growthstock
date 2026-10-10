@@ -243,7 +243,7 @@ def main(argv=None) -> int:
 
     print("=" * 72)
     # 分離力もここに並べる。モデル間の優劣は out-of-fold で見る（探索の
-    # mean_pr_auc は層別k分割で楽観的なので、モデル間比較には使わない）
+    # mean_pr_auc は探索の CV で窓が違うので、モデル間比較には使わない）
     print(f"{'モデル':<10}{'秒':>6}{'MB':>7}{'OOF':>8}"
           f"{'PR-AUC':>9}{'ROC-AUC':>9}{'日内AUC':>9}  保存先")
     for r in rows:

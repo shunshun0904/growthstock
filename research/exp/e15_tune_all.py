@@ -60,7 +60,7 @@ N_TRIALS = 50
 
 
 def why_retune(prev: dict, train_to: str, sig: str,
-               trees: Optional[int] = None) -> Optional[str]:
+               trees: Optional[int] = None, scheme: Optional[str] = None) -> Optional[str]:
     """
     保存済みの探索（prev = multi_params.json の _cv）を使えるか。
     使えるなら None、探索し直すなら理由を返す。
@@ -72,6 +72,8 @@ def why_retune(prev: dict, train_to: str, sig: str,
     trees は木のモデルの本数（tuning_multi.N_ESTIMATORS）。木の無いモデルは None。
     本数が違う探索も使わない（学習は今の本数で組むので、別の本数で選んだ
     パラメータを当てはめることになる）。
+    scheme は探索の分割方式（tuning.PRODUCTION_CV）。違う分割で選んだ探索も使わない
+    （2026-10-10 に本番を層別 k 分割から前進分割に変えた。§32）。
     """
     if not prev:
         return "探索済みパラメータが無い"
@@ -82,6 +84,8 @@ def why_retune(prev: dict, train_to: str, sig: str,
         return f"探索した木の本数が違う（{prev.get('n_estimators')}本 -> {trees}本）"
     if prev.get("train_to") != train_to:
         return f"訓練最終日が {prev.get('train_to')} から {train_to} に動いた"
+    if scheme is not None and prev.get("scheme") != scheme:
+        return f"探索の分割が違う（{prev.get('scheme') or 'なし'} -> {scheme}）"
     return None
 
 
@@ -123,7 +127,8 @@ def main() -> int:
         # 日付が動いていれば母集団が変わっているので50試行やり直す
         # （通常の週次実行では5営業日ぶん進むので、必ず探索が走る）
         why = why_retune(prev, train_to, sig,
-                         TM.N_ESTIMATORS if algo in TM.TREE_ALGOS else None)
+                         TM.N_ESTIMATORS if algo in TM.TREE_ALGOS else None,
+                         scheme=TM.tuning.PRODUCTION_CV)
         if why is None and not force:
             print(f"  [{algo}] 探索済みを読む "
                   f"(PR-AUC {prev['mean_pr_auc']:.4f} / 訓練最終日 {train_to})")
