@@ -132,11 +132,14 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # 成果物はログだけにする（2026-10-10）。リポジトリが公開のあいだ、Actions の成果物は
+      # GitHub にログインした誰でも落とせる。以前は research/_data/oof/ をまるごと上げていて、
+      # 銘柄ごとの値（J-Quants から作った特徴量・株価の経路、日証金・EDINET の値）が入っていた
+      # （実験70 の run 38035185851 で気づいた）。途中結果の引き継ぎは上の actions/cache が担うので、
+      # 成果物を減らしても実験の続きからの再開には影響しない。集計はログに出す
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: exp-${{ steps.exp.outputs.name }}
-          path: |
-            exp.log
-            research/_data/oof/
+          path: exp.log
           retention-days: 30
