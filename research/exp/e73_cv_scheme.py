@@ -1,35 +1,40 @@
 #!/usr/bin/env python3
 """
-実験73: 探索の分割を層別（year_cap_date）から前進分割（walkforward）に変えると、lgbm の精度はどう変わるか。
+実験73: 探索の分割（層別 / 前進分割）と目的関数（PR-AUC / リフト）で、lgbm の精度はどう変わるか。
 
 運用者（2026-10-10）: 探索の 5分割 CV を「時系列の層別 k 分割」にしたい → 形は「本番の窓と同じ前進分割」
 （docs/MODEL_ADOPTION_RULES.md §32）。「まずは lgbm だけで精度はどう変わるか見たい」「いきなり変えるよりも、
-まずは検証してほしい。本番導入するかはその結果次第」。本番は層別（year_cap_date）のまま、これはその検証。
+まずは検証してほしい。本番導入するかはその結果次第」。本番は層別（year_cap_date）・PR-AUC のまま、これはその検証。
+1回目（S と W）の結果を見て、前進分割では窓ごとの正例率（9.8〜23.9%）が PR-AUC の平均を引っ張るので「目的関数を
+正例率で割ったリフトにする」案を出し、運用者の了承（「あくまで 5cv のですよね？であれば試す価値はある」）で WL を足した。
 
 腕（列は本番の239列で同じ。データも同じ。**パラメータだけ**が違う）
-  S  層別（year_cap_date。今の本番）で 50試行 × 5分割
-  W  前進分割（walkforward。候補）で 50試行 × 5分割（検証窓は打ち切り日から遡って 6か月 × 5本）
-探索はどちらもホールドアウトより前（同じ打ち切り日）。Optuna の種も同じ。
+  S   層別（year_cap_date。今の本番）・目的関数 PR-AUC で 50試行 × 5分割
+  W   前進分割（walkforward。候補）・目的関数 PR-AUC で 50試行 × 5分割（検証窓は打ち切り日から遡って 6か月 × 5本）
+  WL  前進分割・目的関数 リフト（PR-AUC ÷ 検証窓の正例率）で 50試行 × 5分割。窓の重みをそろえる
+探索はどれもホールドアウトより前（同じ打ち切り日）。Optuna の種も同じ。目的関数は探索の中だけの話で、
+本番の評価（OOF・窓）は PR-AUC のまま。
 
 物差し（実験67・68・72 と同じ。本番と同じ OOF（36/6/6か月・エンバーゴ20営業日・種42）と、境界を 0/2/4か月ずらした
 32窓 × 種3つの平均）: PR-AUC・正例率に対するリフト・ROC-AUC・日内 AUC・上位10% の超過リターン。
-窓ごとの差 W−S は、全窓と、**探索の打ち切り日より後に始まる窓（探索に一切使っていない期間）** を分けて出す。
-前の窓は、どちらの腕もその期間のデータでパラメータを選んでいる（同じ条件だが、絶対値は楽観側）。
+窓ごとの差は、全窓と、**探索の打ち切り日より後に始まる窓（探索に一切使っていない期間）** を分けて出す。
+前の窓は、どの腕もその期間のデータでパラメータを選んでいる（同じ条件だが、絶対値は楽観側。前進分割の腕は
+その期間の窓で選んでいるぶん、前の窓では有利に見える）。
 
-ついでに、W の探索の CV（前進分割の5窓）と、同じ期間の OOF の窓の PR-AUC を並べる。分割を変えた狙いの1つは
+ついでに、前進分割の腕の探索の CV（5窓）と、同じ期間の OOF の窓の PR-AUC を並べる。分割を変えた狙いの1つは
 「探索の CV の値が本番の OOF と同じ物差しになる」ことなので、それが実際にそうかを見る。
 
 期待（結果を見る前に）
-  実験で何度も見たとおり、同じ列・同じデータなら探索し直しの揺れは PR-AUC で ±0.005 程度。分割を変えても
-  選ばれるパラメータの違いはその範囲に収まり、32窓の W−S は SE の 2倍以内に入る見込み。前進分割は直近 2.5年で
-  選ぶので、打ち切り日より後の窓でだけ W が少し上なら「直近に合わせた」効果、そこでも差が無ければ「どちらでも同じ」。
+  同じ列・同じデータなら探索し直しの揺れは PR-AUC で ±0.005 程度。分割・目的関数を変えても、探索に使っていない
+  窓での差はその範囲に収まる見込み。WL は正例率の低い窓（2024-08〜2025-02）を W より重く見るので、その窓に近い
+  地合いの窓で W より上なら「そろえた」効果。
 
     exp=e73_cv_scheme.py
 試運転: exp=e73_cv_scheme.py args="--tag e73smoke --n-trials 2 --shifts 0"
 
 公開ログには件数・割合・日付・精度だけを出す。本番の設定（research/lgbm_params.json、features.py）には書かない。
 
-結果（2026-10-10、run 38073499515、33分。docs/MODEL_ADOPTION_RULES.md §32）
+結果（1回目 S / W。2026-10-10、run 38073499515、33分。docs/MODEL_ADOPTION_RULES.md §32）
 --------
 - 探索の CV: S 0.3442 ± 0.027（層別・楽観側）、W 0.2995 ± 0.114（前進分割。窓ごと 0.25 / 0.32 / 0.22 / 0.20 / 0.51 で、
   正例率 9.8〜23.9% の違いがそのまま出る）。W の CV は同じ期間の OOF の窓と 0.01 以内で一致した（狙いどおり）
@@ -40,6 +45,7 @@
   楽観が入る
 - 結論: 探索に使っていない期間では精度は変わらない（差 ±0.004 の範囲）。前進分割の利点は「探索の値が本番の OOF と同じ
   物差しになる」ことで、精度の根拠にはならない。本番に入れるかは運用者の判断（§32）
+2回目（WL を足した回）の結果は §32 に追記する。
 """
 from __future__ import annotations
 
@@ -63,22 +69,27 @@ import e68_edinet_ab as E68  # noqa: E402
 from e72_jsf_edinet_only import safe_metrics, windows_on  # noqa: E402
 
 ALGO = "lgbm"
-ARMS = ("S", "W")
-SCHEME_OF = {"S": "year_cap_date", "W": "walkforward"}
-LABELS = {"S": "S 層別（year_cap_date。今の本番）で探索",
-          "W": "W 前進分割（walkforward。候補）で探索"}
+ARMS = ("S", "W", "WL")
+#: 腕 → (分割, 目的関数)
+ARM_SPEC = {"S": ("year_cap_date", "pr_auc"), "W": ("walkforward", "pr_auc"), "WL": ("walkforward", "lift")}
+LABELS = {"S": "S 層別（year_cap_date。今の本番）・PR-AUC で探索",
+          "W": "W 前進分割（walkforward。候補）・PR-AUC で探索",
+          "WL": "WL 前進分割・リフト（PR-AUC ÷ 正例率）で探索"}
+#: 表に出す差（「後 − 前」）
+PAIRS = (("S", "W"), ("S", "WL"), ("W", "WL"))
 TAG = "e73"
 log = E68.log
 
 
 def tune_arm(arm: str, df: pd.DataFrame, cols: list, cutoff, n_trials: int, stamp: dict, compute: bool):
-    """E68.tune は lgbm の分割を E68.CV_SCHEME から読むので、腕ごとに切り替えて呼ぶ（探索の記録は腕ごとに別ファイル）。"""
-    saved = E68.CV_SCHEME
-    E68.CV_SCHEME = SCHEME_OF[arm]
+    """E68.tune は lgbm の分割・目的関数を E68.CV_SCHEME / CV_OBJECTIVE から読むので、腕ごとに切り替えて呼ぶ
+    （探索の記録は腕ごとに別ファイル）。呼んだあと元に戻す。"""
+    saved = (E68.CV_SCHEME, E68.CV_OBJECTIVE)
+    E68.CV_SCHEME, E68.CV_OBJECTIVE = ARM_SPEC[arm]
     try:
         return E68.tune(ALGO, arm, df, cols, cutoff, n_trials, stamp, compute)
     finally:
-        E68.CV_SCHEME = saved
+        E68.CV_SCHEME, E68.CV_OBJECTIVE = saved
 
 
 def window_starts(dates: pd.Series, shifts: list) -> dict:
@@ -120,25 +131,31 @@ def run(df: pd.DataFrame, cols: list, cutoff, n_trials: int, stamp: dict, shifts
     return {"recs": recs, "params": params, "prod": prod, "wins": wins}
 
 
+def _pair_stats(a: np.ndarray, b: np.ndarray) -> dict:
+    d = b - a
+    se = float(d.std(ddof=1) / np.sqrt(len(d))) if len(d) > 1 else float("nan")
+    return {"n": int(len(d)), "d": float(d.mean()), "se": se, "wins": int((d > 0).sum())}
+
+
 def report(res: dict, shifts: list, cutoff, starts: dict) -> dict:
     summary = {"cutoff": str(pd.Timestamp(cutoff).date()), "tuning": {}, "production_oof": {}, "windows": {}}
     print("\n" + "=" * 78)
-    print("■ 1. 探索の CV（S は層別で楽観側、W は前進分割。互いに比べる値ではない。パラメータ選び用）")
-    print(f"  {'腕':<4}{'PR-AUC':>8}{'±SD':>8}{'ROC':>8}{'秒':>6}  分割ごとの PR-AUC")
+    print("■ 1. 探索の CV（S は層別で楽観側、W / WL は前進分割。腕どうしで比べる値ではない。パラメータ選び用）")
+    print(f"  {'腕':<4}{'目的関数':>10}{'PR-AUC':>8}{'±SD':>8}{'ROC':>8}{'秒':>6}  分割ごとの PR-AUC")
     for arm in ARMS:
         rec = res["recs"][arm]
         cv = rec["_cv"]
         fs = cv.get("fold_scores") or []
-        print(f"  {arm:<4}{cv['mean_pr_auc']:>8.4f}{cv['std']:>8.4f}{cv['mean_roc_auc']:>8.4f}{rec.get('_seconds', 0):>6}  "
-              + " / ".join(f"{v:.4f}" for v in fs))
-        summary["tuning"][arm] = {k: cv.get(k) for k in ("scheme", "mean_pr_auc", "std", "mean_roc_auc",
-                                                          "fold_scores", "fold_pos_rate", "fold_windows")}
-        if cv.get("fold_windows"):
+        obj = cv.get("objective", "pr_auc")
+        print(f"  {arm:<4}{obj:>10}{cv['mean_pr_auc']:>8.4f}{cv['std']:>8.4f}{cv['mean_roc_auc']:>8.4f}{rec.get('_seconds', 0):>6}  "
+              + " / ".join(f"{v:.4f}" for v in fs)
+              + (f"  （目的関数の値 {cv['objective_value']:.4f}）" if "objective_value" in cv else ""))
+        summary["tuning"][arm] = {k: cv.get(k) for k in ("scheme", "objective", "objective_value", "mean_pr_auc", "std",
+                                                          "mean_roc_auc", "fold_scores", "fold_pos_rate", "fold_windows")}
+        if cv.get("fold_windows") and ARM_SPEC[arm][0] == "walkforward":
             print("      検証窓: " + " / ".join(f"{w['valid_from']}〜{w['valid_to']}（正例率 {w['pos_rate']*100:.1f}%）"
                                               for w in cv["fold_windows"]))
-    pa, pb = res["params"]["S"], res["params"]["W"]
-    print("  選ばれたパラメータ: " + ("S と W で同じ" if E68.params_hash(pa) == E68.params_hash(pb)
-                                  else f"S {E68.short(pa)} / W {E68.short(pb)}"))
+    print("  選ばれたパラメータ: " + " / ".join(f"{arm} {E68.short(res['params'][arm])}" for arm in ARMS))
 
     print("\n■ 2. 本番と同じ作りの out-of-fold（36/6/6か月・エンバーゴ20営業日・ずらし0・種42。全行）")
     print(f"  {'腕':<4}{'PR-AUC':>8}{'リフト':>7}{'ROC':>8}{'日内':>8}{'上位10%超過':>12}{'勝窓':>7}{'件数':>8}{'正例率':>8}")
@@ -151,8 +168,9 @@ def report(res: dict, shifts: list, cutoff, starts: dict) -> dict:
         print(f"  {arm:<4}{m['pr_auc']:>8.4f}{m['lift']:>6.2f}x{m['roc_auc']:>8.4f}{m['day_auc']:>8.4f}"
               f"{m['ret_o1_20_mean']:>+10.2f}pt{int(m['ret_o1_20_won']):>4}/{int(m['ret_o1_20_n']):<2}{len(o):>8,}"
               f"{m['rate']*100:>7.1f}%")
-    print(f"  W−S {ms['W']['pr_auc'] - ms['S']['pr_auc']:>+8.4f}{'':>7}{ms['W']['roc_auc'] - ms['S']['roc_auc']:>+8.4f}"
-          f"{ms['W']['day_auc'] - ms['S']['day_auc']:>+8.4f}{ms['W']['ret_o1_20_mean'] - ms['S']['ret_o1_20_mean']:>+10.2f}pt")
+    for x, y in PAIRS:
+        print(f"  {y}−{x:<4}{ms[y]['pr_auc'] - ms[x]['pr_auc']:>+7.4f}{'':>7}{ms[y]['roc_auc'] - ms[x]['roc_auc']:>+8.4f}"
+              f"{ms[y]['day_auc'] - ms[x]['day_auc']:>+8.4f}{ms[y]['ret_o1_20_mean'] - ms[x]['ret_o1_20_mean']:>+10.2f}pt")
 
     rows_ = []
     for sh in shifts:
@@ -171,52 +189,61 @@ def report(res: dict, shifts: list, cutoff, starts: dict) -> dict:
     s.to_csv(E68.path("auc_by_window.csv"), index=False)
     print(f"\n■ 3. 窓ごと（境界を {'/'.join(map(str, shifts))}か月ずらした{len(shifts)}通り × 種3つの平均。"
           f"探索の打ち切り日 {pd.Timestamp(cutoff).date()}）")
-    print(f"  {'':<28}{'窓':>4}{'正例率':>8}{'PR S':>9}{'PR W':>9}{'W−S':>9}{'SE':>8}{'W が上':>8}{'ROC S':>9}{'ROC W':>9}{'W−S':>9}")
-    for name, g in (("全窓", s), ("打ち切り日より後に始まる窓", s[s["holdout"]]), ("打ち切り日より前の窓", s[~s["holdout"]])):
+    print(f"  {'':<28}{'窓':>4}{'正例率':>8}" + "".join(f"{'PR ' + arm:>9}" for arm in ARMS)
+          + "".join(f"{'ROC ' + arm:>9}" for arm in ARMS))
+    groups = (("全窓", s), ("打ち切り日より後に始まる窓", s[s["holdout"]]), ("打ち切り日より前の窓", s[~s["holdout"]]))
+    for name, g in groups:
         if not len(g):
             print(f"  {name:<28}{0:>4}")
             continue
-        d_pr = g["pr_W"] - g["pr_S"]
-        d_roc = g["roc_W"] - g["roc_S"]
-        se = float(d_pr.std(ddof=1) / np.sqrt(len(g))) if len(g) > 1 else float("nan")
-        se_roc = float(d_roc.std(ddof=1) / np.sqrt(len(g))) if len(g) > 1 else float("nan")
-        print(f"  {name:<28}{len(g):>4}{g['rate'].mean()*100:>7.1f}%{g['pr_S'].mean():>9.4f}{g['pr_W'].mean():>9.4f}"
-              f"{d_pr.mean():>+9.4f}{se:>8.4f}{int((d_pr > 0).sum()):>5}/{len(g):<3}{g['roc_S'].mean():>8.4f}"
-              f"{g['roc_W'].mean():>9.4f}{d_roc.mean():>+9.4f}")
+        print(f"  {name:<28}{len(g):>4}{g['rate'].mean()*100:>7.1f}%"
+              + "".join(f"{g[f'pr_{arm}'].mean():>9.4f}" for arm in ARMS)
+              + "".join(f"{g[f'roc_{arm}'].mean():>9.4f}" for arm in ARMS))
         summary["windows"][name] = {"n": int(len(g)), "rate": float(g["rate"].mean()),
-                                    "pr_S": float(g["pr_S"].mean()), "pr_W": float(g["pr_W"].mean()),
-                                    "d_pr": float(d_pr.mean()), "se_pr": se, "wins": int((d_pr > 0).sum()),
-                                    "roc_S": float(g["roc_S"].mean()), "roc_W": float(g["roc_W"].mean()),
-                                    "d_roc": float(d_roc.mean()), "se_roc": se_roc}
+                                    **{f"pr_{arm}": float(g[f"pr_{arm}"].mean()) for arm in ARMS},
+                                    **{f"roc_{arm}": float(g[f"roc_{arm}"].mean()) for arm in ARMS}}
+    print(f"  {'':<28}{'':>4}{'':>8}" + "".join(f"{y + '−' + x:>18}" for x, y in PAIRS) + "   （PR の差 ± SE、上の窓）")
+    for name, g in groups:
+        if not len(g):
+            continue
+        cells = []
+        for x, y in PAIRS:
+            st = _pair_stats(g[f"pr_{x}"].to_numpy(), g[f"pr_{y}"].to_numpy())
+            summary["windows"][name][f"pr_{y}-{x}"] = st
+            summary["windows"][name][f"roc_{y}-{x}"] = _pair_stats(g[f"roc_{x}"].to_numpy(), g[f"roc_{y}"].to_numpy())
+            cells.append(f"{st['d']:+.4f}±{st['se']:.4f} {st['wins']}/{st['n']}")
+        print(f"  {name:<28}{'':>4}{'':>8}" + "".join(f"{c:>18}" for c in cells))
     hold = s[s["holdout"]].sort_values(["shift", "fold"])
     if len(hold):
         print("  打ち切り日より後の窓の内訳: " + " / ".join(
-            f"ずらし{int(r['shift'])} 窓{int(r['fold'])}（{r['start'].date()}〜）S {r['pr_S']:.4f} W {r['pr_W']:.4f}"
+            f"ずらし{int(r['shift'])} 窓{int(r['fold'])}（{r['start'].date()}〜）" + " ".join(f"{arm} {r[f'pr_{arm}']:.4f}" for arm in ARMS)
             for _, r in hold.iterrows()))
 
-    # W の探索の CV（前進分割の5窓）と、同じ期間の OOF の窓（ずらし0）
-    cvw = res["recs"]["W"]["_cv"]
-    if cvw.get("fold_windows"):
-        print("\n■ 4. W の探索の CV の窓 と、同じ期間の OOF の窓（ずらし0）の PR-AUC（分割を変えた狙い: 探索の値が OOF と同じ物差しになる）")
-        o = res["prod"]["W"]
+    print("\n■ 4. 前進分割の腕の探索の CV の窓 と、同じ期間の OOF の窓（ずらし0）の PR-AUC（探索の値が OOF と同じ物差しになるか）")
+    from sklearn.metrics import average_precision_score
+    summary["cv_vs_oof"] = {}
+    for arm in ARMS:
+        cv = res["recs"][arm]["_cv"]
+        if ARM_SPEC[arm][0] != "walkforward" or not cv.get("fold_windows"):
+            continue
+        o = res["prod"][arm]
         od = pd.to_datetime(o["Date"])
         pairs = []
-        for w, v in zip(cvw["fold_windows"], cvw.get("fold_scores") or []):
+        for w, v in zip(cv["fold_windows"], cv.get("fold_scores") or []):
             sub = o[(od >= pd.Timestamp(w["valid_from"])) & (od <= pd.Timestamp(w["valid_to"]))]
             if len(sub) >= 100 and sub["label"].nunique() == 2:
-                from sklearn.metrics import average_precision_score
                 pr = float(average_precision_score(sub["label"], sub["score"]))
                 pairs.append((w["valid_from"], w["valid_to"], float(v), pr, float(sub["label"].mean())))
         for a, b, v, pr, rate in pairs:
-            print(f"  {a}〜{b}: 探索の CV {v:.4f} / OOF {pr:.4f} / 正例率 {rate*100:.1f}%")
-        summary["cv_vs_oof"] = [{"from": a, "to": b, "cv": v, "oof": pr, "rate": rate} for a, b, v, pr, rate in pairs]
+            print(f"  {arm:<3} {a}〜{b}: 探索の CV {v:.4f} / OOF {pr:.4f} / 正例率 {rate*100:.1f}%")
+        summary["cv_vs_oof"][arm] = [{"from": a, "to": b, "cv": v, "oof": pr, "rate": rate} for a, b, v, pr, rate in pairs]
     with open(E68.path("summary.json"), "w", encoding="utf-8") as fh:
         json.dump(summary, fh, ensure_ascii=False, indent=1, default=float)
     return summary
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="実験73: 探索の分割（層別 / 前進分割）で lgbm の精度はどう変わるか")
+    ap = argparse.ArgumentParser(description="実験73: 探索の分割（層別 / 前進分割）と目的関数で lgbm の精度はどう変わるか")
     ap.add_argument("--n-trials", type=int, default=50)
     ap.add_argument("--shifts", default="0,2,4")
     ap.add_argument("--tag", default=TAG)
@@ -230,7 +257,8 @@ def main(argv=None) -> int:
     cols = F.columns(F.DEFAULT_PRESET)
 
     print("=" * 78)
-    print("実験73 探索の分割（層別 / 前進分割）で lgbm の精度はどう変わるか（50試行 × 5分割 + 本番と同じ OOF + 32窓）")
+    print("実験73 探索の分割（層別 / 前進分割）と目的関数（PR-AUC / リフト）で lgbm の精度はどう変わるか"
+          "（50試行 × 5分割 + 本番と同じ OOF + 32窓）")
     for arm in ARMS:
         print(f"  {LABELS[arm]}")
     print(f"  列: {F.DEFAULT_PRESET} {len(cols)}列 / 探索 {args.n_trials}試行 × {E68.N_SPLITS}分割 / 窓のずらし {shifts}か月 / "

@@ -145,6 +145,28 @@ SCHEME_JA = {"year": "年で層別", "year_cap": "年×時価総額帯で層別"
              "year_cap_date": "年×時価総額帯で層別・日付単位で分割",
              "cap": "時価総額帯で層別", "timeseries": "時系列（件数で等分）",
              "walkforward": "本番の窓と同じ前進分割（直近 6か月 × 5本・訓練はその前の全部）"}
+#: 探索の目的関数（分割ごとの値の平均）。本番は pr_auc。
+#:   pr_auc  検証窓の PR-AUC そのまま
+#:   lift    PR-AUC ÷ 検証窓の正例率。前進分割では窓ごとの正例率が違う（実験73 で 9.8〜23.9%）ので、
+#:           PR-AUC の平均は正例率の高い窓に引っ張られる。割れば窓の重みがそろう（運用者の了承 2026-10-10。§32）
+#:   excess  PR-AUC − 正例率（差でそろえる）
+#: どれも探索（5分割 CV）の中だけの話で、本番の評価（OOF・窓）は PR-AUC のまま
+PRODUCTION_OBJECTIVE = "pr_auc"
+OBJECTIVES = ("pr_auc", "lift", "excess")
+OBJECTIVE_JA = {"pr_auc": "PR-AUC", "lift": "リフト（PR-AUC ÷ 正例率）", "excess": "超過（PR-AUC − 正例率）"}
+
+
+def cv_objective(prs, rates, objective: str = PRODUCTION_OBJECTIVE) -> float:
+    """分割ごとの PR-AUC と検証窓の正例率から、探索の目的関数の値（分割の平均）。"""
+    prs = np.asarray(prs, dtype=float)
+    rates = np.asarray(rates, dtype=float)
+    if objective == "pr_auc":
+        return float(prs.mean())
+    if objective == "lift":
+        return float((prs / rates).mean())
+    if objective == "excess":
+        return float((prs - rates).mean())
+    raise SystemExit(f"未知の目的関数: {objective}（{' / '.join(OBJECTIVES)}）")
 
 
 def chronological_split(df: pd.DataFrame, valid_frac: float = 0.25
@@ -571,7 +593,8 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
          seed: int = 0, verbose: bool = True, n_splits: int = 5,
          embargo_days: int = 60, scheme: str = "year",
          model: str = "classifier", n_estimators: Optional[int] = None,
-         lr_bounds: Optional[Tuple[float, float]] = None) -> Dict:
+         lr_bounds: Optional[Tuple[float, float]] = None,
+         objective: str = PRODUCTION_OBJECTIVE) -> Dict:
     """
     Optuna で探索する。df は「テスト窓より前」のデータだけを渡すこと。
 
@@ -600,15 +623,18 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
             "LTR は日付単位の分割が必須です（--cv year_cap_date か walkforward）。"
             f"指定: {scheme}。同じ日が訓練と検証に分かれると、"
             "その日の答えの一部を訓練で見ることになります")
+    if objective not in OBJECTIVES:
+        raise SystemExit(f"未知の目的関数: {objective}（{' / '.join(OBJECTIVES)}）")
     folds = cv_folds(df, scheme, n_splits=n_splits, seed=seed, embargo_days=embargo_days)
     if not folds:
         if verbose:
             print("  [tune] 分割を作れないため既定値を使う")
         return dict(DEFAULT_PARAMS)
+    rates = [float(v["label"].mean()) for _, v in folds]
     if verbose:
         ja = SCHEME_JA[scheme]
         print(f"  [tune] {ja}{len(folds)}分割 / 木{n_trees}本固定 / "
-              f"学習率 {lr_lo:g}〜{lr_hi:g}")
+              f"学習率 {lr_lo:g}〜{lr_hi:g} / 目的関数 {OBJECTIVE_JA[objective]}")
         print("  [tune] " + " / ".join(
             f"訓練{len(t):,}→検証{len(v):,}(正例{int(v['label'].sum())})"
             for t, v in folds))
@@ -616,7 +642,7 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
             print("  [tune] 検証窓: " + " / ".join(
                 f"{w['valid_from']}〜{w['valid_to']}（訓練〜{w['train_to']}）" for w in fold_windows(folds)))
 
-    def objective(trial):
+    def _trial_objective(trial):
         params = {
             **FIXED,
             "n_estimators": n_trees,
@@ -649,13 +675,14 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
         # 分割ごとのばらつきが大きい設定は、たまたま当たっただけの可能性がある。
         # 平均で選ぶが、ばらつきも残して後から見られるようにする
         trial.set_user_attr("score_std", float(np.std(prs)))
-        return float(np.mean(prs))
+        trial.set_user_attr("mean_pr_auc", float(np.mean(prs)))
+        return cv_objective(prs, rates, objective)
 
     study = optuna.create_study(
         direction="maximize",
         sampler=optuna.samplers.TPESampler(seed=seed),
     )
-    study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
+    study.optimize(_trial_objective, n_trials=n_trials, show_progress_bar=False)
 
     best = {**FIXED, **study.best_params, "subsample_freq": 1}
     # 木の本数は探索中ずっと固定なので、そのまま採用する
@@ -665,7 +692,10 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
     LAST_CV = {"scheme": scheme, "model": model,
                "n_estimators": n_trees,
                "lr_range": [lr_lo, lr_hi],
-               "n_splits": len(folds), "mean_pr_auc": round(study.best_value, 4),
+               "n_splits": len(folds), "objective": objective,
+               "objective_value": round(float(study.best_value), 4),
+               # 目的関数が何であれ、最良の試行の PR-AUC の平均をここに残す（前の週との比較用）
+               "mean_pr_auc": round(float(at.get("mean_pr_auc", study.best_value)), 4),
                "std": round(float(at.get("score_std", 0.0)), 4),
                "fold_scores": at.get("fold_scores", []),
                "mean_roc_auc": round(float(at.get("roc_auc", float("nan"))), 4),
@@ -694,8 +724,9 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
     if verbose:
         pr_txt = " ".join(f"{x:.4f}" for x in at.get("fold_scores", []))
         roc_txt = " ".join(f"{x:.4f}" for x in at.get("fold_roc", []))
-        print(f"  [tune] {n_trials}試行 / {len(folds)}分割 "
-              f"PR-AUC {study.best_value:.4f} (±{at.get('score_std', 0):.4f}) "
+        print(f"  [tune] {n_trials}試行 / {len(folds)}分割 / 目的関数 {OBJECTIVE_JA[objective]} "
+              f"{study.best_value:.4f} / "
+              f"PR-AUC {at.get('mean_pr_auc', study.best_value):.4f} (±{at.get('score_std', 0):.4f}) "
               f"/ ROC-AUC {at.get('roc_auc', float('nan')):.4f} "
               f"(±{at.get('roc_std', 0):.4f}) / 木 {best['n_estimators']}本")
         print(f"  [tune] 分割ごと PR-AUC : {pr_txt}")

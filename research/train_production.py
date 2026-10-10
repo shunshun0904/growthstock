@@ -256,6 +256,10 @@ def main(argv=None) -> int:
     if cv_scheme and cv_scheme != tuning.PRODUCTION_CV:
         print(f"[warn] パラメータ {args.params} は分割 {cv_scheme} で探索したものです"
               f"（今の本番は {tuning.PRODUCTION_CV}）。週次の再学習（tune=yes）で探索し直す")
+    cv_obj = (rec.get("_cv") or {}).get("objective", "pr_auc")
+    if cv_obj != tuning.PRODUCTION_OBJECTIVE:
+        print(f"[warn] パラメータ {args.params} は目的関数 {cv_obj} で探索したものです"
+              f"（今の本番は {tuning.PRODUCTION_OBJECTIVE}）。週次の再学習（tune=yes）で探索し直す")
     params = tuning.params_for(args.params)
     ds = pd.read_parquet(args.dataset)
     ds["Date"] = pd.to_datetime(ds["Date"])

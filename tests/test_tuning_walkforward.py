@@ -149,5 +149,44 @@ class TestSchemes(unittest.TestCase):
         self.assertIsNone(why_retune({**prev, "scheme": "walkforward"}, "2025-08-08", "sig", 200, scheme="walkforward"))
 
 
+class TestObjective(unittest.TestCase):
+    """探索の目的関数（5分割 CV の中だけ）。pr_auc はそのまま、lift は正例率で割る、excess は正例率を引く。"""
+
+    def test_values(self):
+        prs, rates = [0.20, 0.50], [0.10, 0.25]
+        self.assertAlmostEqual(tuning.cv_objective(prs, rates, "pr_auc"), 0.35)
+        self.assertAlmostEqual(tuning.cv_objective(prs, rates, "lift"), 2.0)            # 2.0 と 2.0 の平均
+        self.assertAlmostEqual(tuning.cv_objective(prs, rates, "excess"), 0.175)        # 0.10 と 0.25 の平均
+        with self.assertRaises(SystemExit):
+            tuning.cv_objective(prs, rates, "f1")
+        self.assertEqual(tuning.PRODUCTION_OBJECTIVE, "pr_auc")                           # 本番は PR-AUC のまま
+        self.assertEqual(set(tuning.OBJECTIVE_JA), set(tuning.OBJECTIVES))
+
+    def test_lift_equalises_windows(self):
+        # 正例率の高い窓が PR-AUC の平均を引っ張る。リフトなら両方の窓が同じ重みになる
+        hi = [0.51, 0.20]     # 正例率 23.9% の窓と 9.8% の窓（実験73 の実測に近い）
+        rates = [0.239, 0.098]
+        lo = [0.45, 0.25]     # 高い窓を少し落とし、低い窓を少し上げた設定（PR-AUC の平均は 0.350 対 0.355）
+        self.assertGreater(tuning.cv_objective(hi, rates, "pr_auc"), tuning.cv_objective(lo, rates, "pr_auc"))
+        self.assertLess(tuning.cv_objective(hi, rates, "lift"), tuning.cv_objective(lo, rates, "lift"))
+
+    def test_tune_rejects_unknown_objective(self):
+        with self.assertRaises(SystemExit):
+            tuning.tune(frame(), ["market_cap"], n_trials=1, scheme="walkforward", embargo_days=20,
+                        objective="f1", verbose=False)
+
+    def test_study_name_carries_objective(self):
+        cols = ["a", "b"]
+        base = TM.study_name("xgb", 5, "2025-08-08", cols, "walkforward")
+        self.assertEqual(TM.study_name("xgb", 5, "2025-08-08", cols, "walkforward", "pr_auc"), base)
+        self.assertIn("_lift", TM.study_name("xgb", 5, "2025-08-08", cols, "walkforward", "lift"))
+
+    def test_why_retune_on_objective_change(self):
+        from e15_tune_all import why_retune
+        prev = {"features_sig": "sig", "n_estimators": 200, "train_to": "2025-08-08", "scheme": "year_cap_date"}
+        self.assertIsNone(why_retune(prev, "2025-08-08", "sig", 200, scheme="year_cap_date", objective="pr_auc"))
+        self.assertIn("目的関数", why_retune(prev, "2025-08-08", "sig", 200, scheme="year_cap_date", objective="lift"))
+
+
 if __name__ == "__main__":
     unittest.main()

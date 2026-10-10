@@ -60,7 +60,8 @@ N_TRIALS = 50
 
 
 def why_retune(prev: dict, train_to: str, sig: str,
-               trees: Optional[int] = None, scheme: Optional[str] = None) -> Optional[str]:
+               trees: Optional[int] = None, scheme: Optional[str] = None,
+               objective: Optional[str] = None) -> Optional[str]:
     """
     保存済みの探索（prev = multi_params.json の _cv）を使えるか。
     使えるなら None、探索し直すなら理由を返す。
@@ -86,6 +87,9 @@ def why_retune(prev: dict, train_to: str, sig: str,
         return f"訓練最終日が {prev.get('train_to')} から {train_to} に動いた"
     if scheme is not None and prev.get("scheme") != scheme:
         return f"探索の分割が違う（{prev.get('scheme') or 'なし'} -> {scheme}）"
+    # 目的関数の記録が無い古い探索は pr_auc（記録を始める前は PR-AUC だけだった）
+    if objective is not None and prev.get("objective", "pr_auc") != objective:
+        return f"探索の目的関数が違う（{prev.get('objective', 'pr_auc')} -> {objective}）"
     return None
 
 
@@ -128,7 +132,7 @@ def main() -> int:
         # （通常の週次実行では5営業日ぶん進むので、必ず探索が走る）
         why = why_retune(prev, train_to, sig,
                          TM.N_ESTIMATORS if algo in TM.TREE_ALGOS else None,
-                         scheme=TM.tuning.PRODUCTION_CV)
+                         scheme=TM.tuning.PRODUCTION_CV, objective=TM.tuning.PRODUCTION_OBJECTIVE)
         if why is None and not force:
             print(f"  [{algo}] 探索済みを読む "
                   f"(PR-AUC {prev['mean_pr_auc']:.4f} / 訓練最終日 {train_to})")

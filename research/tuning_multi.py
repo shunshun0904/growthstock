@@ -366,7 +366,7 @@ def fit_eval(algo: str, params: Dict, tr: pd.DataFrame, va: pd.DataFrame,
 # --------------------------------------------------------------------------- #
 
 def study_name(algo: str, n_splits: int, train_to: str, cols: List[str],
-               scheme: str = "year_cap_date") -> str:
+               scheme: str = "year_cap_date", objective: str = "pr_auc") -> str:
     """
     Optuna の study 名。「解こうとしている問題」を表すものだけで作る
     （モデル・分割数・訓練データの最終日・列、木のモデルは木の本数、分割方式も）。
@@ -376,6 +376,8 @@ def study_name(algo: str, n_splits: int, train_to: str, cols: List[str],
     name = f"{algo}_s{n_splits}_{train_to}_{F.signature(cols)}"
     if scheme != "year_cap_date":
         name += f"_{scheme}"
+    if objective != "pr_auc":                       # 目的関数が違えば別の問題（同上）
+        name += f"_{objective}"
     # 本数を変えて同じ週に探索し直したとき、前の本数で測った試行を引き継がない
     name += f"_t{N_ESTIMATORS}" if algo in TREE_ALGOS else ""
     # 線形・MLP は前処理の版も入れる（v1 以外）。版が違えば別の問題なので、前の版の試行を引き継がない
@@ -387,7 +389,7 @@ def study_name(algo: str, n_splits: int, train_to: str, cols: List[str],
 
 def tune(algo: str, df: pd.DataFrame, cols: List[str], *, n_trials: int = 50,
          n_splits: int = 5, seed: int = SEED, verbose: bool = True,
-         scheme: str = tuning.PRODUCTION_CV) -> Dict:
+         scheme: str = tuning.PRODUCTION_CV, objective: str = tuning.PRODUCTION_OBJECTIVE) -> Dict:
     """
     1アルゴリズムを探索する。df はホールドアウトより手前だけを渡すこと。
 
@@ -399,12 +401,15 @@ def tune(algo: str, df: pd.DataFrame, cols: List[str], *, n_trials: int = 50,
     from train_model import EMBARGO_DAYS
 
     optuna.logging.set_verbosity(optuna.logging.WARNING)
+    if objective not in tuning.OBJECTIVES:
+        raise SystemExit(f"未知の目的関数: {objective}（{' / '.join(tuning.OBJECTIVES)}）")
     folds = tuning.cv_folds(df, scheme, n_splits=n_splits, seed=seed, embargo_days=EMBARGO_DAYS)
     if not folds:
         raise SystemExit("分割を作れません")
+    rates = [float(v["label"].mean()) for _, v in folds]
     if verbose:
         print(f"  [{algo}] {tuning.SCHEME_JA[scheme]}{len(folds)}分割 / 木{N_ESTIMATORS}本固定 / "
-              f"{n_trials}試行")
+              f"{n_trials}試行 / 目的関数 {tuning.OBJECTIVE_JA[objective]}")
         print("  " + " / ".join(
             f"訓練{len(t):,}→検証{len(v):,}(正例{int(v['label'].sum())})"
             for t, v in folds))
@@ -412,7 +417,7 @@ def tune(algo: str, df: pd.DataFrame, cols: List[str], *, n_trials: int = 50,
             print("  検証窓: " + " / ".join(
                 f"{w['valid_from']}〜{w['valid_to']}（訓練〜{w['train_to']}）" for w in tuning.fold_windows(folds)))
 
-    def objective(trial):
+    def _trial_objective(trial):
         params = SPACES[algo](trial)
         prs, rocs = [], []
         for tr, va in folds:
@@ -424,7 +429,8 @@ def tune(algo: str, df: pd.DataFrame, cols: List[str], *, n_trials: int = 50,
         # 分割ごとのばらつきが大きい設定は、たまたま当たっただけの可能性がある。
         # 平均で選ぶが、ばらつきも残して後から見られるようにする
         trial.set_user_attr("score_std", float(np.std(prs)))
-        return float(np.mean(prs))
+        trial.set_user_attr("mean_pr_auc", float(np.mean(prs)))
+        return tuning.cv_objective(prs, rates, objective)
 
     train_to = str(pd.to_datetime(df["Date"]).max().date())
     sig = F.signature(cols)
@@ -448,7 +454,7 @@ def tune(algo: str, df: pd.DataFrame, cols: List[str], *, n_trials: int = 50,
         # 別の列で測った50試行を「完了済み」として引き継ぎ、1試行もせずに
         # 旧い列の最良値を返す（153列 -> 205列 に切り替えた 2026-09-23 に
         # この穴に気づいた）
-        study_name=study_name(algo, n_splits, train_to, cols, scheme),
+        study_name=study_name(algo, n_splits, train_to, cols, scheme, objective),
         load_if_exists=True,
     )
     done = len([t for t in study.trials
@@ -457,15 +463,17 @@ def tune(algo: str, df: pd.DataFrame, cols: List[str], *, n_trials: int = 50,
         print(f"  [{algo}] 完了済み {done}試行を引き継ぐ（残り {max(0, n_trials-done)}）")
     remain = max(0, n_trials - done)
     if remain:
-        study.optimize(objective, n_trials=remain, show_progress_bar=False)
+        study.optimize(_trial_objective, n_trials=remain, show_progress_bar=False)
     at = study.best_trial.user_attrs
     out = {
         "params": dict(study.best_params),
         "_cv": {
             "algo": algo, "scheme": scheme, "n_splits": len(folds),
             "fold_windows": tuning.fold_windows(folds),
+            "objective": objective, "objective_value": round(float(study.best_value), 4),
             "n_trials": n_trials, "n_estimators": N_ESTIMATORS,
-            "mean_pr_auc": round(study.best_value, 4),
+            # 目的関数が何であれ、最良の試行の PR-AUC の平均（前の週との比較用）
+            "mean_pr_auc": round(float(at.get("mean_pr_auc", study.best_value)), 4),
             "std": round(float(at.get("score_std", 0.0)), 4),
             "fold_scores": at.get("fold_scores", []),
             "mean_roc_auc": round(float(at.get("roc_auc", float("nan"))), 4),

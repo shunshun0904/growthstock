@@ -66,6 +66,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                     default="classifier",
                     help="classifier=pointwise（既定） / ranker=LTR（lambdarank）。"
                          "ranker は --cv year_cap_date か walkforward（日付単位）が必須")
+    ap.add_argument("--objective", choices=list(tuning.OBJECTIVES), default=tuning.PRODUCTION_OBJECTIVE,
+                    help="探索の目的関数（分割の平均）。pr_auc=PR-AUC（既定・本番） / lift=PR-AUC ÷ 正例率 / "
+                         "excess=PR-AUC − 正例率（§32。前進分割で窓の重みをそろえる候補）")
     args = ap.parse_args(argv)
 
     # 学習データと同じ (Date, Code) の順（build_dataset.canonical_order）。日付だけの
@@ -97,7 +100,7 @@ def main(argv: Optional[List[str]] = None) -> int:
               f"— 経過 {el/60:.1f}分")
         params = tuning.tune(tune_df, cols, n_trials=args.n_trials,
                              n_splits=args.n_splits, embargo_days=EMBARGO_DAYS,
-                             scheme=args.cv, model=args.model)
+                             scheme=args.cv, model=args.model, objective=args.objective)
         # 探索の記録を一緒に保存する。params_for が読むときに落とすので
         # LightGBM には渡らない
         # LTR は同じ特徴量セットでも目的関数が違うので鍵を分ける
