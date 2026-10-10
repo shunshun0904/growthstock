@@ -94,6 +94,16 @@ class HistoryIsFrozenPerDate(unittest.TestCase):
         self.assertEqual(e["closeNow"], 1100.0)
         self.assertEqual(e["returnPct"], 10.0)
 
+    def test_jev_probability_is_recorded_with_the_pick(self):
+        """Jev の値は記録にも残す（無ければ None。0 にしない）。"""
+        rows = [pick("2026-09-18", "1111", 1), pick("2026-09-18", "2222", 2)]
+        rows[0]["jev"] = {"prob": 41.5, "model": "jev-1.13.0"}
+        rows[1]["jev"] = None
+        PD.update_history(self.args, rows, self.days)
+        by = {e["code"]: e for e in self.history()["entries"]}
+        self.assertEqual(by["1111"]["jevProb"], 41.5)
+        self.assertIsNone(by["2222"]["jevProb"])
+
     def test_elapsed_days_skip_holidays(self):
         """9/18(金) の予測を 9/24(木) の終値で見ると、経過は1営業日（9/18）。
         平日で数えると 9/18・21・22・23 の4日になっていた。"""

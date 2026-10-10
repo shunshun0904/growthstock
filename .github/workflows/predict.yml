@@ -139,8 +139,13 @@ jobs:
           python3 research/build_dataset.py --keep-unlabeled \
             --out research/_data/dataset_predict.parquet 2>&1 | tail -25
 
+      # Jev（TypeSafe AI の判断モデル）に各候補の「+10% 到達」の確率を問う鍵。
+      # 未設定なら Jev の欄は空のまま、日次予測はそのまま動く（research/jev_predict.py、
+      # docs/MODEL_JEV.md）。答えは控え（jev_answers.parquet）に凍結し、同じ日を問い直さない
       - name: Score today's candidates
         if: steps.gate.outputs.run != 'false'
+        env:
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
         run: python3 research/predict_daily.py 2>&1 | tee predict.log
 
       # 学習と予測で特徴量の値が一致するか（research/check_train_serve.py）。
@@ -168,6 +173,21 @@ jobs:
             echo "控えを上げた: $(du -h "$f" | cut -f1)"
           else
             echo "控えが無い（候補が無かった日）"
+          fi
+
+      # Jev の答えの控えを Release に置く（日付ごとに最初の答えで凍結。次の夜は Download raw data
+      # で戻ってくるので、同じ日を問い直さず課金もしない）
+      - name: Save Jev answers (release)
+        if: steps.gate.outputs.run != 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          f=research/_data/jev_answers.parquet
+          if [ -f "$f" ]; then
+            bash scripts/gh_release_upload.sh data-raw "$f"
+            echo "控えを上げた: $(du -h "$f" | cut -f1)"
+          else
+            echo "控えが無い（鍵が未設定か、まだ一度も問うていない）"
           fi
 
       # その日の上位銘柄を、既存の取得スクリプトに通して stocks.json を作る。

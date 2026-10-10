@@ -35,7 +35,7 @@ APIキーはブラウザに置けないため、**取得はGitHub Actions、表�
         ▼
   Vite + React ダッシュボード ── deploy ──> GitHub Pages
         │
-        ├── ブレイク予測（モデルの候補と今日の戦略）
+        ├── ブレイク予測（モデルの候補と今日の戦略。Jev（TypeSafe AI の判断モデル）の見立てを並べる）
         ├── 決算サンキー（有報・半期報告書の損益を EDINET から。原価・販管費まで）
         ├── 8軸オクタゴン比較
         ├── タイムマシーン・モード
@@ -56,6 +56,7 @@ GitHub の `Settings > Secrets and variables > Actions` に登録します。
 | Secret | 必須 | 内容 |
 | --- | :---: | --- |
 | `JQUANTS_API` | ✅ | J-Quants API **V2** の APIキー |
+| `TYPESAFE_API_KEY` | 任意 | [TypeSafe AI](https://typesafe.ai/) の APIキー。あれば日次予測が候補ごとに Jev（判断モデル）へ「20営業日以内に +10% に届く」確率を問い、画面と台帳に並べる（選定の規則には入れない）。無ければその列が出ないだけ。[`docs/MODEL_JEV.md`](docs/MODEL_JEV.md) |
 
 > ### V1 から V2 への移行について
 >
@@ -262,6 +263,10 @@ $R$ は 78週（368営業日）高値接近率。軸5 と同じ値。
 ├── scripts/
 │   ├── jquants_data_fetcher.py   # データ取得・指標算出パイプライン
 │   └── watchlist.json            # 分析対象銘柄 (編集して再実行)
+├── research/
+│   ├── predict_daily.py          # 日次のブレイク予測 (predictions.json)
+│   ├── jev_predict.py            # Jev（TypeSafe AI の判断モデル）に +10% 到達の確率を問う
+│   └── exp/                      # 実験（e73_jev_oof.py は Jev を過去の候補で測る）
 ├── public/data/stocks.json       # 生成データ (ワークフローが上書き)
 ├── src/
 │   ├── lib/scoring.js            # 8軸スコアリングエンジン

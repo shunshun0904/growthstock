@@ -326,3 +326,53 @@ export function exitPlan(close, s = STRATEGY) {
     holdDays: s.holdDays,
   };
 }
+
+/* ------------------------------------------------------------------ Jev（判断モデル） */
+
+/**
+ * Jev（TypeSafe AI の判断モデル）の見立て。predict_daily が各候補に付ける
+ * （research/jev_predict.py。candidates[].jev = { prob, model, question, askedAt, cached }）。
+ * 問いは「翌営業日の寄りで買い、20営業日以内に高値が買値の +10% に達する」の真偽の確率（%）。
+ *
+ * 選定の規則（strategySignal）には入れない（運用者の決定 2026-10-10）。4モデルと同じく
+ * 並べて見るだけ。確率は較正されていないので、「50%」が過去に半分当たったという意味ではない
+ * （過去の候補で測った結果は docs/MODEL_JEV.md の実験73）。買い候補の Jev が line 未満なら
+ * 注意を出す。line は結果を見て引いた線ではなく「確率が五分を切る」という素朴な位置で、
+ * 実績が溜まったら引き直す。
+ */
+export const JEV = { line: 50, target: 10, hold: 20 };
+
+/** Jev の確率（%）。無ければ null（鍵が未設定・失敗・問うていない）。 */
+export function jevProb(candidate) {
+  const v = candidate?.jev?.prob;
+  return Number.isFinite(v) ? v : null;
+}
+
+/**
+ * Jev の値への注意。値が無ければ null。
+ *   warn   line 未満
+ *   badge  行に出す短い文言（line 以上なら null）
+ *   text   詳しい文言（title と、開いたときの本文）
+ */
+export function jevNote(candidate, j = JEV) {
+  const p = jevProb(candidate);
+  if (p === null) return null;
+  const warn = p < j.line;
+  const head = `Jev は「翌営業日の寄りで買い、${j.hold}営業日以内に +${j.target}%」を ${p.toFixed(0)}% と見ている`;
+  return {
+    prob: p,
+    warn,
+    badge: warn ? `Jev ${j.line}%未満` : null,
+    text: warn
+      ? `${head}（${j.line}% 未満）。選定の規則には入れていない。確率は較正されていないので、`
+        + '過去の候補で測った実績（docs/MODEL_JEV.md 実験73）と照らして読む'
+      : `${head}（${j.line}% 以上）。選定の規則には入れていない`,
+  };
+}
+
+/** 買い候補のうち Jev が line 未満のもの（戦略パネルの注意の帯に使う）。 */
+export function jevWarnings(picks, j = JEV) {
+  return (Array.isArray(picks) ? picks : [])
+    .map((c) => ({ c, n: jevNote(c, j) }))
+    .filter((x) => x.n?.warn);
+}

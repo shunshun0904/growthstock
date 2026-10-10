@@ -117,6 +117,9 @@ jobs:
         env:
           EXP: ${{ steps.exp.outputs.name }}
           EXP_ARGS: ${{ inputs.args }}
+          # Jev（TypeSafe AI）の鍵。実験73（e73_jev_oof.py）だけが使う。未設定ならその実験は
+          # 件数と state の例だけ出して止まる（他の実験には関係ない）
+          TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
         run: |
           # 引数も入力なので、配列に展開してから渡す（eval しない）
           read -r -a ARGV <<< "$EXP_ARGS"

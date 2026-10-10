@@ -4,6 +4,7 @@ import { bandColor, bandLabel, pctColor, PCT_LEGEND, modelRows, MODEL_SHORT, MOD
   FAMILY_JA, marketTone, candidateToStock } from '../lib/predictions.js';
 import { STRATEGY, BOOST, BORDER, strategySignal, exitPlan, nearMisses,
          MODEL_JA, fundContrib, frozenNote, borderNote,
+         JEV, jevProb, jevNote, jevWarnings,
 } from '../lib/strategy.js';
 
 /**
@@ -34,6 +35,10 @@ export default function PredictionView({ data, history, onSendToOctagon, sentIds
   const signal = useMemo(() => strategySignal(rows), [rows]);
   const near = useMemo(() => nearMisses(rows), [rows]);
   const m = data?.model || {};
+  // Jev（判断モデル）。鍵が未設定の予測ファイルでは列を出さない（全部「—」の列は邪魔なだけ）。
+  // 古い予測ファイル（payload.jev が無い）でも、候補に値があれば出す
+  const jevInfo = data?.jev || null;
+  const showJev = Boolean(jevInfo?.enabled) || rows.some((c) => jevProb(c) !== null);
 
   return (
     <div className="pred">
@@ -99,13 +104,15 @@ export default function PredictionView({ data, history, onSendToOctagon, sentIds
             <Row key={c.jqCode} c={c} models={data?.models} open={openId === c.jqCode}
                  onToggle={() => setOpenId(openId === c.jqCode ? null : c.jqCode)}
                  onSend={() => onSendToOctagon(candidateToStock(c))}
-                 sent={sentIds?.has(`pred:${c.jqCode}`)} />
+                 sent={sentIds?.has(`pred:${c.jqCode}`)}
+                 showJev={showJev} jevInfo={jevInfo} />
           ))}
         </div>
       </section>
 
       <BandTable bands={data?.scoreBands} />
       <ModelLineup models={data?.models} />
+      <JevCard info={jevInfo} />
       <HistoryPanel history={history} horizon={m.riseHorizon} />
       <ModelCard model={m} notes={data?.notes} generatedAt={data?.generatedAt} />
     </div>
@@ -164,6 +171,7 @@ function StrategyPanel({ signal, near, day, onSend, sentIds }) {
                         sent={sentIds?.has(`pred:${c.jqCode}`)} />
             ))}
           </div>
+          <JevBanner picks={picks} />
           <ol className="strat-steps">
             <li><b>翌営業日の寄り</b>で成行。終値では買えない（候補が分かるのが終値後）</li>
             <li>買えたら <b>+{STRATEGY.takeProfit}% の指値</b>を置く（到達は約1割、
@@ -230,6 +238,12 @@ function NearMiss({ near }) {
               <BorderBadge c={c} />
             </span>
             <span className="num strat-near-pct">最小 {fmt(c.minPct, 1)}</span>
+            {jevProb(c) !== null && (
+              <span className={`num strat-near-pct ${jevNote(c).warn ? 'jev-low' : 'jev-ok'}`}
+                    title={jevNote(c).text}>
+                Jev {fmt(jevProb(c), 0)}%
+              </span>
+            )}
             <span className="sub">
               {c.weak
                 ? `${MODEL_JA[c.laggard] || c.laggard} だけ `
@@ -303,6 +317,7 @@ function PickCard({ c, n, onSend, sent }) {
           <span className="lab">終値</span>
           <span className="num">{fmtInt(c.close)}</span>
         </div>
+        <JevMetric c={c} />
         {plan && (
           <div className="strat-metric">
             <span className="lab">+{plan.takeProfit}% の目安</span>
@@ -332,12 +347,13 @@ function BorderBadge({ c }) {
 
 /* ------------------------------------------------------------------ 候補1件 */
 
-function Row({ c, models, open, onToggle, onSend, sent }) {
+function Row({ c, models, open, onToggle, onSend, sent, showJev, jevInfo }) {
   const color = bandColor(c.band);
   const mr = modelRows(c, models);
+  const jn = jevNote(c);
   return (
     <div className={`pred-row${open ? ' open' : ''}`}>
-      <button className="pred-main" onClick={onToggle} aria-expanded={open}>
+      <button className={`pred-main${showJev ? ' jev' : ''}`} onClick={onToggle} aria-expanded={open}>
         <span className="pred-rank num" style={{ color }}>{c.rankInDay}</span>
         <span className="pred-id">
           <strong>{c.name || c.code}</strong>
@@ -374,6 +390,15 @@ function Row({ c, models, open, onToggle, onSend, sent }) {
           <span className="lab">必要上昇率</span>
           <span className="num">{fmt(c.needPct, 1, '%')}</span>
         </span>
+        {showJev && (
+          <span className="pred-cell pred-jev"
+                title={jn ? jn.text : 'Jev の値がありません（鍵が未設定・失敗・問うていない）'}>
+            <span className="lab">Jev +{JEV.target}%</span>
+            <span className={`num${jn ? (jn.warn ? ' jev-low' : ' jev-ok') : ''}`}>
+              {fmt(jevProb(c), 0, '%')}
+            </span>
+          </span>
+        )}
         <span className={`badge ${c.band >= 9 ? 'violet' : c.band >= 7 ? 'green' : c.band >= 4 ? 'amber' : 'red'}`}
               title={`基準モデル（LightGBM）のスコア帯 ${c.band}/10。`
                      + '左のモデル別の棒とは別の物差しです'}>
@@ -381,7 +406,8 @@ function Row({ c, models, open, onToggle, onSend, sent }) {
         </span>
       </button>
 
-      {open && <Detail c={c} models={models} onSend={onSend} sent={sent} />}
+      {open && <Detail c={c} models={models} onSend={onSend} sent={sent}
+                       showJev={showJev} jevInfo={jevInfo} />}
     </div>
   );
 }
@@ -461,7 +487,7 @@ const NUMS = [
   ['売上成長', (c) => fmtSigned(c.salesGrowth, 1)],
 ];
 
-function Detail({ c, models, onSend, sent }) {
+function Detail({ c, models, onSend, sent, showJev, jevInfo }) {
   const g = c.contrib?.groups || {};
   const maxAbs = Math.max(...Object.values(g).map(Math.abs), 0.001);
   const top = (c.contrib?.top || []).slice(0, 10);
@@ -580,6 +606,8 @@ function Detail({ c, models, onSend, sent }) {
           </div>
         </div>
 
+        {showJev && <JevDetail c={c} info={jevInfo} />}
+
         <div>
           <h4>エントリー判断に使う値</h4>
           <dl className="pred-dl">
@@ -599,6 +627,131 @@ function Detail({ c, models, onSend, sent }) {
         </div>
       </div>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ Jev（判断モデル） */
+
+/**
+ * Jev の値は4モデルと別の物差し（確率 %）なので、百分位の棒には混ぜない。
+ * 選定の規則（strategySignal）には入れず、並べて見るだけ（docs/MODEL_JEV.md）。
+ */
+function JevMetric({ c }) {
+  const n = jevNote(c);
+  if (!n) return null;
+  return (
+    <div className="strat-metric" title={n.text}>
+      <span className="lab">Jev +{JEV.target}%</span>
+      <strong className={`num ${n.warn ? 'jev-low' : 'jev-ok'}`}>{fmt(n.prob, 0)}%</strong>
+      {n.warn && <span className="badge amber">{n.badge}</span>}
+    </div>
+  );
+}
+
+/** 買い候補に Jev が線の下のものがあれば、戦略パネルに注意を出す。規則は変えない。 */
+function JevBanner({ picks }) {
+  const low = jevWarnings(picks);
+  if (!low.length) return null;
+  return (
+    <div className="banner warn strat-jev">
+      <span>⚠</span>
+      <div>
+        <b>Jev の見立てが {JEV.line}% 未満の買い候補があります: </b>
+        {low.map(({ c, n }) => `${c.name || c.code} ${fmt(n.prob, 0)}%`).join(' / ')}。
+        Jev（TypeSafe AI の判断モデル）が「翌営業日の寄りで買い、{JEV.hold}営業日以内に
+        +{JEV.target}%」をどう見たかで、<b>選定の規則には入れていません</b>。確率は較正されて
+        いないので、過去の候補で測った実績（docs/MODEL_JEV.md 実験73）と照らして読んでください。
+      </div>
+    </div>
+  );
+}
+
+function JevDetail({ c, info }) {
+  const n = jevNote(c);
+  return (
+    <div className="pred-jev-detail">
+      <h4>Jev の見立て</h4>
+      {n ? (
+        <>
+          <div className="pred-split">
+            <span>
+              <span className="lab">+{JEV.target}% 到達（{JEV.hold}営業日以内）</span>
+              <b className={`num jev-big ${n.warn ? 'jev-low' : 'jev-ok'}`}>{fmt(n.prob, 0)}%</b>
+            </span>
+            <span>
+              <span className="lab">モデル</span>
+              <b className="num">{c.jev?.model || DASH}</b>
+            </span>
+          </div>
+          <p className="sub">{n.text}</p>
+        </>
+      ) : (
+        <p className="sub">
+          この候補には Jev の値がありません（{info?.note || '問うていない'}）。
+        </p>
+      )}
+      <p className="sub" style={{ marginTop: 8 }}>
+        TypeSafe AI の判断モデル Jev に、この候補の実測値・4モデルの百分位・基準モデルの寄与を
+        渡し、「翌営業日の寄りで買い、{JEV.hold}営業日以内に高値が買値の +{JEV.target}% に達する」の
+        確率を問うたもの（research/jev_predict.py）。<b>選定の規則には入れていません。</b>
+        {c.jev?.askedAt && <> 問うた日時 {fmtDateTime(c.jev.askedAt)}。</>}
+      </p>
+    </div>
+  );
+}
+
+/** Jev の素性（payload.jev）。古い予測ファイル（jev が無い）では出さない。 */
+function JevCard({ info }) {
+  if (!info) return null;
+  const q = info.question || {};
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>Jev（判断モデル）</h2>
+        <span className="sub">
+          4モデルとは別の物差し。並べて見るだけで、選定の規則には入れていません
+        </span>
+      </div>
+      <dl className="pred-dl wide">
+        <dt>状態</dt>
+        <dd>
+          {info.enabled
+            ? <span className="badge green">問うている</span>
+            : <span className="badge slate">問うていない</span>}
+          {info.note && <span className="sub">（{info.note}）</span>}
+        </dd>
+        <dt>問い</dt>
+        <dd>
+          {q.instructions || DASH}
+          {q.criteria?.true && (
+            <span className="sub">（真: {q.criteria.true} / 偽: {q.criteria.false}）</span>
+          )}
+        </dd>
+        <dt>渡すもの</dt>
+        <dd>
+          候補の実測値（株価・需給・バリュエーション・決算・その日の発火数と地合い）、
+          4モデルの百分位、基準モデル（LightGBM）の寄与
+        </dd>
+        <dt>モデル</dt>
+        <dd className="num">
+          {info.resolvedModel || info.model || DASH}
+          <span className="sub">（問いの版 {info.questionVersion || DASH}）</span>
+        </dd>
+        <dt>この実行</dt>
+        <dd className="num">
+          問うた {fmtInt(info.asked)}件<span className="sep">/</span>
+          控えから {fmtInt(info.cached)}件<span className="sep">/</span>
+          失敗 {fmtInt(info.failed)}件<span className="sep">/</span>
+          入力トークン {fmtInt(info.inputTokens)}
+        </dd>
+      </dl>
+      <p className="sub">
+        Jev は TypeSafe AI が 2026-09-15 に公開した判断特化のモデルで、文章を生成せず、問いに
+        対する確率だけを返します。確率は較正されていません（「{JEV.line}%」が過去に {JEV.line}%
+        当たったという意味ではない）。答えは日付ごとに最初の答えで凍結し、台帳（スプレッドシート）
+        にも残します。過去の候補で測った結果は docs/MODEL_JEV.md（実験73）。
+      </p>
+    </section>
   );
 }
 
@@ -719,6 +872,8 @@ function ModelLineup({ models }) {
 
 function HistoryPanel({ history, horizon }) {
   const entries = history?.entries || [];
+  // Jev の列は、記録に値が入り始めてから出す（それまでの行は全部「—」になる）
+  const withJev = entries.some((e) => Number.isFinite(e.jevProb));
   return (
     <section className="card">
       <div className="card-head">
@@ -736,6 +891,7 @@ function HistoryPanel({ history, horizon }) {
           <table className="tbl">
             <thead>
               <tr><th>予測日</th><th>順位</th><th>銘柄</th><th>帯</th>
+                {withJev && <th>Jev</th>}
                 <th>予測時</th><th>現在</th><th>騰落</th><th>経過</th></tr>
             </thead>
             <tbody>
@@ -745,6 +901,11 @@ function HistoryPanel({ history, horizon }) {
                   <td className="num">{e.rank}/{e.nInDay}</td>
                   <td>{e.name || e.code} <span className="sub num">{e.code}</span></td>
                   <td><span className="badge" style={{ color: bandColor(e.band) }}>{e.band}</span></td>
+                  {withJev && (
+                    <td className={`num${Number.isFinite(e.jevProb) ? (e.jevProb < JEV.line ? ' jev-low' : ' jev-ok') : ''}`}>
+                      {fmt(e.jevProb, 0, '%')}
+                    </td>
+                  )}
                   <td className="num">{fmtInt(e.closeAtPick)}</td>
                   <td className="num">{fmtInt(e.closeNow)}</td>
                   <td className="num" style={{ color: (e.returnPct ?? 0) >= 0 ? 'var(--green)' : 'var(--red)' }}>

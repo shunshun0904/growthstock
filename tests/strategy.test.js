@@ -276,3 +276,53 @@ test('BORDER_STATS: 実験70 の数字（件数の合計が形の件数と合う
   assert.equal(t.min.all.n, 271 + 552);                                // 最小 90〜95 と 85〜90
   assert.equal(t.line.n, 616);
 });
+
+/* ------------------------------------------------ Jev（判断モデル） */
+
+import { JEV, jevProb, jevNote, jevWarnings } from '../src/lib/strategy.js';
+
+const withJev = (c, prob) => ({ ...c, jev: { prob, model: 'jev-1.13.0', question: 'rise10_v1', cached: false } });
+
+test('jevProb: 値が無ければ null（0 にしない）', () => {
+  assert.equal(jevProb(cand('A', { lgbm: 95, xgb: 95, cat: 95 })), null);
+  assert.equal(jevProb({ jev: null }), null);
+  assert.equal(jevProb({ jev: { prob: 'x' } }), null);
+  assert.equal(jevProb(withJev(cand('A', { lgbm: 95, xgb: 95, cat: 95 }), 37.5)), 37.5);
+  assert.equal(jevProb(withJev({}, 0)), 0);
+});
+
+test('jevNote: 線（50）未満なら注意、以上なら注意なし。規則の値は文言に入る', () => {
+  assert.equal(JEV.line, 50);
+  const low = jevNote(withJev(cand('A', { lgbm: 95, xgb: 95, cat: 95 }), 32));
+  assert.equal(low.warn, true);
+  assert.equal(low.prob, 32);
+  assert.ok(low.badge.includes('50%未満'));
+  assert.ok(low.text.includes('32%') && low.text.includes('+10%') && low.text.includes('20営業日'));
+  assert.ok(low.text.includes('選定の規則には入れていない'));
+  const hi = jevNote(withJev(cand('B', { lgbm: 95, xgb: 95, cat: 95 }), 50));
+  assert.equal(hi.warn, false);
+  assert.equal(hi.badge, null);
+  assert.equal(jevNote(cand('C', { lgbm: 95, xgb: 95, cat: 95 })), null);
+});
+
+test('jevWarnings: 買い候補のうち線の下のものだけ', () => {
+  const picks = [
+    withJev(cand('A', { lgbm: 95, xgb: 95, cat: 95 }), 70),
+    withJev(cand('B', { lgbm: 95, xgb: 95, cat: 95 }), 20),
+    cand('C', { lgbm: 95, xgb: 95, cat: 95 }),
+  ];
+  const w = jevWarnings(picks);
+  assert.deepEqual(w.map((x) => x.c.code), ['B']);
+  assert.deepEqual(jevWarnings(null), []);
+});
+
+test('strategySignal: Jev の値は選定を変えない（並び・件数・買う銘柄が同じ）', () => {
+  const rows = day(25);
+  const before = strategySignal(rows);
+  const rowsJev = rows.map((c, i) => withJev(c, i === 0 ? 5 : 95));   // 1位の Jev が極端に低くても
+  const after = strategySignal(rowsJev);
+  assert.deepEqual(after.picks.map((c) => c.code), before.picks.map((c) => c.code));
+  assert.equal(after.passed.length, before.passed.length);
+  assert.equal(after.verdict.kind, before.verdict.kind);
+  assert.equal(jevWarnings(after.picks).length, 1);                 // 注意は出る
+});

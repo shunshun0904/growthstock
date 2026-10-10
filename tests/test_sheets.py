@@ -164,6 +164,17 @@ class TestRows(unittest.TestCase):
         self.assertNotIn("LGB%", rows[0])
         self.assertNotIn("LGBスコア", rows[0])
 
+    def test_jev_probability_is_written_when_present(self):
+        """Jev（判断モデル）の +10% 到達の確率（%）。無い候補は空（0 で埋めない）。"""
+        pred = {**PRED, "candidates": [dict(c) for c in PRED["candidates"]]}
+        pred["candidates"][0]["jev"] = {"prob": 37.5, "model": "jev-1.13.0", "question": "rise10_v1"}
+        pred["candidates"][1]["jev"] = None
+        rows = ES.rows_from_predictions(pred)
+        self.assertEqual(rows[0][ES.JEV_COLS[0]], 37.5)
+        self.assertIsNone(rows[1][ES.JEV_COLS[0]])
+        # 鍵を設定する前の予測ファイル（jev が無い）でも落ちない
+        self.assertIsNone(ES.rows_from_predictions(PRED)[0][ES.JEV_COLS[0]])
+
 
 class TestSync(unittest.TestCase):
     #: モデル別の列がまだ無い、運用中のシート。利用者の記入が入っている
@@ -279,10 +290,33 @@ class TestSync(unittest.TestCase):
         before = ws.col_count
         ES.sync(ws, ES.rows_from_predictions(PRED), {}, None)
         want = (len(self.OLD_HEADER) + len(ES.MODEL_COLS) + len(ES.SCORE_COLS) + 1
-                + len(ES.ENTRY_COLS))
+                + len(ES.JEV_COLS) + len(ES.ENTRY_COLS))
         self.assertGreaterEqual(ws.col_count, want,
                                 f"器が広がっていない（{before} のまま）")
         self.assertEqual(len(ws.values[0]), want)
+
+    def test_jev_column_is_added_right_and_backfilled(self):
+        """Jev の列は右端に足し、直近の既存行には空のセルにだけ入れる（記入欄は触らない）。"""
+        header = (ES.OWNED_COLS + ES.MODEL_COLS + ES.SCORE_COLS + [ES.AGREE_COL]
+                  + ES.ENTRY_COLS + ES.TRACK_COLS + ES.USER_COLS)      # Jev の列を足す前のシート
+        p = {h: i for i, h in enumerate(header)}
+        line = [""] * len(header)
+        line[p["予測日"]] = "2026-09-10"
+        line[p["コード"]] = "1234"
+        line[p["建値"]] = "1012"
+        ws = FakeWorksheet([header, line])
+        ws.add_cols(5)
+        pred = {**PRED, "candidates": [dict(c) for c in PRED["candidates"]]}
+        pred["candidates"][0]["jev"] = {"prob": 37.5}
+        ES.sync(ws, ES.rows_from_predictions(pred), {}, None)
+        new_header = ws.values[0]
+        self.assertEqual(new_header[-1], ES.JEV_COLS[0])               # 右端に足す
+        col = len(new_header)
+        written = {u["range"]: u["values"][0][0] for u in ws.batches}
+        self.assertEqual(written.get(f"{ES.a1(col, 2)}"), 37.5)        # 既存行の空セルに入る
+        self.assertTrue(all(not r.startswith(ES.a1(p["建値"] + 1, 2)) for r in written))  # 記入欄は触らない
+        got = row_dict(new_header, ws.appended[0])
+        self.assertEqual(got[ES.JEV_COLS[0]], "")                      # 5678 は値が無いので空
 
     def test_fake_sheet_rejects_out_of_grid_writes(self):
         """この代役が実物と同じく範囲外を撥ねること自体を確かめる。"""
@@ -292,7 +326,7 @@ class TestSync(unittest.TestCase):
 
     def test_header_is_not_touched_when_nothing_is_missing(self):
         header = (ES.OWNED_COLS + ES.MODEL_COLS + ES.SCORE_COLS
-                  + [ES.AGREE_COL] + ES.ENTRY_COLS + ES.TRACK_COLS + ES.USER_COLS)
+                  + [ES.AGREE_COL] + ES.JEV_COLS + ES.ENTRY_COLS + ES.TRACK_COLS + ES.USER_COLS)
         ws = FakeWorksheet([header])
         ES.sync(ws, ES.rows_from_predictions(PRED), {}, None)
         self.assertEqual(ws.updates, [], "見出しを不要に書き換えた")
@@ -420,7 +454,7 @@ class TestCodeFixes(unittest.TestCase):
     「2593」で入った行を直す。予測から外れた過去の行は「コード + "0"」で日足を引くので、
     直さないと普通株（25930）の値動きを追ってしまう。
     """
-    HEADER = (ES.OWNED_COLS + ES.MODEL_COLS + ES.SCORE_COLS + [ES.AGREE_COL]
+    HEADER = (ES.OWNED_COLS + ES.MODEL_COLS + ES.SCORE_COLS + [ES.AGREE_COL] + ES.JEV_COLS
               + ES.ENTRY_COLS + ES.TRACK_COLS + ES.USER_COLS)
     CLOSES = pd.Series({"25935": 2000.0, "25930": 3000.0})
 

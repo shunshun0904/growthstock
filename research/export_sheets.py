@@ -16,7 +16,7 @@
 --------------------------------------------
 ・列は**見出しの名前で探す**。位置では探さない。
   利用者が途中に列を挿しても壊れないようにするため。
-・このスクリプトが書くのは OWNED_COLS と TRACK_COLS だけ。
+・このスクリプトが書くのは OWNED_COLS・モデル別・Jev・ENTRY_COLS・TRACK_COLS だけ。
   それ以外の列（建値・手仕舞い・メモなど）は読みも書きもしない。
 ・行は追記のみ。既存行を作り直さない。
   作り直すと、その行に書かれた手入力が消える。
@@ -81,6 +81,12 @@ OWNED_COLS = [
 MODEL_COLS = [f"{M.SHORT.get(a, a[:3].upper())}%" for a in M.ALGOS]
 SCORE_COLS = [f"{M.SHORT.get(a, a[:3].upper())}スコア" for a in M.ALGOS]
 AGREE_COL = "一致(上位10%)"
+
+#: Jev（TypeSafe AI の判断モデル）の「翌営業日の寄りで買い、20営業日以内に +10% に届く」の
+#: 確率（%）。research/jev_predict.py が予測ファイルの candidates[].jev.prob に載せる。
+#: 4モデルの百分位とは別の物差し（確率。較正されていない）。選定の規則には入れていない。
+#: 鍵が未設定の日は空のまま（0 で埋めない）。問いの版を変えたら列名も変える（混ぜない）
+JEV_COLS = ["Jev+10%確率%"]
 
 #: 既存の「スコア」列は基準モデル（LightGBM）の生スコアで、LGBスコアと同じ値。
 #: 運用開始時から入っている列なので、過去行との連続性のために残す。
@@ -157,6 +163,7 @@ def rows_from_predictions(pred: Dict) -> List[Dict]:
             **by_model,
             AGREE_COL: (f"{c['agree90']}/{c['nModels']}"
                         if c.get("nModels") else None),
+            JEV_COLS[0]: (c.get("jev") or {}).get("prob"),
             "_jqCode": c["jqCode"],
         })
     return out
@@ -400,7 +407,7 @@ def ensure_worksheet(book, title: str):
         return ws, False
     except Exception:
         pass
-    header = (OWNED_COLS + MODEL_COLS + SCORE_COLS + [AGREE_COL] + ENTRY_COLS
+    header = (OWNED_COLS + MODEL_COLS + SCORE_COLS + [AGREE_COL] + JEV_COLS + ENTRY_COLS
               + TRACK_COLS + USER_COLS)
     ws = book.add_worksheet(title=title, rows=2000, cols=max(30, len(header) + 5))
     ws.update([header], "A1")
@@ -421,7 +428,8 @@ def ensure_columns(ws, header: List[str], dry_run: bool = False) -> List[str]:
     既存の中身に触らない。並び順が気になるときは利用者が手で動かしてよい
     （名前を変えなければ、そのまま正しく書き込まれる）。
     """
-    want = OWNED_COLS + MODEL_COLS + SCORE_COLS + [AGREE_COL] + ENTRY_COLS + TRACK_COLS
+    want = (OWNED_COLS + MODEL_COLS + SCORE_COLS + [AGREE_COL] + JEV_COLS + ENTRY_COLS
+            + TRACK_COLS)
     missing = [c for c in want if c not in header]
     if not missing:
         return header
@@ -532,7 +540,8 @@ def sync(ws, rows: List[Dict], closes, as_of, dry_run: bool = False,
     # 列が増えた直後は、直近5営業日ぶんの既存行にモデル別の値が入っていない。
     # 空のセルにだけ入れる。既に値があるセルは触らない（利用者が手で
     # 上書きしている可能性がある。この台帳は手書きと同居する前提）
-    backfill = [c for c in MODEL_COLS + SCORE_COLS + [AGREE_COL] if c in pos]
+    # Jev の列も同じ扱い（列を足した直後の直近5営業日の行と、鍵を設定した直後の行に入る）
+    backfill = [c for c in MODEL_COLS + SCORE_COLS + [AGREE_COL] + JEV_COLS if c in pos]
     for (d, code), r in seen.items():
         x = by_key.get((d, code))
         price = None
@@ -613,14 +622,14 @@ def main(argv=None) -> int:
 
     if args.dry_run:
         # 通信しないので、見出しは初期構成を仮定して整合だけ見る
-        header = (OWNED_COLS + MODEL_COLS + SCORE_COLS + [AGREE_COL] + ENTRY_COLS
+        header = (OWNED_COLS + MODEL_COLS + SCORE_COLS + [AGREE_COL] + JEV_COLS + ENTRY_COLS
                   + TRACK_COLS + USER_COLS)
         print(f"[dry-run] 列 {len(header)}個: {' / '.join(header)}")
         unknown = sorted({k for x in rows for k in x
                           if not k.startswith('_') and k not in header})
         if unknown:
             raise SystemExit(f"見出しに無い項目を書こうとしています: {unknown}")
-        mc = [c for c in MODEL_COLS + SCORE_COLS + [AGREE_COL]]
+        mc = [c for c in MODEL_COLS + SCORE_COLS + [AGREE_COL] + JEV_COLS]
         print(f"[dry-run] モデル別: {' / '.join(mc)}")
         for x in rows[:5]:
             print("  " + " ".join(

@@ -10,6 +10,8 @@
   ・その日の候補一覧（順位・スコア・較正確率・スコア帯の実績）
   ・銘柄ごとの寄与分解（何がスコアを押し上げ／押し下げたか）
   ・モデルの素性（学習日・訓練期間・パラメータ・CV スコア）
+  ・Jev（TypeSafe AI の判断モデル）の「+10% 到達」の確率（research/jev_predict.py。
+    鍵 TYPESAFE_API_KEY があるときだけ。並べて見るだけで、選定の規則には入れない）
 
 出力 public/data/prediction_history.json
   ・過去に出した上位銘柄と、その後の実際の値動き。
@@ -410,6 +412,15 @@ def main(argv=None) -> int:
             x["agree90"] = int(sum(1 for p in pcts if p >= 90))
             x["nModels"] = len(pcts)
 
+    # --- Jev（判断モデル）の見立てを各候補に載せる --- #
+    # 4モデルとは別の物差し（「翌営業日の寄りで買い、20営業日以内に +10% に届く」の
+    # 確率 %）。並べて見るだけで、選定の規則（src/lib/strategy.js）には入れない
+    # （運用者の決定 2026-10-10。docs/MODEL_JEV.md）。鍵が無ければ全件 None のまま動く。
+    # 答えは日付ごとに最初の答えで凍結する（控え: research/_data/jev_answers.parquet）
+    import jev_predict as JV
+    jev = JV.annotate(rows, args.data_dir)
+    print(f"[jev] {JV.describe(jev)}")
+
     # 表示順・順位はどちらも基準モデルのスコア（上の rank_in_day と同じ）。
     # 帯・較正・追跡ファイルも基準モデル基準なので、ここだけ別の物差しで
     # 並べると、同じ行の中で順位と帯が食い違う
@@ -434,6 +445,8 @@ def main(argv=None) -> int:
         "calibration": meta["calibration"],
         # 画面に並べるモデルの素性。基準モデル(lgbm)も含む
         "models": model_info,
+        # Jev の素性と、この実行で問うた数。候補ごとの値は candidates[].jev
+        "jev": jev,
         "notes": [
             "スコアは較正されていない生の出力。確率として読まず、"
             "同じ日の候補の中での順位と、スコア帯の過去実績で読むこと。",
@@ -611,6 +624,8 @@ def update_history(args, rows: List[Dict], days) -> None:
             "score": x["score"], "band": x["band"],
             "calibProb": x["calibProb"], "needPct": x["needPct"],
             "closeAtPick": x["close"],
+            # Jev の +10% 到達の確率（%）。無ければ None（鍵が未設定・失敗）
+            "jevProb": (x.get("jev") or {}).get("prob"),
         })
         added += 1
 

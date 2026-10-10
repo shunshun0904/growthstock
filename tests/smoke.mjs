@@ -104,6 +104,21 @@ check(strat.includes('発火数'), '発火数が表示される');
 check(!strat.includes('NaN') && !strat.includes('undefined'),
       '戦略パネルに NaN / undefined が出ていない');
 
+// Jev（判断モデル）。合成データは4件に値があり、3件目（1671）は値なし（失敗の形）。
+// 列は候補ごとに1つ、値の無い行は「—」。1件目（32%）は線（50）の下なので黄、5件目（77.5%）は緑
+const jevCells = page.locator('.pred-list .pred-jev');
+check((await jevCells.count()) === nRows, `Jev の列が各行に出る (実際: ${await jevCells.count()})`);
+const jevTexts = await jevCells.locator('.num').allTextContents();
+check(jevTexts[0].trim() === '32%' && jevTexts[2].trim() === '—' && jevTexts[4].trim() === '78%',
+      `Jev の値が確率（%）で出て、無い行は「—」 (実際: ${jevTexts.map((t) => t.trim()).join(',')})`);
+check((await jevCells.nth(0).locator('.num').getAttribute('class') || '').includes('jev-low'),
+      '線の下の Jev は黄（jev-low）');
+check((await jevCells.nth(4).locator('.num').getAttribute('class') || '').includes('jev-ok'),
+      '線の上の Jev は緑（jev-ok）');
+check(predBody.includes('Jev（判断モデル）') && predBody.includes('選定の規則には入れていません'),
+      'Jev の素性パネルが出て、規則に入れていないと書いてある');
+check(!strat.includes('Jev の見立てが'), '見送りの日（買い候補なし）は Jev の注意の帯を出さない');
+
 check(!predBody.includes('NaN'), '予測タブに NaN が出ていない');
 check(!predBody.includes('undefined'), '予測タブに undefined が出ていない');
 
@@ -135,6 +150,8 @@ check((borderNote || '').includes('際どい候補') && (borderNote || '').inclu
 const fams = await page.locator('.pred-detail .pred-fam').allTextContents();
 check(fams.join(',') === '決定木系,木以外',
   `詳細のモデル別が塊で分かれる (実際: ${fams.join(',')})`);
+check(detail.includes('Jev の見立て') && detail.includes('32%') && detail.includes('jev-1.13.0'),
+      '詳細に Jev の見立て（確率とモデル名）が出る');
 await page.screenshot({ path: path.join(SHOTS, 'screenshot-prediction.png') });
 await page.locator('.pred-row').first().locator('.pred-main').click();
 
