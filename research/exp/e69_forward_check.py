@@ -92,6 +92,8 @@ HYPOTHESES: Dict[str, dict] = {
 }
 
 LABELS = {"pass": "再現", "weak": "向きは同じ（弱い）", "reverse": "逆向き", "short": "測れない"}
+#: 列全体の数え上げに要る行（screen が列ごとに要る数と同じ）
+FAMILY_MIN_ROWS = 500
 
 
 # ---------------------------------------------------------------------- #
@@ -226,7 +228,7 @@ def report(h: dict, res: dict, final: bool) -> None:
     head = "判定" if final else "途中経過（判定ではない）"
     print(f"\n=== {head}: 決めた向きでの片側 t 検定（α={ALPHA}）===")
     print(f"  {'列':<28}{'向き':>4}{'行':>7}{'窓':>4}{'超過pt':>8}{'SE':>6}{'隣相関':>7}"
-          f"{'t':>7}{'p':>7}{'同じ向き':>8}  結果      （10/10: 超過 / z / 正の窓）")
+          f"{'t':>7}{'p':>7}{'同じ向き':>8}  結果      （決めた時点: 超過 / z / 正の窓）")
     for f, sign in list(h["features"].items()) + list(h["reference"].items()):
         v = res[f]
         ref = f in h["reference"]
@@ -273,11 +275,14 @@ def run_edinet(args) -> dict:
 
     # 列全体（523列）で |z|>2 が偶然より多いか。列の名前は出さない（ここから選び直さないため）
     if not args.no_family:
-        fam = screen(sub, EF.columns("all"), windows)
-        meas = fam["edge_z"].notna()
-        exp_n, p2, n_win = chance_hits(fam[meas])
-        print(f"\n列全体: 測れた {int(meas.sum())}/{len(fam)}列 / |z|>2 {int((fam['abs_z'] > 2).sum())}本"
-              f"（偶然の見込み {exp_n:.1f}本、窓 {n_win}本の t 分布）")
+        fam = screen(sub, EF.columns("all"), windows) if len(sub) >= FAMILY_MIN_ROWS else None
+        meas = fam["edge_z"].notna() if fam is not None else None
+        if fam is None or not meas.any():
+            print(f"\n列全体: 測れる列が無い（新しい銘柄の行 {len(sub):,}。列ごとに 500行・窓ごとに 100行が要る）")
+        else:
+            exp_n, p2, n_win = chance_hits(fam[meas])
+            print(f"\n列全体: 測れた {int(meas.sum())}/{len(fam)}列 / |z|>2 {int((fam['abs_z'] > 2).sum())}本"
+                  f"（偶然の見込み {exp_n:.1f}本、窓 {n_win}本の t 分布）")
     return {"source": "edinet", "new_companies": len(new), "old_companies": len(old),
             "rows": int(rows.sum()), "windows": len(windows), "result": res}
 

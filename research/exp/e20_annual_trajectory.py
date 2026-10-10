@@ -182,6 +182,10 @@ def window_stats(x: np.ndarray, y: np.ndarray, r: np.ndarray, d: np.ndarray, ok:
     return out
 
 
+SCREEN_COLS = ["feature", "coverage", "n", "auc_pooled", "auc_win", "auc_se", "auc_win_gt05", "n_win",
+               "edge_pt", "edge_se", "edge_z", "edge_win_pos"]
+
+
 def screen(frame: pd.DataFrame, feats: List[str], windows: List[tuple]) -> pd.DataFrame:
     from sklearn.metrics import roc_auc_score
 
@@ -212,7 +216,8 @@ def screen(frame: pd.DataFrame, feats: List[str], windows: List[tuple]) -> pd.Da
             "edge_z": edges.mean() / se_e if len(edges) > 1 and se_e > 0 else np.nan,
             "edge_win_pos": int((edges > 0).sum()),
         })
-    out = pd.DataFrame(rows)
+    # 測れる列が1本も無い（行が足りない）ときも同じ形の表を返す（2026-10-10、実験69 の空回しで KeyError）
+    out = pd.DataFrame(rows).reindex(columns=SCREEN_COLS)
     out["abs_z"] = out["edge_z"].abs()
     return out.sort_values("abs_z", ascending=False).reset_index(drop=True)
 

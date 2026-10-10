@@ -212,9 +212,9 @@ class TestEndToEnd(unittest.TestCase):
             if final:
                 self.assertEqual(out["result"]["jsf_loan_chg20_v"]["label"], "pass")
 
-    def _edinet_env(self, n_old, effect):
+    def _edinet_env(self, n_old, effect, n_new=30):
         codes_old = [f"{i:04d}0" for i in range(n_old)]
-        codes_new = [f"{i:04d}0" for i in range(5000, 5030)]
+        codes_new = [f"{i:04d}0" for i in range(5000, 5000 + n_new)]
         frame = synthetic(pd.bdate_range("2018-01-04", "2026-11-13"), codes_old[:5] + codes_new,
                           list(X.HYPOTHESES["edinet"]["features"]), seed=2, effect=effect)
         frame["ed_fiscal_year"] = 2024.0
@@ -247,6 +247,38 @@ class TestEndToEnd(unittest.TestCase):
         self.assertEqual(out["rows"], int(frame["Code"].isin(new).sum()))
         self.assertEqual(out["result"]["ed_avg_annual_salary_yoy1"]["label"], "pass")
         self.assertGreaterEqual(out["result"]["ed_avg_annual_salary_yoy1"]["n"], 8)
+
+    def _run_edinet(self, frame, fin, *extra, columns=None):
+        patches = [mock.patch.object(X.lab, "frame", return_value=frame[["Date", "Code", "label", X.OUTCOME]].copy()),
+                   mock.patch.object(EF, "load_fin"), mock.patch.object(EF, "annual_panel"),
+                   mock.patch.object(EF, "feature_frame"), mock.patch.object(EF, "attach", return_value=frame)]
+        if columns is not None:
+            patches.append(mock.patch.object(EF, "columns", return_value=columns))
+        for p in patches:
+            p.start()
+        try:
+            with self._quiet() as pr:
+                X.main(["--source", "edinet", "--fin", fin, *extra])
+        finally:
+            for p in patches:
+                p.stop()
+        with open(os.path.join(self.dir, "e69_edinet.json"), encoding="utf-8") as fh:
+            return json.load(fh), "\n".join(str(c.args[0]) for c in pr.call_args_list if c.args)
+
+    def test_edinet_with_no_new_companies_yet(self):
+        """2026-10-10 の空回しと同じ状況（新しい銘柄 0社）。列全体の数え上げで落ちずに最後まで行く。"""
+        frame, fin, _ = self._edinet_env(1670, {}, n_new=0)
+        out, log = self._run_edinet(frame, fin)
+        self.assertEqual((out["old_companies"], out["new_companies"], out["rows"]), (1670, 0, 0))
+        self.assertTrue(all(v["label"] == "short" for v in out["result"].values()))
+        self.assertIn("列全体: 測れる列が無い", log)
+
+    def test_edinet_family_count_runs(self):
+        frame, fin, _ = self._edinet_env(1670, {"ed_avg_annual_salary_yoy1": 0.02})
+        cols = list(X.HYPOTHESES["edinet"]["features"])
+        out, log = self._run_edinet(frame, fin, columns=cols)
+        self.assertIn("列全体: 測れた 2/2列", log)
+        self.assertEqual(out["result"]["ed_avg_annual_salary_yoy1"]["label"], "pass")
 
     def test_edinet_stops_when_the_record_is_short(self):
         frame, fin, _ = self._edinet_env(1600, {})

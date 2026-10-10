@@ -112,5 +112,20 @@ class TestScreenUnchanged(unittest.TestCase):
         pd.testing.assert_frame_equal(screen(df, feats, windows), screen_before_2026_10_10(df, feats, windows))
 
 
+class TestScreenShort(unittest.TestCase):
+    """行が足りず測れる列が1本も無いときも、同じ形の表を返す（2026-10-10 の実験69 の空回しで KeyError）。"""
+
+    def test_all_short(self):
+        df = pd.DataFrame({"Date": pd.bdate_range("2024-01-04", periods=3), "label": [1.0, 0.0, 1.0],
+                           OUTCOME: [0.1, -0.1, 0.2], "a": [1.0, 2.0, 3.0], "b": [np.nan] * 3})
+        res = screen(df, ["a", "b"], [(np.datetime64("2024-01-01"), np.datetime64("2024-12-31"))])
+        self.assertEqual(len(res), 2)
+        self.assertTrue({"edge_z", "n_win", "abs_z"} <= set(res.columns))
+        self.assertTrue(res["edge_z"].isna().all())
+        res0 = screen(df.iloc[:0], ["a"], [])
+        self.assertEqual(len(res0), 1)
+        self.assertTrue(res0["abs_z"].isna().all())
+
+
 if __name__ == "__main__":
     unittest.main()
