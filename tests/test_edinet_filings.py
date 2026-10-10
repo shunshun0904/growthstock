@@ -136,6 +136,20 @@ class TestParse(unittest.TestCase):
         self.assertEqual(d["unsupported"], "no-items")                     # 標準の要素が無い（売上の項目名でも拾わない: 段が作れない）
 
 
+class TestRecheck(unittest.TestCase):
+    def test_checks_are_recomputed_from_items(self):
+        """控えに古い判定（不成立）が残っていても、出力は値からいまの規則で判定し直す。"""
+        parsed = {"items": {"OperatingIncome": 150e6, "NonOperatingIncome": 20e6, "NonOperatingExpenses": 10e6,
+                            "OrdinaryIncome": 161e6}, "checks": {"OrdinaryIncome": False}}
+        self.assertEqual(F.recheck(parsed), {"OrdinaryIncome": True})
+        self.assertEqual(F.recheck({"items": {}, "unsupported": "no-items"}), {})
+        idx = {"dates": {"2026-06-25": [{"docID": "A", "secCode": "10000", "docTypeCode": "120",
+                                          "submitDateTime": "2026-06-25 15:00", "csvFlag": "1", "withdrawalStatus": "0"}]}}
+        pub = F.build_public({"A": parsed}, idx, {"10000": "X"})
+        self.assertEqual(pub["docs"]["10000"]["checks"], {"OrdinaryIncome": True})
+        self.assertEqual(pub["docs"]["10000"]["name"], "X")
+
+
 class TestRun(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp()

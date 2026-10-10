@@ -304,6 +304,15 @@ def targets_from_public(predictions: str, stocks: str, extra: Iterable[str] = ()
     return out
 
 
+def recheck(parsed: dict) -> dict:
+    """恒等式の判定を、控えの値からいま（最新の判定の規則）で出し直す。控えは値だけが正本で、判定は毎回作る。"""
+    items = parsed.get("items") or {}
+    if not items:
+        return {}
+    ids = API.IDENTITIES_IFRS if any(k.endswith("IFRS") for k in items) else API.IDENTITIES_JGAAP
+    return {lhs: ok for lhs, ok in API.check_identities(items, ids) if ok is not None}
+
+
 def build_public(cache: dict, idx: dict, targets: Dict[str, str]) -> dict:
     docs = {}
     for jq, name in sorted(targets.items()):
@@ -312,7 +321,7 @@ def build_public(cache: dict, idx: dict, targets: Dict[str, str]) -> dict:
             continue
         parsed = cache.get(str(d.get("docID")))
         if parsed:
-            docs[jq] = {**parsed, "name": name}
+            docs[jq] = {**parsed, "checks": recheck(parsed), "name": name}
     return {"generatedAt": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "source": SOURCE, "docTypes": {"120": "有価証券報告書", "160": "半期報告書"},
             "docs": docs}
