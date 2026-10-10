@@ -243,6 +243,8 @@ def fold_contrib(d: pd.DataFrame, frame: pd.DataFrame, cols: List[str], params: 
         gbm.fit(tr[cols].to_numpy(dtype=float), ytr)
         keys = list(zip(rows["Code"], rows["Date"]))
         X = feat.loc[keys].to_numpy(dtype=float)
+        if len(X) != len(keys):             # (Code, Date) が重複していると行がずれる。黙って進まない
+            raise SystemExit(f"窓{fi}: データセットの (Code, Date) が一意でない（{len(X)} 行 / {len(keys)} 鍵）")
         for k, c in zip(keys, PD.contributions(gbm.booster_, X, cols)):
             out[k] = c
         log(f"  窓{fi}（〜{f.train_end} で学習）: {len(rows):,}行の寄与")
@@ -307,7 +309,8 @@ def save_cache(df: pd.DataFrame, path: str = CACHE) -> None:
 
 
 def ask_arm(arm: str, cands: List[Dict], tones: Dict[str, Optional[str]], client,
-            cache: pd.DataFrame, workers: int, log=log) -> Tuple[Dict[tuple, float], Dict, pd.DataFrame]:
+            cache: pd.DataFrame, workers: int, log=log,
+            path: str = CACHE) -> Tuple[Dict[tuple, float], Dict, pd.DataFrame]:
     """
     腕の全候補に問う。控えにある (腕, コード, 日付, 問いの版) は問い直さない。
     戻り値: {(Code, Date): prob}, 費用の要約, 更新した控え。
@@ -360,7 +363,7 @@ def ask_arm(arm: str, cands: List[Dict], tones: Dict[str, Optional[str]], client
             if n % 100 == 0 or n == len(todo):
                 new_df = pd.DataFrame(new_records, columns=CACHE_COLS)
                 cache = new_df if cache.empty else pd.concat([cache, new_df], ignore_index=True)
-                save_cache(cache)
+                save_cache(cache, path)
                 new_records = []
                 per = usage["input_tokens"] / max(1, usage["asked"])
                 log(f"  [{arm}] {n:,}/{len(todo):,} 済み（{time.time() - t0:.0f}秒・失敗 {usage['failed']}）"

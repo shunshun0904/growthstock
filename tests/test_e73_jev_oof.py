@@ -124,5 +124,111 @@ class TestCandidateRows(unittest.TestCase):
         self.assertNotIn("PER(倍)", JV.build_state(b).get("バリュエーション", {}))   # 全部欠測なら塊ごと無い
 
 
+class TestReportAndAsk(unittest.TestCase):
+    """集計（report）と問い（ask_arm）を、合成データと偽の client で最後まで通す。"""
+
+    ALGOS = ("lgbm", "xgb", "cat", "logit")
+
+    def make_d(self, n=400, seed=0):
+        rng = np.random.default_rng(seed)
+        dates = pd.Timestamp("2025-01-06") + pd.to_timedelta(rng.integers(0, 250, n), unit="D")
+        hit = rng.random(n) < 0.3
+        d = pd.DataFrame({"Code": [f"{1000 + i % 60}0" for i in range(n)], "Date": dates,
+                          "label": hit.astype(int), "hit10": hit, "r": rng.normal(1, 8, n),
+                          "n_break": 10, "rank_in_day": 1})
+        d["tp10"] = np.where(hit, 10.0, d["r"])
+        for a in self.ALGOS:
+            d[f"hp_{a}"] = rng.uniform(0, 100, n)
+            d[f"s_{a}"] = d[f"hp_{a}"] / 100
+        d["jev_prod"] = np.clip(d["hp_lgbm"] * 0.5 + rng.normal(25, 15, n), 0, 100)
+        d["jev_anon"] = np.clip(d["jev_prod"] + rng.normal(0, 10, n), 0, 100)
+        d.loc[:4, "jev_anon"] = np.nan                          # 答えの無い行があっても落ちない
+        return d
+
+    def test_report_runs_and_summarizes(self):
+        import contextlib
+        import io
+        import json
+        d = self.make_d()
+        usage = {a: {"asked": 10, "cached": 390, "failed": 0, "input_tokens": 12000, "output_tokens": 10}
+                 for a in ("prod", "anon")}
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            res = E.report(d, list(self.ALGOS), ["prod", "anon"], usage)
+        out = buf.getvalue()
+        for head in ("=== 1. 較正", "=== 2. 分離力", "=== 3. 運用との重なり", "=== 4. 相関", "=== 5. 費用"):
+            self.assertIn(head, out)
+        self.assertEqual(res["rows"], 400)
+        self.assertEqual(set(res["calibration"]), {"prod", "anon"})
+        self.assertEqual(len(res["calibration"]["prod"]["bins"]), len(E.BINS) - 1)
+        self.assertTrue(0 <= res["auc"]["jev_prod"]["hit10"] <= 1)
+        self.assertIn("hp_min", res["auc"])
+        self.assertIn("線の上（3つとも95以上）", res["split"]["prod"])
+        self.assertIn("prod_anon", res["corr"])
+        # main と同じ書き方で JSON に落とせる
+        json.dumps(res, ensure_ascii=False,
+                   default=lambda x: None if x is None or (isinstance(x, float) and not np.isfinite(x)) else float(x))
+
+    def test_report_without_all_trees_skips_shapes(self):
+        import contextlib
+        import io
+        d = self.make_d().drop(columns=["hp_cat", "s_cat"])
+        with contextlib.redirect_stdout(io.StringIO()):
+            res = E.report(d, ["lgbm", "xgb", "logit"], ["prod"], {"prod": {}})
+        self.assertEqual(res["split"]["prod"]["線の上（3つとも95以上）"]["hi"], {"n": 0})
+
+    def test_ask_arm_uses_cache_and_saves(self):
+        import contextlib
+        import io
+        import shutil
+        import tempfile
+
+        class FakeClient:
+            model = "jev-latest"
+
+            def __init__(self):
+                self.states = []
+
+            def system_one(self, state):
+                self.states.append(state)
+                return {"model": "jev-1.13.0",
+                        "answers": {JV.QUESTION_KEY: {"type": "noul", "noul": 0.4}},
+                        "usage": {"input_tokens": 100, "output_tokens": 1}}
+
+        cands = [{"code": f"{1000 + i}", "jqCode": f"{1000 + i}0", "name": f"銘柄{i}", "date": "2025-10-09",
+                  "rankInDay": i + 1, "nInDay": 3, "close": 100.0 + i, "vol20d": 1.0,
+                  "byModel": {"lgbm": {"score": 0.5, "pctHistorical": 90.0}},
+                  "contrib": {"groups": {}, "top": [], "marketContrib": 0.0}} for i in range(3)]
+        tones = {"2025-10-09": "中立"}
+        cache = pd.DataFrame([{"arm": "prod", "Code": "10000", "Date": "2025-10-09",
+                               "question": JV.QUESTION_VERSION, "state_sha": "old", "model": "jev-1.12.0",
+                               "prob": 77.0, "input_tokens": 1, "output_tokens": 1, "asked_at": "x"}],
+                             columns=E.CACHE_COLS)
+        tmp = tempfile.mkdtemp()
+        try:
+            path = os.path.join(tmp, "e73.parquet")
+            client = FakeClient()
+            with contextlib.redirect_stdout(io.StringIO()):
+                probs, usage, cache2 = E.ask_arm("prod", cands, tones, client, cache, workers=2, path=path)
+            self.assertEqual((usage["asked"], usage["cached"], usage["failed"]), (2, 1, 0))
+            self.assertEqual(usage["sha_mismatch"], 1)                 # 控えの state の作りが違う行を数える
+            self.assertEqual(probs[("10000", "2025-10-09")], 77.0)      # 控えの答え（問い直さない）
+            self.assertEqual(probs[("10010", "2025-10-09")], 40.0)
+            self.assertEqual(len(client.states), 2)
+            self.assertTrue(all("銘柄" in s for s in client.states))   # prod は銘柄を伏せない
+            self.assertEqual(len(cache2), 3)
+            self.assertEqual(set(cache2["arm"]), {"prod"})
+            self.assertTrue(os.path.exists(path))
+            # anon の腕は別の鍵で控える（同じ行でも問い直す）
+            client2 = FakeClient()
+            with contextlib.redirect_stdout(io.StringIO()):
+                _, usage2, cache3 = E.ask_arm("anon", cands, tones, client2, cache2, workers=1, path=path)
+            self.assertEqual((usage2["asked"], usage2["cached"]), (3, 0))
+            self.assertTrue(all("銘柄" not in s for s in client2.states))
+            self.assertEqual(len(cache3), 6)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
