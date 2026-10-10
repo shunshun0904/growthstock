@@ -210,8 +210,14 @@ def load_rows(days: int) -> Tuple[pd.DataFrame, List[str], pd.DataFrame]:
     d = d[d[[f"hp_{a}" for a in algos]].notna().all(axis=1)]
     cutoff = d["Date"].max() - pd.Timedelta(days=int(days))
     d = d[d["Date"] >= cutoff].copy()
+    # OOF は学習時のデータセットで作られている。いまのデータセットに無い行（例: 2026-10-08 に母集団から
+    # 外した優先株 25935。state の素の値も寄与も出せない）は外す。黙って外さず件数を出す
     cols = [c for c in dict.fromkeys(FIELDS.values()) if c in frame.columns]
-    d = d.merge(frame[["Code", "Date"] + cols], on=["Code", "Date"], how="left")
+    before = len(d)
+    d = d.merge(frame[["Code", "Date"] + cols].drop_duplicates(["Code", "Date"]),
+                on=["Code", "Date"], how="inner")
+    if len(d) != before:
+        log(f"OOF の {before - len(d)} 行はいまのデータセットに無いので外す（{before:,} → {len(d):,}）")
     return d.sort_values(["Date", "rank_in_day"]).reset_index(drop=True), algos, frame
 
 
@@ -242,6 +248,9 @@ def fold_contrib(d: pd.DataFrame, frame: pd.DataFrame, cols: List[str], params: 
         gbm = lgb.LGBMClassifier(**params, scale_pos_weight=tuning.scale_pos_weight(ytr))
         gbm.fit(tr[cols].to_numpy(dtype=float), ytr)
         keys = list(zip(rows["Code"], rows["Date"]))
+        missing = [k for k in keys if k not in feat.index]
+        if missing:                         # load_rows で絞ってあるので、ここに来たら作りが変わっている
+            raise SystemExit(f"窓{fi}: データセットに無い行がある（{len(missing)} 件。例 {missing[0]}）")
         X = feat.loc[keys].to_numpy(dtype=float)
         if len(X) != len(keys):             # (Code, Date) が重複していると行がずれる。黙って進まない
             raise SystemExit(f"窓{fi}: データセットの (Code, Date) が一意でない（{len(X)} 行 / {len(keys)} 鍵）")
