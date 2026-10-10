@@ -143,6 +143,8 @@ class TestReportAndAsk(unittest.TestCase):
         d["jev_prod"] = np.clip(d["hp_lgbm"] * 0.5 + rng.normal(25, 15, n), 0, 100)
         d["jev_anon"] = np.clip(d["jev_prod"] + rng.normal(0, 10, n), 0, 100)
         d.loc[:4, "jev_anon"] = np.nan                          # 答えの無い行があっても落ちない
+        d["vol_20d"] = rng.uniform(0.5, 8, n)
+        d["ret_20d"] = rng.normal(5, 10, n)
         return d
 
     def test_report_runs_and_summarizes(self):
@@ -163,6 +165,9 @@ class TestReportAndAsk(unittest.TestCase):
         self.assertEqual(len(res["calibration"]["prod"]["bins"]), len(E.BINS) - 1)
         self.assertTrue(0 <= res["auc"]["jev_prod"]["hit10"] <= 1)
         self.assertIn("hp_min", res["auc"])
+        self.assertIn("vol_20d", res["auc"])                      # 素朴な基準（追記）
+        self.assertIn("vol_20d", res["corr"]["prod"])
+        self.assertIn("日次ボラ vol_20d", out)
         self.assertIn("線の上（3つとも95以上）", res["split"]["prod"])
         self.assertIn("prod_anon", res["corr"])
         # main と同じ書き方で JSON に落とせる

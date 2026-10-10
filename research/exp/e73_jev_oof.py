@@ -31,6 +31,9 @@ state: 本番（research/jev_predict.build_state）と同じ作り。百分位�
   5. 費用: 入力トークンの合計と 1件あたり
 記録: 集計だけをログに出す（銘柄ごとの値は出さない）。答えは research/_data/oof/e73_jev_answers.parquet に
       控える（Actions のキャッシュに乗る。公開の成果物には上げない）。途中で止まっても続きから。
+追記（2026-10-10、全体の結果 run 38078175856 を見てから足した読み解きの補助。採否の基準には使わない）:
+  2 と 4 に素朴な基準（日次ボラ vol_20d・20日リターン ret_20d）の AUC と、Jev との相関を並べる。
+  Jev の「+10% 到達」の確率がボラの言い換えになっていないかを見るため。
 
   exp=e73_jev_oof.py  args="--dry-run"     # 件数と state の例（匿名の腕）、文字数だけ。通信しない
   exp=e73_jev_oof.py  args="--arms prod --limit 200"   # 本番と同じ腕を新しい方から200件だけ（費用の確かめ）
@@ -434,6 +437,10 @@ def report(d: pd.DataFrame, algos: Sequence[str], arms: Sequence[str], usage: Di
     res["auc"] = {}
     rows = [(f"Jev（{arm}）", f"jev_{arm}") for arm in arms]
     rows += [(f"{a} の百分位", f"hp_{a}") for a in algos] + [("3モデルの最小", "hp_min")]
+    # 素朴な基準（追記）。+10% は荒い銘柄ほど届きやすいので、ボラだけでどこまで分かれるかを並べる
+    rows += [(nm, col) for nm, col in (("日次ボラ vol_20d（素朴な基準）", "vol_20d"),
+                                        ("20日リターン ret_20d（素朴な基準）", "ret_20d"))
+             if col in d.columns]
     for nm, col in rows:
         g = d[d[col].notna()]
         a = roc_auc(g["hit10"], g[col])
@@ -464,10 +471,13 @@ def report(d: pd.DataFrame, algos: Sequence[str], arms: Sequence[str], usage: Di
     # 4. 相関
     print("\n=== 4. 相関（Spearman）===")
     res["corr"] = {}
+    naive = [c for c in ("vol_20d", "ret_20d") if c in d.columns]
     for arm in arms:
         col = f"jev_{arm}"
         res["corr"][arm] = {a: spearman(d[col], d[f"hp_{a}"]) for a in algos}
-        print(f"  [{arm}] " + " / ".join(f"{a} {res['corr'][arm][a]:+.3f}" for a in algos))
+        res["corr"][arm].update({c: spearman(d[col], d[c]) for c in naive})
+        print(f"  [{arm}] " + " / ".join(f"{a} {res['corr'][arm][a]:+.3f}" for a in algos)
+              + ("" if not naive else " / " + " / ".join(f"{c} {res['corr'][arm][c]:+.3f}" for c in naive)))
     if len(arms) == 2:
         rho = spearman(d[f"jev_{arms[0]}"], d[f"jev_{arms[1]}"])
         res["corr"]["prod_anon"] = rho
