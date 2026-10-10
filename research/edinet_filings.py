@@ -195,18 +195,32 @@ def choose_context(rows: List[Dict[str, str]], header: List[str], consolidated: 
 
 def parse_statement(raw_zip: bytes, meta: dict) -> Optional[dict]:
     """
-    ZIP（type=5）から画面用の1件を作る。損益が1本も無ければ None。
+    ZIP（type=5）から画面用の1件を作る。損益の標準の要素が1本も無い（米国基準など）・当期のコンテキストが無い
+    書類は unsupported（理由）を付けて返す（控えに残し、画面は「対象外」と出す）。
     値は円（CSV の値そのまま。開示は百万円などに丸めてあることがある）。
     """
+    base = {"docID": meta.get("docID"), "docType": str(meta.get("docTypeCode") or ""),
+            "edinetCode": meta.get("edinetCode"), "secCode": meta.get("secCode"),
+            "submitDate": str(meta.get("submitDateTime") or "")[:10],
+            "periodStart": meta.get("periodStart"), "periodEnd": meta.get("periodEnd"),
+            "fetchedAt": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
+
+    def unsupported(reason: str, dei: Optional[dict] = None) -> dict:
+        # 読めない書類も控えに残す（同じ書類を毎晩取り直さない）。画面は「対象外」と理由を出す
+        d = dei or {}
+        return {**base, "unsupported": reason, "standard": d.get("AccountingStandardsDEI", ""),
+                "periodType": d.get("TypeOfCurrentPeriodDEI", ""), "items": {}, "labels": {},
+                "priorItems": {}, "checks": {}}
+
     got = main_csv(raw_zip)
     if got is None:
-        return None
+        return unsupported("no-csv")
     name, raw = got
     _, text = API.decode_csv(raw)
     header, rows, _ = API.parse_rows(text)
     ce, cl, cc, cv = (API.col(header, k) for k in ("element", "label", "context", "value"))
     if not (ce and cc and cv):
-        return None
+        return unsupported("no-columns")
     dei: Dict[str, str] = {}
     for r in rows:
         nm = API.local_name(r.get(ce, ""))
@@ -215,7 +229,7 @@ def parse_statement(raw_zip: bytes, meta: dict) -> Optional[dict]:
     consolidated = dei.get("WhetherConsolidatedFinancialStatementsArePreparedDEI", "true").strip().lower() == "true"
     ctx = choose_context(rows, header, consolidated)
     if ctx is None:
-        return None
+        return unsupported("no-context", dei)
     prior = PRIOR_OF.get(ctx.replace(NON_CONS, ""), "") + (NON_CONS if ctx.endswith(NON_CONS) else "")
 
     def collect(context: str) -> Tuple[Dict[str, float], Dict[str, str]]:
@@ -246,17 +260,18 @@ def parse_statement(raw_zip: bytes, meta: dict) -> Optional[dict]:
         return items, labels
 
     items, labels = collect(ctx)
-    if not items:
-        return None
+    if not any(k != "Revenue" for k in items):
+        # 損益の段の標準の要素が1本も無い（米国基準の会社は独自の要素で開示する）。売上だけ項目名で拾えても段は作れない
+        return unsupported("no-items", dei)
     prior_items, _ = collect(prior) if prior else ({}, {})
     ids = API.IDENTITIES_IFRS if any(k.endswith("IFRS") for k in items) else API.IDENTITIES_JGAAP
     checks = {lhs: ok for lhs, ok in API.check_identities(items, ids) if ok is not None}
     submit = str(meta.get("submitDateTime") or "")[:10]
     return {
-        "docID": meta.get("docID"), "docType": str(meta.get("docTypeCode") or ""),
+        **base,
         "edinetCode": meta.get("edinetCode") or dei.get("EDINETCodeDEI"),
         "secCode": meta.get("secCode") or dei.get("SecurityCodeDEI"),
-        "submitDate": submit, "periodStart": meta.get("periodStart") or dei.get("CurrentFiscalYearStartDateDEI"),
+        "periodStart": meta.get("periodStart") or dei.get("CurrentFiscalYearStartDateDEI"),
         "periodEnd": meta.get("periodEnd") or dei.get("CurrentPeriodEndDateDEI"),
         "periodType": dei.get("TypeOfCurrentPeriodDEI", ""), "standard": dei.get("AccountingStandardsDEI", ""),
         "consolidated": consolidated, "context": ctx, "csv": os.path.basename(name),
@@ -264,7 +279,6 @@ def parse_statement(raw_zip: bytes, meta: dict) -> Optional[dict]:
         "labels": labels,
         "priorItems": {k: int(v) if float(v).is_integer() else v for k, v in prior_items.items()},
         "checks": checks,
-        "fetchedAt": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
 
 
@@ -333,14 +347,14 @@ def run(p: Optional[API.Probe], args, today: dt.date) -> int:
                 fail += 1
                 continue
             parsed = parse_statement(bytes(body), d)
-            if parsed is None:
+            if parsed.get("unsupported"):
                 fail += 1
-                log(f"[fetch] 損益が読めない書類が1件（docTypeCode {d.get('docTypeCode')}）")
-                continue
+                log(f"[fetch] 対象外の書類が1件（docTypeCode {d.get('docTypeCode')} / {parsed['unsupported']} / "
+                    f"会計基準 {parsed.get('standard') or '不明'}）")
             cache[doc_id] = parsed
             new += 1
         save_json(os.path.join(args.data_dir, CACHE), cache)
-        log(f"[fetch] 控えにあった {got} / 新しく取った {new} / 索引に無い {miss} / 読めない {fail} "
+        log(f"[fetch] 控えにあった {got} / 新しく取った {new} / 索引に無い {miss} / 対象外 {fail} "
             f"/ リクエスト {p.used} / 予算 {p.budget}")
     pub = build_public(cache, idx, targets)
     save_json(args.out, pub)
@@ -348,7 +362,8 @@ def run(p: Optional[API.Probe], args, today: dt.date) -> int:
     for d in pub["docs"].values():
         std[d.get("standard") or "?"] = std.get(d.get("standard") or "?", 0) + 1
     ok = sum(1 for d in pub["docs"].values() if d["checks"] and all(d["checks"].values()))
-    log(f"[out] {args.out}: {len(pub['docs'])}銘柄（会計基準 {std} / 恒等式が全部成立 {ok}）")
+    uns = sum(1 for d in pub["docs"].values() if d.get("unsupported"))
+    log(f"[out] {args.out}: {len(pub['docs'])}銘柄（会計基準 {std} / 恒等式が全部成立 {ok} / 対象外 {uns}）")
     return 0
 
 

@@ -320,17 +320,29 @@ def pl_values(rows: List[Dict[str, str]], header: List[str], context: str) -> Di
     return out
 
 
+def rounding_unit(values: Iterable[float]) -> float:
+    """値がすべて割り切れる最大の単位（百万・千・1）。開示が百万円に丸めてあれば 1e6。"""
+    vs = [abs(float(v)) for v in values if v is not None]
+    for unit in (1e6, 1e3):
+        if vs and all(v % unit == 0 for v in vs):
+            return unit
+    return 1.0
+
+
 def check_identities(vals: Dict[str, float], identities) -> List[Tuple[str, Optional[bool]]]:
-    """各恒等式が成り立つか（None は項目が足りない）。値は返さない。"""
+    """
+    各恒等式が成り立つか（None は項目が足りない）。値は返さない。
+    開示が百万円（千円）に丸めてあると、丸めた項目の足し合わせは最大で 項目数 × 0.5 単位ずれる
+    （実測 2026-10-10: 小さい会社の有報で経常・税引前・純利益の3本が「不成立」になった）。その分は許す。
+    """
     out = []
     for lhs, terms in identities:
         if lhs not in vals or any(t not in vals for t, _ in terms):
             out.append((lhs, None))
             continue
         rhs = sum(s * vals[t] for t, s in terms)
-        # 開示は百万円などに丸めた値のことがあるので、足し合わせで出る丸めの差（関係する値の 0.1%）は許す
-        scale = max([abs(vals[lhs])] + [abs(vals[t]) for t, _ in terms])
-        tol = max(2.0, scale * 1e-3)
+        unit = rounding_unit([vals[lhs]] + [vals[t] for t, _ in terms])
+        tol = max(2.0, 0.5 * unit * (len(terms) + 1))
         out.append((lhs, abs(vals[lhs] - rhs) <= tol))
     return out
 

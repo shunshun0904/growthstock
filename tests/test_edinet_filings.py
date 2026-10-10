@@ -125,10 +125,15 @@ class TestParse(unittest.TestCase):
         self.assertEqual(d["items"]["ProfitLossIFRS"], -100)                # △ は負
         self.assertNotIn("NetSales", d["items"])
 
-    def test_unreadable(self):
-        self.assertIsNone(F.parse_statement(b"not zip", {}))
-        h = "要素ID\t項目名\tコンテキストID\t値\njpdei_cor:AccountingStandardsDEI\t会計基準\tFilingDateInstant\tJapan GAAP\n"
-        self.assertIsNone(F.parse_statement(self._zip_with(h), {}))        # 当期のコンテキストが無い
+    def test_unsupported(self):
+        d = F.parse_statement(b"not zip", {"docID": "Z", "docTypeCode": "120"})
+        self.assertEqual((d["unsupported"], d["docID"], d["items"]), ("no-csv", "Z", {}))
+        h = "要素ID\t項目名\tコンテキストID\t値\njpdei_cor:AccountingStandardsDEI\t会計基準\tFilingDateInstant\tUS GAAP\n"
+        d = F.parse_statement(self._zip_with(h), {"docID": "Z"})
+        self.assertEqual((d["unsupported"], d["standard"]), ("no-context", "US GAAP"))   # 当期のコンテキストが無い
+        h2 = h + "jpcrp030000-asr_E1-000:SalesUSGAAP\t売上高\tCurrentYearDuration\t100\n"
+        d = F.parse_statement(self._zip_with(h2), {"docID": "Z"})
+        self.assertEqual(d["unsupported"], "no-items")                     # 標準の要素が無い（売上の項目名でも拾わない: 段が作れない）
 
 
 class TestRun(unittest.TestCase):
@@ -173,7 +178,7 @@ class TestRun(unittest.TestCase):
         self.assertEqual(sorted(cache), ["S100C001", "S100C003"])
         # 2回目: 索引は最後の日だけ取り直し、書類は控えから。リクエストは 1
         rc, out = capture(lambda: F.main(self._args()))
-        self.assertIn("控えにあった 2 / 新しく取った 0", out)
+        self.assertIn("控えにあった 2 / 新しく取った 0 / 索引に無い 1 / 対象外 0", out)
         self.assertIn("リクエスト 1 /", out)
         # オフライン: 取りに行かずに出力だけ作り直す
         os.remove(self.out)

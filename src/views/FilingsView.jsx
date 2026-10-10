@@ -132,9 +132,11 @@ function FilingSankey({ doc, filings }) {
   if (!flow) {
     return (
       <div className="empty">
-        この書類の損益は図にできません（会計基準 {doc.standard || DASH}）。
+        この書類の損益は図にできません（{DOC_TYPE_JA[doc.docType] || '書類'}・会計基準 {doc.standard || '不明'}
+        {doc.submitDate ? `・${fmtDate(doc.submitDate)} 提出` : ''}）。
         <div className="sub" style={{ marginTop: 6 }}>
-          米国基準・銀行・保険など、売上高から始まる形でない損益計算書は対象外です。
+          米国基準（独自の項目で開示）・銀行・保険など、売上高から売上総利益・営業利益と続く形でない
+          損益計算書は対象外です。
         </div>
       </div>
     );

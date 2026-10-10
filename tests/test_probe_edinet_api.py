@@ -94,10 +94,18 @@ class TestCsv(unittest.TestCase):
         self.assertTrue(res["GrossProfit"])
         self.assertTrue(res["OperatingIncome"])
         self.assertIsNone(res["OrdinaryIncome"])                     # 項目が足りない
-        vals["GrossProfit"] = 401.0                                   # 丸めの差（0.1% 以内）は成立
+        vals["GrossProfit"] = 401.0                                   # 円単位の値で 1 のずれは成立（許容 2）
         self.assertTrue(dict(P.check_identities(vals, P.IDENTITIES_JGAAP))["GrossProfit"])
-        vals["GrossProfit"] = 450.0                                   # それ以上のずれは不成立
+        vals["GrossProfit"] = 403.0                                   # それ以上は不成立
         self.assertFalse(dict(P.check_identities(vals, P.IDENTITIES_JGAAP))["GrossProfit"])
+        # 百万円に丸めた開示: 3項目の足し合わせは 1.5百万円までずれうる
+        m = {"OperatingIncome": 150e6, "NonOperatingIncome": 20e6, "NonOperatingExpenses": 10e6, "OrdinaryIncome": 161e6}
+        self.assertTrue(dict(P.check_identities(m, P.IDENTITIES_JGAAP))["OrdinaryIncome"])       # ずれ 1百万
+        m["OrdinaryIncome"] = 163e6
+        self.assertFalse(dict(P.check_identities(m, P.IDENTITIES_JGAAP))["OrdinaryIncome"])      # ずれ 3百万
+        self.assertEqual(P.rounding_unit([150e6, 20e6]), 1e6)
+        self.assertEqual(P.rounding_unit([150e3, 21e3]), 1e3)
+        self.assertEqual(P.rounding_unit([150e6, 21e3 + 5]), 1.0)
 
     def test_fake_zip_parses_and_identities_hold(self):
         for ifrs in (False, True):

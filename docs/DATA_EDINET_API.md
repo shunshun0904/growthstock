@@ -27,8 +27,7 @@
   0.65〜1.26MB・1,400〜2,100行）と監査報告書の CSV（`jpaud-*`）。**UTF-16（BOM）・タブ区切り**、見出しは
   `要素ID / 項目名 / コンテキストID / 相対年度 / 連結・個別 / 期間・時点 / ユニットID / 単位 / 値`
 - **コンテキスト**: 当期の損益は `CurrentYearDuration`（連結）と `CurrentYearDuration_NonConsolidatedMember`（個別）。
-  前期は `Prior1YearDuration`。半期報告書の当期のコンテキスト名は実測できていない（遡りで見つかった 160 は投資信託の
-  もの）。取り込みは候補（`CurrentYTDDuration` / `InterimDuration` など）を順に試し、無ければ「読めない」と数える
+  前期は `Prior1YearDuration`。半期報告書は `InterimDuration`（初回の取り込みで確認。下記）
 - **DEI**: `AccountingStandardsDEI`（Japan GAAP / IFRS）、`WhetherConsolidatedFinancialStatementsArePreparedDEI`（true/false）、
   `TypeOfCurrentPeriodDEI`（FY）、`CurrentFiscalYearStartDateDEI` / `CurrentPeriodEndDateDEI`、`AmendmentFlagDEI`
 - **日本基準の会社**（任天堂、E02367）: 損益の要素 18本のうち 17本があり（無いのは OperatingRevenue1）、恒等式
@@ -64,8 +63,22 @@
 - 米国基準・銀行・保険など、売上高から始まらない損益は「対象外」と出す
 - 出典（EDINET・PDL1.0）と docID を図の下に出す
 
+## 初回の取り込み（run 38051012338、2026-10-10）
+
+- 索引: 400日ぶん（2025-09-05〜2026-10-09）の平日 286日・9,074件（120 / 130 / 160 / 170 で secCode のあるもの）。
+  リクエスト 286、約5分。書類の取得 45件で計 331 リクエスト（予算 400）
+- 画面の 45銘柄のうち 44銘柄が読めた（日本基準 40・IFRS 4、有報 33・半期報告書 11）。恒等式が全部成立 42
+- **半期報告書の当期のコンテキストは `InterimDuration`**（連結 9件）/ `InterimDuration_NonConsolidatedMember`（個別 2件）。
+  DEI の `TypeOfCurrentPeriodDEI` は `HY`
+- 読めなかった1件は米国基準の会社（標準の要素 `jppfs_cor` / `jpigp_cor` が1本も無い）。2回目から「対象外」として
+  控えに残し、画面は書類の種類・会計基準・提出日と「対象外」の理由を出す
+- 銀行（日本基準だが売上高が無く、経常収益から始まる）は項目は読めるが段が作れないので、画面は「対象外」
+- 恒等式が合わなかった2件は、百万円に丸めた開示で 3項目を足したときの丸めの差（最大 1.5百万円）。判定を
+  「開示の丸めの単位 × 項目数 × 0.5 まで許す」に直した（`probe_edinet_api.check_identities`）
+
 ## まだ確かめていないこと
 
-- 半期報告書（160）の当期のコンテキスト名（最初に 3月決算の会社の半期報告書が出る 11月中旬に、取り込みのログで分かる）
-- 要素 ID の無い段（IFRS の売上収益を独自要素で開示する会社）の項目名の揺れ。取り込みが「読めない」と数えた件数で追う
-- EDINET API の利用枠（公式の記載を確認できていない。1リクエストごとに 0.3秒空けている）
+- 要素 ID の無い段（IFRS の売上収益を独自要素で開示する会社）の項目名の揺れ。取り込みが「対象外」と数えた件数で追う
+- 訂正報告書（130 / 170）の扱い（いまは使わない。訂正で数字が変わった会社は元の書類のまま出る）
+- EDINET API の利用枠（公式の記載を確認できていない。1リクエストごとに 0.3秒空けている。初回の 331 リクエストは
+  すべて HTTP 200）
