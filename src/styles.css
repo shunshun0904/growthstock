@@ -389,8 +389,9 @@ input[type='range']::-moz-range-thumb {
   grid-template-columns: 32px minmax(150px, 1.25fr) minmax(150px, 1.15fr)
                          repeat(4, minmax(66px, 0.65fr)) 68px;
 }
-.jev-ok { color: var(--green); }
-.jev-low { color: var(--amber); }
+/* 実験73 で「低いほど悪い」は支持されなかったので、警告色（黄）ではなく濃淡だけで分ける */
+.jev-ok { color: var(--text); }
+.jev-low { color: var(--text-dim); }
 .jev-big { font-size: 24px; }
 .strat-jev { margin-top: 10px; }
 .strat-metric .badge { font-size: 10px; padding: 1px 6px; }

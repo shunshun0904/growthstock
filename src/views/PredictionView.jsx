@@ -4,7 +4,7 @@ import { bandColor, bandLabel, pctColor, PCT_LEGEND, modelRows, MODEL_SHORT, MOD
   FAMILY_JA, marketTone, candidateToStock } from '../lib/predictions.js';
 import { STRATEGY, BOOST, BORDER, strategySignal, exitPlan, nearMisses,
          MODEL_JA, fundContrib, frozenNote, borderNote,
-         JEV, jevProb, jevNote, jevWarnings,
+         JEV, JEV_STATS, jevProb, jevNote, jevWarnings, jevEvidence,
 } from '../lib/strategy.js';
 
 /**
@@ -643,24 +643,27 @@ function JevMetric({ c }) {
     <div className="strat-metric" title={n.text}>
       <span className="lab">Jev +{JEV.target}%</span>
       <strong className={`num ${n.warn ? 'jev-low' : 'jev-ok'}`}>{fmt(n.prob, 0)}%</strong>
-      {n.warn && <span className="badge amber">{n.badge}</span>}
+      {n.warn && <span className="badge slate">{n.badge}</span>}
     </div>
   );
 }
 
-/** 買い候補に Jev が線の下のものがあれば、戦略パネルに注意を出す。規則は変えない。 */
+/**
+ * 買い候補に Jev が線の下のものがあれば、戦略パネルに注記を出す。規則は変えない。
+ * 実験73 で「Jev が低いほど悪い」は支持されなかったので、警告ではなく参考の帯（info）。
+ */
 function JevBanner({ picks }) {
   const low = jevWarnings(picks);
   if (!low.length) return null;
   return (
-    <div className="banner warn strat-jev">
-      <span>⚠</span>
+    <div className="banner info strat-jev">
+      <span>ℹ</span>
       <div>
-        <b>Jev の見立てが {JEV.line}% 未満の買い候補があります: </b>
+        <b>Jev の見立てが {JEV.line}% 未満の買い候補: </b>
         {low.map(({ c, n }) => `${c.name || c.code} ${fmt(n.prob, 0)}%`).join(' / ')}。
         Jev（TypeSafe AI の判断モデル）が「翌営業日の寄りで買い、{JEV.hold}営業日以内に
-        +{JEV.target}%」をどう見たかで、<b>選定の規則には入れていません</b>。確率は較正されて
-        いないので、過去の候補で測った実績（docs/MODEL_JEV.md 実験73）と照らして読んでください。
+        +{JEV.target}%」をどう見たかで、<b>選定の規則には入れていません</b>。{jevEvidence()}。
+        低いことを見送る理由にはしないでください（docs/MODEL_JEV.md）。
       </div>
     </div>
   );
@@ -749,7 +752,19 @@ function JevCard({ info }) {
         Jev は TypeSafe AI が 2026-09-15 に公開した判断特化のモデルで、文章を生成せず、問いに
         対する確率だけを返します。確率は較正されていません（「{JEV.line}%」が過去に {JEV.line}%
         当たったという意味ではない）。答えは日付ごとに最初の答えで凍結し、台帳（スプレッドシート）
-        にも残します。過去の候補で測った結果は docs/MODEL_JEV.md（実験73）。
+        にも残します。
+      </p>
+      <p className="sub">
+        <b>過去の候補で測った結果（実験73、docs/MODEL_JEV.md）:</b> {jevEvidence()}。
+        +{JEV.target}% に届くかの分離力（ROC-AUC）は Jev {fmt(JEV_STATS.auc.jev, 2)} 対
+        LightGBM の百分位 {fmt(JEV_STATS.auc.lgbm, 2)} で Jev が上ですが、日次ボラ1列だけ
+        （{fmt(JEV_STATS.auc.vol, 2)}）や 20日リターン1列だけ（{fmt(JEV_STATS.auc.ret, 2)}）にも届きません。
+        Jev の答えは渡した 20日リターン・日次ボラと強く相関し（Spearman {fmtSigned(JEV_STATS.rho.ret, 2, '')} /
+        {fmtSigned(JEV_STATS.rho.vol, 2, '')}）、その言い換えに近いものです。+{JEV.target}% の指値で売った
+        収益では母集団に差が無く（{fmtSigned(JEV_STATS.all.d, 2, 'pt')} ± {fmt(JEV_STATS.all.se, 2)}）、
+        Brier スコアは母集団の到達率を常に答える基準より悪い（{fmt(JEV_STATS.brier.jev, 3)} 対
+        {fmt(JEV_STATS.brier.base, 3)}）。「+{JEV.target}% に届くか（荒さ）」の目安で、「買って儲かるか」の
+        目安ではありません。
       </p>
     </section>
   );

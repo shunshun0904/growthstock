@@ -279,7 +279,7 @@ test('BORDER_STATS: 実験70 の数字（件数の合計が形の件数と合う
 
 /* ------------------------------------------------ Jev（判断モデル） */
 
-import { JEV, jevProb, jevNote, jevWarnings } from '../src/lib/strategy.js';
+import { JEV, JEV_STATS, jevProb, jevNote, jevWarnings, jevEvidence } from '../src/lib/strategy.js';
 
 const withJev = (c, prob) => ({ ...c, jev: { prob, model: 'jev-1.13.0', question: 'rise10_v1', cached: false } });
 
@@ -291,7 +291,7 @@ test('jevProb: 値が無ければ null（0 にしない）', () => {
   assert.equal(jevProb(withJev({}, 0)), 0);
 });
 
-test('jevNote: 線（50）未満なら注意、以上なら注意なし。規則の値は文言に入る', () => {
+test('jevNote: 線（50）未満なら参考の印、以上なら印なし。規則の値と実験73 の実測が文言に入る', () => {
   assert.equal(JEV.line, 50);
   const low = jevNote(withJev(cand('A', { lgbm: 95, xgb: 95, cat: 95 }), 32));
   assert.equal(low.warn, true);
@@ -299,10 +299,21 @@ test('jevNote: 線（50）未満なら注意、以上なら注意なし。規則
   assert.ok(low.badge.includes('50%未満'));
   assert.ok(low.text.includes('32%') && low.text.includes('+10%') && low.text.includes('20営業日'));
   assert.ok(low.text.includes('選定の規則には入れていない'));
+  assert.ok(low.text.includes('見送る理由にはしない'));
+  assert.ok(low.text.includes('実験73') && low.text.includes('45%'));   // 70〜90% の帯の実際の到達率
   const hi = jevNote(withJev(cand('B', { lgbm: 95, xgb: 95, cat: 95 }), 50));
   assert.equal(hi.warn, false);
   assert.equal(hi.badge, null);
+  assert.ok(hi.text.includes('買う理由にはしない'));
   assert.equal(jevNote(cand('C', { lgbm: 95, xgb: 95, cat: 95 })), null);
+});
+
+test('JEV_STATS: 実験73 の数字（docs/MODEL_JEV.md と同じ）', () => {
+  assert.equal(JEV_STATS.n, 3830);
+  assert.equal(JEV_STATS.band.hi.hit, 44.7);
+  assert.equal(JEV_STATS.border.d, -2.48);
+  assert.ok(JEV_STATS.auc.vol > JEV_STATS.auc.jev && JEV_STATS.auc.ret > JEV_STATS.auc.jev);  // 素朴な基準が上
+  assert.ok(jevEvidence().includes('3,830件') && jevEvidence().includes('−2.5pt ± 1.5'.replace('−', '-')));
 });
 
 test('jevWarnings: 買い候補のうち線の下のものだけ', () => {

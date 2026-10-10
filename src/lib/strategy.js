@@ -342,31 +342,62 @@ export function exitPlan(close, s = STRATEGY) {
  */
 export const JEV = { line: 50, target: 10, hold: 20 };
 
+/**
+ * 実験73 の実測（docs/MODEL_JEV.md。本番の239列の OOF、2025-09〜2026-09 の 3,830件、run 38078175856）。
+ * 画面の文言に使う。測り直したら差し替える。
+ *   band      Jev が 70〜90% と答えた帯の実際の +10% 到達率（1,755件で 44.7%）と、20〜40% の帯（1,741件で 26.6%）
+ *   brier     Brier スコア（Jev 0.276 / 母集団の到達率を常に答える基準 0.231。小さいほど良い）
+ *   auc       +10% 到達に対する ROC-AUC（Jev 0.617 / LightGBM の百分位 0.480 / 日次ボラ vol_20d だけ 0.649 /
+ *             20日リターン ret_20d だけ 0.627。run 38078866280 の追記）
+ *   rho       Jev と素の値の Spearman（20日リターン +0.776 / 日次ボラ +0.553）。Jev の答えはこの2つの言い換えに近い
+ *   border    際どい候補（実験70 の形）を Jev 50 で分けた +10%指値の差（高い側 − 低い側）: −2.48pt ± 1.50（71件対96件）
+ *   all       母集団の同じ差: +0.12pt ± 0.28
+ * 読み: Jev は「+10% に届くか（荒さ）」は分けるが、+10% の指値で売った収益では差を作らない。確率の値は較正されていない。
+ */
+export const JEV_STATS = {
+  n: 3830, from: '2025-09', to: '2026-09',
+  band: { hi: { lo: 70, hi: 90, n: 1755, hit: 44.7 }, lo: { lo: 20, hi: 40, n: 1741, hit: 26.6 } },
+  brier: { jev: 0.276, base: 0.231 },
+  auc: { jev: 0.617, lgbm: 0.48, vol: 0.649, ret: 0.627 },
+  rho: { ret: 0.776, vol: 0.553 },
+  border: { d: -2.48, se: 1.5, nHi: 71, nLo: 96 },
+  all: { d: 0.12, se: 0.28 },
+};
+
 /** Jev の確率（%）。無ければ null（鍵が未設定・失敗・問うていない）。 */
 export function jevProb(candidate) {
   const v = candidate?.jev?.prob;
   return Number.isFinite(v) ? v : null;
 }
 
+/** 実験73 の要点を1文に。文言を2箇所で別々に書かない。 */
+export function jevEvidence(st = JEV_STATS) {
+  const b = st.band;
+  return `実験73（${st.from}〜${st.to} の ${st.n.toLocaleString('ja-JP')}件）では、Jev が ${b.hi.lo}〜${b.hi.hi}% と答えた帯の`
+    + `実際の +${JEV.target}% 到達率は ${b.hi.hit.toFixed(0)}%（${b.lo.lo}〜${b.lo.hi}% の帯は ${b.lo.hit.toFixed(0)}%）で、`
+    + `際どい候補では Jev が ${JEV.line} 以上の側のほうが +${JEV.target}% 指値の収益が低かった`
+    + `（${st.border.d.toFixed(1)}pt ± ${st.border.se.toFixed(1)}。有意ではない）`;
+}
+
 /**
- * Jev の値への注意。値が無ければ null。
- *   warn   line 未満
+ * Jev の値への注記。値が無ければ null。
+ *   warn   line 未満（線の下。実験73 で「低いほど悪い」は支持されなかったので、画面では参考の印として出す）
  *   badge  行に出す短い文言（line 以上なら null）
- *   text   詳しい文言（title と、開いたときの本文）
+ *   text   詳しい文言（title と、開いたときの本文）。実測の数字を添える
  */
-export function jevNote(candidate, j = JEV) {
+export function jevNote(candidate, j = JEV, st = JEV_STATS) {
   const p = jevProb(candidate);
   if (p === null) return null;
   const warn = p < j.line;
   const head = `Jev は「翌営業日の寄りで買い、${j.hold}営業日以内に +${j.target}%」を ${p.toFixed(0)}% と見ている`;
+  const tail = '選定の規則には入れていない。確率の値は較正されていない（docs/MODEL_JEV.md）';
   return {
     prob: p,
     warn,
-    badge: warn ? `Jev ${j.line}%未満` : null,
+    badge: warn ? `Jev ${j.line}%未満（参考）` : null,
     text: warn
-      ? `${head}（${j.line}% 未満）。選定の規則には入れていない。確率は較正されていないので、`
-        + '過去の候補で測った実績（docs/MODEL_JEV.md 実験73）と照らして読む'
-      : `${head}（${j.line}% 以上）。選定の規則には入れていない`,
+      ? `${head}（${j.line}% 未満）。${jevEvidence(st)}。低いことを見送る理由にはしない。${tail}`
+      : `${head}（${j.line}% 以上）。${jevEvidence(st)}。高いことを買う理由にはしない。${tail}`,
   };
 }
 

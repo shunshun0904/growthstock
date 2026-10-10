@@ -105,16 +105,16 @@ check(!strat.includes('NaN') && !strat.includes('undefined'),
       '戦略パネルに NaN / undefined が出ていない');
 
 // Jev（判断モデル）。合成データは4件に値があり、3件目（1671）は値なし（失敗の形）。
-// 列は候補ごとに1つ、値の無い行は「—」。1件目（32%）は線（50）の下なので黄、5件目（77.5%）は緑
+// 列は候補ごとに1つ、値の無い行は「—」。1件目（32%）は線（50）の下なので薄い色、5件目（77.5%）は濃い色
 const jevCells = page.locator('.pred-list .pred-jev');
 check((await jevCells.count()) === nRows, `Jev の列が各行に出る (実際: ${await jevCells.count()})`);
 const jevTexts = await jevCells.locator('.num').allTextContents();
 check(jevTexts[0].trim() === '32%' && jevTexts[2].trim() === '—' && jevTexts[4].trim() === '78%',
       `Jev の値が確率（%）で出て、無い行は「—」 (実際: ${jevTexts.map((t) => t.trim()).join(',')})`);
 check((await jevCells.nth(0).locator('.num').getAttribute('class') || '').includes('jev-low'),
-      '線の下の Jev は黄（jev-low）');
+      '線の下の Jev は薄い色（jev-low。実験73 で「低いほど悪い」は支持されなかったので警告色にしない）');
 check((await jevCells.nth(4).locator('.num').getAttribute('class') || '').includes('jev-ok'),
-      '線の上の Jev は緑（jev-ok）');
+      '線の上の Jev は濃い色（jev-ok）');
 check(predBody.includes('Jev（判断モデル）') && predBody.includes('選定の規則には入れていません'),
       'Jev の素性パネルが出て、規則に入れていないと書いてある');
 check(!strat.includes('Jev の見立てが'), '見送りの日（買い候補なし）は Jev の注意の帯を出さない');
