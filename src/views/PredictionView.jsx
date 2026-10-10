@@ -766,6 +766,16 @@ function JevCard({ info }) {
         {fmt(JEV_STATS.brier.base, 3)}）。「+{JEV.target}% に届くか（荒さ）」の目安で、「買って儲かるか」の
         目安ではありません。
       </p>
+      <p className="sub">
+        <b>モデルが選んだ候補の中では（3モデルとも90以上の {fmtInt(JEV_STATS.picks.n)}件）:</b> +{JEV.target}% に
+        届いた行と届かなかった行の Jev の平均は {fmt(JEV_STATS.picks.tpJev, 0)}% と {fmt(JEV_STATS.picks.fpJev, 0)}%
+        で同じ（差 ± {fmt(JEV_STATS.picks.gapSe, 1)}pt）。Jev が低い3分の1（{JEV_STATS.picks.loTercile.range}%）の
+        +{JEV.target}% 指値は {fmtSigned(JEV_STATS.picks.loTercile.tp10, 2)}、高い3分の1
+        （{JEV_STATS.picks.hiTercile.range}%）は {fmtSigned(JEV_STATS.picks.hiTercile.tp10, 2)}。
+        Jev {JEV.line} 以上で絞ると {fmtSigned(JEV_STATS.picks.gate.ge.tp10, 2)}（{JEV_STATS.picks.gate.ge.n}件）、
+        {JEV.line} 未満は {fmtSigned(JEV_STATS.picks.gate.lt.tp10, 2)}（{JEV_STATS.picks.gate.lt.n}件）。
+        偽陽性を Jev で見分けることはできていません。
+      </p>
     </section>
   );
 }

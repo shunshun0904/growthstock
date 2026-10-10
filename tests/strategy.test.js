@@ -313,6 +313,8 @@ test('JEV_STATS: 実験73 の数字（docs/MODEL_JEV.md と同じ）', () => {
   assert.equal(JEV_STATS.band.hi.hit, 44.7);
   assert.equal(JEV_STATS.border.d, -2.48);
   assert.ok(JEV_STATS.auc.vol > JEV_STATS.auc.jev && JEV_STATS.auc.ret > JEV_STATS.auc.jev);  // 素朴な基準が上
+  assert.equal(JEV_STATS.picks.n, 110);
+  assert.ok(JEV_STATS.picks.loTercile.tp10 > JEV_STATS.picks.hiTercile.tp10);                 // 低い側のほうが儲かった
   assert.ok(jevEvidence().includes('3,830件') && jevEvidence().includes('−2.5pt ± 1.5'.replace('−', '-')));
 });
 
