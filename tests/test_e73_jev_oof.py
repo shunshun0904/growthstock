@@ -212,6 +212,7 @@ class TestReportAndAsk(unittest.TestCase):
                 probs, usage, cache2 = E.ask_arm("prod", cands, tones, client, cache, workers=2, path=path)
             self.assertEqual((usage["asked"], usage["cached"], usage["failed"]), (2, 1, 0))
             self.assertEqual(usage["sha_mismatch"], 1)                 # 控えの state の作りが違う行を数える
+            self.assertEqual(usage["models"], {"jev-1.12.0": 1, "jev-1.13.0": 2})   # 版ごとの件数（控え＋今回）
             self.assertEqual(probs[("10000", "2025-10-09")], 77.0)      # 控えの答え（問い直さない）
             self.assertEqual(probs[("10010", "2025-10-09")], 40.0)
             self.assertEqual(len(client.states), 2)

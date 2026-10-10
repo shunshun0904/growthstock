@@ -328,7 +328,7 @@ def ask_arm(arm: str, cands: List[Dict], tones: Dict[str, Optional[str]], client
              for x in cache.to_dict("records")}
     probs: Dict[tuple, float] = {}
     usage = {"asked": 0, "cached": 0, "failed": 0, "input_tokens": 0, "output_tokens": 0,
-             "sha_mismatch": 0}
+             "sha_mismatch": 0, "models": {}}
     todo = []
     for c in cands:
         state = arm_state(c, tones.get(c["date"]), arm)
@@ -338,6 +338,8 @@ def ask_arm(arm: str, cands: List[Dict], tones: Dict[str, Optional[str]], client
             rec = known[k]
             probs[(c["jqCode"], c["date"])] = float(rec["prob"])
             usage["cached"] += 1
+            m = str(rec.get("model") or "")
+            usage["models"][m] = usage["models"].get(m, 0) + 1
             if str(rec.get("state_sha") or "") != sha:
                 usage["sha_mismatch"] += 1
             continue
@@ -363,6 +365,8 @@ def ask_arm(arm: str, cands: List[Dict], tones: Dict[str, Optional[str]], client
             usage["asked"] += 1
             usage["input_tokens"] += ans["input_tokens"]
             usage["output_tokens"] += ans["output_tokens"]
+            m = ans["model"] or client.model
+            usage["models"][m] = usage["models"].get(m, 0) + 1
             probs[(c["jqCode"], c["date"])] = ans["prob"]
             new_records.append({"arm": arm, "Code": c["jqCode"], "Date": c["date"],
                                 "question": JV.QUESTION_VERSION, "state_sha": sha,
@@ -479,6 +483,9 @@ def report(d: pd.DataFrame, algos: Sequence[str], arms: Sequence[str], usage: Di
         per = u.get("input_tokens", 0) / max(1, u.get("asked", 0))
         print(f"  [{arm}] 問うた {u.get('asked', 0):,}件 / 控え {u.get('cached', 0):,}件 / 失敗 {u.get('failed', 0):,}件 / "
               f"入力 {u.get('input_tokens', 0):,} トークン（{per:,.0f}/件）/ 出力 {u.get('output_tokens', 0):,}")
+        models = u.get("models") or {}
+        if models:
+            print(f"  [{arm}] 答えたモデルの版: " + " / ".join(f"{m} {n:,}件" for m, n in sorted(models.items())))
     return res
 
 
