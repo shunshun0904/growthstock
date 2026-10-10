@@ -105,6 +105,20 @@ check(!strat.includes('NaN') && !strat.includes('undefined'),
 check(!predBody.includes('NaN'), '予測タブに NaN が出ていない');
 check(!predBody.includes('undefined'), '予測タブに undefined が出ていない');
 
+// 際どい候補の印（運用者の線「3モデルとも95以上」の下）。合成データの1件目は運用者の例の形
+// （lgbm 85・xgb 96・cat 98 → LightGBM が最下位で赤）、5件目は lgbm 96・xgb 100・cat 78.1（CatBoost が最下位で黄）
+const borders = page.locator('.pred-list .pred-border');
+check((await borders.count()) === 2, `際どい候補の印が2件に出る (実際: ${await borders.count()})`);
+const firstBorder = page.locator('.pred-row').first().locator('.pred-border');
+check(((await firstBorder.textContent()) || '').includes('LightGBM が最下位'),
+      '1件目は「LightGBM が最下位」と出る');
+check(((await firstBorder.getAttribute('class')) || '').includes('red'), '1件目の印は赤');
+check(((await firstBorder.getAttribute('title')) || '').includes('過去ほぼ 0%'),
+      '印の title に「過去ほぼ 0%」が出る');
+const lastBorder = page.locator('.pred-row').last().locator('.pred-border');
+check(((await lastBorder.textContent()) || '').includes('最下位 CatBoost'), '5件目は「最下位 CatBoost」');
+check(((await lastBorder.getAttribute('class')) || '').includes('amber'), '5件目の印は黄');
+
 // 1件目（5モデルとも高い候補）を開いて、モデル別の見立てを確かめる
 await page.locator('.pred-row').first().locator('.pred-main').click();
 await page.waitForSelector('.pred-detail', { timeout: 5000 });
@@ -113,6 +127,9 @@ check(detail.includes('モデル別の見立て'), '詳細にモデル別の見�
 check(detail.includes('混ぜていません'), 'アンサンブルではないと明示される');
 const detailBars = await page.locator('.pred-detail .pred-b').count();
 check(detailBars >= 5, `詳細にモデル別の棒が5本以上ある (実際: ${detailBars})`);
+const borderNote = await page.textContent('.pred-detail .pred-border-note');
+check((borderNote || '').includes('際どい候補') && (borderNote || '').includes('過去ほぼ 0%'),
+      '詳細の先頭に際どい候補の注意が出る');
 const fams = await page.locator('.pred-detail .pred-fam').allTextContents();
 check(fams.join(',') === '決定木系,木以外',
   `詳細のモデル別が塊で分かれる (実際: ${fams.join(',')})`);

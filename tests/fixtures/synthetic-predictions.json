@@ -143,15 +143,15 @@
    "byModel": {
     "lgbm": {
      "score": 0.2945,
-     "pctHistorical": 48.9
+     "pctHistorical": 85.0
     },
     "xgb": {
      "score": 0.2785,
-     "pctHistorical": 45.7
+     "pctHistorical": 96.0
     },
     "cat": {
      "score": 0.1675,
-     "pctHistorical": 23.5
+     "pctHistorical": 98.0
     },
     "logit": {
      "score": 0.3315,
@@ -162,7 +162,7 @@
      "pctHistorical": 34.8
     }
    },
-   "agree90": 0,
+   "agree90": 2,
    "nModels": 5,
    "bandOutcome": 1.54
   },

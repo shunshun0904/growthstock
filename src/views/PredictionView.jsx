@@ -2,8 +2,8 @@ import React, { useMemo, useState } from 'react';
 import { fmt, fmtInt, fmtSigned, fmtOku, fmtDate, fmtDateTime, DASH } from '../lib/format.js';
 import { bandColor, bandLabel, pctColor, PCT_LEGEND, modelRows, MODEL_SHORT, MODEL_FAMILY,
   FAMILY_JA, marketTone, candidateToStock } from '../lib/predictions.js';
-import { STRATEGY, BOOST, strategySignal, exitPlan, nearMisses,
-         MODEL_JA, fundContrib, frozenNote,
+import { STRATEGY, BOOST, BORDER, strategySignal, exitPlan, nearMisses,
+         MODEL_JA, fundContrib, frozenNote, borderNote,
 } from '../lib/strategy.js';
 
 /**
@@ -225,15 +225,18 @@ function NearMiss({ near }) {
       <div className="strat-near-list">
         {near.map((c) => (
           <div key={c.jqCode} className="strat-near-row">
-            <span className="strat-near-name">{c.name || c.code}</span>
+            <span className="strat-near-name">
+              {c.name || c.code}
+              <BorderBadge c={c} />
+            </span>
             <span className="num strat-near-pct">最小 {fmt(c.minPct, 1)}</span>
             <span className="sub">
               {c.weak
                 ? `${MODEL_JA[c.laggard] || c.laggard} だけ `
-                  + `${fmt(c.spread, 1)}pt 低い形。実測 +0.30%・勝率49%・`
+                  + `${fmt(c.spread, 1)}pt 低い形。実験36（153列のころ）で +0.30%・勝率49%・`
                   + '−10%割れ 12.6%（270件）で、枠を遊ばせるのと変わらない'
                 : `3モデルがほぼ揃っている（幅 ${fmt(c.spread, 1)}pt）。`
-                  + 'この形は実測 +2.70%（118件）と基準通過組に近いが、'
+                  + 'この形は実験36（153列のころ）で +2.70%（118件）と基準通過組に近いが、'
                   + '事後に見つけた区分けなので基準は動かしていない'}
               <FundNote c={c} />
             </span>
@@ -275,6 +278,7 @@ function PickCard({ c, n, onSend, sent }) {
           <strong>{c.name || c.code}</strong>
           <span className="sub num">{c.code}</span>
           {c.sector && <span className="sub">{c.sector}</span>}
+          <BorderBadge c={c} />
         </span>
         <button className="btn btn-primary" onClick={onSend} disabled={sent}>
           {sent ? '送信済み' : '8軸で見る'}
@@ -311,6 +315,21 @@ function PickCard({ c, n, onSend, sent }) {
   );
 }
 
+/**
+ * 際どい候補の印（運用者の線「3モデルとも95以上」の下。strategy.js の borderNote）。
+ * 一番低いのが LightGBM なら赤（過去ほぼ 0%。実験36・70）、それ以外は黄。
+ * 詳しい文言は title と、行を開いたときの本文に出す。選定の規則は変えない。
+ */
+function BorderBadge({ c }) {
+  const n = borderNote(c);
+  if (!n) return null;
+  return (
+    <span className={`badge ${n.warn ? 'red' : 'amber'} pred-warn pred-border`} title={n.text}>
+      {n.badge}
+    </span>
+  );
+}
+
 /* ------------------------------------------------------------------ 候補1件 */
 
 function Row({ c, models, open, onToggle, onSend, sent }) {
@@ -331,6 +350,7 @@ function Row({ c, models, open, onToggle, onSend, sent }) {
               値動きなし
             </span>
           )}
+          <BorderBadge c={c} />
         </span>
         {mr.length > 0 ? (
           <ModelStrip rows={mr} agree={c.agree90} n={c.nModels} />
@@ -448,9 +468,18 @@ function Detail({ c, models, onSend, sent }) {
   const maxTop = Math.max(...top.map((t) => Math.abs(t.contrib)), 0.001);
 
   const mr = modelRows(c, models);
+  const bn = borderNote(c);
 
   return (
     <div className="pred-detail">
+      {bn && (
+        <div className={`banner ${bn.warn ? 'warn' : 'info'} pred-border-note`}>
+          <span>{bn.warn ? '⚠' : 'ℹ'}</span>
+          <div>
+            <b>際どい候補（3モデルとも{BORDER.line}以上の線の下）。</b>{bn.text}
+          </div>
+        </div>
+      )}
       <div className="pred-detail-grid">
         {mr.length > 0 && (
           <div>

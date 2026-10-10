@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import {
   BOOST, STRATEGY, boostPcts, minPct, passesAgree, dayVerdict, strategySignal, exitPlan,
   freeSlots, pctSpread, laggard, nearMisses, fundContrib, frozenNote,
+  BORDER, BORDER_STATS, borderShape, borderNote,
 } from '../src/lib/strategy.js';
 
 const cand = (code, pcts, score = 0.5) => ({
@@ -204,3 +205,74 @@ test('frozenNote: 直近20日の日次ボラが frozenVol 未満のときだけ�
   assert.equal(STRATEGY.frozenVol, 0.3);
 });
 
+
+/* ------------------------------------------------ 際どい候補（運用者の線 95 の下） */
+
+test('borderShape: 運用者の例（xgb 96・cat 98・lgbm 85）は「2つ95以上・残り 85〜90」', () => {
+  assert.deepEqual(BORDER, { line: 95, lo: 85 });
+  assert.equal(borderShape(cand('A', { lgbm: 85, xgb: 96, cat: 98 })), 'two95_mid');
+});
+
+test('borderShape: 形の全部と境目', () => {
+  const sh = (l, x, c) => borderShape(cand('Z', { lgbm: l, xgb: x, cat: c }));
+  assert.equal(sh(96, 97, 98), null);          // 3つとも95以上は線の上（際どくない）
+  assert.equal(sh(95, 95, 95), null);          // ちょうど95は上
+  assert.equal(sh(91, 96, 97), 'two95_hi');
+  assert.equal(sh(96, 89.9, 97), 'two95_mid');
+  assert.equal(sh(70, 99, 99), 'two95_lo');    // 2つ95以上なら、残りが低くても際どい
+  assert.equal(sh(92, 93, 96), 'min90');       // 95以上は1つ
+  assert.equal(sh(90, 91, 92), 'min90');
+  assert.equal(sh(86, 88, 99), 'min85');
+  assert.equal(sh(85, 88, 94), 'min85');       // 85ちょうどは入る
+  assert.equal(sh(84.9, 99, 94), null);        // 95以上は1つで、最小が85未満
+  assert.equal(sh(60, 70, 80), null);
+  assert.equal(borderShape(cand('Y', { lgbm: 90, xgb: 99 })), null);   // 欠けていれば判定しない
+  assert.equal(borderShape({}), null);
+});
+
+test('borderNote: LightGBM が一番低いと warn。文言は実験70 の数字から作る', () => {
+  const n = borderNote(cand('A', { lgbm: 85, xgb: 96, cat: 98 }));
+  assert.equal(n.warn, true);
+  assert.equal(n.laggard, 'lgbm');
+  assert.equal(n.laggardPct, 85);
+  assert.equal(n.badge, '際どい・LightGBM が最下位');
+  assert.ok(n.text.includes(`過去ほぼ 0%（0.0%・${BORDER_STATS.two95.lgbm.n}件）`));
+  assert.ok(n.text.includes(`（${BORDER_STATS.two95.other.n}件）`));
+  assert.ok(n.text.includes(`（${BORDER_STATS.line.n}件）`));
+  assert.ok(n.text.includes('LightGBM が一番低い（85.0）'));
+  assert.ok(!n.text.includes('−0.0%'));                // 丸めてから符号を付ける
+  assert.ok(!/NaN|undefined|null/.test(n.text));
+});
+
+test('borderNote: XGBoost / CatBoost が一番低いと warn ではない', () => {
+  const n = borderNote(cand('B', { lgbm: 97, xgb: 96, cat: 91 }));
+  assert.equal(n.warn, false);
+  assert.equal(n.laggard, 'cat');
+  assert.equal(n.badge, '際どい・最下位 CatBoost');
+  assert.ok(n.text.startsWith('CatBoost が一番低い（91.0）'));
+  assert.ok(n.text.includes(`（${BORDER_STATS.two95.other.n}件）`));
+  assert.ok(!/NaN|undefined|null/.test(n.text));
+});
+
+test('borderNote: 95以上が1つ以下の形は、LightGBM が一番低くても warn にしない（実験70 で差が無い）', () => {
+  const n = borderNote(cand('C', { lgbm: 86, xgb: 92, cat: 97 }));
+  assert.equal(n.shape, 'min85');
+  assert.equal(n.laggard, 'lgbm');
+  assert.equal(n.warn, false);
+  assert.equal(n.badge, '際どい・最下位 LightGBM');
+  assert.ok(n.text.includes('95以上が1つ以下で最小 85〜95 の形は過去 +1.1%（823件）'));
+  assert.ok(n.text.includes('どのモデルが一番低いかで差は無い'));
+  assert.ok(n.text.includes(`（LightGBM +1.2%・${BORDER_STATS.min.lgbm.n}件 / `
+                            + `XGBoost・CatBoost +1.1%・${BORDER_STATS.min.other.n}件）`));
+  assert.ok(!/NaN|undefined|null|測っていない/.test(n.text));
+  assert.equal(borderNote(cand('D', { lgbm: 96, xgb: 97, cat: 98 })), null);
+  assert.equal(borderNote(cand('E', { lgbm: 50, xgb: 60, cat: 70 })), null);
+});
+
+test('BORDER_STATS: 実験70 の数字（件数の合計が形の件数と合う）', () => {
+  const t = BORDER_STATS;
+  assert.equal(t.two95.lgbm.n + t.two95.other.n, 373 + 95 + 97);     // 2つ95以上の3つの形
+  assert.equal(t.min.lgbm.n + t.min.other.n, t.min.all.n);
+  assert.equal(t.min.all.n, 271 + 552);                                // 最小 90〜95 と 85〜90
+  assert.equal(t.line.n, 616);
+});

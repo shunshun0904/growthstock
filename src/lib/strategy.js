@@ -130,6 +130,101 @@ export function laggard(candidate) {
 }
 
 /**
+ * 運用者の線と「際どい」範囲（運用者の決定 2026-10-10）。
+ *
+ * 運用者は「3モデル（lgbm・xgb・cat）がすべて 95以上」を買いの目安にしている。上の戦略パネルの線
+ * （STRATEGY.agreePct = 90）とは別。その線の下で「際どい」のは次の全部:
+ *   - 2モデルが 95以上で、残り1つが 95未満
+ *   - 3モデルの最小が 85〜95
+ * 例: xgb 96・cat 98・lgbm 85。
+ */
+export const BORDER = { line: 95, lo: 85 };
+
+/**
+ * 際どい候補の過去の成績（実験70。本番の239列の OOF 2021-11〜2026-09、docs/PLAYBOOK.md「実験70」）。
+ * 物差しは +10% の指値（20営業日以内に届けば +10%、届かなければ持ち切り）の平均。
+ * 形は「2つ95以上（two95）」と「95以上は1つ以下・最小 85〜95（min）」、それぞれ一番低いモデルが
+ * lgbm か、xgb / cat か。
+ *   two95: lgbm が一番低い 145件は約 0.0%、xgb / cat が一番低い 420件は +1.83%（差 +1.8pt ± 0.9、z≈2.0）
+ *   min:   lgbm 269件 +1.19%、xgb / cat 554件 +1.06%（差 +0.13pt ± 0.60）→ この形では差が無い
+ * 「lgbm が一番低いと弱い」は 2つ95以上の形でだけ出た（実験36 は 153列のころの 85〜90 の帯で同じ向き、
+ * いまのモデルの 85〜90 の帯では出ない）。だから注意（warn）は two95 の形でだけ出す。
+ */
+export const BORDER_STATS = {
+  line: { n: 616, ret: 2.66 },                     // 3つとも95以上（線の上）
+  two95: { lgbm: { n: 145, ret: -0.01 }, other: { n: 420, ret: 1.83 } },
+  min: { all: { n: 823, ret: 1.10 }, lgbm: { n: 269, ret: 1.19 }, other: { n: 554, ret: 1.06 } },
+};
+
+/**
+ * 際どい候補の形。際どくなければ null。3モデルの百分位が1つでも欠けていれば null。
+ *   two95_hi / two95_mid / two95_lo  2つが95以上、残り1つが 90〜95 / 85〜90 / 85未満
+ *   min90 / min85                    95以上は1つ以下で、最小が 90〜95 / 85〜90
+ */
+export function borderShape(candidate, b = BORDER) {
+  const p = boostPcts(candidate);
+  if (!p) return null;
+  const vals = BOOST.map((a) => p[a]);
+  if (vals.some((v) => v === null)) return null;
+  const n95 = vals.filter((v) => v >= b.line).length;
+  const mn = Math.min(...vals);
+  if (n95 === 3) return null;
+  if (n95 === 2) return mn >= 90 ? 'two95_hi' : mn >= b.lo ? 'two95_mid' : 'two95_lo';
+  if (mn >= 90) return 'min90';
+  if (mn >= b.lo) return 'min85';
+  return null;
+}
+
+/** 収益の表示。小数1桁に丸めてから符号を付ける（−0.01 を「−0.0%」と出さない）。 */
+const fmtRet = (v) => {
+  const r = Math.round(v * 10) / 10;
+  return r === 0 ? '0.0%' : `${r > 0 ? '+' : '−'}${Math.abs(r).toFixed(1)}%`;
+};
+
+/** 「+1.8%（420件）」。数字が無ければ「（測っていない）」。 */
+const past = (x) => (Number.isFinite(x?.ret) && x?.n ? `${fmtRet(x.ret)}（${x.n}件）` : '（測っていない）');
+
+/**
+ * 際どい候補への注意。一番低いモデルと、その形の過去の成績を添える。際どくなければ null。
+ *   warn   2つが95以上で、一番低いのが LightGBM（過去ほぼ 0%）。ほかの形では出さない（差が無い）
+ *   badge  行に出す短い文言
+ *   text   詳しい文言（行の title と、開いたときの本文）
+ * 選定の規則（strategySignal）は変えない。注意だけ出す。
+ */
+export function borderNote(candidate, b = BORDER, st = BORDER_STATS) {
+  const shape = borderShape(candidate, b);
+  if (!shape) return null;
+  const lag = laggard(candidate);
+  const p = boostPcts(candidate);
+  const name = MODEL_JA[lag] || lag;
+  const head = `${name} が一番低い（${p[lag].toFixed(1)}）。`;
+  const lineTxt = `3つとも${b.line}以上は ${past(st.line)}`;
+  const src = '（実験70。+10% の指値で売り、届かなければ20営業日で手仕舞いしたときの平均）';
+  let warn = false;
+  let text;
+  if (shape.startsWith('two95')) {
+    warn = lag === 'lgbm';
+    text = warn
+      ? `${head}2つが${b.line}以上でも、LightGBM が一番低い形は過去ほぼ 0%`
+        + `（${fmtRet(st.two95.lgbm.ret)}・${st.two95.lgbm.n}件）。`
+        + `XGBoost / CatBoost が一番低いなら ${past(st.two95.other)}、${lineTxt}。`
+        + `logit が90以上かは手がかりにならない${src}`
+      : `${head}2つが${b.line}以上で XGBoost / CatBoost が一番低い形は過去 ${past(st.two95.other)}。`
+        + `LightGBM が一番低い形は ${past(st.two95.lgbm)}、${lineTxt}${src}`;
+  } else {
+    text = `${head}${b.line}以上が1つ以下で最小 ${b.lo}〜${b.line} の形は過去 ${past(st.min.all)}。`
+      + 'この形では、どのモデルが一番低いかで差は無い'
+      + `（LightGBM ${fmtRet(st.min.lgbm.ret)}・${st.min.lgbm.n}件 / `
+      + `XGBoost・CatBoost ${fmtRet(st.min.other.ret)}・${st.min.other.n}件）。${lineTxt}${src}`;
+  }
+  return {
+    shape, laggard: lag, laggardPct: p[lag], warn,
+    badge: warn ? `際どい・${name} が最下位` : `際どい・最下位 ${name}`,
+    text,
+  };
+}
+
+/**
  * 基準に届かなかったが惜しい候補（3モデルの最小が 85〜90）。
  *
  * 画面に出すのは「なぜ買わないか」を毎日考え直さないため。実測（実験36、
@@ -141,6 +236,10 @@ export function laggard(candidate) {
  *
  * つまり「1つのモデルだけが5〜10pt下」の形は、空き枠（0%）と変わらない。
  * とくに最下位が LightGBM のときが弱い（104件 +0.39%）。
+ * ※ 上は 153列のころの実験36。いまの239列のモデル（実験70、2026-10-10）では、85〜90 の帯で最下位が
+ *   LightGBM の形は弱くない（LightGBM が最下位 202件 +1.3%、XGBoost / CatBoost が最下位 445件 +0.7%。
+ *   形ごとの表の値から合成）。弱いのは「2つが95以上で LightGBM が最下位」の形（borderNote）。
+ *   幅で分けた数字（+0.30% / +2.70%）は、いまのモデルでは測り直していない。
  */
 export function nearMisses(rows, s = STRATEGY) {
   const list = Array.isArray(rows) ? rows : [];

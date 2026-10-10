@@ -580,5 +580,9 @@ input[type='range']::-moz-range-thumb {
   .strat-near-row { grid-template-columns: 1fr auto; }
   .strat-near-row > .sub { grid-column: 1 / -1; }
 }
+/* 際どい候補の印（運用者の線「3モデルとも95以上」の下。strategy.js の borderNote）。
+   一番低いのが LightGBM なら赤、それ以外は黄。惜しい候補の欄では名前の横に置く */
+.strat-near-name .pred-border { margin-left: 6px; font-weight: 400; vertical-align: middle; }
+.pred-border-note { margin: 0 0 var(--s4); }
 .strat-fund-down { color: var(--red); }
 .strat-fund-up { color: var(--green); }
