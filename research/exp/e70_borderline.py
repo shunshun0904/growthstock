@@ -14,6 +14,7 @@
    形（SHAPES）: 3つとも95以上 / 2つが95以上で残り1つが 90〜95・85〜90・85未満 /
                  95以上は1つ以下で最小が 90〜95・85〜90 / それ以外
    2つが95以上の形は、残り1つ（最下位）がどのモデルか、logit が90以上か、でも分ける
+   1d（2026-10-10 追記。画面の注意の数字のため）: 際どい候補の全部の形を最下位のモデルで分ける（実験36 と同じ仮説）
 2. 際どい候補（上の和集合）を日証金で分ける（日証金は2023年10月からなので、それ以降の行だけ）
    向きは実験66 で決めたもの（実験69 と同じ）:
      融資残高の20日変化（jsf_loan_chg20_v）が上位10% → 良い側
@@ -309,6 +310,35 @@ def main(argv=None) -> int:
             s = summarize(two[m])
             res["two95"][nm] = s
             print(line(nm, s))
+
+    # 1d. 際どい候補の全部の形を、最下位のモデルで分ける（2026-10-10 追記。画面の注意に出す数字のため。
+    #     仮説は実験36 と同じ「最下位が LightGBM のときが弱い」。分けた結果は全部出す）
+    print("\n=== 1d. 際どい候補の形 × 最下位のモデル（全日）===")
+    print(HEAD)
+    res["border_laggard"] = {}
+    for k, nm in SHAPES:
+        if k not in BORDER:
+            continue
+        g = d[d["shape"] == k]
+        for a in TREES:
+            s = summarize(g[g["laggard"] == a])
+            res["border_laggard"][f"{k}_{a}"] = s
+            print(line(f"{nm}・最下位 {a}", s))
+    print()
+    bd = d[d["shape"].isin(BORDER)]
+    for nm, m in (("際どい候補・最下位 lgbm", bd["laggard"] == "lgbm"),
+                  ("際どい候補・最下位 xgb か cat", bd["laggard"] != "lgbm"),
+                  ("95以上は1つ以下・最下位 lgbm", bd["shape"].isin(("min90", "min85")) & (bd["laggard"] == "lgbm")),
+                  ("95以上は1つ以下・最下位 xgb か cat",
+                   bd["shape"].isin(("min90", "min85")) & (bd["laggard"] != "lgbm"))):
+        s = summarize(bd[m])
+        res["border_laggard"][nm] = s
+        print(line(nm, s))
+    for nm, (a, b) in (("際どい候補", ("際どい候補・最下位 lgbm", "際どい候補・最下位 xgb か cat")),
+                       ("95以上は1つ以下", ("95以上は1つ以下・最下位 lgbm", "95以上は1つ以下・最下位 xgb か cat"))):
+        dd = diff(res["border_laggard"][a], res["border_laggard"][b])
+        res["border_laggard"][f"{nm}_diff"] = dd
+        print(f"  {nm}: 最下位 lgbm − それ以外（+10%指値）{dd['d']:+.2f}pt ± {dd['se']:.2f}（z {dd['z']:+.2f}）")
 
     # 1c. 年ごとの件数（運用で際どい候補がどれくらい出るか）
     print("\n=== 1c. 年ごとの件数（行 / 日）===")

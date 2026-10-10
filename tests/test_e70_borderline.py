@@ -9,9 +9,13 @@
 
   python3 tests/test_e70_borderline.py
 """
+import json
 import os
+import shutil
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 import numpy as np
 import pandas as pd
@@ -120,6 +124,49 @@ class TestStats(unittest.TestCase):
         self.assertAlmostEqual(dd["se"], np.sqrt(2) * s["tp10_se"])
         self.assertTrue(np.isnan(E.diff(s, {"n": 0})["d"]))
         self.assertEqual(E.summarize(g.iloc[:0]), {"n": 0})
+
+
+class TestEndToEnd(unittest.TestCase):
+    """作った表で main を最後まで回す（全部の節が落ちずに出て、記録が書けること）。"""
+
+    def test_main_runs(self):
+        rng = np.random.default_rng(1)
+        n = 6000
+        dates = pd.bdate_range("2023-01-04", "2026-08-31")
+        d = pd.DataFrame({"Code": [f"{i:04d}0" for i in rng.integers(0, 800, n)],
+                          "Date": rng.choice(dates, n)})
+        hp = rng.uniform(60, 100, (n, 4))
+        for i, a in enumerate(("lgbm", "xgb", "cat", "logit")):
+            d[f"hp_{a}"] = np.round(hp[:, i], 1)
+        d["r"] = rng.normal(1, 10, n)
+        d["hit10"] = rng.random(n) < 0.3
+        d["tp10"] = np.where(d["hit10"], 10.0, d["r"])
+        d["label"] = (d["r"] > 5).astype(int)
+        d["n_break"] = rng.integers(1, 40, n)
+        d["entry"] = 100.0
+        d["jsf_ratio"] = np.where(d["Date"] >= pd.Timestamp("2023-10-01"), 1.0, np.nan)
+        d["jsf_loan_chg20_v"] = rng.normal(0, 0.2, n)
+        d["jsf_fee_days20"] = np.where(rng.random(n) < 0.25, rng.integers(1, 21, n), 0).astype(float)
+        tmp = tempfile.mkdtemp()
+        try:
+            out = os.path.join(tmp, "e70.json")
+            with mock.patch.object(E, "load", return_value=(d.sort_values("Date").reset_index(drop=True), True)), \
+                    mock.patch.object(E, "OUT", out), mock.patch("builtins.print"):
+                self.assertEqual(E.main([]), 0)
+            with open(out, encoding="utf-8") as fh:
+                res = json.load(fh)
+            self.assertEqual(res["rows"], n)
+            self.assertEqual(set(res["shape_all"]), {k for k, _ in E.SHAPES} | {"border"})
+            self.assertIn("two95_mid_lgbm", res["two95"])
+            self.assertIn("min85_lgbm", res["border_laggard"])
+            self.assertIn("際どい候補_diff", res["border_laggard"])
+            self.assertIn("good", res["jsf"])
+            total = sum(v["n"] for k, v in res["shape_all"].items() if k != "border")
+            self.assertEqual(total, n)                                    # 形は漏れなく重ならない
+            lag = sum(res["border_laggard"][f"{k}_{a}"]["n"] for k in E.BORDER for a in E.TREES)
+            self.assertEqual(lag, res["shape_all"]["border"]["n"])
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 if __name__ == "__main__":
