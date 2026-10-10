@@ -17,6 +17,7 @@ const FIXTURE = path.join(ROOT, 'tests', 'fixtures', 'synthetic-stocks.json');
 // 予測タブも合成データで描く。実データを使うと、その日の候補数や
 // モデルの有無で結果が変わり、失敗したときに再現できない
 const PRED_FIXTURE = path.join(ROOT, 'tests', 'fixtures', 'synthetic-predictions.json');
+const FILINGS_FIXTURE = path.join(ROOT, 'tests', 'fixtures', 'synthetic-filings.json');
 const SHOTS = path.join(ROOT, 'docs');
 fs.mkdirSync(SHOTS, { recursive: true });
 
@@ -32,6 +33,7 @@ const server = http.createServer((req, res) => {
   const fixtures = {
     '/data/stocks.json': FIXTURE,
     '/data/predictions.json': PRED_FIXTURE,
+    '/data/filings.json': FILINGS_FIXTURE,
   };
   const file = fixtures[rel] || path.join(DIST, rel);
   if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
@@ -293,6 +295,46 @@ const afterAdd = await page.textContent('body');
 check(afterAdd.includes('手入力テスト'), '手入力銘柄が追加される');
 check(await page.locator('.stock-card').count() === 4, '銘柄数が4に増える');
 check(afterAdd.includes('手入力'), '手入力バッジで J-Quants 由来と区別される');
+
+console.log('\n== 決算サンキー View ==');
+await page.getByRole('tab', { name: '決算サンキー' }).click();
+await page.waitForSelector('.filings', { timeout: 10000 });
+await page.waitForSelector('.filings .sankey svg', { timeout: 10000 });
+const fil = await page.textContent('.filings');
+check(fil.includes('有価証券報告書'), '書類の種類（有価証券報告書）が出る');
+check(fil.includes('売上原価') && fil.includes('販管費'), '売上原価と販管費が分かれて出る');
+check(fil.includes('営業外収益') && fil.includes('特別損失'), '営業外・特別損益の段が出る');
+check(fil.includes('前期比 +11.1%'), '売上高の前期比が出る');
+check(fil.includes('EDINET') && fil.includes('PDL1.0'), '出典（EDINET・PDL1.0）が出る');
+check(fil.includes('直近の決算短信'), '四半期（決算短信）の欄も出る');
+check(!fil.includes('NaN') && !fil.includes('undefined'), '決算サンキーに NaN / undefined が出ていない');
+const filSvgs = await page.locator('.filings .sankey svg').count();
+check(filSvgs >= 1, `有報のサンキー図が描かれる (svg ${filSvgs}本)`);
+// 同じ列のノードが重ならない（費用と流入が同じ列に来る段がある）
+const filOverlaps = await page.evaluate(() => {
+  const byCol = new Map();
+  const svg = document.querySelector('.filings .sankey svg');
+  for (const r of svg.querySelectorAll('rect')) {
+    const x = +r.getAttribute('x');
+    if (!Number.isFinite(x)) continue;
+    const y = +r.getAttribute('y');
+    const h = +r.getAttribute('height');
+    if (!byCol.has(x)) byCol.set(x, []);
+    byCol.get(x).push([y, y + h]);
+  }
+  let bad = 0;
+  for (const spans of byCol.values()) {
+    spans.sort((a, b) => a[0] - b[0]);
+    for (let i = 1; i < spans.length; i++) if (spans[i][0] < spans[i - 1][1] - 0.5) bad++;
+  }
+  return bad;
+});
+check(filOverlaps === 0, `有報の図で同じ列のノードが重ならない (重なり ${filOverlaps}件)`);
+await page.screenshot({ path: path.join(SHOTS, 'screenshot-filings.png') });
+// 有報の無い銘柄を選ぶと「まだありません」
+await page.selectOption('#filings-stock', { index: 1 });
+await page.waitForTimeout(250);
+check((await page.textContent('.filings')).includes('まだありません'), '有報の無い銘柄は「まだありません」と出る');
 
 console.log('\n== コンソールエラー ==');
 check(consoleErrors.length === 0, `JS エラーなし (${consoleErrors.length}件)`);

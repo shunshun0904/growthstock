@@ -16,6 +16,7 @@
 | モデルの素性 | `research/model/meta.json`（9KB） | git | 日曜の朝 | 過去のモデルが「どういうものだったか」を追えるようにする |
 | 生データ | 日次バー・財務・信用残ほか | GitHub Release（`data-raw`） | 平日 18:40 JST に Routine が起動（10/7 までは 16:10） | 全期間の取得に2.5時間かかるため、差分だけ取って書き戻す |
 | 有報の年次財務 | `edinet_fin.parquet` / `edinet_companies.parquet` / `edinet_manifest.json` | GitHub Release（`data-raw`） | 毎日 10:10 JST に Routine が起動 | EDINET DB は 100/日・900/月の枠しか無いので、毎日 85社ずつ差分で貯める（`docs/DATA_EDINETDB.md`）。**まだ研究用で、本番の特徴量には入っていない** |
+| 有報・半期報告書の損益（画面） | `public/data/filings.json`（git）/ 索引・控え `edinet_filings_index.json` / `edinet_filings_cache.json`（Release `data-raw`） | git / Release | 毎晩の予測の後に `Fetch Filings` が workflow_run で続けて走る | 金融庁 EDINET の公式 API から候補銘柄の最新の有報・半期報告書を取り、売上原価・販管費まで分けた損益を「決算サンキー」のタブに出す（`docs/DATA_EDINET_API.md`）。鍵は Secrets `EDINET_FSA_API_KEY` |
 
 ## 動く順番
 

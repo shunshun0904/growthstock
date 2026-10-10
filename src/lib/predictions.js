@@ -42,6 +42,21 @@ export async function loadPredictions() {
   return data;
 }
 
+const FILINGS_URL = () => `${base()}data/filings.json?v=${BUILD}`;
+
+/**
+ * 有報・半期報告書の損益（public/data/filings.json。Fetch Filings が EDINET から作る）。
+ * 無ければ null（取り込みがまだ）。形が違えば空の docs。
+ */
+export async function loadFilings() {
+  try {
+    const d = await getJson(FILINGS_URL());
+    return d && typeof d.docs === 'object' && d.docs ? d : { docs: {} };
+  } catch {
+    return null;
+  }
+}
+
 /** 追跡ファイルは初回実行時にはまだ薄い。読めなくても空で返す。 */
 export async function loadHistory() {
   try {

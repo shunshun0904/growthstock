@@ -586,3 +586,13 @@ input[type='range']::-moz-range-thumb {
 .pred-border-note { margin: 0 0 var(--s4); }
 .strat-fund-down { color: var(--red); }
 .strat-fund-up { color: var(--green); }
+
+/* ------------------------------------------------------- 決算サンキー（有報・半期報告書） */
+.filings { display: flex; flex-direction: column; gap: var(--s4); }
+.filings-pick { display: flex; align-items: center; flex-wrap: wrap; gap: var(--s3); }
+.filings-select {
+  font: inherit; font-size: 13px; color: var(--text); background: var(--bg-raised);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 6px 10px; max-width: 100%;
+}
+.filings-select:focus { outline: 2px solid var(--blue); outline-offset: 1px; }
+.filings-meta .badge { margin-right: 2px; }

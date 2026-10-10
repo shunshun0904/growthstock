@@ -1,0 +1,62 @@
+{
+ "generatedAt": "2026-10-10T10:00:00Z",
+ "source": {
+  "name": "EDINET（金融庁）",
+  "url": "https://disclosure2dl.edinet-fsa.go.jp/",
+  "license": "公共データ利用規約（PDL1.0）",
+  "credit": "EDINET閲覧（提出）サイトの書類をもとに作成"
+ },
+ "docTypes": {
+  "120": "有価証券報告書",
+  "160": "半期報告書"
+ },
+ "docs": {
+  "93240": {
+   "docID": "S100TEST",
+   "docType": "120",
+   "edinetCode": "E00000",
+   "secCode": "93240",
+   "submitDate": "2026-06-25",
+   "periodStart": "2025-04-01",
+   "periodEnd": "2026-03-31",
+   "periodType": "FY",
+   "standard": "Japan GAAP",
+   "consolidated": true,
+   "context": "CurrentYearDuration",
+   "csv": "jpcrp030000-asr-001_E00000-000_2026-03-31_01_2026-06-25.csv",
+   "items": {
+    "NetSales": 100000000000,
+    "CostOfSales": 60000000000,
+    "GrossProfit": 40000000000,
+    "SellingGeneralAndAdministrativeExpenses": 25000000000,
+    "OperatingIncome": 15000000000,
+    "NonOperatingIncome": 2000000000,
+    "NonOperatingExpenses": 1000000000,
+    "OrdinaryIncome": 16000000000,
+    "ExtraordinaryIncome": 500000000,
+    "ExtraordinaryLoss": 1500000000,
+    "IncomeBeforeIncomeTaxes": 15000000000,
+    "IncomeTaxes": 4500000000,
+    "ProfitLoss": 10500000000,
+    "ProfitLossAttributableToNonControllingInterests": 500000000,
+    "ProfitLossAttributableToOwnersOfParent": 10000000000
+   },
+   "labels": {
+    "NetSales": "売上高"
+   },
+   "priorItems": {
+    "NetSales": 90000000000
+   },
+   "checks": {
+    "GrossProfit": true,
+    "OperatingIncome": true,
+    "OrdinaryIncome": true,
+    "IncomeBeforeIncomeTaxes": true,
+    "ProfitLoss": true
+   },
+   "fetchedAt": "2026-10-10T10:00:00Z",
+   "name": "安田倉庫"
+  }
+ },
+ "_fixture": "tests/fixtures/synthetic-filings.json（合成データ。値は作りもの）"
+}

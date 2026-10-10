@@ -1,0 +1,114 @@
+name: Fetch Filings
+
+# 候補銘柄の最新の有価証券報告書・半期報告書を 金融庁 EDINET の公式 API から取り、損益の明細を
+# 画面用の public/data/filings.json にする（決算サンキーのタブ）。
+#
+# 毎晩の予測（Predict Breakouts）が終わったら workflow_run で続けて走る。予測が休場日で飛んだ日も
+# 走る（索引を今日まで埋めるだけ）。手でも起動できる。
+#
+# 書類一覧は日付ごとにしか引けないので、日付ごとの索引（edinet_filings_index.json）を Release
+# data-raw に貯め、毎日その日ぶんだけ足す。初回は 400 日ぶんを遡る（約 290 リクエスト・8分）。
+# 書類ごとの控え（edinet_filings_cache.json）も Release に置き、同じ書類は二度と取らない。
+#
+# 鍵は Secrets の EDINET_FSA_API_KEY（運用者が EDINET で発行）。ログには出さない。
+# EDINET の情報は公共データ利用規約（PDL1.0）で、出典を書けば加工して公開してよい。
+# ログに出すのは件数だけ（会社名の一覧・財務の値は出さない）。
+on:
+  workflow_run:
+    workflows: ['Predict Breakouts']
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      max_requests:
+        description: 'この実行で使ってよいリクエスト数'
+        required: false
+        default: '400'
+      codes:
+        description: '追加で取る J-Quants コード（5桁・空白区切り。省略可）'
+        required: false
+        default: ''
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: write
+
+# 取り込み（Update Data Store）と同じ concurrency グループにして、Release への書き戻しが重ならないようにする
+concurrency:
+  group: update-data-store
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: data-raw
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_branch || github.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # 標準ライブラリだけで動く。pip install は要らない
+
+      - name: Download stored index and cache
+        id: download
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p research/_data
+          # 初回は Release に無い（合うアセットが無ければ scripts/gh_release_download.sh は exit 0）。
+          # 一部だけ取れた状態では止める（索引・控えを欠けたまま上書きしないため）
+          bash scripts/gh_release_download.sh "$RELEASE_TAG" research/_data 'edinet_filings_*'
+          ls -lh research/_data/edinet_filings_* 2>/dev/null || echo "（索引・控えはまだ無い）"
+
+      - name: Fetch
+        env:
+          EDINET_FSA_API_KEY: ${{ secrets.EDINET_FSA_API_KEY }}
+        run: |
+          read -ra CODES <<< "${{ inputs.codes }}"
+          python3 -u research/edinet_filings.py \
+            --max-requests "${{ inputs.max_requests || '400' }}" \
+            ${CODES:+--codes "${CODES[@]}"} 2>&1 | tee filings.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Upload index and cache to release
+        if: always() && steps.download.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          shopt -s nullglob
+          files=(research/_data/edinet_filings_index.json research/_data/edinet_filings_cache.json)
+          files=("${files[@]}")
+          ok=()
+          for f in "${files[@]}"; do [ -f "$f" ] && ok+=("$f"); done
+          if [ ${#ok[@]} -eq 0 ]; then echo "アップロードなし"; exit 0; fi
+          bash scripts/gh_release_upload.sh "$RELEASE_TAG" "${ok[@]}"
+
+      - name: Commit filings.json
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A public/data/filings.json
+          if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
+          git commit -m "chore(data): 有報・半期報告書の損益を更新 ($(date -u '+%Y-%m-%d %H:%M UTC'))"
+          for i in 1 2 3 4; do
+            if git push; then exit 0; fi
+            sleep $((2 ** i)); git pull --rebase
+          done
+          exit 1
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo '## 有報・半期報告書の取り込み（EDINET）'
+            echo '```'
+            grep -E '^\[' filings.log 2>/dev/null || tail -20 filings.log 2>/dev/null || echo '(出力なし)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

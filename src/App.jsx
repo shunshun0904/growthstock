@@ -3,6 +3,7 @@ import CompareView from './views/CompareView.jsx';
 import TimeMachineView from './views/TimeMachineView.jsx';
 import SimulatorView from './views/SimulatorView.jsx';
 import PredictionView from './views/PredictionView.jsx';
+import FilingsView from './views/FilingsView.jsx';
 import AddStockModal from './components/AddStockModal.jsx';
 import { computeScores } from './lib/scoring.js';
 import { SERIES_COLORS, fmtDateTime } from './lib/format.js';
@@ -10,10 +11,11 @@ import {
   loadDataset, loadManualStocks, saveManualStocks, loadVisibility, saveVisibility,
   manualStockFromForm, mergeStocks, resetSavedState,
 } from './lib/store.js';
-import { loadPredictions, loadHistory } from './lib/predictions.js';
+import { loadPredictions, loadHistory, loadFilings } from './lib/predictions.js';
 
 const TABS = [
   { id: 'prediction', label: 'ブレイク予測' },
+  { id: 'filings', label: '決算サンキー' },
   { id: 'compare', label: '8軸オクタゴン比較' },
   { id: 'timemachine', label: 'タイムマシーン' },
   { id: 'simulator', label: 'What-If シミュレーター' },
@@ -34,6 +36,7 @@ export default function App() {
   const [pred, setPred] = useState(null);
   const [predError, setPredError] = useState(null);
   const [history, setHistory] = useState({ entries: [] });
+  const [filings, setFilings] = useState(null);
   const [tab, setTab] = useState('prediction');
   const [visibleIds, setVisibleIds] = useState(() => new Set());
   const [selectedId, setSelectedId] = useState(null);
@@ -55,6 +58,8 @@ export default function App() {
       .then((d) => { if (!cancelled) setPred(d); })
       .catch((e) => { if (!cancelled) setPredError(e.message); });
     loadHistory().then((h) => { if (!cancelled) setHistory(h); });
+    // 有報・半期報告書（EDINET）。無ければ null のまま（タブは「取り込み待ち」と出す）
+    loadFilings().then((f) => { if (!cancelled) setFilings(f); });
     return () => { cancelled = true; };
   }, []);
 
@@ -260,6 +265,10 @@ export default function App() {
           )
         )}
 
+        {tab === 'filings' && (
+          <FilingsView pred={pred} rows={rows} filings={filings} />
+        )}
+
         {!loading && rows.length > 0 && (
           <>
             {tab === 'compare' && (
@@ -281,6 +290,7 @@ export default function App() {
 
       <footer className="footer">
         データ提供: <a href="https://jpx-jquants.com/" target="_blank" rel="noreferrer">J-Quants API</a>（日本取引所グループ）
+        ／ 有価証券報告書・半期報告書: <a href="https://disclosure2dl.edinet-fsa.go.jp/" target="_blank" rel="noreferrer">EDINET</a>（金融庁）の書類をもとに作成
         ／ 本ツールは分析支援を目的としたものであり、投資判断・投資勧誘を行うものではありません。
       </footer>
 
