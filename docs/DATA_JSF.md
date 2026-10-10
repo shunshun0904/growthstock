@@ -145,6 +145,9 @@
 - **A/B（実験67、`research/exp/e67_jsf_ab.py`）: 採用しない。** ツリー系3モデルとも、列を足すことそのものの差は
   PR-AUC の窓で ±2.2 SE 以内。lgbm の ROC-AUC だけ少し上がる（+0.002〜0.006）が、上位の質は変わらない。
   記録は `docs/MODEL_ADOPTION_RULES.md` §28
+- **単独のモデル（実験72、`research/exp/e72_jsf_edinet_only.py`、2026-10-10）: 日証金の17列だけで組んだ LightGBM は
+  ほぼ当てずっぽう。** 本番と同じ OOF で PR-AUC は正例率の 1.03倍・ROC-AUC 0.52（本番の239列は 1.55倍・0.64）。
+  EDINET DB の 516列と合わせても 1.07倍。上位10% の超過リターンは 0 か負。記録は `docs/MODEL_ADOPTION_RULES.md` §31
 - **前向きの確かめ直し（2026-10-10 に運用者の了承。結果を見てから変えない）**: 台本は
   `research/exp/e69_forward_check.py --source jsf`（実験69）。決めごとは台本の `HYPOTHESES` と
   `tests/test_e69_forward_check.py` にも固定してある
