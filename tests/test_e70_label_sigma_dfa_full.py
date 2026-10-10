@@ -145,6 +145,16 @@ class TestPrecision(unittest.TestCase):
         self.assertEqual(int(s.loc[0, "won"]), 7)
         self.assertEqual(int(s.loc[0, "folds"]), 11)
 
+    def test_summarize_without_base_label_column(self):
+        t = pd.DataFrame({"arm": ["N", "N"], "rule": ["r", "r"], "n": [10, 30], "hit_own": [0.2, 0.4],
+                          "ret20": [1.0, 1.0], "win": [0.5, 0.5], "big_up": [0.1, 0.1], "big_down": [0.1, 0.1],
+                          "won": [1, 2], "folds": [3, 3]})
+        s = E70.summarize_precision(t)  # hit_l0 が無くても落ちない（実験72 が使う）
+        self.assertEqual(len(s), 1)
+        self.assertNotIn("hit_l0", s.columns)
+        self.assertAlmostEqual(float(s.loc[0, "hit_own"]), 0.35)
+        self.assertEqual(int(s.loc[0, "n"]), 40)
+
     def test_load_oof_averages_scores_and_requires_files(self):
         with tempfile.TemporaryDirectory() as d, mock.patch.object(E70, "OOF_DIR", d):
             with self.assertRaises(FileNotFoundError):

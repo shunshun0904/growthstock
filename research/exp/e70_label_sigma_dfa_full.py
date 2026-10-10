@@ -178,6 +178,8 @@ def summarize_precision(t: pd.DataFrame) -> pd.DataFrame:
         tot = w.sum()
         out = {"n": int(tot), "shifts": int(len(g))}
         for k in ("hit_own", "hit_l0", "ret20", "win", "big_up", "big_down"):
+            if k not in g.columns:
+                continue
             v = g[k].to_numpy(dtype=float)
             ok = np.isfinite(v) & (w > 0)
             out[k] = float((v[ok] * w[ok]).sum() / w[ok].sum()) if ok.any() else np.nan
