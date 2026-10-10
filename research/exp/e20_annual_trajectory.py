@@ -160,6 +160,28 @@ def chance_hits(res: pd.DataFrame, z: float = 2.0) -> tuple:
     return len(res) * p, p, n_win
 
 
+def window_stats(x: np.ndarray, y: np.ndarray, r: np.ndarray, d: np.ndarray, ok: np.ndarray,
+                 windows: List[tuple]) -> List[dict]:
+    """
+    窓ごとの {start, end, n, auc, edge}。edge は「特徴量が上位10% の行の r の平均 − 窓全体の平均」（pt）。
+    行が100未満か正例・負例の片方しか無い窓は飛ばす。上位が5行未満なら edge は NaN。
+    screen と前向きの確かめ直し（実験69）が同じ物差しを使うために切り出した。
+    """
+    from sklearn.metrics import roc_auc_score
+
+    out = []
+    for (s, e) in windows:
+        w = ok & (d >= s) & (d <= e)
+        if w.sum() < 100 or len(np.unique(y[w])) < 2:
+            continue
+        xw, yw, rw = x[w], y[w], r[w]
+        thr = np.nanpercentile(xw, TOP_PCT)
+        top = xw >= thr
+        out.append({"start": s, "end": e, "n": int(w.sum()), "auc": roc_auc_score(yw, xw),
+                    "edge": (rw[top].mean() - rw.mean()) * 100 if top.sum() >= 5 else np.nan})
+    return out
+
+
 def screen(frame: pd.DataFrame, feats: List[str], windows: List[tuple]) -> pd.DataFrame:
     from sklearn.metrics import roc_auc_score
 
@@ -175,18 +197,9 @@ def screen(frame: pd.DataFrame, feats: List[str], windows: List[tuple]) -> pd.Da
             rows.append({"feature": f, "coverage": cov, "n": int(ok.sum())})
             continue
         pooled = roc_auc_score(y[ok], x[ok])
-        aucs, edges = [], []
-        for (s, e) in windows:
-            w = ok & (d >= s) & (d <= e)
-            if w.sum() < 100 or len(np.unique(y[w])) < 2:
-                continue
-            xw, yw, rw = x[w], y[w], r[w]
-            aucs.append(roc_auc_score(yw, xw))
-            thr = np.nanpercentile(xw, TOP_PCT)
-            top = xw >= thr
-            if top.sum() >= 5:
-                edges.append((rw[top].mean() - rw.mean()) * 100)
-        aucs, edges = np.array(aucs), np.array(edges)
+        ws = window_stats(x, y, r, d, ok, windows)
+        aucs = np.array([w["auc"] for w in ws])
+        edges = np.array([w["edge"] for w in ws if np.isfinite(w["edge"])])
         se_e = edges.std(ddof=1) / np.sqrt(len(edges)) if len(edges) > 1 else np.nan
         rows.append({
             "feature": f, "coverage": cov, "n": int(ok.sum()),

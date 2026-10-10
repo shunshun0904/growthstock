@@ -6,6 +6,7 @@ research/edinet_fetch.py の単体テスト。ネットワークには触れな�
   - 利用枠を守ること（予算・応答ヘッダの残数・429 で止まる）
   - 取り直さないこと（200 と 404 は記録して二度と叩かない。失敗だけ再試行）
   - 列が会社ごとに違っても壊れずに保存できること
+  - 初めて取れた日時（first_ok_at）が取り直しで消えないこと（実験69 が「10/10 にまだ無かった銘柄」を選ぶ）
 """
 import datetime as dt
 import json
@@ -251,6 +252,79 @@ class TestFetchOrder(unittest.TestCase):
             self.assertEqual(int(m["companies"]["E1"]["last_fy"]), 2026)
         finally:
             shutil.rmtree(d)
+
+
+class TestFirstOk(Base):
+    """first_ok_at: 実験69 の EDINET の確かめ直しは、2026-10-10 にまだ無かった銘柄だけで回す。"""
+
+    def test_backfill_only_legacy_ok_records(self):
+        comp = {"E1": {"status": "ok", "at": "2026-09-21T06:00:00+00:00", "jq": "10000"},
+                "E2": {"status": "ok", "at": "2026-10-10T01:12:30+00:00", "jq": "20000"},
+                "E3": {"status": "no_data", "at": "2026-10-01T00:00:00+00:00", "jq": "30000"},
+                "E4": {"status": "ok", "at": "2026-11-01T01:00:00+00:00", "jq": "40000"},
+                "E5": {"status": "ok", "at": "2026-09-30T00:00:00", "jq": "50000"}}     # tz 無しは UTC
+        self.assertEqual(E.backfill_first_ok(comp), 3)
+        self.assertEqual(comp["E1"]["first_ok_at"], comp["E1"]["at"])
+        self.assertEqual(comp["E2"]["first_ok_at"], comp["E2"]["at"])
+        self.assertEqual(comp["E5"]["first_ok_at"], comp["E5"]["at"])
+        self.assertNotIn("first_ok_at", comp["E3"])                # 取れていない
+        self.assertNotIn("first_ok_at", comp["E4"])                # 足した日より後の at は取り直しかもしれない
+        self.assertEqual(E.backfill_first_ok(comp), 0)             # 2回目は何もしない
+
+    def test_load_manifest_backfills_and_roundtrips(self):
+        with open(os.path.join(self.dir, E.MANIFEST), "w", encoding="utf-8") as fh:
+            json.dump({"companies": {"E1": {"status": "ok", "at": "2026-09-21T06:00:00+00:00",
+                                            "jq": "72030"}}}, fh)
+        m = E.load_manifest(self.dir)
+        self.assertEqual(m["companies"]["E1"]["first_ok_at"], "2026-09-21T06:00:00+00:00")
+        E.save_manifest(self.dir, m)
+        self.assertEqual(E.load_manifest(self.dir)["companies"]["E1"]["first_ok_at"],
+                         "2026-09-21T06:00:00+00:00")
+
+    def test_first_ok_survives_refresh_and_failures(self):
+        hdr = {"x-ratelimit-remaining": "50"}
+        fp = FakeProbe({"/companies/E1/financials": [(200, {"data": fin_rows("E1")}, hdr)]})
+        m = E.load_manifest(self.dir)
+        E.fetch_financials(fp, self.dir, m, self.mapping, ["72030"], 5, NOW, 0)
+        first = m["companies"]["E1"]["first_ok_at"]
+        self.assertEqual(first, NOW.isoformat())
+        # 61日後の取り直しが失敗 → さらに後で取れる。最初の日時のまま
+        later = NOW + dt.timedelta(days=61)
+        bad = FakeProbe({"/companies/E1/financials": [(500, "boom", hdr)]})
+        E.fetch_financials(bad, self.dir, m, self.mapping, ["72030"], 5, later, 0)
+        self.assertEqual(m["companies"]["E1"]["status"], "error")
+        self.assertEqual(m["companies"]["E1"]["first_ok_at"], first)
+        good = FakeProbe({"/companies/E1/financials": [(200, {"data": fin_rows("E1")}, hdr)]})
+        E.fetch_financials(good, self.dir, m, self.mapping, ["72030"], 5, later, 0)
+        self.assertEqual(m["companies"]["E1"]["status"], "ok")
+        self.assertEqual(m["companies"]["E1"]["at"], later.isoformat())
+        self.assertEqual(m["companies"]["E1"]["first_ok_at"], first)
+
+    def test_never_ok_has_no_first_ok(self):
+        fp = FakeProbe({"/companies/E3/financials": [(500, "boom", {})]})       # E2 は 404
+        m = E.load_manifest(self.dir)
+        E.fetch_financials(fp, self.dir, m, self.mapping, ["154A0", "99840"], 5, NOW, 0)
+        self.assertNotIn("first_ok_at", m["companies"]["E2"])
+        self.assertNotIn("first_ok_at", m["companies"]["E3"])
+        # データ無しだった会社が後で取れたら、その日が初めて
+        later = NOW + dt.timedelta(days=61)
+        fp2 = FakeProbe({"/companies/E2/financials": [(200, {"data": fin_rows("E2")}, {})]})
+        E.fetch_financials(fp2, self.dir, m, self.mapping, ["154A0"], 5, later, 0)
+        self.assertEqual(m["companies"]["E2"]["first_ok_at"], later.isoformat())
+
+    def test_split_by_first_ok(self):
+        comp = {"E1": {"status": "error", "jq": "10000", "first_ok_at": "2026-09-21T06:00:00+00:00"},
+                "E2": {"status": "ok", "jq": "20000", "first_ok_at": "2026-10-10T01:12:30+00:00"},
+                "E3": {"status": "ok", "jq": "30000", "first_ok_at": "2026-11-01T01:00:00+00:00"},
+                "E4": {"status": "ok", "jq": "20000", "first_ok_at": "2026-11-01T01:00:00+00:00"},
+                "E5": {"status": "ok", "jq": "50000", "first_ok_at": "2026-10-10T15:00:00+00:00"},
+                "E6": {"status": "no_data", "jq": "60000"},
+                "E7": {"status": "ok", "jq": "70000", "at": "2026-11-02T01:00:00+00:00"}}
+        new, old = E.split_by_first_ok(comp)
+        # E4 は EDINET コードが変わった 20000（前からある）。E5 は 10/11 0:00 JST ちょうど = 新しい側
+        self.assertEqual(new, {"30000", "50000"})
+        self.assertEqual(old, {"10000", "20000"})
+        self.assertFalse(new & old)
 
 
 if __name__ == "__main__":

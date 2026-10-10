@@ -75,6 +75,9 @@ REFRESH_AFTER_DAYS = 60
 PAGE_SIZE = 200
 YEARS = 30
 KEY_COLS = ["edinet_code", "fiscal_year", "doc_id"]
+#: 記録に「初めて取れた日時」（first_ok_at）を足した日。これより前の記録には無いので、
+#: 読み込むときにその記録の at で埋める（backfill_first_ok）
+FIRST_OK_SINCE = "2026-10-11T00:00:00+09:00"
 
 
 # ---------------------------------------------------------------------- #
@@ -90,8 +93,72 @@ def load_manifest(data_dir: str) -> dict:
         m = {}
     m.setdefault("mapping_at", None)
     m.setdefault("requests", {})     # "YYYY-MM" -> 使った数
-    m.setdefault("companies", {})    # EDINET コード -> {status, ...}
+    m.setdefault("companies", {})    # EDINET コード -> {status, at, jq, first_ok_at, ...}
+    backfill_first_ok(m["companies"])
     return m
+
+
+def _parse_at(s) -> Optional[dt.datetime]:
+    try:
+        at = dt.datetime.fromisoformat(s)
+    except (TypeError, ValueError):
+        return None
+    return at if at.tzinfo is not None else at.replace(tzinfo=dt.timezone.utc)
+
+
+def backfill_first_ok(comp: dict) -> int:
+    """
+    first_ok_at の無い取得済み（ok）の記録のうち、at が FIRST_OK_SINCE より前のものに at を入れる。
+    入れた数を返す。
+
+    first_ok_at（その会社の財務が初めて取れた日時）は、実験69 で「2026-10-10 にまだ無かった銘柄」だけを
+    選ぶために 2026-10-10 に足した。それより前の記録の at が初めて取れた日時と言えるのは、取り込みが
+    2026-09-21 に始まり、取り直し（REFRESH_AFTER_DAYS = 60日。しかも未取得の会社が無くなってから）が
+    まだ一度も起きていないから。FIRST_OK_SINCE より後の at は取り直しの日時かもしれないので埋めない。
+    """
+    since = _parse_at(FIRST_OK_SINCE)
+    n = 0
+    for rec in comp.values():
+        if rec.get("status") != "ok" or rec.get("first_ok_at"):
+            continue
+        at = _parse_at(rec.get("at"))
+        if at is not None and at < since:
+            rec["first_ok_at"] = rec["at"]
+            n += 1
+    return n
+
+
+def split_by_first_ok(comp: dict, since: str = FIRST_OK_SINCE) -> Tuple[set, set]:
+    """
+    J-Quants コードを (since 以降に初めて取れた, since より前から取れていた) に分ける。
+    同じ J-Quants コードに since より前の記録が1つでもあれば「前から」に入れる（対応表の更新で
+    EDINET コードが変わった会社を、新しい銘柄と数えない）。一度も取れていない会社と、
+    first_ok_at の無い記録はどちらにも入れない。
+    """
+    t0 = _parse_at(since)
+    new: set = set()
+    old: set = set()
+    for v in comp.values():
+        t = _parse_at(v.get("first_ok_at"))
+        jq = v.get("jq")
+        if t is None or not jq:
+            continue
+        (old if t < t0 else new).add(jq)
+    return new - old, old
+
+
+def put_record(comp: dict, e: str, rec: dict, now: dt.datetime) -> None:
+    """
+    会社の記録を置き換える。first_ok_at は、取り直しで状態が変わっても（ok → 失敗 → ok など）
+    最初の値を引き継ぐ。一度取れた会社の行は edinet_fin.parquet から消えないので、その会社は
+    「その日からあった」ままにする。初めて ok になったときだけ now を入れる。
+    """
+    first = (comp.get(e) or {}).get("first_ok_at")
+    if not first and rec.get("status") == "ok":
+        first = now.isoformat()
+    if first:
+        rec["first_ok_at"] = first
+    comp[e] = rec
 
 
 def save_manifest(data_dir: str, m: dict) -> None:
@@ -288,24 +355,24 @@ def fetch_financials(p: Probe, data_dir: str, m: dict, mapping: pd.DataFrame,
             break
         done += 1
         if st == 404:
-            comp[e] = {"status": "no_data", "at": now.isoformat(), "jq": jq}
+            put_record(comp, e, {"status": "no_data", "at": now.isoformat(), "jq": jq}, now)
             continue
         if st != 200:
-            comp[e] = {"status": "error", "http": st, "at": now.isoformat(),
-                       "jq": jq, "tries": int(rec.get("tries", 0)) + 1}
+            put_record(comp, e, {"status": "error", "http": st, "at": now.isoformat(),
+                                 "jq": jq, "tries": int(rec.get("tries", 0)) + 1}, now)
             continue
         rows = as_rows(body)
         df = pd.DataFrame(rows)
         if df.empty:
-            comp[e] = {"status": "no_data", "at": now.isoformat(), "jq": jq}
+            put_record(comp, e, {"status": "no_data", "at": now.isoformat(), "jq": jq}, now)
             continue
         df["edinet_code"] = e
         df["jq_code"] = jq
         frames.append(df)
         new_rows += len(df)
         fy = pd.to_numeric(df.get("fiscal_year"), errors="coerce")
-        comp[e] = {"status": "ok", "rows": int(len(df)), "at": now.isoformat(),
-                   "jq": jq, "last_fy": int(fy.max()) if fy.notna().any() else None}
+        put_record(comp, e, {"status": "ok", "rows": int(len(df)), "at": now.isoformat(),
+                             "jq": jq, "last_fy": int(fy.max()) if fy.notna().any() else None}, now)
 
     if frames:
         allf = pd.concat(([existing] if existing is not None else []) + frames,
@@ -378,6 +445,9 @@ def main(argv=None) -> int:
     p.say(f"\n[done] 今回 {done}社に問い合わせ / 新規 {new_rows:,}行 / 対応表に無い {unmapped}社")
     p.say(f"[state] 取得済み {n_ok:,}社 / データ無し {n_nd:,}社 / 失敗（再試行）{n_er:,}社 "
           f"/ 残り {sum(1 for t in targets if t not in {v.get('jq') for v in comp.values()}):,}社")
+    new, old = split_by_first_ok(comp)
+    p.say(f"[new] {FIRST_OK_SINCE[:10]} 以降に初めて取れた {len(new):,}社 / それより前から {len(old):,}社"
+          f"（実験69 の EDINET の確かめ直しは前者だけで回す）")
     p.say(f"[quota] この実行 {p.used} / 今月 {spent + p.used} / 予算 {args.monthly_budget}"
           f"（応答ヘッダ: 日次の残数 {header_remaining(p)} / "
           f"月次の残数 {header_remaining(p, 'x-ratelimit-monthly-remaining')}）")
