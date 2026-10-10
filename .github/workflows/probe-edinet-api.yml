@@ -1,0 +1,80 @@
+name: Probe EDINET API
+
+# 金融庁 EDINET の公式 API（Version 2）が実際に何を返すかを実測する。
+#
+# 運用者の指示（2026-10-10）: 候補銘柄の直近の決算・有価証券報告書をサイトから直接取り、
+# 原価・販管費まで分けた損益のサンキー図を画面に出す。取り込みを書く前に、
+# 鍵の渡し方・書類一覧の形・遡りに要るリクエスト数・CSV（type=5）の列とコンテキストと
+# 損益の要素 ID・恒等式を、推測せずに実測で並べる。
+#
+# 作業環境（Claude Code）からは api.edinet-fsa.go.jp に到達できないため、ここから叩く。
+# 鍵は Secrets の EDINET_FSA_API_KEY（EDINET の API キー発行画面で運用者が発行）。
+# ログには出さない（probe 側で URL から鍵を外し、混ざっても伏せる）。会社名の一覧・財務の値も出さない。
+on:
+  workflow_dispatch:
+    inputs:
+      sec_codes:
+        description: '最新の有報 / 半期報告書を探す証券コード（5桁・末尾 0。空白区切り）'
+        required: false
+        default: '79740 72030'
+      max_requests:
+        description: 'この実行で使ってよいリクエスト数'
+        required: false
+        default: '150'
+      scan_days:
+        description: '遡る平日の数'
+        required: false
+        default: '140'
+      busy_date:
+        description: '書類一覧の内訳を見る日（決算の集中する日）。空なら飛ばす'
+        required: false
+        default: '2026-06-26'
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+concurrency:
+  group: probe-edinet-api
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # 標準ライブラリだけで動く。pip install は要らない
+      - name: Probe
+        env:
+          EDINET_FSA_API_KEY: ${{ secrets.EDINET_FSA_API_KEY }}
+        run: |
+          read -ra CODES <<< "${{ inputs.sec_codes }}"
+          python3 -u research/probe_edinet_api.py \
+            --sec-codes "${CODES[@]}" \
+            --max-requests "${{ inputs.max_requests }}" \
+            --scan-days "${{ inputs.scan_days }}" \
+            --busy-date "${{ inputs.busy_date }}" 2>&1 | tee probe.log
+          exit "${PIPESTATUS[0]}"
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo '## EDINET 公式 API の実測'
+            echo
+            echo '```'
+            cat probe.log 2>/dev/null || echo '(出力なし)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: probe-edinet-api
+          path: probe.log
+          retention-days: 14
