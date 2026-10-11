@@ -80,13 +80,14 @@ class TestEval(unittest.TestCase):
     def oof(self, seed=1):
         rng = np.random.default_rng(seed)
         n = 600
-        dates = pd.to_datetime(rng.choice(pd.bdate_range("2024-01-04", "2025-12-30"), n))
+        dates = pd.to_datetime(rng.choice(pd.bdate_range("2024-01-04", "2025-12-30")[::12], n))   # 約43日 × 約14件（日付内の順位相関が引ける）
         y = (rng.random(n) < 0.2).astype(int)
         return pd.DataFrame({"Code": [f"{i % 100:04d}0" for i in range(n)], "Date": dates,
                              "fold": np.where(dates < pd.Timestamp("2025-01-01"), 1, 2),
                              "label": y, "score": y + rng.normal(0, 1, n),
                              "ret_o1_20": rng.normal(0.01, 0.1, n) + 0.1 * y, "ret_o1_40": rng.normal(0.01, 0.15, n),
-                             "y_K12": y, "y_K15": (y & (rng.random(n) < 0.6)).astype(int)})
+                             "y_K12": y, "y_K15": (y & (rng.random(n) < 0.6)).astype(int)}
+                            ).drop_duplicates(["Code", "Date"]).reset_index(drop=True)      # 行は (Code, Date) で一意
 
     def test_monthly_top(self):
         o = self.oof()
@@ -115,6 +116,25 @@ class TestEval(unittest.TestCase):
         self.assertTrue(((w["roc"] > 0.5) & (w["roc"] <= 1.0)).all())
         small = o[(o["fold"] != 1) | (o.index < 50)]                     # 窓1 を 50件に → 落ちる
         self.assertEqual(list(E.windows_cross(small, "y_K12")["fold"]), [2])
+
+    def test_rank_agreement(self):
+        o = self.oof()
+        same = E.rank_agreement(o, o)
+        self.assertEqual(same["n"], len(o))
+        self.assertAlmostEqual(same["rho_all"], 1.0)
+        self.assertAlmostEqual(same["rho_day"], 1.0)
+        self.assertAlmostEqual(same["top5_in_b"], 1.0)
+        self.assertAlmostEqual(same["top10_in_b"], 1.0)
+        self.assertGreater(same["top5_pct_b"], 0.95)
+        self.assertAlmostEqual(same["month_overlap"], 1.0)
+        rng = np.random.default_rng(9)
+        other = o.copy()
+        other["score"] = rng.normal(size=len(o))                      # 無関係なスコア
+        r = E.rank_agreement(o, other)
+        self.assertLess(abs(r["rho_all"]), 0.2)
+        self.assertLess(r["top10_in_b"], 0.4)
+        self.assertLess(r["month_overlap"], 0.5)
+        self.assertEqual(E.rank_agreement(o.iloc[:5], o.iloc[:5])["n"], 5)        # 少なすぎれば件数だけ
 
     def test_cross_label(self):
         o = self.oof()
@@ -168,6 +188,10 @@ class TestReport(unittest.TestCase):
         self.assertIn("y_K12_pr_K15-K12", s["windows"])
         self.assertIn("y_K15_roc_K15-K12", s["windows"])
         self.assertEqual(s["windows"]["y_K12_pr_K15-K12"]["n"], 3)              # 3窓（ずらし0だけ）
+        self.assertIn("K15->K12", s["rank"])
+        self.assertIn("K12->K15", s["rank"])
+        self.assertTrue(0 <= s["rank"]["K15->K12"]["top10_in_b"] <= 1)
+        self.assertTrue(os.path.exists(os.path.join(self.dir, "e78test_k_rank_agreement.csv")))
         kinds = {r["kind"] for r in s["shifts"]}
         self.assertTrue({"thr95", "thr90", "match95", "match90", "top10_within", "within_date"} <= kinds)
         self.assertEqual({r["arm"] for r in s["monthly"]}, {"K12", "K15"})

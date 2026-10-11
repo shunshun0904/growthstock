@@ -178,6 +178,46 @@ def windows_cross(o: pd.DataFrame, label_col: str) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=["fold", "pr", "roc", "rate"])
 
 
+def rank_agreement(o_a: pd.DataFrame, o_b: pd.DataFrame, pcts=(95, 90), n_month: int = MONTHLY_N) -> dict:
+    """
+    2つの腕のスコアの一致（同じ行で）。全体の順位相関（Spearman）、日付内の順位相関の平均（発火 MIN_BREAKS 件以上の日）、
+    窓の中の上位 (100−pct)%（腕 a で選んだ組）が腕 b でも上位に入る割合と、その組の腕 b での百分位（窓の中）の中央値、
+    月に n 銘柄（腕 a の各月の上位 n 件）が腕 b の各月の上位 n 件と重なる割合。
+    """
+    from scipy.stats import spearmanr
+    m = o_a[["Code", "Date", "fold", "score"]].merge(o_b[["Code", "Date", "score"]], on=["Code", "Date"],
+                                                   suffixes=("_a", "_b"))
+    out = {"n": int(len(m))}
+    if len(m) < 10:
+        return out
+    out["rho_all"] = float(spearmanr(m["score_a"], m["score_b"]).correlation)
+    rhos = []
+    for _, g in m.groupby("Date"):
+        if len(g) >= E52.MIN_BREAKS:
+            rhos.append(spearmanr(g["score_a"], g["score_b"]).correlation)
+    out["rho_day"] = float(np.nanmean(rhos)) if rhos else np.nan
+    out["days"] = len(rhos)
+    for pct in pcts:
+        inside, pct_b = [], []
+        for _, g in m.groupby("fold"):
+            if len(g) < E68.MIN_WINDOW_ROWS:
+                continue
+            ta = g["score_a"] > np.percentile(g["score_a"], pct)
+            tb = g["score_b"] > np.percentile(g["score_b"], pct)
+            if not ta.any():
+                continue
+            inside.append(float((ta & tb).sum() / ta.sum()))
+            rb = g["score_b"].rank(pct=True)
+            pct_b.append(float(rb[ta].median()))
+        out[f"top{100-pct}_in_b"] = float(np.mean(inside)) if inside else np.nan
+        out[f"top{100-pct}_pct_b"] = float(np.mean(pct_b)) if pct_b else np.nan
+    pa = monthly_top(o_a, n_month)[["Code", "Date"]]
+    pb = monthly_top(o_b, n_month)[["Code", "Date"]]
+    both = pa.merge(pb, on=["Code", "Date"])
+    out["month_overlap"] = float(len(both) / len(pa)) if len(pa) else np.nan
+    return out
+
+
 def attach_eval_cols(o: pd.DataFrame, df: pd.DataFrame, arms: list) -> pd.DataFrame:
     """OOF に vol_20d と各腕のラベル（y_<腕>）を付ける（評価用。Code・Date で結合）。"""
     cols = ["Code", "Date", "vol_20d"] + [f"y_{a}" for a in arms]
@@ -208,10 +248,21 @@ def prepare(ks: list, rebuild: bool = False):
     if not rebuild and os.path.exists(pf) and os.path.exists(ps):
         with open(ps, encoding="utf-8") as fh:
             stamp = json.load(fh)
-        if stamp.get("ks") == [float(k) for k in ks]:
+        df = pd.read_parquet(pf)
+        have = [float(k) for k in stamp.get("ks", [])]
+        missing = [float(k) for k in ks if not any(abs(float(k) - h) < 1e-9 for h in have)]
+        if missing:
+            # 表の版（built_utc）はそのまま。足りない k のラベル列だけ同じ表から引き直す（保存済みの探索・OOF はそのまま使える）
+            df, tab = build_labels(df, missing)
+            stamp["ks"] = have + missing
+            stamp["labels"] = (stamp.get("labels") or []) + tab.to_dict(orient="records")
+            df.to_parquet(pf, index=False)
+            with open(ps, "w", encoding="utf-8") as fh:
+                json.dump(stamp, fh, ensure_ascii=False, indent=1)
+            log(f"[data] 保存済みの表（{stamp['built_utc']} 作成）に k={missing} のラベルを足した")
+        else:
             log(f"[data] 1回目に作った表を使う（{stamp['built_utc']} 作成・{stamp['rows']:,}行・〜{stamp['date_max']}）")
-            return pd.read_parquet(pf), stamp
-        log("[data] 保存済みの表と k の組が違うので作り直す")
+        return df, stamp
     os.makedirs(E68.OOF_DIR, exist_ok=True)
     t0 = time.time()
     df = lab.frame(rebuild=True)
@@ -297,7 +348,7 @@ def report(res: dict, df: pd.DataFrame, ks: list, shifts: list, stamp: dict) -> 
     names = {arm_name(k): arm_label(k) for k in ks}
     ycols = [f"y_{a}" for a in arms]
     summary = {"data": stamp, "labels": label_report(df, ks), "tuning": {}, "production_oof": {}, "windows": {},
-               "shifts": {}, "monthly": {}, "summary": {}}
+               "rank": {}, "shifts": {}, "monthly": {}, "summary": {}}
 
     print(f"\n■ 2. 探索の CV（{E68.CV_SCHEME} 5分割・自分のラベル。楽観側に出る）と本番と同じ OOF（ずらし0・種42）")
     print(f"  {'腕':<16}{'CV PR':>8}{'±SD':>8}{'CV ROC':>8}{'秒':>6}  本番と同じ OOF: "
@@ -342,6 +393,27 @@ def report(res: dict, df: pd.DataFrame, ks: list, shifts: list, stamp: dict) -> 
                     line, st = E68.pair(f"[{lc[2:]}のラベル] {nm} {a}−{BASE}", m["b"].to_numpy(), m["c"].to_numpy())
                     print(line)
                     summary["windows"][f"{lc}_{met}_{a}-{BASE}"] = st
+
+    # 腕どうしのスコアの一致（運用者の仮説: 厳しいラベルで上位なら、緩いラベルのモデルでも上位）
+    if len(arms) > 1:
+        print(f"\n■ 2c. 腕どうしのスコアの一致（ずらし {'/'.join(map(str, shifts))}か月の平均。a で選んだ組が b でどう見えるか）")
+        print(f"  {'a → b':<14}{'順位相関 全体':>10}{'日付内':>8}{'a 上位5% が b 上位5% にも':>14}{'同 b での百分位':>10}"
+              f"{'a 上位10% が b 上位10% にも':>15}{'同 百分位':>9}{'月2件の重なり':>10}")
+        rows_rank = []
+        for i, a in enumerate(arms):
+            for b in arms:
+                if a == b:
+                    continue
+                vals = [rank_agreement(res["shifted"][(sh, a)], res["shifted"][(sh, b)]) for sh in shifts]
+                keys = ("rho_all", "rho_day", "top5_in_b", "top5_pct_b", "top10_in_b", "top10_pct_b", "month_overlap")
+                avg = {k: float(np.nanmean([v.get(k, np.nan) for v in vals])) for k in keys}
+                avg["n"] = int(np.mean([v.get("n", 0) for v in vals]))
+                rows_rank.append({"a": a, "b": b, **avg})
+                summary["rank"][f"{a}->{b}"] = avg
+                print(f"  {a + ' → ' + b:<14}{avg['rho_all']:>10.3f}{avg['rho_day']:>8.3f}{avg['top5_in_b']*100:>13.0f}%"
+                      f"{avg['top5_pct_b']:>10.3f}{avg['top10_in_b']*100:>14.0f}%{avg['top10_pct_b']:>9.3f}"
+                      f"{avg['month_overlap']*100:>9.0f}%")
+        pd.DataFrame(rows_rank).to_csv(E68.path("rank_agreement.csv"), index=False)
 
     rows_thr, rows_month = [], []
     for sh in shifts:
