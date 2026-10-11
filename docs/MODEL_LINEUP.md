@@ -207,3 +207,6 @@ lgbm は現行のラベルで測っても分離力が上がり、1.8σ は上が
 - ラベルは `build_dataset.rise_label_for_k`（データセットに残る future_rise / end_level / uptrend_end から k だけ変えて引き直す。
   k = 1.2 なら本番のラベルと全行一致）。モデルは `research/model/models/lgbm_k15/`（Release のアセット名 `lgbm_k15_model.joblib`）
 - 初回は `Retrain Weekly` を `only=lgbm_k15,lgbm_k18` で回す（本番の基準モデルは触らない）。以後は日曜の週次に含まれる
+- 運用者の意図（2026-10-11）は「切り替えではなく追加」。xgb / cat / logit の 1.5σ・1.8σ も同じ仕組みで足せる（`VARIANTS` に
+  `{"base": "xgb", "k": 1.5}` などを足すだけ。ロジスティック回帰は元の前処理の版 v2 で組む）。実験78 で xgb / cat / logit を
+  見てから足す。足すときは週次の再学習の時間（探索 1本 20〜60分）を見て、ラベル違いの探索を別のワークフローに分ける

@@ -70,6 +70,22 @@ class TestNames(unittest.TestCase):
         self.assertNotEqual(v15, v18)
         self.assertTrue(v15.startswith("lgbm_k15_") and v15.endswith(f"_t{TM.N_ESTIMATORS}"))   # 木の本数も入る
 
+    def test_logit_variant_uses_the_base_preprocessing(self):
+        """ロジスティック回帰の 1.5σ 版（実験78 の結果を見て足す予定）は、logit の前処理の版（v2）で組む。"""
+        from unittest import mock
+        with mock.patch.dict(TM.VARIANTS, {"logit_k15": {"base": "logit", "k": 1.5}}):
+            self.assertEqual(TM.base_algo("logit_k15"), "logit")
+            self.assertFalse(TM.is_tree("logit_k15"))
+            self.assertEqual(TM.preprocess_version("logit_k15"), TM.preprocess_version("logit"))
+            self.assertEqual(TM.preprocess_version("logit_k15"), "v2")
+            cols = F.columns(F.DEFAULT_PRESET)
+            name = TM.study_name("logit_k15", 5, "2025-08-08", cols)
+            self.assertTrue(name.startswith("logit_k15_") and name.endswith("_v2"))     # 木の本数は入らず、前処理の版が入る
+            y = np.array([0, 1, 0, 1, 1, 0])
+            m = TM.build("logit_k15", {"C": 0.5, "penalty": "l2"}, y, ["a", "b"])
+            self.assertTrue(hasattr(m, "predict_proba"))
+            self.assertEqual(type(m).__name__, "Pipeline")
+
     def test_available_lists_variants_in_lineup_order(self):
         d = tempfile.mkdtemp()
         try:

@@ -96,9 +96,10 @@ def preprocess_version(algo: str, prep: Optional[str] = None) -> str:
     線形・MLP の前処理の版。引数 prep > モデルごとの設定（PREPROCESS_BY_ALGO）> 既定（PREPROCESS）。
     木のモデルは前処理を持たないので ""。
     """
-    if base_algo(algo) in TREE_ALGOS:
+    base = base_algo(algo)              # ラベル違いのモデルは元の学習器の設定（logit_k15 → logit の v2）
+    if base in TREE_ALGOS:
         return ""
-    return prep or PREPROCESS_BY_ALGO.get(algo) or PREPROCESS
+    return prep or PREPROCESS_BY_ALGO.get(base) or PREPROCESS
 
 #: 整数列だが順序に意味があるので one-hot にしない
 #:   cap_band        時価総額帯 0〜4。大小に意味がある
@@ -127,6 +128,8 @@ TREE_ALGOS = ("lgbm", "xgb", "cat", "rf")
 #: 変えたラベルで学習する。本番の合議（models.ALGOS）には入れず、画面とスプレッドシートに並べる。
 #: 名前が探索の記録（multi_params.json）・保存先（research/model/models/<名前>/）・Release のアセット名の鍵。
 #: k の根拠は実験78（docs/MODEL_ADOPTION_RULES.md §34）。本番のラベル（build_dataset.VOL_NORM_K = 1.2）は変えない
+#: xgb / cat / logit の 1.5σ・1.8σ（例: {"base": "xgb", "k": 1.5}）は、実験78 の結果を見てから足す（運用者の指示 2026-10-11
+#: 「ロジスティックも当然」）。足すときは週次の再学習の時間（探索 1本 20〜60分）を見て、探索を別のワークフローに分ける
 VARIANTS: Dict[str, Dict] = {
     "lgbm_k15": {"base": "lgbm", "k": 1.5},
     "lgbm_k18": {"base": "lgbm", "k": 1.8},
