@@ -774,7 +774,8 @@ function JevCard({ info }) {
         （{JEV_STATS.picks.hiTercile.range}%）は {fmtSigned(JEV_STATS.picks.hiTercile.tp10, 2)}。
         Jev {JEV.line} 以上で絞ると {fmtSigned(JEV_STATS.picks.gate.ge.tp10, 2)}（{JEV_STATS.picks.gate.ge.n}件）、
         {JEV.line} 未満は {fmtSigned(JEV_STATS.picks.gate.lt.tp10, 2)}（{JEV_STATS.picks.gate.lt.n}件）。
-        偽陽性を Jev で見分けることはできていません。
+        偽陽性を Jev で見分けることはできていません。問いを「+10% / +20% の指値で儲かるか」「モデルの正例になるか」に
+        変えても同じでした（実験74。docs/MODEL_JEV.md §7）。
       </p>
     </section>
   );
