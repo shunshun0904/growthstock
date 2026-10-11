@@ -50,6 +50,7 @@ from typing import Optional
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import build_dataset as B  # noqa: E402
 import features as F  # noqa: E402
 import lab  # noqa: E402
 import models as M  # noqa: E402
@@ -96,7 +97,11 @@ def why_retune(prev: dict, train_to: str, sig: str,
 def main() -> int:
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
     force = "--force" in sys.argv
-    algos = args or [a for a in TM.ALGOS if a not in M.RETIRED]   # RETIRED（2026-10-09 に外した mlp）は探索しない
+    # RETIRED（2026-10-09 に外した mlp）は探索しない。ラベル違いのモデル（TM.VARIANTS）は既定で探索する
+    algos = args or [a for a in TM.ALGOS if a not in M.RETIRED] + list(TM.VARIANTS)
+    unknown = [a for a in algos if a not in TM.ALGOS and a not in TM.VARIANTS]
+    if unknown:
+        raise SystemExit(f"知らないモデル: {unknown}（{', '.join(list(TM.ALGOS) + list(TM.VARIANTS))} のいずれか）")
     df = lab.frame()
     preset = F.DEFAULT_PRESET
     cols = F.columns(preset)
@@ -131,7 +136,7 @@ def main() -> int:
         # 日付が動いていれば母集団が変わっているので50試行やり直す
         # （通常の週次実行では5営業日ぶん進むので、必ず探索が走る）
         why = why_retune(prev, train_to, sig,
-                         TM.N_ESTIMATORS if algo in TM.TREE_ALGOS else None,
+                         TM.N_ESTIMATORS if TM.is_tree(algo) else None,
                          scheme=TM.tuning.PRODUCTION_CV, objective=TM.tuning.PRODUCTION_OBJECTIVE)
         if why is None and not force:
             print(f"  [{algo}] 探索済みを読む "
@@ -139,8 +144,18 @@ def main() -> int:
             continue
         print(f"  [{algo}] 探索する: {why or '--force'}")
         t0 = time.time()
-        store[algo] = TM.tune(algo, sub, cols, n_trials=N_TRIALS)
+        k = TM.label_k(algo)
+        sub_a = sub
+        if k is not None:
+            # ラベル違いのモデルは k のラベルで探索する（列・分割・目的関数は本番と同じ）
+            sub_a = sub.copy()
+            sub_a["label"] = B.rise_label_for_k(sub_a, k)
+            sub_a = sub_a[sub_a["label"].notna()]
+            print(f"  [{algo}] ラベル {k:.1f}σ: 正例率 {sub_a['label'].mean()*100:.2f}%（{len(sub_a):,}件）")
+        store[algo] = TM.tune(algo, sub_a, cols, n_trials=N_TRIALS)
         store[algo]["_cv"]["preset"] = preset
+        if k is not None:
+            store[algo]["_cv"]["label_k"] = float(k)
         # 途中で落ちても結果を失わないよう、1つ終わるたびに保存する
         TM.save(store)
         print(f"  [{algo}] {time.time()-t0:.0f}秒")

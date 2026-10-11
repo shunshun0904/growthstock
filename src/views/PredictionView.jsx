@@ -353,7 +353,7 @@ function Row({ c, models, open, onToggle, onSend, sent }) {
           <BorderBadge c={c} />
         </span>
         {mr.length > 0 ? (
-          <ModelStrip rows={mr} agree={c.agree90} n={c.nModels} />
+          <ModelStrip rows={mr} agree={c.agree90} n={c.nModels} agreeK={c.agreeK90} nK={c.nK} />
         ) : (
           <span className="pred-bar" title={`スコア ${fmt(c.score, 4)}`}>
             <i style={{ width: `${Math.max(2, (c.pctHistorical ?? 0))}%`, background: color }} />
@@ -395,7 +395,7 @@ function Row({ c, models, open, onToggle, onSend, sent }) {
  * 並び順は行をまたいで固定（payload の models 順）。候補ごとに高い順へ
  * 並べ替えると、同じ位置が同じモデルにならず縦に読めなくなる。
  */
-function ModelStrip({ rows, agree, n }) {
+function ModelStrip({ rows, agree, n, agreeK, nK }) {
   const total = Number.isFinite(n) ? n : rows.length;
   return (
     <span className="pred-ms">
@@ -411,6 +411,11 @@ function ModelStrip({ rows, agree, n }) {
             </b>
             が上位10%
           </>
+        )}
+        {Number.isFinite(agreeK) && nK > 0 && (
+          <span className="sub" title="ラベル違い（1.5σ / 1.8σ で学習した LightGBM）のうち、上位10%と見た数。本番の一致には数えない">
+            <span className="sep">/</span>ラベル違い <b className="num">{agreeK}/{nK}</b>
+          </span>
         )}
         <span className="pred-ms-legend"
               title="色の区分（濃いほど上）: 95以上（上位5%。運用の選定の線）/ 90以上（3モデルの線）/ 80以上 / 60以上 / 30以上 / それ未満">
@@ -695,9 +700,10 @@ function ModelLineup({ models }) {
           <tbody>
             {models.map((m) => (
               <tr key={m.algo}>
-                <td className="num">{MODEL_SHORT[m.algo] || m.algo}</td>
+                <td className="num">{m.short || MODEL_SHORT[m.algo] || m.algo}</td>
                 <td className="sub">{FAMILY_JA[MODEL_FAMILY[m.algo]] || DASH}</td>
-                <td>{m.name}</td>
+                <td>{m.name}{m.variant && Number.isFinite(m.positiveRate)
+                  ? <span className="sub">（正例率 {fmt(m.positiveRate * 100, 1, '%')}）</span> : null}</td>
                 <td className="sub">{m.note || DASH}</td>
                 <td className="num">{fmtDate(m.trainedAt)}</td>
                 <td className="num">{fmtInt(m.nOof)}</td>
@@ -709,6 +715,7 @@ function ModelLineup({ models }) {
       </div>
       <p className="sub">
         探索PR-AUC は探索時の内側検証（5分割・50試行・木200本固定）の値です。
+        ラベル違い（L15 / L18）はラベルが違うので、この値を他のモデルと比べられません。
         運用は上位だけを買うので、この順位がそのまま運用の優劣にはなりません。
         どのモデルを重く見るかは、上の「スコア帯の実績」と
         「過去に出した銘柄のその後」で確かめてください。

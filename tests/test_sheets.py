@@ -278,7 +278,7 @@ class TestSync(unittest.TestCase):
         ws = self._old_sheet()
         before = ws.col_count
         ES.sync(ws, ES.rows_from_predictions(PRED), {}, None)
-        want = (len(self.OLD_HEADER) + len(ES.MODEL_COLS) + len(ES.SCORE_COLS) + 1
+        want = (len(self.OLD_HEADER) + len(ES.MODEL_COLS) + len(ES.SCORE_COLS) + len(ES.AGREE_COLS)
                 + len(ES.ENTRY_COLS))
         self.assertGreaterEqual(ws.col_count, want,
                                 f"器が広がっていない（{before} のまま）")
@@ -292,7 +292,7 @@ class TestSync(unittest.TestCase):
 
     def test_header_is_not_touched_when_nothing_is_missing(self):
         header = (ES.OWNED_COLS + ES.MODEL_COLS + ES.SCORE_COLS
-                  + [ES.AGREE_COL] + ES.ENTRY_COLS + ES.TRACK_COLS + ES.USER_COLS)
+                  + ES.AGREE_COLS + ES.ENTRY_COLS + ES.TRACK_COLS + ES.USER_COLS)
         ws = FakeWorksheet([header])
         ES.sync(ws, ES.rows_from_predictions(PRED), {}, None)
         self.assertEqual(ws.updates, [], "見出しを不要に書き換えた")

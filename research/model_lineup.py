@@ -67,7 +67,7 @@ def main(argv=None) -> int:
                     help="Markdown の表で出す（実行要約に貼る用）")
     args = ap.parse_args(argv)
 
-    rows = [row(a, args.model_dir) for a in M.ALGOS]
+    rows = [row(a, args.model_dir) for a in M.LINEUP]
     head = ("モデル", "状態", "学習日", "訓練件数", "OOF件数", "探索PR-AUC", "サイズ")
     keys = ("name", "state", "trained", "n_train", "n_oof", "pr_auc", "size")
 

@@ -1198,6 +1198,37 @@ def attach_rise_label(df: pd.DataFrame, cfg: RiseConfig = DEFAULT_RISE) -> pd.Da
     return df
 
 
+def rise_label_for_k(df: pd.DataFrame, k: float, cfg: RiseConfig = DEFAULT_RISE) -> pd.Series:
+    """
+    データセットに残る future_rise / end_level / uptrend_end / vol_20d から、到達しきい値の倍数 k だけ変えた
+    ラベルを引き直す（attach_rise_label の合成と同じ。終盤は到達の END_RATIO / RISE_THRESHOLD 倍、MA5>=MA20）。
+
+    ラベル違いのモデル（tuning_multi.VARIANTS。運用者の指示 2026-10-11）と実験78 が使う。k = cfg.vol_norm_k なら
+    本番のラベルと全行一致する（実験78 で 21,937行すべて一致を確認）。判定できない行（元のラベルが未確定、
+    vol_20d が欠測）は NaN。維持日数の条件（keep_days）は keep_days_cnt がデータセットに残らないので引き直せない
+    （課している設定では止める）。
+    """
+    from dataclasses import replace
+
+    if cfg.keep_days:
+        raise SystemExit("維持日数の条件があるラベルは引き直せません（keep_days_cnt が無い）")
+    need_cols = ("vol_20d", "future_rise", "end_level", "uptrend_end", "label")
+    missing = [c for c in need_cols if c not in df.columns]
+    if missing:
+        raise SystemExit(f"ラベルの引き直しに要る列がありません: {missing}")
+    c = replace(cfg, vol_norm_k=float(k))
+    need, end_need = rise_thresholds(df["vol_20d"], c)
+    need.index = df.index
+    end_need.index = df.index
+    ok = (pd.to_numeric(df["future_rise"], errors="coerce") >= need)
+    if c.end_ratio is not None:
+        ok &= pd.to_numeric(df["end_level"], errors="coerce") >= end_need
+    if c.require_uptrend:
+        ok &= pd.to_numeric(df["uptrend_end"], errors="coerce") == 1.0
+    determined = df["label"].notna() & need.notna()
+    return ok.astype(float).where(determined)
+
+
 def report_fund_completeness(samples: pd.DataFrame) -> None:
     """
     決算の変化がどれだけ作れるかを、要求の強さごとに数える。

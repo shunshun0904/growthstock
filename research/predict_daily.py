@@ -162,6 +162,13 @@ def ref_returns(panel: pd.DataFrame, picks: pd.DataFrame) -> pd.Series:
     return (cur / picks["closeAtPick"] - 1.0) * 100.0
 
 
+def agreement(per: Dict[str, Dict], algos, pct: float = 90.0) -> Tuple[int, int]:
+    """algos のうち百分位が付いたモデルの数と、そのうち pct 以上と見たモデルの数（独立した判定の数え上げ）。"""
+    pcts = [per[a]["pctHistorical"] for a in algos
+            if a in per and per[a].get("pctHistorical") is not None]
+    return int(sum(1 for p in pcts if p >= pct)), len(pcts)
+
+
 def score_others(cand: pd.DataFrame, cols: List[str],
                  model_dir: str) -> Tuple[Dict[str, np.ndarray], List[Dict]]:
     """
@@ -208,6 +215,11 @@ def score_others(cand: pd.DataFrame, cols: List[str],
                 "nOof": meta.get("nOof"),
                 "scoreBands": meta.get("scoreBands", {}),
                 "cv": meta.get("tuning", {}),
+                # ラベル違いのモデル（models.VARIANTS）の目印。画面は本番の合議（agree90）に数えず、並べて見せる
+                "variant": M.label_k(algo) is not None,
+                "labelK": meta.get("volNormK"),
+                "label": meta.get("label"),
+                "positiveRate": meta.get("positiveRate"),
             })
             print(f"  [{algo}] 採点 {len(cand):,}件")
         except Exception as exc:          # noqa: BLE001
@@ -386,6 +398,10 @@ def main(argv=None) -> int:
             "scoreBands": meta.get("scoreBands", {}),
             "cv": meta.get("tuning", {}),
             "baseline": True,
+            "variant": False,
+            "labelK": meta.get("volNormK"),
+            "label": meta.get("label"),
+            "positiveRate": meta.get("positiveRate"),
         })
         for i, x in enumerate(rows):
             per = {M.BASELINE: {"score": x["score"],
@@ -399,16 +415,15 @@ def main(argv=None) -> int:
                     "pctHistorical": M.pct_historical(v, hist_by_algo[algo]),
                 }
             x["byModel"] = per
-            pcts = [d["pctHistorical"] for d in per.values()
-                    if d["pctHistorical"] is not None]
             # 何個のモデルが「上位10%」と見ているか。独立した判定の数え上げで、
             # スコアを混ぜた値ではない。
             #
             # ここで平均パーセンタイルを作らないのは意図的。平均を出すと、
             # 呼び名が「表示順」でも中身は5モデルのアンサンブルになる。
-            # 並べて人間が決める運用なので、混ぜた数字は画面に出さない
-            x["agree90"] = int(sum(1 for p in pcts if p >= 90))
-            x["nModels"] = len(pcts)
+            # 並べて人間が決める運用なので、混ぜた数字は画面に出さない。
+            # ラベル違いのモデル（1.5σ・1.8σ）は本番の数（agree90 / nModels）に入れず、別に数える（agreeK90 / nK）
+            x["agree90"], x["nModels"] = agreement(per, M.ALGOS)
+            x["agreeK90"], x["nK"] = agreement(per, M.VARIANTS)
 
     # 表示順・順位はどちらも基準モデルのスコア（上の rank_in_day と同じ）。
     # 帯・較正・追跡ファイルも基準モデル基準なので、ここだけ別の物差しで
@@ -447,6 +462,8 @@ def main(argv=None) -> int:
             "一致度は「上位10%と見ているモデルの数」。独立した判定の数え上げで、"
             "スコアを混ぜた値ではない。順位と帯は基準モデル（LightGBM）の"
             "スコアで付けてあり、他のモデルは並べて見るためのもの。",
+            "L15 / L18 はラベル違いのモデル（到達しきい値 1.5σ / 1.8σ で学習した LightGBM）。"
+            "本番の一致度（agree90）には数えず、agreeK90 / nK で別に数える。検証用で、本番のラベルは 1.2σ のまま。",
         ],
     }
     os.makedirs(args.out_dir, exist_ok=True)

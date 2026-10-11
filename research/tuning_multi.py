@@ -96,7 +96,7 @@ def preprocess_version(algo: str, prep: Optional[str] = None) -> str:
     線形・MLP の前処理の版。引数 prep > モデルごとの設定（PREPROCESS_BY_ALGO）> 既定（PREPROCESS）。
     木のモデルは前処理を持たないので ""。
     """
-    if algo in TREE_ALGOS:
+    if base_algo(algo) in TREE_ALGOS:
         return ""
     return prep or PREPROCESS_BY_ALGO.get(algo) or PREPROCESS
 
@@ -121,6 +121,31 @@ SEED = 0
 ALGOS = ("lgbm", "xgb", "cat", "logit", "mlp")
 #: 木の本数が結果を変えるモデル。探索の記録と study 名で本数を突き合わせる
 TREE_ALGOS = ("lgbm", "xgb", "cat", "rf")
+
+#: ラベル違いのモデル（運用者の指示 2026-10-11「ダッシュボードにも 1.5σ・1.8σ での予測結果を表示」）。
+#: 本番と同じ列・同じ学習器（base）で、目的変数の到達しきい値 k（必要な上昇率 = k × σ20 × √20）だけ
+#: 変えたラベルで学習する。本番の合議（models.ALGOS）には入れず、画面とスプレッドシートに並べる。
+#: 名前が探索の記録（multi_params.json）・保存先（research/model/models/<名前>/）・Release のアセット名の鍵。
+#: k の根拠は実験78（docs/MODEL_ADOPTION_RULES.md §34）。本番のラベル（build_dataset.VOL_NORM_K = 1.2）は変えない
+VARIANTS: Dict[str, Dict] = {
+    "lgbm_k15": {"base": "lgbm", "k": 1.5},
+    "lgbm_k18": {"base": "lgbm", "k": 1.8},
+}
+
+
+def base_algo(algo: str) -> str:
+    """ラベル違いのモデルなら元の学習器の名前、そうでなければそのまま。"""
+    return VARIANTS.get(algo, {}).get("base", algo)
+
+
+def label_k(algo: str) -> Optional[float]:
+    """ラベル違いのモデルの k（σ の倍数）。本番のラベルのモデルは None。"""
+    v = VARIANTS.get(algo)
+    return float(v["k"]) if v else None
+
+
+def is_tree(algo: str) -> bool:
+    return base_algo(algo) in TREE_ALGOS
 
 
 # --------------------------------------------------------------------------- #
@@ -281,6 +306,7 @@ def build(algo: str, params: Dict, y: np.ndarray,
     """
     spw = tuning.scale_pos_weight(y)
     p = dict(params)
+    algo = base_algo(algo)          # ラベル違いのモデルは元の学習器で組む
 
     if algo == "lgbm":
         import lightgbm as lgb
@@ -379,7 +405,7 @@ def study_name(algo: str, n_splits: int, train_to: str, cols: List[str],
     if objective != "pr_auc":                       # 目的関数が違えば別の問題（同上）
         name += f"_{objective}"
     # 本数を変えて同じ週に探索し直したとき、前の本数で測った試行を引き継がない
-    name += f"_t{N_ESTIMATORS}" if algo in TREE_ALGOS else ""
+    name += f"_t{N_ESTIMATORS}" if is_tree(algo) else ""
     # 線形・MLP は前処理の版も入れる（v1 以外）。版が違えば別の問題なので、前の版の試行を引き継がない
     version = preprocess_version(algo)
     if version and version != "v1":
@@ -418,7 +444,7 @@ def tune(algo: str, df: pd.DataFrame, cols: List[str], *, n_trials: int = 50,
                 f"{w['valid_from']}〜{w['valid_to']}（訓練〜{w['train_to']}）" for w in tuning.fold_windows(folds)))
 
     def _trial_objective(trial):
-        params = SPACES[algo](trial)
+        params = SPACES[base_algo(algo)](trial)
         prs, rocs = [], []
         for tr, va in folds:
             pr, roc = fit_eval(algo, params, tr, va, cols)

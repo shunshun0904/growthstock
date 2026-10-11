@@ -78,9 +78,12 @@ OWNED_COLS = [
 #:
 #: 「一致」は上位10%と見ているモデルの数。独立した判定の数え上げで、
 #: スコアを混ぜた値ではない（アンサンブルはしない方針）。
-MODEL_COLS = [f"{M.SHORT.get(a, a[:3].upper())}%" for a in M.ALGOS]
-SCORE_COLS = [f"{M.SHORT.get(a, a[:3].upper())}スコア" for a in M.ALGOS]
+MODEL_COLS = [f"{M.SHORT.get(a, a[:3].upper())}%" for a in M.LINEUP]
+SCORE_COLS = [f"{M.SHORT.get(a, a[:3].upper())}スコア" for a in M.LINEUP]
 AGREE_COL = "一致(上位10%)"
+#: ラベル違いのモデル（L15 / L18。models.VARIANTS）のうち上位10%と見た数。本番の一致（AGREE_COL）には数えない
+AGREE_K_COL = "ラベル違い一致(上位10%)"
+AGREE_COLS = [AGREE_COL, AGREE_K_COL]
 
 #: 既存の「スコア」列は基準モデル（LightGBM）の生スコアで、LGBスコアと同じ値。
 #: 運用開始時から入っている列なので、過去行との連続性のために残す。
@@ -123,7 +126,7 @@ def rows_from_predictions(pred: Dict) -> List[Dict]:
     5モデルを学習する前の予測ファイル（byModel が無い）でも落ちない。
     """
     # 予測ファイルが持っているモデルの順。無ければ models.ALGOS の順
-    algos = [m["algo"] for m in (pred.get("models") or [])] or list(M.ALGOS)
+    algos = [m["algo"] for m in (pred.get("models") or [])] or list(M.LINEUP)
     short = {m["algo"]: m.get("short") for m in (pred.get("models") or [])}
     out = []
     for c in pred["candidates"]:
@@ -157,6 +160,7 @@ def rows_from_predictions(pred: Dict) -> List[Dict]:
             **by_model,
             AGREE_COL: (f"{c['agree90']}/{c['nModels']}"
                         if c.get("nModels") else None),
+            AGREE_K_COL: (f"{c['agreeK90']}/{c['nK']}" if c.get("nK") else None),
             "_jqCode": c["jqCode"],
         })
     return out
@@ -400,7 +404,7 @@ def ensure_worksheet(book, title: str):
         return ws, False
     except Exception:
         pass
-    header = (OWNED_COLS + MODEL_COLS + SCORE_COLS + [AGREE_COL] + ENTRY_COLS
+    header = (OWNED_COLS + MODEL_COLS + SCORE_COLS + AGREE_COLS + ENTRY_COLS
               + TRACK_COLS + USER_COLS)
     ws = book.add_worksheet(title=title, rows=2000, cols=max(30, len(header) + 5))
     ws.update([header], "A1")
@@ -421,7 +425,7 @@ def ensure_columns(ws, header: List[str], dry_run: bool = False) -> List[str]:
     既存の中身に触らない。並び順が気になるときは利用者が手で動かしてよい
     （名前を変えなければ、そのまま正しく書き込まれる）。
     """
-    want = OWNED_COLS + MODEL_COLS + SCORE_COLS + [AGREE_COL] + ENTRY_COLS + TRACK_COLS
+    want = OWNED_COLS + MODEL_COLS + SCORE_COLS + AGREE_COLS + ENTRY_COLS + TRACK_COLS
     missing = [c for c in want if c not in header]
     if not missing:
         return header
@@ -532,7 +536,7 @@ def sync(ws, rows: List[Dict], closes, as_of, dry_run: bool = False,
     # 列が増えた直後は、直近5営業日ぶんの既存行にモデル別の値が入っていない。
     # 空のセルにだけ入れる。既に値があるセルは触らない（利用者が手で
     # 上書きしている可能性がある。この台帳は手書きと同居する前提）
-    backfill = [c for c in MODEL_COLS + SCORE_COLS + [AGREE_COL] if c in pos]
+    backfill = [c for c in MODEL_COLS + SCORE_COLS + AGREE_COLS if c in pos]
     for (d, code), r in seen.items():
         x = by_key.get((d, code))
         price = None
@@ -613,14 +617,14 @@ def main(argv=None) -> int:
 
     if args.dry_run:
         # 通信しないので、見出しは初期構成を仮定して整合だけ見る
-        header = (OWNED_COLS + MODEL_COLS + SCORE_COLS + [AGREE_COL] + ENTRY_COLS
+        header = (OWNED_COLS + MODEL_COLS + SCORE_COLS + AGREE_COLS + ENTRY_COLS
                   + TRACK_COLS + USER_COLS)
         print(f"[dry-run] 列 {len(header)}個: {' / '.join(header)}")
         unknown = sorted({k for x in rows for k in x
                           if not k.startswith('_') and k not in header})
         if unknown:
             raise SystemExit(f"見出しに無い項目を書こうとしています: {unknown}")
-        mc = [c for c in MODEL_COLS + SCORE_COLS + [AGREE_COL]]
+        mc = [c for c in MODEL_COLS + SCORE_COLS + AGREE_COLS]
         print(f"[dry-run] モデル別: {' / '.join(mc)}")
         for x in rows[:5]:
             print("  " + " ".join(

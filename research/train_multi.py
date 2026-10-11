@@ -116,7 +116,7 @@ def untuned(algos: List[str], store: Dict, cols: List[str]) -> Dict[str, str]:
         cv = store[a].get("_cv", {})
         why = tuning.tuned_mismatch(cv.get("features_sig"), cv.get("n_features"), cols)
         # 学習は今の本数（TM.N_ESTIMATORS）で組むので、別の本数で探索したパラメータは使わない
-        if not why and a in TM.TREE_ALGOS and cv.get("n_estimators") != TM.N_ESTIMATORS:
+        if not why and TM.is_tree(a) and cv.get("n_estimators") != TM.N_ESTIMATORS:
             why = (f"探索した木の本数 {cv.get('n_estimators')} と学習する本数 "
                    f"{TM.N_ESTIMATORS} が違います")
         if why:
@@ -126,8 +126,17 @@ def untuned(algos: List[str], store: Dict, cols: List[str]) -> Dict[str, str]:
 
 def train_one(algo: str, ds: pd.DataFrame, cols: List[str],
               out_root: str, preset: str = F.DEFAULT_PRESET) -> Dict:
-    """1モデルぶんを学習して保存し、要約を返す。"""
+    """1モデルぶんを学習して保存し、要約を返す。ラベル違いのモデルは k のラベルを引き直してから。"""
     t0 = time.time()
+    k = M.label_k(algo)
+    label_name = B.DEFAULT_RISE.name
+    if k is not None:
+        from dataclasses import replace
+        ds = ds.copy()
+        ds["label"] = B.rise_label_for_k(ds, k)
+        ds = ds[ds["label"].notna()].reset_index(drop=True)
+        label_name = replace(B.DEFAULT_RISE, vol_norm_k=float(k)).name
+        print(f"  [{algo}] ラベルを {k:.1f}σ で引き直し: 正例率 {ds['label'].mean()*100:.2f}%（{len(ds):,}件）")
     oof = oof_scores(algo, ds, cols)
     bands = score_bands(oof)
     calib = calibration(oof)
@@ -143,7 +152,11 @@ def train_one(algo: str, ds: pd.DataFrame, cols: List[str],
         "name": M.JA.get(algo, algo),
         "note": M.NOTE.get(algo, ""),
         "trainedAt": pd.Timestamp.utcnow().isoformat(),
-        "label": B.DEFAULT_RISE.name,
+        "label": label_name,
+        # 到達しきい値の倍数（ラベル違いのモデルは k、本番のラベルなら VOL_NORM_K）。画面と記録で見分ける
+        "volNormK": float(k) if k is not None else B.VOL_NORM_K,
+        "base": M.base_algo(algo),
+        "variant": k is not None,
         "preset": preset,
         # 線形・MLP の前処理の版（木は ""）。学習時の tuning_multi.preprocess_version
         "preprocess": TM.preprocess_version(algo),
@@ -175,16 +188,16 @@ def main(argv=None) -> int:
     ap.add_argument("--data-dir", default=DATA_DIR)
     ap.add_argument("--dataset", default=os.path.join(DATA_DIR, "dataset.parquet"))
     ap.add_argument("--out-dir", default=MODEL_DIR)
-    ap.add_argument("--models", default=",".join(M.EXTRA),
-                    help=f"学習するモデル（カンマ区切り）。既定: {','.join(M.EXTRA)}"
+    ap.add_argument("--models", default=",".join(M.MULTI),
+                    help=f"学習するモデル（カンマ区切り）。既定: {','.join(M.MULTI)}"
                          f"。基準モデル({M.BASELINE})は train_production.py が作る")
     ap.add_argument("--features", default=F.DEFAULT_PRESET)
     args = ap.parse_args(argv)
 
     algos = [a.strip() for a in args.models.split(",") if a.strip()]
-    unknown = [a for a in algos if a not in M.ALGOS]
+    unknown = [a for a in algos if a not in M.LINEUP]
     if unknown:
-        raise SystemExit(f"知らないモデル: {unknown}（{','.join(M.ALGOS)} のいずれか）")
+        raise SystemExit(f"知らないモデル: {unknown}（{','.join(M.LINEUP)} のいずれか）")
 
     cols = F.columns(args.features)
     ds = pd.read_parquet(args.dataset)

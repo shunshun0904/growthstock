@@ -32,6 +32,10 @@ on:
         type: choice
         options: ['yes', 'no']
         default: 'yes'
+      only:
+        description: '画面に並べる追加モデルのうち、これだけ探索・学習する（例: lgbm_k15,lgbm_k18。空なら全部。指定すると本番の基準モデルは触らない）'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -139,8 +143,22 @@ jobs:
       # 2026-09-27 から本番の列が239列（2026-09-26 の決定）になり、見込みは約30分（先頭の本番の列だけで約13分）。
       # 探索の記録には探索したときの木の本数（tuning.SEARCH_N_ESTIMATORS）が残り、
       # 本番の学習（train_production.py）は本数が今と違えば止まる。
+      # 追加モデルだけ作る回（only）は、本番の基準モデルの探索も学習も飛ばす。
+      # 週の途中で基準モデルを差し替えると、その週の候補が前日までと比較できなくなる
+      - name: Resolve scope
+        id: scope
+        env:
+          ONLY: ${{ inputs.only }}
+        run: |
+          # 入力をそのままシェルに展開しない（run-experiment.yml と同じ考え方）。名前の形だけ通す
+          if [ -n "$ONLY" ] && ! [[ "$ONLY" =~ ^[a-z0-9_]+(,[a-z0-9_]+)*$ ]]; then
+            echo "only の形が不正: $ONLY"; exit 1
+          fi
+          echo "only=$ONLY" >> "$GITHUB_OUTPUT"
+          if [ -n "$ONLY" ]; then echo "対象を限定: $ONLY（基準モデルは触らない）"; else echo "全モデル"; fi
+
       - name: Tune
-        if: inputs.tune == 'yes'
+        if: inputs.tune == 'yes' && steps.scope.outputs.only == ''
         run: |
           PRESETS=$(grep -v '^#' research/tune_presets.txt | tr '\n' ' ')
           # 分割は層別（year_cap_date）。前進分割（walkforward）は候補で、実験73 の結果を
@@ -150,6 +168,7 @@ jobs:
             --features $PRESETS --n-splits 5 2>&1 | tail -30
 
       - name: Train production model
+        if: steps.scope.outputs.only == ''
         run: python3 research/train_production.py 2>&1 | tee retrain.log
 
       # 画面に並べる追加モデル（xgb / cat。2026-10-09 に運用者の決定で logit / mlp を外した）の探索。
@@ -176,8 +195,13 @@ jobs:
         # （10/04 は4モデルで 94分。logit が最長で 29〜74分）。210分なら余裕がある
         timeout-minutes: 210
         continue-on-error: true
+        env:
+          ONLY: ${{ steps.scope.outputs.only }}
         run: |
-          python3 research/exp/e15_tune_all.py 2>&1 | tail -25
+          # only があればそのモデルだけ（名前はカンマ区切り → 引数）。ラベル違いのモデル（lgbm_k15 / lgbm_k18）も
+          # 既定の対象に入っている（models.VARIANTS。見込み +13分 × 2）
+          read -r -a ONLY_ARGS <<< "${ONLY//,/ }"
+          python3 research/exp/e15_tune_all.py "${ONLY_ARGS[@]}" 2>&1 | tail -25
 
       # 追加モデル（models.EXTRA）を学習して research/model/models/<algo>/ に置く。
       # train_production.py（基準モデル）とは別のスクリプトなので、
@@ -186,7 +210,14 @@ jobs:
         # 4モデル × 10窓の out-of-fold ＋ 全期間モデル。実測143秒
         timeout-minutes: 30
         continue-on-error: true
-        run: python3 research/train_multi.py 2>&1 | tee -a retrain.log
+        env:
+          ONLY: ${{ steps.scope.outputs.only }}
+        run: |
+          if [ -n "$ONLY" ]; then
+            python3 research/train_multi.py --models "$ONLY" 2>&1 | tee -a retrain.log
+          else
+            python3 research/train_multi.py 2>&1 | tee -a retrain.log
+          fi
 
       # 1モデルの失敗で他を止めない作りにしたぶん、静かに欠けたまま
       # 運用が続くおそれがある。どれがいつ学習されたのかを毎週要約に出す
@@ -206,7 +237,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          bash scripts/gh_release_upload.sh data-raw research/model/model.txt research/model/oof.parquet
+          # 基準モデルを作らない回（only）には model.txt が無い。あるときだけ上げる
+          if [ -f research/model/model.txt ] && [ -f research/model/oof.parquet ]; then
+            bash scripts/gh_release_upload.sh data-raw research/model/model.txt research/model/oof.parquet
+          else
+            echo "基準モデルは作っていないので上げない"
+          fi
           # 5モデルぶん。ファイル名が algo ごとに衝突するので、
           # Release のアセット名に algo を入れて上げ直す
           shopt -s nullglob

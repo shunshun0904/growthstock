@@ -119,6 +119,7 @@ export function pctColor(pct) {
  */
 export const MODEL_SHORT = {
   lgbm: 'LGB', xgb: 'XGB', cat: 'CAT', logit: 'LR', mlp: 'NN', rf: 'RF',
+  lgbm_k15: 'L15', lgbm_k18: 'L18',
 };
 
 /**
@@ -135,9 +136,12 @@ export const MODEL_SHORT = {
 export const MODEL_FAMILY = {
   lgbm: 'tree', xgb: 'tree', cat: 'tree', rf: 'tree',
   logit: 'other', mlp: 'other',
+  // ラベル違い（到達しきい値 1.5σ / 1.8σ で学習した LightGBM。research/models.py の VARIANTS）。
+  // 本番の合議（BOOST）には入れない。「厳しいラベルでも上位か」を並べて見るためのもの
+  lgbm_k15: 'variant', lgbm_k18: 'variant',
 };
 
-export const FAMILY_JA = { tree: '決定木系', other: '木以外' };
+export const FAMILY_JA = { tree: '決定木系', other: '木以外', variant: 'ラベル違い' };
 
 /**
  * 候補1件を「モデル別に並べられる形」にする。
