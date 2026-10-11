@@ -181,7 +181,8 @@ class TestReport(unittest.TestCase):
                "params": {a: {"n_estimators": 10} for a in ("K12", "K15")}, "prod": prod, "shifted": shifted}
         stamp = {"built_utc": "2026-10-11 12:00 UTC", "rows": len(df), "date_max": "2025-12-30", "ks": [1.2, 1.5], "labels": []}
         with mock.patch("builtins.print"):
-            s = E.report(res, df, [1.2, 1.5], [0], stamp)
+            s = E.report(res, df, [1.2, 1.5], [0], stamp, "lgbm")
+        self.assertEqual(s["algo"], "lgbm")
         self.assertEqual(set(s["labels"]), {"K12", "K15"})
         self.assertLess(s["labels"]["K15"]["pos_rate"], s["labels"]["K12"]["pos_rate"])
         self.assertIn("y_K15", s["production_oof"]["K12"])
@@ -191,13 +192,13 @@ class TestReport(unittest.TestCase):
         self.assertIn("K15->K12", s["rank"])
         self.assertIn("K12->K15", s["rank"])
         self.assertTrue(0 <= s["rank"]["K15->K12"]["top10_in_b"] <= 1)
-        self.assertTrue(os.path.exists(os.path.join(self.dir, "e78test_k_rank_agreement.csv")))
+        self.assertTrue(os.path.exists(os.path.join(self.dir, "e78test_k_lgbm_rank_agreement.csv")))
         kinds = {r["kind"] for r in s["shifts"]}
         self.assertTrue({"thr95", "thr90", "match95", "match90", "top10_within", "within_date"} <= kinds)
         self.assertEqual({r["arm"] for r in s["monthly"]}, {"K12", "K15"})
-        with open(os.path.join(self.dir, "e78test_k_summary.json"), encoding="utf-8") as fh:
+        with open(os.path.join(self.dir, "e78test_k_lgbm_summary.json"), encoding="utf-8") as fh:
             self.assertIn("monthly", json.load(fh))
-        self.assertTrue(os.path.exists(os.path.join(self.dir, "e78test_k_monthly.csv")))
+        self.assertTrue(os.path.exists(os.path.join(self.dir, "e78test_k_lgbm_monthly.csv")))
 
 
 class TestMain(unittest.TestCase):
@@ -207,6 +208,8 @@ class TestMain(unittest.TestCase):
                 E.main(["--ks", "1.5,1.8"])
             with self.assertRaises(SystemExit):
                 E.main(["--ks", "1.2,1.21"])
+            with self.assertRaises(SystemExit):
+                E.main(["--algos", "mlp"])
 
 
 if __name__ == "__main__":

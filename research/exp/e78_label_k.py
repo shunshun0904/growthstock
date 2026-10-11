@@ -32,7 +32,9 @@ MA5>=MA20 は同じ）。k=1.2 の引き直しが本番のラベルと全行一�
      K12 のラベルでの正例率。窓ごとの K15 − K12 の差
   3〜5 は窓のずらし 0/2/4か月 × 種3つの平均（実験68 と同じ作り）。
 
-    exp=e78_label_k.py
+    exp=e78_label_k.py args="--ks 1.2,1.5,1.8"                 （lgbm）
+    exp=e78_label_k.py args="--ks 1.2,1.5,1.8 --algos xgb"     （運用者の指示 2026-10-11「他のモデルも」）
+    exp=e78_label_k.py args="--ks 1.2,1.5,1.8 --algos cat"
 試運転: exp=e78_label_k.py args="--tag e78smoke --n-trials 2 --shifts 0"
 
 結果（2026-10-11、run 38136357178 / 38139194190、docs/MODEL_ADOPTION_RULES.md §34）: K15 は正例率 13.0%（現行 17.0%）。
@@ -67,7 +69,7 @@ import e53_objective_tuning as E53  # noqa: E402
 import e68_edinet_ab as E68  # noqa: E402
 
 log = E68.log
-ALGO = "lgbm"
+DEFAULT_ALGOS = "lgbm"                  # --algos で xgb / cat / logit も（E68.ALGOS）
 OUTCOME = lab.OUTCOME                       # ret_o1_20
 K0 = float(B.VOL_NORM_K)                    # 1.2
 DEFAULT_KS = "1.2,1.5"
@@ -314,7 +316,7 @@ def label_report(df: pd.DataFrame, ks: list) -> dict:
 # --------------------------------------------------------------------------- #
 # 本体
 # --------------------------------------------------------------------------- #
-def run(df: pd.DataFrame, ks: list, cols: list, cutoff, n_trials: int, stamp: dict, shifts: list,
+def run(algo: str, df: pd.DataFrame, ks: list, cols: list, cutoff, n_trials: int, stamp: dict, shifts: list,
         compute: bool = True) -> dict | None:
     arms = [arm_name(k) for k in ks]
     frames = {}
@@ -325,34 +327,34 @@ def run(df: pd.DataFrame, ks: list, cols: list, cutoff, n_trials: int, stamp: di
         frames[a] = f
     recs, params = {}, {}
     for a in arms:
-        recs[a] = E68.tune(ALGO, a, frames[a], cols, cutoff, n_trials, stamp, compute)
+        recs[a] = E68.tune(algo, a, frames[a], cols, cutoff, n_trials, stamp, compute)
         if recs[a] is None:
             return None
         params[a] = recs[a]["params"]
     prod = {}
     for a in arms:
-        o = E68.oof(ALGO, a, frames[a], cols, params[a], 0, (E68.PROD_SEED,), compute)
+        o = E68.oof(algo, a, frames[a], cols, params[a], 0, (E68.PROD_SEED,), compute)
         if o is None:
             return None
         prod[a] = attach_eval_cols(o, df, arms)
     shifted = {}
     for sh in shifts:
         for a in arms:
-            o = E68.oof(ALGO, a, frames[a], cols, params[a], sh, E68.SEEDS[ALGO], compute)
+            o = E68.oof(algo, a, frames[a], cols, params[a], sh, E68.SEEDS[algo], compute)
             if o is None:
                 return None
             shifted[(sh, a)] = attach_eval_cols(o, df, arms)
     return {"recs": recs, "params": params, "prod": prod, "shifted": shifted}
 
 
-def report(res: dict, df: pd.DataFrame, ks: list, shifts: list, stamp: dict) -> dict:
+def report(res: dict, df: pd.DataFrame, ks: list, shifts: list, stamp: dict, algo: str = "lgbm") -> dict:
     arms = [arm_name(k) for k in ks]
     names = {arm_name(k): arm_label(k) for k in ks}
     ycols = [f"y_{a}" for a in arms]
-    summary = {"data": stamp, "labels": label_report(df, ks), "tuning": {}, "production_oof": {}, "windows": {},
+    summary = {"algo": algo, "data": stamp, "labels": label_report(df, ks), "tuning": {}, "production_oof": {}, "windows": {},
                "rank": {}, "shifts": {}, "monthly": {}, "summary": {}}
 
-    print(f"\n■ 2. 探索の CV（{E68.CV_SCHEME} 5分割・自分のラベル。楽観側に出る）と本番と同じ OOF（ずらし0・種42）")
+    print(f"\n■ 2. [{algo}] 探索の CV（{E68.CV_SCHEME} 5分割・自分のラベル。楽観側に出る）と本番と同じ OOF（ずらし0・種42）")
     print(f"  {'腕':<16}{'CV PR':>8}{'±SD':>8}{'CV ROC':>8}{'秒':>6}  本番と同じ OOF: "
           + "  ".join(f"[{names[b]}のラベル] PR / リフト / ROC" for b in arms))
     for a in arms:
@@ -379,7 +381,7 @@ def report(res: dict, df: pd.DataFrame, ks: list, shifts: list, stamp: dict) -> 
                                      "roc": float(r["roc"]), "rate": float(r["rate"])})
     auc = pd.DataFrame(rows_auc)
     if len(auc):
-        auc.to_csv(E68.path("auc_by_window.csv"), index=False)
+        auc.to_csv(E68.path(f"{algo}_auc_by_window.csv"), index=False)
         print(f"\n■ 2b. 窓ごとの分離力（ずらし {'/'.join(map(str, shifts))}か月 × 種3つの平均。同じラベルで測った {BASE} との差）")
         print(f"  {'':<24}{'前':>9}{'後':>9}{'差の平均':>10}{'SE':>9}{'上の窓':>9}{'同じ':>6}")
         for lc in ycols:
@@ -415,7 +417,7 @@ def report(res: dict, df: pd.DataFrame, ks: list, shifts: list, stamp: dict) -> 
                 print(f"  {a + ' → ' + b:<14}{avg['rho_all']:>10.3f}{avg['rho_day']:>8.3f}{avg['top5_in_b']*100:>13.0f}%"
                       f"{avg['top5_pct_b']:>10.3f}{avg['top10_in_b']*100:>14.0f}%{avg['top10_pct_b']:>9.3f}"
                       f"{avg['month_overlap']*100:>9.0f}%")
-        pd.DataFrame(rows_rank).to_csv(E68.path("rank_agreement.csv"), index=False)
+        pd.DataFrame(rows_rank).to_csv(E68.path(f"{algo}_rank_agreement.csv"), index=False)
 
     rows_thr, rows_month = [], []
     for sh in shifts:
@@ -499,9 +501,9 @@ def report(res: dict, df: pd.DataFrame, ks: list, shifts: list, stamp: dict) -> 
     thr = pd.DataFrame(rows_thr)
     mo = pd.DataFrame(rows_month)
     if len(thr):
-        thr.to_csv(E68.path("edges.csv"), index=False)
+        thr.to_csv(E68.path(f"{algo}_edges.csv"), index=False)
     if len(mo):
-        mo.to_csv(E68.path("monthly.csv"), index=False)
+        mo.to_csv(E68.path(f"{algo}_monthly.csv"), index=False)
     summary["shifts"] = thr.to_dict(orient="records") if len(thr) else []
     summary["monthly"] = mo.to_dict(orient="records") if len(mo) else []
 
@@ -534,7 +536,7 @@ def report(res: dict, df: pd.DataFrame, ks: list, shifts: list, stamp: dict) -> 
                                                       "hit10": float(h["hit10"].mean()), "bad10": float(h["bad10"].mean()),
                                                       "diff_mean": float(h["diff_mean"].mean()) if a != BASE else 0.0,
                                                       "diff_wins": int(h["diff_wins"].sum()), "diff_n": int(h["diff_n"].sum())}
-    with open(E68.path("summary.json"), "w", encoding="utf-8") as fh:
+    with open(E68.path(f"{algo}_summary.json"), "w", encoding="utf-8") as fh:
         json.dump(summary, fh, ensure_ascii=False, indent=1, default=float)
     return summary
 
@@ -542,6 +544,7 @@ def report(res: dict, df: pd.DataFrame, ks: list, shifts: list, stamp: dict) -> 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="実験78: 目的変数の到達しきい値 k を 1.2σ → 1.5σ にした lgbm（探索し直し）")
     ap.add_argument("--ks", default=DEFAULT_KS, help="比べる k（σ の倍数）。現行 1.2 は必ず含める")
+    ap.add_argument("--algos", default=DEFAULT_ALGOS, help="この回に計算するモデル（lgbm / xgb / cat / logit。, 区切り）")
     ap.add_argument("--n-trials", type=int, default=50)
     ap.add_argument("--shifts", default="0,2,4")
     ap.add_argument("--tag", default=TAG)
@@ -558,13 +561,17 @@ def main(argv=None) -> int:
     E68.DEADLINE = time.time() + args.budget_min * 60 if args.budget_min > 0 else None
     E68.TIMED_OUT = False
     shifts = [int(x) for x in args.shifts.split(",") if x.strip()]
+    algos = [a for a in args.algos.split(",") if a]
+    bad = [a for a in algos if a not in E68.ALGOS]
+    if bad:
+        raise SystemExit(f"知らないモデル: {bad}（使えるもの {E68.ALGOS}）")
     cols = F.columns(F.DEFAULT_PRESET)
 
     print("=" * 78)
-    print("実験78 目的変数の到達しきい値 k（1.2σ → 1.5σ）を変えた lgbm（腕ごとに探索し直し・本番と同じ OOF・32窓・実収益）")
+    print("実験78 目的変数の到達しきい値 k（1.2σ → 1.5σ / 1.8σ）を変えたモデル（腕ごとに探索し直し・本番と同じ OOF・32窓・実収益）")
     print(f"  腕: " + " / ".join(arm_label(k) for k in ks) + f" / 列 {F.DEFAULT_PRESET} {len(cols)} / "
-          f"探索 {args.n_trials}試行 × {E68.N_SPLITS}分割（{E68.CV_SCHEME}）/ ずらし {shifts}か月 / 種 {E68.SEEDS[ALGO]} / "
-          f"保存 {E68.RUN}_*")
+          f"探索 {args.n_trials}試行 × {E68.N_SPLITS}分割（{E68.CV_SCHEME}）/ ずらし {shifts}か月 / この回のモデル {algos} / "
+          f"種 {E68.SEEDS} / 保存 {E68.RUN}_*")
     print("  特徴量は変えない（目的変数の k に連動する特徴量は無い。rise_need / end_need は特徴量に入れていない）")
     print("=" * 78)
 
@@ -575,14 +582,15 @@ def main(argv=None) -> int:
     cutoff, _, _ = T.holdout_bounds(df["Date"], T.HOLDOUT_MONTHS, T.EMBARGO_DAYS)
     print(f"  行 {len(df):,}（{df['Date'].min().date()} 〜 {df['Date'].max().date()}）。探索の期間（〜{cutoff.date()}）では "
           f"{(df['Date'] <= cutoff).sum():,}行")
-    t0 = time.time()
-    res = run(df, ks, cols, cutoff, args.n_trials, stamp, shifts)
-    log(f"[{ALGO}] {'そろった' if res else '途中（続きは次の回）'} / {time.time()-t0:.0f}秒")
-    if res is None:
-        label_report(df, ks)
-        log("時間の上限で止めた。同じ引数でもう1回回すと、保存済みの探索・out-of-fold の続きから")
-        return 0
-    report(res, df, ks, shifts, stamp)
+    for algo in algos:
+        t0 = time.time()
+        res = run(algo, df, ks, cols, cutoff, args.n_trials, stamp, shifts)
+        log(f"[{algo}] {'そろった' if res else '途中（続きは次の回）'} / {time.time()-t0:.0f}秒")
+        if res is None:
+            label_report(df, ks)
+            log("時間の上限で止めた。同じ引数でもう1回回すと、保存済みの探索・out-of-fold の続きから")
+            break
+        report(res, df, ks, shifts, stamp, algo)
     log(f"記録: {E68.OOF_DIR}/{E68.RUN}_*")
     return 0
 
