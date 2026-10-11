@@ -119,7 +119,9 @@ export function pctColor(pct) {
  */
 export const MODEL_SHORT = {
   lgbm: 'LGB', xgb: 'XGB', cat: 'CAT', logit: 'LR', mlp: 'NN', rf: 'RF',
-  lgbm_k15: 'L15', lgbm_k18: 'L18',
+  // ラベル違い（research/models.py の SHORT と同じ。元の記号の頭 + k）
+  lgbm_k15: 'L15', xgb_k15: 'X15', cat_k15: 'C15', logit_k15: 'LR15',
+  lgbm_k18: 'L18', xgb_k18: 'X18', cat_k18: 'C18', logit_k18: 'LR18',
 };
 
 /**
@@ -136,12 +138,14 @@ export const MODEL_SHORT = {
 export const MODEL_FAMILY = {
   lgbm: 'tree', xgb: 'tree', cat: 'tree', rf: 'tree',
   logit: 'other', mlp: 'other',
-  // ラベル違い（到達しきい値 1.5σ / 1.8σ で学習した LightGBM。research/models.py の VARIANTS）。
-  // 本番の合議（BOOST）には入れない。「厳しいラベルでも上位か」を並べて見るためのもの
-  lgbm_k15: 'variant', lgbm_k18: 'variant',
+  // ラベル違い（到達しきい値 1.5σ / 1.8σ のラベルで学習した4学習器。research/models.py の VARIANTS）。
+  // 本番の合議（BOOST）には入れない。「厳しいラベルでも上位か」を並べて見るためのもので、
+  // k ごとに塊を分ける（1.5σ の4本、1.8σ の4本。同じ k の中の並びは本番と同じ LGB / XGB / CAT / LR）
+  lgbm_k15: 'k15', xgb_k15: 'k15', cat_k15: 'k15', logit_k15: 'k15',
+  lgbm_k18: 'k18', xgb_k18: 'k18', cat_k18: 'k18', logit_k18: 'k18',
 };
 
-export const FAMILY_JA = { tree: '決定木系', other: '木以外', variant: 'ラベル違い' };
+export const FAMILY_JA = { tree: '決定木系', other: '木以外', k15: 'ラベル1.5σ', k18: 'ラベル1.8σ' };
 
 /**
  * 候補1件を「モデル別に並べられる形」にする。

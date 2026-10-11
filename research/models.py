@@ -79,17 +79,20 @@ BASELINE = "lgbm"
 #: 画面の LightGBM も本番モデルに一本化する。
 EXTRA = tuple(a for a in ALGOS if a != BASELINE)
 
-#: ラベル違いのモデル（tuning_multi.VARIANTS。運用者の指示 2026-10-11「画面にも 1.5σ・1.8σ の予測を」）。
-#: 本番と同じ LightGBM・同じ239列で、目的変数の到達しきい値 k だけ変えたラベルで学習したもの。
-#: 本番の合議（ALGOS。画面の BOOST と live_track の規則）には入れない。画面・スプレッドシートに並べ、
-#: 「厳しいラベルでも上位か」を見るためのもの。本番のラベルは変えない（docs/MODEL_ADOPTION_RULES.md §34）
+#: ラベル違いのモデル（tuning_multi.VARIANTS。運用者の指示 2026-10-11「画面にも 1.5σ・1.8σ の予測を」。同日夜に
+#: 「切り替えではなく追加」で xgb / cat / logit の版も足して8本）。本番と同じ学習器・同じ239列で、目的変数の到達
+#: しきい値 k だけ変えたラベルで学習したもの。本番の合議（ALGOS。画面の BOOST と live_track の規則）には入れない。
+#: 画面・スプレッドシートに並べ、「厳しいラベルでも上位か」を見るためのもの。本番のラベルは変えない
+#: （docs/MODEL_ADOPTION_RULES.md §34、docs/MODEL_LINEUP.md）
 VARIANTS = TM.VARIANTS
 base_algo = TM.base_algo
 label_k = TM.label_k
+variants_of = TM.variants_of
 
-#: 画面・スプレッドシートに並べる順（本番の4モデル → ラベル違い）
+#: 画面・スプレッドシートに並べる順（本番の4モデル → 1.5σ の4本 → 1.8σ の4本）
 LINEUP = ALGOS + tuple(VARIANTS)
-#: train_multi.py が学習する既定の対象（基準モデル以外 + ラベル違い）
+#: train_multi.py が作れるもの全部（基準モデル以外 + ラベル違い）。既定の対象は EXTRA（日曜の週次）で、
+#: ラベル違いは土曜の Retrain Weekly が --models で名指しして作る（2026-10-11 夜。8本を日曜に足すと長すぎる）
 MULTI = EXTRA + tuple(VARIANTS)
 
 #: 画面に出す日本語名。棒グラフのラベルに使う
@@ -99,8 +102,10 @@ JA = {
     "cat": "CatBoost",
     "logit": "ロジスティック回帰",
     "mlp": "ニューラルネット",
-    "lgbm_k15": "LightGBM（1.5σ）",
-    "lgbm_k18": "LightGBM（1.8σ）",
+    "lgbm_k15": "LightGBM（1.5σ）", "xgb_k15": "XGBoost（1.5σ）", "cat_k15": "CatBoost（1.5σ）",
+    "logit_k15": "ロジスティック回帰（1.5σ）",
+    "lgbm_k18": "LightGBM（1.8σ）", "xgb_k18": "XGBoost（1.8σ）", "cat_k18": "CatBoost（1.8σ）",
+    "logit_k18": "ロジスティック回帰（1.8σ）",
 }
 
 #: 棒グラフ・スプレッドシートの列名に使う短い記号。
@@ -111,7 +116,9 @@ JA = {
 SHORT = {
     "lgbm": "LGB", "xgb": "XGB", "cat": "CAT",
     "logit": "LR", "mlp": "NN", "rf": "RF",
-    "lgbm_k15": "L15", "lgbm_k18": "L18",
+    # ラベル違い: 元の学習器の記号の頭 + k（LGB → L、XGB → X、CAT → C、LR はそのまま）
+    "lgbm_k15": "L15", "xgb_k15": "X15", "cat_k15": "C15", "logit_k15": "LR15",
+    "lgbm_k18": "L18", "xgb_k18": "X18", "cat_k18": "C18", "logit_k18": "LR18",
 }
 
 #: それぞれ何を見ているか。画面の説明に使う
@@ -122,7 +129,13 @@ NOTE = {
     "logit": "線形モデル。特徴量の足し算で判断するので、木とは外す銘柄が違う",
     "mlp": "ニューラルネット。滑らかな交互作用を見る。木とも線形とも違う",
     "lgbm_k15": "本番と同じ LightGBM を、到達しきい値 1.5σ（必要な上昇率が本番の 1.25倍）のラベルで学習。候補を絞る検証用",
+    "xgb_k15": "本番と同じ XGBoost を、到達しきい値 1.5σ のラベルで学習。検証用",
+    "cat_k15": "本番と同じ CatBoost を、到達しきい値 1.5σ のラベルで学習。検証用",
+    "logit_k15": "本番と同じロジスティック回帰を、到達しきい値 1.5σ のラベルで学習。検証用（線形なので並びは本番とほぼ同じ）",
     "lgbm_k18": "本番と同じ LightGBM を、到達しきい値 1.8σ（同 1.5倍）のラベルで学習。候補を絞る検証用",
+    "xgb_k18": "本番と同じ XGBoost を、到達しきい値 1.8σ のラベルで学習。検証用",
+    "cat_k18": "本番と同じ CatBoost を、到達しきい値 1.8σ のラベルで学習。検証用",
+    "logit_k18": "本番と同じロジスティック回帰を、到達しきい値 1.8σ のラベルで学習。検証用（線形なので並びは本番とほぼ同じ）",
 }
 
 MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model")

@@ -33,7 +33,7 @@ on:
         options: ['yes', 'no']
         default: 'yes'
       only:
-        description: '画面に並べる追加モデルのうち、これだけ探索・学習する（例: lgbm_k15,lgbm_k18。空なら全部。指定すると本番の基準モデルは触らない）'
+        description: '画面に並べる追加モデルのうち、これだけ探索・学習する（例: lgbm_k15,xgb_k15,cat_k15,logit_k15。空なら本番の4モデル。ラベル違いの8本は指定したときだけ。指定すると本番の基準モデルは触らない）'
         required: false
         default: ''
 
@@ -198,12 +198,16 @@ jobs:
         env:
           ONLY: ${{ steps.scope.outputs.only }}
         run: |
-          # only があればそのモデルだけ（名前はカンマ区切り → 引数）。ラベル違いのモデル（lgbm_k15 / lgbm_k18）も
-          # 既定の対象に入っている（models.VARIANTS。見込み +13分 × 2）
+          # only があればそのモデルだけ（名前はカンマ区切り → 引数）。空なら本番の追加モデル（xgb / cat / logit）。
+          # ラベル違いのモデル（models.VARIANTS。1.5σ / 1.8σ × 4学習器の8本）は既定に入れない。土曜に Routine が
+          # only=lgbm_k15,xgb_k15,cat_k15,logit_k15（09:10 JST）と only=lgbm_k18,xgb_k18,cat_k18,logit_k18（14:10 JST）の
+          # 2回に分けて回す（実験78 の実測: 探索 1本 lgbm 13分・cat 12〜17分・logit 21〜26分・xgb 25〜35分。
+          # 1回あたり 1.5〜2時間。8本を日曜に足すと本番の探索と合わせて 6時間に収まらない。2026-10-11 夜）
           read -r -a ONLY_ARGS <<< "${ONLY//,/ }"
           python3 research/exp/e15_tune_all.py "${ONLY_ARGS[@]}" 2>&1 | tail -25
 
-      # 追加モデル（models.EXTRA）を学習して research/model/models/<algo>/ に置く。
+      # 追加モデル（models.EXTRA。only があればその名前。ラベル違いは only のときだけ）を学習して
+      # research/model/models/<algo>/ に置く。
       # train_production.py（基準モデル）とは別のスクリプトなので、
       # ここが丸ごと失敗しても日次予測は動き続ける。
       - name: Train extra models

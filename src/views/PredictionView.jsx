@@ -413,7 +413,7 @@ function ModelStrip({ rows, agree, n, agreeK, nK }) {
           </>
         )}
         {Number.isFinite(agreeK) && nK > 0 && (
-          <span className="sub" title="ラベル違い（1.5σ / 1.8σ で学習した LightGBM）のうち、上位10%と見た数。本番の一致には数えない">
+          <span className="sub" title="ラベル違い（到達しきい値 1.5σ / 1.8σ のラベルで学習した各モデル）のうち、上位10%と見た数。本番の一致には数えない">
             <span className="sep">/</span>ラベル違い <b className="num">{agreeK}/{nK}</b>
           </span>
         )}
@@ -715,7 +715,7 @@ function ModelLineup({ models }) {
       </div>
       <p className="sub">
         探索PR-AUC は探索時の内側検証（5分割・50試行・木200本固定）の値です。
-        ラベル違い（L15 / L18）はラベルが違うので、この値を他のモデルと比べられません。
+        ラベル違い（1.5σ / 1.8σ。記号の末尾が 15 / 18）はラベルが違うので、この値を本番のモデルと比べられません。
         運用は上位だけを買うので、この順位がそのまま運用の優劣にはなりません。
         どのモデルを重く見るかは、上の「スコア帯の実績」と
         「過去に出した銘柄のその後」で確かめてください。

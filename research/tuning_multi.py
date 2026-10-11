@@ -128,12 +128,27 @@ TREE_ALGOS = ("lgbm", "xgb", "cat", "rf")
 #: 変えたラベルで学習する。本番の合議（models.ALGOS）には入れず、画面とスプレッドシートに並べる。
 #: 名前が探索の記録（multi_params.json）・保存先（research/model/models/<名前>/）・Release のアセット名の鍵。
 #: k の根拠は実験78（docs/MODEL_ADOPTION_RULES.md §34）。本番のラベル（build_dataset.VOL_NORM_K = 1.2）は変えない
-#: xgb / cat / logit の 1.5σ・1.8σ（例: {"base": "xgb", "k": 1.5}）は、実験78 の結果を見てから足す（運用者の指示 2026-10-11
-#: 「ロジスティックも当然」）。足すときは週次の再学習の時間（探索 1本 20〜60分）を見て、探索を別のワークフローに分ける
+#: 2026-10-11 夜、実験78 の4モデルの結果（§34）を見た運用者の指示で xgb / cat / logit の 1.5σ・1.8σ も足した（計8本。
+#: 「切り替えではなく追加」「ロジスティックも当然」）。1.5σ は木のモデル（lgbm / xgb / cat）で分離力が少し上がる。1.8σ と
+#: ロジスティック回帰の版は分離力の根拠が無く、仮説「厳しいラベルで上位なら緩いラベルでも上位」の確認とクラスタリングの
+#: 特徴量のための追加。並びは k ごと（1.5σ の4本 → 1.8σ の4本。画面・シートの順）。
+#: 探索・学習は土曜の Retrain Weekly 2回（only=<1.5σ の4本> / only=<1.8σ の4本>。各 1.5〜2時間）で行い、日曜の週次
+#: （本番の4モデル）には含めない（e15_tune_all.py / train_multi.py の既定に入れない。.github/workflows/retrain-weekly.yml）
 VARIANTS: Dict[str, Dict] = {
     "lgbm_k15": {"base": "lgbm", "k": 1.5},
+    "xgb_k15": {"base": "xgb", "k": 1.5},
+    "cat_k15": {"base": "cat", "k": 1.5},
+    "logit_k15": {"base": "logit", "k": 1.5},
     "lgbm_k18": {"base": "lgbm", "k": 1.8},
+    "xgb_k18": {"base": "xgb", "k": 1.8},
+    "cat_k18": {"base": "cat", "k": 1.8},
+    "logit_k18": {"base": "logit", "k": 1.8},
 }
+
+
+def variants_of(k: float) -> Tuple[str, ...]:
+    """到達しきい値 k のラベル違いのモデル名（土曜の Retrain Weekly の only= に渡す組）。"""
+    return tuple(a for a, v in VARIANTS.items() if float(v["k"]) == float(k))
 
 
 def base_algo(algo: str) -> str:

@@ -97,8 +97,9 @@ def why_retune(prev: dict, train_to: str, sig: str,
 def main() -> int:
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
     force = "--force" in sys.argv
-    # RETIRED（2026-10-09 に外した mlp）は探索しない。ラベル違いのモデル（TM.VARIANTS）は既定で探索する
-    algos = args or [a for a in TM.ALGOS if a not in M.RETIRED] + list(TM.VARIANTS)
+    # RETIRED（2026-10-09 に外した mlp）は探索しない。ラベル違いのモデル（TM.VARIANTS。8本）は既定に入れず、
+    # 名指ししたときだけ探索する（土曜の Retrain Weekly が only= で回す。2026-10-11 夜）
+    algos = args or [a for a in TM.ALGOS if a not in M.RETIRED]
     unknown = [a for a in algos if a not in TM.ALGOS and a not in TM.VARIANTS]
     if unknown:
         raise SystemExit(f"知らないモデル: {unknown}（{', '.join(list(TM.ALGOS) + list(TM.VARIANTS))} のいずれか）")

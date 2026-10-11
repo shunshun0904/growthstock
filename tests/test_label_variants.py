@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-ラベル違いのモデル（到達しきい値 1.5σ / 1.8σ で学習した LightGBM。tuning_multi.VARIANTS。運用者の指示 2026-10-11）。
+ラベル違いのモデル（到達しきい値 1.5σ / 1.8σ で学習した lgbm / xgb / cat / logit の8本。tuning_multi.VARIANTS。
+運用者の指示 2026-10-11。同日夜に xgb / cat / logit の版を足した）。
 
 - 名前と元の学習器の対応（base_algo / label_k / is_tree）。探索・学習は元の学習器（lgbm）で組み、study 名は別
-- 画面・スプレッドシートの並び（models.LINEUP）と train_multi の既定の対象（models.MULTI）。本番の合議（ALGOS）には入れない
+- 画面・スプレッドシートの並び（models.LINEUP。1.5σ の4本 → 1.8σ の4本）。train_multi の既定は EXTRA（日曜）で、
+  ラベル違いは名指ししたときだけ（土曜）。本番の合議（ALGOS）には入れない
 - ラベルの引き直し（build_dataset.rise_label_for_k）: k = 1.2 なら本番のラベルと一致、k を上げると正例は部分集合
 - train_multi.untuned は木の本数をラベル違いでも見る
 - predict_daily.agreement: 本番の一致（ALGOS）とラベル違いの一致（VARIANTS）を別に数える
@@ -36,24 +38,31 @@ import tuning_multi as TM  # noqa: E402
 
 class TestNames(unittest.TestCase):
     def test_variants(self):
-        self.assertEqual(list(TM.VARIANTS), ["lgbm_k15", "lgbm_k18"])
-        self.assertEqual(TM.base_algo("lgbm_k15"), "lgbm")
+        k15 = ("lgbm_k15", "xgb_k15", "cat_k15", "logit_k15")
+        k18 = ("lgbm_k18", "xgb_k18", "cat_k18", "logit_k18")
+        self.assertEqual(tuple(TM.VARIANTS), k15 + k18)                            # 1.5σ の4本 → 1.8σ の4本
+        self.assertEqual(TM.variants_of(1.5), k15)
+        self.assertEqual(TM.variants_of(1.8), k18)
+        for a in k15 + k18:
+            self.assertEqual(TM.base_algo(a), a.split("_")[0])
+            self.assertEqual(TM.label_k(a), 1.5 if a in k15 else 1.8)
+            self.assertEqual(TM.is_tree(a), a.split("_")[0] in TM.TREE_ALGOS)
         self.assertEqual(TM.base_algo("xgb"), "xgb")
-        self.assertEqual(TM.label_k("lgbm_k15"), 1.5)
-        self.assertEqual(TM.label_k("lgbm_k18"), 1.8)
         self.assertIsNone(TM.label_k("lgbm"))
-        self.assertTrue(TM.is_tree("lgbm_k15"))
         self.assertFalse(TM.is_tree("logit"))
         self.assertEqual(TM.preprocess_version("lgbm_k15"), "")                  # 木なので前処理なし
+        self.assertEqual(TM.preprocess_version("logit_k15"), TM.preprocess_version("logit"))  # 線形は元の前処理の版
         self.assertEqual(M.VARIANTS, TM.VARIANTS)
-        self.assertEqual(M.LINEUP, M.ALGOS + ("lgbm_k15", "lgbm_k18"))
-        self.assertEqual(M.MULTI, M.EXTRA + ("lgbm_k15", "lgbm_k18"))
-        self.assertNotIn("lgbm_k15", M.ALGOS)                                      # 本番の合議には入れない
+        self.assertEqual(M.LINEUP, M.ALGOS + k15 + k18)
+        self.assertEqual(M.MULTI, M.EXTRA + k15 + k18)
         for a in M.VARIANTS:
+            self.assertNotIn(a, M.ALGOS)                                           # 本番の合議には入れない
             self.assertIn(a, M.JA)
             self.assertIn(a, M.SHORT)
             self.assertIn(a, M.NOTE)
-        self.assertEqual((M.SHORT["lgbm_k15"], M.SHORT["lgbm_k18"]), ("L15", "L18"))
+        self.assertEqual([M.SHORT[a] for a in k15], ["L15", "X15", "C15", "LR15"])
+        self.assertEqual([M.SHORT[a] for a in k18], ["L18", "X18", "C18", "LR18"])
+        self.assertEqual(len(set(M.SHORT.values())), len(M.SHORT))                 # 記号は重ならない（シートの列名）
 
     def test_build_and_study_name(self):
         import lightgbm as lgb
@@ -71,20 +80,25 @@ class TestNames(unittest.TestCase):
         self.assertTrue(v15.startswith("lgbm_k15_") and v15.endswith(f"_t{TM.N_ESTIMATORS}"))   # 木の本数も入る
 
     def test_logit_variant_uses_the_base_preprocessing(self):
-        """ロジスティック回帰の 1.5σ 版（実験78 の結果を見て足す予定）は、logit の前処理の版（v2）で組む。"""
-        from unittest import mock
-        with mock.patch.dict(TM.VARIANTS, {"logit_k15": {"base": "logit", "k": 1.5}}):
-            self.assertEqual(TM.base_algo("logit_k15"), "logit")
-            self.assertFalse(TM.is_tree("logit_k15"))
-            self.assertEqual(TM.preprocess_version("logit_k15"), TM.preprocess_version("logit"))
-            self.assertEqual(TM.preprocess_version("logit_k15"), "v2")
+        """ロジスティック回帰の 1.5σ / 1.8σ 版は、logit の前処理の版（v2）で組む。"""
+        for a in ("logit_k15", "logit_k18"):
+            self.assertEqual(TM.base_algo(a), "logit")
+            self.assertFalse(TM.is_tree(a))
+            self.assertEqual(TM.preprocess_version(a), TM.preprocess_version("logit"))
+            self.assertEqual(TM.preprocess_version(a), "v2")
             cols = F.columns(F.DEFAULT_PRESET)
-            name = TM.study_name("logit_k15", 5, "2025-08-08", cols)
-            self.assertTrue(name.startswith("logit_k15_") and name.endswith("_v2"))     # 木の本数は入らず、前処理の版が入る
-            y = np.array([0, 1, 0, 1, 1, 0])
-            m = TM.build("logit_k15", {"C": 0.5, "penalty": "l2"}, y, ["a", "b"])
-            self.assertTrue(hasattr(m, "predict_proba"))
-            self.assertEqual(type(m).__name__, "Pipeline")
+            name = TM.study_name(a, 5, "2025-08-08", cols)
+            self.assertTrue(name.startswith(a + "_") and name.endswith("_v2"))          # 木の本数は入らず、前処理の版が入る
+            self.assertNotEqual(name, TM.study_name("logit", 5, "2025-08-08", cols))
+        y = np.array([0, 1, 0, 1, 1, 0])
+        m = TM.build("logit_k15", {"C": 0.5, "penalty": "l2"}, y, ["a", "b"])
+        self.assertTrue(hasattr(m, "predict_proba"))
+        self.assertEqual(type(m).__name__, "Pipeline")
+        # xgb / cat の版は元の学習器で組む
+        import xgboost as xgb
+        from catboost import CatBoostClassifier
+        self.assertIsInstance(TM.build("xgb_k18", {"max_depth": 3}, np.array([0, 1, 0, 1]), ["a", "b"]), xgb.XGBClassifier)
+        self.assertIsInstance(TM.build("cat_k15", {"depth": 3}, np.array([0, 1, 0, 1]), ["a", "b"]), CatBoostClassifier)
 
     def test_available_lists_variants_in_lineup_order(self):
         d = tempfile.mkdtemp()
@@ -93,6 +107,9 @@ class TestNames(unittest.TestCase):
                 os.makedirs(M.sub_dir(a, d))
                 open(os.path.join(M.sub_dir(a, d), "model.joblib"), "w").close()
             self.assertEqual(M.available(d), ["xgb", "lgbm_k15"])
+            os.makedirs(M.sub_dir("logit_k18", d))
+            open(os.path.join(M.sub_dir("logit_k18", d), "model.joblib"), "w").close()
+            self.assertEqual(M.available(d), ["xgb", "lgbm_k15", "logit_k18"])    # LINEUP の順
             r = ML.row("lgbm_k18", d)
             self.assertEqual((r["state"], r["name"]), ("未学習", M.JA["lgbm_k18"]))
         finally:
@@ -154,7 +171,9 @@ class TestPredict(unittest.TestCase):
                "logit": {"pctHistorical": None},
                "lgbm_k15": {"pctHistorical": 95.0}, "lgbm_k18": {"pctHistorical": 70.0}}
         self.assertEqual(PD.agreement(per, M.ALGOS), (2, 3))
-        self.assertEqual(PD.agreement(per, M.VARIANTS), (1, 2))
+        self.assertEqual(PD.agreement(per, M.VARIANTS), (1, 2))                   # 無いモデルは数えない
+        per.update({"xgb_k15": {"pctHistorical": 92.0}, "logit_k18": {"pctHistorical": 50.0}})
+        self.assertEqual(PD.agreement(per, M.VARIANTS), (2, 4))
         self.assertEqual(PD.agreement({}, M.VARIANTS), (0, 0))
 
 
@@ -162,6 +181,10 @@ class TestSheets(unittest.TestCase):
     def test_columns_and_rows(self):
         self.assertIn("L15%", ES.MODEL_COLS)
         self.assertIn("L18スコア", ES.SCORE_COLS)
+        for c in ("X15%", "C15%", "LR15%", "X18%", "C18%", "LR18%"):
+            self.assertIn(c, ES.MODEL_COLS)
+        self.assertIn("LR18スコア", ES.SCORE_COLS)
+        self.assertEqual(len(ES.MODEL_COLS), len(M.LINEUP))
         self.assertEqual(ES.AGREE_COLS, [ES.AGREE_COL, ES.AGREE_K_COL])
         pred = {"models": [{"algo": "lgbm", "short": "LGB"}, {"algo": "lgbm_k15", "short": "L15"}],
                 "candidates": [{"date": "2026-10-13", "code": "1234", "jqCode": "12340", "name": "x", "rankInDay": 1,
