@@ -86,6 +86,28 @@ class TestRows(unittest.TestCase):
         self.assertIsNone(ks["all"])
         self.assertEqual(len(ks["covered"]), 2)
 
+    def test_distribution_counts_only(self):
+        df = self.frame()
+        d = E.distribution(df)
+        self.assertEqual(set(d), set(RF.columns("all")))
+        self.assertEqual(d["rel_ind_per"], {"n": 1, "mean": 0.3, "bottom": 0.0, "top": 0.0})
+        self.assertEqual(d["rel_mkt_ROE_q0"]["n"], 1)
+        self.assertAlmostEqual(d["rel_mkt_ROE_q0"]["mean"], 0.9)
+        self.assertEqual(d["rel_mkt_ROE_q0"]["top"], 0.0)                 # 0.9 は 0.95 超でない
+        self.assertEqual(d["rel_ind_pbr"]["n"], 0)
+        self.assertTrue(np.isnan(d["rel_ind_pbr"]["mean"]))
+        stamp = {"built_utc": "2026-10-11 10:00 UTC",
+                 "reference": {"month_ends": 3, "first": "2024-01-31", "last": "2024-03-31",
+                               "names": {"min": 100, "median": 200.0, "max": 260}, "industries": 3,
+                               "industries_ok": {"min": 1, "median": 2.0, "max": 2}, "with_industry": 1.0,
+                               "fill": {m: 0.9 for m in RF.METRICS}},
+                 "min_industry": 20, "min_market": 200, "by_year": {"2024": {"rows": 6, "covered": 2}}}
+        with mock.patch("builtins.print"):
+            c = E.coverage_report(df, stamp)
+        self.assertEqual(c["covered"], 2)
+        self.assertIn("distribution", c)
+        self.assertEqual(c["distribution"]["rel_ind_per"]["n"], 1)
+
     def test_permuted_keeps_base_columns(self):
         rng = np.random.default_rng(0)
         n = 40

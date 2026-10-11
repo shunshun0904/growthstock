@@ -35,6 +35,11 @@ Actions の1回の上限に収まるよう、モデルを分けて回す（既�
 充足だけ見る: exp=e76_relative_ab.py args="--dry"
 試運転:       exp=e76_relative_ab.py args="--tag e76smoke --algos lgbm --n-trials 2 --shifts 0"
 
+結果（lgbm。2026-10-11、run 38121628994・65分、docs/MODEL_ADOPTION_RULES.md §33）: 参照の付いた行 97.3%。32窓の PR-AUC の差は
+C1−A −0.0020 ± 0.0016（17/32）・C2−A −0.0011 ± 0.0009（17/32）で、対照（P1−A −0.0025 ± 0.0015・P2−A +0.0002 ± 0.0012）と
+区別がつかない（C1−P1 +0.0005 ± 0.0015・C2−P2 −0.0014 ± 0.0012）。§7 は C1・C2 とも満たさない（平均 C−A が負）。
+探索し直し（B）も +0.0012 ± 0.0018（20/32）で揺れの範囲。xgb / cat は別の回（結果は §33 に追記）。
+
 公開ログには件数・割合・日付・精度だけを出す（財務の値は出さない）。本番の設定（research/lgbm_params.json、
 research/multi_params.json、features.py）には書かない。
 """
@@ -171,7 +176,25 @@ def coverage_report(df: pd.DataFrame, stamp: dict) -> dict:
         fill[kind] = {"median": float(r.median()), "min": float(r.min()), "max": float(r.max())}
         print(f"  {RF.KIND_JA[kind]}の百分位 {len(r)}列の充足: 中央値 {r.median()*100:.1f}%・最小 {r.min()*100:.1f}%・"
               f"最大 {r.max()*100:.1f}%")
-    return {"covered": int(have.sum()), "covered_share": float(have.mean()), "fill": fill}
+    # 値の分布（列ごとの平均と両端の割合。行の側と参照の側の単位がずれていれば 0 か 1 に寄る）
+    dist = distribution(df)
+    print("  百分位の分布（付いた行の中で。平均 / 0.05 未満 / 0.95 超）:")
+    for m in RF.METRICS:
+        print(f"    {RF.METRIC_JA.get(m, m):<16}" + "  ".join(
+            f"{RF.KIND_JA[k]} {dist[f'rel_{k}_{m}']['mean']:.2f} / {dist[f'rel_{k}_{m}']['bottom']*100:4.1f}% / "
+            f"{dist[f'rel_{k}_{m}']['top']*100:4.1f}%" for k in RF.KINDS))
+    return {"covered": int(have.sum()), "covered_share": float(have.mean()), "fill": fill, "distribution": dist}
+
+
+def distribution(df: pd.DataFrame) -> dict:
+    """rel_* の列ごとの平均と両端（0.05 未満・0.95 超）の割合（付いた行の中で）。行の集計だけ（銘柄ごとの値は出さない）。"""
+    out = {}
+    for c in RF.columns("all"):
+        v = pd.to_numeric(df[c], errors="coerce").dropna()
+        out[c] = {"n": int(len(v)), "mean": float(v.mean()) if len(v) else float("nan"),
+                  "bottom": float((v < 0.05).mean()) if len(v) else float("nan"),
+                  "top": float((v > 0.95).mean()) if len(v) else float("nan")}
+    return out
 
 
 # --------------------------------------------------------------------------- #
