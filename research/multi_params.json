@@ -154,6 +154,164 @@
       "subsample": 0.8949331691823417
     }
   },
+  "lgbm_k15": {
+    "_cv": {
+      "algo": "lgbm_k15",
+      "base_rate": 0.1235,
+      "features_sig": "2cf1283a9de5",
+      "fold_scores": [
+        0.3363,
+        0.3019,
+        0.2712,
+        0.2782,
+        0.2967
+      ],
+      "fold_windows": [
+        {
+          "n_train": 14145,
+          "n_valid": 3616,
+          "pos_rate": 0.1283,
+          "train_to": "2025-08-07",
+          "valid_from": "2018-04-17",
+          "valid_to": "2025-08-08"
+        },
+        {
+          "n_train": 14467,
+          "n_valid": 3294,
+          "pos_rate": 0.1318,
+          "train_to": "2025-08-08",
+          "valid_from": "2018-04-04",
+          "valid_to": "2025-08-05"
+        },
+        {
+          "n_train": 14064,
+          "n_valid": 3697,
+          "pos_rate": 0.1201,
+          "train_to": "2025-08-08",
+          "valid_from": "2018-04-06",
+          "valid_to": "2025-07-30"
+        },
+        {
+          "n_train": 13923,
+          "n_valid": 3838,
+          "pos_rate": 0.1107,
+          "train_to": "2025-08-08",
+          "valid_from": "2018-04-03",
+          "valid_to": "2025-08-06"
+        },
+        {
+          "n_train": 14445,
+          "n_valid": 3316,
+          "pos_rate": 0.1267,
+          "train_to": "2025-08-08",
+          "valid_from": "2018-04-05",
+          "valid_to": "2025-08-07"
+        }
+      ],
+      "label_k": 1.5,
+      "mean_pr_auc": 0.2969,
+      "mean_roc_auc": 0.7224,
+      "n_estimators": 200,
+      "n_features": 239,
+      "n_splits": 5,
+      "n_trials": 50,
+      "objective": "pr_auc",
+      "objective_value": 0.2969,
+      "preset": "all_plus_prog_listing_vol_book",
+      "scheme": "year_cap_date",
+      "std": 0.0228,
+      "train_rows": 17761,
+      "train_to": "2025-08-08"
+    },
+    "params": {
+      "colsample_bytree": 0.3458607795060571,
+      "learning_rate": 0.02345479043376768,
+      "min_child_samples": 72,
+      "num_leaves": 93,
+      "reg_alpha": 0.0006709880949251862,
+      "reg_lambda": 1.7580725428853742e-06,
+      "subsample": 0.9470567729726573
+    }
+  },
+  "lgbm_k18": {
+    "_cv": {
+      "algo": "lgbm_k18",
+      "base_rate": 0.092,
+      "features_sig": "2cf1283a9de5",
+      "fold_scores": [
+        0.2566,
+        0.2816,
+        0.2315,
+        0.2338,
+        0.2194
+      ],
+      "fold_windows": [
+        {
+          "n_train": 14221,
+          "n_valid": 3540,
+          "pos_rate": 0.0941,
+          "train_to": "2025-08-07",
+          "valid_from": "2018-04-03",
+          "valid_to": "2025-08-08"
+        },
+        {
+          "n_train": 13935,
+          "n_valid": 3826,
+          "pos_rate": 0.0923,
+          "train_to": "2025-08-08",
+          "valid_from": "2018-04-09",
+          "valid_to": "2025-08-07"
+        },
+        {
+          "n_train": 14225,
+          "n_valid": 3536,
+          "pos_rate": 0.0882,
+          "train_to": "2025-08-08",
+          "valid_from": "2018-04-06",
+          "valid_to": "2025-07-31"
+        },
+        {
+          "n_train": 14391,
+          "n_valid": 3370,
+          "pos_rate": 0.0938,
+          "train_to": "2025-08-08",
+          "valid_from": "2018-04-17",
+          "valid_to": "2025-07-08"
+        },
+        {
+          "n_train": 14272,
+          "n_valid": 3489,
+          "pos_rate": 0.0914,
+          "train_to": "2025-08-08",
+          "valid_from": "2018-04-04",
+          "valid_to": "2025-07-28"
+        }
+      ],
+      "label_k": 1.8,
+      "mean_pr_auc": 0.2446,
+      "mean_roc_auc": 0.7374,
+      "n_estimators": 200,
+      "n_features": 239,
+      "n_splits": 5,
+      "n_trials": 50,
+      "objective": "pr_auc",
+      "objective_value": 0.2446,
+      "preset": "all_plus_prog_listing_vol_book",
+      "scheme": "year_cap_date",
+      "std": 0.0221,
+      "train_rows": 17761,
+      "train_to": "2025-08-08"
+    },
+    "params": {
+      "colsample_bytree": 0.8711062217493379,
+      "learning_rate": 0.028658991522333428,
+      "min_child_samples": 123,
+      "num_leaves": 60,
+      "reg_alpha": 4.32915654818823e-05,
+      "reg_lambda": 0.017709834873887602,
+      "subsample": 0.6928979971647862
+    }
+  },
   "logit": {
     "_cv": {
       "algo": "logit",
