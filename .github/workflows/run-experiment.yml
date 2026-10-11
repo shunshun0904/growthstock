@@ -137,6 +137,9 @@ jobs:
       # 銘柄ごとの値（J-Quants から作った特徴量・株価の経路、日証金・EDINET の値）が入っていた
       # （実験70 の run 38035185851 で気づいた）。途中結果の引き継ぎは上の actions/cache が担うので、
       # 成果物を減らしても実験の続きからの再開には影響しない。集計はログに出す
+      # 修正前に上げた成果物（exp-* 79件と、古い枝の accgraph・probe・label20 などの 56件、計 3.3GB）は
+      # 2026-10-11 に運用者の承認で API から削除した。残したのはスクリーンショット・github-pages・
+      # 修正後のログだけの成果物。受け渡しに使う raw-* / dataset は削除の対象に入れていない
       - uses: actions/upload-artifact@v4
         if: always()
         with:
