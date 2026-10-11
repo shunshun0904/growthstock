@@ -52,6 +52,10 @@
 土曜 10:40 JST  Check Data Store     保存データ（data-raw）を API の応答と突き合わせる
                                      （種別ごとに数日ぶんを叩き直す）
 
+土曜 09:10 / 14:10 JST  Retrain Weekly（only=）  ラベル違いのモデル（1.5σ の4本 / 1.8σ の4本）だけ
+                                     探索・学習し直す。本番の基準モデルと本番の4モデルは触らない
+                                     （2026-10-11 夜から。docs/MODEL_LINEUP.md「ラベル違いのモデル」）
+
 月〜土 07:40 JST 朝の確認（Routine だけ） 前日の取り込み・予測・日証金・EDINET DB の run の
                                      結論を確かめる。取り込みが無ければ Update Data Store を
                                      起動し直す。月曜は日曜の学習と土曜の検査を見る
@@ -85,8 +89,8 @@
 | 日証金（土日） | 土日 10:20 | Fetch JSF | `mode=history` | `trig_01VF9LEPhar2yRaZSzpfZmsX` |
 | EDINET DB | 毎日 10:10 | Fetch EDINET DB | 既定（85社・対応表は auto） | `trig_018mSPXUBa4PBFsHpK5BzNpK` |
 | 週次学習 | 日曜 09:10 | Retrain Weekly | `tune=yes`（本番の4モデル） | `trig_01MQSVtn55Vmy7HmKjs9mJ6p` |
-| ラベル違い 1.5σ | 土曜 09:10 | Retrain Weekly | `tune=yes` `only=lgbm_k15,xgb_k15,cat_k15,logit_k15` | （下の表。2026-10-11 夜に追加） |
-| ラベル違い 1.8σ | 土曜 14:10 | Retrain Weekly | `tune=yes` `only=lgbm_k18,xgb_k18,cat_k18,logit_k18` | （同上） |
+| ラベル違い 1.5σ | 土曜 09:10 | Retrain Weekly | `tune=yes` `only=lgbm_k15,xgb_k15,cat_k15,logit_k15`（2026-10-11 夜に追加） | `trig_0127nfERdx9RyirNCkFp4BXn` |
+| ラベル違い 1.8σ | 土曜 14:10 | Retrain Weekly | `tune=yes` `only=lgbm_k18,xgb_k18,cat_k18,logit_k18`（同上。09:10 の回が長引けば待ってから走る） | `trig_01JHXTaxZLmDgfUBF3CYbTqe` |
 | 保存データの検査 | 土曜 10:40 | Check Data Store | 既定（5日） | `trig_01G4KY6RJMAsFgY7t57khocW` |
 | 朝の確認 | 月〜土 07:40 | （確かめるだけ） | 前日の run の結論を見る。取り込みの run が無ければ Update Data Store を起動し直す。取り込みは済んで予測だけ無ければ Predict Breakouts を起動する。月曜は日曜の学習と土曜の検査を見る | `trig_01Pscq9oSei7otJrCjgfxgEc` |
 
