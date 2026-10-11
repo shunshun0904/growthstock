@@ -107,6 +107,15 @@ class TestEval(unittest.TestCase):
         self.assertEqual(E.fmt_diff({}), "")
         self.assertIn("±", E.fmt_diff(d))
 
+    def test_windows_cross(self):
+        o = self.oof()
+        w = E.windows_cross(o, "y_K12")
+        self.assertEqual(list(w["fold"]), [1, 2])
+        self.assertTrue((w["pr"] > w["rate"]).all())
+        self.assertTrue(((w["roc"] > 0.5) & (w["roc"] <= 1.0)).all())
+        small = o[(o["fold"] != 1) | (o.index < 50)]                     # 窓1 を 50件に → 落ちる
+        self.assertEqual(list(E.windows_cross(small, "y_K12")["fold"]), [2])
+
     def test_cross_label(self):
         o = self.oof()
         cl = E.cross_label(o, ["y_K12", "y_K15"])
@@ -156,6 +165,9 @@ class TestReport(unittest.TestCase):
         self.assertEqual(set(s["labels"]), {"K12", "K15"})
         self.assertLess(s["labels"]["K15"]["pos_rate"], s["labels"]["K12"]["pos_rate"])
         self.assertIn("y_K15", s["production_oof"]["K12"])
+        self.assertIn("y_K12_pr_K15-K12", s["windows"])
+        self.assertIn("y_K15_roc_K15-K12", s["windows"])
+        self.assertEqual(s["windows"]["y_K12_pr_K15-K12"]["n"], 3)              # 3窓（ずらし0だけ）
         kinds = {r["kind"] for r in s["shifts"]}
         self.assertTrue({"thr95", "thr90", "match95", "match90", "top10_within", "within_date"} <= kinds)
         self.assertEqual({r["arm"] for r in s["monthly"]}, {"K12", "K15"})

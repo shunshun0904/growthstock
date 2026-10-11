@@ -157,6 +157,22 @@ def cross_label(o: pd.DataFrame, label_cols: list) -> dict:
     return out
 
 
+def windows_cross(o: pd.DataFrame, label_col: str) -> pd.DataFrame:
+    """窓ごとの PR-AUC / ROC-AUC を label_col のラベルで測る（MIN_WINDOW_ROWS 未満・1クラスの窓は落とす）。"""
+    from sklearn.metrics import average_precision_score, roc_auc_score
+    rows = []
+    for f, g in o.groupby("fold"):
+        y = pd.to_numeric(g[label_col], errors="coerce")
+        m = y.notna().to_numpy()
+        yy = y[m].to_numpy(dtype=int)
+        if len(yy) < E68.MIN_WINDOW_ROWS or yy.min() == yy.max():
+            continue
+        sc = g.loc[m, "score"].to_numpy(dtype=float)
+        rows.append({"fold": int(f), "pr": float(average_precision_score(yy, sc)), "roc": float(roc_auc_score(yy, sc)),
+                     "rate": float(yy.mean())})
+    return pd.DataFrame(rows, columns=["fold", "pr", "roc", "rate"])
+
+
 def attach_eval_cols(o: pd.DataFrame, df: pd.DataFrame, arms: list) -> pd.DataFrame:
     """OOF に vol_20d と各腕のラベル（y_<腕>）を付ける（評価用。Code・Date で結合）。"""
     cols = ["Code", "Date", "vol_20d"] + [f"y_{a}" for a in arms]
@@ -275,8 +291,8 @@ def report(res: dict, df: pd.DataFrame, ks: list, shifts: list, stamp: dict) -> 
     arms = [arm_name(k) for k in ks]
     names = {arm_name(k): arm_label(k) for k in ks}
     ycols = [f"y_{a}" for a in arms]
-    summary = {"data": stamp, "labels": label_report(df, ks), "tuning": {}, "production_oof": {}, "shifts": {},
-               "monthly": {}, "summary": {}}
+    summary = {"data": stamp, "labels": label_report(df, ks), "tuning": {}, "production_oof": {}, "windows": {},
+               "shifts": {}, "monthly": {}, "summary": {}}
 
     print(f"\n■ 2. 探索の CV（{E68.CV_SCHEME} 5分割・自分のラベル。楽観側に出る）と本番と同じ OOF（ずらし0・種42）")
     print(f"  {'腕':<16}{'CV PR':>8}{'±SD':>8}{'CV ROC':>8}{'秒':>6}  本番と同じ OOF: "
@@ -293,6 +309,34 @@ def report(res: dict, df: pd.DataFrame, ks: list, shifts: list, stamp: dict) -> 
               + "  ".join(f"{cl[c]['pr']:.4f} / {cl[c]['lift']:.2f}x / {cl[c]['roc']:.4f}" for c in ycols))
     for a in arms:
         print(f"  {names[a]:<16}パラメータ {E68.short(res['params'][a])}")
+
+    # 窓ごとの分離力（各腕のラベルで測る。ラベルが同じなら腕どうしを比べられる）
+    rows_auc = []
+    for sh in shifts:
+        for a in arms:
+            for lc in ycols:
+                w = windows_cross(res["shifted"][(sh, a)], lc)
+                for _, r in w.iterrows():
+                    rows_auc.append({"shift": sh, "arm": a, "label": lc, "fold": int(r["fold"]), "pr": float(r["pr"]),
+                                     "roc": float(r["roc"]), "rate": float(r["rate"])})
+    auc = pd.DataFrame(rows_auc)
+    if len(auc):
+        auc.to_csv(E68.path("auc_by_window.csv"), index=False)
+        print(f"\n■ 2b. 窓ごとの分離力（ずらし {'/'.join(map(str, shifts))}か月 × 種3つの平均。同じラベルで測った {BASE} との差）")
+        print(f"  {'':<24}{'前':>9}{'後':>9}{'差の平均':>10}{'SE':>9}{'上の窓':>9}{'同じ':>6}")
+        for lc in ycols:
+            for met, nm in (("pr", "PR"), ("roc", "ROC")):
+                b = auc[(auc["arm"] == BASE) & (auc["label"] == lc)].set_index(["shift", "fold"])[met].rename("b")
+                for a in arms:
+                    if a == BASE:
+                        continue
+                    c = auc[(auc["arm"] == a) & (auc["label"] == lc)].set_index(["shift", "fold"])[met].rename("c")
+                    m = pd.concat([b, c], axis=1).dropna()
+                    if not len(m):
+                        continue
+                    line, st = E68.pair(f"[{lc[2:]}のラベル] {nm} {a}−{BASE}", m["b"].to_numpy(), m["c"].to_numpy())
+                    print(line)
+                    summary["windows"][f"{lc}_{met}_{a}-{BASE}"] = st
 
     rows_thr, rows_month = [], []
     for sh in shifts:
