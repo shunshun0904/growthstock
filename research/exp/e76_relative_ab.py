@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-実験74: 財務指標の相対位置（市場全体の中・同じ33業種の中の百分位。research/relative_features.py）を本番の239列に
+実験76: 財務指標の相対位置（市場全体の中・同じ33業種の中の百分位。research/relative_features.py）を本番の239列に
 足すと、探索（5分割 CV）・本番と同じ作りの out-of-fold・32窓がどう変わるか（実験68 と同じ手順。腕は「列」の違い）。
 
 運用者の問い（2026-10-11）「同業種内での相対的な位置がわかる特徴量は入っているか」→ 無い（株価・出来高の
@@ -29,11 +29,11 @@
 Actions の1回の上限に収まるよう、モデルを分けて回す（既定は lgbm だけ。運用者の「lgbm のみで良い」に合わせ、
 §7 の票に要る xgb / cat は結果を見てから）。表（rel_* を付けた frame）は1回目に作って research/_data/oof/<tag>_*
 に置き、以降の回はそれを使う。--budget-min（既定 290分）を過ぎたら新しい計算を始めずに終わる（続きは次の回）。
-    exp=e74_relative_ab.py args="--algos lgbm"
-    exp=e74_relative_ab.py args="--algos xgb"
-    exp=e74_relative_ab.py args="--algos cat"
-充足だけ見る: exp=e74_relative_ab.py args="--dry"
-試運転:       exp=e74_relative_ab.py args="--tag e74smoke --algos lgbm --n-trials 2 --shifts 0"
+    exp=e76_relative_ab.py args="--algos lgbm"
+    exp=e76_relative_ab.py args="--algos xgb"
+    exp=e76_relative_ab.py args="--algos cat"
+充足だけ見る: exp=e76_relative_ab.py args="--dry"
+試運転:       exp=e76_relative_ab.py args="--tag e76smoke --algos lgbm --n-trials 2 --shifts 0"
 
 公開ログには件数・割合・日付・精度だけを出す（財務の値は出さない）。本番の設定（research/lgbm_params.json、
 research/multi_params.json、features.py）には書かない。
@@ -81,7 +81,7 @@ JUDGE_PAIRS = (("C1", "P1"), ("C2", "P2"))
 #: 対照の入れ替えの種（結果を見る前に決めた）
 PERM_SEED = 20261011
 ROWSETS = {"all": "全行", "covered": "参照の付いた行（業種内・市場全体とも）"}
-TAG = "e74"
+TAG = "e76"
 
 
 def column_sets() -> dict:
@@ -313,7 +313,7 @@ def report(results: dict, shifts: list, stamp: dict, keysets: dict, cover: dict)
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="実験74: 財務指標の相対位置（市場全体・業種内の百分位）を本番の239列に足す前後")
+    ap = argparse.ArgumentParser(description="実験76: 財務指標の相対位置（市場全体・業種内の百分位）を本番の239列に足す前後")
     ap.add_argument("--algos", default=DEFAULT_ALGOS, help="この回に計算するモデル（既定 lgbm。xgb / cat は別の回に）")
     ap.add_argument("--n-trials", type=int, default=50)
     ap.add_argument("--shifts", default="0,2,4")
@@ -335,7 +335,7 @@ def main(argv=None) -> int:
     colsets = column_sets()
 
     print("=" * 78)
-    print("実験74 財務指標の相対位置（市場全体・同じ33業種の中の百分位）を本番の239列に足す前後"
+    print("実験76 財務指標の相対位置（市場全体・同じ33業種の中の百分位）を本番の239列に足す前後"
           "（5分割 CV の探索 + OOF + 32窓・対照 P）")
     print(f"  列: {F.DEFAULT_PRESET} {len(colsets['base'])}列 指紋 {F.signature(colsets['base'])} / "
           f"+ 業種内 {len(colsets['add_ind'])}列 → {len(colsets['ind'])}列 / + 市場全体 → {len(colsets['both'])}列 "

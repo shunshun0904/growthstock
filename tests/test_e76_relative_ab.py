@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-実験74（research/exp/e74_relative_ab.py）の、重い計算を回さない部分のテスト。
+実験76（research/exp/e76_relative_ab.py）の、重い計算を回さない部分のテスト。
 
 - 腕: A / C1（+業種内 10列）/ C2（+業種内 + 市場全体 20列）/ P1・P2（対照）/ B（20列で探索し直し）。
   列の組は 239 / 249 / 259 で、足す列は本番の列と重ならない。探索は A と B だけ
@@ -8,7 +8,7 @@
 - 評価の行の組: 全行と、参照（業種内・市場全体とも）の付いた行
 - 報告: 作った結果で最後まで出て、§7 の判定が C1（対 P1）と C2（対 P2）の両方で出る
 
-  python3 tests/test_e74_relative_ab.py
+  python3 tests/test_e76_relative_ab.py
 """
 import json
 import os
@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.join(ROOT, "research", "exp"))
 import features as F  # noqa: E402
 import relative_features as RF  # noqa: E402
 import e68_edinet_ab as E68  # noqa: E402
-import e74_relative_ab as E  # noqa: E402
+import e76_relative_ab as E  # noqa: E402
 from e44_shortsale import permuted  # noqa: E402
 
 
@@ -108,7 +108,7 @@ class TestReport(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp()
         self.saved = (E68.OOF_DIR, E68.RUN, E68.TAG)
-        E68.OOF_DIR, E68.RUN, E68.TAG = self.dir, "e74test_rel", "e74test"
+        E68.OOF_DIR, E68.RUN, E68.TAG = self.dir, "e76test_rel", "e76test"
 
     def tearDown(self):
         E68.OOF_DIR, E68.RUN, E68.TAG = self.saved
@@ -162,9 +162,9 @@ class TestReport(unittest.TestCase):
                 self.assertEqual(v["of"], 1)
         self.assertGreater(s["production_oof"]["lgbm_C2_all"]["pr_auc"], s["production_oof"]["lgbm_A_all"]["pr_auc"])
         self.assertNotIn("fill", s["data"])                                   # 要約は列ごとの充足を持たない（stamp に）
-        with open(os.path.join(self.dir, "e74test_rel_summary.json"), encoding="utf-8") as fh:
+        with open(os.path.join(self.dir, "e76test_rel_summary.json"), encoding="utf-8") as fh:
             self.assertIn("judge7", json.load(fh))
-        self.assertTrue(os.path.exists(os.path.join(self.dir, "e74test_rel_auc_by_window_all.csv")))
+        self.assertTrue(os.path.exists(os.path.join(self.dir, "e76test_rel_auc_by_window_all.csv")))
 
 
 class TestMain(unittest.TestCase):

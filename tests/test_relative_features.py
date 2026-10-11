@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-相対位置の特徴量（research/relative_features.py。実験74）。
+相対位置の特徴量（research/relative_features.py。実験76）。
 
 - 列の名前: 業種内 10 + 市場全体 10 の 20列。本番の239列と重ならず、元の指標は全部 239列に入っている
 - 参照の作り: 月末の終値は月末から10日以内の最後のバー。母集団は普通株だけ（ETF・REIT 等は除く）で、
