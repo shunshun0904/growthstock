@@ -475,16 +475,80 @@ prod と anon の相関: A 0.921 / B 0.953 / C 0.940 / R 0.918。平均の差は
   決算短信の文章・会社の事業の説明など）。ただし過去1年の候補ぶんの文字情報を集める取り込みが要るので、別の設計
   （費用と期間の見積り）を先に書く
 
-## 8. 変更したもの
+## 8. 実験75（`research/exp/e75_lowvol_pick.py`）: Jev を使わず、日次ボラで同日の選び方を比べる
+
+運用者の読み（2026-10-11、実験74 の結果を見て）: 「Jev の確率は 20日リターンと日次ボラの言い換えに近いので、母集団では
+『荒い銘柄は +10% の高値を付けやすい』という形で Precision と相関する。3モデル95以上で買う候補でも、Jev が異様に高ければ
+ボラが大きいので逆に振れるリスクがある。同日に 95 以上とまではいかなくても Jev が低めの銘柄があれば、そちらを選ぶ使い方は
+あり得る」。
+
+実験74 の数字で確かめると、向きは合っている。3モデルとも90以上の 115件の中で正例を分ける ROC-AUC は、日次ボラ1列 0.312
+（低いほど当たる。反転で 0.69）、20日リターン 0.401、Jev R 0.367、Jev C 0.489。+20% 指値の収益の符号でも日次ボラ 0.346 で
+Jev（0.343〜0.424）と同等以上。ただし Jev は 20日リターンの言い換え（相関 0.78〜0.92）が主で、日次ボラとの相関は 0.44〜0.55 に
+とどまる。**この使い方をするなら、Jev ではなく Jev に渡している日次ボラ（`vol_20d`）そのもので測る。** 費用ゼロ・決定的・Jev の
+モデル版に依らず・全期間の OOF で検証できる（Jev は直近1年しか測っていない）。
+
+注意: モデルの正例は「ボラの 1.2σ 以上の上昇」なので、低ボラほど必要な上昇が小さく、正例になりやすいのは定義上の帰結を含む。
+採否は正例率ではなく、実際の収益（+20% 指値の平均）で見る。低ボラ銘柄は +20% に届く回数が減る一方、届かなかったときの損が
+小さくなるので、符号だけでなく平均の大きさを測る。
+
+運用者の決定（2026-10-11、AskUserQuestion）: 規則は「3モデル90以上の中で日次ボラが最も低い1銘柄」と「3モデル95以上を優先し、
+無い日は 90以上の低ボラ1銘柄」。基準はいまの規則（3モデル95以上を全部、3モデル90以上を全部）。主の物差しは +20% 指値の収益の
+平均。直近1年は実験74 の控え（Jev の答え）も並べる。API の課金なし。
+
+先に決めたこと（スクリプトの冒頭と同じ。結果を見てから分け方を足さない）:
+
+- **対象**: 本番の OOF（lgbm / xgb / cat）の全期間で、3モデルの百分位（前の窓の分布。実験70 と同じ）と +20% の結果が付く行。
+  その日の候補 = 3モデルとも90以上の行（画面の線）
+- **規則**（1日ごとに選ぶ。候補が無い日は買わない）
+
+| 名前 | 種類 | 選び方 |
+|---|---|---|
+| `all95` | 基準 | 3モデルとも95以上を全部買う（運用者の線） |
+| `all90` | 基準 | 3モデルとも90以上を全部買う（画面の線） |
+| `top1` | 基準 | 90以上の中で 3モデルの最小が最大の1銘柄（画面の並び順。同点は LightGBM のスコア） |
+| `top2` | 基準 | 同じく上位2銘柄（`STRATEGY.topK` = 2） |
+| `lowvol1` | 規則 | 90以上の中で日次ボラが最も低い1銘柄（同点は 3モデルの最小が高いほう） |
+| `pref95` | 規則 | 95以上がある日はその中の `top1`、無い日は 90以上の `lowvol1` |
+| `lowvol2` | 参考 | 90以上の中で日次ボラが低い2銘柄 |
+| `lowvol95` | 参考 | 95以上がある日はその中の低ボラ1銘柄、無い日は 90以上の `lowvol1` |
+| `lowjev1` | 参考 | 90以上の中で Jev（R: +10% 到達の確率、prod 腕）が最も低い1銘柄。実験74 の控えがある直近1年だけ |
+
+- **物差し**: 主 = +20% 指値の収益（`tp20`。20営業日以内に届けば +20%、届かなければ持ち切り）の1件あたり平均。
+  副 = +10% 指値、持ち切り、勝率（tp20 > 0）、+20% 到達率、正例率、−10% 割れ（持ち切りが −10% 未満）の率
+- **SE**: 1件あたり平均の SE は銘柄と日付の2方向でまとめる（CR1。V = V_銘柄 + V_日付 − V_iid）。規則同士の差は**同じ日の対**で
+  取る（その日に規則A が選んだ行の tp20 の平均 − 規則B の同じもの。両方が選んだ日だけ。同じ銘柄を選んだ日は差 0 として数に
+  入れる）。SE は月でまとめる（20営業日の保有が重なる隣の日の相関を吸う）。違う銘柄を選んだ日だけの差と、年ごとの差の符号も出す
+- **見るもの**: (1) 規則ごとの成績 (2) 規則同士の差（`lowvol1 − top1`、`pref95 − top1`、`lowvol95 − top1`、`lowvol2 − top2`、
+  `lowvol1 − all90`、`pref95 − all95`）(3) 発火数 8 未満の日を見送ったとき（運用の見送り線）(4) 選定の集合の中で並べる物差し
+  （日次ボラ・20日リターン・3モデルの最小・LightGBM の百分位の、正例と tp20>0 の ROC-AUC と 真陽性−偽陽性 の差、日次ボラの
+  3分位）(5) 直近1年の窓で Jev・日次ボラ・20日リターンを同じ土俵に（`top1` / `lowvol1` / `lowjev1` / `pref95` と、
+  `lowvol1 − lowjev1` などの対）(6) 採否の条件の確認
+- **採否を検討する条件（全部そろったとき。1つの OOF で決めない。満たしても前向きの記録で確かめてから選定の規則に入れる）**:
+  (1) `lowvol1` または `pref95` の tp20 の平均が `top1` より高く、同じ日の対の差（月まとめ SE）で z ≥ 2
+  (2) その差が年ごとに過半の年で正 (3) −10% 割れの率が `top1` より高くない
+  (4) 直近1年の窓で、その規則の tp20 の平均が `lowjev1` より低くない（Jev を使う理由が無いことの確認）
+- **記録**: 集計だけをログに出す（銘柄ごとの値は出さない）
+
+回し方: Actions の `Run Experiment` で ref `ccr-8db003a2-emjac6`、`exp=e75_lowvol_pick.py`、**`reuse=e74_jev_questions.py`**
+（実験74 のキャッシュ＝Jev の控え `e74_jev_answers.parquet` と値動きの表を先に戻す。`run-experiment.yml` に足した入力。キャッシュの
+キーは実験名ごとなので、これが無いと他の実験の途中結果は見えない）。`args=--dry-run` で件数と規則ごとの件数だけ。鍵は要らない。
+`reuse` を省くと §5（Jev との比較）だけ飛ばして動く。
+
+### 結果（未実施）
+
+## 9. 変更したもの
 
 | ファイル | 変更 |
 |---|---|
 | `research/jev_predict.py` | 新規。state・問い・HTTP・控え・`annotate` |
 | `research/predict_daily.py` | byModel の後で `annotate`。`payload.jev`、`candidates[].jev`、`entries[].jevProb` |
 | `.github/workflows/predict.yml` | `TYPESAFE_API_KEY` を採点の段に渡す。控えを Release に上げる |
-| `.github/workflows/run-experiment.yml` | `TYPESAFE_API_KEY` を渡す（実験73 だけが使う） |
+| `.github/workflows/run-experiment.yml` | `TYPESAFE_API_KEY` を渡す（実験73・74 が使う）。入力 `reuse`（別の実験のキャッシュを先に戻す。実験75 が実験74 の控えを読むため） |
 | `research/export_sheets.py` | 列 `Jev+10%確率%` |
 | `src/lib/strategy.js` | `JEV` / `jevProb` / `jevNote` / `jevWarnings`。`strategySignal` は変えない |
 | `src/views/PredictionView.jsx`・`src/styles.css` | 列・買い候補の印と注意の帯・詳細・素性の欄・追跡表の列 |
 | `research/exp/e73_jev_oof.py` | 実験73 |
-| `tests/test_jev_predict.py`・`tests/test_e73_jev_oof.py`・`tests/strategy.test.js`・`tests/test_sheets.py`・`tests/test_prediction_record.py`・`tests/smoke.mjs`・`tests/fixtures/synthetic-predictions.json` | テスト |
+| `research/exp/e74_jev_questions.py` | 実験74（問いを変える） |
+| `research/exp/e75_lowvol_pick.py` | 実験75（Jev を使わず日次ボラで同日の選び方を比べる） |
+| `tests/test_jev_predict.py`・`tests/test_e73_jev_oof.py`・`tests/test_e74_jev_questions.py`・`tests/test_e75_lowvol_pick.py`・`tests/strategy.test.js`・`tests/test_sheets.py`・`tests/test_prediction_record.py`・`tests/smoke.mjs`・`tests/fixtures/synthetic-predictions.json` | テスト |

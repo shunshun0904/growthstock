@@ -24,6 +24,10 @@ on:
         description: '生データの写しのタグ（Snapshot Raw Data で作ったもの。省略可）。research/_data/snapshot/<タグ>/ に置く'
         required: false
         default: ''
+      reuse:
+        description: '別の実験のキャッシュ（research/_data/oof の途中結果）を先に戻す。その実験スクリプト名（例: e74_jev_questions.py）。省略可'
+        required: false
+        default: ''
 
 defaults:
   run:
@@ -61,6 +65,7 @@ jobs:
         id: exp
         env:
           EXP: ${{ inputs.exp }}
+          REUSE: ${{ inputs.reuse }}
         run: |
           ls research/exp/*.py | xargs -n1 basename > /tmp/known.txt
           if ! grep -qxF -- "$EXP" /tmp/known.txt; then
@@ -70,6 +75,15 @@ jobs:
           fi
           echo "name=$EXP" >> "$GITHUB_OUTPUT"
           echo "実験: research/exp/$EXP"
+          # reuse も入力なので、実在する実験名と突き合わせてからキャッシュのキーに使う
+          if [ -n "$REUSE" ]; then
+            if ! grep -qxF -- "$REUSE" /tmp/known.txt; then
+              echo "reuse に指定した実験はありません: $REUSE"
+              exit 1
+            fi
+            echo "reuse=$REUSE" >> "$GITHUB_OUTPUT"
+            echo "先に戻すキャッシュ: exp-oof-$REUSE-*"
+          fi
 
       - name: Download raw data
         env:
@@ -97,6 +111,19 @@ jobs:
           gh release download "$SNAP" --dir "research/_data/snapshot/$SNAP" --clobber
           ls -lh "research/_data/snapshot/$SNAP"
 
+      # 別の実験の途中結果を読む実験のために、その実験のキャッシュを先に戻す（入力 reuse）。
+      # キャッシュのキーは実験名ごとなので、これが無いと他の実験の research/_data/oof は見えない
+      # （例: 実験75 が実験74 の Jev の控え e74_jev_answers.parquet を読む）。戻すだけで保存はしない。
+      # この実験自身のキャッシュは次の段で上に乗る
+      - name: Restore another experiment's cache (reuse)
+        if: steps.exp.outputs.reuse != ''
+        uses: actions/cache/restore@v4
+        with:
+          path: research/_data/oof
+          key: exp-oof-${{ steps.exp.outputs.reuse }}-${{ github.run_id }}
+          restore-keys: |
+            exp-oof-${{ steps.exp.outputs.reuse }}-
+
       # 探索の途中結果を次の実行に引き継ぐ。
       # 上限に当たっても Optuna の study が残っていれば、次は残りの試行
       # だけで済む（tuning_multi.tune は完了済み試行を引き継ぐ作り）。
@@ -117,8 +144,8 @@ jobs:
         env:
           EXP: ${{ steps.exp.outputs.name }}
           EXP_ARGS: ${{ inputs.args }}
-          # Jev（TypeSafe AI）の鍵。実験73（e73_jev_oof.py）だけが使う。未設定ならその実験は
-          # 件数と state の例だけ出して止まる（他の実験には関係ない）
+          # Jev（TypeSafe AI）の鍵。実験73・74（e73_jev_oof.py / e74_jev_questions.py）が使う。未設定なら
+          # その実験は件数と state の例だけ出して止まる（他の実験には関係ない。実験75 は鍵を使わない）
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
         run: |
           # 引数も入力なので、配列に展開してから渡す（eval しない）
