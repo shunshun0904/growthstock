@@ -35,6 +35,11 @@ MA5>=MA20 は同じ）。k=1.2 の引き直しが本番のラベルと全行一�
     exp=e78_label_k.py
 試運転: exp=e78_label_k.py args="--tag e78smoke --n-trials 2 --shifts 0"
 
+結果（2026-10-11、run 38136357178 / 38139194190、docs/MODEL_ADOPTION_RULES.md §34）: K15 は正例率 13.0%（現行 17.0%）。
+現行のラベルで測った 32窓の PR-AUC は K15−K12 +0.0075 ± 0.0019（26/32）、ROC は +0.0008（変わらず）。実収益は上位5% の
+閾値ルールで差が無く（+0.36pt、14/29）、上位10% 以下・日付内1位・月に2銘柄（+2.16pt、19/32）では K15 が上。本番は変えない
+（判断は運用者）。
+
 公開ログには件数・割合・日付・精度だけを出す。本番の設定（research/lgbm_params.json、build_dataset.VOL_NORM_K、
 features.py）には書かない。
 """
