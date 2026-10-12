@@ -1,19 +1,22 @@
 /**
  * 運用の戦略（docs/PLAYBOOK.md）を画面で再現する。
  *
- * 実測（out-of-fold 2021-11〜2026-08、14,966件）から決めた手順:
+ * 手順（2026-10-12 に選定の線を運用者の決定で変えた。下の 1 の数字は以前の規則で測ったもの）:
  *
  *   1. その日の発火数（78週高値を更新した銘柄数）で、その日を取るか決める
- *        20件以上 … 本命。持ち切り +3.27%、勝率63%
- *         8〜19件 … 枠が空いていれば取る（+1.0〜2.2%、勝率54〜55%）
- *         7件以下 … 見送る（142件で −0.11%、−10%割れが 14.1%）
- *      7件以下と8件以上の差は 2.44pt / z≈2.6 で、ここだけは線が実在する。
+ *        20件以上 … 本命。8〜19件 … 枠が空いていれば取る。7件以下 … 見送る
+ *      以前の規則（1.2σ の3モデル 90以上、out-of-fold 2021-11〜2026-08）では、20件以上 +3.27%・勝率63%、
+ *      8〜19件 +1.0〜2.2%、7件以下は142件で −0.11%・−10%割れ 14.1%（7件以下と8件以上の差は z≈2.6）。
+ *      今の規則（1.5σ の3本 95以上、画面と同じ百分位）では 20件以上 192件 +4.9%、8〜19件 140件 +1.5%、
+ *      7件以下は22件と少なく +5.4%（+10% の指値・20営業日目の終値。research/exp/probe_k15_baseline.py）。
  *      **20件未満を全部見送るのは誤り。** 空き枠の収益は 0% なので、
- *      +2% の帯を捨てて枠を遊ばせると損になる（実験35）
- *   2. ブースティング3モデル（LightGBM / XGBoost / CatBoost）**すべて**が
- *      過去分布の上位10%（90パーセンタイル以上）
- *   3. 通った銘柄を「3モデルの最小順位」で並べて上位1〜2件
- *        lgbm 単体の順位で並べると2番手が +0.87% まで落ちる（最小順位なら +2.99%）
+ *      プラスの帯を捨てて枠を遊ばせると損になる（実験35）
+ *   2. 1.5σ のラベルで学んだ木の3モデル（RULE_MODELS: LightGBM / XGBoost / CatBoost の 1.5σ 版）**すべて**が
+ *      過去分布の95以上（運用者の決定 2026-10-12「1.5σの3モデルで95以上を選定のベースラインにしようかな」
+ *      「今日の戦略パネルも変えてください」）。それまでは本番（1.2σ）の3モデルすべてが90以上。
+ *      1.2σ の3本 95以上と比べて、どちらが良いかは過去のデータでは見分けられない（実験82・87）
+ *   3. 通った銘柄を「3モデルの最小順位」で並べて上位1〜2件（同点は本番の LightGBM のスコア順）
+ *        lgbm 単体の順位で並べると2番手が +0.87% まで落ちる（最小順位なら +2.99%。以前の規則で測ったもの）
  *   4. 翌営業日の寄りで買う
  *   5. +10% の指値、届かなければ 20営業日目の終値で売る（2026-10-12 に運用者の実際の売りに合わせた。
  *      それまでは +20% の指値・届かなければ 20営業日目までの5日平均。research/live_track.py も同じ）
@@ -28,11 +31,23 @@
  * views/PredictionView.jsx。
  */
 
-/** ブースティング3モデル。合議の対象はこの3つだけ（線形・MLP は入れない）。 */
+/** 本番（1.2σ のラベル）のブースティング3モデル。2026-10-12 までの規則と、際どい候補の印（実験70）に使う。 */
 export const BOOST = ['lgbm', 'xgb', 'cat'];
 
+/**
+ * 今日の戦略の規則に使う3モデル（2026-10-12 から）。1.5σ のラベルで学んだ木の3本。
+ * research/live_track.py の RULE_MODELS と同じ（tests/test_live_track.py が突き合わせる）。
+ */
+export const RULE_MODELS = ['lgbm_k15', 'xgb_k15', 'cat_k15'];
+
+/** 規則の3モデルの呼び名（画面の文言） */
+export const RULE_JA = '1.5σ の3本';
+
 /** 画面に出す短い呼び名。正本は research/models.py。 */
-export const MODEL_JA = { lgbm: 'LightGBM', xgb: 'XGBoost', cat: 'CatBoost' };
+export const MODEL_JA = {
+  lgbm: 'LightGBM', xgb: 'XGBoost', cat: 'CatBoost',
+  lgbm_k15: 'LightGBM（1.5σ）', xgb_k15: 'XGBoost（1.5σ）', cat_k15: 'CatBoost（1.5σ）',
+};
 
 /**
  * 決算の寄与（水準＋変化）。正本は research/feature_dict.py の MACRO。
@@ -51,14 +66,14 @@ export function fundContrib(candidate) {
 }
 
 export const STRATEGY = {
-  agreePct: 90,      // 3モデルすべてがこの百分位以上
+  agreePct: 95,      // 規則の3モデル（RULE_MODELS）すべてがこの百分位以上。2026-10-12 に 1.2σ の3本 90 → 1.5σ の3本 95
   strongBreaks: 20,  // この件数以上の発火なら本命
   skipBreaks: 8,     // これ未満の発火なら見送る
   topK: 2,           // 買うのは上位何件まで
   takeProfit: 10,    // 利確の指値（%）。2026-10-12 に 20 → 10（運用者の実際の売り）
   holdDays: 20,      // 届かなければ何営業日目の終値で売るか
   maxSlots: 3,       // 同時に持てる銘柄数。埋まっていたら見送る
-  nearLo: 85,        // 「惜しい候補」として画面に出す下限
+  nearLo: 85,        // 「惜しい候補」として画面に出す下限（規則の3モデルの最小が nearLo〜agreePct）
   frozenVol: 0.3,    // 直近20日の日次ボラ（%）がこれ未満なら「値動きが止まっている」注意を出す（TOB 中の可能性。実験63）
 };
 
@@ -90,51 +105,56 @@ export function freeSlots(held, s = STRATEGY) {
 }
 
 /**
- * 3モデルの百分位。1つでも欠けていれば null を混ぜて返す
+ * models の百分位（既定は今の規則の3モデル）。1つでも欠けていれば null を混ぜて返す
  * （欠けたまま「満たした」と判定しないため）。
  */
-export function boostPcts(candidate) {
+export function pctsOf(candidate, models = RULE_MODELS) {
   const per = candidate?.byModel;
   if (!per) return null;
   const out = {};
-  for (const a of BOOST) {
+  for (const a of models) {
     const v = per[a]?.pctHistorical;
     out[a] = Number.isFinite(v) ? v : null;
   }
   return out;
 }
 
-/** 3モデルの最小の百分位。1つでも欠けていれば null。 */
-export function minPct(candidate) {
-  const p = boostPcts(candidate);
+/** 本番（1.2σ）の3モデルの百分位。際どい候補の印（実験70）に使う。 */
+export function boostPcts(candidate) {
+  return pctsOf(candidate, BOOST);
+}
+
+/** 3モデル（既定は今の規則のモデル）の最小の百分位。1つでも欠けていれば null。 */
+export function minPct(candidate, models = RULE_MODELS) {
+  const p = pctsOf(candidate, models);
   if (!p) return null;
-  const vals = BOOST.map((a) => p[a]);
+  const vals = models.map((a) => p[a]);
   return vals.some((v) => v === null) ? null : Math.min(...vals);
 }
 
 /** 3モデルの百分位の幅（最大−最小）。1つでも欠けていれば null。 */
-export function pctSpread(candidate) {
-  const p = boostPcts(candidate);
+export function pctSpread(candidate, models = RULE_MODELS) {
+  const p = pctsOf(candidate, models);
   if (!p) return null;
-  const vals = BOOST.map((a) => p[a]);
+  const vals = models.map((a) => p[a]);
   if (vals.some((v) => v === null)) return null;
   return Math.max(...vals) - Math.min(...vals);
 }
 
 /** 3モデルのうち、いちばん低い評価を出しているモデル。 */
-export function laggard(candidate) {
-  const p = boostPcts(candidate);
+export function laggard(candidate, models = RULE_MODELS) {
+  const p = pctsOf(candidate, models);
   if (!p) return null;
-  const vals = BOOST.map((a) => p[a]);
+  const vals = models.map((a) => p[a]);
   if (vals.some((v) => v === null)) return null;
-  return BOOST[vals.indexOf(Math.min(...vals))];
+  return models[vals.indexOf(Math.min(...vals))];
 }
 
 /**
- * 運用者の線と「際どい」範囲（運用者の決定 2026-10-10）。
+ * 1.2σ の3本で見た「際どい」範囲（運用者の決定 2026-10-10。2026-10-12 まで運用者の目安だった線）。
  *
- * 運用者は「3モデル（lgbm・xgb・cat）がすべて 95以上」を買いの目安にしている。上の戦略パネルの線
- * （STRATEGY.agreePct = 90）とは別。その線の下で「際どい」のは次の全部:
+ * 2026-10-12 までの運用者の目安は「本番の3モデル（lgbm・xgb・cat、1.2σ）がすべて 95以上」。今の規則は 1.5σ の3本
+ * （RULE_MODELS）がすべて95以上だが、この印は 1.2σ の3本で見た際どさ（実験70 の数字）として残す。その線の下で「際どい」のは次の全部:
  *   - 2モデルが 95以上で、残り1つが 95未満
  *   - 3モデルの最小が 85〜95
  * 例: xgb 96・cat 98・lgbm 85。
@@ -195,7 +215,7 @@ const past = (x) => (Number.isFinite(x?.ret) && x?.n ? `${fmtRet(x.ret)}（${x.n
 export function borderNote(candidate, b = BORDER, st = BORDER_STATS) {
   const shape = borderShape(candidate, b);
   if (!shape) return null;
-  const lag = laggard(candidate);
+  const lag = laggard(candidate, BOOST);
   const p = boostPcts(candidate);
   const name = MODEL_JA[lag] || lag;
   const head = `${name} が一番低い（${p[lag].toFixed(1)}）。`;
@@ -220,16 +240,18 @@ export function borderNote(candidate, b = BORDER, st = BORDER_STATS) {
   }
   return {
     shape, laggard: lag, laggardPct: p[lag], warn,
-    badge: warn ? `際どい・${name} が最下位` : `際どい・最下位 ${name}`,
+    badge: warn ? `1.2σで際どい・${name} が最下位` : `1.2σで際どい・最下位 ${name}`,
     text,
   };
 }
 
 /**
- * 基準に届かなかったが惜しい候補（3モデルの最小が 85〜90）。
+ * 基準に届かなかったが惜しい候補（規則の3モデルの最小が nearLo〜agreePct。今は 1.5σ の3本で 85〜95）。
  *
- * 画面に出すのは「なぜ買わないか」を毎日考え直さないため。実測（実験36、
- * 発火8件以上の日・枠の制約なし）:
+ * 画面に出すのは「なぜ買わないか」を毎日考え直さないため。今の規則（1.5σ の3本、画面と同じ百分位、発火8件以上の日、
+ * +10% の指値・20営業日目の終値。research/exp/probe_k15_baseline.py）では、最小 85〜95 で幅5未満 369件 +1.05%・
+ * 勝率58%、幅5以上 584件 +2.08%・勝率63%（線の上の354件は +3.58%）。幅5以上（weak）でも弱くはない。
+ * 以下は以前の規則（1.2σ の3モデル、最小 85〜90）の実測（実験36、発火8件以上の日・枠の制約なし）:
  *
  *   最小 85〜90 で 3モデルの幅 < 5   118件 +2.70% 勝率58% −10%割れ 5.1%
  *   最小 85〜90 で 3モデルの幅 5〜10  270件 +0.30% 勝率49% −10%割れ 12.6%
@@ -258,7 +280,7 @@ export function nearMisses(rows, s = STRATEGY) {
     }));
 }
 
-/** 3モデルすべてが上位10%か。 */
+/** 規則の3モデル（RULE_MODELS）すべてが pct（既定 95）以上か。 */
 export function passesAgree(candidate, pct = STRATEGY.agreePct) {
   const m = minPct(candidate);
   return m !== null && m >= pct;
@@ -276,16 +298,16 @@ export function dayVerdict(nBreak, s = STRATEGY) {
   }
   if (nBreak >= s.strongBreaks) {
     return { kind: 'strong', tone: 'green', label: '本命の日',
-             note: `発火 ${nBreak} 件。実測でいちばん成績が良い帯（20件以上）` };
+             note: `発火 ${nBreak} 件。20件以上の帯（${RULE_JA}が95以上で192件 +4.9%・勝率78%）` };
   }
   if (nBreak >= s.skipBreaks) {
     return { kind: 'ok', tone: 'amber', label: '枠が空いていれば',
-             note: `発火 ${nBreak} 件。悪くはない帯（8〜19件、+1.0〜2.2%）。`
+             note: `発火 ${nBreak} 件。8〜19件の帯（140件 +1.5%・勝率59%）。`
                    + '枠が遊ぶより買うほうが良い' };
   }
   return { kind: 'skip', tone: 'red', label: '見送り',
-           note: `発火 ${nBreak} 件。7件以下は142件で −0.11%、`
-                 + '−10%割れが 14.1%。枠が空いていても買わない' };
+           note: `発火 ${nBreak} 件。7件以下の日は枠が空いていても買わない（この線は以前の規則の142件 −0.11% で`
+                 + `決めたもの。${RULE_JA}が95以上では22件と少なく +5.4%）` };
 }
 
 /**

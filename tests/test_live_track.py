@@ -4,9 +4,10 @@
 
 実運用と OOF の見込みは同じ関数で数えるので、ここで固定する約束が
 そのまま比べ方の約束になる。
-  - 規則の値は画面（src/lib/strategy.js の STRATEGY）と同じ
+  - 規則の値は画面（src/lib/strategy.js の STRATEGY・RULE_MODELS）と同じ。2026-10-12 から 1.5σ の3本がすべて95以上
   - 3モデルのどれかの百分位が欠けた候補は基準を満たさない（画面と同じ）
   - 買うのは発火8件以上の日の、3モデルの最小の百分位が高い順に上位2件
+  - 以前の規則（1.2σ の3本がすべて90以上）と月2件の先着は参考として数える
   - 買値は翌営業日の始値。+20% は1営業日目（買った日）の高値から見る
   - 届かなければ20営業日目までの5日平均終値（ret_o1_20 と同じ）
   - 枠は3つ。+20% に k営業日目で届けば buy+k から空く。途中の玉は枠をふさぐ
@@ -32,12 +33,12 @@ import live_track as L  # noqa: E402
 NAN = float("nan")
 
 
-def cands(date, pcts, scores=None):
-    """1日ぶんの候補。pcts は [(lgbm, xgb, cat), ...]。"""
+def cands(date, pcts, scores=None, models=L.RULE_MODELS):
+    """1日ぶんの候補。pcts は [(1本目, 2本目, 3本目), ...]（既定は今の規則のモデル lgbm_k15 / xgb_k15 / cat_k15 の順）。"""
     scores = scores or [0.5] * len(pcts)
     return pd.DataFrame([{"Date": pd.Timestamp(date), "Code": f"{1000 + i}0",
                           "code": f"{1000 + i}", "score": s,
-                          "p_lgbm": p[0], "p_xgb": p[1], "p_cat": p[2]}
+                          **{f"p_{a}": v for a, v in zip(models, p)}}
                          for i, (p, s) in enumerate(zip(pcts, scores))])
 
 
@@ -70,6 +71,10 @@ class RulesMatchScreen(unittest.TestCase):
         self.assertEqual(val("maxSlots"), L.SLOTS)
         boost = re.search(r"export const BOOST = \[([^\]]*)\]", js).group(1)
         self.assertEqual(tuple(re.findall(r"'(\w+)'", boost)), L.BOOST)
+        rule = re.search(r"export const RULE_MODELS = \[([^\]]*)\]", js).group(1)
+        self.assertEqual(tuple(re.findall(r"'(\w+)'", rule)), L.RULE_MODELS)
+        self.assertEqual(L.RULE_MODELS, ("lgbm_k15", "xgb_k15", "cat_k15"))
+        self.assertEqual(L.AGREE_PCT, 95.0)
 
     def test_pct_matches_production_formula(self):
         rng = np.random.default_rng(0)
@@ -81,11 +86,11 @@ class RulesMatchScreen(unittest.TestCase):
 
 class Decide(unittest.TestCase):
     def test_top2_by_min_pct_then_score(self):
-        rows = cands("2026-09-16", [(96, 95, 99), (99, 92, 93), (93, 92, 97),
-                                    (93, 97, 92), (95, 89, 99)] + [(50, 50, 50)] * 3,
+        rows = cands("2026-09-16", [(98, 97, 99), (99, 96, 97), (97, 96, 99),
+                                    (97, 99, 96), (99, 94, 99)] + [(50, 50, 50)] * 3,
                      scores=[0.1, 0.2, 0.3, 0.9, 0.5, 0.1, 0.1, 0.1])
         _, days, picks = L.decide(rows)
-        # 最小: 95, 92, 92, 92, 89 → 95 が1番、92 の3件はスコア順で 0.9 が2番
+        # 最小: 97, 96, 96, 96, 94 → 97 が1番、96 の3件はスコア順で 0.9 が2番（94 は線 95 の下）
         self.assertEqual(picks["code"].tolist(), ["1000", "1003"])
         self.assertEqual(picks["rank"].tolist(), [1, 2])
         self.assertEqual(int(days.iloc[0]["n_pass"]), 4)
@@ -105,19 +110,29 @@ class Decide(unittest.TestCase):
         self.assertFalse(bool(r["passed"].any()))
         self.assertIn("判定できない", days.iloc[0]["verdict"])
 
-    def test_exactly_90_passes(self):
-        rows = cands("2026-09-17", [(90.0, 90.0, 90.0)] + [(50, 50, 50)] * 7)
+    def test_exactly_95_passes(self):
+        rows = cands("2026-09-17", [(95.0, 95.0, 95.0), (94.9, 99.0, 99.0)] + [(50, 50, 50)] * 6)
         _, _, picks = L.decide(rows)
-        self.assertEqual(len(picks), 1)
+        self.assertEqual(picks["code"].tolist(), ["1000"])
 
-    def test_default_models_are_the_three_boosters(self):
-        # 既定の合議は BOOST の3つ。判定できない日の文言も「3モデル」のまま（画面と同じ）
+    def test_default_models_are_the_rule_models(self):
+        # 既定の合議は RULE_MODELS（1.5σ の3本）。判定できない日の文言は「3モデル」（画面と同じ）
         rows = cands("2026-09-17", [(99, NAN, 99)] + [(50, 50, 50)] * 8)
         rows["p_logit"] = 10.0                                 # 余計な列があっても見ない
         _, days, picks = L.decide(rows)
         self.assertTrue(picks.empty)
         self.assertIn("3モデルの百分位が無い", days.iloc[0]["verdict"])
-        # models を5つにすると、logit の 10 で全件が落ちる
+        # 1.2σ の3本（以前の規則）の列だけでは、今の規則では誰も通らない（列が無ければ欠けと同じ。判定できない日になる）
+        old = cands("2026-09-17", [(99, 99, 99)] * 8, models=L.BOOST)
+        _, od, op = L.decide(old)
+        self.assertTrue(op.empty)
+        self.assertIn("判定できない", od.iloc[0]["verdict"])
+        _, _, pp = L.decide(old, agree=L.PREV_AGREE, models=L.PREV_MODELS)
+        self.assertEqual(len(pp), 2)
+
+    def test_all5_models(self):
+        # models を5つにすると、logit の 10 で全件が落ちる（実験59 の呼び方）
+        rows = cands("2026-09-17", [(99, NAN, 99)] + [(50, 50, 50)] * 8, models=L.BOOST)
         rows["p_logit"] = 10.0
         rows["p_mlp"] = 99.0
         rows.loc[0, "p_xgb"] = 99.0
@@ -262,15 +277,17 @@ class DecisionVersion(unittest.TestCase):
                 "data": {"model": {"trainedAt": "2026-09-13T00:00:00"},
                          "candidates": rows}}
 
-    def cand(self, date, code, p):
-        return {"date": date, "jqCode": f"{code}0", "code": code, "name": code, "score": 0.5,
-                "byModel": {a: {"pctHistorical": p} for a in L.BOOST}}
+    def cand(self, date, code, p, k15=None):
+        per = {a: {"pctHistorical": p} for a in L.BOOST}
+        if k15 is not None:
+            per.update({a: {"pctHistorical": k15} for a in L.RULE_MODELS})
+        return {"date": date, "jqCode": f"{code}0", "code": code, "name": code, "score": 0.5, "byModel": per}
 
     def test_latest_before_next_open(self):
         days = [dt.date(2026, 9, d) for d in (15, 16, 17, 18)]
         vers = [
             self.version("a" * 40, "2026-09-16 13:00", [self.cand("2026-09-16", "1111", 91)]),
-            self.version("b" * 40, "2026-09-16 18:00", [self.cand("2026-09-16", "1111", 95)]),
+            self.version("b" * 40, "2026-09-16 18:00", [self.cand("2026-09-16", "1111", 95, k15=97)]),
             # 翌営業日の寄り（9/17 0:00 UTC）より後。判断には使えない
             self.version("c" * 40, "2026-09-17 01:00", [self.cand("2026-09-16", "1111", 50),
                                                          self.cand("2026-09-15", "2222", 99)]),
@@ -279,7 +296,12 @@ class DecisionVersion(unittest.TestCase):
         d16 = r[r["Date"] == pd.Timestamp("2026-09-16")].iloc[0]
         self.assertEqual(d16["sha"], "bbbbbbb")
         self.assertEqual(d16["p_lgbm"], 95)
+        self.assertEqual(d16["p_lgbm_k15"], 97)                # 今の規則の 1.5σ の3本も読む
         self.assertFalse(bool(d16["late"]))
+        # 9/15 の版には 1.5σ の百分位が無い → 欠け（NaN）。今の規則の記録は 9/16 から
+        self.assertTrue(np.isnan(r[r["Date"] == pd.Timestamp("2026-09-15")].iloc[0]["p_cat_k15"]))
+        self.assertEqual(L.rule_start(r), pd.Timestamp("2026-09-16"))
+        self.assertIsNone(L.rule_start(r[r["Date"] == pd.Timestamp("2026-09-15")]))
         # 9/15 は寄り（9/16 0:00 UTC）の後に初めて出た → 遅れ。最初の版を使う
         d15 = r[r["Date"] == pd.Timestamp("2026-09-15")].iloc[0]
         self.assertTrue(bool(d15["late"]))
@@ -291,6 +313,31 @@ class DecisionVersion(unittest.TestCase):
                          pd.Timestamp("2026-09-24", tz="UTC"))
         # カレンダーの外は次の平日
         self.assertEqual(L.next_trading_day(dt.date(2026, 12, 4), days), dt.date(2026, 12, 7))
+
+
+class References(unittest.TestCase):
+    def test_monthly_first_two(self):
+        rows = pd.concat([cands("2026-10-13", [(96, 96, 96), (99, 98, 97), (50, 50, 50)]),      # 発火3件でも数える
+                          cands("2026-10-14", [(99, 99, 99)] + [(50, 50, 50)] * 7),
+                          cands("2026-11-02", [(95, 95, 95)])], ignore_index=True)
+        r, _, _ = L.decide(rows)
+        mf = L.monthly_first(r)
+        self.assertEqual(mf["Date"].dt.strftime("%m-%d").tolist(), ["10-13", "10-13", "11-02"])
+        self.assertEqual(mf["p_min"].tolist(), [97.0, 96.0, 95.0])            # 同じ日は最小の百分位の順
+        self.assertEqual(mf["rank"].tolist(), [1, 2, 1])
+        self.assertTrue(L.monthly_first(r.iloc[0:0].assign(passed=pd.Series(dtype=bool))).empty)
+
+    def test_ref_summary_counts_only_complete(self):
+        bar_days = list(pd.bdate_range("2026-01-05", periods=60))
+        picks = pd.DataFrame({"Date": [bar_days[0], bar_days[1], bar_days[30]], "Code": ["10000", "20000", "30000"],
+                              "rank": [1, 1, 1], "status": ["満了", "指値到達", "保有中"], "hit_day": [NAN, 3.0, NAN],
+                              "ret": [-2.0, 10.0, NAN]})
+        st = L.ref_summary(picks, bar_days, complete_to=bar_days[10], slots=None)
+        self.assertEqual((st["picks"], st["taken"], st["done"]), (3, 3, 2))
+        self.assertAlmostEqual(st["mean"], 4.0)
+        self.assertAlmostEqual(st["hit"], 50.0)
+        st1 = L.ref_summary(picks, bar_days, complete_to=bar_days[10], slots=1)   # 1枠: 2件目は枠が満杯
+        self.assertEqual((st1["taken"], st1["done"]), (2, 1))
 
 
 class CompleteOnly(unittest.TestCase):

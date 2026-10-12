@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { fmt, fmtInt, fmtSigned, fmtOku, fmtDate, fmtDateTime, DASH } from '../lib/format.js';
 import { bandColor, bandLabel, pctColor, pctInk, PCT_LEGEND, modelRows, modelGrid, MODEL_SHORT, MODEL_FAMILY,
   FAMILY_JA, marketTone, candidateToStock } from '../lib/predictions.js';
-import { STRATEGY, BOOST, BORDER, strategySignal, exitPlan, nearMisses,
+import { STRATEGY, RULE_MODELS, RULE_JA, BORDER, strategySignal, exitPlan, nearMisses,
          MODEL_JA, fundContrib, frozenNote, borderNote,
 } from '../lib/strategy.js';
 
@@ -121,7 +121,7 @@ export default function PredictionView({ data, history, onSendToOctagon, sentIds
 /**
  * docs/PLAYBOOK.md の手順を、その日のデータでそのまま実行して見せる。
  *
- * 判断の材料（発火数・3モデルの百分位）は下の一覧にも出ているが、
+ * 判断の材料（発火数・規則の3モデル（2026-10-12 から 1.5σ の3本）の百分位）は下の一覧にも出ているが、
  * 「今日は買うのか、買うなら何を、いくらで手仕舞うのか」を1か所で
  * 言い切る場所が要る。迷いどころを毎日つくらないための画面。
  */
@@ -132,7 +132,7 @@ function StrategyPanel({ signal, near, day, models, onSend, sentIds }) {
       <div className="card-head">
         <h2>今日の戦略</h2>
         <span className="sub">
-          3モデルが揃って上位10%と見た銘柄を{STRATEGY.topK}件まで。
+          {RULE_JA}（L15・X15・C15）がすべて{STRATEGY.agreePct}以上の銘柄を{STRATEGY.topK}件まで。
           翌営業日の寄りで買い、+{STRATEGY.takeProfit}% の指値か
           {STRATEGY.holdDays}営業日目の終値で降りる（同時保有は{STRATEGY.maxSlots}銘柄まで、
           発火{STRATEGY.skipBreaks}件未満の日は見送り）
@@ -151,7 +151,7 @@ function StrategyPanel({ signal, near, day, models, onSend, sentIds }) {
             </span>
           </div>
           <div>
-            <span className="lab">3モデルが揃って上位10%</span>
+            <span className="lab">{RULE_JA}がすべて{STRATEGY.agreePct}以上</span>
             <strong className="num">{passed.length}</strong>
             <span className="sub">件 / {nBreak}件</span>
           </div>
@@ -171,7 +171,7 @@ function StrategyPanel({ signal, near, day, models, onSend, sentIds }) {
           <ol className="strat-steps">
             <li><b>翌営業日の寄り</b>で成行。終値では買えない（候補が分かるのが終値後）</li>
             <li>買えたら <b>+{STRATEGY.takeProfit}% の指値</b>を置く
-                （過去の予測で、この規則の候補が届いたのは約35%、届くときの中央値は10営業日）</li>
+                （過去の予測でこの手順のとおりに買った取引のうち、届いたのは約40%、届くときの中央値は7営業日）</li>
             <li>届かなければ <b>{STRATEGY.holdDays}営業日目の終値</b>で売る</li>
             <li><b>枠は{STRATEGY.maxSlots}つまで</b>。埋まっていたら見送る。
                 保有中の銘柄は、ここに良い候補が出ても<b>切らない</b>
@@ -182,7 +182,7 @@ function StrategyPanel({ signal, near, day, models, onSend, sentIds }) {
         <div className="empty strat-empty">
           {nBreak === 0 ? 'この日は新規の高値更新がありません。'
             : passed.length === 0
-              ? '3モデルが揃って上位10%と見た銘柄はありません。買いません。'
+              ? `${RULE_JA}がすべて${STRATEGY.agreePct}以上の銘柄はありません。買いません。`
               : `発火が ${nBreak} 件しかありません。基準を満たした銘柄はありますが、`
                 + 'この日は見送ります。'}
         </div>
@@ -203,22 +203,23 @@ function StrategyPanel({ signal, near, day, models, onSend, sentIds }) {
       {near.length > 0 && <NearMiss near={near} />}
 
       <p className="strat-src sub">
-        実測（2021-11〜2026-08 の out-of-fold、基準を満たした757件）:
-        発火20件以上は +3.27%・勝率63%、8〜19件は +1.0〜2.2%・勝率54〜55%、
-        7件以下は −0.11%・−10%割れ14.1%。7件以下と8件以上の差だけは
-        z≈2.6 で実在する。20件という線は結果を見てから選んだもので、
-        そこで切ると枠が6割遊び、2022年は1年まるごと0件になる
-        （docs/PLAYBOOK.md）。
+        実測（画面と同じ百分位、2021-05〜2026-09 の out-of-fold、{RULE_JA}がすべて95以上の354件。
+        +10% の指値・届かなければ20営業日目の終値）: 発火20件以上は192件で +4.9%・勝率78%、
+        8〜19件は140件で +1.5%・勝率59%、7件以下は22件と少なく +5.4%。この手順のとおり3枠で回すと
+        107取引・1取引 +1.5%（その時点の百分位で測ると118取引・+1.8%）。これまでの目安（1.2σ の3本が
+        95以上）と比べて、どちらが良いかは過去のデータでは見分けられない
+        （docs/MODEL_ADOPTION_RULES.md §46）。
       </p>
     </section>
   );
 }
 
 /**
- * 惜しい候補（3モデルの最小が85〜90）。**買わない**ことの根拠を添えて出す。
+ * 惜しい候補（規則の3モデル（1.5σ の3本）の最小が 85〜95）。**買わない**ことの根拠を添えて出す。
  *
- * 毎日「あと3pt なのに」と迷い直さないための欄。実測では、1つのモデルだけが
- * 5pt以上低い形は空き枠（0%）と変わらない（実験36 / docs/PLAYBOOK.md）。
+ * 毎日「あと少しなのに」と迷い直さないための欄。数字は今の規則で測ったもの（research/exp/probe_k15_baseline.py。
+ * 画面と同じ百分位、発火8件以上の日）。以前の規則（1.2σ の3本、最小 85〜90）で「1つだけ5pt以上低い形は空き枠と
+ * 変わらない」とした実験36 は、1.5σ の3本では成り立たない（幅5以上のほうが少し上）。
  */
 function NearMiss({ near }) {
   return (
@@ -237,11 +238,10 @@ function NearMiss({ near }) {
             <span className="sub">
               {c.weak
                 ? `${MODEL_JA[c.laggard] || c.laggard} だけ `
-                  + `${fmt(c.spread, 1)}pt 低い形。実験36（153列のころ）で +0.30%・勝率49%・`
-                  + '−10%割れ 12.6%（270件）で、枠を遊ばせるのと変わらない'
-                : `3モデルがほぼ揃っている（幅 ${fmt(c.spread, 1)}pt）。`
-                  + 'この形は実験36（153列のころ）で +2.70%（118件）と基準通過組に近いが、'
-                  + '事後に見つけた区分けなので基準は動かしていない'}
+                  + `${fmt(c.spread, 1)}pt 低い形。最小 85〜95・幅5以上の形は過去 584件で +2.1%・勝率63%`
+                  + `（3本とも95以上は354件で +3.6%）`
+                : `3本がほぼ揃っている（幅 ${fmt(c.spread, 1)}pt）。最小 85〜95・幅5未満の形は過去 369件で `
+                  + '+1.1%・勝率58%（3本とも95以上は354件で +3.6%）'}
               <FundNote c={c} />
             </span>
           </div>
@@ -290,7 +290,7 @@ function PickCard({ c, n, models, onSend, sent }) {
       </div>
       <div className="strat-pick-body">
         <div className="strat-metric">
-          <span className="lab">3モデルの最小</span>
+          <span className="lab">{RULE_JA}の最小</span>
           <strong className="num">
             <i className="pct-sw" style={{ background: pctColor(c.minPct) }} aria-hidden="true" />
             {fmt(c.minPct, 0)}
@@ -302,7 +302,7 @@ function PickCard({ c, n, models, onSend, sent }) {
             <span className="lab">モデル別の百分位</span>
             <ModelGrid c={c} models={models} />
           </div>
-        ) : BOOST.map((a) => (
+        ) : RULE_MODELS.map((a) => (
           <div key={a} className="strat-metric">
             <span className="lab">{MODEL_SHORT[a]}</span>
             <span className="num">{fmt(c.byModel?.[a]?.pctHistorical, 0)}</span>
@@ -325,7 +325,7 @@ function PickCard({ c, n, models, onSend, sent }) {
 }
 
 /**
- * 際どい候補の印（運用者の線「3モデルとも95以上」の下。strategy.js の borderNote）。
+ * 際どい候補の印（1.2σ の3本で見た線「3本とも95以上」の下。2026-10-12 までの運用者の目安。strategy.js の borderNote）。
  * 一番低いのが LightGBM なら赤（過去ほぼ 0%。実験36・70）、それ以外は黄。
  * 詳しい文言は title と、行を開いたときの本文に出す。選定の規則は変えない。
  */
@@ -484,7 +484,7 @@ function Detail({ c, models, onSend, sent }) {
         <div className={`banner ${bn.warn ? 'warn' : 'info'} pred-border-note`}>
           <span>{bn.warn ? '⚠' : 'ℹ'}</span>
           <div>
-            <b>際どい候補（3モデルとも{BORDER.line}以上の線の下）。</b>{bn.text}
+            <b>1.2σ の3本で見た際どい候補（3本とも{BORDER.line}以上の線の下。2026-10-12 までの目安）。</b>{bn.text}
           </div>
         </div>
       )}
@@ -513,8 +513,9 @@ function Detail({ c, models, onSend, sent }) {
               </span>
             </div>
             <p className="sub" style={{ margin: '8px 0 0' }}>
-              行は学習に使ったラベルで、1.2σ が本番です。1.5σ・1.8σ は、より大きく上がった銘柄だけを
-              正例にして学習したもので、本番の判定（今日の戦略の「3モデルとも〜以上」）には使いません。
+              行は学習に使ったラベルで、1.2σ が本番（順位・帯の基準）です。1.5σ・1.8σ は、より大きく上がった
+              銘柄だけを正例にして学習したもの。今日の戦略の規則は、2026-10-12 から 1.5σ の木の3本
+              （L15・X15・C15）がすべて95以上です（運用者の決定）。
               同じ行・同じ列のモデルは似た見方をするので、そろって高くても独立した票ではありません。
               1.2σ の3本が95以上の候補に「1.5σ・1.8σ の3本も95以上」を足しても、過去の前向きの
               検証では成績は安定して上がりませんでした（実験82）。

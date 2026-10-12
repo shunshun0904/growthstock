@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import live_track as LT  # noqa: E402
 
 EXITS = ((10.0, "close", "+10% の指値・20日目の終値（新）"), (20.0, "ma5", "+20% の指値・5日平均（以前）"))
+PANEL_AGREE = 90.0       # 記録した時の画面の規則の線（1.2σ の3本）
 
 
 def exit_summary(pf: pd.DataFrame, bar_days, n_days: int) -> dict:
@@ -45,16 +46,17 @@ def exit_summary(pf: pd.DataFrame, bar_days, n_days: int) -> dict:
 
 
 def main() -> int:
-    rows = LT.oof_rows(LT.DATA_DIR, LT.MODEL_DIR)
+    # 規則は記録した時（2026-10-12）の画面の規則: 1.2σ の3本・90以上。その後 1.5σ の3本・95以上になったので明示して固定する
+    rows = LT.oof_rows(LT.DATA_DIR, LT.MODEL_DIR, algos=LT.BOOST)
     bars = LT.load_bars(LT.DATA_DIR, start=pd.Timestamp("2021-01-01"))
     bar_days = sorted(pd.Timestamp(d) for d in bars["Date"].unique())
     print(f"[oof] 候補 {len(rows):,}件（{rows['Date'].min().date()} 〜 {rows['Date'].max().date()}）。"
           f"規則: 発火{LT.SKIP_BREAKS}件以上・上位{LT.TOP_K}件・{LT.SLOTS}枠・{LT.HOLD}営業日。今の指値の設定 +{LT.TAKE_PROFIT:g}%"
           f"・届かなければ {LT.FALLBACK}")
-    for agree in (LT.AGREE_PCT, 95.0):
-        r, days, picks = LT.decide(rows, agree=agree)
+    for agree in (PANEL_AGREE, 95.0):
+        r, days, picks = LT.decide(rows, agree=agree, models=LT.BOOST)
         n_days = LT.n_bar_days(bar_days, r["Date"].min(), r["Date"].max())
-        print(f"\n■ 3モデルすべて {agree:g} 以上（{'画面の規則' if agree == LT.AGREE_PCT else '運用者の目安'}）: 選んだ候補 {len(picks):,}件")
+        print(f"\n■ 3モデルすべて {agree:g} 以上（{'画面の規則' if agree == PANEL_AGREE else '運用者の目安'}）: 選んだ候補 {len(picks):,}件")
         for target, fb, name in EXITS:
             pf = LT.forward(bars, picks, target=target, fallback=fb)
             s = exit_summary(pf, bar_days, n_days)

@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  BOOST, STRATEGY, boostPcts, minPct, passesAgree, dayVerdict, strategySignal, exitPlan,
+  BOOST, RULE_MODELS, RULE_JA, STRATEGY, boostPcts, pctsOf, minPct, passesAgree, dayVerdict, strategySignal, exitPlan,
   freeSlots, pctSpread, laggard, nearMisses, fundContrib, frozenNote,
   BORDER, BORDER_STATS, borderShape, borderNote,
 } from '../src/lib/strategy.js';
@@ -16,34 +16,53 @@ const cand = (code, pcts, score = 0.5) => ({
     Object.entries(pcts).map(([a, p]) => [a, { score, pctHistorical: p }])),
 });
 
+/** 今の規則のモデル（1.5σ の3本: lgbm_k15 / xgb_k15 / cat_k15）の百分位で候補を作る。 */
+const rule = (code, [a, b, c], score = 0.5) => {
+  const pcts = {};
+  [a, b, c].forEach((v, i) => { if (v !== undefined) pcts[RULE_MODELS[i]] = v; });
+  return cand(code, pcts, score);
+};
+
 const day = (n, pcts = [95, 95, 95]) =>
-  Array.from({ length: n }, (_, i) =>
-    cand(`X${i}`, { lgbm: pcts[0], xgb: pcts[1], cat: pcts[2] }, 0.5 - i * 0.01));
+  Array.from({ length: n }, (_, i) => rule(`X${i}`, pcts, 0.5 - i * 0.01));
 
-/* ------------------------------------------------ 3モデルの百分位 */
+/* ------------------------------------------------ 規則の3モデルの百分位 */
 
-test('minPct: 3モデルの最小を返す', () => {
-  assert.equal(minPct(cand('A', { lgbm: 95, xgb: 91, cat: 99 })), 91);
+test('規則のモデル: 2026-10-12 から 1.5σ の3本・線 95', () => {
+  assert.deepEqual(RULE_MODELS, ['lgbm_k15', 'xgb_k15', 'cat_k15']);
+  assert.equal(STRATEGY.agreePct, 95);
+  assert.equal(RULE_JA, '1.5σ の3本');
 });
 
-test('minPct: 線形・MLP は混ぜない', () => {
-  const c = cand('A', { lgbm: 95, xgb: 91, cat: 99 });
-  c.byModel.logit = { score: 0.1, pctHistorical: 10 };
+test('minPct: 規則の3モデルの最小を返す（本番の1.2σ の値は見ない）', () => {
+  const c = rule('A', [95, 91, 99]);
+  c.byModel.lgbm = { score: 0.1, pctHistorical: 10 };       // 1.2σ の値が低くても規則には効かない
+  assert.equal(minPct(c), 91);
+  assert.equal(minPct(c, BOOST), null);                     // 1.2σ の3本はそろっていない
+});
+
+test('minPct: 線形・MLP・1.2σ は混ぜない', () => {
+  const c = rule('A', [95, 91, 99]);
+  c.byModel.logit_k15 = { score: 0.1, pctHistorical: 10 };
   c.byModel.mlp = { score: 0.1, pctHistorical: 5 };
   assert.equal(minPct(c), 91);
+  assert.deepEqual(Object.keys(pctsOf(c)), RULE_MODELS);
   assert.deepEqual(Object.keys(boostPcts(c)), BOOST);
 });
 
 test('minPct: 1つでも欠けていれば null（欠測を「満たした」にしない）', () => {
-  const c = cand('A', { lgbm: 95, cat: 99 });
+  const c = rule('A', [95, undefined, 99]);
   assert.equal(minPct(c), null);
   assert.equal(passesAgree(c), false);
   assert.equal(minPct({}), null);
+  // 1.5σ のモデルがまだ無い予測ファイル（1.2σ だけ）では誰も通らない
+  assert.equal(passesAgree(cand('B', { lgbm: 99, xgb: 99, cat: 99 })), false);
 });
 
-test('passesAgree: 3つすべてが 90 以上のときだけ true', () => {
-  assert.equal(passesAgree(cand('A', { lgbm: 90, xgb: 90, cat: 90 })), true);
-  assert.equal(passesAgree(cand('B', { lgbm: 99, xgb: 99, cat: 89.9 })), false);
+test('passesAgree: 3つすべてが 95 以上のときだけ true', () => {
+  assert.equal(passesAgree(rule('A', [95, 95, 95])), true);
+  assert.equal(passesAgree(rule('B', [99, 99, 94.9])), false);
+  assert.equal(passesAgree(rule('C', [90, 90, 90])), false);    // 以前の線 90 では通らない
 });
 
 /* ------------------------------------------------ その日を取るか */
@@ -62,7 +81,7 @@ test('dayVerdict: 発火数で3段階に分かれる', () => {
 
 test('strategySignal: 発火が多い日は上位2件を買う', () => {
   const rows = day(25);
-  rows[3].byModel.lgbm.pctHistorical = 99;   // 最小は 95 のまま
+  rows[3].byModel.lgbm_k15.pctHistorical = 99;   // 最小は 95 のまま
   const s = strategySignal(rows);
   assert.equal(s.nBreak, 25);
   assert.equal(s.verdict.kind, 'strong');
@@ -73,13 +92,13 @@ test('strategySignal: 発火が多い日は上位2件を買う', () => {
 
 test('strategySignal: 3モデルの最小順位で並ぶ（lgbm 単体の順ではない）', () => {
   const rows = [
-    cand('LOW', { lgbm: 99, xgb: 91, cat: 92 }, 0.9),   // 最小 91・スコア最大
-    cand('TOP', { lgbm: 93, xgb: 96, cat: 95 }, 0.5),   // 最小 93
-    cand('MID', { lgbm: 92, xgb: 92, cat: 99 }, 0.6),   // 最小 92
-    ...day(20),
+    rule('LOW', [99, 95.1, 95.2], 0.9),   // 最小 95.1・スコア最大
+    rule('TOP', [96.5, 99, 98], 0.5),     // 最小 96.5
+    rule('MID', [95.5, 95.5, 99], 0.6),   // 最小 95.5
+    ...day(20, [97, 97, 97]),
   ];
   const s = strategySignal(rows);
-  assert.equal(s.picks[0].code, 'X0');                  // 最小 95 が先頭
+  assert.equal(s.picks[0].code, 'X0');                  // 最小 97 が先頭
   const order = s.passed.map((c) => c.code);
   assert.ok(order.indexOf('TOP') < order.indexOf('MID'));
   assert.ok(order.indexOf('MID') < order.indexOf('LOW'));
@@ -151,35 +170,47 @@ test('freeSlots: 保有数が分からなければ null（枠の話をしない�
 });
 
 test('pctSpread / laggard: 3モデルの幅と最下位モデル', () => {
-  // クニミネ工業 2026-09-18 の実際の値
-  const k = cand('5388', { lgbm: 86.5, xgb: 91.7, cat: 91.5 });
+  // クニミネ工業 2026-09-18 の 1.2σ の実際の値を、規則のモデル（1.5σ）にも当てる
+  const k = rule('5388', [86.5, 91.7, 91.5]);
   assert.equal(minPct(k), 86.5);
   assert.equal(Math.round(pctSpread(k) * 10) / 10, 5.2);
-  assert.equal(laggard(k), 'lgbm');
+  assert.equal(laggard(k), 'lgbm_k15');
+  const k12 = cand('5388', { lgbm: 86.5, xgb: 91.7, cat: 91.5 });
+  assert.equal(laggard(k12, BOOST), 'lgbm');                 // 1.2σ の3本で見るとき
   // 欠けていれば null（欠けたまま判定しない）
-  const bad = cand('9999', { lgbm: 90, xgb: 90 });
+  const bad = rule('9999', [90, 90]);
   assert.equal(pctSpread(bad), null);
   assert.equal(laggard(bad), null);
 });
 
-test('nearMisses: 最小85〜90 だけを拾い、幅5以上は弱い形と印を付ける', () => {
+test('nearMisses: 最小85〜95 だけを拾い、幅5以上の形に印を付ける', () => {
   const rows = [
-    cand('A', { lgbm: 95, xgb: 94, cat: 96 }),        // 基準通過。対象外
-    cand('B', { lgbm: 86.5, xgb: 91.7, cat: 91.5 }),  // 惜しい・幅5.2 → 弱い
-    cand('C', { lgbm: 88, xgb: 89, cat: 87 }),        // 惜しい・幅2 → 揃っている
-    cand('D', { lgbm: 70, xgb: 95, cat: 95 }),        // 85未満。対象外
+    rule('A', [96, 95, 97]),          // 基準通過。対象外
+    rule('B', [86.5, 91.7, 91.5]),    // 惜しい・幅5.2
+    rule('C', [88, 89, 87]),          // 惜しい・幅2 → 揃っている
+    rule('D', [70, 95, 95]),          // 85未満。対象外
+    rule('E', [94, 96, 97]),          // 惜しい（以前の線 90 なら通っていた）
   ];
   const n = nearMisses(rows);
-  assert.deepEqual(n.map((x) => x.code), ['C', 'B']);  // 最小の降順
+  assert.deepEqual(n.map((x) => x.code), ['E', 'C', 'B']);  // 最小の降順
   assert.equal(n.find((x) => x.code === 'B').weak, true);
   assert.equal(n.find((x) => x.code === 'C').weak, false);
-  assert.equal(n.find((x) => x.code === 'B').laggard, 'lgbm');
+  assert.equal(n.find((x) => x.code === 'B').laggard, 'lgbm_k15');
 });
 
-test('nearMisses: 境界（85ちょうどは入る / 90ちょうどは入らない）', () => {
-  assert.equal(nearMisses([cand('E', { lgbm: 85, xgb: 99, cat: 99 })]).length, 1);
-  assert.equal(nearMisses([cand('F', { lgbm: 90, xgb: 99, cat: 99 })]).length, 0);
-  assert.equal(nearMisses([cand('G', { lgbm: 84.9, xgb: 99, cat: 99 })]).length, 0);
+test('nearMisses: 境界（85ちょうどは入る / 95ちょうどは入らない）', () => {
+  assert.equal(nearMisses([rule('E', [85, 99, 99])]).length, 1);
+  assert.equal(nearMisses([rule('F', [95, 99, 99])]).length, 0);
+  assert.equal(nearMisses([rule('G', [84.9, 99, 99])]).length, 0);
+  assert.equal(nearMisses([rule('H', [94.9, 99, 99])]).length, 1);
+});
+
+test('dayVerdict: 文言は今の規則で測った数字（7件以下は以前の規則で決めた線と明記）', () => {
+  assert.ok(dayVerdict(25).note.includes('192件 +4.9%'));
+  assert.ok(dayVerdict(10).note.includes('140件 +1.5%'));
+  const skip = dayVerdict(5).note;
+  assert.ok(skip.includes('以前の規則の142件 −0.11%') && skip.includes('22件と少なく +5.4%'));
+  for (const n of [25, 10, 5, 0]) assert.ok(!/NaN|undefined|null/.test(dayVerdict(n).note));
 });
 
 test('fundContrib: 決算の寄与（水準＋変化）を足す', () => {
@@ -236,7 +267,7 @@ test('borderNote: LightGBM が一番低いと warn。文言は実験70 の数字
   assert.equal(n.warn, true);
   assert.equal(n.laggard, 'lgbm');
   assert.equal(n.laggardPct, 85);
-  assert.equal(n.badge, '際どい・LightGBM が最下位');
+  assert.equal(n.badge, '1.2σで際どい・LightGBM が最下位');
   assert.ok(n.text.includes(`過去ほぼ 0%（0.0%・${BORDER_STATS.two95.lgbm.n}件）`));
   assert.ok(n.text.includes(`（${BORDER_STATS.two95.other.n}件）`));
   assert.ok(n.text.includes(`（${BORDER_STATS.line.n}件）`));
@@ -249,7 +280,7 @@ test('borderNote: XGBoost / CatBoost が一番低いと warn ではない', () =
   const n = borderNote(cand('B', { lgbm: 97, xgb: 96, cat: 91 }));
   assert.equal(n.warn, false);
   assert.equal(n.laggard, 'cat');
-  assert.equal(n.badge, '際どい・最下位 CatBoost');
+  assert.equal(n.badge, '1.2σで際どい・最下位 CatBoost');
   assert.ok(n.text.startsWith('CatBoost が一番低い（91.0）'));
   assert.ok(n.text.includes(`（${BORDER_STATS.two95.other.n}件）`));
   assert.ok(!/NaN|undefined|null/.test(n.text));
@@ -260,7 +291,7 @@ test('borderNote: 95以上が1つ以下の形は、LightGBM が一番低くて�
   assert.equal(n.shape, 'min85');
   assert.equal(n.laggard, 'lgbm');
   assert.equal(n.warn, false);
-  assert.equal(n.badge, '際どい・最下位 LightGBM');
+  assert.equal(n.badge, '1.2σで際どい・最下位 LightGBM');
   assert.ok(n.text.includes('95以上が1つ以下で最小 85〜95 の形は過去 +1.1%（823件）'));
   assert.ok(n.text.includes('どのモデルが一番低いかで差は無い'));
   assert.ok(n.text.includes(`（LightGBM +1.2%・${BORDER_STATS.min.lgbm.n}件 / `

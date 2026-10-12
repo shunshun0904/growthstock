@@ -139,7 +139,8 @@ export const MODEL_FAMILY = {
   lgbm: 'tree', xgb: 'tree', cat: 'tree', rf: 'tree',
   logit: 'other', mlp: 'other',
   // ラベル違い（到達しきい値 1.5σ / 1.8σ のラベルで学習した4学習器。research/models.py の VARIANTS）。
-  // 本番の合議（BOOST）には入れない。「厳しいラベルでも上位か」を並べて見るためのもので、
+  // 本番の「上位10%と見たモデル」の数え上げ（agree90）には入れない（ラベル違いは agreeK90 で別に数える）。
+  // 2026-10-12 から、今日の戦略の規則は 1.5σ の木3本（strategy.js の RULE_MODELS）がすべて95以上。
   // k ごとに塊を分ける（1.5σ の4本、1.8σ の4本。同じ k の中の並びは本番と同じ LGB / XGB / CAT / LR）
   lgbm_k15: 'k15', xgb_k15: 'k15', cat_k15: 'k15', logit_k15: 'k15',
   lgbm_k18: 'k18', xgb_k18: 'k18', cat_k18: 'k18', logit_k18: 'k18',
