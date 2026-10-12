@@ -330,6 +330,39 @@ def frame_long(seed=11):
     return fr
 
 
+class TestNotices(unittest.TestCase):
+    @staticmethod
+    def unesc(s):
+        return s.replace("%0A", "\n").replace("%0D", "\r").replace("%25", "%")
+
+    def test_roundtrip_under_limit(self):
+        text = "".join(f"  分割 +10% / 高値−{i % 15}%  1取引 +{i % 7}.12%（中央 +1.00）  勝率 70.0%\n" for i in range(1200))
+        chunks = E.notice_chunks(text)
+        self.assertLessEqual(len(chunks), E.NOTICE_MAX)
+        self.assertTrue(all(len(E.esc_data(c).encode("utf-8")) <= E.NOTICE_BYTES for c in chunks))
+        self.assertEqual("".join(chunks), text)
+        buf = io.StringIO()
+        n = E.emit_notices(text, out=buf)
+        lines = buf.getvalue().splitlines()
+        self.assertEqual(len(lines), n)
+        got = ""
+        for i, ln in enumerate(lines, 1):
+            head = f"::notice title=e89 結果 ({i}/{n})::"
+            self.assertTrue(ln.startswith(head))
+            got += self.unesc(ln[len(head):])
+        self.assertEqual(got, text)
+
+    def test_long_line_and_cap(self):
+        text = "あ" * 30000 + "\n"                          # 1行 90KB。10KB ずつ 9塊に切れる
+        chunks = E.notice_chunks(text, limit=10000)
+        self.assertEqual(len(chunks), 10)                     # 9塊 + 改行だけの塊（行の終わり）
+        self.assertEqual("".join(chunks), text)
+        self.assertTrue(all(len(E.esc_data(c).encode("utf-8")) <= 10000 for c in chunks))
+        many = E.notice_chunks("x" * 100 + "\n" * 1, limit=10, max_n=3)
+        self.assertEqual(len(many), 3)
+        self.assertIn("省略", many[-1])
+
+
 class TestPlanAndVerdict(unittest.TestCase):
     def test_plan(self):
         self.assertEqual(E.make_plan([0]), [("0", 0, False)])                       # 軽く回す: 学習し直さない

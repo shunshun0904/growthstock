@@ -63,6 +63,8 @@ OK」）、後半の上限は 40営業日（「40日まででお願いします�
     args="--perm 2000"                  （既定。ずらし 0・2・4 か月と、学習し直した 0 か月 = 0r）
     args="--shifts 0 --perm 200"        （軽く回す。Release の out-of-fold だけ。学習し直さない）
     args="--no-retrain0"                （学習し直した 0 か月 = 0r を省く）
+  GitHub Actions の中では、報告の全文（集計だけ。ログと同じ中身）を最後に注釈（notice。1つ 20KB 以下・最大10個）でも出す。
+  ログ・成果物の保管先に届かない環境から、API（check-runs/<job>/annotations）で結果を読むため（--notice で手元でも出せる）
   学習し直した out-of-fold は research/_data/oof/e89_<モデル>_sh<月>_<指紋>.parquet に置く（run-experiment.yml の
   actions/cache で次の実行に引き継ぐ。指紋はパラメータ・種・列・データセットの中身（学習の列とラベルの列のハッシュ）から
   作るので、どれかが変われば作り直す）
@@ -71,11 +73,13 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import math
 import os
 import sys
 import time
+import traceback
 
 import numpy as np
 import pandas as pd
@@ -876,13 +880,101 @@ def conv(o):
     return str(o)
 
 
+#: 注釈（notice）1つの大きさの上限（UTF-8 のバイト。エスケープ後）と、1ステップに出せる数
+NOTICE_BYTES = 20000
+NOTICE_MAX = 10
+
+
+def esc_data(s: str) -> str:
+    """ワークフローコマンドのデータのエスケープ（% → %25、CR → %0D、LF → %0A）。"""
+    return s.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+
+
+def notice_chunks(text: str, limit: int = NOTICE_BYTES, max_n: int = NOTICE_MAX) -> list:
+    """text を行の区切りで、エスケープ後 limit バイト以下の塊に分ける（長すぎる行は文字で切る）。max_n を超える分は省く。"""
+    def size(x: str) -> int:
+        return len(esc_data(x).encode("utf-8"))
+
+    pieces = []
+    for ln in text.splitlines(keepends=True):
+        while size(ln) > limit:
+            lo, hi = 1, len(ln)                 # 収まるいちばん長い頭（二分探索）
+            while lo < hi:
+                mid = (lo + hi + 1) // 2
+                if size(ln[:mid]) <= limit:
+                    lo = mid
+                else:
+                    hi = mid - 1
+            pieces.append(ln[:lo])
+            ln = ln[lo:]
+        if ln:
+            pieces.append(ln)
+    chunks, cur, n = [], [], 0
+    for p in pieces:
+        b = size(p)
+        if cur and n + b > limit:
+            chunks.append("".join(cur))
+            cur, n = [], 0
+        cur.append(p)
+        n += b
+    if cur:
+        chunks.append("".join(cur))
+    if len(chunks) > max_n:
+        chunks = chunks[:max_n - 1] + [f"（ほか {len(chunks) - max_n + 1} 塊は省略。全文は exp.log）\n"]
+    return chunks
+
+
+def emit_notices(text: str, out=None, title: str = "e89 結果") -> int:
+    """text（集計だけの報告）を Actions の注釈（notice）として出す。API（check-runs の annotations）で読めるように。"""
+    out = out or sys.stdout
+    chunks = notice_chunks(text)
+    for i, c in enumerate(chunks, 1):
+        out.write(f"::notice title={title} ({i}/{len(chunks)})::{esc_data(c)}\n")
+    out.flush()
+    return len(chunks)
+
+
+class Tee:
+    """標準出力をそのまま流しつつ、写しを取る（最後に注釈で出すため）。"""
+
+    def __init__(self, *streams):
+        self.streams = streams
+
+    def write(self, s):
+        for st in self.streams:
+            st.write(s)
+        return len(s)
+
+    def flush(self):
+        for st in self.streams:
+            st.flush()
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="実験89: 分割決済（前半 +10% の指値・後半 高値からのトレーリング）")
     ap.add_argument("--perm", type=int, default=N_PERM)
     ap.add_argument("--shifts", default=",".join(str(s) for s in SHIFTS),
                     help="窓の境界をずらす月数（カンマ区切り）。0 は本番の窓（Release の out-of-fold）")
     ap.add_argument("--no-retrain0", action="store_true", help="学習し直した 0 か月（参考）を省く")
+    ap.add_argument("--notice", action="store_true",
+                    help="報告の全文（集計だけ）を最後に Actions の注釈（notice）でも出す（GitHub Actions の中では既定で出す）")
     args = ap.parse_args(argv)
+    if not (args.notice or os.environ.get("GITHUB_ACTIONS") == "true"):
+        return run(args)
+    cap = io.StringIO()
+    orig = sys.stdout
+    sys.stdout = Tee(orig, cap)
+    try:
+        return run(args)
+    except BaseException:
+        cap.write("\n[error] " + traceback.format_exc())
+        raise
+    finally:
+        sys.stdout = orig
+        emit_notices(cap.getvalue())
+
+
+def run(args) -> int:
     shifts = [int(x) for x in args.shifts.split(",") if x.strip() != ""]
     t0 = time.time()
     fr = lab.frame()
