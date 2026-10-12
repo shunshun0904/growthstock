@@ -23,6 +23,10 @@
        判定: 主 − 今のやり方 の窓ごとの差の平均が正・上の窓が過半
   分位点: 選んだ取引の収益の 10 / 25 / 50 / 75 / 90% 点。選んだ行・線の avg6 の水準（同じ窓の候補全体の中で上位何%か）
   avg6 の四分位: 窓ごとに A15 の行を avg6 の順位で4つに分け、成績を比べる（上の四分位 − 下の四分位、窓ごと。見るだけ）
+  スコアの下限（運用者「どの程度のスコアの下限なのか知りたい」）: 各月の A15 の6本の平均（画面の丸め）の1番目と2番目
+       （2番目 = その月の上位2件に入る下限）の月ごとの散らばり。前向きと、画面と同じ全期間の百分位の両方。先着2件の線
+       （前向きは窓ごと、画面の物差しでは全期間で A15 が月平均2件になる高さ）と、線の高さごとの月あたりの件数・成績（見るだけ。
+       線はここから選ばない）
   百分位は前向き（実験79 の window_split、丸めは画面と同じ）。テスト窓 3〜11。参考に全期間の百分位（A だけ）
 
 公開ログには集計だけ（群ごとの件数・平均・分位点、窓ごとの差）。銘柄・日付ごとの値は出さない。
@@ -189,6 +193,67 @@ def group_line(name: str, g: pd.DataFrame, months: int, width: int = 38) -> str:
             f"  勝率 {(r > 0).mean() * 100:4.1f}%  到達 {hit:4.1f}%  −10%割れ {(r < -10).mean() * 100:4.1f}%  ｜ 参考 {refs}")
 
 
+CUT_GRID = (97.0, 97.5, 98.0, 98.5, 99.0, 99.5)
+
+
+def month_cutoffs(fr: pd.DataFrame, flag: str = FLAG, col: str = "avg6r") -> pd.DataFrame:
+    """各月の flag の行の col の1番目・2番目（2番目 = その月の上位2件に入る下限）と件数。flag の行が無い月は出さない。"""
+    sub = fr[fr[flag].to_numpy(dtype=bool)].assign(_m=months_of)
+    rows = []
+    for m, g in sub.groupby("_m"):
+        v = np.sort(pd.to_numeric(g[col], errors="coerce").dropna().to_numpy(dtype=float))[::-1]
+        if not len(v):
+            continue
+        rows.append({"_m": m, "window": int(g["window"].iloc[0]), "n": int(len(v)), "first": float(v[0]),
+                     "second": float(v[1]) if len(v) > 1 else float("nan")})
+    return pd.DataFrame(rows, columns=["_m", "window", "n", "first", "second"])
+
+
+def full_threshold(fr: pd.DataFrame, flag: str = FLAG, col: str = "avg6r", per_month: float = TOP_N) -> dict:
+    """fr の全期間で flag の行が月に平均 per_month 件になる col の線（画面の物差しの線に使う）と、候補全体で線以上の割合（%）。"""
+    months = E82.n_months(fr)
+    v = np.sort(pd.to_numeric(fr.loc[fr[flag].to_numpy(dtype=bool), col], errors="coerce").dropna().to_numpy())[::-1]
+    k = int(round(per_month * months))
+    if not len(v) or k < 1:
+        return {"T": float("inf"), "months": months, "k": k, "share_all": 0.0}
+    T = float(v[min(k, len(v)) - 1])
+    return {"T": T, "months": months, "k": k, "n_flag": int(len(v)),
+            "share_all": float((pd.to_numeric(fr[col], errors="coerce") >= T).mean() * 100)}
+
+
+def grid_rows(fr: pd.DataFrame, months: int, grid=CUT_GRID, flag: str = FLAG, col: str = "avg6r") -> list:
+    """線（col）の高さごとに、flag かつ線以上の行の月あたりの件数・1件以上ある月の割合・先着2件の +10% の成績。"""
+    out = []
+    for t in grid:
+        mask = fr[flag].to_numpy(dtype=bool) & (pd.to_numeric(fr[col], errors="coerce").to_numpy(dtype=float) >= t)
+        picks = first_by(fr, mask, "avg6")
+        r = pd.to_numeric(picks[MAIN], errors="coerce").dropna()
+        out.append({"t": t, "per_month": float(mask.sum() / months) if months else float("nan"),
+                    "months_any": int(picks["_m"].nunique()) if len(picks) else 0, "n_picks": int(len(picks)),
+                    "mean": float(r.mean()) if len(r) else float("nan"), "med": float(r.median()) if len(r) else float("nan"),
+                    "win": float((r > 0).mean() * 100) if len(r) else float("nan"),
+                    "p10": float(np.percentile(r, 10)) if len(r) else float("nan")})
+    return out
+
+
+def print_cutoffs(fr: pd.DataFrame, label: str) -> dict:
+    months = E82.n_months(fr)
+    mc = month_cutoffs(fr)
+    two = mc.dropna(subset=["second"])
+    q1, q2 = qtiles(mc["first"]), qtiles(two["second"])
+    n0 = months - len(mc)
+    n1 = int((mc["n"] == 1).sum())
+    print(f"  {label}: {months}か月のうち A15 が2件以上の月 {len(two)}・1件の月 {n1}・0件の月 {n0}")
+    print(f"    各月の1番目（最上位）: " + "  ".join(f"{q_}% {q1[f'p{q_}']:.1f}" for q_ in QS)
+          + f"  最小 {q1['min']:.1f}・最大 {q1['max']:.1f}")
+    print(f"    各月の2番目（上位2件に入る下限）: " + "  ".join(f"{q_}% {q2[f'p{q_}']:.1f}" for q_ in QS)
+          + f"  最小 {q2['min']:.1f}・最大 {q2['max']:.1f}")
+    byw = two.groupby("window")["second"].median()
+    print("    窓ごとの2番目の中央: " + "  ".join(f"窓{int(w)} {v:.1f}" for w, v in byw.items()))
+    return {"months": months, "two": int(len(two)), "one": n1, "zero": int(n0), "first": q1, "second": q2,
+            "second_by_window": {int(w): float(v) for w, v in byw.items()}}
+
+
 def quartiles_in_window(ft: pd.DataFrame, flag: str, key: str = "avg6", min_rows: int = 8) -> pd.Series:
     """窓ごとに flag の行を key の順位で4つ（0 = 下 〜 3 = 上）に分ける。行が少ない窓は NaN。"""
     out = pd.Series(np.nan, index=ft.index)
@@ -258,6 +323,11 @@ def report(ft: pd.DataFrame, thr: dict | None = None, ff: pd.DataFrame | None = 
         sh = np.array([v["share_all"] for v in thr.values() if np.isfinite(v["T"])])
         print(f"  線（6本の平均、丸める前）: 窓ごとに {Ts.min():.2f}〜{Ts.max():.2f}（中央 {np.median(Ts):.2f}）。訓練の候補全体で"
               f"線以上は上位 {np.median(sh):.2f}%（中央。{sh.min():.2f}〜{sh.max():.2f}%）")
+        mth = threshold_mask(ft, thr)
+        per_w = ft.assign(_ok=mth, _m=months_of).groupby("window").agg(n=("_ok", "sum"), m=("_m", "nunique"))
+        print("  窓ごとの線と、テストで線以上の A15 の月あたりの件数: " + "  ".join(
+            f"窓{int(w)} {thr[int(w)]['T']:.2f}（{per_w.loc[w, 'n'] / per_w.loc[w, 'm']:.1f}件）" for w in per_w.index
+            if int(w) in thr))
         selb = {"thr": ("A15 で線以上の先着2件（主）", first_by(ft, threshold_mask(ft, thr), "avg6")),
                 "cur": ("今のやり方: R0 の先着2件", first_by(ft, ft[BASE].to_numpy(dtype=bool), "pmin3")),
                 "a15": ("A15 の先着2件（線なし）", first_by(ft, ft[FLAG].to_numpy(dtype=bool), "avg6"))}
@@ -291,6 +361,9 @@ def report(ft: pd.DataFrame, thr: dict | None = None, ff: pd.DataFrame | None = 
     summary["quartiles"]["top_minus_low"] = dq
     print(f"  上の四分位 − 下の四分位（窓ごと）: {fmt_s(dq)}")
 
+    # ---- 5（先に作る）. スコアの下限
+    cut = {"forward": None, "full": None}
+
     # ---- 4. 全期間の百分位（参考）
     if ff is not None and len(ff):
         mf = E82.n_months(ff)
@@ -301,6 +374,30 @@ def report(ft: pd.DataFrame, thr: dict | None = None, ff: pd.DataFrame | None = 
         print(f"    分位点（主）{fmt_q(qtiles(t6f[MAIN]))}")
         summary["full"] = {"top6": qtiles(t6f[MAIN]), "cur": qtiles(tcf[MAIN]), "vs_cur": window_diff(t6f, tcf, MAIN)}
         print(f"    窓ごとの差（主 − 今のやり方）{fmt_s(summary['full']['vs_cur'])}")
+
+    print("\n■ 5. スコアの下限（6本の平均。画面の丸めの値の平均）")
+    print("  後から見た月の上位2件に入る下限 = 各月の A15 の2番目の値")
+    cut["forward"] = print_cutoffs(ft, "前向きの百分位")
+    if ff is not None and len(ff):
+        cut["full"] = print_cutoffs(ff, "画面と同じ全期間の百分位（窓 1〜11）")
+        tf = full_threshold(ff)
+        mf = E82.n_months(ff)
+        print(f"  先着2件の線を画面の物差しで1本にすると（全期間で A15 が月平均2件になる高さ）: 6本の平均 {tf['T']:.1f} 以上"
+              f"（候補全体の上位 {tf['share_all']:.2f}%）")
+        cut["full_T"] = tf
+        print("  線の高さごとの、A15 かつ線以上の月あたりの件数と先着2件の +10% の成績（画面の物差し・全期間。見るだけ。線はここから選ばない）")
+        rows = grid_rows(ff, mf)
+        cut["grid_full"] = rows
+        for r in rows:
+            print(f"    {r['t']:.1f} 以上: 月 {r['per_month']:4.2f}件・買える月 {r['months_any']}/{mf}・先着2件 {r['n_picks']}件  "
+                  f"1取引 {r['mean']:+6.2f}%（中央 {r['med']:+5.2f}・10% 点 {r['p10']:+6.2f}）  勝率 {r['win']:4.1f}%")
+    print("  線の高さごとの、同じ表（前向きの百分位。見るだけ）")
+    rows_f = grid_rows(ft, months)
+    cut["grid_forward"] = rows_f
+    for r in rows_f:
+        print(f"    {r['t']:.1f} 以上: 月 {r['per_month']:4.2f}件・買える月 {r['months_any']}/{months}・先着2件 {r['n_picks']}件  "
+              f"1取引 {r['mean']:+6.2f}%（中央 {r['med']:+5.2f}・10% 点 {r['p10']:+6.2f}）  勝率 {r['win']:4.1f}%")
+    summary["cutoff"] = cut
 
     print("\n■ まとめ（出口はどれも +10% の指値・20日目の終値）")
     A = summary["A"]
@@ -314,6 +411,13 @@ def report(ft: pd.DataFrame, thr: dict | None = None, ff: pd.DataFrame | None = 
               f"今のやり方 {B['cur']['q']['mean']:+.2f}%（{B['cur']['n']}件）。差 {fmt_s(B['vs_cur'])} → "
               f"{'通る' if B['passed'] else '通らない'}")
     print(f"  四分位: 上 − 下 {fmt_s(summary['quartiles']['top_minus_low'])}")
+    c = summary["cutoff"]
+    for key, name in (("forward", "前向き"), ("full", "画面の物差し")):
+        if c.get(key):
+            q2 = c[key]["second"]
+            print(f"  上位2件に入る下限（{name}）: 中央 {q2['p50']:.1f}（10〜90% 点 {q2['p10']:.1f}〜{q2['p90']:.1f}）")
+    if c.get("full_T"):
+        print(f"  先着2件の線（画面の物差し、月平均2件）: {c['full_T']['T']:.1f} 以上")
     print("  注意: 確かめられるのは同じ期間の out-of-fold だけ。手数料・税・すべりは含まない")
     return summary
 

@@ -86,16 +86,35 @@ class TestSixMean(unittest.TestCase):
             earliest = sub[sub["_m"] == m]["Date"].sort_values().iloc[:len(g)]
             self.assertTrue((g["Date"].sort_values().to_numpy() == earliest.to_numpy()).all())   # 先着
 
+    def test_cutoffs_and_threshold_grid(self):
+        mc = E.month_cutoffs(self.ft)
+        two = mc.dropna(subset=["second"])
+        self.assertTrue((two["second"] <= two["first"]).all())
+        self.assertTrue((mc.loc[mc["n"] == 1, "second"].isna()).all())
+        a15 = self.ft[self.ft["A15"]].assign(_m=E.months_of)
+        m0 = two.iloc[0]
+        top2 = a15[a15["_m"] == m0["_m"]]["avg6r"].nlargest(2)
+        self.assertAlmostEqual(m0["second"], top2.iloc[1])               # 2番目 = 上位2件に入る下限
+        tf = E.full_threshold(self.ft)
+        n_above = int((a15["avg6r"] >= tf["T"]).sum())
+        self.assertGreaterEqual(n_above, min(tf["k"], len(a15)))          # 全期間で月平均2件
+        rows = E.grid_rows(self.ft, E.E82.n_months(self.ft))
+        pm = [r["per_month"] for r in rows]
+        self.assertEqual(pm, sorted(pm, reverse=True))                   # 線が高いほど件数は減る
+        self.assertTrue(all(r["n_picks"] <= 2 * E.E82.n_months(self.ft) for r in rows))
+
     def test_report_prints_no_codes(self):
         thr = E.train_thresholds(self.df, self.split)
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             s = E.report(self.ft, thr=thr, ff=self.ft, draws=50)
         out = buf.getvalue()
-        for tag in ("■ 1.", "■ 2.", "■ 3.", "■ 4.", "■ まとめ", "分位点", "今のやり方"):
+        for tag in ("■ 1.", "■ 2.", "■ 3.", "■ 4.", "■ 5.", "■ まとめ", "分位点", "今のやり方", "上位2件に入る下限"):
             self.assertIn(tag, out)
         self.assertIn("p10", s["A"]["top6"]["q"])
         self.assertIn("vs_cur", s["B"])
+        self.assertIn("second", s["cutoff"]["forward"])
+        self.assertIn("T", s["cutoff"]["full_T"])
         for code in self.df["Code"].unique()[:80]:
             self.assertNotIn(code, out)
 
