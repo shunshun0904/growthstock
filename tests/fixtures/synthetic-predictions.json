@@ -157,17 +157,44 @@
      "score": 0.3315,
      "pctHistorical": 56.3
     },
-    "mlp": {
-     "score": 0.224,
-     "pctHistorical": 34.8
+    "lgbm_k15": {
+     "score": 0.2356,
+     "pctHistorical": 83.6
+    },
+    "xgb_k15": {
+     "score": 0.2228,
+     "pctHistorical": 97.1
+    },
+    "cat_k15": {
+     "score": 0.134,
+     "pctHistorical": 97.4
+    },
+    "logit_k15": {
+     "score": 0.2652,
+     "pctHistorical": 54.0
+    },
+    "lgbm_k18": {
+     "score": 0.1767,
+     "pctHistorical": 81.1
+    },
+    "xgb_k18": {
+     "score": 0.1671,
+     "pctHistorical": 94.3
+    },
+    "cat_k18": {
+     "score": 0.1005,
+     "pctHistorical": 95.2
+    },
+    "logit_k18": {
+     "score": 0.1989,
+     "pctHistorical": 51.1
     }
    },
    "agree90": 2,
-   "nModels": 5,
+   "nModels": 4,
    "bandOutcome": 1.54,
-   "cons12": 81.5,
-   "consPct": 82.4,
-   "nCons": 12
+   "agreeK90": 4,
+   "nK": 8
   },
   {
    "code": "1699",
@@ -321,17 +348,44 @@
      "score": 0.2715,
      "pctHistorical": 44.3
     },
-    "mlp": {
-     "score": 0.409,
-     "pctHistorical": 71.8
+    "lgbm_k15": {
+     "score": 0.1892,
+     "pctHistorical": 35.5
+    },
+    "xgb_k15": {
+     "score": 0.3208,
+     "pctHistorical": 71.6
+    },
+    "cat_k15": {
+     "score": 0.2364,
+     "pctHistorical": 48.3
+    },
+    "logit_k15": {
+     "score": 0.2172,
+     "pctHistorical": 41.3
+    },
+    "lgbm_k18": {
+     "score": 0.1419,
+     "pctHistorical": 32.2
+    },
+    "xgb_k18": {
+     "score": 0.2406,
+     "pctHistorical": 68.0
+    },
+    "cat_k18": {
+     "score": 0.1773,
+     "pctHistorical": 45.5
+    },
+    "logit_k18": {
+     "score": 0.1629,
+     "pctHistorical": 37.5
     }
    },
    "agree90": 0,
-   "nModels": 5,
+   "nModels": 4,
    "bandOutcome": 1.54,
-   "cons12": 55.0,
-   "consPct": 51.0,
-   "nCons": 12
+   "agreeK90": 0,
+   "nK": 8
   },
   {
    "code": "1671",
@@ -485,17 +539,44 @@
      "score": 0.321,
      "pctHistorical": 54.2
     },
-    "mlp": {
-     "score": 0.393,
-     "pctHistorical": 68.6
+    "lgbm_k15": {
+     "score": 0.2936,
+     "pctHistorical": 61.2
+    },
+    "xgb_k15": {
+     "score": 0.2724,
+     "pctHistorical": 59.9
+    },
+    "cat_k15": {
+     "score": 0.3832,
+     "pctHistorical": 84.8
+    },
+    "logit_k15": {
+     "score": 0.2568,
+     "pctHistorical": 50.5
+    },
+    "lgbm_k18": {
+     "score": 0.2202,
+     "pctHistorical": 57.2
+    },
+    "xgb_k18": {
+     "score": 0.2043,
+     "pctHistorical": 55.4
+    },
+    "cat_k18": {
+     "score": 0.2874,
+     "pctHistorical": 81.3
+    },
+    "logit_k18": {
+     "score": 0.1926,
+     "pctHistorical": 45.9
     }
    },
    "agree90": 0,
-   "nModels": 5,
+   "nModels": 4,
    "bandOutcome": 1.54,
-   "cons12": 63.6,
-   "consPct": 64.2,
-   "nCons": 12
+   "agreeK90": 0,
+   "nK": 8
   },
   {
    "code": "9434",
@@ -649,17 +730,44 @@
      "score": 0.526,
      "pctHistorical": 95.2
     },
-    "mlp": {
-     "score": 0.3705,
-     "pctHistorical": 64.1
+    "lgbm_k15": {
+     "score": 0.4392,
+     "pctHistorical": 97.1
+    },
+    "xgb_k15": {
+     "score": 0.3136,
+     "pctHistorical": 70.5
+    },
+    "cat_k15": {
+     "score": 0.3692,
+     "pctHistorical": 81.2
+    },
+    "logit_k15": {
+     "score": 0.4208,
+     "pctHistorical": 90.8
+    },
+    "lgbm_k18": {
+     "score": 0.3294,
+     "pctHistorical": 92.4
+    },
+    "xgb_k18": {
+     "score": 0.2352,
+     "pctHistorical": 65.2
+    },
+    "cat_k18": {
+     "score": 0.2769,
+     "pctHistorical": 77.0
+    },
+    "logit_k18": {
+     "score": 0.3156,
+     "pctHistorical": 85.3
     }
    },
    "agree90": 2,
-   "nModels": 5,
+   "nModels": 4,
    "bandOutcome": 1.54,
-   "cons12": 93.4,
-   "consPct": 97.9,
-   "nCons": 12
+   "agreeK90": 3,
+   "nK": 8
   },
   {
    "code": "9082",
@@ -813,14 +921,40 @@
      "score": 0.55,
      "pctHistorical": 100.0
     },
-    "mlp": {
-     "score": 0.55,
+    "lgbm_k15": {
+     "score": 0.424,
+     "pctHistorical": 92.9
+    },
+    "xgb_k15": {
+     "score": 0.44,
      "pctHistorical": 100.0
+    },
+    "cat_k15": {
+     "score": 0.3524,
+     "pctHistorical": 76.8
+    },
+    "logit_k15": {
+     "score": 0.44,
+     "pctHistorical": 94.9
+    },
+    "lgbm_k18": {
+     "score": 0.318,
+     "pctHistorical": 87.4
+    },
+    "xgb_k18": {
+     "score": 0.33,
+     "pctHistorical": 96.3
+    },
+    "cat_k18": {
+     "score": 0.2643,
+     "pctHistorical": 71.9
     }
    },
-   "agree90": 4,
-   "nModels": 5,
-   "bandOutcome": -0.9
+   "agree90": 3,
+   "nModels": 4,
+   "bandOutcome": -0.9,
+   "agreeK90": 4,
+   "nK": 7
   }
  ],
  "model": {
@@ -1204,9 +1338,10 @@
    }
   },
   {
-   "algo": "mlp",
-   "name": "ニューラルネット",
-   "note": "ニューラルネット。滑らかな交互作用を見る。木とも線形とも違う",
+   "algo": "lgbm_k15",
+   "name": "LightGBM（1.5σ）",
+   "short": "L15",
+   "note": "本番と同じ LightGBM を、到達しきい値 1.5σ（必要な上昇率が本番の 1.25倍）のラベルで学習。候補を絞る検証用",
    "trainedAt": "2026-09-06T12:31:00+00:00",
    "nOof": 16431,
    "scoreBands": {
@@ -1218,32 +1353,142 @@
      "label": "翌営業日の寄りで買い、20営業日後の5日平均終値で売ったときの上昇率"
     }
    },
-   "cv": {
-    "mean_pr_auc": 0.3044,
-    "mean_roc_auc": 0.7,
-    "n_splits": 5,
-    "n_trials": 50
-   }
+   "variant": true,
+   "positiveRate": 0.21
+  },
+  {
+   "algo": "xgb_k15",
+   "name": "XGBoost（1.5σ）",
+   "short": "X15",
+   "note": "本番と同じ XGBoost を、到達しきい値 1.5σ のラベルで学習。検証用",
+   "trainedAt": "2026-09-06T12:31:00+00:00",
+   "nOof": 16431,
+   "scoreBands": {
+    "outcome": {
+     "name": "ret_o1_20",
+     "horizon": 20,
+     "entry": "翌営業日の寄り",
+     "exit": "20営業日後の5日平均終値",
+     "label": "翌営業日の寄りで買い、20営業日後の5日平均終値で売ったときの上昇率"
+    }
+   },
+   "variant": true,
+   "positiveRate": 0.21
+  },
+  {
+   "algo": "cat_k15",
+   "name": "CatBoost（1.5σ）",
+   "short": "C15",
+   "note": "本番と同じ CatBoost を、到達しきい値 1.5σ のラベルで学習。検証用",
+   "trainedAt": "2026-09-06T12:31:00+00:00",
+   "nOof": 16431,
+   "scoreBands": {
+    "outcome": {
+     "name": "ret_o1_20",
+     "horizon": 20,
+     "entry": "翌営業日の寄り",
+     "exit": "20営業日後の5日平均終値",
+     "label": "翌営業日の寄りで買い、20営業日後の5日平均終値で売ったときの上昇率"
+    }
+   },
+   "variant": true,
+   "positiveRate": 0.21
+  },
+  {
+   "algo": "logit_k15",
+   "name": "ロジスティック回帰（1.5σ）",
+   "short": "LR15",
+   "note": "本番と同じロジスティック回帰を、到達しきい値 1.5σ のラベルで学習。検証用（線形なので並びは本番とほぼ同じ）",
+   "trainedAt": "2026-09-06T12:31:00+00:00",
+   "nOof": 16431,
+   "scoreBands": {
+    "outcome": {
+     "name": "ret_o1_20",
+     "horizon": 20,
+     "entry": "翌営業日の寄り",
+     "exit": "20営業日後の5日平均終値",
+     "label": "翌営業日の寄りで買い、20営業日後の5日平均終値で売ったときの上昇率"
+    }
+   },
+   "variant": true,
+   "positiveRate": 0.21
+  },
+  {
+   "algo": "lgbm_k18",
+   "name": "LightGBM（1.8σ）",
+   "short": "L18",
+   "note": "本番と同じ LightGBM を、到達しきい値 1.8σ（同 1.5倍）のラベルで学習。候補を絞る検証用",
+   "trainedAt": "2026-09-06T12:31:00+00:00",
+   "nOof": 16431,
+   "scoreBands": {
+    "outcome": {
+     "name": "ret_o1_20",
+     "horizon": 20,
+     "entry": "翌営業日の寄り",
+     "exit": "20営業日後の5日平均終値",
+     "label": "翌営業日の寄りで買い、20営業日後の5日平均終値で売ったときの上昇率"
+    }
+   },
+   "variant": true,
+   "positiveRate": 0.15
+  },
+  {
+   "algo": "xgb_k18",
+   "name": "XGBoost（1.8σ）",
+   "short": "X18",
+   "note": "本番と同じ XGBoost を、到達しきい値 1.8σ のラベルで学習。検証用",
+   "trainedAt": "2026-09-06T12:31:00+00:00",
+   "nOof": 16431,
+   "scoreBands": {
+    "outcome": {
+     "name": "ret_o1_20",
+     "horizon": 20,
+     "entry": "翌営業日の寄り",
+     "exit": "20営業日後の5日平均終値",
+     "label": "翌営業日の寄りで買い、20営業日後の5日平均終値で売ったときの上昇率"
+    }
+   },
+   "variant": true,
+   "positiveRate": 0.15
+  },
+  {
+   "algo": "cat_k18",
+   "name": "CatBoost（1.8σ）",
+   "short": "C18",
+   "note": "本番と同じ CatBoost を、到達しきい値 1.8σ のラベルで学習。検証用",
+   "trainedAt": "2026-09-06T12:31:00+00:00",
+   "nOof": 16431,
+   "scoreBands": {
+    "outcome": {
+     "name": "ret_o1_20",
+     "horizon": 20,
+     "entry": "翌営業日の寄り",
+     "exit": "20営業日後の5日平均終値",
+     "label": "翌営業日の寄りで買い、20営業日後の5日平均終値で売ったときの上昇率"
+    }
+   },
+   "variant": true,
+   "positiveRate": 0.15
+  },
+  {
+   "algo": "logit_k18",
+   "name": "ロジスティック回帰（1.8σ）",
+   "short": "LR18",
+   "note": "本番と同じロジスティック回帰を、到達しきい値 1.8σ のラベルで学習。検証用（線形なので並びは本番とほぼ同じ）",
+   "trainedAt": "2026-09-06T12:31:00+00:00",
+   "nOof": 16431,
+   "scoreBands": {
+    "outcome": {
+     "name": "ret_o1_20",
+     "horizon": 20,
+     "entry": "翌営業日の寄り",
+     "exit": "20営業日後の5日平均終値",
+     "label": "翌営業日の寄りで買い、20営業日後の5日平均終値で売ったときの上昇率"
+    }
+   },
+   "variant": true,
+   "positiveRate": 0.15
   }
  ],
- "_fixture": "tests/fixtures/synthetic-predictions.json（合成データ）",
- "consensus": {
-  "models": [
-   "lgbm",
-   "xgb",
-   "cat",
-   "logit",
-   "lgbm_k15",
-   "xgb_k15",
-   "cat_k15",
-   "logit_k15",
-   "lgbm_k18",
-   "xgb_k18",
-   "cat_k18",
-   "logit_k18"
-  ],
-  "nHist": 16320,
-  "line90": 86.3,
-  "line975": 91.2
- }
+ "_fixture": "tests/fixtures/synthetic-predictions.json（合成データ）"
 }

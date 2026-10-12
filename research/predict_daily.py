@@ -177,6 +177,8 @@ def agreement(per: Dict[str, Dict], algos, pct: float = 90.0) -> Tuple[int, int]
 # の平均。合意の百分位 = その平均が、過去の out-of-fold の行の合意の分布で下から何%か（97.5 以上 = 過去の上位2.5%、
 # 90 以上 = 上位10%）。実験79〜81（docs/MODEL_ADOPTION_RULES.md §35〜37）で、12本の値の中で判断に効いたのは
 # 「12本がそろって高いか」（合意の高さ）だけだった。順位・帯・較正・追跡ファイルは基準モデルのまま。
+# 同じ日の運用者の指示（「12本の平均ではなく、12個全てを載せてほしい」）で、画面は12本の百分位をそのまま表で出す
+# 形に変え、合意は画面に出さなくなった。値は確認・研究用に predictions.json に残す（§38）。
 
 def oof_scores_of(algo: str, model_dir: str) -> Optional[pd.DataFrame]:
     """そのモデルの out-of-fold（Code, Date, score）。基準モデルは model_dir/oof.parquet、ほかは models/<名前>/。"""
@@ -439,7 +441,7 @@ def main(argv=None) -> int:
             "contrib": contrib[i],
         })
     # --- 他モデルの採点を各候補に載せる --- #
-    # アンサンブルはしない。並べるだけ。買うかの判断は人間が統合的に行う（12本の合意は参考に並べる）
+    # アンサンブルはしない。並べるだけ。買うかの判断は人間が統合的に行う
     others, model_info = score_others(cand, cols, args.model_dir)
     consensus_meta = None
     if others:
@@ -498,9 +500,9 @@ def main(argv=None) -> int:
             # ラベル違いのモデル（1.5σ・1.8σ）は本番の数（agree90 / nModels）に入れず、別に数える（agreeK90 / nK）
             x["agree90"], x["nModels"] = agreement(per, M.ALGOS)
             x["agreeK90"], x["nK"] = agreement(per, M.VARIANTS)
-            # 12本の合意（cons12）と、その過去の分布での百分位（consPct）。2026-10-09 までは「平均は出さない
-            # （混ぜた数字は画面に出さない）」方針だったが、実験79〜81 で判断に効くのが合意の高さだけだったので、
-            # 運用者の指示（2026-10-12）で出す。丸める前の百分位で計算する。順位・帯は基準モデルのまま
+            # 12本の合意（cons12）と、その過去の分布での百分位（consPct）。丸める前の百分位で計算する。
+            # 2026-10-12 に一度画面に出したが、同じ日の運用者の指示（「12本の平均ではなく、12個全てを載せてほしい」）で
+            # 画面は12本の百分位をそのまま表で出す形に変え、合意は出さなくなった。確認・研究用に predictions.json には残す
             raw = {M.BASELINE: raw_pct(M.BASELINE, float(base_scores[i]))}
             raw.update({a: raw_pct(a, float(sc[i])) for a, sc in others.items()})
             x.update(consensus_fields(raw, cons_ref, cons_used))
@@ -536,7 +538,8 @@ def main(argv=None) -> int:
         "calibration": meta["calibration"],
         # 画面に並べるモデルの素性。基準モデル(lgbm)も含む
         "models": model_info,
-        # 12本の合意の物差し（consensus_reference）。線は過去の合意の分布の 90% / 97.5% 点（12本の平均の値）
+        # 12本の合意の物差し（consensus_reference）。線は過去の合意の分布の 90% / 97.5% 点（12本の平均の値）。
+        # 画面には出さない（上の cons12 / consPct と同じ。確認・研究用）
         "consensus": consensus_meta,
         "notes": [
             "スコアは較正されていない生の出力。確率として読まず、"
@@ -548,8 +551,6 @@ def main(argv=None) -> int:
             "モデル別の値は混ぜていない（アンサンブルではない）。"
             "学習器が違えばスコアのスケールも意味も違うので、"
             "各モデル自身の過去スコア分布での位置に揃えて並べてある。",
-            "12本の合意（cons12）は12本の百分位の平均、合意の百分位（consPct）はその平均が過去の予測の中で"
-            "下から何%か（97.5以上 = 過去の上位2.5%、90以上 = 上位10%）。並べて見る参考値で、順位と帯は基準モデルのまま。",
             "一致度は「上位10%と見ているモデルの数」。独立した判定の数え上げで、"
             "スコアを混ぜた値ではない。順位と帯は基準モデル（LightGBM）の"
             "スコアで付けてあり、他のモデルは並べて見るためのもの。",

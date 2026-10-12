@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { fmt, fmtInt, fmtSigned, fmtOku, fmtDate, fmtDateTime, DASH } from '../lib/format.js';
-import { bandColor, bandLabel, pctColor, PCT_LEGEND, modelRows, MODEL_SHORT, MODEL_FAMILY,
-  FAMILY_JA, marketTone, candidateToStock, consensusLabel, consensusTitle } from '../lib/predictions.js';
+import { bandColor, bandLabel, pctColor, pctInk, PCT_LEGEND, modelRows, modelGrid, MODEL_SHORT, MODEL_FAMILY,
+  FAMILY_JA, marketTone, candidateToStock } from '../lib/predictions.js';
 import { STRATEGY, BOOST, BORDER, strategySignal, exitPlan, nearMisses,
          MODEL_JA, fundContrib, frozenNote, borderNote,
 } from '../lib/strategy.js';
@@ -15,9 +15,10 @@ import { STRATEGY, BOOST, BORDER, strategySignal, exitPlan, nearMisses,
  *
  * スコアはモデルごとに並べる。混ぜて1つにはしない（アンサンブルにしない）。
  * 学習器が違えばスコアのスケールも意味も違うので、各モデル自身の過去スコア
- * 分布での位置に揃えて横に並べ、買うかどうかは人間が統合して決める。
- * ただし「12本の合意の百分位」（12本の百分位の平均が過去の予測の中で下から何%か）は
- * 参考に出す（運用者の指示 2026-10-12。実験79〜81 で判断に効いたのが合意の高さだけだったため）。
+ * 分布での位置に揃えて並べ、買うかどうかは人間が統合して決める。
+ * 12本（本番の4モデル + ラベル違いの8本）は、ラベル × 学習器の表に数字と色で出す
+ * （運用者の指示 2026-10-12「12本の平均ではなく、12個全てを載せてほしい。棒グラフ形式でなくてよい。
+ * 大小が分かればよい」。同じ日に出した「12本の合意の百分位」の欄はこの指示で外した）。
  * 順位・帯・追跡は基準モデル（LightGBM）のまま。
  * byModel が無い予測ファイル（5モデルを学習する前のもの）でも壊れないよう、
  * 基準モデル1本の表示に落ちる作りにしてある。
@@ -40,7 +41,7 @@ export default function PredictionView({ data, history, onSendToOctagon, sentIds
 
   return (
     <div className="pred">
-      <StrategyPanel signal={signal} near={near} day={day} cm={data?.consensus}
+      <StrategyPanel signal={signal} near={near} day={day} models={data?.models}
                      onSend={(c) => onSendToOctagon(candidateToStock(c))}
                      sentIds={sentIds} />
 
@@ -99,7 +100,7 @@ export default function PredictionView({ data, history, onSendToOctagon, sentIds
 
         <div className="pred-list">
           {rows.map((c) => (
-            <Row key={c.jqCode} c={c} models={data?.models} cm={data?.consensus} open={openId === c.jqCode}
+            <Row key={c.jqCode} c={c} models={data?.models} open={openId === c.jqCode}
                  onToggle={() => setOpenId(openId === c.jqCode ? null : c.jqCode)}
                  onSend={() => onSendToOctagon(candidateToStock(c))}
                  sent={sentIds?.has(`pred:${c.jqCode}`)} />
@@ -124,7 +125,7 @@ export default function PredictionView({ data, history, onSendToOctagon, sentIds
  * 「今日は買うのか、買うなら何を、いくらで手仕舞うのか」を1か所で
  * 言い切る場所が要る。迷いどころを毎日つくらないための画面。
  */
-function StrategyPanel({ signal, near, day, cm, onSend, sentIds }) {
+function StrategyPanel({ signal, near, day, models, onSend, sentIds }) {
   const { nBreak, verdict, picks, passed, buyable } = signal;
   return (
     <section className="card strat">
@@ -162,7 +163,7 @@ function StrategyPanel({ signal, near, day, cm, onSend, sentIds }) {
         <>
           <div className="strat-picks">
             {picks.map((c, i) => (
-              <PickCard key={c.jqCode} c={c} n={i + 1} cm={cm}
+              <PickCard key={c.jqCode} c={c} n={i + 1} models={models}
                         onSend={() => onSend(c)}
                         sent={sentIds?.has(`pred:${c.jqCode}`)} />
             ))}
@@ -271,7 +272,7 @@ function FundNote({ c }) {
   );
 }
 
-function PickCard({ c, n, cm, onSend, sent }) {
+function PickCard({ c, n, models, onSend, sent }) {
   const plan = exitPlan(c.close);
   return (
     <div className="strat-pick">
@@ -296,16 +297,12 @@ function PickCard({ c, n, cm, onSend, sent }) {
           </strong>
           <span className="sub">百分位</span>
         </div>
-        <div className="strat-metric" title={consensusTitle(c, cm)}>
-          <span className="lab">{consensusLabel(c)}</span>
-          <strong className="num">
-            {Number.isFinite(c.consPct) && (
-              <i className="pct-sw" style={{ background: pctColor(c.consPct) }} aria-hidden="true" />
-            )}
-            {fmt(c.consPct, 1)}
-          </strong>
-        </div>
-        {BOOST.map((a) => (
+        {modelRows(c, models).length > 0 ? (
+          <div className="strat-metric strat-mg">
+            <span className="lab">モデル別の百分位</span>
+            <ModelGrid c={c} models={models} />
+          </div>
+        ) : BOOST.map((a) => (
           <div key={a} className="strat-metric">
             <span className="lab">{MODEL_SHORT[a]}</span>
             <span className="num">{fmt(c.byModel?.[a]?.pctHistorical, 0)}</span>
@@ -344,7 +341,7 @@ function BorderBadge({ c }) {
 
 /* ------------------------------------------------------------------ 候補1件 */
 
-function Row({ c, models, cm, open, onToggle, onSend, sent }) {
+function Row({ c, models, open, onToggle, onSend, sent }) {
   const color = bandColor(c.band);
   const mr = modelRows(c, models);
   return (
@@ -365,23 +362,16 @@ function Row({ c, models, cm, open, onToggle, onSend, sent }) {
           <BorderBadge c={c} />
         </span>
         {mr.length > 0 ? (
-          <ModelStrip rows={mr} agree={c.agree90} n={c.nModels} agreeK={c.agreeK90} nK={c.nK} />
+          <span className="pred-ms">
+            <span className="lab">モデル別の百分位<PctLegend /></span>
+            <ModelGrid c={c} models={models} />
+          </span>
         ) : (
           <span className="pred-bar" title={`スコア ${fmt(c.score, 4)}`}>
             <i style={{ width: `${Math.max(2, (c.pctHistorical ?? 0))}%`, background: color }} />
             <em className="num">{fmt(c.pctHistorical, 0)}</em>
           </span>
         )}
-        {/* 12本の合意の百分位。古い予測ファイルには無いので「—」（列の位置はそろえる） */}
-        <span className="pred-cell" title={consensusTitle(c, cm)}>
-          <span className="lab">{consensusLabel(c)}</span>
-          <span className="num">
-            {Number.isFinite(c.consPct) && (
-              <i className="pct-sw" style={{ background: pctColor(c.consPct) }} aria-hidden="true" />
-            )}
-            {fmt(c.consPct, 1)}
-          </span>
-        </span>
         <span className="pred-cell">
           <span className="lab">帯の正例率</span>
           <span className="num">{fmt(c.bandPositiveRate, 1, '%')}</span>
@@ -398,74 +388,65 @@ function Row({ c, models, cm, open, onToggle, onSend, sent }) {
         </span>
         <span className={`badge ${c.band >= 9 ? 'violet' : c.band >= 7 ? 'green' : c.band >= 4 ? 'amber' : 'red'}`}
               title={`基準モデル（LightGBM）のスコア帯 ${c.band}/10。`
-                     + '左のモデル別の棒とは別の物差しです'}>
+                     + '左のモデル別の百分位とは別の物差しです'}>
           {bandLabel(c.band)}
         </span>
       </button>
 
-      {open && <Detail c={c} models={models} cm={cm} onSend={onSend} sent={sent} />}
+      {open && <Detail c={c} models={models} onSend={onSend} sent={sent} />}
     </div>
   );
 }
 
-/**
- * 折りたたみ行の「モデル別」セル。
- *
- * 5モデルを縦棒で横に並べる。棒の高さは**そのモデル自身の**過去スコア分布
- * での位置。モデルをまたいで生スコアを比べてはいけないので、位置に揃える。
- *
- * 並び順は行をまたいで固定（payload の models 順）。候補ごとに高い順へ
- * 並べ替えると、同じ位置が同じモデルにならず縦に読めなくなる。
- */
-function ModelStrip({ rows, agree, n, agreeK, nK }) {
-  const total = Number.isFinite(n) ? n : rows.length;
+/** 百分位の色の区分（明るいほど上）。表の見出しに添える。 */
+function PctLegend() {
   return (
-    <span className="pred-ms">
-      <span className="lab">
-        モデル別
-        {Number.isFinite(agree) && total > 0 && (
-          <>
-            <span className="sep">/</span>
-            {/* 四角の色は「何割のモデルが上位10%と見たか」。棒と同じ尺度に乗せる */}
-            <b className="num">
-              <i className="pct-sw" style={{ background: pctColor((agree / total) * 100) }} aria-hidden="true" />
-              {agree}/{total}
-            </b>
-            が上位10%
-          </>
-        )}
-        {Number.isFinite(agreeK) && nK > 0 && (
-          <span className="sub" title="ラベル違い（到達しきい値 1.5σ / 1.8σ のラベルで学習した各モデル）のうち、上位10%と見た数。本番の一致には数えない">
-            <span className="sep">/</span>ラベル違い <b className="num">{agreeK}/{nK}</b>
+    <span className="pred-ms-legend"
+          title="色の区分（明るいほど上）: 95以上（上位5%。運用の選定の線）/ 90以上 / 80以上 / 60以上 / 30以上 / それ未満">
+      {PCT_LEGEND.map((t) => (
+        <i key={t} style={{ background: pctColor(t) }} aria-hidden="true" />
+      ))}
+      95+
+    </span>
+  );
+}
+
+/**
+ * モデル別の百分位の表（運用者の指示 2026-10-12「12個全てを載せてほしい。棒グラフ形式でなくてよい。
+ * 大小が分かればよい」）。
+ *
+ * 行 = 学習に使ったラベル（1.2σ = 本番 / 1.5σ / 1.8σ）、列 = 学習器（LGB / XGB / CAT / LR）。マスの数字は
+ * **そのモデル自身の**過去スコア分布での位置（百分位）、地の色は区分（明るいほど上。pctColor）。
+ * モデルをまたいで生スコアを比べられないので、位置に揃えてある。並び順は行をまたいで固定
+ * （payload の models 順）。予測ファイルに無いモデルのマスは「—」。
+ * large は行を開いた詳しい欄（小数1桁・行の見出しに「本番」）。
+ */
+function ModelGrid({ c, models, large = false }) {
+  const g = modelGrid(c, models);
+  if (!g.rows.length) return null;
+  return (
+    <span className={`pred-mg${large ? ' lg' : ''}`} style={{ '--mg-cols': g.cols.length }}
+          aria-label="モデル別の百分位（行はラベル、列は学習器）">
+      <span className="h" aria-hidden="true" />
+      {g.cols.map((k) => <span key={k.learner} className="h">{k.short}</span>)}
+      {g.rows.map((r) => (
+        <React.Fragment key={r.label}>
+          <span className="r"
+                title={r.label === 'base' ? '本番のラベル（到達しきい値 1.2σ）で学習したモデル'
+                  : `ラベル違い（到達しきい値 ${r.labelJa}）で学習したモデル。本番の判定には使わない`}>
+            {r.labelJa}{large && r.label === 'base' ? '（本番）' : ''}
           </span>
-        )}
-        <span className="pred-ms-legend"
-              title="色の区分（濃いほど上）: 95以上（上位5%。運用の選定の線）/ 90以上（3モデルの線）/ 80以上 / 60以上 / 30以上 / それ未満">
-          {PCT_LEGEND.map((t) => (
-            <i key={t} style={{ background: pctColor(t) }} aria-hidden="true" />
-          ))}
-          95+
-        </span>
-      </span>
-      <span className="pred-ms-row">
-        {rows.map((r, i) => (
-          <React.Fragment key={r.algo}>
-            {/* 塊が変わる位置で区切る。木3本が揃っても独立した3票ではない */}
-            {i > 0 && r.family !== rows[i - 1].family && (
-              <span className="pred-ms-sep" aria-hidden="true" />
-            )}
-            <span className="pred-ms-i"
-                  title={`${r.name}（${FAMILY_JA[r.family]}）: `
-                         + `過去スコア分布の下から ${fmt(r.pct, 1, '%')}`
-                         + `／生スコア ${fmt(r.score, 4)}`}>
-              <em className="num">{fmt(r.pct, 0)}</em>
-              <i><b style={{ height: `${Math.max(3, r.pct ?? 0)}%`,
-                             background: pctColor(r.pct) }} /></i>
-              <span className="k">{r.short}</span>
+          {r.cells.map((x, i) => (x && Number.isFinite(x.pct) ? (
+            <span key={g.cols[i].learner} className="c num"
+                  style={{ background: pctColor(x.pct), color: pctInk(x.pct) }}
+                  title={`${x.name}: 過去スコア分布の下から ${fmt(x.pct, 1, '%')}／生スコア ${fmt(x.score, 4)}`}>
+              {fmt(x.pct, large ? 1 : 0)}
             </span>
-          </React.Fragment>
-        ))}
-      </span>
+          ) : (
+            <span key={g.cols[i].learner} className="c na">{DASH}</span>
+          )))}
+        </React.Fragment>
+      ))}
     </span>
   );
 }
@@ -488,7 +469,7 @@ const NUMS = [
   ['売上成長', (c) => fmtSigned(c.salesGrowth, 1)],
 ];
 
-function Detail({ c, models, cm, onSend, sent }) {
+function Detail({ c, models, onSend, sent }) {
   const g = c.contrib?.groups || {};
   const maxAbs = Math.max(...Object.values(g).map(Math.abs), 0.001);
   const top = (c.contrib?.top || []).slice(0, 10);
@@ -512,37 +493,19 @@ function Detail({ c, models, cm, onSend, sent }) {
           <div>
             <h4>モデル別の見立て</h4>
             <p className="sub">
-              学習器の違う5モデルが、それぞれ独立に採点したもの。
+              {mr.length}本のモデルが、それぞれ独立に採点したもの。
               <b>混ぜていません</b>（アンサンブルではない）。生スコアはモデル間で
-              比べられないので、<b>各モデル自身の過去スコア分布での位置</b>に
-              揃えてあります。
+              比べられないので、<b>各モデル自身の過去スコア分布での位置</b>（百分位）に
+              揃えてあります。地の色が明るいほど上です<PctLegend />
             </p>
-            <div className="pred-bars">
-              {mr.map((r, i) => (
-                <React.Fragment key={r.algo}>
-                  {(i === 0 || r.family !== mr[i - 1].family) && (
-                    <div className="pred-fam lab">{FAMILY_JA[r.family]}</div>
-                  )}
-                  <div className="pred-b" title={r.note}>
-                    <span className="k">{r.name}</span>
-                    <span className="t">
-                      <i style={{ width: `${Math.max(2, r.pct ?? 0)}%`,
-                                  background: pctColor(r.pct) }} />
-                    </span>
-                    <span className="v num">{fmt(r.pct, 1)}</span>
-                  </div>
-                </React.Fragment>
-              ))}
-            </div>
+            <ModelGrid c={c} models={models} large />
             <div className="pred-split" style={{ marginTop: 10 }}>
               <span>
                 <span className="lab">上位10%と見たモデル</span>
                 <b className="num">{c.agree90}/{c.nModels}</b>
-              </span>
-              <span title={consensusTitle(c, cm)}>
-                <span className="lab">{consensusLabel(c)}の百分位</span>
-                <b className="num">{fmt(c.consPct, 1)}</b>
-                {Number.isFinite(c.cons12) && <span className="sub">（12本の平均 {fmt(c.cons12, 1)}）</span>}
+                {Number.isFinite(c.agreeK90) && c.nK > 0 && (
+                  <span className="sub">（ラベル違い {c.agreeK90}/{c.nK}）</span>
+                )}
               </span>
               <span>
                 <span className="lab">順位・帯の基準</span>
@@ -550,15 +513,11 @@ function Detail({ c, models, cm, onSend, sent }) {
               </span>
             </div>
             <p className="sub" style={{ margin: '8px 0 0' }}>
-              実測のスコア相関で、木3つ（0.80〜0.89）と木以外2つ（0.823）の
-              2つの塊に分かれます。塊の中は<b>同じ見方が繰り返されているだけ</b>
-              なので、木3本が揃っても独立した3票ではありません。
-              <b>塊をまたいで揃ったとき</b>だけ、見方の違うモデルが同じ結論に
-              達したと読めます（塊をまたぐ相関は 0.63〜0.71）。
-              「12本の合意」は、12本の百分位の平均が過去の予測の中で下から何%かを表す参考値です
-              （97.5以上 = 過去の上位2.5%、90以上 = 上位10%）。実験79〜81 では、12本の値の中で
-              判断に効いたのは合意の高さだけで、どのモデルが高いかの違いは足しになりませんでした。
-              順位と帯は LightGBM のままです。
+              行は学習に使ったラベルで、1.2σ が本番です。1.5σ・1.8σ は、より大きく上がった銘柄だけを
+              正例にして学習したもので、本番の判定（今日の戦略の「3モデルとも〜以上」）には使いません。
+              同じ行・同じ列のモデルは似た見方をするので、そろって高くても独立した票ではありません。
+              1.2σ の3本が95以上の候補に「1.5σ・1.8σ の3本も95以上」を足しても、過去の前向きの
+              検証では成績は安定して上がりませんでした（実験82）。
             </p>
           </div>
         )}

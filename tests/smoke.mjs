@@ -77,22 +77,36 @@ const predBody = await page.textContent('body');
 const nRows = await page.locator('.pred-row').count();
 check(nRows === 5, `候補が5件描画される (実際: ${nRows})`);
 
-// モデル別の縦棒。5モデル × 候補数 だけ出る
-const strips = await page.locator('.pred-ms-i').count();
-check(strips === nRows * 5, `モデル別の棒が ${nRows}行 × 5モデル (実際: ${strips})`);
-const shorts = await page.locator('.pred-row').first().locator('.pred-ms-i .k')
-  .allTextContents();
-check(shorts.join(',') === 'LGB,XGB,CAT,LR,NN',
-  `モデルの並び順が行をまたいで固定 (実際: ${shorts.join(',')})`);
-check(predBody.includes('が上位10%'), '一致度（上位10%と見たモデル数）が表示される');
-// 塊の区切り（木3本 | 木以外2本）が各行に1本入る
-const seps = await page.locator('.pred-ms-sep').count();
-check(seps === nRows, `塊の区切りが各行に1本ある (実際: ${seps})`);
-check(predBody.includes('決定木系') && predBody.includes('木以外'),
-  '塊の名前が一覧パネルに出る');
+// モデル別の百分位の表（運用者の指示 2026-10-12「12個全てを載せてほしい。棒グラフ形式でなくてよい。大小が分かればよい」）。
+// 行 = ラベル（1.2σ / 1.5σ / 1.8σ）、列 = 学習器。合成データは12本で、5件目だけ logit_k18 が欠ける
+const gridCells = page.locator('.pred-list .pred-row .pred-main .pred-mg .c');
+check((await gridCells.count()) === nRows * 12, `行ごとに12マス (実際: ${await gridCells.count()})`);
+const firstGrid = page.locator('.pred-row').first().locator('.pred-main .pred-mg');
+const heads = await firstGrid.locator('.h').allTextContents();
+check(heads.join(',') === ',LGB,XGB,CAT,LR', `列は LGB / XGB / CAT / LR (実際: ${heads.join(',')})`);
+const labels = await firstGrid.locator('.r').allTextContents();
+check(labels.join(',') === '1.2σ,1.5σ,1.8σ', `行は 1.2σ / 1.5σ / 1.8σ (実際: ${labels.join(',')})`);
+const vals = await firstGrid.locator('.c').allTextContents();
+check(vals.join(',') === '85,96,98,56,84,97,97,54,81,94,95,51', `1件目の12本の値 (実際: ${vals.join(',')})`);
+check(((await firstGrid.locator('.c').first().getAttribute('title')) || '').includes('過去スコア分布の下から 85.0%'),
+      'マスの title に小数1桁の百分位が出る');
+const look = (loc) => loc.evaluate((el) => {
+  const st = getComputedStyle(el);
+  return `${st.backgroundColor}|${st.color}`;
+});
+check((await look(firstGrid.locator('.c').nth(2))) === 'rgb(219, 234, 254)|rgb(10, 14, 23)',
+      '98 のマスは最上位（95以上）の色に暗い字');
+const lowCell = page.locator('.pred-row').nth(1).locator('.pred-main .pred-mg .c').first();   // 37.3
+check((await look(lowCell)) === 'rgb(29, 78, 216)|rgb(232, 237, 246)', '37 のマスは 30 の区分の色に明るい字');
+const naCells = page.locator('.pred-row').nth(4).locator('.pred-main .pred-mg .c.na');
+check((await naCells.count()) === 1 && ((await naCells.textContent()) || '').includes('—'),
+      '欠けたモデルのマスは「—」');
+check((await page.locator('.pred-ms-i').count()) === 0, 'モデル別の縦棒は出さない');
+check(!predBody.includes('12本の合意'), '12本の合意（平均）は出さない');
+check(predBody.includes('決定木系') && predBody.includes('ラベル1.8σ'), '塊の名前が一覧パネルに出る');
 check(predBody.includes('並べているモデル'), 'モデル一覧パネルが表示される');
-check(predBody.includes('ニューラルネット') && predBody.includes('ロジスティック回帰'),
-  '5モデルの日本語名が出る');
+check(predBody.includes('LightGBM（1.5σ）') && predBody.includes('ロジスティック回帰（1.8σ）'),
+  '12本の日本語名が出る');
 // 今日の戦略パネル（docs/PLAYBOOK.md の手順）。
 // 合成データは候補5件・低い百分位なので「見送り」になるのが正しい
 const strat = await page.textContent('.strat');
@@ -121,29 +135,22 @@ const lastBorder = page.locator('.pred-row').last().locator('.pred-border');
 check(((await lastBorder.textContent()) || '').includes('最下位 CatBoost'), '5件目は「最下位 CatBoost」');
 check(((await lastBorder.getAttribute('class')) || '').includes('amber'), '5件目の印は黄');
 
-// 12本の合意の百分位（運用者の指示 2026-10-12）。合成データは4件目が 97.9、5件目は合意が入る前の形（—）
-const consCells = page.locator('.pred-list .pred-row .pred-main .pred-cell:has(.lab:text("12本の合意"))');
-check((await consCells.count()) === 5, `行ごとに「12本の合意」の欄がある (実際: ${await consCells.count()})`);
-check(((await consCells.nth(3).textContent()) || '').includes('97.9'), '4件目の合意の百分位 97.9 が出る');
-check(((await consCells.nth(4).textContent()) || '').includes('—'), '合意の無い古い予測は「—」');
-check(((await consCells.nth(3).getAttribute('title')) || '').includes('上位2.5% の線は 91.2'),
-      '合意の欄の title に上位2.5% の線が出る');
-
-// 1件目（5モデルとも高い候補）を開いて、モデル別の見立てを確かめる
+// 1件目を開いて、モデル別の見立てを確かめる
 await page.locator('.pred-row').first().locator('.pred-main').click();
 await page.waitForSelector('.pred-detail', { timeout: 5000 });
 const detail = await page.textContent('.pred-detail');
 check(detail.includes('モデル別の見立て'), '詳細にモデル別の見立てが出る');
 check(detail.includes('混ぜていません'), 'アンサンブルではないと明示される');
-check(detail.includes('12本の合意の百分位') && detail.includes('82.4'), '詳細に12本の合意の百分位が出る');
-const detailBars = await page.locator('.pred-detail .pred-b').count();
-check(detailBars >= 5, `詳細にモデル別の棒が5本以上ある (実際: ${detailBars})`);
+const bigCells = await page.locator('.pred-detail .pred-mg.lg .c').allTextContents();
+check(bigCells.length === 12 && bigCells[0] === '85.0', `詳細に12本の表（小数1桁）が出る (実際: ${bigCells.slice(0, 3).join(',')}…)`);
+check(detail.includes('1.2σ（本番）'), '詳細の表は 1.2σ の行に「本番」と出る');
+check(detail.includes('上位10%と見たモデル') && detail.includes('2/4') && detail.includes('ラベル違い 4/8'),
+      '詳細に上位10%と見たモデルの数（本番・ラベル違い）が出る');
+check(detail.includes('実験82'), '詳細に「1.5σ・1.8σ も95以上」を足しても安定しない（実験82）と出る');
+check(!detail.includes('12本の合意'), '詳細にも12本の合意（平均）は出さない');
 const borderNote = await page.textContent('.pred-detail .pred-border-note');
 check((borderNote || '').includes('際どい候補') && (borderNote || '').includes('過去ほぼ 0%'),
       '詳細の先頭に際どい候補の注意が出る');
-const fams = await page.locator('.pred-detail .pred-fam').allTextContents();
-check(fams.join(',') === '決定木系,木以外',
-  `詳細のモデル別が塊で分かれる (実際: ${fams.join(',')})`);
 await page.screenshot({ path: path.join(SHOTS, 'screenshot-prediction.png') });
 await page.locator('.pred-row').first().locator('.pred-main').click();
 

@@ -249,26 +249,49 @@ export function marketTone(candidates) {
 }
 
 /**
- * 12本の合意の百分位（research/predict_daily.py の consPct / cons12 / nCons と、payload の consensus）の読み方。
- *
- * 合意 = 12本（本番の4モデル + ラベル違いの8本）の百分位の平均。合意の百分位 = その平均が、過去の予測
- * （out-of-fold）の合意の分布で下から何%か。97.5 以上 = 過去の上位2.5%、90 以上 = 上位10%。
- * 実験79〜81（docs/MODEL_ADOPTION_RULES.md §35〜37）で、12本の値の中で判断に効いたのは合意の高さだけだった。
- * 順位・帯は基準モデル（LightGBM）のまま。運用者の指示（2026-10-12）
+ * pctColor で塗ったマスに載せる字の色。明るい区分（60 以上）は暗い字、暗い区分（60 未満）は明るい字。
+ * コントラスト比（WCAG の式で計算）: 95 / 90 / 80 / 60 の地に --bg の字で 15.8 / 10.7 / 7.6 / 5.3、
+ * 30 / 0 の地に --text の字で 5.7 / 8.8。どの組も 4.5 以上（逆の組み合わせは 1.0〜3.1 で読めない）。
  */
-export function consensusLabel(c) {
-  const n = Number.isFinite(c?.nCons) && c.nCons > 0 ? c.nCons : 12;
-  return `${n}本の合意`;
+export function pctInk(pct) {
+  const t = pctTier(pct);
+  if (t === null) return 'var(--text-faint)';
+  return t >= 60 ? 'var(--bg)' : 'var(--text)';
 }
 
-export function consensusTitle(c, cm) {
-  if (!Number.isFinite(c?.consPct) || !Number.isFinite(c?.cons12)) {
-    return '12本の合意が入る前の予測ファイルです';
+/** ラベル違いの接尾辞（research/models.py の VARIANTS）。無ければ本番のラベル（1.2σ）。 */
+const LABEL_SUFFIX = [['_k15', 'k15'], ['_k18', 'k18']];
+export const LABEL_JA = { base: '1.2σ', k15: '1.5σ', k18: '1.8σ' };
+
+/**
+ * モデル別の百分位を表の形にする（運用者の指示 2026-10-12「12個全てを載せてほしい。棒グラフ形式でなくてよい。
+ * 大小が分かればよい」）。行 = 学習に使ったラベル（1.2σ = 本番 / 1.5σ / 1.8σ）、列 = 学習器（LGB / XGB / CAT / LR）。
+ *
+ * 列の並びは payload の models の順で、学習器が最初に出た順。予測ファイルに無いモデルのマスは null。
+ * 古い予測ファイル（ラベル違いが無い4本・5本）は 1.2σ の1行だけになり、MLP がある日は NN の列が付く。
+ */
+export function modelGrid(candidate, models) {
+  const rows = modelRows(candidate, models);
+  const cols = [];
+  const lines = new Map();
+  for (const r of rows) {
+    const hit = LABEL_SUFFIX.find(([sfx]) => r.algo.endsWith(sfx));
+    const label = hit ? hit[1] : 'base';
+    const learner = hit ? r.algo.slice(0, -hit[0].length) : r.algo;
+    if (!cols.includes(learner)) cols.push(learner);
+    if (!lines.has(label)) lines.set(label, new Map());
+    lines.get(label).set(learner, r);
   }
-  const lines = cm && Number.isFinite(cm.line975) && Number.isFinite(cm.line90)
-    ? `（12本の平均でいうと、上位2.5% の線は ${cm.line975.toFixed(1)}、上位10% は ${cm.line90.toFixed(1)}）`
-    : '';
-  return `${c.nCons}本の百分位の平均 ${c.cons12.toFixed(1)} が、過去の予測の中で下から ${c.consPct.toFixed(1)}% の位置。`
-    + `97.5以上 = 過去の上位2.5%、90以上 = 上位10%${lines}。順位と帯は LightGBM のまま`;
+  return {
+    cols: cols.map((l) => ({
+      learner: l,
+      short: lines.get('base')?.get(l)?.short || MODEL_SHORT[l] || l.slice(0, 3).toUpperCase(),
+    })),
+    rows: ['base', 'k15', 'k18'].filter((k) => lines.has(k)).map((k) => ({
+      label: k,
+      labelJa: LABEL_JA[k],
+      cells: cols.map((l) => lines.get(k).get(l) || null),
+    })),
+  };
 }
 
