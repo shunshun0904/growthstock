@@ -132,15 +132,25 @@ class Forward(unittest.TestCase):
 
     def test_hit_on_day_k(self):
         n = 30
-        h = [110.0] * n
-        h[5] = 121.0                       # 選定日の5営業日後 = 買って5日目
+        h = [105.0] * n
+        h[5] = 111.0                       # 選定日の5営業日後 = 買って5日目に +10% に届く
         b = make_bars("11110", "2026-01-05", [100.0] * n, h, [100.0] * n)
-        f = L.forward(b, self.keys(b)).iloc[0]
-        self.assertEqual(f["status"], "+20%到達")
+        f = L.forward(b, self.keys(b), target=10.0, fallback="close").iloc[0]
+        self.assertEqual(f["status"], L.HIT)
         self.assertEqual(f["hit_day"], 5)
-        self.assertEqual(f["ret"], 20.0)
+        self.assertEqual(f["ret"], 10.0)
         self.assertEqual(f["exit_date"], b["Date"].iloc[5])
         self.assertEqual(f["entry"], 100.0)
+
+    def test_hit_with_other_target(self):
+        n = 30
+        h = [110.0] * n
+        h[5] = 121.0                       # +20% には5日目で届く（+10% なら1日目）
+        b = make_bars("11110", "2026-01-05", [100.0] * n, h, [100.0] * n)
+        f20 = L.forward(b, self.keys(b), target=20.0).iloc[0]
+        self.assertEqual((f20["hit_day"], f20["ret"]), (5, 20.0))
+        f10 = L.forward(b, self.keys(b), target=10.0).iloc[0]
+        self.assertEqual((f10["hit_day"], f10["ret"]), (1, 10.0))   # 高値 110 = 買値 100 の +10% ちょうど（浮動小数点の誤差で取りこぼさない）
 
     def test_hit_on_buy_day(self):
         n = 30
@@ -150,18 +160,24 @@ class Forward(unittest.TestCase):
         f = L.forward(b, self.keys(b)).iloc[0]
         self.assertEqual(f["hit_day"], 1)
 
-    def test_no_hit_uses_5day_average_close(self):
+    def test_no_hit_sells_at_day20_close(self):
         n = 30
         c = [100.0 + k for k in range(n)]
         o = [100.0] * n
-        o[1] = 110.0                       # 買値
+        o[1] = 110.0                       # 買値。高値 115 は +10% に届かない
         b = make_bars("11110", "2026-01-05", o, [115.0] * n, c)
-        f = L.forward(b, self.keys(b)).iloc[0]
+        f = L.forward(b, self.keys(b), target=10.0, fallback="close").iloc[0]
         self.assertEqual(f["status"], "満了")
         ma5 = np.mean(c[16:21])            # 20営業日目までの5日平均
-        self.assertAlmostEqual(f["ret"], (ma5 / 110.0 - 1) * 100)
+        self.assertAlmostEqual(f["ret"], (c[20] / 110.0 - 1) * 100)          # 届かなければ 20営業日目の終値
         self.assertAlmostEqual(f["ret_close"], (c[20] / 110.0 - 1) * 100)
+        self.assertAlmostEqual(f["ret_hold"], (ma5 / 110.0 - 1) * 100)
         self.assertEqual(f["exit_date"], b["Date"].iloc[20])
+        # 5日平均で数える出口（実験32〜35 と記録した実験の数え方）
+        f_old = L.forward(b, self.keys(b), target=20.0, fallback="ma5").iloc[0]
+        self.assertAlmostEqual(f_old["ret"], (ma5 / 110.0 - 1) * 100)
+        with self.assertRaises(ValueError):
+            L.forward(b, self.keys(b), fallback="open")
 
     def test_open_position(self):
         n = 11

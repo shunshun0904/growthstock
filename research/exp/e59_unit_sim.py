@@ -80,6 +80,7 @@ import live_track as L  # noqa: E402
 OOF_DIR = os.path.join(L.DATA_DIR, "oof")
 
 UNIT = 100            # 1単元の株数
+TP = 20.0             # 利確の指値（%）。記録どおり +20%（2026-10-12 に運用の指値が +10% になった後も変えない）
 MIN_HIST = 500        # 過去分布で百分位を出すのに要る過去の行数（約 40営業日ぶん）
 YEAR_DAYS = 365.25    # 「年間」に直すときの日数（暦の日数で割る）
 
@@ -211,7 +212,7 @@ class PriceGrid:
 
 
 def rule_exit(px: PriceGrid, col: int, buy: int, entry: float, *, hold: int = L.HOLD,
-              target: float = L.TAKE_PROFIT):
+              target: float = TP):
     """
     買った日 buy（index）から規則どおりに持ったときの出口。(出口の index, 収益率 %, status)。
     +20% は買った日から hold 日目までの高値で見る（live_track.forward と同じ）。届かなければ
@@ -283,7 +284,7 @@ def _closed(p: dict, px: PriceGrid, exit_idx: int, last_idx: int, ret: float, st
 
 
 def simulate_arm(picks: pd.DataFrame, px: PriceGrid, *, arm: str = "A", slots: int = L.SLOTS,
-                 hold: int = L.HOLD, target: float = L.TAKE_PROFIT, unit: int = UNIT,
+                 hold: int = L.HOLD, target: float = TP, unit: int = UNIT,
                  stall_days: int = STALL_DAYS, stall_gain: float = STALL_GAIN):
     """
     日ごとに進める模擬。picks は decide の買う銘柄（Date / Code / rank / p_min）。
@@ -598,7 +599,7 @@ def main(argv=None) -> int:
           + (f"、学習 {str(meta.get('trainedAt', ''))[:10]} / {meta.get('preset', '')}" if meta else ""))
     print(f"  日足 〜{bar_days[-1].date()}。成績に数える選定日 {lo.date()}〜{hi.date()}"
           f"（20営業日の出口まで日足が揃う範囲）")
-    print(f"  出口: +{L.TAKE_PROFIT:.0f}% の指値 / {L.HOLD}営業日目の終値 / 乗り換えは翌寄り。手数料・税・配当は含まない。"
+    print(f"  出口: +{TP:.0f}% の指値 / {L.HOLD}営業日目の終値 / 乗り換えは翌寄り。手数料・税・配当は含まない。"
           f"年間は暦の日数（{YEAR_DAYS}日）で割る")
     print(f"  腕 E の「伸びていない」= 買ってから {args.stall_days}営業日以上で含み {args.stall_gain:+.1f}% 以下")
 
@@ -644,7 +645,7 @@ def main(argv=None) -> int:
                     tt.insert(0, "how", HOWS[how])
                     trades.append(tt)
         print(f"  （取引 = 枠に入って終わった取引（乗り換えで売った玉も1件）。年間 = 取引 ÷ 年数。乗換 = 乗り換えの回数。"
-              f"到達 = +{L.TAKE_PROFIT:.0f}% に届いた割合。")
+              f"到達 = +{TP:.0f}% に届いた割合。")
         print(f"    必要資金 = 最大同時投下資本。回転 = 年間買付額 ÷ 必要資金。稼働 = 枠が埋まっていた営業日の割合。万円）")
 
         if how == "past" and len(use_arms) > 1:

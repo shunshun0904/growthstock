@@ -145,12 +145,13 @@ class Simulate(unittest.TestCase):
         self.assertAlmostEqual(t["pnl"].iloc[2], 250.0)                           # 5千 × +5%
         self.assertEqual(counts["n_swaps"], 0)
         self.assertFalse(pos)
-        # live_track の forward + simulate と同じ取引・同じ出口
-        fwd = L.forward(self.bars, picks)
+        # live_track の forward + simulate と同じ取引・同じ出口（実験59 は +20% の指値・20日目の終値。live_track の
+        # 到達の印は 2026-10-12 から「指値到達」なので、実験59 の「+20%到達」と同じものとして比べる）
+        fwd = L.forward(self.bars, picks, target=E.TP, fallback="close")
         sim = L.simulate(fwd, DAYS)
         self.assertEqual(sim["taken"].tolist(), [L.TAKEN] * 3)
-        self.assertEqual(sim["status"].tolist(), t["status"].tolist())
-        lt = np.where(sim["status"] == "+20%到達", 20.0, sim["ret_close"])
+        self.assertEqual(sim["status"].replace({L.HIT: "+20%到達"}).tolist(), t["status"].tolist())
+        lt = np.where(sim["status"].isin(L.HIT_LABELS), 20.0, sim["ret_close"])
         np.testing.assert_allclose(t["ret"].to_numpy(), lt)
 
     def test_full_slots_skip_and_no_double_buy(self):

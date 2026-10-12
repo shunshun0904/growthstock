@@ -97,7 +97,7 @@ def attach_exits(df: pd.DataFrame, bars: pd.DataFrame, targets=TARGETS, hold: in
     """
     指値の水準ごとに、到達の印 hit<k>・到達日 hitday<k>（1 = 買った日）・収益 tp<k>c（到達なら +k%、届かなければ 20営業日目の
     終値）を足す。c20（20日目の終値）・hold5（20日目の5日平均 = ret_o1_20）・tp20a（+20% 指値・5日平均）も。収益は %。
-    live_track.forward の status は水準によらず「+20%到達」と書くので、到達は hit_day の有無で決める。
+    到達は hit_day の有無で決める（live_track.forward の status は水準によらず同じ印）。
     """
     keys = df[["Code", "Date"]]
     out = df.copy()
@@ -186,7 +186,7 @@ def trade_sim(ft: pd.DataFrame, flag: str, col: str, hit: str | None, hitday: st
               key: str = "pmin3", keep_trades: bool = False) -> dict:
     """
     運用の通りの売買（発火8件以上の日に上位2件・3枠・先着順）。出口 col。指値に届いた取引は到達日の翌営業日から枠が空き
-    （live_track.simulate の「+20%到達」の扱いを、どの水準の指値にも使う）、届かなければ 20営業日の翌営業日から空く。
+    （live_track.simulate の指値到達の扱いを、どの水準の指値にも使う）、届かなければ 20営業日の翌営業日から空く。
     key はその日の並べ方（既定は今の画面と同じ 1.2σ の3本の最小）。keep_trades なら買えた取引の収益（rets）も返す。
     """
     picks = E82.daily_picks(ft, flag, key=key)
@@ -195,7 +195,7 @@ def trade_sim(ft: pd.DataFrame, flag: str, col: str, hit: str | None, hitday: st
     p = picks.copy()
     p["ret"] = pd.to_numeric(p[col], errors="coerce")
     hit_v = p[hit].astype(bool).to_numpy() if hit else np.zeros(len(p), dtype=bool)
-    p["status"] = np.where(p["ret"].isna(), "日足なし", np.where(hit_v, "+20%到達", "満了"))
+    p["status"] = np.where(p["ret"].isna(), "日足なし", np.where(hit_v, LT.HIT, "満了"))
     p["hit_day"] = p[hitday].to_numpy(dtype=float) if hitday else np.nan
     sim = LT.simulate(p, bar_days, slots=LT.SLOTS, hold=HOLD)
     taken = sim[sim["taken"] == LT.TAKEN]

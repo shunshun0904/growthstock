@@ -96,6 +96,7 @@ REF = (("A9", "R0"), ("A15_4", "R0_4"), ("A18_4", "R0_4"))      # 参考（同�
 SWAP = ("K15", "K18")                                           # 置き換え（R0 と比べる。重なるので検定しない）
 TRADE_RULES = ("R0", "A15", "A18", "A9")
 N_PERM = 2000
+TP = 20.0                           # 運用の出口（記録どおり +20% の指値・届かなければ5日平均。2026-10-12 に運用の指値が +10% になった後も変えない）
 MIN_GROUP = 5                       # 窓ごとの比較で、群に要る件数（実験80 と同じ）
 MONTHLY_N = 2
 SEED = 42
@@ -175,7 +176,7 @@ def group_stats(g: pd.DataFrame, months: float) -> dict:
         "tp": float(t.mean()) if len(t) else nan,
         "tp_win": float((t > 0).mean() * 100) if len(t) else nan,
         "tp_bad10": float((t < -10).mean() * 100) if len(t) else nan,
-        "hit20": float((g.loc[ok, "status"] == "+20%到達").mean() * 100) if len(t) else nan,
+        "hit20": float(g.loc[ok, "status"].isin(LT.HIT_LABELS).mean() * 100) if len(t) else nan,
     }
 
 
@@ -391,7 +392,7 @@ def report(ft: pd.DataFrame, bar_days=None, ff: pd.DataFrame | None = None, n_pe
     if bar_days is not None and len(bar_days):
         n_days = LT.n_bar_days(bar_days, pd.to_datetime(ft["Date"]).min(), pd.to_datetime(ft["Date"]).max())
         print(f"\n■ 4. 運用の通りの売買（発火{LT.SKIP_BREAKS}件以上の日に上位{LT.TOP_K}件・{LT.SLOTS}枠・先着順・"
-              f"+{LT.TAKE_PROFIT:g}% の指値・{LT.HOLD}営業日。{n_days}営業日）")
+              f"+{TP:g}% の指値・{LT.HOLD}営業日。{n_days}営業日）")
         print("  月の収益 = 取引の収益の合計 ÷ 枠数 ÷ 月数（1取引に資金の1/3。複利にしない。手数料・税は含まない）")
         summary["trade"] = {}
         for key in TRADE_RULES:
@@ -464,7 +465,7 @@ def report(ft: pd.DataFrame, bar_days=None, ff: pd.DataFrame | None = None, n_pe
 
 def attach_exit(df: pd.DataFrame, bars: pd.DataFrame) -> tuple[pd.DataFrame, dict]:
     """運用の出口（+20% の指値・20営業日）の収益 ret_tp（%）と status / hit_day を足す。ret_o1_20 との一致も数える。"""
-    fw = LT.forward(bars, df[["Code", "Date"]], target=LT.TAKE_PROFIT, hold=LT.HOLD)
+    fw = LT.forward(bars, df[["Code", "Date"]], target=TP, hold=LT.HOLD, fallback="ma5")
     fw = fw[["Code", "Date", "ret", "ret_hold", "status", "hit_day"]].rename(columns={"ret": "ret_tp"})
     out = df.merge(fw, on=["Code", "Date"], how="left")
     a = pd.to_numeric(out["ret_hold"], errors="coerce").to_numpy(dtype=float)

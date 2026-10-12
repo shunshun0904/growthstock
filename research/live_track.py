@@ -23,18 +23,21 @@ tests/test_live_track.py が両者を突き合わせる）
   その日の発火（候補数）が 8件未満なら買わない
   ブースティング3モデル（LightGBM / XGBoost / CatBoost）すべてが 90 以上
   3モデルの最小の百分位が高い順に上位2件（同点は LightGBM のスコア順）
-  翌営業日の寄りで買い、+20% の指値、届かなければ 20営業日で手仕舞い
+  翌営業日の寄りで買い、+20% の指値、届かなければ 20営業日目までの5日平均終値
   同時に持つのは 3銘柄まで。埋まっていたら見送る（先着順・乗り換えなし）
+  （指値の幅と届かないときの売り方は TAKE_PROFIT / FALLBACK。過去の実験は記録どおりの出口を明示して呼ぶ）
 
-収益の数え方は OOF の実験（実験32〜35）と同じ
+収益の数え方
   買値       翌営業日の始値（分割調整後）
-  +20%到達   1〜20営業日目（1 = 買った日）の高値が買値の1.2倍以上なら +20% ちょうど
-  届かない   20営業日目までの5日平均終値（lab.realized_returns の ret_o1_20）
-  参考に「20営業日目の終値で売った場合」も並べる
+  指値到達   1〜20営業日目（1 = 買った日）の高値が買値 ×（1 + TAKE_PROFIT%）以上なら TAKE_PROFIT% ちょうど
+             （寄りで超えて始まった日も指値ちょうどで数える）
+  届かない   FALLBACK = "ma5" なら 20営業日目までの5日平均終値（lab.realized_returns の ret_o1_20。実験32〜35 と同じ）、
+             "close" なら 20営業日目の終値
+  どちらの出口でも ret_hold（5日平均）と ret_close（20営業日目の終値）を並べる
   手数料・税・スリッページは含まない
 
 途中の取引を平均に入れない
-  +20% に早く届いた取引だけが先に確定するので、確定した取引だけで平均を
+  指値に早く届いた取引だけが先に確定するので、確定した取引だけで平均を
   取ると勝ち側に偏る。**選定日から20営業日が過ぎた日の取引だけ**を成績に
   数え、それより後の取引は「途中」として含み損益だけ出す。
 
@@ -83,6 +86,11 @@ STRONG_BREAKS = 20    # strongBreaks: この件数以上の発火なら本命の
 SKIP_BREAKS = 8       # skipBreaks: これ未満の発火なら見送る
 TOP_K = 2             # topK: 買うのは上位何件まで
 TAKE_PROFIT = 20.0    # takeProfit: 利確の指値（%）
+FALLBACK = "ma5"      # 指値に届かなければ: "close" = 20営業日目の終値 / "ma5" = 20営業日目までの5日平均
+HIT = "指値到達"      # 指値に届いた取引の状態
+LEVEL_EPS = 1e-9      # 指値の比べの許容（相対）。高値がちょうど指値なら届いたと数える
+#: 指値に届いた状態として扱う文字列。"+20%到達" は 2026-10-12 より前の書き方（古い実験のコードと記録用）
+HIT_LABELS = (HIT, "+20%到達")
 HOLD = 20             # holdDays: 届かなければ何営業日で手仕舞いするか
 SLOTS = 3             # maxSlots: 同時に持てる銘柄数
 
@@ -255,7 +263,7 @@ def decide(rows: pd.DataFrame, *, agree: float = AGREE_PCT,
 
 
 # ---------------------------------------------------------------- #
-# 値動き: 買値・+20% 到達・満了
+# 値動き: 買値・指値の到達・満了
 # ---------------------------------------------------------------- #
 
 def load_bars(data_dir: str, start: Optional[pd.Timestamp] = None,
@@ -280,15 +288,18 @@ def load_bars(data_dir: str, start: Optional[pd.Timestamp] = None,
 
 
 def forward(bars: pd.DataFrame, keys: pd.DataFrame, *, target: float = TAKE_PROFIT,
-            hold: int = HOLD) -> pd.DataFrame:
+            hold: int = HOLD, fallback: str = FALLBACK) -> pd.DataFrame:
     """
     (Code, Date) ごとの値動き。Date は選定日（ブレイクの日）。
 
-    列: status（満了 / +20%到達 / 保有中 / 未約定 / 寄り付かず / 日足なし）,
-        buy_date, entry, hit_day, exit_date, ret（規則どおりの収益 %）,
+    列: status（満了 / 指値到達 / 保有中 / 未約定 / 寄り付かず / 日足なし）,
+        buy_date, entry, hit_day, exit_date, ret（規則どおりの収益 %。指値に届けば target、届かなければ
+        fallback="close" で ret_close・fallback="ma5" で ret_hold）,
         ret_hold（ret_o1_20 %）, ret_close（20営業日目の終値で売った場合 %）,
         elapsed（選定日から数えた営業日。1 = 買った日）, ret_now（保有中の含み %）
     """
+    if fallback not in ("close", "ma5"):
+        raise ValueError(f"fallback は close か ma5: {fallback}")
     need = keys[["Code", "Date"]].drop_duplicates()
     want = need.groupby("Code")["Date"].apply(list).to_dict()
     b = bars[bars["Code"].isin(want)].sort_values(["Code", "Date"])
@@ -323,7 +334,9 @@ def forward(bars: pd.DataFrame, keys: pd.DataFrame, *, target: float = TAKE_PROF
                 out.append(rec)
                 continue
             rec["entry"] = entry
-            level = entry * (1.0 + target / 100.0)
+            # 高値がちょうど指値の値（例: 買値 100 円で 110 円）でも届いたと数える。100 × 1.1 は浮動小数点で
+            # 110.00000000000001 になり、そのまま比べると取りこぼすので、ごくわずかに（相対 1e-9）下げて比べる
+            level = entry * (1.0 + target / 100.0) * (1.0 - LEVEL_EPS)
             last = min(n - 1, i + hold)
             hit = None
             for k in range(1, last - i + 1):
@@ -334,10 +347,10 @@ def forward(bars: pd.DataFrame, keys: pd.DataFrame, *, target: float = TAKE_PROF
                 rec["ret_hold"] = (ma5[i + hold] / entry - 1.0) * 100
                 rec["ret_close"] = (c[i + hold] / entry - 1.0) * 100
             if hit is not None:
-                rec.update(status="+20%到達", hit_day=hit, ret=target,
+                rec.update(status=HIT, hit_day=hit, ret=target,
                            exit_date=pd.Timestamp(dates[i + hit]))
             elif i + hold < n:
-                rec.update(status="満了", ret=rec["ret_hold"],
+                rec.update(status="満了", ret=rec["ret_close"] if fallback == "close" else rec["ret_hold"],
                            exit_date=pd.Timestamp(dates[i + hold]))
             else:
                 rec.update(status="保有中", elapsed=n - 1 - i,
@@ -361,7 +374,7 @@ def simulate(picks: pd.DataFrame, bar_days: Sequence, *, slots: int = SLOTS,
 
     実験35（research/exp/e35_slack.py の simulate）と同じ約束:
       翌営業日（選定日の次の日足の日）に買う
-      +20% に k営業日目で届けば、その翌営業日から枠が空く
+      指値に k営業日目で届けば、その翌営業日から枠が空く
       届かなければ 20営業日目の翌営業日から空く
       空きが無ければ見送る。保有中の玉は切らない
     まだ終わっていない玉（保有中・未約定）は、終わるまで枠をふさぐ。
@@ -384,7 +397,7 @@ def simulate(picks: pd.DataFrame, bar_days: Sequence, *, slots: int = SLOTS,
             out.append(rec)
             continue
         s = empty[0]
-        if r.get("status") == "+20%到達":
+        if r.get("status") in HIT_LABELS:
             free[s] = buy + float(r["hit_day"])
         elif r.get("status") == "満了":
             free[s] = buy + hold
@@ -403,7 +416,7 @@ def trade_stats(t: pd.DataFrame, n_days: int, slots: int = SLOTS) -> dict:
     r = pd.to_numeric(t.get("ret", pd.Series(dtype=float)), errors="coerce").dropna()
     months = max(n_days, 1) / MONTH
     n = int(len(r))
-    hit = (t.loc[r.index, "status"] == "+20%到達") if n else pd.Series(dtype=bool)
+    hit = t.loc[r.index, "status"].isin(HIT_LABELS) if n else pd.Series(dtype=bool)
     return {"n": n,
             "mean": float(r.mean()) if n else np.nan,
             "median": float(r.median()) if n else np.nan,
@@ -781,7 +794,7 @@ def main(argv=None) -> int:
     print("\n■ 4. 見込みとの比較（OOF を同じ長さで切り出した散らばり）")
     print(f"  OOF 全体: {o_lo.date()}〜{o_hi.date()}、候補 {len(orows):,}件。"
           f"規則どおりの取引 {wt['n']}件、平均 {_f(wt['mean'])}%（SE {_f(wt['se'], '{:.2f}')}）、"
-          f"勝率 {_f(wt['win'], '{:.0f}')}%、+20%到達 {_f(wt['hit'], '{:.0f}')}%、"
+          f"勝率 {_f(wt['win'], '{:.0f}')}%、+{TAKE_PROFIT:g}%到達 {_f(wt['hit'], '{:.0f}')}%、"
           f"月あたり {_f(wt['monthly'])}%（概算）")
     osim = simulate(opicks_fwd, bar_days)
     ot = osim[osim["taken"] == TAKEN].assign(year=lambda x: x["Date"].dt.year)
@@ -810,7 +823,7 @@ def main(argv=None) -> int:
               f"{int((blk_done['trade_n'] == 0).sum())}本）")
         print(COMPARE_HEAD)
         for key, name, fmt in (("n", "取引数", "{:.0f}"), ("mean", "1取引の平均 %", "{:+.2f}"),
-                               ("win", "勝率 %", "{:.0f}"), ("hit", "+20%到達 %", "{:.0f}"),
+                               ("win", "勝率 %", "{:.0f}"), ("hit", f"+{TAKE_PROFIT:g}%到達 %", "{:.0f}"),
                                ("monthly", "月あたり（概算）%", "{:+.2f}")):
             print(compare_line(name, ts[key],
                                where(ts[key], blk_done.get(f"trade_{key}", [])), fmt))
