@@ -51,10 +51,10 @@ def main() -> int:
     bars = LT.load_bars(LT.DATA_DIR, start=pd.Timestamp("2021-01-01"))
     bar_days = sorted(pd.Timestamp(d) for d in bars["Date"].unique())
     print(f"[oof] 候補 {len(rows):,}件（{rows['Date'].min().date()} 〜 {rows['Date'].max().date()}）。"
-          f"規則: 発火{LT.SKIP_BREAKS}件以上・上位{LT.TOP_K}件・{LT.SLOTS}枠・{LT.HOLD}営業日。今の指値の設定 +{LT.TAKE_PROFIT:g}%"
+          f"規則: 発火{LT.PREV_SKIP_BREAKS}件以上・上位{LT.TOP_K}件・{LT.SLOTS}枠・{LT.HOLD}営業日。今の指値の設定 +{LT.TAKE_PROFIT:g}%"
           f"・届かなければ {LT.FALLBACK}")
     for agree in (PANEL_AGREE, 95.0):
-        r, days, picks = LT.decide(rows, agree=agree, models=LT.BOOST)
+        r, days, picks = LT.decide(rows, agree=agree, min_break=LT.PREV_SKIP_BREAKS, models=LT.BOOST)
         n_days = LT.n_bar_days(bar_days, r["Date"].min(), r["Date"].max())
         print(f"\n■ 3モデルすべて {agree:g} 以上（{'画面の規則' if agree == PANEL_AGREE else '運用者の目安'}）: 選んだ候補 {len(picks):,}件")
         for target, fb, name in EXITS:

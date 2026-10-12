@@ -548,7 +548,7 @@ def selections(base: pd.DataFrame, slots: int):
     for name, models, agree in PATTERNS:
         r, _, picks = L.decide(base, agree=agree, min_break=0, top_k=1, models=models)
         out.append((name, r[r["passed"] & r["buyable_day"]], picks))
-    r, _, picks = L.decide(base, agree=REFERENCE[2], min_break=L.SKIP_BREAKS, top_k=L.TOP_K, models=REFERENCE[1])
+    r, _, picks = L.decide(base, agree=REFERENCE[2], min_break=L.PREV_SKIP_BREAKS, top_k=L.TOP_K, models=REFERENCE[1])
     out.append((REFERENCE[0], r[r["passed"] & r["buyable_day"]], picks))
     return out
 

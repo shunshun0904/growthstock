@@ -47,7 +47,7 @@ MODELS = E79.MODELS
 RULES = ("R0", "A15")
 RULE_JA = {"R0": "3本とも95以上（R0）", "A15": "6本とも95以上（A15）"}
 SCALES = (("s", "画面の物差し"), ("f", "前向き"))
-MIN_BREAK = LT.SKIP_BREAKS
+MIN_BREAK = LT.PREV_SKIP_BREAKS        # 8（集計のときの画面の線）
 CSV_COLS = ("month", "breaks", "days", "hot_days") + tuple(
     f"{s}_{k}" for s, _ in SCALES for k in ("r0", "a15", "r0_codes", "a15_codes", "r0_hot", "a15_hot"))
 

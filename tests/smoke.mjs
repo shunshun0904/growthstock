@@ -108,12 +108,15 @@ check(predBody.includes('並べているモデル'), 'モデル一覧パネル�
 check(predBody.includes('LightGBM（1.5σ）') && predBody.includes('ロジスティック回帰（1.8σ）'),
   '12本の日本語名が出る');
 // 今日の戦略パネル（docs/PLAYBOOK.md の手順）。
-// 合成データは候補5件・低い百分位なので「見送り」になるのが正しい
+// 合成データは候補5件。2026-10-12 から発火の数では見送らないので「発火が少ない日」。
+// 1.5σ の3本がすべて95以上の候補は無いので、買う銘柄は出ない
 const strat = await page.textContent('.strat');
 check(strat.includes('今日の戦略'), '戦略パネルが表示される');
-check(strat.includes('見送り'), `発火5件の日は見送りと出る`);
+check(strat.includes('発火が少ない日'), '発火5件の日は「発火が少ない日」と出る（見送りではない）');
+check(strat.includes('発火の数では見送らない'), 'パネルの見出しに「発火の数では見送らない」と出る');
+check(strat.includes('1.5σ の3本がすべて95以上の銘柄はありません'), '買わない理由（基準を満たす銘柄なし）が出る');
 check((await page.locator('.strat-pick').count()) === 0,
-      '見送りの日は買う銘柄を出さない');
+      '基準を満たす銘柄が無い日は買う銘柄を出さない');
 check(strat.includes('発火数'), '発火数が表示される');
 check(!strat.includes('NaN') && !strat.includes('undefined'),
       '戦略パネルに NaN / undefined が出ていない');

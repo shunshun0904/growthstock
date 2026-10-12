@@ -134,8 +134,8 @@ function StrategyPanel({ signal, near, day, models, onSend, sentIds }) {
         <span className="sub">
           {RULE_JA}（L15・X15・C15）がすべて{STRATEGY.agreePct}以上の銘柄を{STRATEGY.topK}件まで。
           翌営業日の寄りで買い、+{STRATEGY.takeProfit}% の指値か
-          {STRATEGY.holdDays}営業日目の終値で降りる（同時保有は{STRATEGY.maxSlots}銘柄まで、
-          発火{STRATEGY.skipBreaks}件未満の日は見送り）
+          {STRATEGY.holdDays}営業日目の終値で降りる（同時保有は{STRATEGY.maxSlots}銘柄まで。
+          発火の数では見送らない）
         </span>
       </div>
 
@@ -147,7 +147,7 @@ function StrategyPanel({ signal, near, day, models, onSend, sentIds }) {
             <strong className="num">{nBreak}</strong>
             <span className="sub">
               件（{STRATEGY.strongBreaks}件以上が本命 /
-              {STRATEGY.skipBreaks - 1}件以下は見送り）
+              {STRATEGY.quietBreaks - 1}件以下は発火が少ない日）
             </span>
           </div>
           <div>
@@ -205,10 +205,11 @@ function StrategyPanel({ signal, near, day, models, onSend, sentIds }) {
       <p className="strat-src sub">
         実測（画面と同じ百分位、2021-05〜2026-09 の out-of-fold、{RULE_JA}がすべて95以上の354件。
         +10% の指値・届かなければ20営業日目の終値）: 発火20件以上は192件で +4.9%・勝率78%、
-        8〜19件は140件で +1.5%・勝率59%、7件以下は22件と少なく +5.4%。この手順のとおり3枠で回すと
-        107取引・1取引 +1.5%（その時点の百分位で測ると118取引・+1.8%）。これまでの目安（1.2σ の3本が
-        95以上）と比べて、どちらが良いかは過去のデータでは見分けられない
-        （docs/MODEL_ADOPTION_RULES.md §46）。
+        8〜19件は140件で +1.5%・勝率59%、7件以下は22件と少なく +5.4%。その時点の百分位で測り直しても
+        7件以下の日（36件 +3.7%）は8件以上の日（523件 +3.1%）より悪くなかったので、2026-10-12 から発火の数では
+        見送らない。この手順のとおり3枠で回すと、その時点の百分位で128取引・1取引 +2.2%（以前の「発火8件以上の日
+        だけ」は118取引・+1.8%）。これまでの目安（1.2σ の3本が95以上）と比べて、どちらが良いかは過去のデータでは
+        見分けられない（docs/MODEL_ADOPTION_RULES.md §46・§47）。
       </p>
     </section>
   );

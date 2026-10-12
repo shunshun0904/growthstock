@@ -72,7 +72,7 @@ MODELS = E79.MODELS
 RULES = (("K15", "今の規則: 1.5σ の3本 95以上", "min_K15", 95.0),
          ("T3_90", "以前の規則: 1.2σ の3本 90以上", "min_T3", 90.0),
          ("ALL", "候補全体", None, None))
-SKIP = LT.SKIP_BREAKS                       # 8: これ未満は見送り（画面の線）
+SKIP = LT.PREV_SKIP_BREAKS                  # 8: これ未満は見送り（実験のときの画面の線。2026-10-12 に外した）
 STRONG = LT.STRONG_BREAKS                   # 20: 本命
 BANDS = ((1, SKIP - 1, f"1〜{SKIP - 1}件"), (SKIP, STRONG - 1, f"{SKIP}〜{STRONG - 1}件"), (STRONG, None, f"{STRONG}件以上"))
 FINE = ((1, 3), (4, 7), (8, 11), (12, 19), (20, 29), (30, 49), (50, None))

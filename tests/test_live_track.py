@@ -96,12 +96,25 @@ class Decide(unittest.TestCase):
         self.assertEqual(int(days.iloc[0]["n_pass"]), 4)
         self.assertTrue(bool(days.iloc[0]["buy"]))
 
-    def test_seven_breaks_is_skip(self):
+    def test_seven_breaks_buys_from_2026_10_12(self):
+        # 2026-10-12 から発火の数では見送らない（運用者の決定・実験88）。7件の日も上位2件を買う
+        self.assertEqual(L.SKIP_BREAKS, 1)
         rows = cands("2026-09-14", [(99, 99, 99)] * 7)
         _, days, picks = L.decide(rows)
+        self.assertEqual(len(picks), 2)
+        self.assertTrue(bool(days.iloc[0]["buy"]))
+        self.assertIn("買う", days.iloc[0]["verdict"])
+
+    def test_seven_breaks_is_skip_with_previous_line(self):
+        # 以前の線（PREV_SKIP_BREAKS = 8。■5 の以前の規則と過去の実験の再現）では見送り
+        self.assertEqual(L.PREV_SKIP_BREAKS, 8)
+        rows = cands("2026-09-14", [(99, 99, 99)] * 7)
+        _, days, picks = L.decide(rows, min_break=L.PREV_SKIP_BREAKS)
         self.assertTrue(picks.empty)
         self.assertFalse(bool(days.iloc[0]["buy"]))
         self.assertIn("見送り", days.iloc[0]["verdict"])
+        self.assertEqual(L.breaks_txt(L.SKIP_BREAKS), "発火の数は問わず")
+        self.assertEqual(L.breaks_txt(L.PREV_SKIP_BREAKS), "発火8件以上の日に")
 
     def test_missing_model_never_passes(self):
         rows = cands("2026-09-17", [(99, NAN, 99)] + [(50, 50, 50)] * 8)

@@ -60,7 +60,7 @@ LABELS = {"C": "C 分類（本番）", "R": "R 収益の回帰（huber）",
 CLIP_Q = (0.01, 0.99)
 #: LTR の段階数（同じ日の中の収益の分位）
 N_GRADES = 5
-#: 日付内の指標に使う最小の発火数（運用の見送り基準 SKIP_BREAKS と同じ8件）
+#: 日付内の指標に使う最小の発火数（実験のときの運用の見送り基準と同じ8件。live_track.PREV_SKIP_BREAKS）
 MIN_BREAKS = 8
 
 

@@ -399,7 +399,7 @@ def check_against(ft: pd.DataFrame, ft83: pd.DataFrame, bar_days) -> dict:
     """速い回し方が、実験83 の trade_sim（画面の形）・実験84 の first_by（月2件の先着）と同じ取引になるか。"""
     out = {}
     n_days = LT.n_bar_days(bar_days, pd.to_datetime(ft83["Date"]).min(), pd.to_datetime(ft83["Date"]).max())
-    a = run_one(ft, bar_days, "T3", 95.0, LT.SKIP_BREAKS, LT.TOP_K, LT.SLOTS, 0, 10.0)
+    a = run_one(ft, bar_days, "T3", 95.0, LT.PREV_SKIP_BREAKS, LT.TOP_K, LT.SLOTS, 0, 10.0)
     ref = E83.trade_sim(ft83, "R0", "tp10c", "hit10", "hitday10", bar_days, n_days, keep_trades=True)
     ra, rb = np.sort(a["tp10c"].to_numpy(dtype=float)), np.sort(np.asarray(ref.get("rets", []), dtype=float))
     out["screen"] = {"name": "画面の形（実験83 の trade_sim）", "n_fast": int(len(ra)), "n_ref": int(len(rb)),

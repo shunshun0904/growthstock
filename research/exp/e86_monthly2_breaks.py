@@ -7,7 +7,7 @@
 
 規則と比べ方（先に決めたもの。結果を見てから動かさない）
 ------------------------------------------
-  発火 = その日の候補の数（out-of-fold の行数。画面・live_track.decide と同じ数え方）。発火8件以上 = LT.SKIP_BREAKS 以上
+  発火 = その日の候補の数（out-of-fold の行数。画面・live_track.decide と同じ数え方）。発火8件以上 = LT.PREV_SKIP_BREAKS 以上
   R0 = 1.2σ の lgbm・xgb・cat の3本とも95以上（運用者の目安）。百分位は前向き（実験79 の window_split、丸めは画面と同じ）。
   テスト窓 3〜11。出口: +10% の指値・届かなければ 20営業日目の終値（運用者の今の売り。実験83 の tp10c）
   主: R0 の先着2件・発火8件以上の日だけ（各月、発火8件以上の日の R0 の行を日付の早い順に。同じ日は3本の最小の順、同点は
@@ -74,7 +74,7 @@ import e85_tier_cascade as E85  # noqa: E402
 MODELS = E79.MODELS
 MAIN = "tp10c"
 TOP_N = 2
-MIN_BREAK = LT.SKIP_BREAKS      # 8
+MIN_BREAK = LT.PREV_SKIP_BREAKS      # 8（実験のときの画面の線。2026-10-12 に画面からは外した）
 DRAWS = 2000
 SEED = 42
 GRID = (1, 4, 8, 12, 16, 20)
@@ -274,7 +274,7 @@ def report(ft: pd.DataFrame, bar_days=None, ff: pd.DataFrame | None = None, draw
     # ---- 4. 画面の売買の形
     if bar_days is not None and len(bar_days):
         n_days = LT.n_bar_days(bar_days, pd.to_datetime(ft["Date"]).min(), pd.to_datetime(ft["Date"]).max())
-        print(f"\n■ 4. 参考: 画面の売買の形（発火{LT.SKIP_BREAKS}件以上の日に上位{LT.TOP_K}件・{LT.SLOTS}枠・先着順）を R0 で")
+        print(f"\n■ 4. 参考: 画面の売買の形（発火{LT.PREV_SKIP_BREAKS}件以上の日に上位{LT.TOP_K}件・{LT.SLOTS}枠・先着順）を R0 で")
         sim = E83.trade_sim(ft, "R0", MAIN, "hit10", "hitday10", bar_days, n_days, keep_trades=True)
         summary["daily"] = sim_line("R0・3枠", sim, months)
         dw = by_window_diff(summary["daily"]["by_window"], cur)

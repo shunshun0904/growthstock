@@ -151,7 +151,7 @@ def scale_block(ft: pd.DataFrame, bar_days, name: str) -> dict:
     for code, ja in RULES:
         rows = ft[rule_mask(ft, code)]
         first2 = E87.run_one(ft, bar_days, code, LINE, 1, 3, 5, 2, 10.0)
-        screen = E87.run_one(ft, bar_days, code, LINE, LT.SKIP_BREAKS, LT.TOP_K, LT.SLOTS, 0, 10.0)
+        screen = E87.run_one(ft, bar_days, code, LINE, LT.PREV_SKIP_BREAKS, LT.TOP_K, LT.SLOTS, 0, 10.0)
         res[code] = {"rows": rows, "first2": first2, "screen": screen}
         s_rows, s_f2, s_sc = stats(rows, months), stats(first2, months), stats(screen, months)
         r_sc = pd.to_numeric(screen["tp10c"], errors="coerce").dropna()
@@ -188,13 +188,13 @@ def panel_block(ff: pd.DataFrame, months: int) -> dict:
               f"−10%割れ {s['bad10']:4.1f}%")
     mn = ff["min_K15"].to_numpy(dtype=float)
     sp = ff["max_K15"].to_numpy(dtype=float) - mn
-    near = (mn >= NEAR_LO) & (mn < LINE) & (nb >= LT.SKIP_BREAKS)
+    near = (mn >= NEAR_LO) & (mn < LINE) & (nb >= LT.PREV_SKIP_BREAKS)
     out["near"] = {}
     for name, m in (("惜しい帯・幅5未満", near & (sp < WIDE)), ("惜しい帯・幅5以上", near & (sp >= WIDE))):
         s = stats(ff[m])
         out["near"][name] = s
         print(f"  {LT._l(name, 18)}{s['n']:>4}件  +10% {s['mean']:+6.2f}%（中央 {s['med']:+5.2f}）  勝率 {s['win']:4.1f}%  "
-              f"−10%割れ {s['bad10']:4.1f}%（3本の最小 {NEAR_LO:g}〜{LINE:g}・発火{LT.SKIP_BREAKS}件以上の日）")
+              f"−10%割れ {s['bad10']:4.1f}%（3本の最小 {NEAR_LO:g}〜{LINE:g}・発火{LT.PREV_SKIP_BREAKS}件以上の日）")
     return out
 
 
@@ -218,7 +218,7 @@ def main(argv=None) -> int:
     ff = add_spread(E87.build(df, parts_s), parts_s)
 
     # 確かめ
-    sc = E87.run_one(ft, bar_days, "T3", LINE, LT.SKIP_BREAKS, LT.TOP_K, LT.SLOTS, 0, 10.0)
+    sc = E87.run_one(ft, bar_days, "T3", LINE, LT.PREV_SKIP_BREAKS, LT.TOP_K, LT.SLOTS, 0, 10.0)
     print(f"■ 0. 確かめ: 前向きの 1.2σ の3本 95以上 {int(rule_mask(ft, 'T3').sum())}件（実験82・83 は 543件）、画面の3枠の形 "
           f"{len(sc)}件・+{pd.to_numeric(sc['tp10c']).mean():.2f}%（実験83・87 は 93件・+2.33%）")
 

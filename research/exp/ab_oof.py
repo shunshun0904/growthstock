@@ -101,7 +101,7 @@ def rule_trades(oofs: Dict[str, pd.DataFrame], bars: pd.DataFrame, bar_days) -> 
                                                  on=["Code", "Date"], how="inner")
     base["score"] = base["s_lgbm"]
     # 規則は記録どおり 1.2σ の3本・90以上（2026-10-12 に画面の規則が 1.5σ の3本・95以上になった後も変えない）
-    _, _, picks = L.decide(base, agree=90.0, models=L.BOOST)
+    _, _, picks = L.decide(base, agree=90.0, min_break=L.PREV_SKIP_BREAKS, models=L.BOOST)
     # 出口は記録どおり +20% の指値・届かなければ5日平均（2026-10-12 に運用の指値が +10% になった後も変えない）
     pf = L.forward(bars, picks, target=20.0, fallback="ma5")
     sim = L.simulate(pf, bar_days)

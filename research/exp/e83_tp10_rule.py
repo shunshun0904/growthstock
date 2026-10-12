@@ -280,7 +280,7 @@ def report(ft: pd.DataFrame, bar_days=None, ff: pd.DataFrame | None = None, n_pe
 
     if bar_days is not None and len(bar_days):
         n_days = LT.n_bar_days(bar_days, pd.to_datetime(ft["Date"]).min(), pd.to_datetime(ft["Date"]).max())
-        print(f"\n■ 5. 運用の通りの売買（発火{LT.SKIP_BREAKS}件以上の日に上位{LT.TOP_K}件・{LT.SLOTS}枠・先着順。"
+        print(f"\n■ 5. 運用の通りの売買（発火{LT.PREV_SKIP_BREAKS}件以上の日に上位{LT.TOP_K}件・{LT.SLOTS}枠・先着順。"
               f"{n_days}営業日）")
         print("  月の収益 = 取引の収益の合計 ÷ 枠数 ÷ 月数（1取引に資金の1/3。複利にしない。手数料・税は含まない）")
         summary["trade"] = {}

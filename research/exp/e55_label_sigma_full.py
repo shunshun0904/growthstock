@@ -129,7 +129,7 @@ def rule_trades_at(oofs: Dict[str, pd.DataFrame], bars: pd.DataFrame, bar_days, 
         base = o if base is None else base.merge(o.drop(columns=["label", "fold"]),
                                                  on=["Code", "Date"], how="inner")
     base["score"] = base["s_lgbm"]
-    _, _, picks = L.decide(base, agree=agree, models=L.BOOST)       # 1.2σ の3本（記録どおり）
+    _, _, picks = L.decide(base, agree=agree, min_break=L.PREV_SKIP_BREAKS, models=L.BOOST)   # 1.2σ の3本・発火8件以上（記録どおり）
     # 出口は記録どおり +20% の指値・届かなければ5日平均（2026-10-12 に運用の指値が +10% になった後も変えない）
     pf = L.forward(bars, picks, target=20.0, fallback="ma5")
     sim = L.simulate(pf, bar_days)

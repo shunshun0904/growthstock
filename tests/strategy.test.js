@@ -67,14 +67,19 @@ test('passesAgree: 3つすべてが 95 以上のときだけ true', () => {
 
 /* ------------------------------------------------ その日を取るか */
 
-test('dayVerdict: 発火数で3段階に分かれる', () => {
+test('dayVerdict: 発火数で帯に分かれる。2026-10-12 から発火の数では見送らない（7件以下は「発火が少ない日」）', () => {
+  assert.equal(STRATEGY.skipBreaks, 1);
+  assert.equal(STRATEGY.quietBreaks, 8);
   assert.equal(dayVerdict(26).kind, 'strong');
   assert.equal(dayVerdict(20).kind, 'strong');
   assert.equal(dayVerdict(19).kind, 'ok');
   assert.equal(dayVerdict(8).kind, 'ok');
-  assert.equal(dayVerdict(7).kind, 'skip');
+  assert.equal(dayVerdict(7).kind, 'quiet');
+  assert.equal(dayVerdict(1).kind, 'quiet');
   assert.equal(dayVerdict(0).kind, 'none');
   assert.equal(dayVerdict(null).kind, 'none');
+  // 線を戻せば（以前の 8）7件以下は見送り
+  assert.equal(dayVerdict(7, { ...STRATEGY, skipBreaks: 8 }).kind, 'skip');
 });
 
 /* ------------------------------------------------ シグナル */
@@ -104,8 +109,17 @@ test('strategySignal: 3モデルの最小順位で並ぶ（lgbm 単体の順で�
   assert.ok(order.indexOf('MID') < order.indexOf('LOW'));
 });
 
-test('strategySignal: 発火が少ない日は買わない（基準を満たしても）', () => {
+test('strategySignal: 発火が少ない日（7件以下）も基準を満たせば上位2件を買う（2026-10-12 から）', () => {
   const s = strategySignal(day(5));
+  assert.equal(s.verdict.kind, 'quiet');
+  assert.equal(s.buyable, true);
+  assert.equal(s.picks.length, 2);
+  assert.equal(s.passed.length, 5);
+  assert.equal(s.held.length, 3);
+});
+
+test('strategySignal: 見送りの線を戻すと（以前の 8）、発火が少ない日は買わない', () => {
+  const s = strategySignal(day(5), { ...STRATEGY, skipBreaks: 8 });
   assert.equal(s.verdict.kind, 'skip');
   assert.equal(s.buyable, false);
   assert.equal(s.picks.length, 0);
@@ -205,11 +219,13 @@ test('nearMisses: 境界（85ちょうどは入る / 95ちょうどは入らな�
   assert.equal(nearMisses([rule('H', [94.9, 99, 99])]).length, 1);
 });
 
-test('dayVerdict: 文言は今の規則で測った数字（7件以下は以前の規則で決めた線と明記）', () => {
+test('dayVerdict: 文言は今の規則で測った数字（7件以下は件数が少なく当たり外れが大きいと添える）', () => {
   assert.ok(dayVerdict(25).note.includes('192件 +4.9%'));
   assert.ok(dayVerdict(10).note.includes('140件 +1.5%'));
-  const skip = dayVerdict(5).note;
-  assert.ok(skip.includes('以前の規則の142件 −0.11%') && skip.includes('22件と少なく +5.4%'));
+  const quiet = dayVerdict(5).note;
+  assert.ok(quiet.includes('枠が空いていれば買う') && quiet.includes('22件 +5.4%'));
+  assert.ok(quiet.includes('36件 +3.7%') && quiet.includes('−10%割れ 11%'));
+  assert.equal(dayVerdict(5).label, '発火が少ない日');
   for (const n of [25, 10, 5, 0]) assert.ok(!/NaN|undefined|null/.test(dayVerdict(n).note));
 });
 

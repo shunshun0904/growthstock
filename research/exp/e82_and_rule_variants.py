@@ -254,7 +254,7 @@ def vs_consensus(ft: pd.DataFrame, flag: str, within: str, col: str = "ret20", m
 # 運用の通りの売買・月に2銘柄
 # --------------------------------------------------------------------------- #
 
-def daily_picks(ft: pd.DataFrame, flag: str, min_break: int = LT.SKIP_BREAKS, top_k: int = LT.TOP_K,
+def daily_picks(ft: pd.DataFrame, flag: str, min_break: int = LT.PREV_SKIP_BREAKS, top_k: int = LT.TOP_K,
                 key: str = "pmin3") -> pd.DataFrame:
     """
     画面の判断（live_track.decide）と同じ並べ方: 発火（その日の候補の数）が min_break 以上の日に、flag を満たす候補を
@@ -391,7 +391,7 @@ def report(ft: pd.DataFrame, bar_days=None, ff: pd.DataFrame | None = None, n_pe
 
     if bar_days is not None and len(bar_days):
         n_days = LT.n_bar_days(bar_days, pd.to_datetime(ft["Date"]).min(), pd.to_datetime(ft["Date"]).max())
-        print(f"\n■ 4. 運用の通りの売買（発火{LT.SKIP_BREAKS}件以上の日に上位{LT.TOP_K}件・{LT.SLOTS}枠・先着順・"
+        print(f"\n■ 4. 運用の通りの売買（発火{LT.PREV_SKIP_BREAKS}件以上の日に上位{LT.TOP_K}件・{LT.SLOTS}枠・先着順・"
               f"+{TP:g}% の指値・{LT.HOLD}営業日。{n_days}営業日）")
         print("  月の収益 = 取引の収益の合計 ÷ 枠数 ÷ 月数（1取引に資金の1/3。複利にしない。手数料・税は含まない）")
         summary["trade"] = {}

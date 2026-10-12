@@ -224,8 +224,8 @@ def report(ft: pd.DataFrame, ff: pd.DataFrame | None = None) -> dict:
     print("  strategy.js に写す形:")
     for s in js_lines(t, k):
         print("  " + s)
-    hot = ft[ft["n_break"].to_numpy() >= LT.SKIP_BREAKS]
-    print(f"\n■ 4. 参考: 発火{LT.SKIP_BREAKS}件以上の日に限る（{GROUP_JA[k]}・前向き）")
+    hot = ft[ft["n_break"].to_numpy() >= LT.PREV_SKIP_BREAKS]
+    print(f"\n■ 4. 参考: 発火{LT.PREV_SKIP_BREAKS}件以上の日に限る（{GROUP_JA[k]}・前向き）")
     summary["hot"] = family_table(hot, k)
     print_family(summary["hot"], k)
     if ff is not None and len(ff):

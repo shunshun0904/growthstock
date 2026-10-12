@@ -20,7 +20,8 @@
 
 規則（docs/PLAYBOOK.md。画面の src/lib/strategy.js の STRATEGY と同じ値で、
 tests/test_live_track.py が両者を突き合わせる）
-  その日の発火（候補数）が 8件未満なら買わない
+  その日の発火（候補数）の数では見送らない（2026-10-12 の運用者の決定「Aでお願いします」から。それまでは 8件未満の日は
+  買わなかった。実験88 で今の規則ではこの線を支える数字が無かった）
   1.5σ のラベルで学んだ木の3モデル（RULE_MODELS: lgbm_k15 / xgb_k15 / cat_k15）すべてが 95 以上
   （2026-10-12 の運用者の決定から。それまでは 1.2σ の3モデル（BOOST）すべてが 90 以上。参考として並べて出す）
   3モデルの最小の百分位が高い順に上位2件（同点は本番の LightGBM のスコア順）
@@ -97,7 +98,9 @@ ALL5 = ("lgbm", "xgb", "cat", "logit", "mlp")
 # --- 運用の規則。src/lib/strategy.js の STRATEGY と同じ値 --- #
 AGREE_PCT = 95.0      # agreePct: 規則の3モデル（RULE_MODELS）すべてがこの百分位以上。2026-10-12 に 1.2σ の3本 90 → 1.5σ の3本 95
 STRONG_BREAKS = 20    # strongBreaks: この件数以上の発火なら本命の日
-SKIP_BREAKS = 8       # skipBreaks: これ未満の発火なら見送る
+SKIP_BREAKS = 1       # skipBreaks: これ未満の発火なら見送る。2026-10-12 に 8 → 1（発火の数では見送らない。実験88）
+#: 2026-10-12 までの見送りの線（発火がこれ未満の日は買わない）。以前の規則（■5）と、それまでの実験の再現に使う
+PREV_SKIP_BREAKS = 8
 TOP_K = 2             # topK: 買うのは上位何件まで
 TAKE_PROFIT = 10.0    # takeProfit: 利確の指値（%）。2026-10-12 に 20 → 10（運用者の実際の売りに合わせた）
 FALLBACK = "close"    # 指値に届かなければ: "close" = 20営業日目の終値（2026-10-12 から）/ "ma5" = 5日平均（それまで）
@@ -227,6 +230,11 @@ def live_rows(versions: Sequence[dict], days: Sequence[dt.date]) -> pd.DataFrame
 # ---------------------------------------------------------------- #
 # 規則: 日ごとの判断と、買う銘柄
 # ---------------------------------------------------------------- #
+
+def breaks_txt(min_break: int) -> str:
+    """規則の文言の発火の部分。1以下なら発火の数を問わない（2026-10-12 から）。"""
+    return "発火の数は問わず" if min_break <= 1 else f"発火{min_break}件以上の日に"
+
 
 def decide(rows: pd.DataFrame, *, agree: float = AGREE_PCT,
            min_break: int = SKIP_BREAKS, top_k: int = TOP_K,
@@ -705,12 +713,12 @@ def print_reference(prev_live: pd.DataFrame, lrows: pd.DataFrame, bars: pd.DataF
     （今の規則の候補を月ごとに先着2件。発火は問わない。枠なし）を今の規則の記録の始まりから。
     """
     out = {}
-    print(f"\n■ 5. 参考: 以前の画面の規則（{' / '.join(PREV_MODELS)} がすべて{PREV_AGREE:g}以上・発火{SKIP_BREAKS}件以上の日に"
-          f"上位{TOP_K}件・{SLOTS}枠。2026-10-12 まで）")
+    print(f"\n■ 5. 参考: 以前の画面の規則（{' / '.join(PREV_MODELS)} がすべて{PREV_AGREE:g}以上・"
+          f"{breaks_txt(PREV_SKIP_BREAKS)}上位{TOP_K}件・{SLOTS}枠。2026-10-12 まで）")
     if prev_live.empty:
         print("  （記録が無い）")
     else:
-        pr, pdays, ppicks = decide(prev_live, agree=PREV_AGREE, models=PREV_MODELS)
+        pr, pdays, ppicks = decide(prev_live, agree=PREV_AGREE, min_break=PREV_SKIP_BREAKS, models=PREV_MODELS)
         st = ref_summary(forward(bars, ppicks), bar_days, complete_to, slots=SLOTS)
         out["prev"] = st
         print(f"  {prev_live['Date'].min().date()}〜{prev_live['Date'].max().date()}: 買う日 {int(pdays['buy'].sum())}日・"
@@ -820,9 +828,9 @@ def main(argv=None) -> int:
 
     print("=" * 78)
     print(f"実運用の追跡（ミニブレイク予測・運用の規則）  集計 {today} / 日足 〜{last_bar.date()}")
-    print(f"規則: {' / '.join(RULE_MODELS)}（1.5σ の3本）がすべて{AGREE_PCT:g}以上・発火{SKIP_BREAKS}件以上の日に上位{TOP_K}件・"
+    print(f"規則: {' / '.join(RULE_MODELS)}（1.5σ の3本）がすべて{AGREE_PCT:g}以上・{breaks_txt(SKIP_BREAKS)}上位{TOP_K}件・"
           f"{SLOTS}枠・+{TAKE_PROFIT:g}% の指値か{HOLD}営業日目の終値（2026-10-12 から。それまでは "
-          f"{' / '.join(PREV_MODELS)} がすべて{PREV_AGREE:g}以上。■5 に参考）")
+          f"{' / '.join(PREV_MODELS)} がすべて{PREV_AGREE:g}以上・発火{PREV_SKIP_BREAKS}件以上の日。■5 に参考）")
     print("=" * 78)
     print("\n■ 結論")
     print(f"  ・記録: {live_lo.date()}〜{live_hi.date()} の {int(ldays['Date'].nunique())}営業日"
@@ -938,7 +946,7 @@ def main(argv=None) -> int:
             print(compare_line(name, ts[key],
                                where(ts[key], blk_done.get(f"trade_{key}", [])), fmt))
         ap_ = lst["all_pass"]
-        print("\n  (c) 枠を気にしない場合（発火8件以上の日の基準通過すべて）")
+        print(f"\n  (c) 枠を気にしない場合（{breaks_txt(SKIP_BREAKS)}基準を通ったすべて）")
         print(COMPARE_HEAD)
         print(compare_line("件数", ap_["n"], where(ap_["n"], blk_done.get("all_pass_n", [])),
                            "{:.0f}"))
