@@ -121,12 +121,21 @@ const lastBorder = page.locator('.pred-row').last().locator('.pred-border');
 check(((await lastBorder.textContent()) || '').includes('最下位 CatBoost'), '5件目は「最下位 CatBoost」');
 check(((await lastBorder.getAttribute('class')) || '').includes('amber'), '5件目の印は黄');
 
+// 12本の合意の百分位（運用者の指示 2026-10-12）。合成データは4件目が 97.9、5件目は合意が入る前の形（—）
+const consCells = page.locator('.pred-list .pred-row .pred-main .pred-cell:has(.lab:text("12本の合意"))');
+check((await consCells.count()) === 5, `行ごとに「12本の合意」の欄がある (実際: ${await consCells.count()})`);
+check(((await consCells.nth(3).textContent()) || '').includes('97.9'), '4件目の合意の百分位 97.9 が出る');
+check(((await consCells.nth(4).textContent()) || '').includes('—'), '合意の無い古い予測は「—」');
+check(((await consCells.nth(3).getAttribute('title')) || '').includes('上位2.5% の線は 91.2'),
+      '合意の欄の title に上位2.5% の線が出る');
+
 // 1件目（5モデルとも高い候補）を開いて、モデル別の見立てを確かめる
 await page.locator('.pred-row').first().locator('.pred-main').click();
 await page.waitForSelector('.pred-detail', { timeout: 5000 });
 const detail = await page.textContent('.pred-detail');
 check(detail.includes('モデル別の見立て'), '詳細にモデル別の見立てが出る');
 check(detail.includes('混ぜていません'), 'アンサンブルではないと明示される');
+check(detail.includes('12本の合意の百分位') && detail.includes('82.4'), '詳細に12本の合意の百分位が出る');
 const detailBars = await page.locator('.pred-detail .pred-b').count();
 check(detailBars >= 5, `詳細にモデル別の棒が5本以上ある (実際: ${detailBars})`);
 const borderNote = await page.textContent('.pred-detail .pred-border-note');

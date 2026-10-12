@@ -30,7 +30,7 @@ import glob
 import json
 import os
 import sys
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -167,6 +167,66 @@ def agreement(per: Dict[str, Dict], algos, pct: float = 90.0) -> Tuple[int, int]
     pcts = [per[a]["pctHistorical"] for a in algos
             if a in per and per[a].get("pctHistorical") is not None]
     return int(sum(1 for p in pcts if p >= pct)), len(pcts)
+
+
+# --------------------------------------------------------------------------- #
+# 12本の合意（運用者の指示 2026-10-12「ダッシュボードに12本の合意の百分位を表示」）
+# --------------------------------------------------------------------------- #
+#
+# 合意 = 本番の4モデルとラベル違いの8本の百分位（pctHistorical と同じ「そのモデル自身の過去スコア分布での位置」）
+# の平均。合意の百分位 = その平均が、過去の out-of-fold の行の合意の分布で下から何%か（97.5 以上 = 過去の上位2.5%、
+# 90 以上 = 上位10%）。実験79〜81（docs/MODEL_ADOPTION_RULES.md §35〜37）で、12本の値の中で判断に効いたのは
+# 「12本がそろって高いか」（合意の高さ）だけだった。順位・帯・較正・追跡ファイルは基準モデルのまま。
+
+def oof_scores_of(algo: str, model_dir: str) -> Optional[pd.DataFrame]:
+    """そのモデルの out-of-fold（Code, Date, score）。基準モデルは model_dir/oof.parquet、ほかは models/<名前>/。"""
+    import models as M
+    p = (os.path.join(model_dir, "oof.parquet") if algo == M.BASELINE
+         else os.path.join(M.sub_dir(algo, model_dir), "oof.parquet"))
+    if not os.path.exists(p):
+        return None
+    o = pd.read_parquet(p, columns=["Code", "Date", "score"])
+    o["Code"] = o["Code"].astype(str)
+    o["Date"] = pd.to_datetime(o["Date"])
+    return o
+
+
+def consensus_reference(model_dir: str, algos) -> Tuple[Optional[np.ndarray], List[str]]:
+    """
+    過去の out-of-fold の行（algos の全部で (Code, Date) がそろった行）の合意を昇順で返す。各行の百分位は
+    そのモデルの out-of-fold 全行の分布で付ける（画面の pctHistorical と同じ: 同点は数えない）。
+    out-of-fold が無いモデルは外し、使ったモデルを返す。
+    """
+    wide, used = None, []
+    for a in algos:
+        o = oof_scores_of(a, model_dir)
+        if o is None or o["score"].notna().sum() == 0:
+            continue
+        o = o.dropna(subset=["score"])
+        ref = np.sort(o["score"].to_numpy(dtype=float))
+        o = o[["Code", "Date"]].assign(
+            **{a: np.searchsorted(ref, o["score"].to_numpy(dtype=float), side="left") / len(ref) * 100.0})
+        o = o.drop_duplicates(["Code", "Date"])
+        wide = o if wide is None else wide.merge(o, on=["Code", "Date"], how="inner")
+        used.append(a)
+    if wide is None or wide.empty:
+        return None, []
+    return np.sort(wide[used].mean(axis=1).to_numpy(dtype=float)), used
+
+
+def consensus_fields(pcts: Dict[str, Optional[float]], ref: Optional[np.ndarray], used: List[str]) -> Dict:
+    """
+    候補1件の合意（cons12。used の百分位の平均）と、それが過去の合意の分布で下から何%か（consPct）。
+    pcts は丸める前の百分位。used の全部がそろわなければ None（欠けたまま平均すると別の物差しになる）。
+    """
+    n = len(used)
+    vals = [pcts.get(a) for a in used]
+    if ref is None or not len(ref) or not n or any(v is None or not np.isfinite(v) for v in vals):
+        return {"cons12": None, "consPct": None, "nCons": n}
+    c = float(np.mean(vals))
+    return {"cons12": round(c, 1),
+            "consPct": round(float(np.searchsorted(ref, c, side="left")) / len(ref) * 100.0, 1),
+            "nCons": n}
 
 
 def score_others(cand: pd.DataFrame, cols: List[str],
@@ -379,8 +439,9 @@ def main(argv=None) -> int:
             "contrib": contrib[i],
         })
     # --- 他モデルの採点を各候補に載せる --- #
-    # アンサンブルはしない。並べるだけ。買うかの判断は人間が統合的に行う
+    # アンサンブルはしない。並べるだけ。買うかの判断は人間が統合的に行う（12本の合意は参考に並べる）
     others, model_info = score_others(cand, cols, args.model_dir)
+    consensus_meta = None
     if others:
         import models as M
         hist_by_algo = {a: M.hist_scores(a, args.model_dir) for a in others}
@@ -403,6 +464,24 @@ def main(argv=None) -> int:
             "label": meta.get("label"),
             "positiveRate": meta.get("positiveRate"),
         })
+        # 12本の合意の物差し（過去の out-of-fold の合意の分布）。並びは画面と同じ LINEUP の順。
+        # 作れなくても日次予測は止めない（合意を出さないだけ。1モデルの失敗で止めない score_others と同じ考え方）
+        try:
+            cons_ref, cons_used = consensus_reference(
+                args.model_dir, [a for a in M.LINEUP if a == M.BASELINE or a in others])
+        except Exception as exc:          # noqa: BLE001
+            print(f"[consensus] 物差しを作れないので合意は出さない: {type(exc).__name__}: {exc}")
+            cons_ref, cons_used = None, []
+        sorted_hist = {a: (np.sort(h) if h is not None and len(h) else None)
+                       for a, h in [(M.BASELINE, hist_scores)] + list(hist_by_algo.items())}
+
+        def raw_pct(a, v):
+            h = sorted_hist.get(a)
+            if h is None or not np.isfinite(v):
+                return None
+            return float(np.searchsorted(h, v, side="left")) / len(h) * 100.0
+
+        base_scores = cand["score"].to_numpy(dtype=float)
         for i, x in enumerate(rows):
             per = {M.BASELINE: {"score": x["score"],
                                 "pctHistorical": x["pctHistorical"]}}
@@ -415,15 +494,23 @@ def main(argv=None) -> int:
                     "pctHistorical": M.pct_historical(v, hist_by_algo[algo]),
                 }
             x["byModel"] = per
-            # 何個のモデルが「上位10%」と見ているか。独立した判定の数え上げで、
-            # スコアを混ぜた値ではない。
-            #
-            # ここで平均パーセンタイルを作らないのは意図的。平均を出すと、
-            # 呼び名が「表示順」でも中身は5モデルのアンサンブルになる。
-            # 並べて人間が決める運用なので、混ぜた数字は画面に出さない。
+            # 何個のモデルが「上位10%」と見ているか。独立した判定の数え上げ。
             # ラベル違いのモデル（1.5σ・1.8σ）は本番の数（agree90 / nModels）に入れず、別に数える（agreeK90 / nK）
             x["agree90"], x["nModels"] = agreement(per, M.ALGOS)
             x["agreeK90"], x["nK"] = agreement(per, M.VARIANTS)
+            # 12本の合意（cons12）と、その過去の分布での百分位（consPct）。2026-10-09 までは「平均は出さない
+            # （混ぜた数字は画面に出さない）」方針だったが、実験79〜81 で判断に効くのが合意の高さだけだったので、
+            # 運用者の指示（2026-10-12）で出す。丸める前の百分位で計算する。順位・帯は基準モデルのまま
+            raw = {M.BASELINE: raw_pct(M.BASELINE, float(base_scores[i]))}
+            raw.update({a: raw_pct(a, float(sc[i])) for a, sc in others.items()})
+            x.update(consensus_fields(raw, cons_ref, cons_used))
+        if cons_ref is not None:
+            consensus_meta = {"models": cons_used, "nHist": int(len(cons_ref)),
+                              "line90": round(float(np.quantile(cons_ref, 0.90)), 1),
+                              "line975": round(float(np.quantile(cons_ref, 0.975)), 1)}
+        print(f"[consensus] {len(cons_used)}本の合意 / 過去の行 {len(cons_ref) if cons_ref is not None else 0:,}件"
+              + (f" / 上位10% の線 {np.quantile(cons_ref, 0.90):.1f}・上位2.5% の線 {np.quantile(cons_ref, 0.975):.1f}"
+                 if cons_ref is not None else ""))
 
     # 表示順・順位はどちらも基準モデルのスコア（上の rank_in_day と同じ）。
     # 帯・較正・追跡ファイルも基準モデル基準なので、ここだけ別の物差しで
@@ -449,6 +536,8 @@ def main(argv=None) -> int:
         "calibration": meta["calibration"],
         # 画面に並べるモデルの素性。基準モデル(lgbm)も含む
         "models": model_info,
+        # 12本の合意の物差し（consensus_reference）。線は過去の合意の分布の 90% / 97.5% 点（12本の平均の値）
+        "consensus": consensus_meta,
         "notes": [
             "スコアは較正されていない生の出力。確率として読まず、"
             "同じ日の候補の中での順位と、スコア帯の過去実績で読むこと。",
@@ -459,6 +548,8 @@ def main(argv=None) -> int:
             "モデル別の値は混ぜていない（アンサンブルではない）。"
             "学習器が違えばスコアのスケールも意味も違うので、"
             "各モデル自身の過去スコア分布での位置に揃えて並べてある。",
+            "12本の合意（cons12）は12本の百分位の平均、合意の百分位（consPct）はその平均が過去の予測の中で"
+            "下から何%か（97.5以上 = 過去の上位2.5%、90以上 = 上位10%）。並べて見る参考値で、順位と帯は基準モデルのまま。",
             "一致度は「上位10%と見ているモデルの数」。独立した判定の数え上げで、"
             "スコアを混ぜた値ではない。順位と帯は基準モデル（LightGBM）の"
             "スコアで付けてあり、他のモデルは並べて見るためのもの。",

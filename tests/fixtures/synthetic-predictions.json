@@ -164,7 +164,10 @@
    },
    "agree90": 2,
    "nModels": 5,
-   "bandOutcome": 1.54
+   "bandOutcome": 1.54,
+   "cons12": 81.5,
+   "consPct": 82.4,
+   "nCons": 12
   },
   {
    "code": "1699",
@@ -325,7 +328,10 @@
    },
    "agree90": 0,
    "nModels": 5,
-   "bandOutcome": 1.54
+   "bandOutcome": 1.54,
+   "cons12": 55.0,
+   "consPct": 51.0,
+   "nCons": 12
   },
   {
    "code": "1671",
@@ -486,7 +492,10 @@
    },
    "agree90": 0,
    "nModels": 5,
-   "bandOutcome": 1.54
+   "bandOutcome": 1.54,
+   "cons12": 63.6,
+   "consPct": 64.2,
+   "nCons": 12
   },
   {
    "code": "9434",
@@ -647,7 +656,10 @@
    },
    "agree90": 2,
    "nModels": 5,
-   "bandOutcome": 1.54
+   "bandOutcome": 1.54,
+   "cons12": 93.4,
+   "consPct": 97.9,
+   "nCons": 12
   },
   {
    "code": "9082",
@@ -1214,5 +1226,24 @@
    }
   }
  ],
- "_fixture": "tests/fixtures/synthetic-predictions.json（合成データ）"
+ "_fixture": "tests/fixtures/synthetic-predictions.json（合成データ）",
+ "consensus": {
+  "models": [
+   "lgbm",
+   "xgb",
+   "cat",
+   "logit",
+   "lgbm_k15",
+   "xgb_k15",
+   "cat_k15",
+   "logit_k15",
+   "lgbm_k18",
+   "xgb_k18",
+   "cat_k18",
+   "logit_k18"
+  ],
+  "nHist": 16320,
+  "line90": 86.3,
+  "line975": 91.2
+ }
 }

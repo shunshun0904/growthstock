@@ -247,3 +247,28 @@ export function marketTone(candidates) {
     tone: med > 0.05 ? 'green' : med < -0.05 ? 'red' : 'slate',
   };
 }
+
+/**
+ * 12本の合意の百分位（research/predict_daily.py の consPct / cons12 / nCons と、payload の consensus）の読み方。
+ *
+ * 合意 = 12本（本番の4モデル + ラベル違いの8本）の百分位の平均。合意の百分位 = その平均が、過去の予測
+ * （out-of-fold）の合意の分布で下から何%か。97.5 以上 = 過去の上位2.5%、90 以上 = 上位10%。
+ * 実験79〜81（docs/MODEL_ADOPTION_RULES.md §35〜37）で、12本の値の中で判断に効いたのは合意の高さだけだった。
+ * 順位・帯は基準モデル（LightGBM）のまま。運用者の指示（2026-10-12）
+ */
+export function consensusLabel(c) {
+  const n = Number.isFinite(c?.nCons) && c.nCons > 0 ? c.nCons : 12;
+  return `${n}本の合意`;
+}
+
+export function consensusTitle(c, cm) {
+  if (!Number.isFinite(c?.consPct) || !Number.isFinite(c?.cons12)) {
+    return '12本の合意が入る前の予測ファイルです';
+  }
+  const lines = cm && Number.isFinite(cm.line975) && Number.isFinite(cm.line90)
+    ? `（12本の平均でいうと、上位2.5% の線は ${cm.line975.toFixed(1)}、上位10% は ${cm.line90.toFixed(1)}）`
+    : '';
+  return `${c.nCons}本の百分位の平均 ${c.cons12.toFixed(1)} が、過去の予測の中で下から ${c.consPct.toFixed(1)}% の位置。`
+    + `97.5以上 = 過去の上位2.5%、90以上 = 上位10%${lines}。順位と帯は LightGBM のまま`;
+}
+

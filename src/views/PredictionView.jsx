@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { fmt, fmtInt, fmtSigned, fmtOku, fmtDate, fmtDateTime, DASH } from '../lib/format.js';
 import { bandColor, bandLabel, pctColor, PCT_LEGEND, modelRows, MODEL_SHORT, MODEL_FAMILY,
-  FAMILY_JA, marketTone, candidateToStock } from '../lib/predictions.js';
+  FAMILY_JA, marketTone, candidateToStock, consensusLabel, consensusTitle } from '../lib/predictions.js';
 import { STRATEGY, BOOST, BORDER, strategySignal, exitPlan, nearMisses,
          MODEL_JA, fundContrib, frozenNote, borderNote,
 } from '../lib/strategy.js';
@@ -13,9 +13,12 @@ import { STRATEGY, BOOST, BORDER, strategySignal, exitPlan, nearMisses,
  * 見つけるのがこの画面、入るかどうかを決めるのは「8軸オクタゴン比較」なので、
  * 候補をオクタゴン側へ送る導線を必ず置く。
  *
- * スコアは5モデルぶん並べる。混ぜて1つにはしない（アンサンブルにしない）。
+ * スコアはモデルごとに並べる。混ぜて1つにはしない（アンサンブルにしない）。
  * 学習器が違えばスコアのスケールも意味も違うので、各モデル自身の過去スコア
  * 分布での位置に揃えて横に並べ、買うかどうかは人間が統合して決める。
+ * ただし「12本の合意の百分位」（12本の百分位の平均が過去の予測の中で下から何%か）は
+ * 参考に出す（運用者の指示 2026-10-12。実験79〜81 で判断に効いたのが合意の高さだけだったため）。
+ * 順位・帯・追跡は基準モデル（LightGBM）のまま。
  * byModel が無い予測ファイル（5モデルを学習する前のもの）でも壊れないよう、
  * 基準モデル1本の表示に落ちる作りにしてある。
  */
@@ -37,7 +40,7 @@ export default function PredictionView({ data, history, onSendToOctagon, sentIds
 
   return (
     <div className="pred">
-      <StrategyPanel signal={signal} near={near} day={day}
+      <StrategyPanel signal={signal} near={near} day={day} cm={data?.consensus}
                      onSend={(c) => onSendToOctagon(candidateToStock(c))}
                      sentIds={sentIds} />
 
@@ -96,7 +99,7 @@ export default function PredictionView({ data, history, onSendToOctagon, sentIds
 
         <div className="pred-list">
           {rows.map((c) => (
-            <Row key={c.jqCode} c={c} models={data?.models} open={openId === c.jqCode}
+            <Row key={c.jqCode} c={c} models={data?.models} cm={data?.consensus} open={openId === c.jqCode}
                  onToggle={() => setOpenId(openId === c.jqCode ? null : c.jqCode)}
                  onSend={() => onSendToOctagon(candidateToStock(c))}
                  sent={sentIds?.has(`pred:${c.jqCode}`)} />
@@ -121,7 +124,7 @@ export default function PredictionView({ data, history, onSendToOctagon, sentIds
  * 「今日は買うのか、買うなら何を、いくらで手仕舞うのか」を1か所で
  * 言い切る場所が要る。迷いどころを毎日つくらないための画面。
  */
-function StrategyPanel({ signal, near, day, onSend, sentIds }) {
+function StrategyPanel({ signal, near, day, cm, onSend, sentIds }) {
   const { nBreak, verdict, picks, passed, buyable } = signal;
   return (
     <section className="card strat">
@@ -159,7 +162,7 @@ function StrategyPanel({ signal, near, day, onSend, sentIds }) {
         <>
           <div className="strat-picks">
             {picks.map((c, i) => (
-              <PickCard key={c.jqCode} c={c} n={i + 1}
+              <PickCard key={c.jqCode} c={c} n={i + 1} cm={cm}
                         onSend={() => onSend(c)}
                         sent={sentIds?.has(`pred:${c.jqCode}`)} />
             ))}
@@ -268,7 +271,7 @@ function FundNote({ c }) {
   );
 }
 
-function PickCard({ c, n, onSend, sent }) {
+function PickCard({ c, n, cm, onSend, sent }) {
   const plan = exitPlan(c.close);
   return (
     <div className="strat-pick">
@@ -292,6 +295,15 @@ function PickCard({ c, n, onSend, sent }) {
             {fmt(c.minPct, 0)}
           </strong>
           <span className="sub">百分位</span>
+        </div>
+        <div className="strat-metric" title={consensusTitle(c, cm)}>
+          <span className="lab">{consensusLabel(c)}</span>
+          <strong className="num">
+            {Number.isFinite(c.consPct) && (
+              <i className="pct-sw" style={{ background: pctColor(c.consPct) }} aria-hidden="true" />
+            )}
+            {fmt(c.consPct, 1)}
+          </strong>
         </div>
         {BOOST.map((a) => (
           <div key={a} className="strat-metric">
@@ -332,7 +344,7 @@ function BorderBadge({ c }) {
 
 /* ------------------------------------------------------------------ 候補1件 */
 
-function Row({ c, models, open, onToggle, onSend, sent }) {
+function Row({ c, models, cm, open, onToggle, onSend, sent }) {
   const color = bandColor(c.band);
   const mr = modelRows(c, models);
   return (
@@ -360,6 +372,16 @@ function Row({ c, models, open, onToggle, onSend, sent }) {
             <em className="num">{fmt(c.pctHistorical, 0)}</em>
           </span>
         )}
+        {/* 12本の合意の百分位。古い予測ファイルには無いので「—」（列の位置はそろえる） */}
+        <span className="pred-cell" title={consensusTitle(c, cm)}>
+          <span className="lab">{consensusLabel(c)}</span>
+          <span className="num">
+            {Number.isFinite(c.consPct) && (
+              <i className="pct-sw" style={{ background: pctColor(c.consPct) }} aria-hidden="true" />
+            )}
+            {fmt(c.consPct, 1)}
+          </span>
+        </span>
         <span className="pred-cell">
           <span className="lab">帯の正例率</span>
           <span className="num">{fmt(c.bandPositiveRate, 1, '%')}</span>
@@ -381,7 +403,7 @@ function Row({ c, models, open, onToggle, onSend, sent }) {
         </span>
       </button>
 
-      {open && <Detail c={c} models={models} onSend={onSend} sent={sent} />}
+      {open && <Detail c={c} models={models} cm={cm} onSend={onSend} sent={sent} />}
     </div>
   );
 }
@@ -466,7 +488,7 @@ const NUMS = [
   ['売上成長', (c) => fmtSigned(c.salesGrowth, 1)],
 ];
 
-function Detail({ c, models, onSend, sent }) {
+function Detail({ c, models, cm, onSend, sent }) {
   const g = c.contrib?.groups || {};
   const maxAbs = Math.max(...Object.values(g).map(Math.abs), 0.001);
   const top = (c.contrib?.top || []).slice(0, 10);
@@ -517,6 +539,11 @@ function Detail({ c, models, onSend, sent }) {
                 <span className="lab">上位10%と見たモデル</span>
                 <b className="num">{c.agree90}/{c.nModels}</b>
               </span>
+              <span title={consensusTitle(c, cm)}>
+                <span className="lab">{consensusLabel(c)}の百分位</span>
+                <b className="num">{fmt(c.consPct, 1)}</b>
+                {Number.isFinite(c.cons12) && <span className="sub">（12本の平均 {fmt(c.cons12, 1)}）</span>}
+              </span>
               <span>
                 <span className="lab">順位・帯の基準</span>
                 <b>LightGBM</b>
@@ -528,8 +555,10 @@ function Detail({ c, models, onSend, sent }) {
               なので、木3本が揃っても独立した3票ではありません。
               <b>塊をまたいで揃ったとき</b>だけ、見方の違うモデルが同じ結論に
               達したと読めます（塊をまたぐ相関は 0.63〜0.71）。
-              平均は出していません。混ぜた数字を1つ出すと、呼び名が何であれ
-              アンサンブルになるためです。
+              「12本の合意」は、12本の百分位の平均が過去の予測の中で下から何%かを表す参考値です
+              （97.5以上 = 過去の上位2.5%、90以上 = 上位10%）。実験79〜81 では、12本の値の中で
+              判断に効いたのは合意の高さだけで、どのモデルが高いかの違いは足しになりませんでした。
+              順位と帯は LightGBM のままです。
             </p>
           </div>
         )}

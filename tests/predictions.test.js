@@ -9,7 +9,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { modelRows, MODEL_SHORT, MODEL_FAMILY, FAMILY_JA } from '../src/lib/predictions.js';
+import { modelRows, MODEL_SHORT, MODEL_FAMILY, FAMILY_JA, consensusLabel, consensusTitle } from '../src/lib/predictions.js';
 
 const models = [
   { algo: 'lgbm', name: 'LightGBM', short: 'LGB' },
@@ -55,3 +55,18 @@ test('modelRows: payload に無いモデルは並べない（古い予測ファ�
   const rows2 = modelRows(cand, [{ algo: 'lgbm_k15', name: 'x' }, { algo: 'xgb_k18', name: 'y' }]);
   assert.deepEqual(rows2.map((r) => r.short), ['L15', 'X18']);
 });
+
+test('consensusLabel / consensusTitle: 12本の合意の百分位の読み方', () => {
+  const c = { consPct: 97.9, cons12: 93.4, nCons: 12 };
+  assert.equal(consensusLabel(c), '12本の合意');
+  assert.equal(consensusLabel({ nCons: 11 }), '11本の合意');                 // モデルが欠けた日はその本数
+  assert.equal(consensusLabel({}), '12本の合意');
+  const t = consensusTitle(c, { line90: 86.3, line975: 91.2 });
+  assert.ok(t.includes('平均 93.4'));
+  assert.ok(t.includes('下から 97.9%'));
+  assert.ok(t.includes('上位2.5% の線は 91.2'));
+  assert.ok(t.includes('LightGBM のまま'));
+  assert.ok(!consensusTitle(c, null).includes('の線は'));                   // 線が無い予測ファイルでも壊れない
+  assert.equal(consensusTitle({}, null), '12本の合意が入る前の予測ファイルです');
+});
+
