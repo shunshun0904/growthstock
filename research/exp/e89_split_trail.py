@@ -63,7 +63,8 @@ OK」）、後半の上限は 40営業日（「40日まででお願いします�
     args="--perm 2000"                  （既定。ずらし 0・2・4 か月と、学習し直した 0 か月 = 0r）
     args="--shifts 0 --perm 200"        （軽く回す。Release の out-of-fold だけ。学習し直さない）
     args="--no-retrain0"                （学習し直した 0 か月 = 0r を省く）
-  GitHub Actions の中では、報告の全文（集計だけ。ログと同じ中身）を最後に注釈（notice。1つ 20KB 以下・最大10個）でも出す。
+  GitHub Actions の中では、短い要約（集計だけ。compact_report）を最後に注釈（notice。GitHub は1つを約4KB で切るので
+  3.8KB 以下・最大10個）でも出す。全文はログ（exp.log）に。
   ログ・成果物の保管先に届かない環境から、API（check-runs/<job>/annotations）で結果を読むため（--notice で手元でも出せる）
   学習し直した out-of-fold は research/_data/oof/e89_<モデル>_sh<月>_<指紋>.parquet に置く（run-experiment.yml の
   actions/cache で次の実行に引き継ぐ。指紋はパラメータ・種・列・データセットの中身（学習の列とラベルの列のハッシュ）から
@@ -880,8 +881,81 @@ def conv(o):
     return str(o)
 
 
+def _f(x, fmt="{:+.2f}") -> str:
+    return "-" if x is None or not np.isfinite(x) else fmt.format(x)
+
+
+def compact_report(runs: dict, infos: dict, final: dict, cutoff) -> str:
+    """
+    注釈（notice）に出す短い報告（集計だけ）。GitHub は注釈1つを約4KB で切るので、要る数字だけを短い書式で並べる。
+    出口の列名: tp10c 全部+10%（今の運用）/ tp20a +20%・5日平均 / c20・c40 指値なしの20・40日目の終値 /
+    split<W> 分割（前半 +10%・後半 高値−W%）/ trail<W> 後半だけ。数字は %（差は pt）
+    """
+    L = [f"e89 分割決済 要約（比べる行 = 選定日 {cutoff} まで・全出口に値がある行。手数料・税・すべりなし）",
+         "出口: tp10c=全部+10%(今) tp20a=+20%/5日平均(10/12まで) c20/c40=指値なし20/40日 split<W>=前半+10%・後半 高値−W% "
+         "trail<W>=後半だけ",
+         "成績の列: 件数 平均 中央 勝率 −10%割れ 最悪 [指値到達] [発動 寄りで割った 日 発動単位 残り単位]"]
+    for tag, r in runs.items():
+        inf = infos.get(tag, {})
+        rw = (inf.get("exit_check") or {}).get("compare_rows", {})
+        L.append(f"━{tag}（{'Release' if tag == '0' else '学習し直し'}）行{r['rows']} 窓{r['windows'][0]}〜{r['windows'][-1]}"
+                 f" {r['span'][0]}〜{r['span'][1]} 外した行: 未了{rw.get('late', '-')} 欠測{rw.get('missing', '-')}"
+                 f"(A15 {rw.get('missing_a15', '-')})")
+        if "e83_check" in r:
+            e = r["e83_check"]
+            L.append(f" 確かめ(実験83の行): A15×tp10c {e['n']}件 {_f(e['mean'])} 中央{_f(e['med'])} 勝率{_f(e['win'], '{:.1f}')}"
+                     f" 到達{_f(e['hit'], '{:.1f}')}（実験83: 333件 +3.59 中央+5.96 70.9 43.2）")
+        for rule, g in r.get("groups", {}).items():
+            L.append(f" {rule} 出口")
+            for col, st in g.items():
+                x = (f"  {col} {st['n']} {_f(st['mean'])} {_f(st['med'])} {_f(st['win'], '{:.1f}')} "
+                     f"{_f(st['bad10'], '{:.1f}')} {_f(st['worst'], '{:.1f}')}")
+                if np.isfinite(st.get("hit", NAN)):
+                    x += f" 到{st['hit']:.1f}"
+                if np.isfinite(st.get("fire", NAN)):
+                    x += (f" 発{st['fire']:.1f} 寄{st['gap']:.1f} {_f(st['fire_day'], '{:.1f}')}日"
+                          f" {_f(st['fire_ret'])}/{_f(st['keep_ret'])}")
+                L.append(x)
+        parts = []
+        for k, m in r["main"].items():
+            sm = m["row"]["summary"]
+            parts.append(f"−{k}% {_f(sm['mean'])}±{_f(sm['se'], '{:.2f}')}({sm['wins']}/{sm['n']}) p{m['row']['p']:.3f}"
+                         f" 銘p{m['code']['p']:.3f} {'通' if m['judge']['pass'] else '否'}")
+        L.append(" 判定 split−tp10c(A15・窓ごと): " + " | ".join(parts))
+        if tag == "0":
+            for k, m in r["main"].items():
+                L.append(f"  窓 −{k}%: " + " ".join(f"{w}:{d:+.2f}" for w, d in zip(m["row"]["windows"], m["row"]["diffs"])))
+            ref = r.get("ref", {})
+            for rule in RULES:
+                items = [f"{key.split('_', 1)[1]} {_f(v['mean'])}±{_f(v['se'], '{:.2f}')}({v['wins']}/{v['n']})"
+                         for key, v in ref.items() if key.startswith(rule + "_") and v.get("n")]
+                if items:
+                    L.append(f" 参考差 {rule}: " + "; ".join(items))
+            for col, wm in r.get("a15_windows", {}).items():
+                L.append(f"  A15窓 {col}: " + " ".join(f"{w}:{m:+.2f}({n})" for w, n, m in wm))
+        for rule, sims in r.get("sim", {}).items():
+            L.append(f" 3枠 {rule}: 出口 候補→買 見送 1取引 中央 勝率 −10% 月の収益 年率 最大DD 月利平均/中央/最悪 稼働 銘柄 2銘柄以上")
+            for col, st in sims.items():
+                if not isinstance(st, dict) or "picks" not in st:
+                    continue
+                if not st.get("n"):
+                    L.append(f"  {col} 取引なし")
+                    continue
+                L.append(f"  {col} {st['picks']}→{st['n']} {st['skipped']} {_f(st['mean'])} {_f(st['median'])}"
+                         f" {st['win']:.1f} {st['bad10']:.1f} {_f(st['monthly'])} {_f(st['cagr'], '{:+.1f}')}"
+                         f" {_f(st['mdd'], '{:+.1f}')} {_f(st['m_mean'])}/{_f(st['m_med'])}/{_f(st['m_worst'], '{:+.1f}')}"
+                         f" {st['util']:.0f} {st['held']:.2f} {st['held2']:.0f}")
+            diffs = [f"{key.split('-')[0]} {_f(v['mean'])}±{_f(v['se'], '{:.2f}')}({v['wins']}/{v['n']})"
+                     for key, v in sims.items() if key.endswith("-" + MAIN_EXIT) and isinstance(v, dict) and v.get("n")]
+            if diffs:
+                L.append("  取引の窓ごとの差(−tp10c): " + "; ".join(diffs))
+    L.append(f"判定: {final['verdict']}")
+    L.append("幅の安定(見るだけ): " + " > ".join(f"−{k}%({g}/{n} 最悪{_f(w)})" for k, g, n, w in final["stability"]))
+    return "\n".join(L) + "\n"
+
+
 #: 注釈（notice）1つの大きさの上限（UTF-8 のバイト。エスケープ後）と、1ステップに出せる数
-NOTICE_BYTES = 20000
+NOTICE_BYTES = 3800                     # GitHub は注釈1つを約4KB（4,096バイト）で切る
 NOTICE_MAX = 10
 
 
@@ -964,17 +1038,22 @@ def main(argv=None) -> int:
     cap = io.StringIO()
     orig = sys.stdout
     sys.stdout = Tee(orig, cap)
+    done = {}
     try:
-        return run(args)
+        return run(args, done)
     except BaseException:
         cap.write("\n[error] " + traceback.format_exc())
         raise
     finally:
         sys.stdout = orig
-        emit_notices(cap.getvalue())
+        if "compact" in done:
+            emit_notices(done["compact"])
+        else:                                   # 途中で止まった: ログの最後（約3.5KB）を1つだけ出す
+            tail = cap.getvalue().encode("utf-8")[-3500:].decode("utf-8", errors="ignore")
+            emit_notices(tail, title="e89 途中で止まった")
 
 
-def run(args) -> int:
+def run(args, done: dict | None = None) -> int:
     shifts = [int(x) for x in args.shifts.split(",") if x.strip() != ""]
     t0 = time.time()
     fr = lab.frame()
@@ -1024,6 +1103,8 @@ def run(args) -> int:
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(summary, fh, ensure_ascii=False, indent=1, default=conv)
     log(f"記録: {path} / 全体 {time.time() - t0:.0f}秒")
+    if done is not None:
+        done["compact"] = compact_report(runs, infos, summary["final"], cutoff.date())
     return 0
 
 

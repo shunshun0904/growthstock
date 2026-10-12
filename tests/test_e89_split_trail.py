@@ -336,7 +336,7 @@ class TestNotices(unittest.TestCase):
         return s.replace("%0A", "\n").replace("%0D", "\r").replace("%25", "%")
 
     def test_roundtrip_under_limit(self):
-        text = "".join(f"  分割 +10% / 高値−{i % 15}%  1取引 +{i % 7}.12%（中央 +1.00）  勝率 70.0%\n" for i in range(1200))
+        text = "".join(f"  分割 +10% / 高値−{i % 15}%  1取引 +{i % 7}.12%（中央 +1.00）  勝率 70.0%\n" for i in range(300))
         chunks = E.notice_chunks(text)
         self.assertLessEqual(len(chunks), E.NOTICE_MAX)
         self.assertTrue(all(len(E.esc_data(c).encode("utf-8")) <= E.NOTICE_BYTES for c in chunks))
@@ -552,6 +552,16 @@ class TestReport(unittest.TestCase):
         self.assertGreater(s0["sim"]["A15"]["tp10c"]["n"], 0)
         for code in self.df["Code"].unique()[:80]:
             self.assertNotIn(code, out)
+        # 注釈に出す短い要約: 10個 × 3.8KB に収まり、銘柄コードを含まない
+        infos = {t: {"exit_check": {"compare_rows": {"late": 1, "missing": 2, "missing_a15": 0}}} for t in ("0", "2")}
+        text = E.compact_report({"0": s0, "2": s2}, infos, fin, "2024-05-02")
+        chunks = E.notice_chunks(text)
+        self.assertEqual("".join(chunks), text)
+        self.assertLessEqual(len(chunks), E.NOTICE_MAX)
+        for tag in ("━0", "━2", "判定 split−tp10c", "3枠 A15", "参考差 A15", "判定:", "幅の安定"):
+            self.assertIn(tag, text)
+        for code in self.df["Code"].unique()[:80]:
+            self.assertNotIn(code, text)
 
 
 if __name__ == "__main__":
