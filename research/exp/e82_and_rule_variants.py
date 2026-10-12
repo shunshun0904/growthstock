@@ -253,15 +253,16 @@ def vs_consensus(ft: pd.DataFrame, flag: str, within: str, col: str = "ret20", m
 # 運用の通りの売買・月に2銘柄
 # --------------------------------------------------------------------------- #
 
-def daily_picks(ft: pd.DataFrame, flag: str, min_break: int = LT.SKIP_BREAKS, top_k: int = LT.TOP_K) -> pd.DataFrame:
+def daily_picks(ft: pd.DataFrame, flag: str, min_break: int = LT.SKIP_BREAKS, top_k: int = LT.TOP_K,
+                key: str = "pmin3") -> pd.DataFrame:
     """
     画面の判断（live_track.decide）と同じ並べ方: 発火（その日の候補の数）が min_break 以上の日に、flag を満たす候補を
-    1.2σ の3本の最小の百分位の高い順（同点は lgbm のスコア順）に上位 top_k 件。
+    1.2σ の3本の最小の百分位（key。実験84 は6本の平均でも並べる）の高い順（同点は lgbm のスコア順）に上位 top_k 件。
     """
     r = ft.copy()
     r["n_break"] = r.groupby("Date")["Code"].transform("size")
     ok = r[flag].to_numpy(dtype=bool) & (r["n_break"] >= min_break).to_numpy()
-    p = r[ok].sort_values(["Date", "pmin3", "score"], ascending=[True, False, False], kind="mergesort")
+    p = r[ok].sort_values(["Date", key, "score"], ascending=[True, False, False], kind="mergesort")
     p["rank"] = p.groupby("Date").cumcount() + 1
     return p[p["rank"] <= top_k].reset_index(drop=True)
 

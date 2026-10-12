@@ -182,12 +182,14 @@ def window_means(g: pd.DataFrame, col: str) -> list:
             for w, x in g.groupby("window")]
 
 
-def trade_sim(ft: pd.DataFrame, flag: str, col: str, hit: str | None, hitday: str | None, bar_days, n_days: int) -> dict:
+def trade_sim(ft: pd.DataFrame, flag: str, col: str, hit: str | None, hitday: str | None, bar_days, n_days: int,
+              key: str = "pmin3", keep_trades: bool = False) -> dict:
     """
     運用の通りの売買（発火8件以上の日に上位2件・3枠・先着順）。出口 col。指値に届いた取引は到達日の翌営業日から枠が空き
     （live_track.simulate の「+20%到達」の扱いを、どの水準の指値にも使う）、届かなければ 20営業日の翌営業日から空く。
+    key はその日の並べ方（既定は今の画面と同じ 1.2σ の3本の最小）。keep_trades なら買えた取引の収益（rets）も返す。
     """
-    picks = E82.daily_picks(ft, flag)
+    picks = E82.daily_picks(ft, flag, key=key)
     if not len(picks):
         return {"picks": 0, "n": 0, "by_window": {}}
     p = picks.copy()
@@ -203,6 +205,8 @@ def trade_sim(ft: pd.DataFrame, flag: str, col: str, hit: str | None, hitday: st
     r = pd.to_numeric(taken["ret"], errors="coerce").dropna()
     st["bad10"] = float((r < -10).mean() * 100) if len(r) else float("nan")
     st["by_window"] = {int(w): float(pd.to_numeric(x["ret"], errors="coerce").mean()) for w, x in taken.groupby("window")}
+    if keep_trades:
+        st["rets"] = r.to_numpy(dtype=float)
     return st
 
 
