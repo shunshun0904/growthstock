@@ -121,19 +121,19 @@ check(!strat.includes('NaN') && !strat.includes('undefined'),
 check(!predBody.includes('NaN'), '予測タブに NaN が出ていない');
 check(!predBody.includes('undefined'), '予測タブに undefined が出ていない');
 
-// 際どい候補の印（運用者の線「3モデルとも95以上」の下）。合成データの1件目は運用者の例の形
-// （lgbm 85・xgb 96・cat 98 → LightGBM が最下位で赤）、5件目は lgbm 96・xgb 100・cat 78.1（CatBoost が最下位で黄）
+// 際どい候補の印（今の規則の線「1.5σ の3本とも95以上」の下）。合成データの1件目は 1.5σ の3本で
+// lgbm_k15 83.6・xgb_k15 97.1・cat_k15 97.4（2本95以上で LightGBM が最下位。今の数字では赤の組が無いので黄）。
+// 5件目は 1.2σ の3本なら際どい形（96・100・78.1）だが、1.5σ の3本（92.9・100・76.8）では際どくない → 印なし
 const borders = page.locator('.pred-list .pred-border');
-check((await borders.count()) === 2, `際どい候補の印が2件に出る (実際: ${await borders.count()})`);
+check((await borders.count()) === 1, `際どい候補の印が1件に出る (実際: ${await borders.count()})`);
 const firstBorder = page.locator('.pred-row').first().locator('.pred-border');
-check(((await firstBorder.textContent()) || '').includes('LightGBM が最下位'),
-      '1件目は「LightGBM が最下位」と出る');
-check(((await firstBorder.getAttribute('class')) || '').includes('red'), '1件目の印は赤');
-check(((await firstBorder.getAttribute('title')) || '').includes('過去ほぼ 0%'),
-      '印の title に「過去ほぼ 0%」が出る');
-const lastBorder = page.locator('.pred-row').last().locator('.pred-border');
-check(((await lastBorder.textContent()) || '').includes('最下位 CatBoost'), '5件目は「最下位 CatBoost」');
-check(((await lastBorder.getAttribute('class')) || '').includes('amber'), '5件目の印は黄');
+check(((await firstBorder.textContent()) || '').includes('1.5σで際どい・最下位 LightGBM'),
+      '1件目は「1.5σで際どい・最下位 LightGBM」と出る');
+check(((await firstBorder.getAttribute('class')) || '').includes('amber'), '1件目の印は黄（赤の組は無い）');
+check(((await firstBorder.getAttribute('title')) || '').includes('LightGBM が一番低いときは、過去 +1.6%（141件）'),
+      '印の title にその形の過去の数字が出る');
+check((await page.locator('.pred-row').last().locator('.pred-border').count()) === 0,
+      '5件目（1.2σ の3本なら際どい形）には印が出ない');
 
 // 1件目を開いて、モデル別の見立てを確かめる
 await page.locator('.pred-row').first().locator('.pred-main').click();
@@ -149,8 +149,8 @@ check(detail.includes('上位10%と見たモデル') && detail.includes('2/4') &
 check(detail.includes('実験82'), '詳細に「1.5σ・1.8σ も95以上」を足しても安定しない（実験82）と出る');
 check(!detail.includes('12本の合意'), '詳細にも12本の合意（平均）は出さない');
 const borderNote = await page.textContent('.pred-detail .pred-border-note');
-check((borderNote || '').includes('際どい候補') && (borderNote || '').includes('過去ほぼ 0%'),
-      '詳細の先頭に際どい候補の注意が出る');
+check((borderNote || '').includes('1.5σ の3本で見た際どい候補') && (borderNote || '').includes('+1.6%（141件）'),
+      '詳細の先頭に際どい候補の注意（1.5σ の3本）が出る');
 await page.screenshot({ path: path.join(SHOTS, 'screenshot-prediction.png') });
 await page.locator('.pred-row').first().locator('.pred-main').click();
 

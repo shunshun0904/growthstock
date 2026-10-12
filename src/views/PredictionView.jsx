@@ -325,8 +325,8 @@ function PickCard({ c, n, models, onSend, sent }) {
 }
 
 /**
- * 際どい候補の印（1.2σ の3本で見た線「3本とも95以上」の下。2026-10-12 までの運用者の目安。strategy.js の borderNote）。
- * 一番低いのが LightGBM なら赤（過去ほぼ 0%。実験36・70）、それ以外は黄。
+ * 際どい候補の印（1.5σ の3本で見た今の規則の線「3本とも95以上」の下。strategy.js の borderNote）。
+ * その形でそのモデルが一番低い組の過去の平均が 0% 以下（20件以上）なら赤、それ以外は黄（先に決めた線。BORDER_WARN）。
  * 詳しい文言は title と、行を開いたときの本文に出す。選定の規則は変えない。
  */
 function BorderBadge({ c }) {
@@ -484,7 +484,7 @@ function Detail({ c, models, onSend, sent }) {
         <div className={`banner ${bn.warn ? 'warn' : 'info'} pred-border-note`}>
           <span>{bn.warn ? '⚠' : 'ℹ'}</span>
           <div>
-            <b>1.2σ の3本で見た際どい候補（3本とも{BORDER.line}以上の線の下。2026-10-12 までの目安）。</b>{bn.text}
+            <b>{RULE_JA}で見た際どい候補（3本とも{BORDER.line}以上の線の下）。</b>{bn.text}
           </div>
         </div>
       )}

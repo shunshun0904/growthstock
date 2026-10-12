@@ -9,6 +9,8 @@
  *      8〜19件 +1.0〜2.2%、7件以下は142件で −0.11%・−10%割れ 14.1%（7件以下と8件以上の差は z≈2.6）。
  *      今の規則（1.5σ の3本 95以上、画面と同じ百分位）では 20件以上 192件 +4.9%、8〜19件 140件 +1.5%、
  *      7件以下は22件と少なく +5.4%（+10% の指値・20営業日目の終値。research/exp/probe_k15_baseline.py）。
+ *      前向きの百分位で測り直すと（実験88）、7件以下の日 36件 +3.71%・8件以上 523件 +3.05% で、見送りの線を支える
+ *      数字は無い（線は運用者が決めるまで変えない）。
  *      **20件未満を全部見送るのは誤り。** 空き枠の収益は 0% なので、
  *      プラスの帯を捨てて枠を遊ばせると損になる（実験35）
  *   2. 1.5σ のラベルで学んだ木の3モデル（RULE_MODELS: LightGBM / XGBoost / CatBoost の 1.5σ 版）**すべて**が
@@ -31,7 +33,7 @@
  * views/PredictionView.jsx。
  */
 
-/** 本番（1.2σ のラベル）のブースティング3モデル。2026-10-12 までの規則と、際どい候補の印（実験70）に使う。 */
+/** 本番（1.2σ のラベル）のブースティング3モデル。2026-10-12 までの規則（実運用の追跡の参考・実験の再現）に使う。 */
 export const BOOST = ['lgbm', 'xgb', 'cat'];
 
 /**
@@ -119,7 +121,7 @@ export function pctsOf(candidate, models = RULE_MODELS) {
   return out;
 }
 
-/** 本番（1.2σ）の3モデルの百分位。際どい候補の印（実験70）に使う。 */
+/** 本番（1.2σ）の3モデルの百分位。 */
 export function boostPcts(candidate) {
   return pctsOf(candidate, BOOST);
 }
@@ -151,41 +153,47 @@ export function laggard(candidate, models = RULE_MODELS) {
 }
 
 /**
- * 1.2σ の3本で見た「際どい」範囲（運用者の決定 2026-10-10。2026-10-12 まで運用者の目安だった線）。
- *
- * 2026-10-12 までの運用者の目安は「本番の3モデル（lgbm・xgb・cat、1.2σ）がすべて 95以上」。今の規則は 1.5σ の3本
- * （RULE_MODELS）がすべて95以上だが、この印は 1.2σ の3本で見た際どさ（実験70 の数字）として残す。その線の下で「際どい」のは次の全部:
- *   - 2モデルが 95以上で、残り1つが 95未満
- *   - 3モデルの最小が 85〜95
- * 例: xgb 96・cat 98・lgbm 85。
+ * 1.5σ の3本（RULE_MODELS）で見た「際どい」範囲（運用者の依頼 2026-10-12「1.5σで際どいにしてほしいです」。
+ * それまでは 1.2σ の3本と実験70 の数字）。今の規則の線「3本とも95以上」の下で、次のどちらか:
+ *   - 2本が 95以上で、残り1本が 95未満
+ *   - 95以上は1本以下で、3本の最小が 85〜95
+ * 例: xgb_k15 96・cat_k15 98・lgbm_k15 85。
  */
 export const BORDER = { line: 95, lo: 85 };
 
 /**
- * 際どい候補の過去の成績（実験70。本番の239列の OOF 2021-11〜2026-09、docs/PLAYBOOK.md「実験70」）。
- * 物差しは +10% の指値（20営業日以内に届けば +10%、届かなければ持ち切り）の平均。
- * 形は「2つ95以上（two95）」と「95以上は1つ以下・最小 85〜95（min）」、それぞれ一番低いモデルが
- * lgbm か、xgb / cat か。
- *   two95: lgbm が一番低い 145件は約 0.0%、xgb / cat が一番低い 420件は +1.83%（差 +1.8pt ± 0.9、z≈2.0）
- *   min:   lgbm 269件 +1.19%、xgb / cat 554件 +1.06%（差 +0.13pt ± 0.60）→ この形では差が無い
- * 「lgbm が一番低いと弱い」は 2つ95以上の形でだけ出た（実験36 は 153列のころの 85〜90 の帯で同じ向き、
- * いまのモデルの 85〜90 の帯では出ない）。だから注意（warn）は two95 の形でだけ出す。
+ * 際どい候補の過去の成績（research/exp/probe_k15_border.py、run 38217095967。前向きの百分位・テスト窓 3〜11
+ * （2022-05〜2026-09）・発火の数を問わない。docs/MODEL_ADOPTION_RULES.md §48）。物差しは +10% の指値
+ * （届かなければ20営業日目の終値）の平均（%）。形は「2本95以上（two95）」と「95以上は1本以下・最小 85〜95（min）」で、
+ * それぞれ一番低いモデルで分けた:
+ *   3本とも95以上（線の上）       559件 +3.09%
+ *   2本95以上                     489件 +2.39%（一番低いのが LightGBM 141件 +1.64% / XGBoost 228件 +2.65% / CatBoost 120件 +2.79%）
+ *   95以上は1本以下・最小 85〜95  856件 +1.15%（LightGBM 268件 +0.47% / XGBoost 362件 +1.14% / CatBoost 226件 +1.95%）
+ * どちらの形も LightGBM が一番低い組がいちばん低いが、ほかの2本との差は SE の範囲（−1.06 ± 0.88pt / −0.98 ± 0.63pt）。
+ * 先に決めた赤の線（BORDER_WARN: 20件以上で平均 0% 以下）に当たる組は無いので、今の数字では赤は出ない（全部黄）。
+ * 以前の 1.2σ の3本の印（実験70「2つ95以上で LightGBM が一番低い 145件は約 0.0%」→ 赤）は、同じ前向きの物差しで測ると
+ * 225件 +1.47% で、0% 付近ではなかった（実験70 は届かなければ持ち切り・窓2以降の百分位で、物差しが違う）。
  */
 export const BORDER_STATS = {
-  line: { n: 616, ret: 2.66 },                     // 3つとも95以上（線の上）
-  two95: { lgbm: { n: 145, ret: -0.01 }, other: { n: 420, ret: 1.83 } },
-  min: { all: { n: 823, ret: 1.10 }, lgbm: { n: 269, ret: 1.19 }, other: { n: 554, ret: 1.06 } },
+  line: { n: 559, ret: 3.09 },                     // 3本とも95以上（線の上）
+  two95: { all: { n: 489, ret: 2.39 }, lgbm_k15: { n: 141, ret: 1.64 }, xgb_k15: { n: 228, ret: 2.65 },
+           cat_k15: { n: 120, ret: 2.79 } },
+  min: { all: { n: 856, ret: 1.15 }, lgbm_k15: { n: 268, ret: 0.47 }, xgb_k15: { n: 362, ret: 1.14 },
+         cat_k15: { n: 226, ret: 1.95 } },
 };
 
+/** 赤の注意を出す線（先に決めたもの）: 件数が minN 件以上で、平均が ret（%）以下。件数が少ない組は赤にしない。 */
+export const BORDER_WARN = { minN: 20, ret: 0 };
+
 /**
- * 際どい候補の形。際どくなければ null。3モデルの百分位が1つでも欠けていれば null。
- *   two95_hi / two95_mid / two95_lo  2つが95以上、残り1つが 90〜95 / 85〜90 / 85未満
- *   min90 / min85                    95以上は1つ以下で、最小が 90〜95 / 85〜90
+ * 際どい候補の形。際どくなければ null。3本の百分位が1つでも欠けていれば null。
+ *   two95_hi / two95_mid / two95_lo  2本が95以上、残り1本が 90〜95 / 85〜90 / 85未満
+ *   min90 / min85                    95以上は1本以下で、最小が 90〜95 / 85〜90
  */
-export function borderShape(candidate, b = BORDER) {
-  const p = boostPcts(candidate);
+export function borderShape(candidate, b = BORDER, models = RULE_MODELS) {
+  const p = pctsOf(candidate, models);
   if (!p) return null;
-  const vals = BOOST.map((a) => p[a]);
+  const vals = models.map((a) => p[a]);
   if (vals.some((v) => v === null)) return null;
   const n95 = vals.filter((v) => v >= b.line).length;
   const mn = Math.min(...vals);
@@ -202,45 +210,49 @@ const fmtRet = (v) => {
   return r === 0 ? '0.0%' : `${r > 0 ? '+' : '−'}${Math.abs(r).toFixed(1)}%`;
 };
 
-/** 「+1.8%（420件）」。数字が無ければ「（測っていない）」。 */
-const past = (x) => (Number.isFinite(x?.ret) && x?.n ? `${fmtRet(x.ret)}（${x.n}件）` : '（測っていない）');
+/** 「+1.8%（420件）」。過去に0件なら「0件」、数字が無ければ「（測っていない）」。 */
+const past = (x) => {
+  if (x?.n === 0) return '0件';
+  return Number.isFinite(x?.ret) && x?.n ? `${fmtRet(x.ret)}（${x.n}件）` : '（測っていない）';
+};
+
+/** 短い呼び名（「LightGBM（1.5σ）」→「LightGBM」。印の頭と注意の見出しに 1.5σ と書くので）。 */
+const shortJa = (a) => MODEL_JA[String(a).replace(/_k1[58]$/, '')] || a;
+
+/** 先に決めた線（BORDER_WARN）に当たるか: 件数 minN 以上で平均が ret 以下。 */
+export function borderWarn(x, w = BORDER_WARN) {
+  return Number.isFinite(x?.ret) && Number.isFinite(x?.n) && x.n >= w.minN && x.ret <= w.ret;
+}
 
 /**
- * 際どい候補への注意。一番低いモデルと、その形の過去の成績を添える。際どくなければ null。
- *   warn   2つが95以上で、一番低いのが LightGBM（過去ほぼ 0%）。ほかの形では出さない（差が無い）
+ * 際どい候補への注意。一番低いモデルと、その形・そのモデルが一番低いときの過去の成績を添える。際どくなければ null。
+ *   warn   その組が先に決めた線（BORDER_WARN）に当たる（過去の平均が 0% 以下 = 空き枠と同じか悪い）
+ *   few    その組の件数が BORDER_WARN.minN 未満（目安にしにくい）
  *   badge  行に出す短い文言
  *   text   詳しい文言（行の title と、開いたときの本文）
  * 選定の規則（strategySignal）は変えない。注意だけ出す。
  */
-export function borderNote(candidate, b = BORDER, st = BORDER_STATS) {
+export function borderNote(candidate, b = BORDER, st = BORDER_STATS, w = BORDER_WARN) {
   const shape = borderShape(candidate, b);
   if (!shape) return null;
-  const lag = laggard(candidate, BOOST);
-  const p = boostPcts(candidate);
-  const name = MODEL_JA[lag] || lag;
-  const head = `${name} が一番低い（${p[lag].toFixed(1)}）。`;
-  const lineTxt = `3つとも${b.line}以上は ${past(st.line)}`;
-  const src = '（実験70。+10% の指値で売り、届かなければ20営業日で手仕舞いしたときの平均）';
-  let warn = false;
-  let text;
-  if (shape.startsWith('two95')) {
-    warn = lag === 'lgbm';
-    text = warn
-      ? `${head}2つが${b.line}以上でも、LightGBM が一番低い形は過去ほぼ 0%`
-        + `（${fmtRet(st.two95.lgbm.ret)}・${st.two95.lgbm.n}件）。`
-        + `XGBoost / CatBoost が一番低いなら ${past(st.two95.other)}、${lineTxt}。`
-        + `logit が90以上かは手がかりにならない${src}`
-      : `${head}2つが${b.line}以上で XGBoost / CatBoost が一番低い形は過去 ${past(st.two95.other)}。`
-        + `LightGBM が一番低い形は ${past(st.two95.lgbm)}、${lineTxt}${src}`;
-  } else {
-    text = `${head}${b.line}以上が1つ以下で最小 ${b.lo}〜${b.line} の形は過去 ${past(st.min.all)}。`
-      + 'この形では、どのモデルが一番低いかで差は無い'
-      + `（LightGBM ${fmtRet(st.min.lgbm.ret)}・${st.min.lgbm.n}件 / `
-      + `XGBoost・CatBoost ${fmtRet(st.min.other.ret)}・${st.min.other.n}件）。${lineTxt}${src}`;
-  }
+  const lag = laggard(candidate);
+  const p = pctsOf(candidate);
+  const name = shortJa(lag);
+  const fam = shape.startsWith('two95') ? 'two95' : 'min';
+  const g = st?.[fam]?.[lag];
+  const warn = borderWarn(g, w);
+  const few = !(Number.isFinite(g?.n) && g.n >= w.minN);
+  const form = fam === 'two95' ? `2本が${b.line}以上` : `${b.line}以上が1本以下・最小 ${b.lo}〜${b.line} `;
+  const others = RULE_MODELS.filter((a) => a !== lag).map((a) => `${shortJa(a)} ${past(st?.[fam]?.[a])}`).join('・');
+  const text = `${name} が一番低い（${p[lag].toFixed(1)}）。`
+    + `${form}の形で ${name} が一番低いときは、過去 ${past(g)}`
+    + (warn ? '。空き枠（0%）と同じか悪い' : '')
+    + (few ? '。件数が少なく目安にしにくい' : '')
+    + `。ほかが一番低いときは ${others}、3本とも${b.line}以上は ${past(st?.line)}`
+    + '（1.5σ の3本・前向きの百分位。+10% の指値で売り、届かなければ20営業日目の終値で売ったときの平均）';
   return {
-    shape, laggard: lag, laggardPct: p[lag], warn,
-    badge: warn ? `1.2σで際どい・${name} が最下位` : `1.2σで際どい・最下位 ${name}`,
+    shape, laggard: lag, laggardPct: p[lag], warn, few,
+    badge: warn ? `1.5σで際どい・${name} が最下位` : `1.5σで際どい・最下位 ${name}`,
     text,
   };
 }
@@ -261,8 +273,8 @@ export function borderNote(candidate, b = BORDER, st = BORDER_STATS) {
  * とくに最下位が LightGBM のときが弱い（104件 +0.39%）。
  * ※ 上は 153列のころの実験36。いまの239列のモデル（実験70、2026-10-10）では、85〜90 の帯で最下位が
  *   LightGBM の形は弱くない（LightGBM が最下位 202件 +1.3%、XGBoost / CatBoost が最下位 445件 +0.7%。
- *   形ごとの表の値から合成）。弱いのは「2つが95以上で LightGBM が最下位」の形（borderNote）。
- *   幅で分けた数字（+0.30% / +2.70%）は、いまのモデルでは測り直していない。
+ *   形ごとの表の値から合成）。1.5σ の3本（probe_k15_border、前向き）では、最小 85〜95 の形で一番低いのが
+ *   LightGBM の組が +0.47%（268件）といちばん低いが、ほかとの差は SE の範囲（borderNote の BORDER_STATS）。
  */
 export function nearMisses(rows, s = STRATEGY) {
   const list = Array.isArray(rows) ? rows : [];
