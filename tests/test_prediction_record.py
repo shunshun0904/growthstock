@@ -11,6 +11,9 @@
   - その日の記録が1件でもあれば、後から足さない（最初の予測で凍結）
   - 追跡列（現在値・騰落率・経過日）の更新は続ける
   - 経過日は取引所の営業日で数える（祝日を数えない）
+  - 予測タブの過去の日は、その日に出した値のまま（predict_daily.freeze_past_days。運用者の指示 2026-10-12）。
+    一度だけの移行（research/restore_first_predictions.py）は、日次予測の実行が出した版のうち、その日が最新だった
+    最後の版に戻す
 
   python3 tests/test_prediction_record.py
 """
@@ -30,6 +33,7 @@ import pandas as pd  # noqa: E402
 
 import export_sheets as ES  # noqa: E402
 import predict_daily as PD  # noqa: E402
+import restore_first_predictions as RF  # noqa: E402
 import trading_calendar as TC  # noqa: E402
 
 D = dt.date.fromisoformat
@@ -125,6 +129,133 @@ class ElapsedDays(unittest.TestCase):
         tv = ES.track_values("11110", 1000.0, "2026-09-18", pd.Series({"11110": 1100.0}),
                              pd.Timestamp("2026-09-24"))
         self.assertEqual(tv["経過営業日"], 4)       # カレンダー無しは従来どおり平日
+
+
+def row(date, code, score, rank=1):
+    return {"date": date, "jqCode": f"{code}0", "code": code, "score": score, "rankInDay": rank}
+
+
+class PastDaysAreFrozen(unittest.TestCase):
+    """過去の日は前の predictions.json の行のまま。新しい日だけ今回の採点。"""
+
+    DAYS = ["2026-10-07", "2026-10-08", "2026-10-09"]
+    RUN = {"trainedAt": "2026-10-11T00:00:00", "generatedAt": "2026-10-13T09:50:00+00:00"}
+
+    def prev(self, day_info=True):
+        p = {"asOf": "2026-10-08", "dates": ["2026-10-06", "2026-10-07", "2026-10-08"],
+             "generatedAt": "2026-10-08T09:50:00+00:00", "model": {"trainedAt": "2026-10-04T06:00:00"},
+             "candidates": [row("2026-10-06", "1000", 0.9), row("2026-10-07", "1111", 0.5),
+                            row("2026-10-08", "2222", 0.6), row("2026-10-08", "3333", 0.4, 2)]}
+        if day_info:
+            p["dayInfo"] = {"2026-10-07": {"trainedAt": "2026-09-27T00:00:00", "generatedAt": "2026-10-07T07:21:00"}}
+        return p
+
+    def rescored(self):
+        # 新しいモデルで採点し直すと、過去の日のスコア・順位・候補の数が変わる
+        return [row("2026-10-07", "1111", 0.8), row("2026-10-08", "3333", 0.9), row("2026-10-08", "2222", 0.1, 2),
+                row("2026-10-08", "4444", 0.05, 3), row("2026-10-09", "5555", 0.7)]
+
+    def test_past_days_keep_previous_rows(self):
+        rows, info, st = PD.freeze_past_days(self.rescored(), self.DAYS, self.prev(), self.RUN)
+        got = sorted((x["date"], x["code"], x["score"]) for x in rows)
+        self.assertEqual(got, [("2026-10-07", "1111", 0.5), ("2026-10-08", "2222", 0.6), ("2026-10-08", "3333", 0.4),
+                               ("2026-10-09", "5555", 0.7)])
+        self.assertEqual(st["frozen"], ["2026-10-07", "2026-10-08"])
+        self.assertEqual(st["scored"], ["2026-10-09"])
+        self.assertEqual((st["rows_frozen"], st["rows_dropped"]), (3, 4))
+        self.assertFalse(st["latest_overwritten"])
+        # dayInfo: 前のファイルの dayInfo を引き継ぎ、無い日は前のファイルの model.trainedAt / generatedAt
+        self.assertEqual(info["2026-10-07"]["trainedAt"], "2026-09-27T00:00:00")
+        self.assertEqual(info["2026-10-08"], {"trainedAt": "2026-10-04T06:00:00",
+                                               "generatedAt": "2026-10-08T09:50:00+00:00"})
+        self.assertEqual(info["2026-10-09"], self.RUN)
+        self.assertNotIn("2026-10-06", info)                    # 窓から外れた日は出さない
+
+    def test_without_previous_file_everything_is_scored(self):
+        rows, info, st = PD.freeze_past_days(self.rescored(), self.DAYS, None, self.RUN)
+        self.assertEqual(len(rows), 5)
+        self.assertEqual(st["frozen"], [])
+        self.assertTrue(all(v == self.RUN for v in info.values()))
+
+    def test_new_past_day_is_scored_and_empty_day_stays_empty(self):
+        prev = self.prev()
+        prev["dates"] = ["2026-10-08"]                          # 10/7 は前のファイルに無い → 初めて出す日
+        prev["candidates"] = []                                 # 10/8 は候補0件の日として出していた
+        rows, info, st = PD.freeze_past_days(self.rescored(), self.DAYS, prev, self.RUN)
+        got = sorted((x["date"], x["score"]) for x in rows)
+        self.assertEqual(got, [("2026-10-07", 0.8), ("2026-10-09", 0.7)])
+        self.assertEqual(st["frozen"], ["2026-10-08"])
+        self.assertEqual(info["2026-10-07"], self.RUN)
+
+    def test_latest_day_is_overwritten_only_by_an_explicit_rerun(self):
+        prev = self.prev()
+        prev["dates"].append("2026-10-09")                     # 同じ日を予測し直した（FORCE_PREDICT）
+        prev["candidates"].append(row("2026-10-09", "9999", 0.99))
+        rows, info, st = PD.freeze_past_days(self.rescored(), self.DAYS, prev, self.RUN)
+        latest = [(x["code"], x["score"]) for x in rows if x["date"] == "2026-10-09"]
+        self.assertEqual(latest, [("5555", 0.7)])
+        self.assertTrue(st["latest_overwritten"])
+
+    def test_chained_runs_keep_the_first_values(self):
+        """次の日の実行でも、前の実行で固定した値（dayInfo ごと）がそのまま残る。"""
+        rows1, info1, _ = PD.freeze_past_days(self.rescored(), self.DAYS, self.prev(), self.RUN)
+        prev2 = {"asOf": "2026-10-09", "dates": self.DAYS, "generatedAt": self.RUN["generatedAt"],
+                 "model": {"trainedAt": self.RUN["trainedAt"]}, "dayInfo": info1, "candidates": rows1}
+        days2 = ["2026-10-08", "2026-10-09", "2026-10-13"]
+        run2 = {"trainedAt": "2026-10-18T00:00:00", "generatedAt": "2026-10-13T09:50:00+00:00"}
+        again = [row("2026-10-08", "2222", 0.01), row("2026-10-09", "5555", 0.02), row("2026-10-13", "6666", 0.3)]
+        rows2, info2, _ = PD.freeze_past_days(again, days2, prev2, run2)
+        got = sorted((x["date"], x["code"], x["score"]) for x in rows2)
+        self.assertEqual(got, [("2026-10-08", "2222", 0.6), ("2026-10-08", "3333", 0.4), ("2026-10-09", "5555", 0.7),
+                               ("2026-10-13", "6666", 0.3)])
+        self.assertEqual(info2["2026-10-08"]["trainedAt"], "2026-10-04T06:00:00")
+        self.assertEqual(info2["2026-10-09"], self.RUN)
+        self.assertEqual(info2["2026-10-13"], run2)
+
+    def test_load_previous_tolerates_missing_or_broken_file(self):
+        d = tempfile.mkdtemp()
+        try:
+            path = os.path.join(d, "predictions.json")
+            self.assertIsNone(PD.load_previous(path))
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write("{broken")
+            self.assertIsNone(PD.load_previous(path))
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({"dates": ["2026-10-08"]}, fh)
+            self.assertEqual(PD.load_previous(path)["dates"], ["2026-10-08"])
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+
+class RestoreFirstPredictions(unittest.TestCase):
+    """一度だけの移行: 各日を、その日が最新だった最後の版（日次予測の実行が出した版）の行に戻す。"""
+
+    def test_restore_uses_the_last_version_of_each_day(self):
+        v1 = {"asOf": "2026-10-07", "generatedAt": "g1", "model": {"trainedAt": "t1"},
+              "candidates": [row("2026-10-07", "1111", 0.5)]}
+        v2 = {"asOf": "2026-10-08", "generatedAt": "g2", "model": {"trainedAt": "t1"},
+              "candidates": [row("2026-10-07", "1111", 0.55), row("2026-10-08", "2222", 0.6),
+                             row("2026-10-08", "3333", 0.4, 2)]}
+        v3 = {"asOf": "2026-10-08", "generatedAt": "g3", "model": {"trainedAt": "t1"},    # 同じ日に予測し直した版
+              "candidates": [row("2026-10-08", "2222", 0.61), row("2026-10-08", "3333", 0.41, 2)]}
+        cur = {"asOf": "2026-10-09", "dates": ["2026-10-06", "2026-10-07", "2026-10-08", "2026-10-09"],
+               "generatedAt": "g4", "model": {"trainedAt": "t2"},
+               "candidates": [row("2026-10-06", "0000", 0.3), row("2026-10-07", "1111", 0.9),
+                              row("2026-10-08", "3333", 0.8), row("2026-10-09", "5555", 0.7)]}
+        new, rep = RF.restore(cur, [("a", v1), ("b", v2), ("c", v3), ("d", cur)])
+        got = sorted((x["date"], x["code"], x["score"]) for x in new["candidates"])
+        self.assertEqual(got, [("2026-10-06", "0000", 0.3), ("2026-10-07", "1111", 0.5), ("2026-10-08", "2222", 0.61),
+                               ("2026-10-08", "3333", 0.41), ("2026-10-09", "5555", 0.7)])
+        self.assertEqual(new["dayInfo"]["2026-10-07"], {"trainedAt": "t1", "generatedAt": "g1"})
+        self.assertEqual(new["dayInfo"]["2026-10-08"]["generatedAt"], "g3")
+        self.assertEqual(new["dayInfo"]["2026-10-09"], {"trainedAt": "t2", "generatedAt": "g4"})
+        self.assertEqual(new["dayInfo"]["2026-10-06"]["generatedAt"], "g4")      # 最新だった版が無い日は今のまま
+        by = {r["date"]: r for r in rep}
+        self.assertEqual((by["2026-10-07"]["source"], by["2026-10-07"]["changed"]), ("a", 1))
+        self.assertEqual((by["2026-10-08"]["before"], by["2026-10-08"]["after"], by["2026-10-08"]["changed"]), (1, 2, 2))
+        self.assertEqual(by["2026-10-09"]["changed"], 0)
+        self.assertEqual(new["dates"], cur["dates"])
+        self.assertNotIn("dayInfo", cur)                                      # 元の中身は書き換えない
 
 
 if __name__ == "__main__":

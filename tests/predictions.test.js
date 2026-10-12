@@ -6,12 +6,14 @@
  *   記号は payload の short（無ければ L15 / X15 / C15 / LR15 / L18 / X18 / C18 / LR18）
  * - 表の形（modelGrid）: 行 = ラベル（1.2σ / 1.5σ / 1.8σ）、列 = 学習器。無いモデルのマスは null。古い予測ファイルは1行
  * - マスの字の色（pctInk）: 明るい区分（60 以上）は暗い字、暗い区分は明るい字
+ * - 選んだ日の値の素性（dayOrigin）: 過去の日は dayInfo のモデルの学習日と出した時刻。dayInfo が無ければ今のモデル
  *
  *   node --test tests/predictions.test.js
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { modelRows, modelGrid, pctInk, MODEL_SHORT, MODEL_FAMILY, FAMILY_JA, LABEL_JA } from '../src/lib/predictions.js';
+import { modelRows, modelGrid, pctInk, MODEL_SHORT, MODEL_FAMILY, FAMILY_JA, LABEL_JA, dayOrigin }
+  from '../src/lib/predictions.js';
 
 const models = [
   { algo: 'lgbm', name: 'LightGBM', short: 'LGB' },
@@ -99,3 +101,26 @@ test('pctInk: 明るい地（60 以上）は暗い字、暗い地は明るい字
   assert.equal(pctInk(NaN), 'var(--text-faint)');
 });
 
+
+test('dayOrigin: 過去の日は、その日に出した値のモデル（dayInfo）。最新の日と dayInfo が無いファイルは今のモデル', () => {
+  const data = {
+    asOf: '2026-10-13',
+    model: { trainedAt: '2026-10-11T01:00:00+00:00' },
+    dayInfo: {
+      '2026-10-09': { trainedAt: '2026-10-04T06:23:15+00:00', generatedAt: '2026-10-09T11:53:25+00:00' },
+      '2026-10-13': { trainedAt: '2026-10-11T01:00:00+00:00', generatedAt: '2026-10-13T09:50:00+00:00' },
+    },
+  };
+  const past = dayOrigin(data, '2026-10-09');
+  assert.equal(past.past, true);
+  assert.equal(past.trainedAt, '2026-10-04T06:23:15+00:00');
+  assert.equal(past.generatedAt, '2026-10-09T11:53:25+00:00');
+  assert.equal(past.sameModel, false);
+  const now = dayOrigin(data, '2026-10-13');
+  assert.equal(now.past, false);
+  assert.equal(now.sameModel, true);
+  // dayInfo が無い（固定を始める前の形の）ファイル: 今のモデルの学習日、出した時刻は無し
+  const old = dayOrigin({ asOf: '2026-09-11', model: { trainedAt: 't' } }, '2026-09-10');
+  assert.deepEqual(old, { past: true, trainedAt: 't', generatedAt: null, sameModel: true });
+  assert.equal(dayOrigin(null, '2026-09-10').past, false);
+});

@@ -118,6 +118,19 @@ test('strategySignal: 発火が少ない日（7件以下）も基準を満たせ
   assert.equal(s.held.length, 3);
 });
 
+test('strategySignal: 規則の3本の百分位が欠けた候補が1件でもあれば判定できない（買わない。live_track と同じ）', () => {
+  const s = strategySignal([rule('A', [99, 99, 99]), rule('B', [99, undefined, 99]), ...day(8, [50, 50, 50])]);
+  assert.equal(s.missing, 1);
+  assert.equal(s.buyable, false);
+  assert.equal(s.picks.length, 0);
+  // 1.2σ の値だけの日（1.5σ のモデルを予測に入れる前に出し、その日の値のまま固定した日）も判定できない
+  const old = strategySignal([cand('C', { lgbm: 99, xgb: 99, cat: 99 }), cand('D', { lgbm: 98, xgb: 97, cat: 99 })]);
+  assert.equal(old.missing, 2);
+  assert.equal(old.picks.length, 0);
+  assert.equal(strategySignal(day(10)).missing, 0);
+  assert.equal(strategySignal(day(10)).picks.length, 2);
+});
+
 test('strategySignal: 見送りの線を戻すと（以前の 8）、発火が少ない日は買わない', () => {
   const s = strategySignal(day(5), { ...STRATEGY, skipBreaks: 8 });
   assert.equal(s.verdict.kind, 'skip');

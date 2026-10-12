@@ -296,3 +296,23 @@ export function modelGrid(candidate, models) {
   };
 }
 
+
+/**
+ * 選んだ日の値の素性（research/predict_daily.py が書く dayInfo）。過去の日は、その日に出した値のまま固定している
+ * （運用者の指示 2026-10-12「過去の日は最初に出した値のまま固定してください」）。
+ *   past        今の予測ファイルの最新の日（asOf）より前の日か
+ *   trainedAt   その日の値を出したモデルの学習日。dayInfo が無い（固定を始める前の形の）ファイルは今のモデルの学習日
+ *   generatedAt その日の値を出した時刻（無ければ null）
+ *   sameModel   今のモデルと同じ学習日か（違えば、今のモデルの訓練件数などはその日には当てはまらない）
+ */
+export function dayOrigin(data, day) {
+  const info = data?.dayInfo?.[day] || null;
+  const current = data?.model?.trainedAt || null;
+  const trainedAt = info?.trainedAt || current;
+  return {
+    past: Boolean(data?.asOf) && Boolean(day) && day !== data.asOf,
+    trainedAt,
+    generatedAt: info?.generatedAt || null,
+    sameModel: trainedAt === current,
+  };
+}

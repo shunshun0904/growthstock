@@ -192,7 +192,7 @@ jobs:
             --general-market-start research/_data/dataset_predict_general_market_start.json \
             2>&1 | tail -15
 
-      # 長期の台帳。リポジトリ側は画面用で、predictions.json は毎日上書き、
+      # 長期の台帳。リポジトリ側は画面用で、predictions.json は直近5営業日だけ（過去の日はその日に出した値のまま）、
       # prediction_history.json は上位5件・400日で消えるので、
       # 実績の検証と手売買の記録はスプレッドシートを正本にする。
       #

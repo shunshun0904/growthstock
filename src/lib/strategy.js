@@ -340,12 +340,17 @@ export function strategySignal(rows, s = STRATEGY) {
   const list = Array.isArray(rows) ? rows : [];
   const nBreak = list.length;
   const verdict = dayVerdict(nBreak, s);
+  // 規則の3モデルの百分位が1つでも欠けた候補の数。1件でもあればその日は判定できない（買わない）。
+  // research/live_track.py の decide（「判定できない」）と同じ。過去の日は、その日に出した値のまま固定するので
+  // （research/predict_daily.py の freeze_past_days）、1.5σ のモデルを予測に入れる前の日は欠ける
+  const missing = list.filter((c) => minPct(c) === null).length;
   const passed = list
     .filter((c) => passesAgree(c, s.agreePct))
     .map((c) => ({ ...c, minPct: minPct(c) }))
     // 最小順位の降順。同点なら基準モデルのスコアで決める（表示順を安定させる）
     .sort((a, b) => (b.minPct - a.minPct) || ((b.score ?? 0) - (a.score ?? 0)));
-  const buyable = verdict.kind === 'strong' || verdict.kind === 'ok' || verdict.kind === 'quiet';
+  const buyable = missing === 0
+    && (verdict.kind === 'strong' || verdict.kind === 'ok' || verdict.kind === 'quiet');
   return {
     nBreak,
     verdict,
@@ -354,6 +359,7 @@ export function strategySignal(rows, s = STRATEGY) {
     // 基準は満たしたが、その日を取らない判断で見送るもの
     held: buyable ? passed.slice(s.topK) : passed,
     buyable,
+    missing,
   };
 }
 

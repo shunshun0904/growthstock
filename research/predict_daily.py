@@ -10,6 +10,9 @@
   ・その日の候補一覧（順位・スコア・較正確率・スコア帯の実績）
   ・銘柄ごとの寄与分解（何がスコアを押し上げ／押し下げたか）
   ・モデルの素性（学習日・訓練期間・パラメータ・CV スコア）
+  ・直近5営業日を画面で切り替えられる。**過去の日は、その日に出した値のまま**（freeze_past_days。
+    運用者の指示 2026-10-12「過去の日は最初に出した値のまま固定してください」）。採点するのは新しい日だけで、
+    日ごとにどのモデル（学習日）でいつ出した値かを dayInfo に残す
 
 出力 public/data/prediction_history.json
   ・過去に出した上位銘柄と、その後の実際の値動き。
@@ -517,12 +520,24 @@ def main(argv=None) -> int:
     # 表示順・順位はどちらも基準モデルのスコア（上の rank_in_day と同じ）。
     # 帯・較正・追跡ファイルも基準モデル基準なので、ここだけ別の物差しで
     # 並べると、同じ行の中で順位と帯が食い違う
+    # 過去の日は、前に出した値のまま（freeze_past_days）。採点し直したのは新しい日だけを使う
+    generated_at = pd.Timestamp.utcnow().isoformat()
+    out_path = os.path.join(args.out_dir, "predictions.json")
+    day_list = [pd.Timestamp(d).date().isoformat() for d in days]
+    rows, day_info, fz = freeze_past_days(rows, day_list, load_previous(out_path),
+                                          {"trainedAt": meta["trainedAt"], "generatedAt": generated_at})
+    print(f"[freeze] 過去の日 {len(fz['frozen'])}日（{fz['rows_frozen']}件）は前に出した値のまま"
+          f"（今回の採点 {fz['rows_dropped']}件は使わない）・採点した日 {', '.join(fz['scored'])}"
+          + ("（最新の日を予測し直した）" if fz["latest_overwritten"] else ""))
+
     rows.sort(key=lambda x: (x["date"], x["score"]), reverse=True)
 
     payload = {
-        "generatedAt": pd.Timestamp.utcnow().isoformat(),
-        "asOf": pd.Timestamp(days[-1]).date().isoformat(),
-        "dates": [pd.Timestamp(d).date().isoformat() for d in days],
+        "generatedAt": generated_at,
+        "asOf": day_list[-1],
+        "dates": day_list,
+        # 日ごとに、どのモデル（学習日）でいつ出した値か。過去の日はその日に出した値のまま（freeze_past_days）
+        "dayInfo": day_info,
         "candidates": rows,
         "model": {
             "trainedAt": meta["trainedAt"], "label": meta["label"],
@@ -554,13 +569,14 @@ def main(argv=None) -> int:
             "一致度は「上位10%と見ているモデルの数」。独立した判定の数え上げで、"
             "スコアを混ぜた値ではない。順位と帯は基準モデル（LightGBM）の"
             "スコアで付けてあり、他のモデルは並べて見るためのもの。",
+            "過去の日は、その日に出した値のまま（後の再学習や、後から入ったデータで採点し直さない）。"
+            "どのモデルで出した値かは dayInfo の学習日。",
             "L15 / X15 / C15 / LR15 は到達しきい値 1.5σ、L18 / X18 / C18 / LR18 は 1.8σ のラベルで学習した"
             "ラベル違いのモデル（学習器は記号の元と同じ LightGBM / XGBoost / CatBoost / ロジスティック回帰）。"
             "本番の一致度（agree90）には数えず、agreeK90 / nK で別に数える。検証用で、本番のラベルは 1.2σ のまま。",
         ],
     }
     os.makedirs(args.out_dir, exist_ok=True)
-    out_path = os.path.join(args.out_dir, "predictions.json")
     with open(out_path, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, ensure_ascii=False, separators=(",", ":"))
     print(f"[done] {out_path} ({os.path.getsize(out_path)/1e3:.0f}KB)")
@@ -681,6 +697,60 @@ def save_live_features(cand: pd.DataFrame, cols: List[str], days, data_dir: str,
     out.to_parquet(path, index=False, compression="zstd")
     print(f"[live] {latest.date()} の {len(new)}件 × {len(keep) - 2}列を控えた"
           f"（累計 {out['Date'].nunique()}日 / {len(out):,}件）")
+
+
+def load_previous(path: str) -> Optional[Dict]:
+    """前の predictions.json（無い・読めなければ None。固定せずに全部の日を今回の採点で出す）。"""
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except Exception as exc:                     # noqa: BLE001
+        print(f"[freeze] 前の予測を読めないので、過去の日も今回の採点で出す: {type(exc).__name__}")
+        return None
+
+
+def freeze_past_days(rows: List[Dict], days: List[str], prev: Optional[Dict],
+                     run_info: Dict) -> Tuple[List[Dict], Dict[str, Dict], Dict]:
+    """
+    過去の日は、前の predictions.json に出した値のまま残す（運用者の指示 2026-10-12「過去の日は最初に出した値のまま
+    固定してください」）。それまでは毎回、直近5営業日ぶんを最新のモデル・その日に作り直した特徴量で採点し直して
+    上書きしていたので、週次の再学習や後から入ったデータで、過去の日のスコア・順位・候補の数が当日に見たものと変わった。
+
+    rows: 今回の採点（days のすべての日）。days: ISO の日付（古い順。最後が今回の新しい日）。
+    prev: 前の predictions.json（None なら固定しない）。run_info: 今回の採点の {"trainedAt", "generatedAt"}。
+    規則:
+      - 最新の日は今回の採点（同じ日を予測し直すのは、workflow の FORCE_PREDICT で意図したときだけ）
+      - それより前の日で、前のファイルの dates に入っている日は、前のファイルの行をそのまま使う（0件の日は0件のまま）
+      - 前のファイルに無い過去の日（初めて出す日）は今回の採点
+    戻り値: (行, dayInfo, 件数)。dayInfo[日] = {"trainedAt", "generatedAt"}: その日の値を出したモデルの学習日と採点した時刻。
+      前のファイルの dayInfo を引き継ぎ、無い（固定を始める前の形の）ときは前のファイルの model.trainedAt と generatedAt。
+    """
+    latest = days[-1]
+    prev_dates = set((prev or {}).get("dates") or [])
+    prev_info = (prev or {}).get("dayInfo") or {}
+    prev_model = ((prev or {}).get("model") or {}).get("trainedAt")
+    prev_gen = (prev or {}).get("generatedAt")
+    frozen = [d for d in days[:-1] if d in prev_dates]
+    by_day: Dict[str, List[Dict]] = {}
+    for x in (prev or {}).get("candidates") or []:
+        if x.get("date") in frozen:
+            by_day.setdefault(x["date"], []).append(x)
+    out = [x for x in rows if x["date"] not in frozen]
+    for d in frozen:
+        out.extend(by_day.get(d, []))
+    info = {}
+    for d in days:
+        if d in frozen:
+            info[d] = dict(prev_info.get(d) or {"trainedAt": prev_model, "generatedAt": prev_gen})
+        else:
+            info[d] = {"trainedAt": run_info.get("trainedAt"), "generatedAt": run_info.get("generatedAt")}
+    stats = {"frozen": frozen, "scored": [d for d in days if d not in frozen],
+             "rows_frozen": sum(len(by_day.get(d, [])) for d in frozen),
+             "rows_dropped": sum(1 for x in rows if x["date"] in frozen),
+             "latest_overwritten": latest in prev_dates}
+    return out, info, stats
 
 
 def update_history(args, rows: List[Dict], days) -> None:

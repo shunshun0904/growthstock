@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { fmt, fmtInt, fmtSigned, fmtOku, fmtDate, fmtDateTime, DASH } from '../lib/format.js';
 import { bandColor, bandLabel, pctColor, pctInk, PCT_LEGEND, modelRows, modelGrid, MODEL_SHORT, MODEL_FAMILY,
-  FAMILY_JA, marketTone, candidateToStock } from '../lib/predictions.js';
+  FAMILY_JA, marketTone, candidateToStock, dayOrigin } from '../lib/predictions.js';
 import { STRATEGY, RULE_MODELS, RULE_JA, BORDER, strategySignal, exitPlan, nearMisses,
          MODEL_JA, fundContrib, frozenNote, borderNote,
 } from '../lib/strategy.js';
@@ -38,6 +38,8 @@ export default function PredictionView({ data, history, onSendToOctagon, sentIds
   const signal = useMemo(() => strategySignal(rows), [rows]);
   const near = useMemo(() => nearMisses(rows), [rows]);
   const m = data?.model || {};
+  // 過去の日は、その日に出した値のまま（research/predict_daily.py の freeze_past_days。dayInfo にその日のモデルの学習日）
+  const origin = useMemo(() => dayOrigin(data, day), [data, day]);
 
   return (
     <div className="pred">
@@ -77,11 +79,25 @@ export default function PredictionView({ data, history, onSendToOctagon, sentIds
           </div>
           <div>
             <span className="lab">モデル</span>
-            <span className="num">{fmtDate(m.trainedAt)}</span> 学習
-            <span className="sep">/</span>
-            訓練 <span className="num">{fmtInt(m.nTrain)}</span>件
+            <span className="num">{fmtDate(origin.trainedAt)}</span> 学習
+            {origin.sameModel && (
+              <>
+                <span className="sep">/</span>
+                訓練 <span className="num">{fmtInt(m.nTrain)}</span>件
+              </>
+            )}
           </div>
         </div>
+
+        {origin.past && (
+          <div className="banner info pred-note pred-frozen">
+            <span>ℹ</span>
+            <div>
+              {`この日の値は、${origin.generatedAt ? fmtDateTime(origin.generatedAt) : 'その日'}に出したまま固定しています`
+                + `（${fmtDate(origin.trainedAt)} 学習のモデル）。後の再学習や、後から入ったデータで採点し直していません。`}
+            </div>
+          </div>
+        )}
 
         {tone?.tone === 'red' && (
           <div className="banner warn pred-note">
@@ -181,6 +197,9 @@ function StrategyPanel({ signal, near, day, models, onSend, sentIds }) {
       ) : (
         <div className="empty strat-empty">
           {nBreak === 0 ? 'この日は新規の高値更新がありません。'
+            : signal.missing > 0
+              ? `この日の予測には${RULE_JA}の百分位が無い候補が ${signal.missing}件あるため、判定できません`
+                + `（${RULE_JA}を予測に入れる前に出した値など）。`
             : passed.length === 0
               ? `${RULE_JA}がすべて${STRATEGY.agreePct}以上の銘柄はありません。買いません。`
               : `発火が ${nBreak} 件しかありません。基準を満たした銘柄はありますが、`
@@ -188,7 +207,7 @@ function StrategyPanel({ signal, near, day, models, onSend, sentIds }) {
         </div>
       )}
 
-      {!buyable && passed.length > 0 && (
+      {!buyable && !signal.missing && passed.length > 0 && (
         <div className="strat-held">
           <span className="lab">参考（基準は満たしたが見送る）</span>
           {passed.slice(0, 3).map((c) => (
