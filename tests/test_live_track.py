@@ -64,6 +64,8 @@ class RulesMatchScreen(unittest.TestCase):
         self.assertEqual(val("skipBreaks"), L.SKIP_BREAKS)
         self.assertEqual(val("topK"), L.TOP_K)
         self.assertEqual(val("takeProfit"), L.TAKE_PROFIT)
+        # 届かなければ 20営業日目の終値で売る（運用者の実際の売り。2026-10-12 から。画面の手順の文言と同じ）
+        self.assertEqual(L.FALLBACK, "close")
         self.assertEqual(val("holdDays"), L.HOLD)
         self.assertEqual(val("maxSlots"), L.SLOTS)
         boost = re.search(r"export const BOOST = \[([^\]]*)\]", js).group(1)

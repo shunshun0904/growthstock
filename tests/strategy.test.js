@@ -119,9 +119,10 @@ test('strategySignal: byModel の無い古い JSON では誰も通らない', ()
 
 /* ------------------------------------------------ 出口 */
 
-test('exitPlan: 終値から指値の目安を出す', () => {
+test('exitPlan: 終値から指値の目安を出す（2026-10-12 から +10%）', () => {
   const p = exitPlan(1000);
-  assert.equal(p.target, 1200);
+  assert.equal(STRATEGY.takeProfit, 10);
+  assert.ok(Math.abs(p.target - 1100) < 1e-9);          // 1000 × 1.1（浮動小数点の端数は画面で丸める）
   assert.equal(p.takeProfit, STRATEGY.takeProfit);
   assert.equal(p.holdDays, 20);
   assert.equal(exitPlan(0), null);

@@ -133,8 +133,8 @@ function StrategyPanel({ signal, near, day, models, onSend, sentIds }) {
         <h2>今日の戦略</h2>
         <span className="sub">
           3モデルが揃って上位10%と見た銘柄を{STRATEGY.topK}件まで。
-          翌営業日の寄りで買い、+{STRATEGY.takeProfit}% か
-          {STRATEGY.holdDays}営業日で降りる（同時保有は{STRATEGY.maxSlots}銘柄まで、
+          翌営業日の寄りで買い、+{STRATEGY.takeProfit}% の指値か
+          {STRATEGY.holdDays}営業日目の終値で降りる（同時保有は{STRATEGY.maxSlots}銘柄まで、
           発火{STRATEGY.skipBreaks}件未満の日は見送り）
         </span>
       </div>
@@ -170,9 +170,9 @@ function StrategyPanel({ signal, near, day, models, onSend, sentIds }) {
           </div>
           <ol className="strat-steps">
             <li><b>翌営業日の寄り</b>で成行。終値では買えない（候補が分かるのが終値後）</li>
-            <li>買えたら <b>+{STRATEGY.takeProfit}% の指値</b>を置く（到達は約1割、
-                届くときの中央値は11〜12営業日）</li>
-            <li>届かなければ <b>{STRATEGY.holdDays}営業日</b>で手仕舞い</li>
+            <li>買えたら <b>+{STRATEGY.takeProfit}% の指値</b>を置く
+                （過去の予測で、この規則の候補が届いたのは約35%、届くときの中央値は10営業日）</li>
+            <li>届かなければ <b>{STRATEGY.holdDays}営業日目の終値</b>で売る</li>
             <li><b>枠は{STRATEGY.maxSlots}つまで</b>。埋まっていたら見送る。
                 保有中の銘柄は、ここに良い候補が出ても<b>切らない</b>
                 （実測で乗り換え37回のうち24回は切らないほうが良かった）</li>
