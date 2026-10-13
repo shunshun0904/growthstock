@@ -9,9 +9,9 @@ import {
 } from '../lib/samples.js';
 
 /**
- * 再学習で加わった例（運用者の依頼 2026-10-13「直近追加されたサンプルのチャート（週次のリトレインで新たに追加された
+ * 再学習で加わったサンプル（運用者の依頼 2026-10-13「直近追加されたサンプルのチャート（週次のリトレインで新たに追加された
  * サンプルのチャート）、正例、負例で5例ずつ程度で良いので、表示してほしいです。正例は5例もないかもしれませんが、
- * なければないで大丈夫です」）。
+ * なければないで大丈夫です」。同日夜「チャートの表示期間は78週にしてください。タブの名前も「例」ではなく「サンプル」」）。
  *
  * データは public/data/new_samples.json（New Training Samples が再学習の後に research/new_samples.py で書く）。
  * チャートの線は学習のラベルと同じ式で引いてある（research/export_label_samples.build_case）。
@@ -34,9 +34,10 @@ export default function SamplesView({ data }) {
     <div className="samples">
       <section className="card">
         <div className="card-head">
-          <h2>再学習で加わった例</h2>
+          <h2>再学習で加わったサンプル</h2>
           <span className="sub">
-            週次の再学習で新しく学習に入ったサンプルから、正例・負例を最大5件ずつ（無作為。週ごとに入れ替わる）
+            {'週次の再学習で新しく学習に入ったサンプルから、正例・負例を最大5件ずつ（無作為。週ごとに入れ替わる）。'
+              + 'チャートは更新日の78週前から判定の20営業日の後まで'}
           </span>
         </div>
         <div className="pred-strip">
@@ -167,7 +168,7 @@ function SampleChart({ c }) {
         <ReferenceArea x1={ch.win[0]} x2={ch.win[1]} fill="var(--accent)" fillOpacity={0.08} stroke="none"
                        ifOverflow="visible" />
         <XAxis dataKey="i" type="number" domain={[0, ch.points.length - 1]} ticks={ch.ticks}
-               tickFormatter={(i) => fmtMD(ch.points[i]?.date)}
+               tickFormatter={(i) => ch.tickLabels[i] ?? fmtMD(ch.points[i]?.date)}
                tick={{ fill: 'var(--text-faint)', fontSize: 10 }} stroke="var(--border)" />
         <YAxis domain={ch.yDomain} ticks={ch.yTicks} width={50} allowDecimals={false}
                tick={{ fill: 'var(--text-faint)', fontSize: 10 }} stroke="var(--border)"

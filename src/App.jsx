@@ -16,15 +16,15 @@ import { loadPredictions, loadHistory, loadFilings, loadFeatureNames, loadNewSam
 
 /*
  * hidden のタブは画面に出さない（運用者の指示 2026-10-13「決算サンキーとWhat-Ifシミュレーターのタブは消してください。
- * 表示から消してくれるだけで良いです」）。画面のコード（FilingsView / SimulatorView）とデータの取り込み
- * （Fetch Filings）は残してあるので、hidden を外せば戻る。
+ * 表示から消してくれるだけで良いです」、同日夜「8軸オクタゴン比較のタブも消してください」）。画面のコード
+ * （FilingsView / SimulatorView / CompareView）とデータの取り込み（Fetch Filings）は残してあるので、hidden を外せば戻る。
  */
 const TABS = [
   { id: 'prediction', label: 'ブレイク予測' },
-  // 週次の再学習で加わったサンプルのチャート（運用者の依頼 2026-10-13）
-  { id: 'samples', label: '再学習で加わった例' },
+  // 週次の再学習で加わったサンプルのチャート（運用者の依頼 2026-10-13。名前は同日夜「「例」ではなく「サンプル」」）
+  { id: 'samples', label: '再学習で加わったサンプル' },
   { id: 'filings', label: '決算サンキー', hidden: true },
-  { id: 'compare', label: '8軸オクタゴン比較' },
+  { id: 'compare', label: '8軸オクタゴン比較', hidden: true },
   { id: 'timemachine', label: 'タイムマシーン' },
   { id: 'simulator', label: 'What-If シミュレーター', hidden: true },
 ];
@@ -48,7 +48,7 @@ export default function App() {
   const [history, setHistory] = useState({ entries: [] });
   const [filings, setFilings] = useState(null);
   const [featureNames, setFeatureNames] = useState({});
-  // 再学習で加わった例。undefined = 読み込み中、null = まだ無い
+  // 再学習で加わったサンプル。undefined = 読み込み中、null = まだ無い
   const [newSamples, setNewSamples] = useState(undefined);
   const [tab, setTab] = useState('prediction');
   const [visibleIds, setVisibleIds] = useState(() => new Set());
@@ -130,7 +130,7 @@ export default function App() {
   }, []);
 
   /**
-   * 予測タブで見つけた候補を、オクタゴン側で見られるように手入力銘柄として足す。
+   * 予測タブで見つけた候補を、タイムマシーン（と、隠している8軸オクタゴン比較）で見られるように手入力銘柄として足す。
    *
    * 予測パイプラインが持っている実測値をそのまま渡す。
    * ここで値を作らないこと（作ると画面の数字の出どころが分からなくなる）。
@@ -244,7 +244,7 @@ export default function App() {
             分析対象の銘柄がありません。
             <div style={{ marginTop: 'var(--s4)' }}>
               「ブレイク予測」タブで候補を選び、
-              <b>「8軸オクタゴンで見る」</b>から送ると、ここで分析できます。
+              <b>「タイムマシーンで見る」</b>から送ると、ここで分析できます。
             </div>
             <div style={{ marginTop: 'var(--s4)' }}>
               <button className="btn btn-primary" onClick={() => setTab('prediction')}>
@@ -289,7 +289,7 @@ export default function App() {
 
         {!loading && rows.length > 0 && (
           <>
-            {tab === 'compare' && (
+            {tab === 'compare' && isVisible('compare') && (
               <CompareView
                 rows={rows} visibleIds={visibleIds} onToggle={toggleVisible}
                 selectedId={selectedId} onSelect={setSelectedId}

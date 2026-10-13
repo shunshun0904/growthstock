@@ -11,8 +11,8 @@ import { STRATEGY, RULE_MODELS, RULE_JA, BORDER, strategySignal, exitPlan, nearM
  * ブレイク予測タブ。
  *
  * その日に78週高値を更新した銘柄を並べ替えたもの。
- * 見つけるのがこの画面、入るかどうかを決めるのは「8軸オクタゴン比較」なので、
- * 候補をオクタゴン側へ送る導線を必ず置く。
+ * 候補をタイムマシーン（過去の8軸の推移）へ送る導線を置く。送り先だった「8軸オクタゴン比較」のタブは
+ * 2026-10-13 から画面に出していない（運用者の指示「8軸オクタゴン比較のタブも消してください」。src/App.jsx の TABS）。
  *
  * スコアはモデルごとに並べる。混ぜて1つにはしない（アンサンブルにしない）。
  * 学習器が違えばスコアのスケールも意味も違うので、各モデル自身の過去スコア
@@ -332,7 +332,7 @@ function PickCard({ c, n, models, onSend, sent }) {
           <EarnBadge c={c} />
         </span>
         <button className="btn btn-primary" onClick={onSend} disabled={sent}>
-          {sent ? '送信済み' : '8軸で見る'}
+          {sent ? '送信済み' : 'タイムマシーンで見る'}
         </button>
       </div>
       <div className="strat-pick-body">
@@ -671,7 +671,7 @@ function Detail({ c, models, featureNames, onSend, sent }) {
             ))}
           </dl>
           <button className={`btn ${sent ? '' : 'btn-primary'}`} onClick={onSend} disabled={sent}>
-            {sent ? '8軸オクタゴンに追加済み' : '8軸オクタゴンで見る →'}
+            {sent ? 'タイムマシーンに追加済み' : 'タイムマシーンで見る →'}
           </button>
           <p className="sub" style={{ marginTop: 8 }}>
             予測パイプラインが持っている実測値をそのまま渡します。

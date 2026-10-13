@@ -1,14 +1,16 @@
 /**
- * 再学習で加わった例（public/data/new_samples.json）のチャートの組み立て。描画（JSX）から切り離して単体テストする。
+ * 再学習で加わったサンプル（public/data/new_samples.json）のチャートの組み立て。描画（JSX）から切り離して単体テストする。
  *
  * 1件（case）は research/new_samples.py が research/export_label_samples.build_case で作ったもの。
- *   dates / close / maShort / maLong … 更新日の前40営業日〜判定の20営業日の後5日の日足（分割調整後）
+ *   dates / close … 更新日の78週前（368営業日。78週高値を測る期間）〜判定の20営業日の後5日の日足（分割調整後。
+ *                   運用者の指示 2026-10-13 夜「チャートの表示期間は78週にしてください」）
  *   tPos     … 更新日（78週高値を抜けた日）の位置。horizon … 判定の窓 [tPos+1, tPos+20]
  *   entryPrice … 基準の価格（翌営業日の寄り）。target … 到達に必要な水準（寄り × (1 + k×σ)）
  *   endLineAdopted … 終盤に必要な水準（窓の最後5日の平均がこれ以上）
  *   verdict … 成否の内訳（データセットの材料から）: reached / endOk / uptrend と、その数値（%）
  */
 import { fmtSigned, fmtDate } from './format.js';
+import { quarterTicks, fmtTick, toTime } from './pricechart.js';
 
 /** 正例・負例に分ける（並びはファイルの順 = 日付・銘柄の順）。 */
 export function splitCases(data) {
@@ -29,18 +31,37 @@ export const fmtMD = (d) => {
 };
 
 /**
+ * 横軸の目盛り（営業日の並び i）。四半期の初め（1・4・7・10月）以降の最初の営業日に置き、文字はタイムマシーンの
+ * 株価推移と同じ「年/月」（25/7）。78週なら6本ほど。
+ */
+export function quarterIndexTicks(dates) {
+  const ds = Array.isArray(dates) ? dates : [];
+  const ticks = [];
+  const labels = {};
+  if (!ds.length) return { ticks, labels };
+  let k = 0;
+  for (const q of quarterTicks(toTime(ds[0]), toTime(ds[ds.length - 1]))) {
+    while (k < ds.length && toTime(ds[k]) < q) k += 1;
+    if (k < ds.length && !(k in labels)) {
+      ticks.push(k);
+      labels[k] = fmtTick(q);
+    }
+  }
+  return { ticks, labels };
+}
+
+/**
  * チャートの点・窓・目盛り・縦軸の範囲。
- *   points … { i, date, close, ma5, ma20 }（横軸は営業日の並び i。土日や祝日の隙間を空けない）
+ *   points … { i, date, close }（横軸は営業日の並び i。土日や祝日の隙間を空けない）
  *   win    … 判定の20営業日 [from, to]（i）。endWin … 窓の最後5日（終盤の水準を測るところ）
- *   entryPos … 寄り（翌営業日）の位置。yDomain … 終値・寄り・到達・終盤の線がすべて入る範囲（上下3%の余白）
- *   ticks  … 目盛り（最初・更新日・窓の終わり・最後）
+ *   entryPos … 寄り（翌営業日）の位置。yDomain … 終値・寄り・到達・終盤の線がすべて入る範囲（上下2%の余白）
+ *   ticks / tickLabels … 目盛りと文字。78週なら四半期の初め（年/月）。短い日足（四半期の初めが3本に届かない）は
+ *                        最初・更新日・窓の終わり・最後（月/日）
  */
 export function caseChart(c) {
   const dates = Array.isArray(c?.dates) ? c.dates : [];
   const close = Array.isArray(c?.close) ? c.close : [];
-  const points = dates.map((date, i) => ({
-    i, date, close: num(close[i]), ma5: num(c?.maShort?.[i]), ma20: num(c?.maLong?.[i]),
-  }));
+  const points = dates.map((date, i) => ({ i, date, close: num(close[i]) }));
   const last = Math.max(0, points.length - 1);
   const tPos = Number.isInteger(c?.tPos) ? Math.min(c.tPos, last) : 0;
   const [w0, w1] = Array.isArray(c?.horizon) ? c.horizon : [tPos + 1, tPos + 20];
@@ -50,11 +71,17 @@ export function caseChart(c) {
     ...points.map((p) => p.close)].filter((v) => v !== null);
   const lo = levels.length ? Math.min(...levels) : 0;
   const hi = levels.length ? Math.max(...levels) : 1;
-  const ticks = [...new Set([0, tPos, win[1], last])].filter((i) => i >= 0 && i <= last).sort((a, b) => a - b);
+  const q = quarterIndexTicks(dates);
+  let ticks = q.ticks;
+  let tickLabels = q.labels;
+  if (ticks.length < 3) {
+    ticks = [...new Set([0, tPos, win[1], last])].filter((i) => i >= 0 && i <= last).sort((a, b) => a - b);
+    tickLabels = Object.fromEntries(ticks.map((i) => [i, fmtMD(dates[i])]));
+  }
   const y = niceAxis(lo * 0.98, hi * 1.02);
   return {
     points, win, endWin, tPos, entryPos: Math.min(tPos + 1, last),
-    yDomain: y.domain, yTicks: y.ticks, ticks,
+    yDomain: y.domain, yTicks: y.ticks, ticks, tickLabels,
   };
 }
 

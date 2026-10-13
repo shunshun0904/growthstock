@@ -596,7 +596,7 @@ input[type='range']::-moz-range-thumb {
 .filings-select:focus { outline: 2px solid var(--blue); outline-offset: 1px; }
 .filings-meta .badge { margin-right: 2px; }
 
-/* ---------------------------------------------------------- 再学習で加わった例 */
+/* ---------------------------------------------------------- 再学習で加わったサンプル */
 /* 終値の線1本だけがデータの系列。注記の線は色ではなく線の形（破線・点線）と言葉で見分ける */
 .samples { display: flex; flex-direction: column; gap: var(--s4); }
 .samples-note { margin: var(--s3) 0 0; max-width: 78ch; line-height: 1.6; }

@@ -108,8 +108,12 @@ class Build(unittest.TestCase):
             v = c["verdict"]
             self.assertEqual(c["label"] == 1, v["reached"] and v["endOk"] and v["uptrend"])
             self.assertEqual(len(c["dates"]), len(c["close"]))
-            self.assertEqual(c["tPos"], NS.BEFORE)                       # 更新日の前は40営業日
+            self.assertEqual(c["tPos"], NS.BEFORE)                       # 更新日の前は78週（368営業日）
+            self.assertEqual(NS.BEFORE, B.HIGH_WINDOW)                    # 運用者の指示「表示期間は78週」
+            self.assertEqual(len(c["dates"]), NS.BEFORE + 1 + NS.AFTER)   # 後ろは判定の20営業日＋5日
             self.assertEqual(c["horizon"], [NS.BEFORE + 1, NS.BEFORE + B.RISE_HORIZON])
+            for k in ("maShort", "maLong", "high52w"):                    # 画面が描かない系列は持ち出さない
+                self.assertNotIn(k, c)
             self.assertEqual(c["t"], self.break_day)
             self.assertGreater(c["target"], c["entryPrice"])
             self.assertEqual(len(c["code"]), 4)

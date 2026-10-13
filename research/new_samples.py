@@ -26,7 +26,7 @@
   - 内訳から引き直したラベルが、データセットのラベルと加わった全件で一致するか
   - チャートの基準の価格・最大上昇率が、データセットの値と食い違わないか（表示する分）
 
-出力: public/data/new_samples.json（画面のタブ「再学習で加わった例」が読む）。ログには件数と日付だけ（銘柄は出さない）。
+出力: public/data/new_samples.json（画面のタブ「再学習で加わったサンプル」が読む）。ログには件数と日付だけ（銘柄は出さない）。
 
   python3 research/new_samples.py                      # research/_data の dataset.parquet と日足から
   python3 research/new_samples.py --prev-to 2026-09-01  # 前回の学習期間の終わりを手で与える
@@ -56,8 +56,9 @@ META = os.path.join(HERE, "model", "meta.json")
 META_REL = "research/model/meta.json"
 OUT = os.path.join(ROOT, "public", "data", "new_samples.json")
 N_EACH = 5
-#: 更新日の前に何営業日ぶん見せるか（小さなチャートなので短め）。後ろは判定の20営業日＋5日
-BEFORE = 40
+#: 更新日の前に何営業日ぶん見せるか。78週（78週高値を測る期間と同じ368営業日。運用者の指示 2026-10-13 夜「チャートの
+#: 表示期間は78週にしてください」。それまでは40営業日）。後ろは判定の20営業日＋5日
+BEFORE = B.HIGH_WINDOW
 AFTER = B.RISE_HORIZON + 5
 DS_COLS = ["Code", "Date", "label", "vol_20d", "entry_price", "future_rise", "end_level", "uptrend_end"]
 
@@ -167,10 +168,11 @@ def _r(v, d=2):
     return round(v, d) if np.isfinite(v) else None
 
 
-#: チャートに要る項目だけ持ち出す（厳しい案の比較・出来高は使わない）
+#: チャートに要る項目だけ持ち出す（厳しい案の比較・出来高は使わない。画面が描かない移動平均・78週高値の系列も
+#: 持ち出さない。78週にして日足が約6倍になったので、使わない系列でファイルを膨らませない）
 CASE_KEYS = ["t", "tPos", "horizon", "closeAtT", "entryPrice", "target", "thresholdPct", "hitPos",
              "endLineAdopted", "endRatioAdopted", "endLevel", "uptrendEnd", "maxGain", "maxDraw", "endGain",
-             "dates", "close", "high52w", "maShort", "maLong"]
+             "dates", "close"]
 
 
 def build_cases(sel: pd.DataFrame, parts: pd.DataFrame, panel: pd.DataFrame, names: Dict[str, str],

@@ -166,6 +166,8 @@ await page.locator('.pred-row').first().locator('.pred-main').click();
 await page.waitForSelector('.pred-detail', { timeout: 5000 });
 const detail = await page.textContent('.pred-detail');
 check(detail.includes('モデル別の見立て'), '詳細にモデル別の見立てが出る');
+check(detail.includes('タイムマシーンで見る') && !detail.includes('8軸オクタゴン'),
+      '詳細の送るボタンはタイムマシーン行き（8軸オクタゴン比較のタブは隠した）');
 check(detail.includes('混ぜていません'), 'アンサンブルではないと明示される');
 const bigCells = await page.locator('.pred-detail .pred-mg.lg .c').allTextContents();
 check(bigCells.length === 12 && bigCells[0] === '85.0', `詳細に12本の表（小数1桁）が出る (実際: ${bigCells.slice(0, 3).join(',')}…)`);
@@ -203,48 +205,6 @@ check((borderNote || '').includes('1.5σ の3本で見た際どい候補') && (b
 await page.screenshot({ path: path.join(SHOTS, 'screenshot-prediction.png') });
 await page.locator('.pred-row').first().locator('.pred-main').click();
 
-console.log('\n== 8軸オクタゴン比較 View ==');
-await page.getByRole('tab', { name: '8軸オクタゴン比較' }).click();
-await page.waitForSelector('.recharts-surface', { timeout: 15000 });
-
-const body = await page.textContent('body');
-check(body.includes('テスト銘柄A'), '銘柄名が描画される');
-check(await page.locator('.stock-card').count() === 3, '3銘柄ぶんのコントロールカード');
-check(await page.locator('.recharts-radar').count() >= 1, 'レーダーチャートが描画される');
-check(body.includes('BREAKOUT'), 'BREAKOUT ゾーン判定が表示される');
-check(body.includes('機関熱狂') || body.includes('MEGA'), '機関投資家参入度バッジが表示される');
-const covBadges = await page.locator('.stock-card .badge').allTextContents();
-check(covBadges.includes('8/8軸'), '全軸そろった銘柄は 8/8軸');
-check(covBadges.includes('5/8軸'), '欠測のある銘柄は 5/8軸 (EPS成長・信用倍率・進捗が欠測)');
-check(covBadges.includes('CAP LOW'), '時価総額100億円未満は CAP LOW と判定される');
-check(!body.includes('NaN'), 'NaN が画面に出ていない');
-check(!body.includes('undefined'), 'undefined が画面に出ていない');
-
-// テスト銘柄A の総合スコアを scoring.js の期待値と突き合わせる
-const scoreA = await page.locator('.stock-card').first().locator('.score-big').first().textContent();
-check(/^\d\.\d/.test(scoreA.trim()), `総合スコアが数値で表示される (取得値: ${scoreA.trim()})`);
-
-// 進捗期待は、何で割った比率かを表に出す（銘柄A は前年同期の基準 45% を持つ）
-await page.locator('.stock-card').first().locator('button').first().click();
-await page.waitForTimeout(250);
-const axisA = await page.locator('.axis-table').first().textContent();
-check(axisA.includes('基準 45.0%（前年同期）') && axisA.includes('比率 1.41倍'),
-      '進捗期待に前年同期の基準と比率が出る');
-
-// 欠測軸が「—」になっていること
-await page.locator('.stock-card').nth(1).locator('button').first().click();
-await page.waitForTimeout(250);
-const naCount = await page.locator('.axis-table .na').count();
-check(naCount >= 3, `欠測軸が「—」で表示される (${naCount}箇所)`);
-
-await page.screenshot({ path: path.join(SHOTS, 'screenshot-compare.png'), fullPage: false });
-
-console.log('\n== 直近決算サンキー（隠した） ==');
-// 運用者の指示（2026-10-13「直近決算サンキーも消してください」）。部品は残し、8軸の画面から外しただけ
-// （src/views/CompareView.jsx の SHOW_EARNINGS_FLOW）
-check((await page.locator('.sankey').count()) === 0, '8軸オクタゴン比較に直近決算のサンキー図を出さない');
-check(!((await page.textContent('body')) || '').includes('直近決算の流れ'), '「直近決算の流れ」の欄を出さない');
-
 console.log('\n== タイムマシーン View ==');
 await page.getByRole('tab', { name: 'タイムマシーン' }).click();
 await page.waitForSelector('#tm-stock', { timeout: 10000 });
@@ -257,36 +217,27 @@ check(tmBody.includes('78週高値を更新'), 'ストーリータイムライ�
 check(await page.locator('.recharts-line').count() >= 1, '株価推移チャートが描画される');
 await page.screenshot({ path: path.join(SHOTS, 'screenshot-timemachine.png') });
 
-console.log('\n== 銘柄追加モーダル ==');
-await page.getByRole('tab', { name: '8軸オクタゴン比較' }).click();
-await page.getByRole('button', { name: '+ 銘柄を追加' }).click();
-await page.waitForSelector('.modal');
-await page.locator('#f-code').fill('9999');
-await page.locator('#f-name').fill('手入力テスト');
-await page.locator('#f-epsGrowth').fill('45');
-await page.locator('#f-highRatio').fill('99');
-await page.getByRole('button', { name: '追加する' }).click();
-await page.waitForTimeout(400);
-const afterAdd = await page.textContent('body');
-check(afterAdd.includes('手入力テスト'), '手入力銘柄が追加される');
-check(await page.locator('.stock-card').count() === 4, '銘柄数が4に増える');
-check(afterAdd.includes('手入力'), '手入力バッジで J-Quants 由来と区別される');
-
 console.log('\n== 隠したタブ ==');
 // 運用者の指示（2026-10-13）「決算サンキーとWhat-Ifシミュレーターのタブは消してください。表示から消してくれるだけで
-// 良いです」。画面のコードは残し、タブの一覧から外しただけ（src/App.jsx の TABS の hidden）
+// 良いです」、同日夜「8軸オクタゴン比較のタブも消してください」。画面のコードは残し、タブの一覧から外しただけ
+// （src/App.jsx の TABS の hidden）。8軸オクタゴン比較の画面（と、そこにあった銘柄追加のボタン・直近決算のサンキー図）の
+// 確かめはタブと一緒に外した
 const tabNames = (await page.getByRole('tab').allTextContents()).map((t) => t.trim());
-check(tabNames.join(',') === 'ブレイク予測,再学習で加わった例,8軸オクタゴン比較,タイムマシーン',
-      `タブは ブレイク予測 / 再学習で加わった例 / 8軸オクタゴン比較 / タイムマシーン の4つ (実際: ${tabNames.join(',')})`);
-check(!tabNames.includes('決算サンキー') && !tabNames.includes('What-If シミュレーター'),
-      '決算サンキーと What-If シミュレーターのタブは出ない');
+check(tabNames.join(',') === 'ブレイク予測,再学習で加わったサンプル,タイムマシーン',
+      `タブは ブレイク予測 / 再学習で加わったサンプル / タイムマシーン の3つ (実際: ${tabNames.join(',')})`);
+check(!tabNames.includes('決算サンキー') && !tabNames.includes('What-If シミュレーター')
+        && !tabNames.includes('8軸オクタゴン比較'),
+      '決算サンキー・What-If シミュレーター・8軸オクタゴン比較のタブは出ない');
+check((await page.locator('.sankey').count()) === 0 && (await page.locator('.stock-card').count()) === 0,
+      '8軸オクタゴン比較の画面（銘柄カード・サンキー図）はどのタブにも出ない');
 check(!((await page.textContent('.footer')) || '').includes('EDINET'),
       '決算サンキーを隠している間は EDINET の出典を出さない');
 
-console.log('\n== 再学習で加わった例 ==');
+console.log('\n== 再学習で加わったサンプル ==');
 // 運用者の依頼（2026-10-13）「直近追加されたサンプルのチャート（週次のリトレインで新たに追加されたサンプルのチャート）、
-// 正例、負例で5例ずつ程度」。合成データは加わった4件（正例2・負例2）を全部出す
-await page.getByRole('tab', { name: '再学習で加わった例' }).click();
+// 正例、負例で5例ずつ程度」、同日夜「チャートの表示期間は78週にしてください。タブの名前も「例」ではなく「サンプル」」。
+// 合成データは加わった4件（正例2・負例2）を全部出す。日足は更新日（2025-07-28）の78週前 2024-02-28 から 2025-09-01 まで
+await page.getByRole('tab', { name: '再学習で加わったサンプル' }).click();
 await page.waitForSelector('.sample-card', { timeout: 10000 });
 await page.waitForSelector('.sample-card .recharts-line', { timeout: 10000 });
 const smp = (await page.textContent('.samples')) || '';
@@ -300,7 +251,12 @@ check(smp.includes('最大 +15.0%（必要 +9.5%）'), '正例の成否の内訳
 check((await page.locator('.sample-verdict li.ng').count()) === 6, '負例2件の3条件はどれも ✗（6行）');
 check((await page.locator('.sample-verdict li.ok').count()) === 6, '正例2件の3条件はどれも ✓（6行）');
 check(smp.includes('到達に必要な水準') && smp.includes('判定の20営業日'), '線の見分け方（凡例）が言葉で出る');
-check(!smp.includes('NaN') && !smp.includes('undefined'), '再学習で加わった例に NaN / undefined が出ていない');
+check(!smp.includes('NaN') && !smp.includes('undefined'), '再学習で加わったサンプルに NaN / undefined が出ていない');
+check(smp.includes('再学習で加わったサンプル') && smp.includes('更新日の78週前から'), '見出しが「サンプル」で、78週の表示と書いてある');
+const xTicks = (await page.locator('.sample-card').first().locator('.recharts-xAxis .recharts-cartesian-axis-tick-value')
+  .allTextContents()).map((t) => t.trim());
+check(xTicks.includes('24/4') && xTicks.includes('25/7') && xTicks.every((t) => /^\d{2}\/\d{1,2}$/.test(t)),
+      `横軸は78週を四半期の初め（年/月）で刻む (実際: ${xTicks.join(' ')})`);
 await page.screenshot({ path: path.join(SHOTS, 'screenshot-samples.png'), fullPage: true });
 
 console.log('\n== コンソールエラー ==');

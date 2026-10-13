@@ -78,7 +78,7 @@ export default function FilingsView({ pred, rows, filings }) {
             <EarningsSankey quarters={stock.quarters} />
           ) : (
             <div className="empty">
-              四半期の数字は、ブレイク予測の候補を「8軸で見る」で送ると取れます。
+              四半期の数字は、ブレイク予測の候補を「タイムマシーンで見る」で送ると取れます。
             </div>
           )}
         </section>

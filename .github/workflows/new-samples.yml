@@ -1,7 +1,7 @@
 name: New Training Samples
 
 # 週次の再学習で新しく学習に加わったサンプル（前回の学習期間の終わりより後・今回の終わりまでの更新日）から、
-# 正例・負例を最大5件ずつ選んで、画面のタブ「再学習で加わった例」のチャート用に public/data/new_samples.json を書く
+# 正例・負例を最大5件ずつ選んで、画面のタブ「再学習で加わったサンプル」のチャート用に public/data/new_samples.json を書く
 # （運用者の依頼 2026-10-13。research/new_samples.py）。
 #
 # Retrain Weekly が終わったら workflow_run で続けて走る。学習と同じデータ（Release data-raw。再学習が取り込みの
