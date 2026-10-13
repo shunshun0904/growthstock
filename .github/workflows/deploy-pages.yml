@@ -12,7 +12,8 @@ on:
     #
     # push で繋がないのは、GITHUB_TOKEN による push が
     # 他のワークフローを起こさないため（GitHub のループ防止）。
-    workflows: ['Fetch J-Quants Data', 'Predict Breakouts', 'Refresh Stock Details', 'Fetch Filings']
+    workflows: ['Fetch J-Quants Data', 'Predict Breakouts', 'Refresh Stock Details', 'Fetch Filings',
+                'New Training Samples']
     types: [completed]
 
 permissions:

@@ -125,16 +125,17 @@ def verdict(df: pd.DataFrame, cfg: RiseConfig) -> pd.Series:
 
 
 def build_case(panel: pd.DataFrame, code: str, t_date: pd.Timestamp,
-               name: str, label: int, bucket: str | None = None) -> Dict | None:
-    """1ケース分のチャートデータを組み立てる。"""
+               name: str, label: int, bucket: str | None = None,
+               before: int = BEFORE, after: int = AFTER) -> Dict | None:
+    """1ケース分のチャートデータを組み立てる。before / after は基準日の前後に何営業日ぶん見せるか。"""
     g = panel[panel["Code"] == code].reset_index(drop=True)
     idx = g.index[g["Date"] == t_date]
     if len(idx) == 0:
         return None
     i = int(idx[0])
 
-    lo = max(0, i - BEFORE)
-    hi = min(len(g), i + AFTER + 1)
+    lo = max(0, i - before)
+    hi = min(len(g), i + after + 1)
     win = g.iloc[lo:hi]
     t_pos = i - lo   # ウィンドウ内での基準日（＝52週高値の更新日）の位置
 

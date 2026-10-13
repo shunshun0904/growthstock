@@ -4,6 +4,7 @@ import TimeMachineView from './views/TimeMachineView.jsx';
 import SimulatorView from './views/SimulatorView.jsx';
 import PredictionView from './views/PredictionView.jsx';
 import FilingsView from './views/FilingsView.jsx';
+import SamplesView from './views/SamplesView.jsx';
 import AddStockModal from './components/AddStockModal.jsx';
 import { computeScores } from './lib/scoring.js';
 import { SERIES_COLORS, fmtDateTime } from './lib/format.js';
@@ -11,7 +12,7 @@ import {
   loadDataset, loadManualStocks, saveManualStocks, loadVisibility, saveVisibility,
   manualStockFromForm, mergeStocks, resetSavedState,
 } from './lib/store.js';
-import { loadPredictions, loadHistory, loadFilings, loadFeatureNames } from './lib/predictions.js';
+import { loadPredictions, loadHistory, loadFilings, loadFeatureNames, loadNewSamples } from './lib/predictions.js';
 
 /*
  * hidden のタブは画面に出さない（運用者の指示 2026-10-13「決算サンキーとWhat-Ifシミュレーターのタブは消してください。
@@ -20,6 +21,8 @@ import { loadPredictions, loadHistory, loadFilings, loadFeatureNames } from './l
  */
 const TABS = [
   { id: 'prediction', label: 'ブレイク予測' },
+  // 週次の再学習で加わったサンプルのチャート（運用者の依頼 2026-10-13）
+  { id: 'samples', label: '再学習で加わった例' },
   { id: 'filings', label: '決算サンキー', hidden: true },
   { id: 'compare', label: '8軸オクタゴン比較' },
   { id: 'timemachine', label: 'タイムマシーン' },
@@ -45,6 +48,8 @@ export default function App() {
   const [history, setHistory] = useState({ entries: [] });
   const [filings, setFilings] = useState(null);
   const [featureNames, setFeatureNames] = useState({});
+  // 再学習で加わった例。undefined = 読み込み中、null = まだ無い
+  const [newSamples, setNewSamples] = useState(undefined);
   const [tab, setTab] = useState('prediction');
   const [visibleIds, setVisibleIds] = useState(() => new Set());
   const [selectedId, setSelectedId] = useState(null);
@@ -70,6 +75,7 @@ export default function App() {
     if (isVisible('filings')) loadFilings().then((f) => { if (!cancelled) setFilings(f); });
     // 特徴量の日本語名（効いた特徴量の表示）。読めなければ元の列名のまま
     loadFeatureNames().then((n) => { if (!cancelled) setFeatureNames(n); });
+    loadNewSamples().then((d) => { if (!cancelled) setNewSamples(d); });
     return () => { cancelled = true; };
   }, []);
 
@@ -233,7 +239,7 @@ export default function App() {
 
         {!loading && dataset && <DataNotices dataset={dataset} />}
 
-        {!loading && rows.length === 0 && tab !== 'prediction' && (
+        {!loading && rows.length === 0 && tab !== 'prediction' && tab !== 'samples' && (
           <div className="card empty">
             分析対象の銘柄がありません。
             <div style={{ marginTop: 'var(--s4)' }}>
@@ -274,6 +280,8 @@ export default function App() {
             />
           )
         )}
+
+        {tab === 'samples' && <SamplesView data={newSamples} />}
 
         {tab === 'filings' && isVisible('filings') && (
           <FilingsView pred={pred} rows={rows} filings={filings} />

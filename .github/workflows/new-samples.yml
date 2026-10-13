@@ -1,0 +1,105 @@
+name: New Training Samples
+
+# 週次の再学習で新しく学習に加わったサンプル（前回の学習期間の終わりより後・今回の終わりまでの更新日）から、
+# 正例・負例を最大5件ずつ選んで、画面のタブ「再学習で加わった例」のチャート用に public/data/new_samples.json を書く
+# （運用者の依頼 2026-10-13。research/new_samples.py）。
+#
+# Retrain Weekly が終わったら workflow_run で続けて走る。学習と同じデータ（Release data-raw。再学習が取り込みの
+# 差分を上げ直している）からデータセットを作り直し、前回の学習期間の終わりは research/model/meta.json の git の
+# 履歴から取る（再学習が毎週コミットする）。手で起動してもよい（今の週の分を作り直す）。
+#
+# ログに出すのは件数と日付だけ（銘柄は出さない）。内訳から引き直したラベルがデータセットと食い違えば止まり、
+# コミットしない。
+on:
+  workflow_run:
+    workflows: ['Retrain Weekly']
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: new-samples
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 再学習が積んだ meta.json のコミットを含む公開ブランチの先頭（deploy-pages.yml と同じ理由）
+          ref: ${{ github.event_name == 'workflow_run' && 'claude/jquants-browser-app-bwk19a' || github.ref }}
+          # 前回の学習期間の終わりを meta.json の履歴から取るので、履歴をすべて取る
+          fetch-depth: 0
+
+      # 土曜のラベル違いだけの再学習（only=）でも Retrain Weekly は終わるので、ここが走る。本番の基準モデルの
+      # 学習日（meta.json の trainedAt）が、画面のファイルを作ったときと同じなら何もしない（手で起動したときは作り直す）
+      - name: Check whether the production model changed
+        id: check
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          m = json.load(open("research/model/meta.json", encoding="utf-8")).get("trainedAt")
+          p = "public/data/new_samples.json"
+          old = json.load(open(p, encoding="utf-8")).get("model", {}).get("trainedAt") if os.path.exists(p) else None
+          print(f"changed={'false' if m and m == old else 'true'}")
+          PY
+          cat "$GITHUB_OUTPUT" | tail -1
+
+      - uses: actions/setup-python@v5
+        if: steps.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r research/requirements.txt
+        if: steps.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+
+      - name: Download raw data (release)
+        if: steps.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p research/_data
+          bash scripts/gh_release_download.sh data-raw research/_data
+
+      - name: Build dataset
+        if: steps.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+        run: python3 research/build_dataset.py 2>&1 | tail -20
+
+      - name: Pick the added samples
+        if: steps.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+        run: |
+          set -o pipefail
+          python3 research/new_samples.py 2>&1 | tee samples.log
+
+      - name: Commit
+        if: steps.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/data/new_samples.json
+          if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
+          git commit -m "chore(data): 再学習で加わったサンプルを更新 ($(date -u '+%Y-%m-%d %H:%M UTC'))"
+          for i in 1 2 3 4; do
+            if git push; then exit 0; fi
+            sleep $((2 ** i)); git pull --rebase
+          done
+          exit 1
+
+      - name: Summary
+        if: always()
+        run: |
+          { echo '## 再学習で加わったサンプル'
+            echo '```'
+            cat samples.log 2>/dev/null || echo '(実行せず)'
+            echo '```'; } >> "$GITHUB_STEP_SUMMARY"

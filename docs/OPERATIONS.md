@@ -8,6 +8,7 @@
 |---|---|---|---|---|
 | 今日の予測 | `public/data/predictions.json`（直近5営業日の全候補・寄与分解つき） | git → GitHub Pages | 平日夜 | 画面が直接読む静的ファイル。毎日書き直すが、**過去の日はその日に出した値のまま**（2026-10-12 から。下の「過去の日の予測は固定」） |
 | 画面用の追跡 | `public/data/prediction_history.json`（上位5件/日・400日で削除） | git | 平日夜 | 画面に出すぶんだけ。**長期の台帳ではない** |
+| 再学習で加わった例 | `public/data/new_samples.json`（週次の再学習で新しく学習に入ったサンプルから正例・負例を最大5件ずつ。日足・到達の線・終盤の線・成否の内訳） | git → GitHub Pages | 日曜の Retrain Weekly の後に `New Training Samples` が workflow_run で続けて走る（本番の基準モデルの学習日が変わったときだけ作り直す。手で起動すると今の週を作り直す） | 画面のタブ「再学習で加わった例」（運用者の依頼 2026-10-13）。加わったサンプル = 前回の学習期間の終わり（meta.json の git の履歴）より後・今回の終わりまでの更新日。選び方は学習期間の終わりを種にした無作為抽出。線は学習のラベルと同じ式（`research/new_samples.py` → `export_label_samples.build_case`）。内訳から引き直したラベルがデータセットと食い違えば止まる |
 | 特徴量の日本語名 | `public/data/feature_names.json`（列名 → 短い日本語名と説明） | git → GitHub Pages | 特徴量を足したとき（手で） | 画面の「効いた特徴量」を日本語名で出す。正本は `research/feature_dict.py`（`NAME_JA`・軸 × 接尾辞）で、`python3 research/feature_dict.py --names-json public/data/feature_names.json` で書き出す。辞書とずれると `tests/test_feature_names.py` が落ちる |
 | **長期の台帳** | 予測ログ（全候補・1行1銘柄） | **Google スプレッドシート** | 平日夜 | 手売買の記録を同じ行に書き足せる。実績の検証はここを正本にする |
 | 保有の推移 | チャットで報告した取引の、売りのルールでの日ごとの損益とグラフ。予測ログの行を保有中は赤・売却済みは青に塗る | Google スプレッドシートの別タブ「保有の推移」（取引は「取引の記録」タブ） | 平日夜（予測のあと） | 予測ログは手書きの欄を壊さないよう追記だけにしているので、毎日作り直す表は別のタブに置く（下の「保有の推移と取引の記録」） |
@@ -49,6 +50,8 @@
                                      → 鮮度チェック（2営業日より古ければ停止）
                                      → Release へ書き戻し → 学習
                                      → モデルを Release へ、meta.json を git へ
+                                     → 終わったら New Training Samples（workflow_run）が
+                                       学習に加わったサンプルのチャートを作り直す
 
 土曜 10:40 JST  Check Data Store     保存データ（data-raw）を API の応答と突き合わせる
                                      （種別ごとに数日ぶんを叩き直す）

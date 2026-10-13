@@ -18,6 +18,7 @@ const FIXTURE = path.join(ROOT, 'tests', 'fixtures', 'synthetic-stocks.json');
 // モデルの有無で結果が変わり、失敗したときに再現できない
 const PRED_FIXTURE = path.join(ROOT, 'tests', 'fixtures', 'synthetic-predictions.json');
 const FILINGS_FIXTURE = path.join(ROOT, 'tests', 'fixtures', 'synthetic-filings.json');
+const SAMPLES_FIXTURE = path.join(ROOT, 'tests', 'fixtures', 'synthetic-new-samples.json');
 const SHOTS = path.join(ROOT, 'docs');
 fs.mkdirSync(SHOTS, { recursive: true });
 
@@ -34,6 +35,7 @@ const server = http.createServer((req, res) => {
     '/data/stocks.json': FIXTURE,
     '/data/predictions.json': PRED_FIXTURE,
     '/data/filings.json': FILINGS_FIXTURE,
+    '/data/new_samples.json': SAMPLES_FIXTURE,
   };
   const file = fixtures[rel] || path.join(DIST, rel);
   if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
@@ -274,12 +276,32 @@ console.log('\n== 隠したタブ ==');
 // 運用者の指示（2026-10-13）「決算サンキーとWhat-Ifシミュレーターのタブは消してください。表示から消してくれるだけで
 // 良いです」。画面のコードは残し、タブの一覧から外しただけ（src/App.jsx の TABS の hidden）
 const tabNames = (await page.getByRole('tab').allTextContents()).map((t) => t.trim());
-check(tabNames.join(',') === 'ブレイク予測,8軸オクタゴン比較,タイムマシーン',
-      `タブは ブレイク予測 / 8軸オクタゴン比較 / タイムマシーン の3つ (実際: ${tabNames.join(',')})`);
+check(tabNames.join(',') === 'ブレイク予測,再学習で加わった例,8軸オクタゴン比較,タイムマシーン',
+      `タブは ブレイク予測 / 再学習で加わった例 / 8軸オクタゴン比較 / タイムマシーン の4つ (実際: ${tabNames.join(',')})`);
 check(!tabNames.includes('決算サンキー') && !tabNames.includes('What-If シミュレーター'),
       '決算サンキーと What-If シミュレーターのタブは出ない');
 check(!((await page.textContent('.footer')) || '').includes('EDINET'),
       '決算サンキーを隠している間は EDINET の出典を出さない');
+
+console.log('\n== 再学習で加わった例 ==');
+// 運用者の依頼（2026-10-13）「直近追加されたサンプルのチャート（週次のリトレインで新たに追加されたサンプルのチャート）、
+// 正例、負例で5例ずつ程度」。合成データは加わった4件（正例2・負例2）を全部出す
+await page.getByRole('tab', { name: '再学習で加わった例' }).click();
+await page.waitForSelector('.sample-card', { timeout: 10000 });
+await page.waitForSelector('.sample-card .recharts-line', { timeout: 10000 });
+const smp = (await page.textContent('.samples')) || '';
+check((await page.locator('.sample-card').count()) === 4, `正例2・負例2の4枚のチャート (実際: ${await page.locator('.sample-card').count()})`);
+check((await page.locator('.sample-card .recharts-line').count()) === 4, '各カードに終値の線が1本ずつ');
+check(smp.includes('2026/10/11') && smp.includes('2025/07/25 より後 〜 2025/07/28'),
+      '再学習の日と、加わった更新日の範囲が出る');
+check(/加わった件数\s*4\s*件/.test(smp) && smp.includes('正例 2・負例 2・正例率 50.0%'), '加わった件数と正例率が出る');
+check(smp.includes('2件中 2件を表示'), '正例・負例の見出しに件数が出る');
+check(smp.includes('最大 +15.0%（必要 +9.5%）'), '正例の成否の内訳（到達）が数字で出る');
+check((await page.locator('.sample-verdict li.ng').count()) === 6, '負例2件の3条件はどれも ✗（6行）');
+check((await page.locator('.sample-verdict li.ok').count()) === 6, '正例2件の3条件はどれも ✓（6行）');
+check(smp.includes('到達に必要な水準') && smp.includes('判定の20営業日'), '線の見分け方（凡例）が言葉で出る');
+check(!smp.includes('NaN') && !smp.includes('undefined'), '再学習で加わった例に NaN / undefined が出ていない');
+await page.screenshot({ path: path.join(SHOTS, 'screenshot-samples.png'), fullPage: true });
 
 console.log('\n== コンソールエラー ==');
 check(consoleErrors.length === 0, `JS エラーなし (${consoleErrors.length}件)`);

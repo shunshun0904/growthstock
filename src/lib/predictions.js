@@ -27,6 +27,7 @@ const base = () => import.meta.env?.BASE_URL ?? '/';
 const BUILD = typeof __BUILD_ID__ === 'string' ? __BUILD_ID__ : 'dev';
 const PRED_URL = () => `${base()}data/predictions.json?v=${BUILD}`;
 const HIST_URL = () => `${base()}data/prediction_history.json?v=${BUILD}`;
+const SAMPLES_URL = () => `${base()}data/new_samples.json?v=${BUILD}`;
 
 async function getJson(url) {
   const res = await fetch(url, { cache: 'no-cache' });
@@ -79,6 +80,19 @@ export async function loadFilings() {
   try {
     const d = await getJson(FILINGS_URL());
     return d && typeof d.docs === 'object' && d.docs ? d : { docs: {} };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 週次の再学習で加わったサンプルのチャート（public/data/new_samples.json。New Training Samples が
+ * research/new_samples.py で書く）。無ければ null（まだ作っていない）。形が違えば cases を空に。
+ */
+export async function loadNewSamples() {
+  try {
+    const d = await getJson(SAMPLES_URL());
+    return d && Array.isArray(d.cases) ? d : { ...(d || {}), cases: [] };
   } catch {
     return null;
   }
