@@ -118,6 +118,9 @@ def level_counts(values: Iterable) -> Optional[Counter]:
     vals = list(values)
     if any(isinstance(v, (list, tuple, dict, np.ndarray)) for v in vals):
         return None
+    # 法人の名前らしい値（株式会社・LTD など）が混ざる項目は、値の種類が少なくても出さない
+    if any(isinstance(v, str) and XF.CORP_PAT.search(v) for v in vals):
+        return None
     c = Counter("（空）" if v is None or (isinstance(v, float) and np.isnan(v)) else str(v) for v in vals)
     return c if len(c) <= MAX_LEVELS else None
 
@@ -256,6 +259,154 @@ def report(d: pd.DataFrame) -> Dict:
         yy = sub.dt.year.to_numpy()
         print("  年ごとの「運用会社・投資顧問が先頭で、増えた／新規」の報告書の数: " + " / ".join(
             f"{int(y)}年 {int(((yy == y) & inst & up).sum()):,}" for y in sorted(set(yy[~pd.isna(yy)]))))
+    out.update(report_detail(d, hl, sub))
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# 2回目（2026-10-13）: 種類のコード・保有目的の区分・直近60日の取得・処分の明細
+# --------------------------------------------------------------------------- #
+
+#: 区分のコード（値はコードなので出してよい）。1回目は名前らしい項目の判定（…Code）で飛ばしていた
+CODE_COLS = ["LargeHldgTypeCode", "DocTypeCode"]
+CODE_KEYS = ["LargeHldrTypeCode"]
+#: 保有目的（HldgPurp）の文の区分（上から順に当てる）。件数を見るための代理で、定義はこの結果を見て決める
+PURPOSE_CLASSES = [
+    ("証券業務・貸借・担保", re.compile(r"証券業務|商品在庫|トレーディング|ディーリング|自己勘定|貸借|担保")),
+    ("重要提案", re.compile(r"重要提案")),
+    ("経営・安定株主・政策投資", re.compile(r"経営|安定株主|政策投資|支配|業務提携|資本提携|取引関係")),
+    ("運用（純投資・投資一任・顧客の資産）", re.compile(r"純投資|投資一任|顧客|運用|信託財産|ポートフォリオ")),
+]
+#: 取得・処分の明細の文に出てくる言葉
+ACQ_WORDS = ["取得", "処分", "市場内", "市場外", "買付", "売付", "借入", "返還", "貸付", "新株予約権", "公開買付", "現物",
+             "株式分割", "合併"]
+
+
+def purpose_class(text) -> str:
+    if not isinstance(text, str) or not text.strip():
+        return "（空）"
+    for label, pat in PURPOSE_CLASSES:
+        if pat.search(text):
+            return label
+    return "その他"
+
+
+def items(cell) -> List:
+    """入れ子の明細（ndarray / list）を list に。"""
+    if isinstance(cell, np.ndarray):
+        cell = cell.tolist()
+    return list(cell) if isinstance(cell, (list, tuple)) else []
+
+
+def _f(x) -> float:
+    v = pd.to_numeric(x, errors="coerce")
+    return float(v) if np.isfinite(v) else np.nan
+
+
+def holder_move(h: dict) -> str:
+    """保有者ごとの割合の動き（ShsRatio と ShsRatioLast）。"""
+    return ratio_move(h.get("ShsRatio"), h.get("ShsRatioLast"))
+
+
+def report_detail(d: pd.DataFrame, hl: List[List[dict]], sub: pd.Series) -> Dict:
+    out: Dict = {}
+    n = len(d)
+    print("\n== 2回目: 区分のコード（値ごとの件数） ==")
+    for c in CODE_COLS:
+        if c in d.columns:
+            lc = level_counts(d[c].tolist())
+            if lc is not None:
+                print_counts(c, lc, n)
+            else:
+                print(f"  {c}: 値の種類が {MAX_LEVELS} を超える（{d[c].nunique():,}種類）")
+    for k in CODE_KEYS:
+        vals = [h.get(k) for hs in hl for h in hs if k in h]
+        lc = level_counts(vals)
+        if lc is not None:
+            print_counts(f"保有者の {k}", lc, len(vals))
+        elif vals:
+            print(f"  保有者の {k}: 値の種類が {MAX_LEVELS} を超える")
+
+    # 保有目的の区分 × 保有者ごとの割合の動き × 種類のコード
+    rows = []
+    for i, hs in enumerate(hl):
+        for h in hs:
+            rows.append({"i": i, "cls": purpose_class(h.get("HldgPurp")), "move": holder_move(h),
+                         "type": str(h.get("LargeHldrTypeCode")), "acq": items(h.get("AcqDisp"))})
+    hd = pd.DataFrame(rows)
+    out["purpose_classes"] = {}
+    if len(hd):
+        print("\n== 2回目: 保有目的（HldgPurp）の区分ごとの保有者の数と、保有者ごとの割合の動き ==")
+        for cls, g in hd.groupby("cls"):
+            mv = Counter(g["move"])
+            up = mv.get("増えた", 0) + mv.get("新規（前回なし）", 0)
+            tp = Counter(g["type"])
+            print(f"  {cls}: {len(g):,}（{pct(len(g), len(hd))}）・増えた {mv.get('増えた', 0):,}・新規 "
+                  f"{mv.get('新規（前回なし）', 0):,}・減った {mv.get('減った', 0):,}（増えた＋新規 {pct(up, len(g))}）"
+                  f"・種類のコード {dict(tp.most_common(6))}")
+            out["purpose_classes"][cls] = {"n": int(len(g)), "up": int(up)}
+
+        # 直近60日の取得・処分の明細
+        acq = [a for lst in hd["acq"] for a in lst]
+        nacq = hd["acq"].map(len).to_numpy()
+        print(f"\n== 2回目: 直近60日の取得・処分の明細（AcqDisp） ==")
+        print(f"  明細のある保有者 {int((nacq > 0).sum()):,} / {len(hd):,}（{pct(int((nacq > 0).sum()), len(hd))}）・"
+              f"明細の行 {len(acq):,}・1保有者の行数 中央 {np.median(nacq[nacq > 0]) if (nacq > 0).any() else 0:.0f}・"
+              f"90% {np.quantile(nacq[nacq > 0], 0.9) if (nacq > 0).any() else 0:.0f}")
+        dicts = [a for a in acq if isinstance(a, dict)]
+        keys, filled, types = Counter(), Counter(), {}
+        for a in dicts:
+            for k, v in a.items():
+                keys[k] += 1
+                if v is not None and not (isinstance(v, float) and np.isnan(v)) and str(v).strip() != "":
+                    filled[k] += 1
+                types.setdefault(k, Counter())[type(v).__name__] += 1
+        for k, c in keys.most_common():
+            print(f"    {k}: {pct(filled[k], c)}  型 {dict(types[k])}")
+        for k in keys:
+            if NAME_LIKE.search(str(k)) or re.search(r"date|dt$|day", str(k), re.I):
+                continue                                   # 名前・日付は値を出さない（日付は下で提出日との差だけ）
+            vals = [a.get(k) for a in dicts]
+            if all(isinstance(v, (int, float, np.integer, np.floating)) or v is None for v in vals):
+                continue
+            lc = level_counts(vals)
+            if lc is not None:
+                print_counts(f"  明細の {k}", lc, len(vals))
+            else:
+                word_counts(f"  明細の {k}", vals, ACQ_WORDS)
+        # 日付らしい項目: 提出日の何日前の取引か
+        subs = d["SubDate"].reset_index(drop=True) if "SubDate" in d.columns else None
+        for k in keys:
+            if not re.search(r"date|dt$|day", str(k), re.I) or subs is None:
+                continue
+            lag = []
+            for i, lst in zip(hd["i"], hd["acq"]):
+                s0 = pd.to_datetime(subs.iloc[i], errors="coerce")
+                for a in lst:
+                    if isinstance(a, dict):
+                        t = pd.to_datetime(a.get(k), errors="coerce")
+                        if pd.notna(t) and pd.notna(s0):
+                            lag.append((s0 - t).days)
+            if lag:
+                q = np.quantile(lag, [0.1, 0.5, 0.9])
+                print(f"  明細の {k}: 提出日の何日前か 10% {q[0]:.0f}・中央 {q[1]:.0f}・90% {q[2]:.0f}日（{len(lag):,}行）")
+
+        # 候補の定義ごとの報告書の数（年ごと）
+        acq_buy = hd["acq"].map(lambda lst: any("取得" in str(a) or "買付" in str(a) for a in lst))
+        up_h = hd["move"].isin(["増えた", "新規（前回なし）"])
+        run = hd["cls"] == "運用（純投資・投資一任・顧客の資産）"
+        yy = sub.reset_index(drop=True).dt.year
+        defs = {"D1 運用目的の保有者の割合が増えた／新規": run & up_h,
+                "D2 D1 かつ直近60日の明細に取得": run & up_h & acq_buy,
+                "D3 運用目的の保有者の明細に取得（割合は問わない）": run & acq_buy}
+        print("\n== 2回目: 候補の定義ごとの報告書の数（年ごと。1報告書に当たる保有者が1人でもいれば1件） ==")
+        out["defs"] = {}
+        for name, m in defs.items():
+            docs = sorted(set(hd.loc[m, "i"]))
+            ys = Counter(int(yy.iloc[i]) for i in docs if pd.notna(yy.iloc[i]))
+            print(f"  {name}: {len(docs):,}（全報告書の {pct(len(docs), n)}）・" + " / ".join(
+                f"{y}年 {c:,}" for y, c in sorted(ys.items())))
+            out["defs"][name] = len(docs)
     return out
 
 

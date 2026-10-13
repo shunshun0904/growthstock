@@ -27,21 +27,38 @@ NAMES = ["テスト・アセットマネジメント株式会社", "テスト証
          "テスト発行体株式会社", "Test Capital Partners LLC"]
 
 
+def acq(date, kind, cpty="相手方株式会社"):
+    return {"Date": date, "AcqDispType": kind, "Mkt": "市場内", "Cpty": cpty}
+
+
 def frame():
     rows = [
         {"SubDate": "2024-03-01", "Code": "11110", "IsrName": NAMES[4], "DocTitle": "大量保有報告書",
          "TotalShsRatio": 0.0512, "TotalShsRatioLast": None, "ChgRsn": "",
-         "Hldrs": [{"HldrName": NAMES[0], "Purpose": "純投資", "ShsHeld": 1000},
-                   {"HldrName": NAMES[5], "Purpose": "純投資", "ShsHeld": 10}]},
+         "LargeHldgTypeCode": "1",
+         "Hldrs": [{"HldrName": NAMES[0], "Purpose": "純投資", "ShsHeld": 1000, "LargeHldrTypeCode": "2",
+                    "HldgPurp": "投資信託財産の運用のため", "ShsRatio": 0.04, "ShsRatioLast": None,
+                    "AcqDisp": [acq("2024-02-20", "取得")]},
+                   {"HldrName": NAMES[5], "Purpose": "純投資", "ShsHeld": 10, "LargeHldrTypeCode": "2",
+                    "HldgPurp": "純投資", "ShsRatio": 0.0112, "ShsRatioLast": None, "AcqDisp": []}]},
         {"SubDate": "2025-06-02", "Code": "22220", "IsrName": NAMES[4], "DocTitle": "変更報告書",
          "TotalShsRatio": 0.0710, "TotalShsRatioLast": 0.0601, "ChgRsn": "市場内取引による取得",
-         "Hldrs": [{"HldrName": NAMES[1], "Purpose": "貸借", "ShsHeld": 5000}]},
+         "LargeHldgTypeCode": "2",
+         "Hldrs": [{"HldrName": NAMES[1], "Purpose": "貸借", "ShsHeld": 5000, "LargeHldrTypeCode": "2",
+                    "HldgPurp": "証券業務に係る商品在庫として保有", "ShsRatio": 0.071, "ShsRatioLast": 0.0601,
+                    "AcqDisp": [acq("2025-05-28", "取得")]}]},
         {"SubDate": "2025-07-03", "Code": "22220", "IsrName": NAMES[4], "DocTitle": "変更報告書",
          "TotalShsRatio": 0.0402, "TotalShsRatioLast": 0.0710, "ChgRsn": "市場内取引による処分",
-         "Hldrs": [{"HldrName": NAMES[2], "Purpose": "政策投資", "ShsHeld": 7}]},
+         "LargeHldgTypeCode": "1",
+         "Hldrs": [{"HldrName": NAMES[2], "Purpose": "政策投資", "ShsHeld": 7, "LargeHldrTypeCode": "1",
+                    "HldgPurp": "安定株主として保有", "ShsRatio": 0.0402, "ShsRatioLast": 0.071,
+                    "AcqDisp": [acq("2025-06-30", "処分")]}]},
         {"SubDate": "2025-08-04", "Code": "33330", "IsrName": NAMES[4], "DocTitle": "変更報告書",
          "TotalShsRatio": 0.0800, "TotalShsRatioLast": 0.0700, "ChgRsn": None,
-         "Hldrs": [{"HldrName": NAMES[3], "Purpose": "重要提案行為等", "ShsHeld": 9}]},
+         "LargeHldgTypeCode": "1",
+         "Hldrs": [{"HldrName": NAMES[3], "Purpose": "重要提案行為等", "ShsHeld": 9, "LargeHldrTypeCode": "2",
+                    "HldgPurp": "顧客の資産の運用（投資一任契約）", "ShsRatio": 0.08, "ShsRatioLast": 0.07,
+                    "AcqDisp": [acq("2025-07-30", "処分")]}]},
     ]
     return pd.DataFrame(rows)
 
@@ -96,6 +113,26 @@ class Report(unittest.TestCase):
         self.assertNotIn("顧客の資産1", text)
         self.assertIn("Purpose: 文が入っている 45件", text)
         self.assertIn("純投資 42（93.3%）", text)
+        for name in NAMES:
+            self.assertNotIn(name, text)
+
+    def test_second_pass_codes_purposes_and_acquisitions(self):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            out = P.report(frame())
+        text = buf.getvalue()
+        self.assertIn("LargeHldgTypeCode（4件）", text)            # 区分のコードは値ごとの件数
+        self.assertIn("保有者の LargeHldrTypeCode（5件）", text)
+        pc = out["purpose_classes"]
+        self.assertEqual(pc["運用（純投資・投資一任・顧客の資産）"], {"n": 3, "up": 3})
+        self.assertEqual(pc["証券業務・貸借・担保"], {"n": 1, "up": 1})
+        self.assertEqual(pc["経営・安定株主・政策投資"], {"n": 1, "up": 0})
+        defs = out["defs"]
+        self.assertEqual(defs["D1 運用目的の保有者の割合が増えた／新規"], 2)        # 1件目・4件目
+        self.assertEqual(defs["D2 D1 かつ直近60日の明細に取得"], 1)                # 1件目だけ
+        self.assertEqual(defs["D3 運用目的の保有者の明細に取得（割合は問わない）"], 1)
+        self.assertIn("提出日の何日前か", text)
+        self.assertNotIn("相手方株式会社", text)                     # 明細の相手方の名前は出さない
         for name in NAMES:
             self.assertNotIn(name, text)
 
