@@ -158,9 +158,11 @@ function SampleTooltip({ active, payload, entry }) {
 function SampleChart({ c }) {
   const ch = caseChart(c);
   if (!ch.points.length) return <div className="empty">日足がありません。</div>;
+  // 線の文字は「到達」を線の上、「寄り」を線の下に置く（2本が近い銘柄でも文字がぶつからない）。recharts の横線の
+  // label は高さ0の枠に置かれるので、insideBottom… が線の上・insideTop… が線の下になる。上の余白は「到達」の文字の分
   return (
     <ResponsiveContainer width="100%" height={180}>
-      <ComposedChart data={ch.points} margin={{ top: 8, right: 6, bottom: 0, left: -8 }}>
+      <ComposedChart data={ch.points} margin={{ top: 14, right: 6, bottom: 0, left: -8 }}>
         <CartesianGrid stroke="var(--border-soft)" vertical={false} />
         <ReferenceArea x1={ch.win[0]} x2={ch.win[1]} fill="var(--accent)" fillOpacity={0.08} stroke="none"
                        ifOverflow="visible" />
@@ -173,11 +175,11 @@ function SampleChart({ c }) {
         <ReferenceLine x={ch.tPos} stroke="var(--text-faint)" strokeDasharray="2 3" />
         {Number.isFinite(c.entryPrice) && (
           <ReferenceLine y={c.entryPrice} stroke="var(--text-dim)" strokeDasharray="1 3" strokeWidth={1}
-                         label={{ value: '寄り', position: 'insideBottomLeft', fill: 'var(--text-dim)', fontSize: 10 }} />
+                         label={{ value: '寄り', position: 'insideTopLeft', fill: 'var(--text-dim)', fontSize: 10 }} />
         )}
         {Number.isFinite(c.target) && (
           <ReferenceLine y={c.target} stroke="var(--amber)" strokeDasharray="5 3" strokeWidth={1.5}
-                         label={{ value: `到達 ${fmtSigned(c.thresholdPct, 1)}`, position: 'insideTopLeft',
+                         label={{ value: `到達 ${fmtSigned(c.thresholdPct, 1)}`, position: 'insideBottomLeft',
                                   fill: 'var(--text-dim)', fontSize: 10 }} />
         )}
         {Number.isFinite(c.endLineAdopted) && (
