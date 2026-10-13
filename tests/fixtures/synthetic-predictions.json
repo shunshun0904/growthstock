@@ -194,7 +194,12 @@
    "nModels": 4,
    "bandOutcome": 1.54,
    "agreeK90": 4,
-   "nK": 8
+   "nK": 8,
+   "nextEarnDate": "2026-09-25",
+   "nextEarnQuarter": "2Q",
+   "nextEarnDays": 14,
+   "nextEarnTradingDays": 7,
+   "daysSinceDisc": 74
   },
   {
    "code": "1699",
@@ -385,7 +390,12 @@
    "nModels": 4,
    "bandOutcome": 1.54,
    "agreeK90": 0,
-   "nK": 8
+   "nK": 8,
+   "nextEarnDate": null,
+   "nextEarnQuarter": null,
+   "nextEarnDays": null,
+   "nextEarnTradingDays": null,
+   "daysSinceDisc": null
   },
   {
    "code": "1671",
@@ -576,7 +586,12 @@
    "nModels": 4,
    "bandOutcome": 1.54,
    "agreeK90": 0,
-   "nK": 8
+   "nK": 8,
+   "nextEarnDate": null,
+   "nextEarnQuarter": null,
+   "nextEarnDays": null,
+   "nextEarnTradingDays": null,
+   "daysSinceDisc": null
   },
   {
    "code": "9434",
@@ -767,7 +782,12 @@
    "nModels": 4,
    "bandOutcome": 1.54,
    "agreeK90": 3,
-   "nK": 8
+   "nK": 8,
+   "nextEarnDate": "2026-11-05",
+   "nextEarnQuarter": "2Q",
+   "nextEarnDays": 55,
+   "nextEarnTradingDays": 36,
+   "daysSinceDisc": 43
   },
   {
    "code": "9082",
@@ -954,7 +974,12 @@
    "nModels": 4,
    "bandOutcome": -0.9,
    "agreeK90": 4,
-   "nK": 7
+   "nK": 7,
+   "nextEarnDate": null,
+   "nextEarnQuarter": null,
+   "nextEarnDays": null,
+   "nextEarnTradingDays": null,
+   "daysSinceDisc": 120
   }
  ],
  "model": {

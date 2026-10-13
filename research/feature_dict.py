@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import argparse
+import glob
 import html
 import json
 import os
@@ -290,6 +291,218 @@ COL_JA = {
 }
 
 
+#: 画面に出す短い日本語名（運用者の依頼 2026-10-13「特徴量の重要度ランキングですが、実際のインプットに使用している
+#: 名前ではなく、日本語に変換してほしいです」）。決算の軸 × 接尾辞の列は AXIS_NAME と SUFFIX_NAME から組み立てる
+#: （name_ja）。それ以外の列は1列ずつ書く。定義の詳しい説明は describe（COL_JA・AXIS_JA × SUFFIX_JA）
+AXIS_NAME = {
+    "eps_growth": "EPS成長率",
+    "sales_growth": "売上成長率",
+    "eps_growth_sym": "EPS成長率・対称版",
+    "sales_growth_sym": "売上成長率・対称版",
+    "ROE": "ROE",
+    "ROA": "ROA",
+    "op_margin": "営業利益率",
+    "equity_ratio": "自己資本比率",
+}
+SUFFIX_NAME = {
+    "q0": "{axis}（直近）",
+    "q1": "{axis}（1期前）",
+    "q2": "{axis}（2期前）",
+    "q3": "{axis}（3期前）",
+    "chg1": "{axis}の変化（前期→今期）",
+    "chg2": "{axis}の変化（2期前→前期）",
+    "chg3": "{axis}の変化（3期前→2期前）",
+    "chg": "{axis}の変化（2期前→今期）",
+    "chg_3q": "{axis}の変化（3期前→今期）",
+    "accel": "{axis}の変化の加速",
+    "up_streak": "{axis}の連続増加期数",
+    "pos_ratio": "{axis}がプラスの期の割合",
+}
+NAME_JA = {
+    # 株価・高値更新
+    "r_high": "78週高値に対する終値の位置",
+    "r_high_3m": "78週高値に対する位置（3か月前）",
+    "r_high_6m": "78週高値に対する位置（6か月前）",
+    "base_length": "前回の高値更新からの営業日数",
+    "break_margin": "78週高値の上抜け幅",
+    "close_position": "日中の値幅での終値の位置",
+    "ret_20d": "20日上昇率",
+    "vol_20d": "20日ボラティリティ",
+    "volume_trend": "出来高の20日平均比",
+    "log_trading_value": "売買代金（20日平均・対数）",
+    "log_market_cap": "時価総額（対数）",
+    "credit_ratio": "信用倍率（買残÷売残）",
+    "cap_band": "時価総額の帯",
+    # 決算・バリュエーション
+    "progress_pct": "決算進捗率の過去比順位",
+    "per": "PER",
+    "pbr": "PBR",
+    "earnings_yield": "益利回り（PERの逆数）",
+    "book_yield": "PBRの逆数",
+    "psr": "PSR（株価売上高倍率）",
+    "sales_yield": "PSRの逆数",
+    "peg": "PEGレシオ",
+    "div_yield": "配当利回り",
+    "payout_ratio": "配当性向",
+    "has_dividend": "配当の有無",
+    "cfo_yield": "営業CF利回り",
+    "fcf_yield": "フリーCF利回り",
+    "cfo_to_op": "営業CF÷営業利益",
+    "accruals": "アクルーアル（利益−営業CF）",
+    "net_margin": "純利益率",
+    "ordinary_margin": "経常利益率",
+    "asset_turnover": "総資産回転率",
+    "guidance_op_growth": "会社予想営業利益の前年比",
+    "guidance_revision": "会社予想営業利益の修正率",
+    "eps_growth_turn": "EPSの黒字転換",
+    "sales_growth_turn": "売上成長率のプラス転換",
+    "fund_complete": "決算の変化がそろっているか",
+    "jq_fwdeps": "予想EPS",
+    "jq_fwdper": "予想PER",
+    "jq_fwdroe": "予想ROE",
+    "jq_fwd_earnings_yield": "予想益利回り",
+    "jq_roe_gap": "予想ROE−実績ROE",
+    "jq_per_gap": "実績PER÷予想PER",
+    "cash_mcap": "現金同等物÷時価総額",
+    "cash_chg1_sym": "現金同等物の変化（前回→今回）",
+    "cash_chg2_sym": "現金同等物の変化（2回前→前回）",
+    "cfi_mcap": "投資CF÷時価総額",
+    "cff_mcap": "財務CF÷時価総額",
+    "cfo_yoy_sym": "営業CFの前年同期比",
+    "cfo_yoy_sym_p1": "営業CFの前年同期比（1年前）",
+    "fcf_yoy_sym": "フリーCFの前年同期比",
+    "fcf_yoy_sym_p1": "フリーCFの前年同期比（1年前）",
+    "cfi_yoy_sym": "投資CFの前年同期比",
+    "cfi_yoy_sym_p1": "投資CFの前年同期比（1年前）",
+    "cff_yoy_sym": "財務CFの前年同期比",
+    "cff_yoy_sym_p1": "財務CFの前年同期比（1年前）",
+    "sustainable_growth": "サスティナブル成長率",
+    "sustainable_growth_chg1": "サスティナブル成長率の変化（前回→今回）",
+    "sustainable_growth_chg2": "サスティナブル成長率の変化（2回前→前回）",
+    "equity_turnover": "株主資本回転率",
+    "equity_turnover_chg1": "株主資本回転率の変化（前回→今回）",
+    "equity_turnover_chg2": "株主資本回転率の変化（2回前→前回）",
+    "div_growth_sym": "1株配当の前年同期比",
+    "div_growth_sym_p1": "1株配当の前年同期比（1年前）",
+    "div_up": "増配",
+    "bps_yoy": "BPSの前年同期比",
+    "bps_yoy_p1": "BPSの前年同期比（1年前）",
+    "shares_yoy": "株数の前年同期比",
+    "shares_yoy_p1": "株数の前年同期比（1年前）",
+    "acct_ifrs": "会計基準（IFRS等なら1）",
+    # 業種・市場区分
+    "s33_code": "東証33業種",
+    "s17_code": "東証17業種",
+    "scalecat_code": "規模区分（TOPIX Core30 など）",
+    "mkt_code": "市場区分",
+    "listing_years": "一般市場への上場からの年数",
+    # 地合い・業種の動き
+    "sector_ret_20": "業種指数の20日リターン",
+    "sector_ret_120": "業種指数の120日リターン",
+    "rel_sector_20": "業種に対する20日の超過リターン",
+    "sector_vs_topix_20": "業種のTOPIXに対する20日の超過",
+    "topix_ret_20": "TOPIXの20日リターン",
+    "topix_ret_120": "TOPIXの120日リターン",
+    "topix_vol_20": "TOPIXの20日ボラティリティ",
+    "topix_ma200_gap": "TOPIXの200日線からの乖離",
+    "nk225_ret_20": "日経225の20日リターン",
+    "nk225_ret_120": "日経225の120日リターン",
+    "gold_ret_20": "金価格の20日リターン",
+    "gold_ret_120": "金価格の120日リターン",
+    "growth250_ret_20": "グロース250の20日リターン",
+    "growth250_ret_120": "グロース250の120日リターン",
+    "risk_off_20": "金−TOPIXの20日リターン差",
+    # 開示・イベントのタイミング
+    "days_since_disc": "前回の決算開示からの日数",
+    "days_since_fy": "前回の通期決算からの日数",
+    "days_to_earn": "次の決算発表までの日数",
+    "days_since_rev": "前回の業績予想修正からの日数",
+    "rev_pct": "業績予想の修正幅",
+    "rev_up": "業績予想の修正の向き（上方=1）",
+    "rev_n_60": "業績予想の修正回数（60日）",
+    "rev_n_250": "業績予想の修正回数（250日）",
+    "rev_up_n_250": "上方修正の回数（250日）",
+    "rev_dn_n_250": "下方修正の回数（250日）",
+    "days_since_divrev": "前回の配当予想修正からの日数",
+    # 大量保有・大株主・政策保有
+    "lvs_days": "前回の大量保有報告からの日数",
+    "lvs_ratio": "大量保有報告の保有割合",
+    "lvs_ratio_chg": "大量保有の保有割合の変化",
+    "lvs_n_20": "大量保有報告の件数（20日）",
+    "lvs_n_60": "大量保有報告の件数（60日）",
+    "lvs_n_250": "大量保有報告の件数（250日）",
+    "mjr_days": "前回の大株主情報からの日数",
+    "mjr_top1": "筆頭株主の保有割合",
+    "mjr_top10": "上位10大株主の保有割合",
+    "mjr_n": "大株主の人数",
+    "mjr_conc": "筆頭株主への集中度",
+    "mjr_trust": "信託・カストディ名義の保有割合",
+    "mjr_indiv": "法人名に見えない大株主の保有割合",
+    "xh_days": "前回の政策保有株の開示からの日数",
+    "xh_iss": "政策保有株の銘柄数",
+    "xh_bookval": "政策保有株の計上額",
+    "xh_dec_amt": "政策保有株の売却額",
+    "xh_inc_cost": "政策保有株の取得額",
+    "xh_net": "政策保有株の増減額",
+    "xh_bookval_mc": "政策保有株の計上額÷時価総額",
+    "xh_net_mc": "政策保有株の増減÷時価総額",
+    # 需給（規制・空売り・投資部門別）
+    "alert_days": "前回の規制・警報からの日数",
+    "alert_longoutratio": "規制・警報時の信用買残の比率",
+    "alert_shrtoutratio": "規制・警報時の信用売残の比率",
+    "alert_slratio": "規制・警報時の売残÷買残",
+    "short_ratio": "空売り比率（その他業種）",
+    "short_ratio_20": "空売り比率の20日平均からの乖離",
+    "inv_foreign": "投資部門別：外国人の差引",
+    "inv_foreign_4w": "投資部門別：外国人の差引（4週）",
+    "inv_trust": "投資部門別：投資信託の差引",
+    "inv_trust_4w": "投資部門別：投資信託の差引（4週）",
+    "inv_indiv": "投資部門別：個人の差引",
+    "inv_indiv_4w": "投資部門別：個人の差引（4週）",
+    "inv_prop": "投資部門別：証券自己の差引",
+    "inv_prop_4w": "投資部門別：証券自己の差引（4週）",
+    "inv_busco": "投資部門別：事業法人の差引",
+    "inv_busco_4w": "投資部門別：事業法人の差引（4週）",
+    # ボラティリティの形
+    "vol_rel_long": "ボラティリティの長期比（20日÷120日）",
+    "vol_rel_mkt": "ボラティリティのTOPIX比",
+    "vol_rel_sector": "ボラティリティの業種比",
+    "vol_updown": "上昇日と下落日のボラティリティ比",
+    "vol_rel_short": "ボラティリティの短期比（5日÷20日）",
+    "vol_gap_ratio": "寄り付きギャップと日中値幅のボラティリティ比",
+}
+
+
+def name_ja(col: str) -> str:
+    """画面に出す短い日本語名。決算の軸 × 接尾辞は組み立て、それ以外は NAME_JA。無ければ元の列名のまま。"""
+    if col in NAME_JA:
+        return NAME_JA[col]
+    for axis in sorted(AXIS_NAME, key=len, reverse=True):
+        if col.startswith(axis + "_"):
+            suf = col[len(axis) + 1:]
+            if suf in SUFFIX_NAME:
+                return SUFFIX_NAME[suf].format(axis=AXIS_NAME[axis])
+    return col
+
+
+def known_columns(model_dir: str = os.path.join(HERE, "model")) -> List[str]:
+    """名前を出す列: 本番と並べているモデルの特徴量（meta.json・models/<名前>/meta.json）と、辞書にある列の和。"""
+    cols = set(COL_JA) | set(NAME_JA) | {f"{a}_{s}" for a in AXIS_NAME for s in SUFFIX_NAME}
+    for path in [os.path.join(model_dir, "meta.json")] + sorted(
+            glob.glob(os.path.join(model_dir, "models", "*", "meta.json"))):
+        try:
+            with open(path, encoding="utf-8") as fh:
+                cols |= set(json.load(fh).get("features") or [])
+        except (OSError, ValueError):
+            continue
+    return sorted(cols)
+
+
+def names_payload(cols: List[str]) -> Dict[str, Dict[str, str]]:
+    """画面用の {列名: {name: 短い日本語名, desc: 説明}}（public/data/feature_names.json）。"""
+    return {c: {"name": name_ja(c), "desc": describe(c).replace("**", "")} for c in cols}
+
+
 def describe(col: str) -> str:
     """列名から説明を組み立てる。決算系は 軸 × 接尾辞 で決まる。"""
     if col in COL_JA:
@@ -392,7 +605,17 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="特徴量辞書のページを作る")
     ap.add_argument("--eda", default=os.path.join(HERE, "eda.json"))
     ap.add_argument("--out", default=os.path.join(HERE, "feature_dict.html"))
+    ap.add_argument("--names-json", default=None,
+                    help="画面用の日本語名を書き出すだけ（例: public/data/feature_names.json）")
     args = ap.parse_args(argv)
+
+    if args.names_json:
+        payload = names_payload(known_columns())
+        with open(args.names_json, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False, indent=0, sort_keys=True)
+            fh.write("\n")
+        print(f"[done] {args.names_json}（{len(payload)}列）")
+        return 0
 
     stats = None
     if os.path.exists(args.eda):

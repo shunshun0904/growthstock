@@ -151,6 +151,24 @@ check(detail.includes('上位10%と見たモデル') && detail.includes('2/4') &
       '詳細に上位10%と見たモデルの数（本番・ラベル違い）が出る');
 check(detail.includes('実験82'), '詳細に「1.5σ・1.8σ も95以上」を足しても安定しない（実験82）と出る');
 check(!detail.includes('12本の合意'), '詳細にも12本の合意（平均）は出さない');
+// 次の決算発表（予測日までに公表済みの予定）。合成データの1件目は7営業日後（持つ20営業日の中 → 黄）、
+// 4件目は36営業日後（灰）、ほかは未公表（灰）。帯に「20営業日以内に決算 1 / 5」
+const earnBadges = page.locator('.pred-list .pred-earn');
+check((await earnBadges.count()) === 5, `次の決算の印が全件に出る (実際: ${await earnBadges.count()})`);
+const firstEarn = page.locator('.pred-row').first().locator('.pred-earn');
+check(((await firstEarn.textContent()) || '').includes('決算 7営業日後')
+      && ((await firstEarn.getAttribute('class')) || '').includes('amber'), '1件目は「決算 7営業日後」で黄');
+const strip = (await page.textContent('.pred-strip')) || '';
+check(strip.includes('20営業日以内に決算') && /1\s*\/\s*5/.test(strip), '帯に「20営業日以内に決算 1 / 5」が出る');
+check(((await page.textContent('.pred-detail')) || '').includes('次の決算発表 2026/09/25（第2四半期）'),
+      '詳細に次の決算発表の日付と四半期が出る');
+
+// 効いた特徴量は日本語名で出す（public/data/feature_names.json。元の列名はホバーの説明に添える）
+const featNames = await page.locator('.pred-detail .pred-feats .pred-b .k').allTextContents();
+check(featNames.length > 0 && featNames[0] === '20日ボラティリティ' && !featNames.some((t) => /_/.test(t)),
+      `効いた特徴量が日本語名で出る (実際: ${featNames.slice(0, 3).join(' / ')})`);
+const featTitle = await page.locator('.pred-detail .pred-feats .pred-b').first().getAttribute('title');
+check((featTitle || '').includes('（vol_20d）'), 'ホバーの説明に元の列名が添えてある');
 const borderNote = await page.textContent('.pred-detail .pred-border-note');
 check((borderNote || '').includes('1.5σ の3本で見た際どい候補') && (borderNote || '').includes('+1.6%（141件）'),
       '詳細の先頭に際どい候補の注意（1.5σ の3本）が出る');

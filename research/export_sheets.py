@@ -85,6 +85,11 @@ AGREE_COL = "一致(上位10%)"
 AGREE_K_COL = "ラベル違い一致(上位10%)"
 AGREE_COLS = [AGREE_COL, AGREE_K_COL]
 
+#: 次の決算発表（予測日までに公表済みの予定。predict_daily.next_earnings）と前回の開示からの日数。
+#: 運用者の依頼 2026-10-13「予測が実質的に、次の決算の予測になっていないか確認するために、次の決算発表までの日数も
+#: どこかに表示してほしい」。追記するときに一度だけ書く（2026-10-13 より前の行は空のまま）
+EARN_COLS = ["次の決算日", "次の決算まで営業日", "前回開示からの日数"]
+
 #: 既存の「スコア」列は基準モデル（LightGBM）の生スコアで、LGBスコアと同じ値。
 #: 運用開始時から入っている列なので、過去行との連続性のために残す。
 
@@ -161,6 +166,9 @@ def rows_from_predictions(pred: Dict) -> List[Dict]:
             AGREE_COL: (f"{c['agree90']}/{c['nModels']}"
                         if c.get("nModels") else None),
             AGREE_K_COL: (f"{c['agreeK90']}/{c['nK']}" if c.get("nK") else None),
+            "次の決算日": c.get("nextEarnDate"),
+            "次の決算まで営業日": c.get("nextEarnTradingDays"),
+            "前回開示からの日数": c.get("daysSinceDisc"),
             "_jqCode": c["jqCode"],
         })
     return out
@@ -405,7 +413,7 @@ def ensure_worksheet(book, title: str):
     except Exception:
         pass
     header = (OWNED_COLS + MODEL_COLS + SCORE_COLS + AGREE_COLS + ENTRY_COLS
-              + TRACK_COLS + USER_COLS)
+              + TRACK_COLS + USER_COLS + EARN_COLS)
     ws = book.add_worksheet(title=title, rows=2000, cols=max(30, len(header) + 5))
     ws.update([header], "A1")
     ws.freeze(rows=1)
@@ -425,7 +433,7 @@ def ensure_columns(ws, header: List[str], dry_run: bool = False) -> List[str]:
     既存の中身に触らない。並び順が気になるときは利用者が手で動かしてよい
     （名前を変えなければ、そのまま正しく書き込まれる）。
     """
-    want = OWNED_COLS + MODEL_COLS + SCORE_COLS + AGREE_COLS + ENTRY_COLS + TRACK_COLS
+    want = OWNED_COLS + MODEL_COLS + SCORE_COLS + AGREE_COLS + ENTRY_COLS + TRACK_COLS + EARN_COLS
     missing = [c for c in want if c not in header]
     if not missing:
         return header

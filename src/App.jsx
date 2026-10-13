@@ -11,7 +11,7 @@ import {
   loadDataset, loadManualStocks, saveManualStocks, loadVisibility, saveVisibility,
   manualStockFromForm, mergeStocks, resetSavedState,
 } from './lib/store.js';
-import { loadPredictions, loadHistory, loadFilings } from './lib/predictions.js';
+import { loadPredictions, loadHistory, loadFilings, loadFeatureNames } from './lib/predictions.js';
 
 const TABS = [
   { id: 'prediction', label: 'ブレイク予測' },
@@ -37,6 +37,7 @@ export default function App() {
   const [predError, setPredError] = useState(null);
   const [history, setHistory] = useState({ entries: [] });
   const [filings, setFilings] = useState(null);
+  const [featureNames, setFeatureNames] = useState({});
   const [tab, setTab] = useState('prediction');
   const [visibleIds, setVisibleIds] = useState(() => new Set());
   const [selectedId, setSelectedId] = useState(null);
@@ -60,6 +61,8 @@ export default function App() {
     loadHistory().then((h) => { if (!cancelled) setHistory(h); });
     // 有報・半期報告書（EDINET）。無ければ null のまま（タブは「取り込み待ち」と出す）
     loadFilings().then((f) => { if (!cancelled) setFilings(f); });
+    // 特徴量の日本語名（効いた特徴量の表示）。読めなければ元の列名のまま
+    loadFeatureNames().then((n) => { if (!cancelled) setFeatureNames(n); });
     return () => { cancelled = true; };
   }, []);
 
@@ -258,7 +261,7 @@ export default function App() {
             <div className="empty">予測データを読み込んでいます…</div>
           ) : (
             <PredictionView
-              data={pred} history={history}
+              data={pred} history={history} featureNames={featureNames}
               onSendToOctagon={sendToOctagon}
               sentIds={new Set(manual.map((s) => s.id))}
             />

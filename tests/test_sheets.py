@@ -279,7 +279,7 @@ class TestSync(unittest.TestCase):
         before = ws.col_count
         ES.sync(ws, ES.rows_from_predictions(PRED), {}, None)
         want = (len(self.OLD_HEADER) + len(ES.MODEL_COLS) + len(ES.SCORE_COLS) + len(ES.AGREE_COLS)
-                + len(ES.ENTRY_COLS))
+                + len(ES.ENTRY_COLS) + len(ES.EARN_COLS))
         self.assertGreaterEqual(ws.col_count, want,
                                 f"器が広がっていない（{before} のまま）")
         self.assertEqual(len(ws.values[0]), want)
@@ -292,7 +292,7 @@ class TestSync(unittest.TestCase):
 
     def test_header_is_not_touched_when_nothing_is_missing(self):
         header = (ES.OWNED_COLS + ES.MODEL_COLS + ES.SCORE_COLS
-                  + ES.AGREE_COLS + ES.ENTRY_COLS + ES.TRACK_COLS + ES.USER_COLS)
+                  + ES.AGREE_COLS + ES.ENTRY_COLS + ES.TRACK_COLS + ES.USER_COLS + ES.EARN_COLS)
         ws = FakeWorksheet([header])
         ES.sync(ws, ES.rows_from_predictions(PRED), {}, None)
         self.assertEqual(ws.updates, [], "見出しを不要に書き換えた")
@@ -388,8 +388,8 @@ class TestNextOpen(unittest.TestCase):
         ES.sync(ws, [], pd.Series({"12340": 1100.0}), pd.Timestamp("2026-09-24"),
                 cal=self.cal(), opens=self.BARS)
         header = ws.values[0]
-        # 見出しの右端に足している（記入欄は動かない）
-        self.assertEqual(header[-1], "翌営業日始値")
+        # 見出しの右端に足している（記入欄は動かない）。次の決算の列（EARN_COLS。2026-10-13）はその後ろ
+        self.assertEqual(header[-(len(ES.EARN_COLS) + 1):], ["翌営業日始値"] + ES.EARN_COLS)
         self.assertLess(header.index("メモ"), header.index("翌営業日始値"))
         wrote = self._written(ws)
         self.assertEqual(wrote.get((2, "翌営業日始値")), 1010.0)

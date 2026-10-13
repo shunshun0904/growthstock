@@ -10,6 +10,7 @@
   ・その日の候補一覧（順位・スコア・較正確率・スコア帯の実績）
   ・銘柄ごとの寄与分解（何がスコアを押し上げ／押し下げたか）
   ・モデルの素性（学習日・訓練期間・パラメータ・CV スコア）
+  ・候補ごとの次の決算発表の予定（next_earnings。予測日までに公表済みのもの）と、前回の決算開示からの日数
   ・直近5営業日を画面で切り替えられる。**過去の日は、その日に出した値のまま**（freeze_past_days。
     運用者の指示 2026-10-12「過去の日は最初に出した値のまま固定してください」）。採点するのは新しい日だけで、
     日ごとにどのモデル（学習日）でいつ出した値かを dayInfo に残す
@@ -115,6 +116,50 @@ def name_map(data_dir: str) -> pd.DataFrame:
     return m[keep].drop_duplicates("Code")
 
 
+def next_earnings(keys, data_dir: str, cal=None) -> Dict[Tuple[str, str], Dict]:
+    """
+    候補ごとの次の決算発表予定（運用者の依頼 2026-10-13「予測が実質的に、次の決算の予測になっていないか確認するために、
+    次の決算発表までの日数もどこかに表示してほしい」）。
+
+    特徴量 days_to_earn（extra_features.earnings_ahead）と同じ規則: 予測日までに公表済み（PubDate ≤ 予測日）で、
+    予測日以降（SchDate ≥ 予測日）の予定のうち一番早いもの。予定日は J-Quants の決算発表予定日（/fins/earnings-date）。
+    keys: (jqCode, ISO の日付) の並び。戻り値: {(jqCode, 日付): {"date", "quarter", "days", "tradingDays"}}。
+      days = 暦日、tradingDays = 予測日から発表日までの営業日（予測日の翌営業日に発表なら 1、予測日に発表なら 0。
+      カレンダーが覆わない先は平日で数える）。予定が公表されていない銘柄は入れない。
+    """
+    import extra_features as XF
+
+    d = XF._read("earndate", data_dir, columns=["PubDate", "SchDate", "FQName", "Code"])
+    if d.empty or not {"PubDate", "SchDate", "Code"} <= set(d.columns):
+        return {}
+    d = d.copy()
+    d["Code"] = d["Code"].astype(str)
+    d["PubDate"] = pd.to_datetime(d["PubDate"], errors="coerce")
+    d["SchDate"] = pd.to_datetime(d["SchDate"], errors="coerce")
+    d = d.dropna(subset=["PubDate", "SchDate", "Code"])
+    left = pd.DataFrame(list(dict.fromkeys((str(c), str(t)) for c, t in keys)), columns=["Code", "Date"])
+    if left.empty or d.empty:
+        return {}
+    left["_d"] = pd.to_datetime(left["Date"])
+    j = left.merge(d, on="Code", how="inner")
+    j = j[(j["PubDate"] <= j["_d"]) & (j["SchDate"] >= j["_d"])]
+    if j.empty:
+        return {}
+    j = j.sort_values(["Code", "_d", "SchDate"]).drop_duplicates(["Code", "Date"], keep="first")
+    out = {}
+    for code, day, dd, sd, q in zip(j["Code"], j["Date"], j["_d"], j["SchDate"], j.get("FQName", [None] * len(j))):
+        d0, d1 = dd.date(), sd.date()
+        out[(code, day)] = {"date": d1.isoformat(), "quarter": (str(q) if q is not None and not pd.isna(q) else None),
+                            "days": int((d1 - d0).days), "tradingDays": int(TC.elapsed_days(d0, d1, cal))}
+    return out
+
+
+def feature_desc(col: str) -> str:
+    """特徴量の説明（feature_dict.describe）。説明が無い列は空。"""
+    d = FD.describe(col)
+    return "" if d == "（説明未登録）" else d.replace("**", "")
+
+
 def contributions(booster, X: np.ndarray, cols: List[str]) -> List[Dict]:
     """
     TreeSHAP による寄与分解。LightGBM の pred_contrib で厳密に出る。
@@ -129,7 +174,8 @@ def contributions(booster, X: np.ndarray, cols: List[str]) -> List[Dict]:
         c = raw[i, :-1]
         base = float(raw[i, -1])
         order = np.argsort(-np.abs(c))
-        top = [{"col": cols[j], "ja": FD.COL_JA.get(cols[j], ""),
+        # name: 画面に出す短い日本語名、ja: 説明（どちらも research/feature_dict.py。決算の軸 × 接尾辞の列にも付く）
+        top = [{"col": cols[j], "name": FD.name_ja(cols[j]), "ja": feature_desc(cols[j]),
                 "contrib": round(float(c[j]), 4)}
                for j in order[:N_CONTRIB * 2] if abs(c[j]) > 1e-9]
         groups: Dict[str, float] = {}
@@ -440,6 +486,8 @@ def main(argv=None) -> int:
             "progressBenchmark": r(pf.get("progressBenchmark")),
             "progressBasis": pf.get("progressBasis"),
             "high52w": r(s.get("high52w"), 1),
+            # 前回の決算開示からの日数（特徴量 days_since_disc。暦日・上限400）。次の決算の予定が未公表のときの手がかり
+            "daysSinceDisc": r(s.get("days_since_disc"), 0),
             # --- 内部挙動 --- #
             "contrib": contrib[i],
         })
@@ -520,6 +568,20 @@ def main(argv=None) -> int:
     # 表示順・順位はどちらも基準モデルのスコア（上の rank_in_day と同じ）。
     # 帯・較正・追跡ファイルも基準モデル基準なので、ここだけ別の物差しで
     # 並べると、同じ行の中で順位と帯が食い違う
+    # 次の決算発表の予定（公表済みのものだけ）。予測が実質的に次の決算の予測になっていないかを見るため
+    earn = next_earnings([(x["jqCode"], x["date"]) for x in rows], args.data_dir, TC.load(args.data_dir))
+    for x in rows:
+        e = earn.get((x["jqCode"], x["date"])) or {}
+        x["nextEarnDate"] = e.get("date")
+        x["nextEarnQuarter"] = e.get("quarter")
+        x["nextEarnDays"] = e.get("days")
+        x["nextEarnTradingDays"] = e.get("tradingDays")
+    latest_rows = [x for x in rows if x["date"] == pd.Timestamp(days[-1]).date().isoformat()]
+    soon = sum(1 for x in latest_rows if x["nextEarnTradingDays"] is not None
+               and x["nextEarnTradingDays"] <= B.RISE_HORIZON)
+    print(f"[earn] 最新の日の候補 {len(latest_rows)}件: 決算の予定が公表済み "
+          f"{sum(1 for x in latest_rows if x['nextEarnDate'])}件・{B.RISE_HORIZON}営業日以内に発表 {soon}件")
+
     # 過去の日は、前に出した値のまま（freeze_past_days）。採点し直したのは新しい日だけを使う
     generated_at = pd.Timestamp.utcnow().isoformat()
     out_path = os.path.join(args.out_dir, "predictions.json")

@@ -43,6 +43,33 @@ export async function loadPredictions() {
 }
 
 const FILINGS_URL = () => `${base()}data/filings.json?v=${BUILD}`;
+const NAMES_URL = () => `${base()}data/feature_names.json?v=${BUILD}`;
+
+/**
+ * 特徴量の日本語名（public/data/feature_names.json。research/feature_dict.py --names-json が書く）。
+ * {列名: {name: 短い日本語名, desc: 説明}}。読めなければ空（画面は元の列名のまま出す）。
+ */
+export async function loadFeatureNames() {
+  try {
+    const d = await getJson(NAMES_URL());
+    return d && typeof d === 'object' ? d : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * 寄与の行（contrib.top の1件）に出す名前と、ホバーで出す説明。
+ * 日本語名は feature_names.json → 行の name（predict_daily が付ける）→ 元の列名 の順で探す。
+ * 説明は feature_names.json の desc → 行の ja。説明の末尾に元の列名を添える（モデルの入力の名前と突き合わせるため）。
+ */
+export function featureLabel(t, names) {
+  const col = t?.col ?? '';
+  const entry = names?.[col];
+  const name = entry?.name || t?.name || col;
+  const desc = String(entry?.desc || t?.ja || '').replace(/\*\*/g, '');
+  return { name, title: desc ? `${desc}（${col}）` : col, translated: name !== col };
+}
 
 /**
  * 有報・半期報告書の損益（public/data/filings.json。Fetch Filings が EDINET から作る）。
@@ -315,4 +342,49 @@ export function dayOrigin(data, day) {
     generatedAt: info?.generatedAt || null,
     sameModel: trainedAt === current,
   };
+}
+
+/** 決算の四半期の呼び名（J-Quants の決算発表予定日の FQName） */
+export const QUARTER_JA = { FY: '通期', '1Q': '第1四半期', '2Q': '第2四半期', '3Q': '第3四半期' };
+
+/**
+ * 次の決算発表の予定（research/predict_daily.py の next_earnings。予測日までに公表済みの予定だけ）。
+ * 運用者の依頼 2026-10-13「予測が実質的に、次の決算の予測になっていないか確認するために、次の決算発表までの日数も
+ * どこかに表示してほしい」。horizon は買ってから持つ営業日（売りのルールの20営業日）。
+ *   known       予定が公表済みか
+ *   inWindow    発表日が予測日から horizon 営業日以内（買ってから持つ間に決算が来る）
+ *   label/tone  行に出す短い印。text は詳しい文言
+ * この項目が無い予測ファイル（その日に出した値のまま固定した過去の日など）は null。
+ */
+export function earningsNote(c, horizon = 20) {
+  if (!c || !Object.prototype.hasOwnProperty.call(c, 'nextEarnDate')) return null;
+  const k = c.nextEarnTradingDays;
+  if (c.nextEarnDate && Number.isFinite(k)) {
+    const q = QUARTER_JA[c.nextEarnQuarter] || c.nextEarnQuarter || '';
+    const inWindow = k <= horizon;
+    const when = k === 0 ? '予測日の当日' : `${k}営業日後`;
+    return {
+      known: true, inWindow, tradingDays: k,
+      label: k === 0 ? '決算 当日' : `決算 ${k}営業日後`,
+      tone: inWindow ? 'amber' : 'slate',
+      text: `次の決算発表 ${String(c.nextEarnDate).replace(/-/g, '/')}${q ? `（${q}）` : ''}: ${when}`
+        + `${Number.isFinite(c.nextEarnDays) ? `・${c.nextEarnDays}日後` : ''}。`
+        + (inWindow ? `買ってから${horizon}営業日の中に入る（決算の結果で動きうる）`
+          : `買ってから${horizon}営業日より先`),
+    };
+  }
+  const since = Number.isFinite(c.daysSinceDisc) ? `前回の決算開示から ${c.daysSinceDisc}日。` : '';
+  return {
+    known: false, inWindow: false, tradingDays: null, label: '決算予定 未公表', tone: 'slate',
+    text: '次の決算発表の予定は、予測日までに公表されていない（今年の予定では9割が発表の32日以上前に公表されている）。'
+      + since,
+  };
+}
+
+/** その日の候補のうち、次の決算が horizon 営業日以内の件数。項目の無いファイルなら null。 */
+export function earningsSummary(rows, horizon = 20) {
+  const notes = (Array.isArray(rows) ? rows : []).map((c) => earningsNote(c, horizon)).filter(Boolean);
+  if (!notes.length) return null;
+  return { total: notes.length, known: notes.filter((n) => n.known).length,
+           soon: notes.filter((n) => n.inWindow).length };
 }

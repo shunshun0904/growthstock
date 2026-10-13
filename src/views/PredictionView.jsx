@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { fmt, fmtInt, fmtSigned, fmtOku, fmtDate, fmtDateTime, DASH } from '../lib/format.js';
 import { bandColor, bandLabel, pctColor, pctInk, PCT_LEGEND, modelRows, modelGrid, MODEL_SHORT, MODEL_FAMILY,
-  FAMILY_JA, marketTone, candidateToStock, dayOrigin } from '../lib/predictions.js';
+  FAMILY_JA, marketTone, candidateToStock, dayOrigin, featureLabel, earningsNote, earningsSummary,
+} from '../lib/predictions.js';
 import { STRATEGY, RULE_MODELS, RULE_JA, BORDER, strategySignal, exitPlan, nearMisses,
          MODEL_JA, fundContrib, frozenNote, borderNote,
 } from '../lib/strategy.js';
@@ -23,7 +24,7 @@ import { STRATEGY, RULE_MODELS, RULE_JA, BORDER, strategySignal, exitPlan, nearM
  * byModel が無い予測ファイル（5モデルを学習する前のもの）でも壊れないよう、
  * 基準モデル1本の表示に落ちる作りにしてある。
  */
-export default function PredictionView({ data, history, onSendToOctagon, sentIds }) {
+export default function PredictionView({ data, history, featureNames, onSendToOctagon, sentIds }) {
   const dates = data?.dates || [];
   const [day, setDay] = useState(() => data?.asOf || dates[dates.length - 1]);
   const [openId, setOpenId] = useState(null);
@@ -40,6 +41,8 @@ export default function PredictionView({ data, history, onSendToOctagon, sentIds
   const m = data?.model || {};
   // 過去の日は、その日に出した値のまま（research/predict_daily.py の freeze_past_days。dayInfo にその日のモデルの学習日）
   const origin = useMemo(() => dayOrigin(data, day), [data, day]);
+  // 次の決算が持つ間（売りのルールの営業日）に来る候補の数。予測が実質的に決算の予測になっていないかを見る
+  const earn = useMemo(() => earningsSummary(rows, STRATEGY.holdDays), [rows]);
 
   return (
     <div className="pred">
@@ -77,6 +80,14 @@ export default function PredictionView({ data, history, onSendToOctagon, sentIds
               <span className={`badge ${tone.tone}`}>{tone.label}</span>
             ) : DASH}
           </div>
+          {earn && (
+            <div title={`次の決算発表の予定（予測日までに公表済みのもの）が、予測日から${STRATEGY.holdDays}営業日以内の候補の数。`
+                        + '多いほど、予測が次の決算の結果に左右されやすい'}>
+              <span className="lab">{STRATEGY.holdDays}営業日以内に決算</span>
+              <strong className="num">{earn.soon}</strong> / {earn.total} 銘柄
+              <span className="sub">（予定が未公表 {earn.total - earn.known}）</span>
+            </div>
+          )}
           <div>
             <span className="lab">モデル</span>
             <span className="num">{fmtDate(origin.trainedAt)}</span> 学習
@@ -116,7 +127,7 @@ export default function PredictionView({ data, history, onSendToOctagon, sentIds
 
         <div className="pred-list">
           {rows.map((c) => (
-            <Row key={c.jqCode} c={c} models={data?.models} open={openId === c.jqCode}
+            <Row key={c.jqCode} c={c} models={data?.models} featureNames={featureNames} open={openId === c.jqCode}
                  onToggle={() => setOpenId(openId === c.jqCode ? null : c.jqCode)}
                  onSend={() => onSendToOctagon(candidateToStock(c))}
                  sent={sentIds?.has(`pred:${c.jqCode}`)} />
@@ -303,6 +314,7 @@ function PickCard({ c, n, models, onSend, sent }) {
           <span className="sub num">{c.code}</span>
           {c.sector && <span className="sub">{c.sector}</span>}
           <BorderBadge c={c} />
+          <EarnBadge c={c} />
         </span>
         <button className="btn btn-primary" onClick={onSend} disabled={sent}>
           {sent ? '送信済み' : '8軸で見る'}
@@ -359,9 +371,23 @@ function BorderBadge({ c }) {
   );
 }
 
+/**
+ * 次の決算発表の印（research/predict_daily.py の next_earnings。予測日までに公表済みの予定）。
+ * 買ってから持つ間（売りのルールの営業日）に発表が来るなら黄、それより先・未公表なら灰。詳しい文言は title。
+ */
+function EarnBadge({ c }) {
+  const n = earningsNote(c, STRATEGY.holdDays);
+  if (!n) return null;
+  return (
+    <span className={`badge ${n.tone} pred-warn pred-earn`} title={n.text}>
+      {n.label}
+    </span>
+  );
+}
+
 /* ------------------------------------------------------------------ 候補1件 */
 
-function Row({ c, models, open, onToggle, onSend, sent }) {
+function Row({ c, models, featureNames, open, onToggle, onSend, sent }) {
   const color = bandColor(c.band);
   const mr = modelRows(c, models);
   return (
@@ -380,6 +406,7 @@ function Row({ c, models, open, onToggle, onSend, sent }) {
             </span>
           )}
           <BorderBadge c={c} />
+          <EarnBadge c={c} />
         </span>
         {mr.length > 0 ? (
           <span className="pred-ms">
@@ -413,7 +440,7 @@ function Row({ c, models, open, onToggle, onSend, sent }) {
         </span>
       </button>
 
-      {open && <Detail c={c} models={models} onSend={onSend} sent={sent} />}
+      {open && <Detail c={c} models={models} featureNames={featureNames} onSend={onSend} sent={sent} />}
     </div>
   );
 }
@@ -472,6 +499,8 @@ function ModelGrid({ c, models, large = false }) {
 }
 
 const NUMS = [
+  ['次の決算発表', (c) => earningsNote(c, STRATEGY.holdDays)?.text ?? DASH],
+  ['前回の決算開示から', (c) => fmtInt(c.daysSinceDisc, '日')],
   ['株価', (c) => fmtInt(c.close, '円')],
   ['時価総額', (c) => fmtOku(c.marketCap)],
   ['売買代金(20日平均)', (c) => fmt(c.tradingValue, 2, '億円/日')],
@@ -489,7 +518,7 @@ const NUMS = [
   ['売上成長', (c) => fmtSigned(c.salesGrowth, 1)],
 ];
 
-function Detail({ c, models, onSend, sent }) {
+function Detail({ c, models, featureNames, onSend, sent }) {
   const g = c.contrib?.groups || {};
   const maxAbs = Math.max(...Object.values(g).map(Math.abs), 0.001);
   const top = (c.contrib?.top || []).slice(0, 10);
@@ -580,17 +609,20 @@ function Detail({ c, models, onSend, sent }) {
 
         <div>
           <h4>効いた特徴量</h4>
-          <div className="pred-bars">
-            {top.map((t) => (
-              <div key={t.col} className="pred-b" title={t.ja || t.col}>
-                <span className="k mono">{t.col}</span>
+          <div className="pred-bars pred-feats">
+            {top.map((t) => {
+              const lb = featureLabel(t, featureNames);
+              return (
+              <div key={t.col} className="pred-b" title={lb.title}>
+                <span className={`k${lb.translated ? '' : ' mono'}`}>{lb.name}</span>
                 <span className="t">
                   <i className={t.contrib >= 0 ? 'pos' : 'neg'}
                      style={{ width: `${(Math.abs(t.contrib) / maxTop) * 100}%` }} />
                 </span>
                 <span className="v num">{fmtSigned(t.contrib, 3, '')}</span>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
 

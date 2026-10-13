@@ -7,13 +7,15 @@
  * - 表の形（modelGrid）: 行 = ラベル（1.2σ / 1.5σ / 1.8σ）、列 = 学習器。無いモデルのマスは null。古い予測ファイルは1行
  * - マスの字の色（pctInk）: 明るい区分（60 以上）は暗い字、暗い区分は明るい字
  * - 選んだ日の値の素性（dayOrigin）: 過去の日は dayInfo のモデルの学習日と出した時刻。dayInfo が無ければ今のモデル
+ * - 効いた特徴量の名前（featureLabel）: feature_names.json の日本語名 → 行の name → 元の列名。説明に元の列名を添える
+ * - 次の決算発表（earningsNote / earningsSummary）: 持つ間（20営業日）に来るなら黄。未公表・項目の無いファイル
  *
  *   node --test tests/predictions.test.js
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { modelRows, modelGrid, pctInk, MODEL_SHORT, MODEL_FAMILY, FAMILY_JA, LABEL_JA, dayOrigin }
-  from '../src/lib/predictions.js';
+import { modelRows, modelGrid, pctInk, MODEL_SHORT, MODEL_FAMILY, FAMILY_JA, LABEL_JA, dayOrigin, featureLabel,
+  earningsNote, earningsSummary } from '../src/lib/predictions.js';
 
 const models = [
   { algo: 'lgbm', name: 'LightGBM', short: 'LGB' },
@@ -123,4 +125,50 @@ test('dayOrigin: 過去の日は、その日に出した値のモデル（dayInf
   const old = dayOrigin({ asOf: '2026-09-11', model: { trainedAt: 't' } }, '2026-09-10');
   assert.deepEqual(old, { past: true, trainedAt: 't', generatedAt: null, sameModel: true });
   assert.equal(dayOrigin(null, '2026-09-10').past, false);
+});
+
+test('featureLabel: 日本語名は feature_names.json → 行の name → 元の列名。説明に元の列名を添える', () => {
+  const names = { vol_20d: { name: '20日ボラティリティ', desc: '直近20営業日の日次リターン標準偏差（%）' } };
+  const a = featureLabel({ col: 'vol_20d', ja: '古い説明', contrib: 0.1 }, names);
+  assert.equal(a.name, '20日ボラティリティ');
+  assert.equal(a.title, '直近20営業日の日次リターン標準偏差（%）（vol_20d）');
+  assert.equal(a.translated, true);
+  // 名前の辞書が無い・読めない（{}）: 行の name、それも無ければ元の列名（説明は行の ja。** は落とす）
+  const b = featureLabel({ col: 'eps_growth_q1', name: 'EPS成長率（1期前）', ja: '**説明**' }, {});
+  assert.deepEqual(b, { name: 'EPS成長率（1期前）', title: '説明（eps_growth_q1）', translated: true });
+  const c = featureLabel({ col: 'x_new' }, null);
+  assert.deepEqual(c, { name: 'x_new', title: 'x_new', translated: false });
+});
+
+test('earningsNote: 次の決算が持つ間（20営業日）に来るなら黄。より先・未公表は灰。項目の無い行は出さない', () => {
+  const soon = earningsNote({ nextEarnDate: '2026-10-30', nextEarnQuarter: '2Q', nextEarnDays: 17,
+                              nextEarnTradingDays: 13, daysSinceDisc: 75 }, 20);
+  assert.equal(soon.label, '決算 13営業日後');
+  assert.equal(soon.tone, 'amber');
+  assert.equal(soon.inWindow, true);
+  assert.equal(soon.text, '次の決算発表 2026/10/30（第2四半期）: 13営業日後・17日後。買ってから20営業日の中に入る（決算の結果で動きうる）');
+  const far = earningsNote({ nextEarnDate: '2026-12-10', nextEarnQuarter: 'FY', nextEarnDays: 58, nextEarnTradingDays: 40 }, 20);
+  assert.equal(far.tone, 'slate');
+  assert.ok(far.text.endsWith('買ってから20営業日より先'));
+  assert.equal(earningsNote({ nextEarnDate: '2026-10-13', nextEarnTradingDays: 0, nextEarnDays: 0 }).label, '決算 当日');
+  // ちょうど20営業日目は入る、21 は入らない
+  assert.equal(earningsNote({ nextEarnDate: 'x', nextEarnTradingDays: 20 }, 20).inWindow, true);
+  assert.equal(earningsNote({ nextEarnDate: 'x', nextEarnTradingDays: 21 }, 20).inWindow, false);
+  const none = earningsNote({ nextEarnDate: null, nextEarnTradingDays: null, daysSinceDisc: 120 });
+  assert.equal(none.known, false);
+  assert.equal(none.label, '決算予定 未公表');
+  assert.ok(none.text.includes('前回の決算開示から 120日'));
+  assert.equal(earningsNote({ code: 'old' }), null);          // 項目の無い行（その日に出した値のまま固定した日など）
+  assert.ok(!/NaN|undefined|null/.test(soon.text + far.text + none.text));
+});
+
+test('earningsSummary: 持つ間に決算が来る候補の数。項目の無い日は null', () => {
+  const rows = [
+    { nextEarnDate: '2026-10-30', nextEarnTradingDays: 13 },
+    { nextEarnDate: '2026-12-10', nextEarnTradingDays: 40 },
+    { nextEarnDate: null, nextEarnTradingDays: null },
+  ];
+  assert.deepEqual(earningsSummary(rows, 20), { total: 3, known: 2, soon: 1 });
+  assert.equal(earningsSummary([{ code: 'old' }], 20), null);
+  assert.equal(earningsSummary(null, 20), null);
 });
