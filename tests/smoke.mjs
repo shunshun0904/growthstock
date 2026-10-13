@@ -96,9 +96,11 @@ const look = (loc) => loc.evaluate((el) => {
 });
 check((await look(firstGrid.locator('.c').nth(2))) === 'rgb(219, 234, 254)|rgb(10, 14, 23)',
       '98 のマスは最上位（95以上）の色に暗い字');
-const lowCell = page.locator('.pred-row').nth(1).locator('.pred-main .pred-mg .c').first();   // 37.3
+// 行は並び順で探さず、銘柄名で探す（並び順は下で別に確かめる）
+const rowOf = (name) => page.locator('.pred-row', { hasText: name });
+const lowCell = rowOf('野村アセットマネジメント').locator('.pred-main .pred-mg .c').first();   // 37.3
 check((await look(lowCell)) === 'rgb(29, 78, 216)|rgb(232, 237, 246)', '37 のマスは 30 の区分の色に明るい字');
-const naCells = page.locator('.pred-row').nth(4).locator('.pred-main .pred-mg .c.na');
+const naCells = rowOf('大和自動車交通').locator('.pred-main .pred-mg .c.na');
 check((await naCells.count()) === 1 && ((await naCells.textContent()) || '').includes('—'),
       '欠けたモデルのマスは「—」');
 check((await page.locator('.pred-ms-i').count()) === 0, 'モデル別の縦棒は出さない');
@@ -135,8 +137,27 @@ check(((await firstBorder.textContent()) || '').includes('1.5σで際どい・�
 check(((await firstBorder.getAttribute('class')) || '').includes('amber'), '1件目の印は黄（赤の組は無い）');
 check(((await firstBorder.getAttribute('title')) || '').includes('LightGBM が一番低いときは、過去 +1.6%（141件）'),
       '印の title にその形の過去の数字が出る');
-check((await page.locator('.pred-row').last().locator('.pred-border').count()) === 0,
-      '5件目（1.2σ の3本なら際どい形）には印が出ない');
+check((await rowOf('大和自動車交通').locator('.pred-border').count()) === 0,
+      '大和自動車交通（1.2σ の3本なら際どい形）には印が出ない');
+
+// 一覧の並び順（運用者の決定 2026-10-13「1.5σ の3本のうち一番低い百分位でいきましょう」）。
+// 合成データの 1.5σ の3本の最小: 安田倉庫 83.6・大和自動車交通 76.8・ソフトバンク 70.5・シンプレクス 59.9・
+// 野村 35.5（1.2σ の LightGBM のスコア順なら 安田倉庫・野村・シンプレクス・ソフトバンク・大和自動車交通）
+const names = await page.locator('.pred-list .pred-row .pred-id strong').allTextContents();
+const want = ['安田倉庫', '大和自動車交通', 'ソフトバンク', 'シンプレクス', '野村アセットマネジメント'];
+check(names.length === 5 && want.every((w, i) => (names[i] || '').includes(w)),
+      `一覧は 1.5σ の3本の最小が高い順 (実際: ${names.map((t) => t.slice(0, 6)).join(' / ')})`);
+const ranks = await page.locator('.pred-list .pred-rank').allTextContents();
+check(ranks.join(',') === '183.6,276.8,370.5,459.9,535.5', `順位の数字は並び順で、下に最小を添える (実際: ${ranks.join(',')})`);
+const rank2 = page.locator('.pred-list .pred-rank').nth(1);
+check(((await rank2.getAttribute('title')) || '').includes('基準モデル（1.2σ の LightGBM）の順位 5 / 5'),
+      '順位の title に基準モデルの順位を添える');
+check((await rank2.evaluate((el) => getComputedStyle(el).color)) === 'rgb(151, 163, 184)',
+      '最小が 85 未満の順位は控えめの字');
+check(((await page.textContent('.card-head:has(h2:text-is("ブレイク予測")) .sub')) || '')
+        .includes('1.5σ の3本のうち一番低い百分位が高い順'),
+      '見出しに並び順の物差しが出る');
+check((await page.locator('.pred-order-note').count()) === 0, '1.5σ の値がそろった日は並び順の注記を出さない');
 
 // 1件目を開いて、モデル別の見立てを確かめる
 await page.locator('.pred-row').first().locator('.pred-main').click();
@@ -147,6 +168,11 @@ check(detail.includes('混ぜていません'), 'アンサンブルではない�
 const bigCells = await page.locator('.pred-detail .pred-mg.lg .c').allTextContents();
 check(bigCells.length === 12 && bigCells[0] === '85.0', `詳細に12本の表（小数1桁）が出る (実際: ${bigCells.slice(0, 3).join(',')}…)`);
 check(detail.includes('1.2σ（本番）'), '詳細の表は 1.2σ の行に「本番」と出る');
+check(/並び順\s*1\.5σ の3本の最小\s*（83\.6）/.test(detail) && /帯の基準\s*LightGBM（1\.2σ）\s*（1 \/ 5 位）/.test(detail),
+      '詳細に並び順の物差し（1.5σ の3本の最小）と帯の基準（1.2σ の LightGBM の順位）が分けて出る');
+check(detail.includes('基準モデルの見立ての内訳') && detail.includes('基準モデル（1.2σ の LightGBM）の出力を')
+        && detail.includes('一覧の並び順（1.5σ の3本の最小）の内訳ではありません'),
+      '寄与の欄は 1.2σ の LightGBM のものと明示される');
 check(detail.includes('上位10%と見たモデル') && detail.includes('2/4') && detail.includes('ラベル違い 4/8'),
       '詳細に上位10%と見たモデルの数（本番・ラベル違い）が出る');
 check(detail.includes('実験82'), '詳細に「1.5σ・1.8σ も95以上」を足しても安定しない（実験82）と出る');

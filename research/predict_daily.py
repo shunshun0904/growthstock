@@ -565,9 +565,9 @@ def main(argv=None) -> int:
               + (f" / 上位10% の線 {np.quantile(cons_ref, 0.90):.1f}・上位2.5% の線 {np.quantile(cons_ref, 0.975):.1f}"
                  if cons_ref is not None else ""))
 
-    # 表示順・順位はどちらも基準モデルのスコア（上の rank_in_day と同じ）。
-    # 帯・較正・追跡ファイルも基準モデル基準なので、ここだけ別の物差しで
-    # 並べると、同じ行の中で順位と帯が食い違う
+    # ファイルの並び・rankInDay（予測ログの「順位」）はどちらも基準モデルのスコア（上の rank_in_day と同じ）。
+    # 帯・較正・追跡ファイルも基準モデル基準なので、ここは基準モデルのまま。画面の一覧は 2026-10-13 から
+    # 1.5σ の3本の百分位の最小の順に並べ直す（src/lib/strategy.js の orderRows。運用者の決定）
     # 次の決算発表の予定（公表済みのものだけ）。予測が実質的に次の決算の予測になっていないかを見るため
     earn = next_earnings([(x["jqCode"], x["date"]) for x in rows], args.data_dir, TC.load(args.data_dir))
     for x in rows:

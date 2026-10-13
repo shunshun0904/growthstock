@@ -367,7 +367,10 @@ input[type='range']::-moz-range-thumb {
   background: none; border: 0; text-align: left;
 }
 .pred-main:hover { background: #18202f; }
-.pred-rank { font-size: 18px; font-weight: 700; text-align: center; }
+.pred-rank { font-size: 18px; font-weight: 700; text-align: center;
+             display: flex; flex-direction: column; align-items: center; line-height: 1.1; }
+/* 並び順の物差し（1.5σ の3本の最小の百分位）。順位の数字の下に小さく添える */
+.pred-rank-min { font-size: 10px; font-weight: 500; color: var(--text-faint); margin-top: 2px; }
 .pred-id { display: flex; flex-direction: column; line-height: 1.35; min-width: 0; }
 .pred-id strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pred-id .sub, .pred-cell .lab { font-size: 11px; color: var(--text-faint); }

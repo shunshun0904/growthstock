@@ -4,7 +4,7 @@ import { bandColor, bandLabel, pctColor, pctInk, PCT_LEGEND, modelRows, modelGri
   FAMILY_JA, marketTone, candidateToStock, dayOrigin, featureLabel, earningsNote, earningsSummary,
 } from '../lib/predictions.js';
 import { STRATEGY, RULE_MODELS, RULE_JA, BORDER, strategySignal, exitPlan, nearMisses,
-         MODEL_JA, fundContrib, frozenNote, borderNote,
+         MODEL_JA, fundContrib, frozenNote, borderNote, orderRows, ruleMinTier,
 } from '../lib/strategy.js';
 
 /**
@@ -20,7 +20,9 @@ import { STRATEGY, RULE_MODELS, RULE_JA, BORDER, strategySignal, exitPlan, nearM
  * 12本（本番の4モデル + ラベル違いの8本）は、ラベル × 学習器の表に数字と色で出す
  * （運用者の指示 2026-10-12「12本の平均ではなく、12個全てを載せてほしい。棒グラフ形式でなくてよい。
  * 大小が分かればよい」。同じ日に出した「12本の合意の百分位」の欄はこの指示で外した）。
- * 順位・帯・追跡は基準モデル（LightGBM）のまま。
+ * 一覧の並び順は、今日の戦略の規則と同じ 1.5σ の3本の百分位の最小が高い順（運用者の決定 2026-10-13
+ * 「1.5σ の3本のうち一番低い百分位でいきましょう」。strategy.js の orderRows）。帯・較正・追跡と
+ * rankInDay（予測ログの「順位」）は基準モデル（1.2σ の LightGBM）のまま。
  * byModel が無い予測ファイル（5モデルを学習する前のもの）でも壊れないよう、
  * 基準モデル1本の表示に落ちる作りにしてある。
  */
@@ -29,12 +31,13 @@ export default function PredictionView({ data, history, featureNames, onSendToOc
   const [day, setDay] = useState(() => data?.asOf || dates[dates.length - 1]);
   const [openId, setOpenId] = useState(null);
 
+  // 1.5σ の3本の最小が高い順（orderRows）。各行に order（並び順）と ruleMin（最小）が付く
   const rows = useMemo(
-    () => (data?.candidates || [])
-      .filter((c) => c.date === day)
-      .sort((a, b) => a.rankInDay - b.rankInDay),
+    () => orderRows((data?.candidates || []).filter((c) => c.date === day)),
     [data, day]
   );
+  // 1.5σ の3本のどれかが欠けて最小が出せない行（1.5σ を予測に入れる前の固定した日）。後ろに基準モデルの順で並ぶ
+  const nNoRule = rows.filter((c) => c.ruleMin === null).length;
   const tone = useMemo(() => marketTone(rows), [rows]);
   const signal = useMemo(() => strategySignal(rows), [rows]);
   const near = useMemo(() => nearMisses(rows), [rows]);
@@ -54,7 +57,7 @@ export default function PredictionView({ data, history, featureNames, onSendToOc
         <div className="card-head">
           <h2>ブレイク予測</h2>
           <span className="sub">
-            78週高値を更新した日の銘柄を、上がって続く見込みの順に並べます
+            {`78週高値を更新した日の銘柄を、${RULE_JA}のうち一番低い百分位が高い順に並べます（今日の戦略の規則と同じ物差し）`}
           </span>
         </div>
 
@@ -106,6 +109,18 @@ export default function PredictionView({ data, history, featureNames, onSendToOc
             <div>
               {`この日の値は、${origin.generatedAt ? fmtDateTime(origin.generatedAt) : 'その日'}に出したまま固定しています`
                 + `（${fmtDate(origin.trainedAt)} 学習のモデル）。後の再学習や、後から入ったデータで採点し直していません。`}
+            </div>
+          </div>
+        )}
+
+        {nNoRule > 0 && (
+          <div className="banner info pred-note pred-order-note">
+            <span>ℹ</span>
+            <div>
+              {nNoRule === rows.length
+                ? `この日は${RULE_JA}の百分位が無い（1.5σ のモデルを予測に入れる前の日）ので、`
+                  + '基準モデル（1.2σ の LightGBM）のスコア順に並べています。'
+                : `${RULE_JA}の百分位が欠けた ${nNoRule} 件は、最後に基準モデル（1.2σ の LightGBM）のスコア順で並べています。`}
             </div>
           </div>
         )}
@@ -387,13 +402,24 @@ function EarnBadge({ c }) {
 
 /* ------------------------------------------------------------------ 候補1件 */
 
+/** 順位の数字の色。規則の線以上は緑、惜しい・際どい範囲は黄、それ未満は薄い字。最小が出せない行は基準モデルの帯の色。 */
+const RANK_INK = { pass: 'var(--green)', near: 'var(--amber)', below: 'var(--text-dim)' };
+
 function Row({ c, models, featureNames, open, onToggle, onSend, sent }) {
   const color = bandColor(c.band);
   const mr = modelRows(c, models);
+  const tier = ruleMinTier(c.ruleMin);
+  const base = `基準モデル（1.2σ の LightGBM）の順位 ${c.rankInDay} / ${c.nInDay}`;
+  const rankTitle = tier
+    ? `${RULE_JA}のうち一番低い百分位 ${fmt(c.ruleMin, 1)}（この順に並べています）。${base}`
+    : `${RULE_JA}の百分位が無いので、基準モデルのスコア順。${base}`;
   return (
     <div className={`pred-row${open ? ' open' : ''}`}>
       <button className="pred-main" onClick={onToggle} aria-expanded={open}>
-        <span className="pred-rank num" style={{ color }}>{c.rankInDay}</span>
+        <span className="pred-rank num" style={{ color: tier ? RANK_INK[tier] : color }} title={rankTitle}>
+          {c.order ?? c.rankInDay}
+          {tier && <small className="pred-rank-min">{fmt(c.ruleMin, 1)}</small>}
+        </span>
         <span className="pred-id">
           <strong>{c.name || c.code}</strong>
           <span className="sub num">{c.code}</span>
@@ -557,14 +583,21 @@ function Detail({ c, models, featureNames, onSend, sent }) {
                 )}
               </span>
               <span>
-                <span className="lab">順位・帯の基準</span>
-                <b>LightGBM</b>
+                <span className="lab">並び順</span>
+                <b>{RULE_JA}の最小</b>
+                {Number.isFinite(c.ruleMin) && <span className="sub num">（{fmt(c.ruleMin, 1)}）</span>}
+              </span>
+              <span>
+                <span className="lab">帯の基準</span>
+                <b>LightGBM（1.2σ）</b>
+                <span className="sub num">（{c.rankInDay} / {c.nInDay} 位）</span>
               </span>
             </div>
             <p className="sub" style={{ margin: '8px 0 0' }}>
-              行は学習に使ったラベルで、1.2σ が本番（順位・帯の基準）です。1.5σ・1.8σ は、より大きく上がった
+              行は学習に使ったラベルで、1.2σ が本番（帯の基準）です。1.5σ・1.8σ は、より大きく上がった
               銘柄だけを正例にして学習したもの。今日の戦略の規則は、2026-10-12 から 1.5σ の木の3本
               （L15・X15・C15）がすべて95以上です（運用者の決定）。
+              一覧はこの3本の最小が高い順です（2026-10-13 から。それまでは 1.2σ の LightGBM のスコア順）。
               同じ行・同じ列のモデルは似た見方をするので、そろって高くても独立した票ではありません。
               1.2σ の3本が95以上の候補に「1.5σ・1.8σ の3本も95以上」を足しても、過去の前向きの
               検証では成績は安定して上がりませんでした（実験82）。
@@ -572,9 +605,11 @@ function Detail({ c, models, featureNames, onSend, sent }) {
           </div>
         )}
         <div>
-          <h4>この順位の根拠</h4>
+          {/* h4 は大文字に変換される（σ が Σ になる）ので、見出しにはラテン・ギリシャ文字を入れない */}
+          <h4>基準モデルの見立ての内訳</h4>
           <p className="sub">
-            モデルの出力を特徴量ごとに分解したもの（TreeSHAP）。
+            基準モデル（1.2σ の LightGBM）の出力を特徴量ごとに分解したもの（TreeSHAP）。
+            {`一覧の並び順（${RULE_JA}の最小）の内訳ではありません。`}
             対数オッズ空間の寄与なので、確率の差ではなく
             <b>押し上げ／押し下げの相対の大きさ</b>として読みます。
           </p>

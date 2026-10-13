@@ -136,6 +136,43 @@ export function minPct(candidate, models = RULE_MODELS) {
   return vals.some((v) => v === null) ? null : Math.min(...vals);
 }
 
+/**
+ * 予測タブの一覧の並び順（運用者の決定 2026-10-13「1.5σ の3本のうち一番低い百分位でいきましょう」。それまでは
+ * 基準モデル（1.2σ の LightGBM）のスコア順＝rankInDay）。
+ *
+ * 規則の3モデル（RULE_MODELS）の百分位の最小が高い順。同点は基準モデルのスコアが高い順（strategySignal と同じ）。
+ * 3本のどれかが欠けた候補（1.5σ のモデルを予測に入れる前の、固定した過去の日など）は最小が出せないので後ろに
+ * 置き、基準モデルのスコア順に並べる。戻り値は各行に order（1始まりの並び順）と ruleMin（最小。出せなければ
+ * null）を足した新しい配列（元の行は変えない）。rankInDay（基準モデルの順位）は帯・較正・予測ログ・追跡の
+ * 物差しなので、そのまま残す。
+ */
+export function orderRows(rows, models = RULE_MODELS) {
+  const list = Array.isArray(rows) ? rows : [];
+  const byBase = (a, b) => ((b.c.score ?? 0) - (a.c.score ?? 0))
+    || ((a.c.rankInDay ?? Infinity) - (b.c.rankInDay ?? Infinity));
+  return list
+    .map((c) => ({ c, m: minPct(c, models) }))
+    .sort((a, b) => {
+      if (a.m === null || b.m === null) {
+        if (a.m === null && b.m === null) return byBase(a, b);
+        return a.m === null ? 1 : -1;
+      }
+      return (b.m - a.m) || byBase(a, b);
+    })
+    .map(({ c, m }, i) => ({ ...c, order: i + 1, ruleMin: m }));
+}
+
+/**
+ * 一覧の順位の数字の色の区分（規則の3本の最小）。'pass' = 規則の線（agreePct）以上、'near' = nearLo〜線
+ * （惜しい候補・際どい候補と同じ範囲）、'below' = それ未満。最小が出せなければ null。
+ */
+export function ruleMinTier(m, s = STRATEGY) {
+  if (!Number.isFinite(m)) return null;
+  if (m >= s.agreePct) return 'pass';
+  if (m >= s.nearLo) return 'near';
+  return 'below';
+}
+
 /** 3モデルの百分位の幅（最大−最小）。1つでも欠けていれば null。 */
 export function pctSpread(candidate, models = RULE_MODELS) {
   const p = pctsOf(candidate, models);

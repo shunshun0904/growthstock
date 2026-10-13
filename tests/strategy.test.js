@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import {
   BOOST, RULE_MODELS, RULE_JA, STRATEGY, boostPcts, pctsOf, minPct, passesAgree, dayVerdict, strategySignal, exitPlan,
   freeSlots, pctSpread, laggard, nearMisses, fundContrib, frozenNote,
-  BORDER, BORDER_STATS, BORDER_WARN, borderShape, borderNote, borderWarn,
+  BORDER, BORDER_STATS, BORDER_WARN, borderShape, borderNote, borderWarn, orderRows, ruleMinTier,
 } from '../src/lib/strategy.js';
 
 const cand = (code, pcts, score = 0.5) => ({
@@ -107,6 +107,68 @@ test('strategySignal: 3モデルの最小順位で並ぶ（lgbm 単体の順で�
   const order = s.passed.map((c) => c.code);
   assert.ok(order.indexOf('TOP') < order.indexOf('MID'));
   assert.ok(order.indexOf('MID') < order.indexOf('LOW'));
+});
+
+/* ------------------------------------------------ 一覧の並び順（運用者の決定 2026-10-13） */
+
+test('orderRows: 1.5σ の3本の最小が高い順（1.2σ の LightGBM のスコア順ではない）', () => {
+  const rows = [
+    { ...rule('BASE1', [83.6, 97.1, 97.4], 0.9), rankInDay: 1 },   // 1.2σ の LightGBM では1位・最小 83.6
+    { ...rule('PASS', [99.2, 95.2, 98.4], 0.4), rankInDay: 4 },    // 最小 95.2（規則を満たす）
+    { ...rule('NEAR', [94.4, 93.5, 95.3], 0.8), rankInDay: 2 },    // 最小 93.5
+  ];
+  rows[0].byModel.lgbm = { score: 0.9, pctHistorical: 99.9 };      // 1.2σ の値は並び順に使わない
+  const out = orderRows(rows);
+  assert.deepEqual(out.map((c) => c.code), ['PASS', 'NEAR', 'BASE1']);
+  assert.deepEqual(out.map((c) => c.order), [1, 2, 3]);
+  assert.deepEqual(out.map((c) => c.ruleMin), [95.2, 93.5, 83.6]);
+  assert.deepEqual(out.map((c) => c.rankInDay), [4, 2, 1]);        // 基準モデルの順位はそのまま残す
+  assert.equal(rows[0].order, undefined);                          // 元の行は変えない
+});
+
+test('orderRows: 最小が同じなら基準モデルのスコアが高い順（strategySignal の並びと同じ）', () => {
+  const rows = [
+    ...day(3, [96, 96, 96]),                       // スコア 0.50 / 0.49 / 0.48
+    rule('HI', [96, 99, 99], 0.7),
+    rule('TOP', [97, 97, 97], 0.1),
+    ...day(20, [50, 50, 50]).map((c, i) => ({ ...c, code: `L${i}`, jqCode: `L${i}0` })),
+  ];
+  const out = orderRows(rows);
+  assert.deepEqual(out.slice(0, 5).map((c) => c.code), ['TOP', 'HI', 'X0', 'X1', 'X2']);
+  const s = strategySignal(rows);
+  assert.deepEqual(s.passed.map((c) => c.code), out.filter((c) => c.ruleMin >= 95).map((c) => c.code));
+});
+
+test('orderRows: 1.5σ の百分位が欠けた行は後ろに、基準モデルのスコア順で並ぶ', () => {
+  const rows = [
+    { ...rule('MISS_HI', [99, 99, undefined], 0.9), rankInDay: 1 },
+    { ...rule('LOW', [10, 20, 30], 0.2), rankInDay: 5 },
+    { ...cand('OLD', { lgbm: 99 }, 0.5), rankInDay: 3 },              // 1.5σ を予測に入れる前の行
+    { ...rule('HIGH', [90, 91, 92], 0.3), rankInDay: 4 },
+  ];
+  const out = orderRows(rows);
+  assert.deepEqual(out.map((c) => c.code), ['HIGH', 'LOW', 'MISS_HI', 'OLD']);
+  assert.deepEqual(out.map((c) => c.ruleMin), [90, 10, null, null]);
+});
+
+test('orderRows: 1.5σ の値がまったく無い日（固定した過去の日）は基準モデルの順のまま', () => {
+  const rows = [3, 1, 2].map((r) => ({ ...cand(`R${r}`, { lgbm: 90 - r }, 0.6 - r * 0.1), rankInDay: r }));
+  const out = orderRows(rows);
+  assert.deepEqual(out.map((c) => c.code), ['R1', 'R2', 'R3']);
+  assert.ok(out.every((c) => c.ruleMin === null));
+  assert.deepEqual(orderRows([]), []);
+  assert.deepEqual(orderRows(null), []);
+});
+
+test('ruleMinTier: 規則の線（95）以上・惜しい範囲（85〜95）・それ未満', () => {
+  assert.equal(ruleMinTier(95), 'pass');
+  assert.equal(ruleMinTier(100), 'pass');
+  assert.equal(ruleMinTier(94.9), 'near');
+  assert.equal(ruleMinTier(85), 'near');
+  assert.equal(ruleMinTier(84.9), 'below');
+  assert.equal(ruleMinTier(0), 'below');
+  assert.equal(ruleMinTier(null), null);
+  assert.equal(ruleMinTier(NaN), null);
 });
 
 test('strategySignal: 発火が少ない日（7件以下）も基準を満たせば上位2件を買う（2026-10-12 から）', () => {
