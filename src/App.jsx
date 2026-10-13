@@ -13,13 +13,20 @@ import {
 } from './lib/store.js';
 import { loadPredictions, loadHistory, loadFilings, loadFeatureNames } from './lib/predictions.js';
 
+/*
+ * hidden のタブは画面に出さない（運用者の指示 2026-10-13「決算サンキーとWhat-Ifシミュレーターのタブは消してください。
+ * 表示から消してくれるだけで良いです」）。画面のコード（FilingsView / SimulatorView）とデータの取り込み
+ * （Fetch Filings）は残してあるので、hidden を外せば戻る。
+ */
 const TABS = [
   { id: 'prediction', label: 'ブレイク予測' },
-  { id: 'filings', label: '決算サンキー' },
+  { id: 'filings', label: '決算サンキー', hidden: true },
   { id: 'compare', label: '8軸オクタゴン比較' },
   { id: 'timemachine', label: 'タイムマシーン' },
-  { id: 'simulator', label: 'What-If シミュレーター' },
+  { id: 'simulator', label: 'What-If シミュレーター', hidden: true },
 ];
+const VISIBLE_TABS = TABS.filter((t) => !t.hidden);
+const isVisible = (id) => VISIBLE_TABS.some((t) => t.id === id);
 
 /**
  * ビルド識別子。vite.config.js が define で埋める。
@@ -59,8 +66,8 @@ export default function App() {
       .then((d) => { if (!cancelled) setPred(d); })
       .catch((e) => { if (!cancelled) setPredError(e.message); });
     loadHistory().then((h) => { if (!cancelled) setHistory(h); });
-    // 有報・半期報告書（EDINET）。無ければ null のまま（タブは「取り込み待ち」と出す）
-    loadFilings().then((f) => { if (!cancelled) setFilings(f); });
+    // 有報・半期報告書（EDINET）。無ければ null のまま（タブは「取り込み待ち」と出す）。タブを隠している間は読まない
+    if (isVisible('filings')) loadFilings().then((f) => { if (!cancelled) setFilings(f); });
     // 特徴量の日本語名（効いた特徴量の表示）。読めなければ元の列名のまま
     loadFeatureNames().then((n) => { if (!cancelled) setFeatureNames(n); });
     return () => { cancelled = true; };
@@ -169,7 +176,7 @@ export default function App() {
           <span>8軸モメンタム・スコアリング</span>
         </div>
         <nav className="tabs" role="tablist">
-          {TABS.map((t) => (
+          {VISIBLE_TABS.map((t) => (
             <button
               key={t.id} role="tab" aria-selected={tab === t.id}
               onClick={() => setTab(t.id)}
@@ -268,7 +275,7 @@ export default function App() {
           )
         )}
 
-        {tab === 'filings' && (
+        {tab === 'filings' && isVisible('filings') && (
           <FilingsView pred={pred} rows={rows} filings={filings} />
         )}
 
@@ -284,7 +291,7 @@ export default function App() {
             {tab === 'timemachine' && (
               <TimeMachineView rows={rows} selectedId={selectedId} onSelect={setSelectedId} />
             )}
-            {tab === 'simulator' && (
+            {tab === 'simulator' && isVisible('simulator') && (
               <SimulatorView rows={rows} selectedId={selectedId} onSelect={setSelectedId} />
             )}
           </>
@@ -293,7 +300,12 @@ export default function App() {
 
       <footer className="footer">
         データ提供: <a href="https://jpx-jquants.com/" target="_blank" rel="noreferrer">J-Quants API</a>（日本取引所グループ）
-        ／ 有価証券報告書・半期報告書: <a href="https://disclosure2dl.edinet-fsa.go.jp/" target="_blank" rel="noreferrer">EDINET</a>（金融庁）の書類をもとに作成
+        {/* EDINET の書類を使うのは決算サンキーのタブだけ。タブを隠している間は出典も出さない */}
+        {isVisible('filings') && (
+          <>
+            ／ 有価証券報告書・半期報告書: <a href="https://disclosure2dl.edinet-fsa.go.jp/" target="_blank" rel="noreferrer">EDINET</a>（金融庁）の書類をもとに作成
+          </>
+        )}
         ／ 本ツールは分析支援を目的としたものであり、投資判断・投資勧誘を行うものではありません。
       </footer>
 
