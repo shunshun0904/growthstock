@@ -7,6 +7,13 @@ import { InstitutionalBadge, ZoneBadge } from '../components/Badges.jsx';
 import { INSTITUTIONAL_META, ZONE_META } from '../lib/scoring.js';
 import { fmt, fmtOku, fmtInt, fmtDate, scoreColor, DASH } from '../lib/format.js';
 
+/**
+ * 直近決算の流れ（サンキー図）を出すか。運用者の指示（2026-10-13「直近決算サンキーも消してください」。同じ日に
+ * 決算サンキーと What-If シミュレーターのタブも「表示から消してくれるだけで良いです」と隠した）で false。
+ * 部品（EarningsSankey）は残してあるので、true に戻せば出る。
+ */
+const SHOW_EARNINGS_FLOW = false;
+
 /** 5.1 マルチ銘柄8軸オクタゴン比較 View */
 export default function CompareView({
   rows, visibleIds, onToggle, selectedId, onSelect, onAdd, onDeleteManual,
@@ -149,16 +156,18 @@ function DetailPanel({ row }) {
 
     {/* 決算の損益の流れ。8軸は「どのくらい良いか」を点数にしたものなので、
         その点数がどこから来ているのかを、元の金額の流れで確かめられるようにする。
-        幅が要るので grid-2 の外に全幅で置く */}
-    <div className="card">
-      <div className="card-head">
-        <h2>直近決算の流れ</h2>
-        <span className="sub">
-          売上高がどこへ出ていき、いくら残ったか（{stock.code} {stock.name}）
-        </span>
+        幅が要るので grid-2 の外に全幅で置く。2026-10-13 から隠している（SHOW_EARNINGS_FLOW） */}
+    {SHOW_EARNINGS_FLOW && (
+      <div className="card">
+        <div className="card-head">
+          <h2>直近決算の流れ</h2>
+          <span className="sub">
+            売上高がどこへ出ていき、いくら残ったか（{stock.code} {stock.name}）
+          </span>
+        </div>
+        <EarningsSankey quarters={stock.quarters} />
       </div>
-      <EarningsSankey quarters={stock.quarters} />
-    </div>
+    )}
     </div>
   );
 }
