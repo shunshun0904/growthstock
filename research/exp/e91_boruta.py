@@ -23,8 +23,8 @@ Boruta（Kursa & Rudnicki 2010 の手順。判定は BorutaPy 0.4.3 の既定と
      1行の日どうし）。その日は全銘柄同じ値の列（地合い・市場全体の需給。データから見つける）は日付ごと入れ替える。
      全行で入れ替えると影は「どの日か」を表せなくなり、時期をなぞるだけの列でも影に勝ってしまう
   2. 影との比べ方。銘柄ごとの列は銘柄ごとの列の影の最大と、日付単位の列は日付単位の列の影の最大と比べる
-     （日付単位の影は日の当たり外れを訓練の中で拾えるぶん重要度が大きく出やすいと見込んだ。混ぜると銘柄ごとの列の
-     物差しが日付単位の影で決まってしまう。見込みが合っているかは ■1 の「影の物差し」で確かめる）
+     （2種類の列は影の重要度の出方が違うので、同じ種類どうしで比べる。回す前は日付単位の影のほうが大きく出ると見込んだが、
+     試運転では銘柄ごとの影の物差しのほうが大きく、見込みは外れた。§51）
   3. 重要度。本番の 1.5σ の LightGBM（lgbm_k15 のパラメータ・木200本）の gain（BorutaPy は feature_importances_ で、
      LightGBM の既定では split の回数）
   回すのはずらし0の窓（訓練期間の行だけ）。ずらし2・4か月の窓は、訓練の終わりがそれ以前のずらし0の窓のうち最も後の
@@ -43,9 +43,10 @@ Boruta（Kursa & Rudnicki 2010 の手順。判定は BorutaPy 0.4.3 の既定と
 
 公開ログには件数・割合・日付・精度・列の名前だけ（銘柄・値は出さない）。
 
-    exp=e91_boruta.py args="--algos lgbm"   （1回目。Boruta の選定（ずらし0の窓）+ lgbm の3腕）
-    exp=e91_boruta.py args="--algos xgb"
-    exp=e91_boruta.py args="--algos cat"
+    exp=e91_boruta.py args="--algos lgbm --perc 100,75"   （1回目。2つの版の選定（ずらし0の窓）+ lgbm の腕）
+    exp=e91_boruta.py args="--algos xgb --perc 100,75"
+    exp=e91_boruta.py args="--algos cat --perc 100,75"
+  （2026-10-14 運用者の決定: 回す前に決めた版（影の最大 = 100）と、75 百分位に緩めた版を並べ、版ごとに §7 で判定する）
 選定のようすだけ見る: exp=e91_boruta.py args="--select-only"
 行と影の単位だけ見る: exp=e91_boruta.py args="--dry"
 試運転:               exp=e91_boruta.py args="--tag e91smoke --algos lgbm --max-iter 10 --shifts 0 --seeds 42"
@@ -728,7 +729,7 @@ def pi_report(results: dict, algos: list, shifts: list, cnt: dict, n_sel: int) -
 
 
 def report(results: dict, shifts: list, seeds, stamp: dict, cms: dict, sels: dict, base: list, groups: dict,
-           date_cols: list) -> dict:
+           date_cols: list, show_pi: bool = True) -> dict:
     algos = [a for a in ALGOS if results.get(a)]
     missing = [a for a in ALGOS if not results.get(a)]
     print("\n" + "=" * 78)
@@ -807,7 +808,7 @@ def report(results: dict, shifts: list, seeds, stamp: dict, cms: dict, sels: dic
                           f"{r['pr_S']:>8.4f}{r['pr_R']:>8.4f}{r['pr_S'] - r['pr_A']:>+9.4f}"
                           f"{r['pr_R'] - r['pr_A']:>+9.4f}{r['pr_S'] - r['pr_R']:>+9.4f}")
         summary["per_window"] = s.assign(start=s["start"].astype(str), end=s["end"].astype(str)).to_dict("records")
-    if algos:
+    if algos and show_pi:
         summary["perm_importance"] = pi_report(results, algos, shifts, summary["selection"].get("rejected_count", {}),
                                                len(sels))
     with open(path(f"summary_{variant()}.json"), "w", encoding="utf-8") as fh:
@@ -837,8 +838,9 @@ def main(argv=None) -> int:
     ap.add_argument("--budget-min", type=float, default=290.0,
                     help="この分数を過ぎたら新しい計算を始めない（0 で無制限）")
     ap.add_argument("--select-only", action="store_true", help="Boruta の選定だけ回して報告する")
-    ap.add_argument("--perc", type=float, default=PERC,
-                    help="影の最大の代わりに使う百分位（100 が回す前に決めたもの。50 以下は、でたらめな列も外れなくなるので止める）")
+    ap.add_argument("--perc", default=f"{PERC:g}",
+                    help="影の最大の代わりに使う百分位。カンマ区切りで複数の版を1回で回す（例 100,75。100 が回す前に決めたもの。"
+                         "50 以下は、でたらめな列も外れなくなるので止める）")
     ap.add_argument("--shadow", choices=SHADOW_MODES, default="date",
                     help="影の作り（date が回す前に決めたもの。month・global は §51 の選択肢）")
     ap.add_argument("--dry", action="store_true", help="行・日付単位の列・影の単位だけ出して終わる")
@@ -847,10 +849,12 @@ def main(argv=None) -> int:
     RUN = f"{TAG}_k15"
     MAX_ITER_IN_USE = args.max_iter
     SHADOW = args.shadow
-    if not 50 < args.perc <= 100:
+    percs = [float(x) for x in str(args.perc).split(",") if x.strip()]
+    bad = [x for x in percs if not 50 < x <= 100]
+    if not percs or bad:
         raise SystemExit(f"--perc は 50 より大きく 100 以下（実際: {args.perc}）。50 以下では、でたらめな列も影の"
                          "百分位に半分は勝つので rejected にならない")
-    PERC_IN_USE = args.perc
+    PERC_IN_USE = percs[0]
     if args.budget_min > 0:
         DEADLINE = time.time() + args.budget_min * 60
     algos = [algo_name(a) for a in args.algos.split(",") if a.strip()]
@@ -865,7 +869,8 @@ def main(argv=None) -> int:
     for arm in ARMS:
         print(f"  {LABELS[arm]}")
     print(f"  ラベル {K:.1f}σ / この回に計算: {', '.join(map(short_name, algos))} / 選定のモデル {SELECT_ALGO}（gain）/ "
-          f"Boruta 最大 {args.max_iter}回・α {ALPHA}・影の {PERC_IN_USE:g} 百分位・影の作り {SHADOW}・種 {BORUTA_SEED} / "
+          f"Boruta 最大 {args.max_iter}回・α {ALPHA}・影の百分位 {', '.join(f'{x:g}' for x in percs)}（版ごと）・"
+          f"影の作り {SHADOW}・種 {BORUTA_SEED} / "
           f"窓のずらし {shifts}か月 / "
           f"種 {seeds} / 対照の種 {R_SEED} / 入れ替え重要度の種 {PI_SEED} / 上限 {args.budget_min:g}分 / 保存 {RUN}_*")
     print("=" * 78)
@@ -895,28 +900,40 @@ def main(argv=None) -> int:
     sel_params = params_of(SELECT_ALGO, stamp)
     log("[params] 1回目に控えたパラメータ: " + " / ".join(f"{short_name(a)} {params_hash(params_of(a, stamp))}"
                                                      for a in ALGOS))
-    sels = {}
-    log(f"[Boruta] ずらし0の {len(folds0)}窓で選ぶ（保存済みの窓は読む）")
-    for f in folds0:
-        rec = select_window(df, base, f, sel_params, stamp, date_cols, args.max_iter)
-        if rec is not None:
-            sels[int(f.index)] = rec
-    log(f"[Boruta] 選定のそろった窓 {len(sels)}/{len(folds0)}・選定の指紋 {selection_sig(sels)}")
     folds_by_shift = {sh: E41.folds_for(df["Date"], sh) for sh in shifts}
-    cms = colmaps(base, folds_by_shift, folds0, sels)
     pi = {"groups": groups, "date_cols": set(date_cols)}
-
-    results = {}
-    if not args.select_only:
-        if len(sels) < len(folds0):
-            log(f"[Boruta] 選定のそろっていない窓がある（{len(sels)}/{len(folds0)}）。そろってから out-of-fold を作る")
-        else:
-            for a in ALGOS:
-                t0 = time.time()
-                results[a] = run(a, df, cms, stamp, shifts, seeds, pi, compute=a in algos)
-                if a in algos:
-                    log(f"[{short_name(a)}] {'そろった' if results[a] else '途中（続きは次の回）'} / {time.time()-t0:.0f}秒")
-    report(results, shifts, seeds, stamp, cms, sels, base, groups, date_cols)
+    verdicts = {}
+    for i, perc in enumerate(percs):
+        PERC_IN_USE = perc
+        print("\n" + "#" * 78)
+        print(f"版 {variant()}（影の作り {SHADOW}・影の {perc:g} 百分位"
+              f"{'。回す前に決めた版' if perc == PERC and SHADOW == 'date' else '。試運転のあとに足した版（§51）'}）")
+        print("#" * 78)
+        sels = {}
+        log(f"[Boruta {variant()}] ずらし0の {len(folds0)}窓で選ぶ（保存済みの窓は読む）")
+        for f in folds0:
+            rec = select_window(df, base, f, sel_params, stamp, date_cols, args.max_iter)
+            if rec is not None:
+                sels[int(f.index)] = rec
+        log(f"[Boruta {variant()}] 選定のそろった窓 {len(sels)}/{len(folds0)}・選定の指紋 {selection_sig(sels)}")
+        cms = colmaps(base, folds_by_shift, folds0, sels)
+        results = {}
+        if not args.select_only:
+            if len(sels) < len(folds0):
+                log(f"[Boruta] 選定のそろっていない窓がある（{len(sels)}/{len(folds0)}）。そろってから out-of-fold を作る")
+            else:
+                for a in ALGOS:
+                    t0 = time.time()
+                    results[a] = run(a, df, cms, stamp, shifts, seeds, pi, compute=a in algos)
+                    if a in algos:
+                        log(f"[{short_name(a)} {variant()}] {'そろった' if results[a] else '途中（続きは次の回）'} / "
+                            f"{time.time()-t0:.0f}秒")
+        summ = report(results, shifts, seeds, stamp, cms, sels, base, groups, date_cols, show_pi=(i == 0))
+        verdicts[variant()] = summ.get("judge7", {}).get("verdict")
+    if len(percs) > 1:
+        print("\n■ 版ごとの判定（それぞれ §7 の形。2つ並べると偶然に満たす見込みは少し上がる）")
+        for v, vd in verdicts.items():
+            print(f"  {v:<12}" + (vd["text"] if vd else "まだ判定できない（out-of-fold がそろっていない）"))
     if TIMED_OUT:
         log("時間の上限で止めた。同じ引数でもう1回回すと、保存済みの選定・out-of-fold の続きから")
     log(f"記録: {OOF_DIR}/{RUN}_*")
