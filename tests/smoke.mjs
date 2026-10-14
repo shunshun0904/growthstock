@@ -223,8 +223,9 @@ console.log('\n== 隠したタブ ==');
 // （src/App.jsx の TABS の hidden）。8軸オクタゴン比較の画面（と、そこにあった銘柄追加のボタン・直近決算のサンキー図）の
 // 確かめはタブと一緒に外した
 const tabNames = (await page.getByRole('tab').allTextContents()).map((t) => t.trim());
-check(tabNames.join(',') === 'ブレイク予測,再学習で加わったサンプル,タイムマシーン',
-      `タブは ブレイク予測 / 再学習で加わったサンプル / タイムマシーン の3つ (実際: ${tabNames.join(',')})`);
+// 再学習で加わったサンプルは一番右（運用者の指示 2026-10-14「一番右側に持ってきてください」）
+check(tabNames.join(',') === 'ブレイク予測,タイムマシーン,再学習で加わったサンプル',
+      `タブは ブレイク予測 / タイムマシーン / 再学習で加わったサンプル の3つ (実際: ${tabNames.join(',')})`);
 check(!tabNames.includes('決算サンキー') && !tabNames.includes('What-If シミュレーター')
         && !tabNames.includes('8軸オクタゴン比較'),
       '決算サンキー・What-If シミュレーター・8軸オクタゴン比較のタブは出ない');

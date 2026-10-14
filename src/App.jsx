@@ -21,12 +21,13 @@ import { loadPredictions, loadHistory, loadFilings, loadFeatureNames, loadNewSam
  */
 const TABS = [
   { id: 'prediction', label: 'ブレイク予測' },
-  // 週次の再学習で加わったサンプルのチャート（運用者の依頼 2026-10-13。名前は同日夜「「例」ではなく「サンプル」」）
-  { id: 'samples', label: '再学習で加わったサンプル' },
   { id: 'filings', label: '決算サンキー', hidden: true },
   { id: 'compare', label: '8軸オクタゴン比較', hidden: true },
   { id: 'timemachine', label: 'タイムマシーン' },
   { id: 'simulator', label: 'What-If シミュレーター', hidden: true },
+  // 週次の再学習で加わったサンプルのチャート（運用者の依頼 2026-10-13。名前は同日夜「「例」ではなく「サンプル」」）。
+  // 一番右（運用者の指示 2026-10-14「一番右側に持ってきてください」）
+  { id: 'samples', label: '再学習で加わったサンプル' },
 ];
 const VISIBLE_TABS = TABS.filter((t) => !t.hidden);
 const isVisible = (id) => VISIBLE_TABS.some((t) => t.id === id);
