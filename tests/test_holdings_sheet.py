@@ -8,6 +8,10 @@
   - 売りのルール: 買った日を1日目に 20 営業日以内に日中の高値が 買値×1.10 に届いたらその値で売り。
     届かなければ 20 日目の終値で売り、含み損なら持ち越し（その後はルールで売らない）
   - 報告の売りはルールより優先（値段が無ければその日の終値、日足より先の日なら値段で確定）
+  - 指値の変更（2026-10-14）: 効く最初の日から 買値×(1+%) を指値にする。それより前は +10% のまま
+    （さかのぼって売らない）。その日に効くのは日付がいちばん新しいもの（同じ日なら報告の順で後のもの）。
+    表には、保有中は最新の指値、売ったものは売った日に効いていた指値。取引の記録タブの「指値%」の列は
+    前からあるタブにも右端に足される
   - 営業日は取引所のカレンダーで数える。買う日の日足が欠けていたら待つ
   - 日付ごとの表: 銘柄の列は売った日まで、合計には確定した損益が残る
   - グラフは「損益(円)」の列だけ（軸は1本）。合計は淡い青の太い帯。銘柄は保有中と売って
@@ -72,10 +76,11 @@ def with_value(n, base, changes):
 
 
 def pos(code="6912", pick="2026-09-24", buy=None, entry=None, shares=100, sell=None,
-        sell_price=None, row=2, name="A社"):
+        sell_price=None, row=2, name="A社", targets=()):
     return H.Position(pick_date=pick, code=code, name=name, row=row,
                       buy_date=T(buy) if buy else None, entry_price=entry, shares=shares,
-                      sell_date=T(sell) if sell else None, sell_price=sell_price)
+                      sell_date=T(sell) if sell else None, sell_price=sell_price,
+                      targets=[(T(d), float(v)) for d, v in targets])
 
 
 # --------------------------------------------------------------------------- #
@@ -112,6 +117,12 @@ class LogTab(unittest.TestCase):
                          ("買い", "A社", "", "", 200.0))
         c = H.event_record({"id": ID_B, "action": "cancel", "code": None, "ref": "aaaaaaaa"}, {})
         self.assertEqual((c["種類"], c["取消の対象"], c["コード"]), ("取消", "aaaaaaaa", ""))
+        self.assertEqual((rec["指値%"], c["指値%"]), ("", ""))
+        t = H.event_record({"id": ID_C, "action": "target", "code": "6912", "pick_date": "2026-09-24",
+                            "date": "2026-10-01", "pct": 7.0}, {"6912": "A社"})
+        self.assertEqual((t["種類"], t["銘柄名"], t["予測日"], t["日付"], t["指値%"], t["価格"]),
+                         ("指値", "A社", "2026-09-24", "2026-10-01", 7.0, ""))
+        self.assertEqual(H.LOG_HEADER[-1], "指値%")             # 前からあるタブには右端に足す
 
 
 class PositionsFromLog(unittest.TestCase):
@@ -122,9 +133,9 @@ class PositionsFromLog(unittest.TestCase):
             ["2026-10-02", "6912", "A社", ""]]
 
     @staticmethod
-    def rec(rid, kind, code="6912", pick="", day="", price="", shares="", ref=""):
+    def rec(rid, kind, code="6912", pick="", day="", price="", shares="", ref="", pct=""):
         return {"id": rid, "種類": kind, "コード": code, "予測日": pick, "日付": day,
-                "価格": price, "株数": shares, "取消の対象": ref}
+                "価格": price, "株数": shares, "取消の対象": ref, "指値%": pct}
 
     def test_buy_finds_the_prediction_row(self):
         ps, issues, cleared = H.positions_from_log(
@@ -191,10 +202,40 @@ class PositionsFromLog(unittest.TestCase):
         self.assertEqual(ps[1].row, None)
         self.assertEqual(sorted(issues), sorted([
             "同じ買いが2回ある", "買いの行に コード・予測日（か日付）が無い",
-            "種類が 買い・売り・取消 のどれでもない", "取消の対象が短い（id の先頭 8 文字以上）",
+            "種類が 買い・売り・取消・指値 のどれでもない", "取消の対象が短い（id の先頭 8 文字以上）",
             "買いの予測日とコードに合う予測ログの行が無い"]))
         for text in issues:
             for word in ("6912", "9999", "A社", "2026"):
+                self.assertNotIn(word, text)
+
+    def test_target_goes_to_the_latest_buy_made_by_that_day(self):
+        rows = [self.rec(ID_A, "買い", pick="2026-09-24"),
+                self.rec(ID_B, "買い", pick="2026-10-02"),
+                self.rec(ID_C, "指値", day="2026-09-30", pct="5"),             # 2回目の買いより前
+                self.rec("d" * 32, "target", day="2026-10-20", pct="7.5%"),
+                self.rec("e" * 32, "指値", pick="2026-09-24", day="2026-10-21", pct="+3")]
+        ps, issues, _ = H.positions_from_log(rows, self.PRED)
+        first, second = ps
+        self.assertEqual(first.targets, [(T("2026-09-30"), 5.0), (T("2026-10-21"), 3.0)])
+        self.assertEqual(second.targets, [(T("2026-10-20"), 7.5)])
+        self.assertEqual(issues, [])
+
+    def test_bad_or_cancelled_targets(self):
+        rows = [self.rec(ID_A, "買い", pick="2026-09-24"),
+                self.rec(ID_B, "指値", day="2026-10-20"),                       # % が無い
+                self.rec(ID_C, "指値", pct="5"),                                # 日付が無い
+                self.rec("d" * 32, "指値", day="2026-10-20", pct="0"),
+                self.rec("e" * 32, "指値", day="2026-10-20", pct="150"),
+                self.rec("f" * 32, "指値", code="7713", day="2026-10-20", pct="5"),   # 買いが無い
+                self.rec("1" * 32, "指値", day="2026-09-20", pct="5"),          # 買う前
+                self.rec("2" * 32, "指値", day="2026-10-20", pct="4"),
+                self.rec("3" * 32, "取消", code="", ref="2" * 8)]                # 取り消した指値
+        ps, issues, _ = H.positions_from_log(rows, self.PRED)
+        self.assertEqual(ps[0].targets, [])
+        bad = "指値の行に 日付・指値%（0 より大きく 100 以下）が無い"
+        self.assertEqual(sorted(issues), sorted([bad] * 4 + ["指値に合う買いが無い"] * 2))
+        for text in issues:
+            for word in ("6912", "7713", "2026", "150"):
                 self.assertNotIn(word, text)
 
 
@@ -367,6 +408,66 @@ class Simulate(unittest.TestCase):
         path = H.simulate(pos(), b, CAL)
         self.assertEqual(list(path["close"]), [1010.0, 1020.0, 1020.0, 1030.0])
 
+    # 指値の変更（2026-10-14）。買値は 9/25（DAYS[1]）の始値 1000
+
+    def test_a_lowered_target_counts_only_from_its_day(self):
+        """+5% に下げても、効く日より前の高値（DAYS[3] の 1080）ではさかのぼって売らない。"""
+        b = make_bars(h=with_value(self.N, 1000, {3: 1080, 8: 1049.9, 9: 1050}))
+        p = pos(targets=[(DAYS[6], 5)])
+        path = H.simulate(p, b, CAL)
+        self.assertEqual((p.state, p.reason, p.exit_day), (H.SOLD, "+5%に到達", DAYS[9]))
+        self.assertAlmostEqual(p.exit_price, 1050.0)
+        self.assertAlmostEqual(p.target, 1050.0)
+        self.assertEqual((p.target_pct, p.target_from), (5.0, DAYS[6]))
+        self.assertEqual(H.limit_text(p), f"+5%（{DAYS[6].month}/{DAYS[6].day}〜）")
+        self.assertAlmostEqual(path["pnl_yen"].iloc[-1], 5000.0)
+        self.assertEqual(path["Date"].iloc[-1], DAYS[9])
+        self.assertEqual(p.peak, 1080.0)
+        # 変えていなければ同じ日足で +10% には届かず、20日目の終値で売る
+        q = pos()
+        H.simulate(q, b, CAL)
+        self.assertEqual((q.reason, q.exit_day, H.limit_text(q)), ("20日目の終値", DAYS[20], "+10%"))
+
+    def test_a_held_position_shows_the_latest_target_before_it_starts(self):
+        b = make_bars(days=DAYS[:8], h=with_value(8, 1000, {3: 1080}))
+        p = pos(targets=[(DAYS[10], 5)])                         # 保存した日足より先の日から効く
+        H.simulate(p, b, CAL)
+        self.assertEqual(p.state, "保有中")                       # 1080 は効く前
+        self.assertAlmostEqual(p.target, 1050.0)
+        self.assertEqual((p.target_pct, p.target_from), (5.0, DAYS[10]))
+
+    def test_sold_before_the_change_keeps_the_old_target(self):
+        b = make_bars(h=with_value(self.N, 1000, {4: 1100}))
+        p = pos(targets=[(DAYS[6], 5)])
+        H.simulate(p, b, CAL)
+        self.assertEqual((p.state, p.reason, p.exit_day), (H.SOLD, "+10%に到達", DAYS[4]))
+        self.assertAlmostEqual(p.target, 1100.0)
+        self.assertEqual((p.target_pct, p.target_from, H.limit_text(p)), (None, None, "+10%"))
+
+    def test_the_newest_target_wins_and_it_can_be_raised(self):
+        """+5%（DAYS[3]〜）のあと DAYS[5] に +15% と +12%（同じ日は報告の順で後のもの = +12%）。"""
+        b = make_bars(h=with_value(self.N, 1000, {4: 1040, 6: 1110, 7: 1120}))
+        p = pos(targets=[(DAYS[5], 15), (DAYS[3], 5), (DAYS[5], 12)])
+        H.simulate(p, b, CAL)
+        self.assertEqual((p.state, p.reason, p.exit_day), (H.SOLD, "+12%に到達", DAYS[7]))
+        self.assertAlmostEqual(p.exit_price, 1120.0)
+        self.assertEqual((p.target_pct, p.target_from), (12.0, DAYS[5]))
+
+    def test_day_20_and_reported_sells_stay_with_a_changed_target(self):
+        b = make_bars(c=with_value(self.N, 1000, {20: 1030}))
+        p = pos(targets=[(DAYS[2], 5)])                          # 1030 は +5%（1050）に届かない
+        H.simulate(p, b, CAL)
+        self.assertEqual((p.state, p.reason, p.exit_day, p.exit_price),
+                         (H.SOLD, "20日目の終値", DAYS[20], 1030.0))
+        self.assertEqual(H.limit_text(p), f"+5%（{DAYS[2].month}/{DAYS[2].day}〜）")
+        q = pos(targets=[(DAYS[2], 5)], sell=DAYS[3], sell_price=1020)
+        H.simulate(q, make_bars(h=with_value(self.N, 1000, {4: 1060})), CAL)
+        self.assertEqual((q.state, q.reason, q.exit_day, q.exit_price), (H.SOLD, "報告", DAYS[3], 1020.0))
+
+    def test_pct_text(self):
+        self.assertEqual([H.pct_text(v) for v in (None, 5, 5.0, 7.5, 12.25)],
+                         ["+10%", "+5%", "+5%", "+7.5%", "+12.25%"])
+
 
 # --------------------------------------------------------------------------- #
 # 日付ごとの表・グラフ・タブの中身
@@ -415,14 +516,28 @@ class Daily(unittest.TestCase):
         self.assertAlmostEqual(a["売値"], 1100.0)
         self.assertEqual((c["状態"], c["買った日"], c["建値"], c["20日目"], c["損益(円)"]),
                          ("保有中", "2026-09-29", 500.0, f"{DAYS[22]:%Y-%m-%d}", 4000))
-        self.assertEqual((c["+10%の値"], c["20日目までの高値"], c["高値の日"]),
-                         (550.0, 540.0, "2026-10-07"))
-        self.assertEqual((a["+10%の値"], a["20日目までの高値"], a["高値の日"]),
-                         (1100.0, 1100.0, "2026-09-29"))
+        self.assertEqual((c["売りの指値"], c["指値%"], c["20日目までの高値"], c["高値の日"]),
+                         (550.0, "+10%", 540.0, "2026-10-07"))
+        self.assertEqual((a["売りの指値"], a["指値%"], a["20日目までの高値"], a["高値の日"]),
+                         (1100.0, "+10%", 1100.0, "2026-09-29"))
         total, sold, held = rows[-3:]
         i = head.index("損益(円)")
         self.assertEqual([(r[0], r[i]) for r in (total, sold, held)],
                          [("合計", 14000), ("うち確定（売却済み）", 10000), ("うち含み（保有中）", 4000)])
+
+    def test_summary_shows_a_changed_target(self):
+        self.c.targets = [(DAYS[12], 5.0)]                       # 保存した日足より先から +5%
+        paths = {k: H.simulate(p, self.bars, CAL) for k, p in enumerate(self.ps)}
+        c = dict(zip(H.SUMMARY_HEADER, H.summary_rows(self.ps, paths)[1]))
+        when = f"{DAYS[12].month}/{DAYS[12].day}〜"
+        self.assertEqual((c["状態"], c["売りの指値"], c["指値%"]), ("保有中", 525.0, f"+5%（{when}）"))
+        # 買い待ち（買う日の日足がまだ無い）でも % は出す。値段は買値が決まるまで空
+        w = pos(code="7713", pick="2026-10-07", row=None, name="C社", targets=[(DAYS[12], 5)])
+        self.assertIsNone(H.simulate(w, self.bars, CAL))
+        line = dict(zip(H.SUMMARY_HEADER, H.summary_rows([w], {})[0]))
+        self.assertEqual((line["状態"], line["売りの指値"], line["指値%"]), ("買い待ち", "", f"+5%（{when}）"))
+        with self.assertRaises(KeyError):                        # 見出しに無い列の名前は打ち間違い
+            H._summary_line({"+10%の値": 1})
 
     def test_same_stock_twice_gets_separate_columns(self):
         b = make_bars("69120", DAYS[:12])
@@ -440,7 +555,9 @@ class Daily(unittest.TestCase):
         lay = H.build_layout("2026-10-07", H.summary_rows(self.ps, self.paths), self.daily,
                              len(self.ps), series)
         self.assertEqual(lay.values[3], [H._cell(h) for h in H.SUMMARY_HEADER])
-        self.assertIn("'+10%の値", lay.values[3])
+        self.assertIn("売りの指値", lay.values[3])
+        i = H.SUMMARY_HEADER.index("指値%")
+        self.assertEqual([r[i] for r in lay.values[4:6]], ["'+10%", "'+10%"])   # 式と読まれないように
         self.assertEqual(lay.values[lay.daily_header_row][0], "日付")
         self.assertEqual(lay.values[lay.daily_header_row + 1][0], "2026-09-25")
         self.assertEqual([c for c, _, _ in lay.series], [1, 4, 5])
@@ -629,7 +746,7 @@ class EndToEnd(unittest.TestCase):
                                 serialization.NoEncryption()).decode("ascii")
         self.env = json.dumps({"private_key": pem})
         self.inbox = os.path.join(self.dir, "inbox.jsonl")
-        pub = TI.public_pem(key)
+        pub = self.pub = TI.public_pem(key)
         events = [TI.make_event("buy", "6912", pick_date="2026-09-24"),
                   TI.make_event("buy", "1111", pick_date="2026-09-24"),
                   TI.make_event("buy", "7713", pick_date="2026-09-28")]
@@ -693,6 +810,30 @@ class EndToEnd(unittest.TestCase):
         last = [r["repeatCell"] for r in book.requests
                 if r.get("repeatCell", {}).get("range", {}).get("sheetId") == 0][-3:]
         self.assertEqual(last[1]["cell"]["userEnteredFormat"], {"backgroundColor": H.BLUE})
+
+    def test_a_target_change_moves_the_limit_and_adds_its_column(self):
+        """前からある取引の記録タブ（「指値%」の列が無い・列数もぎりぎり）に指値の変更を足す。"""
+        old = H.LOG_HEADER[:-1]
+        book = FakeBook(self.PRED)
+        book.tabs[H.LOG_TAB] = FakeWorksheet(H.LOG_TAB, [old], sid=5, cols=len(old))
+        TI.append(self.inbox, TI.encrypt(TI.make_event(
+            "target", "7713", pick_date="2026-09-28", date=f"{DAYS[5]:%Y-%m-%d}", pct="5"), self.pub))
+        code, out = self.run_main(book)
+        self.assertEqual(code, 0)
+        log = book.tabs[H.LOG_TAB]
+        self.assertEqual(log.values[0], old + ["指値%"])        # 右端に足す
+        self.assertEqual(log.col_count, len(H.LOG_HEADER))
+        self.assertEqual((log.values[-1][2], log.values[-1][-1]), ("指値", "5.0"))
+        tab = book.tabs[H.TAB].updates[-1][0]
+        c = dict(zip(H.SUMMARY_HEADER, tab[5]))
+        # C社 は 9/29 に 500 で買い、+5%（525）に最後の日の高値 540 で届く（+10% の 550 には届かない）
+        self.assertEqual((tab[5][0], c["状態"], c["売りの理由"], c["売値"], c["売りの指値"], c["指値%"]),
+                         ("C社", H.SOLD, "'+5%に到達", 525.0, 525.0,
+                          f"'+5%（{DAYS[5].month}/{DAYS[5].day}〜）"))
+        self.assertIn("指値を変えた保有 1件", out)
+        self.assertIn("取引の記録に足した 5件", out)
+        for word in ("C社", "7713", "525", "合わなかった"):
+            self.assertNotIn(word, out)
 
     def test_dry_run_writes_nothing(self):
         book = FakeBook(self.PRED)

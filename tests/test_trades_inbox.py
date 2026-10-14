@@ -5,7 +5,8 @@
 固定すること
   - 暗号化した行は id のほかに中身（コード・日付・値段）が読めない。正しい鍵でだけ元に戻る
   - 中身や id を書き換えた行、別の鍵の行は戻らず、数えるだけで止まらない
-  - 報告の形の確かめ（買いは予測日か日付、売りは日付、取消は id の先頭 8 文字以上）
+  - 報告の形の確かめ（買いは予測日か日付、売りは日付、取消は id の先頭 8 文字以上、指値の変更は
+    効く最初の日と買値からの %（0 より大きく 100 以下）。指値の変更に値段・株数は付けない）
   - add は1行足して、id の先頭だけを出す（銘柄・値段を出さない）
   - pubkey は環境変数の秘密鍵から公開鍵を出す
 
@@ -57,6 +58,18 @@ class MakeEvent(unittest.TestCase):
         c = TI.make_event("cancel", ref="ABCDEF12")
         self.assertEqual((c["action"], c["ref"], c["code"]), ("cancel", "abcdef12", None))
 
+    def test_target(self):
+        t = TI.make_event("target", "6912", pick_date="2026-09-24", date="2026-10-01", pct="5",
+                          note="n", now=NOW)
+        self.assertEqual({k: t[k] for k in ("action", "code", "pick_date", "date", "pct", "price",
+                                            "shares", "ref", "note")},
+                         {"action": "target", "code": "6912", "pick_date": "2026-09-24",
+                          "date": "2026-10-01", "pct": 5.0, "price": None, "shares": None,
+                          "ref": None, "note": "n"})
+        self.assertEqual(TI.make_event("target", "6912", date="2026-10-01", pct="7.5")["pct"], 7.5)
+        self.assertEqual(TI.make_event("target", "6912", date="2026-10-01", pct=100)["pct"], 100.0)
+        self.assertIsNone(TI.make_event("buy", "6912", "2026-09-24")["pct"])
+
     def test_bad_reports_are_refused(self):
         bad = [dict(action="hold", code="6912", pick_date="2026-09-24"),
                dict(action="buy", code="", pick_date="2026-09-24"),
@@ -68,10 +81,32 @@ class MakeEvent(unittest.TestCase):
                dict(action="buy", code="6912", pick_date="2026-09-24", shares="-100"),
                dict(action="sell", code="6912"),                                 # 売った日が無い
                dict(action="cancel", ref="abc1234"),                             # 7文字
-               dict(action="cancel", ref="zzzzzzzz")]                            # 16進でない
+               dict(action="cancel", ref="zzzzzzzz"),                            # 16進でない
+               dict(action="buy", code="6912", pick_date="2026-09-24", price="nan"),
+               dict(action="buy", code="6912", pick_date="2026-09-24", price="inf"),
+               dict(action="buy", code="6912", pick_date="2026-09-24", pct="5"),   # % は指値だけ
+               dict(action="target", code="6912", pct="5"),                      # 効く日が無い
+               dict(action="target", code="6912", date="2026-10-01"),            # % が無い
+               dict(action="target", code="6912", date="2026-10-01", pct="0"),
+               dict(action="target", code="6912", date="2026-10-01", pct="-5"),
+               dict(action="target", code="6912", date="2026-10-01", pct="100.1"),
+               dict(action="target", code="6912", date="2026-10-01", pct="nan"),
+               dict(action="target", code="6912", date="2026-10-01", pct="5%"),
+               dict(action="target", code="6912", date="2026-10-01", pct="5", price="1000"),
+               dict(action="target", code="6912", date="2026-10-01", pct="5", shares="100"),
+               dict(action="target", date="2026-10-01", pct="5")]                # コードが無い
         for kw in bad:
             with self.subTest(kw=kw), self.assertRaises(ValueError):
                 TI.make_event(**kw)
+
+
+    def test_cli_help_prints(self):
+        """help の文の % は %% と書く（そのままだと -h で落ちる）。"""
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), self.assertRaises(SystemExit) as cm:
+            TI.main(["add", "-h"])
+        self.assertEqual(cm.exception.code, 0)
+        self.assertIn("買値からの %（5 なら", out.getvalue())
 
 
 @unittest.skipUnless(HAVE_CRYPTO, "cryptography を読み込めない")
@@ -136,6 +171,23 @@ class Crypto(unittest.TestCase):
         self.assertEqual((len(events), failed), (1, 0))
         self.assertEqual((events[0]["code"], events[0]["price"]), ("6912", 2691.0))
         self.assertTrue(text.strip().endswith(f"id {events[0]['id'][:8]}）"))
+
+    def test_cli_add_target(self):
+        pub = os.path.join(self.dir, "pub.pem")
+        with open(pub, "wb") as f:
+            f.write(self.pub)
+        inbox = os.path.join(self.dir, "inbox.jsonl")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            TI.main(["add", "--action", "target", "--code", "6912", "--pick-date", "2026-09-24",
+                     "--date", "2026-10-01", "--pct", "5", "--inbox", inbox, "--pubkey", pub])
+        for word in ("6912", "2026", "target"):
+            self.assertNotIn(word, out.getvalue())
+        events, failed = TI.read_inbox(inbox, self.key)
+        self.assertEqual((len(events), failed), (1, 0))
+        self.assertEqual({k: events[0][k] for k in ("action", "code", "pick_date", "date", "pct")},
+                         {"action": "target", "code": "6912", "pick_date": "2026-09-24",
+                          "date": "2026-10-01", "pct": 5.0})
 
     def test_cli_pubkey_reads_the_service_account(self):
         pem = self.key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
