@@ -635,11 +635,11 @@ def summary_rows(positions: List[Position], paths: Dict[int, pd.DataFrame]) -> L
         rows.append(_summary_line({
             "銘柄": p.name, "コード": p.code, "予測日": p.pick_date or "",
             "買った日": _ymd(p.entry_day), "建値": round(float(p.entry), 1), "株数": p.shares,
-            "売りの指値": round(float(p.target), 1), "指値%": limit_text(p),
+            "売りの指値": round(float(p.target), 2), "指値%": limit_text(p),
             "20日目": _ymd(p.day20),
             "20日目までの高値": "" if p.peak is None else round(p.peak, 1),
             "高値の日": _ymd(p.peak_day), "売った日": _ymd(p.exit_day),
-            "売値": "" if p.exit_price is None else round(float(p.exit_price), 1),
+            "売値": "" if p.exit_price is None else round(float(p.exit_price), 2),
             "売りの理由": p.reason, "最新日": _ymd(last["Date"]),
             "最新終値": "" if p.state == SOLD else round(float(last["close"]), 1),
             "損益(円)": round(yen), "損益%": round(float(last["pnl_pct"]), 2), "状態": p.state}))
@@ -763,7 +763,10 @@ def chart_request(sheet_id: int, lay: Layout) -> Optional[Dict]:
 
 
 def format_requests(sheet_id: int, lay: Layout) -> List[Dict]:
-    """円は桁区切りと符号、% は小数2桁と符号、値段は小数1桁。見出しは太字。"""
+    """
+    円は桁区切りと符号、% は小数2桁と符号、値段は小数1桁。見出しは太字。売りの指値と売値は小数2桁
+    （建値×1.05 は 0.05 円の端数が出る。小数1桁に丸めると 2 進数の誤差で切り下がって見える。2026-10-14）。
+    """
     reqs: List[Dict] = []
 
     def num(r0, r1, c, pattern):
@@ -786,11 +789,12 @@ def format_requests(sheet_id: int, lay: Layout) -> List[Dict]:
     yen = "+#,##0;-#,##0;0"
     pct = "+0.00;-0.00;0.00"
     price = "#,##0.0"
+    price2 = "#,##0.00"
     s0 = 3                                    # 銘柄ごとの表の見出し
     bold(s0)
     s1 = s0 + 1 + lay.summary_rows
-    for name, pattern in (("建値", price), ("売りの指値", price), ("20日目までの高値", price),
-                          ("売値", price), ("最新終値", price), ("損益(円)", yen), ("損益%", pct)):
+    for name, pattern in (("建値", price), ("売りの指値", price2), ("20日目までの高値", price),
+                          ("売値", price2), ("最新終値", price), ("損益(円)", yen), ("損益%", pct)):
         num(s0 + 1, s1, SUMMARY_HEADER.index(name), pattern)
     for r in range(s1 - 3, s1):               # 合計・うち確定・うち含み
         bold(r)
@@ -838,7 +842,7 @@ def user_cell_updates(header: List[str], positions: List[Position],
             continue
         put(p.row, {"建値": round(float(p.entry), 1), "株数": p.shares,
                     "手仕舞い日": _ymd(p.exit_day),
-                    "手仕舞い値": "" if p.exit_price is None else round(float(p.exit_price), 1),
+                    "手仕舞い値": "" if p.exit_price is None else round(float(p.exit_price), 2),
                     "損益": round(float(path.iloc[-1]["pnl_yen"]))})
     for r in sorted(cleared):
         put(r, {})

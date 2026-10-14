@@ -539,6 +539,26 @@ class Daily(unittest.TestCase):
         with self.assertRaises(KeyError):                        # 見出しに無い列の名前は打ち間違い
             H._summary_line({"+10%の値": 1})
 
+    def test_limit_and_sale_prices_keep_two_decimals(self):
+        """1001 の +5% は 1051.05。小数1桁に丸めると 2 進数の誤差で 1051.0 に切り下がる（2026-10-14）。"""
+        b = make_bars("69120", DAYS[:10], o=[1001.0] * 10, h=with_value(10, 1001.0, {6: 1052.0}))
+        p = pos(targets=[(DAYS[3], 5)])
+        paths = {0: H.simulate(p, b, CAL)}
+        line = dict(zip(H.SUMMARY_HEADER, H.summary_rows([p], paths)[0]))
+        self.assertEqual((line["売りの指値"], line["売値"], line["損益(円)"]), (1051.05, 1051.05, 5005))
+        cells = {c["range"]: c["values"][0][0]
+                 for c in H.user_cell_updates(["建値", "手仕舞い値"], [p], paths)}
+        self.assertEqual(cells["B2"], 1051.05)
+        lay = H.build_layout("2026-10-07", H.summary_rows([p], paths), H.daily_table(
+            [p], paths, H.trading_days(b, paths)), 1, [])
+        pats = {r["repeatCell"]["range"]["startColumnIndex"]:
+                r["repeatCell"]["cell"]["userEnteredFormat"]["numberFormat"]["pattern"]
+                for r in H.format_requests(1, lay)
+                if r["repeatCell"]["range"].get("startRowIndex") == 4
+                and "numberFormat" in r["repeatCell"]["cell"]["userEnteredFormat"]}
+        self.assertEqual([pats[H.SUMMARY_HEADER.index(n)] for n in ("建値", "売りの指値", "売値")],
+                         ["#,##0.0", "#,##0.00", "#,##0.00"])
+
     def test_same_stock_twice_gets_separate_columns(self):
         b = make_bars("69120", DAYS[:12])
         ps = [pos(), pos(pick="2026-09-30", row=5)]
