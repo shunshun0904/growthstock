@@ -55,6 +55,20 @@ class TestLineup(unittest.TestCase):
         self.assertEqual(E.SHADOW_MODES, ("date", "month", "global"))
         self.assertEqual(E.SHADOW, "date")
 
+    def test_perc_option(self):
+        saved = (E.PERC_IN_USE, E.SHADOW)
+        try:
+            self.assertEqual(E.variant(), "date")                            # 登録した版はファイル名を変えない
+            E.PERC_IN_USE = 75.0
+            self.assertEqual(E.variant(), "date_p75")
+            E.SHADOW = "global"
+            self.assertEqual(E.variant(), "global_p75")
+        finally:
+            E.PERC_IN_USE, E.SHADOW = saved
+        for bad in ("50", "40", "101"):
+            with self.assertRaises(SystemExit):
+                E.main(["--perc", bad, "--dry"])
+
     def test_algo_names(self):
         self.assertEqual([E.algo_name(a) for a in ("lgbm", "xgb", "cat", "cat_k15")],
                          ["lgbm_k15", "xgb_k15", "cat_k15", "cat_k15"])
@@ -225,6 +239,27 @@ class TestBorutaLoop(unittest.TestCase):
         # 影の最大になった列（診断）は、その種類の列を指す
         self.assertTrue(all(0 <= t["stock_from"] < 6 for t in res["thr"]))
         self.assertTrue(all(6 <= t["date_from"] < X.shape[1] for t in res["thr"]))
+
+    def test_perc_relaxes_the_bar(self):
+        """影の最大（100）だと弱い列も外れる。75 百分位なら弱い列は残り、でたらめと同じ列は外れる。"""
+        rng0 = np.random.default_rng(5)
+        dates = np.repeat(pd.bdate_range("2023-01-04", periods=50), 4)
+        X = rng0.standard_normal((len(dates), 8))
+
+        def fit_imp(Xs, y, it):
+            rng = np.random.default_rng(100 + it)
+            p = Xs.shape[1] // 2
+            real = np.array([10.0, 0.8, 0.8, 0.5, 0.5, 0.5, 0.5, 0.5])[:p]   # 強い・弱い2本・でたらめと同じ5本
+            return np.concatenate([real, rng.random(p)])                       # 影は一様乱数（最大は 1 に近い）
+
+        y = np.zeros(len(dates), dtype=int)
+        isd = np.zeros(8, dtype=bool)
+        strict = E.boruta(X, y, E.Shuffler(dates), isd, fit_imp, max_iter=60, perc=100)["decision"]
+        mild = E.boruta(X, y, E.Shuffler(dates), isd, fit_imp, max_iter=60, perc=75)["decision"]
+        self.assertEqual(strict[0], 1)
+        self.assertEqual(strict[1:3].tolist(), [-1, -1])                     # 影の最大には勝てない
+        self.assertTrue((mild[1:3] >= 0).all())                              # 75 百分位なら外れない
+        self.assertTrue((mild[3:] == -1).all())                              # でたらめと同じ列は外れる
 
     def test_with_a_small_lightgbm(self):
         X, y, dates, is_date = self.frame(n_days=150, per_day=12, seed=2, n_mkt=1)

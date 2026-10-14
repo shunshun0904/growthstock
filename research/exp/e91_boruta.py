@@ -93,7 +93,8 @@ LABELS = {"A": "A いまの本番（239列）",
           "S": "S 窓ごとの Boruta で rejected の列を外す（tentative は残す）・A のパラメータ",
           "R": "R 対照（S と同じ本数をでたらめに外す）・A のパラメータ"}
 PAIRS = (("A", "S"), ("A", "R"), ("R", "S"))
-#: Boruta の設定（回す前に決めた。BorutaPy 0.4.3 の既定と同じ）
+#: Boruta の設定（回す前に決めた。BorutaPy 0.4.3 の既定と同じ）。PERC は影の最大（100）の代わりに使う百分位で、
+#: --perc で緩めた版も回せる（試運転のあとに足した選択肢。§51）
 MAX_ITER = 100
 ALPHA = 0.05
 PERC = 100
@@ -365,14 +366,14 @@ def gain_fitter(params: dict):
 
 def select_key(fold, cols: list, params: dict, stamp: dict, date_cols: list, max_iter: int) -> dict:
     return {"train_end": str(fold.train_end), "cols": F.signature(cols), "params": params_hash(params),
-            "data": stamp["built_utc"], "max_iter": max_iter, "alpha": ALPHA, "perc": PERC, "seed": BORUTA_SEED,
+            "data": stamp["built_utc"], "max_iter": max_iter, "alpha": ALPHA, "perc": PERC_IN_USE, "seed": BORUTA_SEED,
             "min_date_rows": MIN_DATE_ROWS, "date_cols": F.signature(date_cols), "shadow": SHADOW}
 
 
 def select_window(df: pd.DataFrame, cols: list, fold, params: dict, stamp: dict, date_cols: list,
                   max_iter: int, compute: bool = True) -> dict | None:
     """ずらし0の窓 fold の訓練期間の行だけで Boruta。保存済みなら読む（設定と表の版が同じときだけ）。"""
-    p = path(f"boruta_{SHADOW}_f{int(fold.index):02d}.json")
+    p = path(f"boruta_{variant()}_f{int(fold.index):02d}.json")
     key = select_key(fold, cols, params, stamp, date_cols, max_iter)
     if os.path.exists(p):
         with open(p, encoding="utf-8") as fh:
@@ -397,7 +398,7 @@ def select_window(df: pd.DataFrame, cols: list, fold, params: dict, stamp: dict,
             log(f"    窓{fold.index} {it}回: confirmed {(dec == 1).sum()} / tentative {(dec == 0).sum()} / "
                 f"rejected {(dec == -1).sum()}（{time.time()-t0:.0f}秒）")
 
-    res = boruta(X, y, sh, is_date, gain_fitter(params), max_iter=max_iter, progress=progress)
+    res = boruta(X, y, sh, is_date, gain_fitter(params), max_iter=max_iter, perc=PERC_IN_USE, progress=progress)
     dec = res["decision"]
     rec = {"key": key, "fold": int(fold.index), "train_end": str(fold.train_end), "n_train": int(len(tr)),
            "pos_rate": float(y.mean()), "n_iter": int(res["n_iter"]), "seconds": round(time.time() - t0),
@@ -626,7 +627,7 @@ def selection_report(sels: dict, base: list, groups: dict, date_cols: list) -> d
         return out
     ks = sorted(sels)
     print(f"\n■ 1. Boruta の選定（影の作り {SHADOW}・ずらし0の窓ごと。訓練期間の行だけ。最大 {MAX_ITER_IN_USE}回・α {ALPHA}・"
-          f"影の {PERC} 百分位）")
+          f"影の {PERC_IN_USE:g} 百分位）")
     print(f"  {'窓':>3}  {'訓練の終わり':<12}{'行':>8}{'正例率':>8}{'回数':>6}{'confirmed':>11}{'tentative':>11}"
           f"{'rejected':>10}{'秒':>7}  影の物差し（gain の中央値: 銘柄ごと / 日付単位）")
     for k in ks:
@@ -733,10 +734,10 @@ def report(results: dict, shifts: list, seeds, stamp: dict, cms: dict, sels: dic
     print("\n" + "=" * 78)
     print(f"ラベル {K:.1f}σ / 結果のそろったモデル: {', '.join(map(short_name, algos)) or 'なし'}"
           + (f" / まだ: {', '.join(map(short_name, missing))}" if missing else ""))
-    summary = {"data": stamp, "label_k": K, "boruta": {"max_iter": MAX_ITER_IN_USE, "alpha": ALPHA, "perc": PERC,
+    summary = {"data": stamp, "label_k": K, "boruta": {"max_iter": MAX_ITER_IN_USE, "alpha": ALPHA, "perc": PERC_IN_USE,
                                                         "seed": BORUTA_SEED, "min_date_rows": MIN_DATE_ROWS},
                "r_seed": R_SEED, "pi_seed": PI_SEED, "date_level_columns": date_cols, "shadow": SHADOW,
-               "selection_sig": selection_sig(sels),
+               "selection_sig": selection_sig(sels), "variant": variant(),
                "production_oof": {}, "windows": {}, "judge7": {}, "per_window": []}
     summary["selection"] = selection_report(sels, base, groups, date_cols)
 
@@ -764,7 +765,7 @@ def report(results: dict, shifts: list, seeds, stamp: dict, cms: dict, sels: dic
     complete = (all(a in algos for a in ALGOS) and sorted(shifts) == [0, 2, 4] and tuple(seeds) == SEEDS
                 and MAX_ITER_IN_USE == MAX_ITER)
     if len(s):
-        s.to_csv(path(f"auc_by_window_{SHADOW}.csv"), index=False)
+        s.to_csv(path(f"auc_by_window_{variant()}.csv"), index=False)
         print(f"\n■ 3. 窓ごと（境界を {'/'.join(map(str, shifts))}か月ずらした{len(shifts)}通り。種 {len(seeds)}つの平均）")
         print(f"  {'':<24}{'前':>9}{'後':>9}{'差の平均':>10}{'SE':>9}{'上の窓':>9}{'同じ':>6}")
         for a in algos:
@@ -809,17 +810,23 @@ def report(results: dict, shifts: list, seeds, stamp: dict, cms: dict, sels: dic
     if algos:
         summary["perm_importance"] = pi_report(results, algos, shifts, summary["selection"].get("rejected_count", {}),
                                                len(sels))
-    with open(path(f"summary_{SHADOW}.json"), "w", encoding="utf-8") as fh:
+    with open(path(f"summary_{variant()}.json"), "w", encoding="utf-8") as fh:
         json.dump(summary, fh, ensure_ascii=False, indent=1, default=str)
     return summary
 
 
-#: この回の Boruta の最大回数（試運転で減らしたときは判定を「参考」にする）
+#: この回の Boruta の最大回数（試運転で減らしたときは判定を「参考」にする）と、影の百分位（--perc）
 MAX_ITER_IN_USE = MAX_ITER
+PERC_IN_USE = PERC
+
+
+def variant() -> str:
+    """選定・要約のファイル名に入れる版の名前（登録した版は影の作りだけ。百分位を変えた版は _p<百分位> を足す）。"""
+    return SHADOW + ("" if PERC_IN_USE == PERC else f"_p{PERC_IN_USE:g}")
 
 
 def main(argv=None) -> int:
-    global TAG, RUN, DEADLINE, MAX_ITER_IN_USE, SHADOW
+    global TAG, RUN, DEADLINE, MAX_ITER_IN_USE, SHADOW, PERC_IN_USE
     ap = argparse.ArgumentParser(description="実験91: Boruta で本番の239列を絞ると、木3モデル（1.5σ）の分離力が上がるか")
     ap.add_argument("--algos", default="lgbm,xgb,cat", help="この回に計算するモデル（lgbm / xgb / cat）")
     ap.add_argument("--shifts", default="0,2,4")
@@ -830,6 +837,8 @@ def main(argv=None) -> int:
     ap.add_argument("--budget-min", type=float, default=290.0,
                     help="この分数を過ぎたら新しい計算を始めない（0 で無制限）")
     ap.add_argument("--select-only", action="store_true", help="Boruta の選定だけ回して報告する")
+    ap.add_argument("--perc", type=float, default=PERC,
+                    help="影の最大の代わりに使う百分位（100 が回す前に決めたもの。50 以下は、でたらめな列も外れなくなるので止める）")
     ap.add_argument("--shadow", choices=SHADOW_MODES, default="date",
                     help="影の作り（date が回す前に決めたもの。month・global は §51 の選択肢）")
     ap.add_argument("--dry", action="store_true", help="行・日付単位の列・影の単位だけ出して終わる")
@@ -838,6 +847,10 @@ def main(argv=None) -> int:
     RUN = f"{TAG}_k15"
     MAX_ITER_IN_USE = args.max_iter
     SHADOW = args.shadow
+    if not 50 < args.perc <= 100:
+        raise SystemExit(f"--perc は 50 より大きく 100 以下（実際: {args.perc}）。50 以下では、でたらめな列も影の"
+                         "百分位に半分は勝つので rejected にならない")
+    PERC_IN_USE = args.perc
     if args.budget_min > 0:
         DEADLINE = time.time() + args.budget_min * 60
     algos = [algo_name(a) for a in args.algos.split(",") if a.strip()]
@@ -852,7 +865,7 @@ def main(argv=None) -> int:
     for arm in ARMS:
         print(f"  {LABELS[arm]}")
     print(f"  ラベル {K:.1f}σ / この回に計算: {', '.join(map(short_name, algos))} / 選定のモデル {SELECT_ALGO}（gain）/ "
-          f"Boruta 最大 {args.max_iter}回・α {ALPHA}・影の {PERC} 百分位・影の作り {SHADOW}・種 {BORUTA_SEED} / "
+          f"Boruta 最大 {args.max_iter}回・α {ALPHA}・影の {PERC_IN_USE:g} 百分位・影の作り {SHADOW}・種 {BORUTA_SEED} / "
           f"窓のずらし {shifts}か月 / "
           f"種 {seeds} / 対照の種 {R_SEED} / 入れ替え重要度の種 {PI_SEED} / 上限 {args.budget_min:g}分 / 保存 {RUN}_*")
     print("=" * 78)
