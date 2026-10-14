@@ -51,6 +51,9 @@ class TestLineup(unittest.TestCase):
         self.assertEqual((E.BORUTA_SEED, E.R_SEED, E.PI_SEED), (20261014, 20261015, 20261016))
         self.assertEqual(E.MIN_DATE_ROWS, 2)
         self.assertTrue(all(TM.label_k(a) == 1.5 for a in E.ALGOS))
+        # 影の作りは date が回す前に決めたもの（既定）。month・global は試運転のあとに足した選択肢
+        self.assertEqual(E.SHADOW_MODES, ("date", "month", "global"))
+        self.assertEqual(E.SHADOW, "date")
 
     def test_algo_names(self):
         self.assertEqual([E.algo_name(a) for a in ("lgbm", "xgb", "cat", "cat_k15")],
@@ -106,6 +109,13 @@ class TestShadows(unittest.TestCase):
         self.assertEqual(g[7], g[8])
         self.assertEqual(len({g[0], g[3], g[5], g[7]}), 4)
         self.assertEqual(len(E.shadow_groups([])), 0)
+        # month: 同じ月どうし（1行しか無い月は同じ年の1行の月どうし）。global: 全行で1つ
+        gm = E.shadow_groups(dates, "month")
+        self.assertEqual(len(set(gm[:5])), 1)                               # 1月の5行
+        self.assertEqual(gm[5], gm[6])                                       # 2月・3月は1行ずつなので年でまとめる
+        self.assertNotEqual(gm[0], gm[5])
+        self.assertEqual(len(set(gm[7:])), 1)                                # 4月の2行
+        np.testing.assert_array_equal(E.shadow_groups(dates, "global"), np.zeros(9))
 
     def setUp(self):
         rng = np.random.default_rng(0)
@@ -375,13 +385,14 @@ class TestReport(unittest.TestCase):
         self.assertIn("lgbm", s["judge7"])
         self.assertEqual(s["selection"]["rejected_count"]["c6"], 3)
         self.assertEqual(s["selection"]["rejected_count"]["c11"], 1)
-        p = os.path.join(self.dir, "e91test_k15_summary.json")
+        p = os.path.join(self.dir, "e91test_k15_summary_date.json")
         self.assertTrue(os.path.exists(p))
         with open(p, encoding="utf-8") as fh:
             saved = json.load(fh)
         self.assertEqual(saved["label_k"], 1.5)
         self.assertEqual(saved["boruta"]["max_iter"], 100)
         self.assertEqual(saved["selection_sig"], E.selection_sig(sels))
+        self.assertEqual(saved["shadow"], "date")
 
     def test_verdict(self):
         ok, ng = {"pass": True}, {"pass": False}

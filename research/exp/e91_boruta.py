@@ -103,6 +103,12 @@ R_SEED = 20261015
 PI_SEED = 20261016
 #: これより行の少ない日は、同じ月の少ない日どうしでまとめて入れ替える（1行の日は入れ替えても自分の値のまま）
 MIN_DATE_ROWS = 2
+#: 影の作り（--shadow）。date が回す前に決めたもの（2026-10-14）。month・global は試運転のあとに足した選択肢（§51）
+#:   date    銘柄ごとの列は同じ日付の行どうし（1行の日は同じ月の1行の日どうし）、日付単位の列は日付ごと。影との比べ方は列の種類ごと
+#:   month   銘柄ごとの列は同じ月の行どうし、日付単位の列は日付ごと。影との比べ方は列の種類ごと
+#:   global  全部の列を全行で入れ替える（BorutaPy と同じ）。影の最大は全部の影から1つ
+SHADOW_MODES = ("date", "month", "global")
+SHADOW = "date"
 #: 窓の学習に要る行（E41.oof_folds と同じ）
 MIN_TRAIN, MIN_TEST = 1000, 200
 KEEP = ["Code", "Date", "label", "ret_o1_20", "ret_o1_40"]
@@ -207,17 +213,25 @@ def date_level_columns(df: pd.DataFrame, cols: list) -> list:
     return [c for c in cols if per_day[c] <= 1 and overall[c] > 1]
 
 
-def shadow_groups(dates) -> np.ndarray:
+def shadow_groups(dates, mode: str = "date") -> np.ndarray:
     """
-    銘柄ごとの列を入れ替える単位（行ごとの番号）。行が MIN_DATE_ROWS 以上の日はその日。少ない日は同じ月の少ない日
-    どうし、それでも1行なら同じ年の少ない日どうし（1行の単位は入れ替えても自分の値のままで、影が元の列と同じになる）。
+    銘柄ごとの列を入れ替える単位（行ごとの番号）。mode が date なら、行が MIN_DATE_ROWS 以上の日はその日、少ない日は
+    同じ月の少ない日どうし。month なら同じ月。global なら全行で1つ。どちらも1行しか無い単位は同じ年の同じ扱いの行どうし
+    （1行の単位は入れ替えても自分の値のままで、影が元の列と同じになる）。
     """
     d = pd.to_datetime(pd.Series(np.asarray(dates)))
     if not len(d):
         return np.zeros(0)
-    n_day = d.map(d.value_counts()).to_numpy()
-    small = n_day < MIN_DATE_ROWS
-    key = np.where(small, "m" + d.dt.strftime("%Y-%m"), d.dt.strftime("%Y-%m-%d"))
+    if mode == "global":
+        return np.zeros(len(d))
+    month = "m" + d.dt.strftime("%Y-%m")
+    if mode == "month":
+        small = np.ones(len(d), dtype=bool)
+        key = month.to_numpy()
+    else:
+        n_day = d.map(d.value_counts()).to_numpy()
+        small = n_day < MIN_DATE_ROWS
+        key = np.where(small, month, d.dt.strftime("%Y-%m-%d"))
     n_key = pd.Series(key).map(pd.Series(key).value_counts()).to_numpy()
     key = np.where(small & (n_key < 2), "y" + d.dt.strftime("%Y"), key)
     return pd.factorize(pd.Series(key))[0].astype(float)
@@ -227,13 +241,13 @@ class Shuffler:
     """
     同じ行の集まりに何度も使う並べ替え。戻り値 perm は「行 i に持ってくる行の番号」（X[perm] が入れ替えた写し）。
 
-      within   shadow_groups の単位の中だけで一様に並べ替える（単位の中の値の集まりは変わらない）
+      within   shadow_groups の単位（mode）の中だけで一様に並べ替える（単位の中の値の集まりは変わらない）
       by_date  日付ごと入れ替える（行 i に、でたらめに対応させた別の日の代表の行を持ってくる。日付単位の列用）
     """
 
-    def __init__(self, dates):
+    def __init__(self, dates, mode: str = "date"):
         d = pd.to_datetime(pd.Series(np.asarray(dates)))
-        self.groups = shadow_groups(d)
+        self.groups = shadow_groups(d, mode)
         self.n = len(self.groups)
         self.base = np.argsort(self.groups, kind="stable")
         codes, uniq = pd.factorize(d)
@@ -352,13 +366,13 @@ def gain_fitter(params: dict):
 def select_key(fold, cols: list, params: dict, stamp: dict, date_cols: list, max_iter: int) -> dict:
     return {"train_end": str(fold.train_end), "cols": F.signature(cols), "params": params_hash(params),
             "data": stamp["built_utc"], "max_iter": max_iter, "alpha": ALPHA, "perc": PERC, "seed": BORUTA_SEED,
-            "min_date_rows": MIN_DATE_ROWS, "date_cols": F.signature(date_cols)}
+            "min_date_rows": MIN_DATE_ROWS, "date_cols": F.signature(date_cols), "shadow": SHADOW}
 
 
 def select_window(df: pd.DataFrame, cols: list, fold, params: dict, stamp: dict, date_cols: list,
                   max_iter: int, compute: bool = True) -> dict | None:
     """ずらし0の窓 fold の訓練期間の行だけで Boruta。保存済みなら読む（設定と表の版が同じときだけ）。"""
-    p = path(f"boruta_f{int(fold.index):02d}.json")
+    p = path(f"boruta_{SHADOW}_f{int(fold.index):02d}.json")
     key = select_key(fold, cols, params, stamp, date_cols, max_iter)
     if os.path.exists(p):
         with open(p, encoding="utf-8") as fh:
@@ -373,9 +387,9 @@ def select_window(df: pd.DataFrame, cols: list, fold, params: dict, stamp: dict,
         return None
     X = tr[cols].to_numpy(dtype=float)
     y = tr["label"].to_numpy(dtype=int)
-    dset = set(date_cols)
+    dset = set(date_cols) if SHADOW != "global" else set()       # global は種類を分けない（BorutaPy と同じ）
     is_date = np.array([c in dset for c in cols])
-    sh = Shuffler(tr["Date"])
+    sh = Shuffler(tr["Date"], SHADOW)
     t0 = time.time()
 
     def progress(it, dec):
@@ -611,7 +625,8 @@ def selection_report(sels: dict, base: list, groups: dict, date_cols: list) -> d
         print("\n■ 1. Boruta の選定: まだ1窓も無い")
         return out
     ks = sorted(sels)
-    print(f"\n■ 1. Boruta の選定（ずらし0の窓ごと。訓練期間の行だけ。最大 {MAX_ITER_IN_USE}回・α {ALPHA}・影の {PERC} 百分位）")
+    print(f"\n■ 1. Boruta の選定（影の作り {SHADOW}・ずらし0の窓ごと。訓練期間の行だけ。最大 {MAX_ITER_IN_USE}回・α {ALPHA}・"
+          f"影の {PERC} 百分位）")
     print(f"  {'窓':>3}  {'訓練の終わり':<12}{'行':>8}{'正例率':>8}{'回数':>6}{'confirmed':>11}{'tentative':>11}"
           f"{'rejected':>10}{'秒':>7}  影の物差し（gain の中央値: 銘柄ごと / 日付単位）")
     for k in ks:
@@ -720,7 +735,7 @@ def report(results: dict, shifts: list, seeds, stamp: dict, cms: dict, sels: dic
           + (f" / まだ: {', '.join(map(short_name, missing))}" if missing else ""))
     summary = {"data": stamp, "label_k": K, "boruta": {"max_iter": MAX_ITER_IN_USE, "alpha": ALPHA, "perc": PERC,
                                                         "seed": BORUTA_SEED, "min_date_rows": MIN_DATE_ROWS},
-               "r_seed": R_SEED, "pi_seed": PI_SEED, "date_level_columns": date_cols,
+               "r_seed": R_SEED, "pi_seed": PI_SEED, "date_level_columns": date_cols, "shadow": SHADOW,
                "selection_sig": selection_sig(sels),
                "production_oof": {}, "windows": {}, "judge7": {}, "per_window": []}
     summary["selection"] = selection_report(sels, base, groups, date_cols)
@@ -749,7 +764,7 @@ def report(results: dict, shifts: list, seeds, stamp: dict, cms: dict, sels: dic
     complete = (all(a in algos for a in ALGOS) and sorted(shifts) == [0, 2, 4] and tuple(seeds) == SEEDS
                 and MAX_ITER_IN_USE == MAX_ITER)
     if len(s):
-        s.to_csv(path("auc_by_window.csv"), index=False)
+        s.to_csv(path(f"auc_by_window_{SHADOW}.csv"), index=False)
         print(f"\n■ 3. 窓ごと（境界を {'/'.join(map(str, shifts))}か月ずらした{len(shifts)}通り。種 {len(seeds)}つの平均）")
         print(f"  {'':<24}{'前':>9}{'後':>9}{'差の平均':>10}{'SE':>9}{'上の窓':>9}{'同じ':>6}")
         for a in algos:
@@ -794,7 +809,7 @@ def report(results: dict, shifts: list, seeds, stamp: dict, cms: dict, sels: dic
     if algos:
         summary["perm_importance"] = pi_report(results, algos, shifts, summary["selection"].get("rejected_count", {}),
                                                len(sels))
-    with open(path("summary.json"), "w", encoding="utf-8") as fh:
+    with open(path(f"summary_{SHADOW}.json"), "w", encoding="utf-8") as fh:
         json.dump(summary, fh, ensure_ascii=False, indent=1, default=str)
     return summary
 
@@ -804,7 +819,7 @@ MAX_ITER_IN_USE = MAX_ITER
 
 
 def main(argv=None) -> int:
-    global TAG, RUN, DEADLINE, MAX_ITER_IN_USE
+    global TAG, RUN, DEADLINE, MAX_ITER_IN_USE, SHADOW
     ap = argparse.ArgumentParser(description="実験91: Boruta で本番の239列を絞ると、木3モデル（1.5σ）の分離力が上がるか")
     ap.add_argument("--algos", default="lgbm,xgb,cat", help="この回に計算するモデル（lgbm / xgb / cat）")
     ap.add_argument("--shifts", default="0,2,4")
@@ -815,11 +830,14 @@ def main(argv=None) -> int:
     ap.add_argument("--budget-min", type=float, default=290.0,
                     help="この分数を過ぎたら新しい計算を始めない（0 で無制限）")
     ap.add_argument("--select-only", action="store_true", help="Boruta の選定だけ回して報告する")
+    ap.add_argument("--shadow", choices=SHADOW_MODES, default="date",
+                    help="影の作り（date が回す前に決めたもの。month・global は §51 の選択肢）")
     ap.add_argument("--dry", action="store_true", help="行・日付単位の列・影の単位だけ出して終わる")
     args = ap.parse_args(argv)
     TAG = args.tag
     RUN = f"{TAG}_k15"
     MAX_ITER_IN_USE = args.max_iter
+    SHADOW = args.shadow
     if args.budget_min > 0:
         DEADLINE = time.time() + args.budget_min * 60
     algos = [algo_name(a) for a in args.algos.split(",") if a.strip()]
@@ -834,7 +852,8 @@ def main(argv=None) -> int:
     for arm in ARMS:
         print(f"  {LABELS[arm]}")
     print(f"  ラベル {K:.1f}σ / この回に計算: {', '.join(map(short_name, algos))} / 選定のモデル {SELECT_ALGO}（gain）/ "
-          f"Boruta 最大 {args.max_iter}回・α {ALPHA}・影の {PERC} 百分位・種 {BORUTA_SEED} / 窓のずらし {shifts}か月 / "
+          f"Boruta 最大 {args.max_iter}回・α {ALPHA}・影の {PERC} 百分位・影の作り {SHADOW}・種 {BORUTA_SEED} / "
+          f"窓のずらし {shifts}か月 / "
           f"種 {seeds} / 対照の種 {R_SEED} / 入れ替え重要度の種 {PI_SEED} / 上限 {args.budget_min:g}分 / 保存 {RUN}_*")
     print("=" * 78)
 
@@ -846,13 +865,16 @@ def main(argv=None) -> int:
         raise SystemExit(f"表に無い列: {miss[:8]}")
     df = with_label(full, K)
     date_cols = date_level_columns(df, base)
-    sh_all = Shuffler(df["Date"])
+    sh_all = Shuffler(df["Date"], SHADOW)
     n_day = df.groupby("Date").size()
     print(f"\n■ 0. 行（ラベル {K:.1f}σ）: {len(df):,}行・正例率 {df['label'].mean()*100:.1f}%・"
           f"{df['Date'].min().date()} 〜 {df['Date'].max().date()}・{len(n_day):,}日")
     print(f"  日付単位の列（その日は全銘柄同じ値）{len(date_cols)}本: " + ", ".join(date_cols))
-    print(f"  影の単位: {int(sh_all.groups.max()) + 1 if len(sh_all.groups) else 0:,}（1行の日 {int((n_day < MIN_DATE_ROWS).sum()):,}日・"
-          f"{int(n_day[n_day < MIN_DATE_ROWS].sum()):,}行は同じ月の1行の日どうしでまとめた）")
+    n_units = int(sh_all.groups.max()) + 1 if len(sh_all.groups) else 0
+    how = {"date": f"同じ日付の行どうし。1行の日 {int((n_day < MIN_DATE_ROWS).sum()):,}日・"
+                   f"{int(n_day[n_day < MIN_DATE_ROWS].sum()):,}行は同じ月の1行の日どうしでまとめた",
+           "month": "同じ月の行どうし", "global": "全行で入れ替える（日付単位の列も同じ。影の最大は全部の影から1つ）"}[SHADOW]
+    print(f"  影の作り {SHADOW}: 銘柄ごとの列の入れ替えの単位 {n_units:,}（{how}）")
     if args.dry:
         return 0
 
