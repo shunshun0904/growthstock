@@ -323,6 +323,7 @@ def boruta(X: np.ndarray, y: np.ndarray, sh: Shuffler, is_date: np.ndarray, fit_
             if m.any():
                 thr[m] = np.percentile(sha[m], perc)
                 rec[nm] = float(thr[m][0])
+                rec[f"{nm}_from"] = int(act[np.where(m)[0][np.argmax(sha[m])]])    # 影の最大になった列（診断）
         it += 1
         hits[act] += real > thr
         imp_sum[act] += real
@@ -393,7 +394,10 @@ def select_window(df: pd.DataFrame, cols: list, fold, params: dict, stamp: dict,
            "mean_gain": {c: (None if not np.isfinite(g) else float(g)) for c, g in zip(cols, res["mean_imp"])},
            "thr_last": res["thr"][-1] if res["thr"] else {},
            "thr_median": {k: float(np.median([t[k] for t in res["thr"] if k in t]))
-                          for k in ("stock", "date") if any(k in t for t in res["thr"])}}
+                          for k in ("stock", "date") if any(k in t for t in res["thr"])},
+           "max_shadow_from": {k: {cols[j]: int(n) for j, n in pd.Series(
+               [t[f"{k}_from"] for t in res["thr"] if f"{k}_from" in t], dtype=int).value_counts().items()}
+               for k in ("stock", "date")}}
     with open(p, "w", encoding="utf-8") as fh:
         json.dump(rec, fh, ensure_ascii=False, indent=1)
     log(f"  [Boruta] 窓{fold.index}（訓練 〜{fold.train_end}・{len(tr):,}行・正例率 {y.mean()*100:.1f}%）: "
@@ -633,6 +637,17 @@ def selection_report(sels: dict, base: list, groups: dict, date_cols: list) -> d
         kind = "（日付単位）" if all(c in date_cols for c in cs) else ""
         print(f"    {g:<22}{len(cs):>4}列{kind}: 平均 {mean_rej:>5.1f}本 / すべて {always:>3} / なし {never:>3}")
         out["groups"][g] = {"n": len(cs), "mean_rejected": mean_rej, "always": always, "never": never}
+    for kind, nm in (("stock", "銘柄ごと"), ("date", "日付単位")):
+        tot = {}
+        for k in ks:
+            for c, v in sels[k].get("max_shadow_from", {}).get(kind, {}).items():
+                tot[c] = tot.get(c, 0) + v
+        if tot:
+            n_it = sum(tot.values())
+            top = sorted(tot.items(), key=lambda x: -x[1])[:6]
+            print(f"  影の最大になった列（{nm}・{n}窓の {n_it}回のうち）: "
+                  + ", ".join(f"{c} {v}回（{v / n_it * 100:.0f}%）" for c, v in top))
+            out[f"max_shadow_from_{kind}"] = tot
     hist = pd.Series(list(cnt.values())).value_counts().sort_index()
     print(f"\n  列ごとの rejected になった窓の数（{n}窓中）: " + " / ".join(f"{int(k)}窓 {int(v)}列"
                                                                for k, v in hist.items()))

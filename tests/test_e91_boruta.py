@@ -212,6 +212,9 @@ class TestBorutaLoop(unittest.TestCase):
         self.assertEqual(res["decision"][:2].tolist(), [1, 1])
         self.assertGreater(res["thr"][0]["date"], 50)
         self.assertLess(res["thr"][0]["stock"], 1)
+        # 影の最大になった列（診断）は、その種類の列を指す
+        self.assertTrue(all(0 <= t["stock_from"] < 6 for t in res["thr"]))
+        self.assertTrue(all(6 <= t["date_from"] < X.shape[1] for t in res["thr"]))
 
     def test_with_a_small_lightgbm(self):
         X, y, dates, is_date = self.frame(n_days=150, per_day=12, seed=2, n_mkt=1)
@@ -332,7 +335,8 @@ class TestReport(unittest.TestCase):
         date_cols = base[10:]
         sels = {k: {"fold": k, "train_end": f"202{k}-04-03", "n_train": 5000 + 1000 * k, "pos_rate": 0.13,
                     "n_iter": 100, "seconds": 300, "confirmed": base[:2], "tentative": base[2:6] + base[8:10],
-                    "rejected": base[6:8] + ([base[11]] if k == 3 else [])} for k in (1, 2, 3)}
+                    "rejected": base[6:8] + ([base[11]] if k == 3 else []),
+                    "max_shadow_from": {"stock": {"c1": 60, "c4": 40}, "date": {"c10": 100}}} for k in (1, 2, 3)}
         f0 = [SimpleNamespace(index=k, train_end=f"202{k}-04-03") for k in (1, 2, 3)]
         cms = E.colmaps(base, {0: f0, 2: f0}, f0, sels)
         results = {}
@@ -363,6 +367,7 @@ class TestReport(unittest.TestCase):
         self.assertIn("lgbm・ずらし2か月（3窓）", text)
         self.assertIn("2021-06-01〜", text)
         self.assertIn("最後の窓（訓練 〜2023-04-03", text)
+        self.assertIn("影の最大になった列（銘柄ごと・3窓の 300回のうち）: c1 180回（60%）, c4 120回（40%）", text)
         self.assertIn("偶然の見込み", text)
         self.assertNotIn("nan", text.lower())
         self.assertEqual(len(s["per_window"]), 2 * 2 * 3)
