@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import time
 
@@ -388,20 +389,22 @@ def to_json(obj) -> str:
     return json.dumps(obj, ensure_ascii=True, separators=(",", ":"), default=_js, allow_nan=False)
 
 
+_CHUNK_RE = re.compile(r"@viz(\d{4})\|")
+
+
 def chunk_lines(s: str, size: int = CHUNK) -> list:
-    """JSON の文字列を @viz で始まる行に分ける（ログの1行が長くなりすぎないように）。"""
-    return ["@viz" + s[i:i + size] for i in range(0, len(s), size)]
+    """JSON の文字列を「@viz0001|」のように番号付きの行に分ける（ログの1行が長くなりすぎないように。番号でつなぎ直す）。"""
+    return [f"@viz{i:04d}|" + s[j:j + size] for i, j in enumerate(range(0, len(s), size))]
 
 
 def parse_chunks(lines) -> dict:
-    """@viz の行をつなぎ直して JSON に戻す（手元で図にするとき用）。"""
-    parts = []
+    """番号付きの @viz の行をつなぎ直して JSON に戻す（手元で図にするとき用）。見出しや時刻の前置きは無視する。"""
+    parts = {}
     for ln in lines:
-        ln = ln.rstrip("\r\n")
-        j = ln.find("@viz")
-        if j >= 0:
-            parts.append(ln[j + 4:])
-    return json.loads("".join(parts)) if parts else {}
+        m = _CHUNK_RE.search(ln.rstrip("\r\n"))
+        if m:
+            parts[int(m.group(1))] = ln.rstrip("\r\n")[m.end():]
+    return json.loads("".join(parts[k] for k in sorted(parts))) if parts else {}
 
 
 def print_brief(line: float, s: dict) -> None:
@@ -450,7 +453,7 @@ def main(argv=None) -> int:
         out["lines"][f"{line:.0f}"] = s
         print_brief(line, s)
     js = to_json(out)
-    print(f"\n■ @viz: JSON {len(js):,}文字を {CHUNK} 文字ずつの行に分けて出す（集計だけ。銘柄・日付ごとの値は無い）")
+    print(f"\n■ 集計の JSON {len(js):,}文字を、番号付きの @viz の行（{CHUNK} 文字ずつ）に分けて出す（集計だけ。銘柄・日付ごとの値は無い）")
     for ln in chunk_lines(js):
         print(ln)
     os.makedirs(OUT_DIR, exist_ok=True)

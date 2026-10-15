@@ -89,9 +89,12 @@ class TestCollect(unittest.TestCase):
         js = E.to_json(out)
         self.assertNotIn("NaN", js)
         lines = E.chunk_lines(js, size=300)
-        self.assertTrue(all(ln.startswith("@viz") for ln in lines))
-        back = E.parse_chunks(["2026-10-15T00:00:00.0000000Z " + ln for ln in lines] + ["other line"])
-        self.assertEqual(back, out if False else E.parse_chunks(lines))
+        self.assertTrue(all(ln.startswith("@viz") and ln[8] == "|" for ln in lines))
+        shuffled = ["2026-10-15T00:00:00.0000000Z ■ 集計の JSON を @viz の行に分けて出す"] + \
+                   ["2026-10-15T00:00:00.0000000Z " + ln for ln in reversed(lines)] + ["other line"]
+        back = E.parse_chunks(shuffled)                               # 見出し・時刻の前置き・順番の乱れに強い
+        self.assertEqual(back, E.parse_chunks(lines))
+        self.assertEqual(back["lines"]["80"]["picks"]["M"]["hist"], s["picks"]["M"]["hist"])
         self.assertEqual(E.parse_chunks(lines)["lines"]["80"]["picks"]["Q"]["hist"], s["picks"]["Q"]["hist"])
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
