@@ -232,6 +232,17 @@ class TestRuleFrame(unittest.TestCase):
         self.assertTrue(np.allclose(ft["score"], ft["score_lgbm"]))
         self.assertTrue(pd.to_numeric(ft["tp10c"], errors="coerce").notna().mean() > 0.9)
 
+    def test_rule_frame_with_lgbm_only(self):
+        """運用者の指示（lgbm だけ）: 規則の最小は lgbm の百分位そのもの。無いモデルは要らない。"""
+        ft3 = E.rule_frame(self.prods, self.pop, self.bars, self.ck)
+        ft1 = E.rule_frame({"lgbm": self.prods["lgbm"]}, self.pop, self.bars, self.ck)
+        self.assertEqual(len(ft1), len(ft3))
+        self.assertTrue(np.allclose(ft1["min_K15"], ft1["pct_score_lgbm"]) if "pct_score_lgbm" in ft1.columns
+                        else (ft1["min_K15"] >= ft3["min_K15"]).all())
+        self.assertTrue((ft1["min_K15"].to_numpy() >= ft3["min_K15"].to_numpy() - 1e-9).all())   # 3本の最小 ≤ 1本
+        with self.assertRaises(ValueError):
+            E.rule_frame({}, self.pop, self.bars, self.ck)
+
     def test_stats_pairs_and_trade_form(self):
         ft = E.rule_frame(self.prods, self.pop, self.bars, self.ck)
         months = E.E82.n_months(ft)
@@ -325,7 +336,7 @@ class TestReport(unittest.TestCase):
             self.assertIn(head, text)
         self.assertIn("判定に使う行（回す前に決めた）", text)
         self.assertIn("木3モデルがそろってから判定", text)
-        self.assertIn("木3モデル（lgbm, xgb, cat）がそろった回で出す", text)
+        self.assertIn("木モデル（lgbm, xgb, cat のどれか）の結果がそろった回で出す", text)
         self.assertIn("lgbm・ずらし2か月（3窓）", text)
         self.assertNotIn("nan", text.lower().replace("nan（", ""))
         self.assertEqual(len(s["per_window"]["common"]), 12)                     # 2モデル × 2通り × 3窓
@@ -345,7 +356,7 @@ class TestReport(unittest.TestCase):
         ck = E.keys_of(base[base["Code"] != "10000"])
         ft = E.rule_frame(prods, base[["Code", "Date"]], bars, ck)
         months = E.E82.n_months(ft)
-        st = {}
+        st = {"models": ["lgbm"]}
         for arm, line in zip(E.ARMS, (60.0, 55.0, 65.0, 70.0)):
             rule = ft[ft["min_K15"] >= line]
             st[arm] = {"pop": E.POP_OF[arm], "rows": len(ft), "windows": [3, 4], "months": months,
@@ -363,7 +374,8 @@ class TestReport(unittest.TestCase):
         self.assertIn("(ii) 規則", text)
         self.assertIn("(iii) 軽い代わり", text)
         self.assertIn("行ってこい", text)
-        for k in ("rule_ok", "count_ok", "filter_equiv", "arms", "pairs"):
+        self.assertIn("lgbm の1本（運用者の指示で絞った", text)
+        for k in ("models", "rule_ok", "count_ok", "filter_equiv", "arms", "pairs"):
             self.assertIn(k, out)
         self.assertIsInstance(out["rule_ok"], bool)
 

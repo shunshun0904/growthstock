@@ -46,15 +46,17 @@
   (i) と (ii) の両方を満たせば入り口の変更を運用者に出す。片方だけ・どちらも満たさないときは、結果を見せて運用者が
   決める（(iii) が立てば規則の条件だけを出す）。
 
+  運用者の指示（2026-10-15、lgbm の回の途中）「時間がかかるので、比較にはlgbmだけで良いです」→ xgb・cat は回さない。
+  (i) は lgbm の1票（「2つ以上」は満たせないので、lgbm が §7 を満たすかどうかを出す）。(ii)(iii) の規則「1.5σ の3本すべて
+  95以上」は、回したモデルだけの前向きの百分位（lgbm だけなら lgbm が95以上）で代える。
+
 出すもの: 母集団の違い（件数・年別・正例率・共通の行）、探索の CV、本番と同じ OOF（共通の行）、32窓の差・§7、窓ごとの値、
 規則の成績（各腕の母集団・A の規則の行を共通/それ以外に分けた成績 = 行ってこいの行の成績・取引の形・月の候補数）。
 公開ログには件数・割合・日付・精度だけ（銘柄・値は出さない）。
 
     exp=e90_close_breakout.py args="--dry"                （母集団の違いだけ。4〜5分）
-    exp=e90_close_breakout.py args="--k 1.5 --algos lgbm"
-    exp=e90_close_breakout.py args="--k 1.5 --algos xgb"
-    exp=e90_close_breakout.py args="--k 1.5 --algos cat"   （3本そろった回で §6・§7 が出る）
-    （参考に --k 1.2 で同じ3回）
+    exp=e90_close_breakout.py args="--k 1.5 --algos lgbm"  （運用者の指示で lgbm だけ。§6・§7 は回したモデルで出る）
+    （xgb・cat・--k 1.2 も同じ形で回せる）
 試運転: exp=e90_close_breakout.py args="--tag e90smoke --algos lgbm --n-trials 2 --shifts 0"
 
 Run Experiment は同じ実験を同時に1本しか走らせず、待ちに置けるのも1本だけなので、1本ずつ起動する。表（2つの母集団）は
@@ -544,20 +546,25 @@ def forward_pct(o: pd.DataFrame, score_cols: list) -> pd.DataFrame:
 
 def rule_frame(prods: dict, pop_frame: pd.DataFrame, bars: pd.DataFrame, ck: pd.MultiIndex) -> pd.DataFrame:
     """
-    木3モデルの本番と同じ OOF（ずらし0・種42）を (Code, Date) で突き合わせ、前向きの百分位・規則の最小・発火（その日の
-    母集団の行数）・出口（tp10c）・共通の行の印を付けた表。前向きの百分位が付く窓の行だけ。
+    木モデル（prods にあるもの。本番と同じ OOF、ずらし0・種42）を (Code, Date) で突き合わせ、前向きの百分位・規則の最小・
+    発火（その日の母集団の行数）・出口（tp10c）・共通の行の印を付けた表。前向きの百分位が付く窓の行だけ。
+    規則の最小（min_K15）は prods にあるモデルの百分位の最小（3本そろえば画面の規則と同じ。運用者の指示で lgbm だけの
+    ときは lgbm の百分位）。並べ替えのスコアは lgbm（無ければ最初のモデル）。
     """
+    algos = [a for a in JUDGE_ALGOS if a in prods]
+    if not algos:
+        raise ValueError("木モデルの OOF が無い")
     o = None
-    for a in JUDGE_ALGOS:
+    for a in algos:
         x = prods[a][["Code", "Date", "fold", "label", lab.OUTCOME, "score"]].rename(columns={"score": f"score_{a}"})
         if o is None:
             o = x
         else:
             o = o.merge(x[["Code", "Date", "fold", f"score_{a}"]], on=["Code", "Date", "fold"], how="inner")
     o = o.sort_values(["Date", "Code"], kind="mergesort").reset_index(drop=True)
-    pct = forward_pct(o, [f"score_{a}" for a in JUDGE_ALGOS])
-    o["min_K15"] = pct[[f"pct_score_{a}" for a in JUDGE_ALGOS]].min(axis=1)   # どれか欠ければ NaN = 満たさない
-    o["score"] = o["score_lgbm"]
+    pct = forward_pct(o, [f"score_{a}" for a in algos])
+    o["min_K15"] = pct[[f"pct_score_{a}" for a in algos]].min(axis=1)   # どれか欠ければ NaN = 満たさない
+    o["score"] = o[f"score_{'lgbm' if 'lgbm' in algos else algos[0]}"]
     nb = pop_frame.groupby("Date").size()
     o["n_break"] = o["Date"].map(nb).fillna(0).astype(int)
     o, _ = E83.attach_exits(o, bars, targets=(TP,))
@@ -594,17 +601,18 @@ def paired_windows(a: dict, b: dict) -> dict:
 
 
 def strategy(results: dict, frames_k: dict, ck: pd.MultiIndex) -> dict | None:
-    """各腕の規則の成績。木3モデルがそろっていなければ None。"""
-    if not all(results.get(a) for a in JUDGE_ALGOS):
+    """各腕の規則の成績（結果のある木モデルで。1本も無ければ None）。"""
+    avail = [a for a in JUDGE_ALGOS if results.get(a)]
+    if not avail:
         return None
     t0 = time.time()
     start = min(f["Date"].min() for f in frames_k.values()) - pd.Timedelta(days=10)
     bars = LT.load_bars(lab.DATA_DIR, start=start)
     bar_days = list(pd.to_datetime(np.sort(bars["Date"].unique())))
-    out = {}
+    out = {"models": avail}
     for arm in ARMS:
         pop = POP_OF[arm]
-        ft = rule_frame({a: results[a]["prod_full"][arm] for a in JUDGE_ALGOS}, frames_k[pop], bars, ck)
+        ft = rule_frame({a: results[a]["prod_full"][arm] for a in avail}, frames_k[pop], bars, ck)
         months = E82.n_months(ft)
         rule = ft[ft["min_K15"] >= RULE_LINE]
         rec = {"pop": pop, "rows": int(len(ft)), "windows": sorted(int(w) for w in ft["window"].unique()),
@@ -615,13 +623,16 @@ def strategy(results: dict, frames_k: dict, ck: pd.MultiIndex) -> dict | None:
         out[arm] = rec
     out["pairs"] = {f"{y}-{x}": paired_windows(out[x]["rule"], out[y]["rule"]) for x, y in PAIRS}
     out["pairs"]["A_common-A"] = paired_windows(out["A"]["rule"], out["A"]["rule_common"])
-    log(f"[rule] 規則の成績を測った / {time.time()-t0:.0f}秒")
+    log(f"[rule] 規則の成績を測った（{', '.join(avail)}） / {time.time()-t0:.0f}秒")
     return out
 
 
 def strategy_report(st: dict, k: float) -> dict:
     """§6（規則の成績）と §7（判定のまとめ）。"""
-    print(f"\n■ 6. 規則の成績（各腕の自分の母集団。前向きの百分位（前の窓 {MIN_TRAIN_WINDOWS}つ以上）が 1.5σ の3本すべて "
+    models = st.get("models", list(JUDGE_ALGOS))
+    rule_ja = ("1.5σ の3本すべて" if len(models) == 3 else
+               f"{', '.join(models)} の{len(models)}本（運用者の指示で絞った。画面の規則「3本すべて」の代わり）が")
+    print(f"\n■ 6. 規則の成績（各腕の自分の母集団。前向きの百分位（前の窓 {MIN_TRAIN_WINDOWS}つ以上）が {rule_ja} "
           f"{RULE_LINE:g} 以上の行。出口 +{TP:g}% の指値・届かなければ20営業日目の終値。手数料・税・すべりは含まない）")
     head = f"  {'':<34}{'件数':>6}{'月あたり':>8}{'1取引':>9}{'中央':>8}{'SE':>6}{'勝率':>7}{'到達':>7}{'−10%割れ':>9}"
     print(head)
@@ -660,8 +671,8 @@ def strategy_report(st: dict, k: float) -> dict:
           f"{'同等以上（規則の条件を足すほうが軽い）' if equiv else '下回る'}")
     print(f"  参考: C − A {E79.fmt_s(st['pairs']['C-A'])} / A の規則の行のうち それ以外（行ってこい など）"
           f" {a['rule_other']['n']:,}件 {a['rule_other']['mean']:+.2f}%")
-    return {"rule_ok": ok_ret, "count_ok": ok_count, "filter_equiv": equiv, "arms": {arm: st[arm] for arm in ARMS},
-            "pairs": st["pairs"]}
+    return {"models": models, "rule_ok": ok_ret, "count_ok": ok_count, "filter_equiv": equiv,
+            "arms": {arm: st[arm] for arm in ARMS}, "pairs": st["pairs"]}
 
 
 # --------------------------------------------------------------------------- #
@@ -776,7 +787,7 @@ def report(results: dict, shifts: list, stamp: dict, keysets: dict, pop: dict, k
     if strat is not None:
         summary["strategy"] = strategy_report(strat, k)
     else:
-        print(f"\n■ 6. 規則の成績: 木3モデル（{', '.join(JUDGE_ALGOS)}）がそろった回で出す")
+        print(f"\n■ 6. 規則の成績: 木モデル（{', '.join(JUDGE_ALGOS)} のどれか）の結果がそろった回で出す")
     with open(path("summary.json"), "w", encoding="utf-8") as fh:
         json.dump(summary, fh, ensure_ascii=False, indent=1, default=str)
     return summary
