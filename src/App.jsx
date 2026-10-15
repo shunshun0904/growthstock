@@ -25,12 +25,13 @@ const TABS = [
   // 候補の比較（似た過去の事例の収益の分布。参考で、選定には使わない）。運用者の指示 2026-10-15
   // 「別タブとして、左から2番目の位置に追加して下さい。3枚で良いです」
   { id: 'knn', label: '候補の比較' },
-  // 週次の再学習で加わったサンプルのチャート（運用者の依頼 2026-10-13。名前は同日夜「「例」ではなく「サンプル」」）
-  { id: 'samples', label: '再学習で加わったサンプル' },
   { id: 'filings', label: '決算サンキー', hidden: true },
   { id: 'compare', label: '8軸オクタゴン比較', hidden: true },
   { id: 'timemachine', label: 'タイムマシーン' },
   { id: 'simulator', label: 'What-If シミュレーター', hidden: true },
+  // 週次の再学習で加わったサンプルのチャート（運用者の依頼 2026-10-13。名前は同日夜「「例」ではなく「サンプル」」）。
+  // 一番右（運用者の指示 2026-10-14「一番右側に持ってきてください」）
+  { id: 'samples', label: '再学習で加わったサンプル' },
 ];
 const VISIBLE_TABS = TABS.filter((t) => !t.hidden);
 const isVisible = (id) => VISIBLE_TABS.some((t) => t.id === id);

@@ -26,6 +26,8 @@
       [--date 2026-09-25] [--price 2691] [--shares 100] [--note ...]
   python3 research/trades_inbox.py add --action sell --code 6912 --date 2026-10-20 [--price 2960]
   python3 research/trades_inbox.py add --action cancel --ref 1a2b3c4d   # 取り消す行の id の先頭
+  python3 research/trades_inbox.py add --action target --code 6912 --date 2026-10-01 --pct 7 \\
+      [--pick-date 2026-09-24]      # 売りの指値を 買値の +7% に変える（--date の日の寄りから効く）
 """
 from __future__ import annotations
 
@@ -33,6 +35,7 @@ import argparse
 import base64
 import datetime as dt
 import json
+import math
 import os
 import re
 import sys
@@ -43,8 +46,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 INBOX = os.path.join(HERE, "trades_inbox.jsonl")
 PUBKEY = os.path.join(HERE, "trades_pubkey.pem")
 JST = dt.timezone(dt.timedelta(hours=9))
-ACTIONS = ("buy", "sell", "cancel")
+#: target = 売りの指値の変更（運用者の依頼 2026-10-14。保有ごとに +10% から変えられるように）
+ACTIONS = ("buy", "sell", "cancel", "target")
 MIN_REF = 8                       # 取消の対象は id の先頭 8 文字以上（取引の記録タブの id 列）
+MAX_PCT = 100.0                   # 指値は買値の +100% まで（それより上は打ち間違いとみなす）
 
 
 def _b64(b: bytes) -> str:
@@ -135,15 +140,18 @@ def _num(s) -> Optional[float]:
     if s in (None, ""):
         return None
     v = float(str(s).replace(",", ""))
-    if v <= 0:
+    if not math.isfinite(v) or v <= 0:
         raise ValueError(f"正の数ではない: {s}")
     return v
 
 
 def make_event(action: str, code: Optional[str] = None, pick_date: Optional[str] = None,
                date: Optional[str] = None, price=None, shares=None, note: str = "",
-               now: Optional[dt.datetime] = None, ref: Optional[str] = None) -> Dict:
-    """報告1件。値の形をここで確かめる（買いは予測日か日付、売りは日付、取消は対象の id が要る）。"""
+               now: Optional[dt.datetime] = None, ref: Optional[str] = None, pct=None) -> Dict:
+    """
+    報告1件。値の形をここで確かめる（買いは予測日か日付、売りは日付、取消は対象の id、
+    指値の変更は 日付（変えた指値が効く最初の日）と pct（買値からの %。5 なら 買値×1.05）が要る）。
+    """
     if action not in ACTIONS:
         raise ValueError(f"action は {ACTIONS} のどれか: {action}")
     code = str(code or "").strip().upper()
@@ -161,11 +169,21 @@ def make_event(action: str, code: Optional[str] = None, pick_date: Optional[str]
         raise ValueError("買った日が予測日以前（予測は引けのあとに出るので、買うのは次の営業日から）")
     if action == "sell" and day is None:
         raise ValueError("売りには 売った日 が要る")
+    pct_v = _num(pct)
+    if action == "target":
+        if day is None:
+            raise ValueError("指値の変更には 変えた指値が効く最初の日（--date）が要る")
+        if pct_v is None or pct_v > MAX_PCT:
+            raise ValueError(f"指値の変更には 買値からの %（0 より大きく {MAX_PCT:g} 以下）が要る")
+        if price not in (None, "") or shares not in (None, ""):
+            raise ValueError("指値の変更に 値段・株数は使わない（--pct で買値からの % を渡す）")
+    elif pct_v is not None:
+        raise ValueError("--pct は指値の変更（--action target）だけで使う")
     now = now or dt.datetime.now(JST)
     return {"id": uuid.uuid4().hex, "at": now.isoformat(timespec="seconds"),
             "action": action, "pick_date": pick, "code": code or None, "date": day,
             "price": _num(price), "shares": _num(shares), "note": str(note or ""),
-            "ref": ref or None}
+            "ref": ref or None, "pct": pct_v}
 
 
 def append(path: str, line: Dict) -> None:
@@ -179,12 +197,14 @@ def main(argv=None) -> int:
     sub.add_parser("pubkey", help="サービスアカウントの公開鍵を出す（Actions で使う）")
     a = sub.add_parser("add", help="取引を1件足す（手元で使う）")
     a.add_argument("--action", required=True, choices=ACTIONS)
-    a.add_argument("--code", default=None, help="銘柄コード（買い・売り）")
+    a.add_argument("--code", default=None, help="銘柄コード（買い・売り・指値）")
     a.add_argument("--pick-date", default=None, help="予測日（予測ログの行を見つけるのに使う）")
-    a.add_argument("--date", default=None, help="買った日・売った日（買いは省くと予測日の次の営業日）")
+    a.add_argument("--date", default=None, help="買った日・売った日（買いは省くと予測日の次の営業日）。"
+                   "指値の変更は、変えた指値が効く最初の日")
     a.add_argument("--price", default=None, help="値段（省くと買いはその日の始値、売りはその日の終値）")
     a.add_argument("--shares", default=None, help="株数（省くと100）")
     a.add_argument("--ref", default=None, help="取消: 取り消す行の id の先頭 8 文字以上")
+    a.add_argument("--pct", default=None, help="指値の変更: 買値からの %%（5 なら 買値×1.05 で売る）")
     a.add_argument("--note", default="")
     a.add_argument("--inbox", default=INBOX)
     a.add_argument("--pubkey", default=PUBKEY)
@@ -199,7 +219,7 @@ def main(argv=None) -> int:
     with open(args.pubkey, "rb") as f:
         pem = f.read()
     event = make_event(args.action, args.code, args.pick_date, args.date,
-                       args.price, args.shares, args.note, ref=args.ref)
+                       args.price, args.shares, args.note, ref=args.ref, pct=args.pct)
     append(args.inbox, encrypt(event, pem))
     print(f"[trades] 1件を暗号化して足した（id {event['id'][:8]}）")
     return 0

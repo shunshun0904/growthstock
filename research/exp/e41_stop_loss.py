@@ -207,10 +207,13 @@ def folds_for(dates: pd.Series, shift_months: int):
 
 
 def oof_folds(algo: str, df: pd.DataFrame, cols: list, params: dict, seed: int,
-              folds) -> pd.DataFrame:
+              folds, train_mask=None) -> pd.DataFrame:
     """
     folds で out-of-fold を作る。学習器は実験39 と同じ（LightGBM は
     e19_freshdata.oof_for、他は e27_timing_multi.oof_multi と同じ組み方）。
+
+    train_mask（df の行に沿った真偽の列）を渡すと、学習は True の行だけで行い、予測は窓の全行に出す
+    （実験90 の対照 P: 今の母集団から無作為に抜いた行で学習して、全行を予測する）。None なら全行で学習。
     """
     import lightgbm as lgb
     import models as M
@@ -221,10 +224,16 @@ def oof_folds(algo: str, df: pd.DataFrame, cols: list, params: dict, seed: int,
         params = params["params"]
     d = pd.to_datetime(df["Date"])
     keep = ["Code", "Date", "label", "ret_o1_20", "ret_o1_40"]
+    ok_tr = df["label"].notna()
+    if train_mask is not None:
+        m = pd.Series(np.asarray(train_mask, dtype=bool), index=df.index)
+        if len(m) != len(df):
+            raise ValueError(f"train_mask の長さが合わない: {len(m)} != {len(df)}")
+        ok_tr = ok_tr & m
     parts = []
     try:
         for f in folds:
-            tr = df[(d <= pd.Timestamp(f.train_end)) & df["label"].notna()]
+            tr = df[(d <= pd.Timestamp(f.train_end)) & ok_tr]
             te = df[(d >= pd.Timestamp(f.test_start)) & (d <= pd.Timestamp(f.test_end))
                     & df["label"].notna()]
             if len(te) < 200 or len(tr) < 1000:

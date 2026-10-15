@@ -17,6 +17,10 @@
     売りの報告があるまで持つ
   - 売りの報告があれば、ルールより報告（その日・その値段。値段が無ければその日の終値）を優先する
   - ルールで売ったものも売却済みとして確定する
+  - 指値の変更（種類「指値」。運用者の依頼 2026-10-14。保有ごとに +10% から変えられるように）が
+    あれば、その日（変えた指値が効く最初の日）から 買値×(1+指値%) を指値にする。その日より前は
+    元の指値のまま（さかのぼって売ったことにはしない）。同じ保有に何度あっても、その日に効くのは
+    日付がいちばん新しいもの
   営業日は取引所のカレンダーで数える（無ければその銘柄の日足の日付）。
 
 色: 予測ログで、保有中（持ち越し・買い待ちを含む）の行を赤、売却済みの行を青に塗る（2026-10-09 まで黄色。
@@ -49,7 +53,7 @@ import math
 import os
 import re
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
 import numpy as np
@@ -62,12 +66,13 @@ import trades_inbox as TI  # noqa: E402
 
 TAB = "保有の推移"
 LOG_TAB = "取引の記録"
+#: 「指値%」は指値の変更の行だけ（買値からの %）。2026-10-14 に右端に足した（前からあるタブにも右端に足される）
 LOG_HEADER = ["id", "受付", "種類", "予測日", "コード", "銘柄名", "日付", "価格", "株数",
-              "取消の対象", "メモ"]
-KIND_JA = {"buy": "買い", "sell": "売り", "cancel": "取消"}
+              "取消の対象", "メモ", "指値%"]
+KIND_JA = {"buy": "買い", "sell": "売り", "cancel": "取消", "target": "指値"}
 KIND_EN = {**{v: k for k, v in KIND_JA.items()}, **{k: k for k in KIND_JA}}
 DEFAULT_SHARES = 100
-TARGET = 1.10                     # 買値の +10% で売る
+TARGET = 1.10                     # 買値の +10% で売る（指値の変更が無いとき）
 HORIZON = 20                      # 買った日を1日目として 20 営業日
 RED = {"red": 1.0, "green": 0.0, "blue": 0.0}
 #: 売却済み。純粋な青（0, 0, 1）は黒い文字が読めないので、明るめの青 #4a86e8（黒い文字との
@@ -84,9 +89,10 @@ TOTAL_STYLE = ("#86b6ef", 6)
 #: 使わない）。先頭の青・橙・緑は色覚の差の検査に全組み合わせで通る（2026-10-08 に
 #: validate_palette で確認）
 SERIES_COLORS = ["#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
-#: 「+10%の値」は売りの指値（建値×1.10）、「20日目までの高値」はルールで見た日中の高値の最大
-#: （売った日まで）。保有中のものがどこまで近づいたかを見るため
-SUMMARY_HEADER = ["銘柄", "コード", "予測日", "買った日", "建値", "株数", "+10%の値", "20日目",
+#: 「売りの指値」は 建値×(1+指値%)（2026-10-14 まで「+10%の値」）、「指値%」はその % と、変えたなら効く
+#: 最初の日（保有中は最新の指値、売ったものは売った日に効いていた指値）。「20日目までの高値」はルールで
+#: 見た日中の高値の最大（売った日まで）。保有中のものがどこまで近づいたかを見るため
+SUMMARY_HEADER = ["銘柄", "コード", "予測日", "買った日", "建値", "株数", "売りの指値", "指値%", "20日目",
                   "20日目までの高値", "高値の日", "売った日", "売値", "売りの理由", "最新日", "最新終値",
                   "損益(円)", "損益%", "状態"]
 
@@ -102,6 +108,8 @@ class Position:
     shares: float
     sell_date: Optional[pd.Timestamp] = None    # 報告の売り
     sell_price: Optional[float] = None
+    #: 指値の変更 (効く最初の日, 買値からの %)。報告の順
+    targets: List[Tuple[pd.Timestamp, float]] = field(default_factory=list)
     # 計算の結果（simulate が埋める）
     state: str = ""
     reason: str = ""
@@ -111,7 +119,9 @@ class Position:
     day20: Optional[pd.Timestamp] = None
     exit_day: Optional[pd.Timestamp] = None
     exit_price: Optional[float] = None
-    target: Optional[float] = None             # 売りの指値（建値×1.10）
+    target: Optional[float] = None             # 売りの指値（建値×(1+指値%)。表に出すもの）
+    target_pct: Optional[float] = None         # 変えた指値の %（変えていなければ None = +10%）
+    target_from: Optional[pd.Timestamp] = None  # 変えた指値が効く最初の日
     peak: Optional[float] = None               # 20日目まで（売った日まで）の日中の高値の最大
     peak_day: Optional[pd.Timestamp] = None
 
@@ -161,6 +171,12 @@ def _ymd(d) -> str:
     return "" if d is None or pd.isna(d) else f"{pd.Timestamp(d):%Y-%m-%d}"
 
 
+def pct_text(pct: Optional[float]) -> str:
+    """指値の % の書き方。None は元の指値（+10%）。5.0 → "+5%"、7.5 → "+7.5%"。"""
+    v = (TARGET - 1.0) * 100.0 if pct is None else float(pct)
+    return f"+{round(v, 4):g}%"
+
+
 # --------------------------------------------------------------------------- #
 # 取引の記録（タブ）
 # --------------------------------------------------------------------------- #
@@ -187,7 +203,8 @@ def event_record(e: Dict, names: Dict[str, str]) -> Dict[str, object]:
             "日付": e.get("date") or "",
             "価格": "" if e.get("price") is None else e["price"],
             "株数": "" if e.get("shares") is None else e["shares"],
-            "取消の対象": e.get("ref") or "", "メモ": e.get("note") or ""}
+            "取消の対象": e.get("ref") or "", "メモ": e.get("note") or "",
+            "指値%": "" if e.get("pct") is None else e["pct"]}
 
 
 def new_events(rows: List[Dict], events: List[Dict]) -> List[Dict]:
@@ -208,7 +225,8 @@ def positions_from_log(rows: List[Dict], pred_values: List[List[str]]
 
     返り値は (保有, 合わなかった行の説明, 取り消した買いの予測ログの行番号)。
     売りは、同じコードで、売った日までに買っていて、まだ売りの無い保有のうち最も新しいものに付ける
-    （予測日があればそれも合わせる）。
+    （予測日があればそれも合わせる）。指値の変更は、同じコードで、効く最初の日までに買った保有のうち
+    最も新しいものに付ける（予測日があればそれも合わせる）。
     """
     header = [str(h).strip() for h in pred_values[0]] if pred_values else []
     idx = {h: i for i, h in enumerate(header)}
@@ -242,8 +260,8 @@ def positions_from_log(rows: List[Dict], pred_values: List[List[str]]
     cleared: Set[int] = set()
     seen = set()
     for rec in rows:
-        if _kind(rec) not in ("buy", "sell", "cancel"):
-            issues.append("種類が 買い・売り・取消 のどれでもない")
+        if _kind(rec) not in ("buy", "sell", "cancel", "target"):
+            issues.append("種類が 買い・売り・取消・指値 のどれでもない")
             continue
         if _kind(rec) != "buy":
             continue
@@ -290,6 +308,23 @@ def positions_from_log(rows: List[Dict], pred_values: List[List[str]]
         p = max(cands, key=start_of)
         p.sell_date = day
         p.sell_price = _num(rec.get("価格"))
+
+    for rec in rows:
+        if _kind(rec) != "target" or cancelled(rec):
+            continue
+        code = _code(rec.get("コード"))
+        pick = _date(rec.get("予測日"))
+        day = _date(rec.get("日付"))
+        pct = _num(str(rec.get("指値%", "")).replace("%", ""))
+        if day is None or pct is None or not 0 < pct <= TI.MAX_PCT:
+            issues.append(f"指値の行に 日付・指値%（0 より大きく {TI.MAX_PCT:g} 以下）が無い")
+            continue
+        cands = [p for p in positions if p.code == code
+                 and (pick is None or p.pick_date == _ymd(pick)) and start_of(p) <= day]
+        if not cands:
+            issues.append("指値に合う買いが無い")
+            continue
+        max(cands, key=start_of).targets.append((day, pct))
     active = {p.row for p in positions if p.row is not None}
     positions.sort(key=lambda p: (p.pick_date or _ymd(p.buy_date), p.code))
     return positions, issues, cleared - active
@@ -351,7 +386,11 @@ def simulate(p: Position, bars: pd.DataFrame, cal=None) -> Optional[pd.DataFrame
     """
     p.state = p.reason = p.issue = ""
     p.entry_day = p.entry = p.day20 = p.exit_day = p.exit_price = None
-    p.target = p.peak = p.peak_day = None
+    p.target = p.target_pct = p.target_from = p.peak = p.peak_day = None
+    # 指値の変更（効く最初の日の順。同じ日なら報告の順で、あとのものが効く）
+    changes = sorted(p.targets, key=lambda t: t[0])
+    if changes:
+        p.target_from, p.target_pct = changes[-1]
     b = bars[bars["Code"] == p.jq_code].sort_values("Date").reset_index(drop=True)
     if b.empty:
         p.state = "株価なし"
@@ -388,12 +427,23 @@ def simulate(p: Position, bars: pd.DataFrame, cal=None) -> Optional[pd.DataFrame
     exit_i: Optional[int] = None
     exit_px: Optional[float] = None
     reason = ""
-    target = p.target = entry * TARGET
+
+    def limit_on(day) -> Tuple[float, Optional[float], Optional[pd.Timestamp]]:
+        """その日に効いている (指値, 変えた %, 効く最初の日)。変えていなければ (建値×1.10, None, None)。"""
+        out: Tuple[float, Optional[float], Optional[pd.Timestamp]] = (entry * TARGET, None, None)
+        for d, pct in changes:
+            if d <= day:
+                out = (entry * (1.0 + pct / 100.0), pct, d)
+        return out
+
+    # 表に出す指値は、持っている間は最新のもの（まだ効いていない先の日付でも）。売ったら下で直す
+    p.target, p.target_pct, p.target_from = limit_on(pd.Timestamp.max)
     window = after.index if p.day20 is None else after.index[after["Date"] <= p.day20]
     for i in window:
         h = high.iloc[i]
+        target, pct, _ = limit_on(after.loc[i, "Date"])
         if pd.notna(h) and h >= target - 1e-9:
-            exit_i, exit_px, reason = int(i), target, "+10%に到達"
+            exit_i, exit_px, reason = int(i), target, f"{pct_text(pct)}に到達"
             break
     carried = False
     if exit_i is None and p.day20 is not None and last_bar >= p.day20:
@@ -441,6 +491,7 @@ def simulate(p: Position, bars: pd.DataFrame, cal=None) -> Optional[pd.DataFrame
         return None
     if exit_i is not None or extra is not None:
         p.state, p.exit_day, p.exit_price = SOLD, pd.Timestamp(path["Date"].iloc[-1]), exit_px
+        p.target, p.target_pct, p.target_from = limit_on(p.exit_day)    # 売った日に効いていた指値
     else:
         p.state = "持ち越し中" if carried else "保有中"
     p.reason = reason or ("20日目に含み損で持ち越し" if carried else "")
@@ -546,6 +597,22 @@ def chart_series(positions: List[Position], paths: Dict[int, pd.DataFrame],
     return series
 
 
+def limit_text(p: Position) -> str:
+    """表の「指値%」。変えていなければ +10%、変えたら その % と効く最初の日（+7%（10/1〜））。"""
+    if p.target_pct is None or p.target_from is None:
+        return pct_text(None)
+    d = pd.Timestamp(p.target_from)
+    return f"{pct_text(p.target_pct)}（{d.month}/{d.day}〜）"
+
+
+def _summary_line(vals: Dict[str, object]) -> List:
+    """銘柄ごとの表の1行（見出しの名前 → 値。無い列は空）。"""
+    unknown = sorted(set(vals) - set(SUMMARY_HEADER))
+    if unknown:
+        raise KeyError(f"銘柄ごとの表に無い列: {unknown}")
+    return [vals.get(h, "") for h in SUMMARY_HEADER]
+
+
 def summary_rows(positions: List[Position], paths: Dict[int, pd.DataFrame]) -> List[List]:
     """銘柄ごと1行と、合計・うち確定・うち含みの3行。"""
     rows: List[List] = []
@@ -554,9 +621,10 @@ def summary_rows(positions: List[Position], paths: Dict[int, pd.DataFrame]) -> L
     for k, p in enumerate(positions):
         path = paths.get(k)
         if path is None or path.empty:
-            rows.append([p.name, p.code, p.pick_date or "", _ymd(p.buy_date),
-                         p.entry_price or "", p.shares, "", "", "", "", "", "", p.reason,
-                         "", "", "", "", p.state])
+            rows.append(_summary_line({
+                "銘柄": p.name, "コード": p.code, "予測日": p.pick_date or "",
+                "買った日": _ymd(p.buy_date), "建値": p.entry_price or "", "株数": p.shares,
+                "指値%": limit_text(p), "売りの理由": p.reason, "状態": p.state}))
             continue
         last = path.iloc[-1]
         yen = float(last["pnl_yen"])
@@ -564,12 +632,17 @@ def summary_rows(positions: List[Position], paths: Dict[int, pd.DataFrame]) -> L
         for key in ("all", part):
             tot[key] += yen
             cost[key] += float(p.entry) * p.shares
-        rows.append([p.name, p.code, p.pick_date or "", _ymd(p.entry_day), round(float(p.entry), 1),
-                     p.shares, round(float(p.target), 1), _ymd(p.day20),
-                     "" if p.peak is None else round(p.peak, 1), _ymd(p.peak_day), _ymd(p.exit_day),
-                     "" if p.exit_price is None else round(float(p.exit_price), 1), p.reason,
-                     _ymd(last["Date"]), "" if p.state == SOLD else round(float(last["close"]), 1),
-                     round(yen), round(float(last["pnl_pct"]), 2), p.state])
+        rows.append(_summary_line({
+            "銘柄": p.name, "コード": p.code, "予測日": p.pick_date or "",
+            "買った日": _ymd(p.entry_day), "建値": round(float(p.entry), 1), "株数": p.shares,
+            "売りの指値": round(float(p.target), 2), "指値%": limit_text(p),
+            "20日目": _ymd(p.day20),
+            "20日目までの高値": "" if p.peak is None else round(p.peak, 1),
+            "高値の日": _ymd(p.peak_day), "売った日": _ymd(p.exit_day),
+            "売値": "" if p.exit_price is None else round(float(p.exit_price), 2),
+            "売りの理由": p.reason, "最新日": _ymd(last["Date"]),
+            "最新終値": "" if p.state == SOLD else round(float(last["close"]), 1),
+            "損益(円)": round(yen), "損益%": round(float(last["pnl_pct"]), 2), "状態": p.state}))
 
     def pct(key):
         return round(tot[key] / cost[key] * 100.0, 2) if cost[key] > 0 else ""
@@ -598,8 +671,9 @@ class Layout:
 
 
 def _cell(v):
-    """シートに USER_ENTERED で書く値。= + - @ で始まる文字は式と読まれる（「+10%の値」が #ERROR! に
-    なった。2026-10-08）ので、先頭に ' を付けて文字のまま書く（' はシートには出ない）。"""
+    """シートに USER_ENTERED で書く値。= + - @ で始まる文字は式と読まれる（見出しの「+10%の値」が
+    #ERROR! になった。2026-10-08）ので、先頭に ' を付けて文字のまま書く（' はシートには出ない）。
+    「指値%」の +10% なども同じ。"""
     if v is None:
         return ""
     if isinstance(v, str) and v[:1] in ("=", "+", "-", "@"):
@@ -620,7 +694,8 @@ def build_layout(as_of: str, summary: List[List], daily: pd.DataFrame, n_positio
                  series: Sequence[Tuple[str, str, int]] = ()) -> Layout:
     """タブ全体の値。1〜2行目に説明、4行目から銘柄ごとの表、その下に日付ごとの表。"""
     note = ("チャットで報告した取引（このシートの「取引の記録」タブ）の損益。売りのルール: 買った日を1日目と"
-            "して20営業日以内に日中の高値が買値の+10%に届いたら、その値で売り。届かなければ20日目の終値で"
+            "して20営業日以内に日中の高値が買値の+10%に届いたら、その値で売り（指値を変えた保有は、変えた"
+            "指値が効く日からその値。「指値%」の列）。届かなければ20日目の終値で"
             "売り（含み損なら売らずに持ち越し、売りの報告まで持つ）。報告の売りはルールより優先。グラフは"
             "合計と、保有中・売ってから20営業日以内の銘柄。毎晩の予測のあとに作り直します（このタブに手で"
             "書いた内容は消えます）")
@@ -688,7 +763,10 @@ def chart_request(sheet_id: int, lay: Layout) -> Optional[Dict]:
 
 
 def format_requests(sheet_id: int, lay: Layout) -> List[Dict]:
-    """円は桁区切りと符号、% は小数2桁と符号、値段は小数1桁。見出しは太字。"""
+    """
+    円は桁区切りと符号、% は小数2桁と符号、値段は小数1桁。見出しは太字。売りの指値と売値は小数2桁
+    （建値×1.05 は 0.05 円の端数が出る。小数1桁に丸めると 2 進数の誤差で切り下がって見える。2026-10-14）。
+    """
     reqs: List[Dict] = []
 
     def num(r0, r1, c, pattern):
@@ -711,11 +789,12 @@ def format_requests(sheet_id: int, lay: Layout) -> List[Dict]:
     yen = "+#,##0;-#,##0;0"
     pct = "+0.00;-0.00;0.00"
     price = "#,##0.0"
+    price2 = "#,##0.00"
     s0 = 3                                    # 銘柄ごとの表の見出し
     bold(s0)
     s1 = s0 + 1 + lay.summary_rows
-    for name, pattern in (("建値", price), ("+10%の値", price), ("20日目までの高値", price),
-                          ("売値", price), ("最新終値", price), ("損益(円)", yen), ("損益%", pct)):
+    for name, pattern in (("建値", price), ("売りの指値", price2), ("20日目までの高値", price),
+                          ("売値", price2), ("最新終値", price), ("損益(円)", yen), ("損益%", pct)):
         num(s0 + 1, s1, SUMMARY_HEADER.index(name), pattern)
     for r in range(s1 - 3, s1):               # 合計・うち確定・うち含み
         bold(r)
@@ -763,7 +842,7 @@ def user_cell_updates(header: List[str], positions: List[Position],
             continue
         put(p.row, {"建値": round(float(p.entry), 1), "株数": p.shares,
                     "手仕舞い日": _ymd(p.exit_day),
-                    "手仕舞い値": "" if p.exit_price is None else round(float(p.exit_price), 1),
+                    "手仕舞い値": "" if p.exit_price is None else round(float(p.exit_price), 2),
                     "損益": round(float(path.iloc[-1]["pnl_yen"]))})
     for r in sorted(cleared):
         put(r, {})
@@ -790,6 +869,8 @@ def sync_log_tab(book, events: List[Dict], names: Dict[str, str],
     if new and not dry_run:
         if ws is None:
             ws = book.add_worksheet(title=LOG_TAB, rows=500, cols=len(LOG_HEADER) + 2)
+        if ws.col_count < len(header):        # 見出しを右端に足すとき（2026-10-14 の「指値%」）
+            ws.resize(cols=len(header))
         if not values or header != [str(h).strip() for h in values[0]]:
             ws.update([header], "A1", value_input_option="RAW")
         # 文字のまま書く（id や日付を数や日付として読まれないように）。列は見出しの名前で合わせる
@@ -854,6 +935,9 @@ def report(n_events: int, n_failed: int, n_added: int, positions: List[Position]
     lines = [f"[holdings] 受け皿 {n_events}件（復号できない {n_failed}）・取引の記録に足した {n_added}件",
              f"[holdings] 保有 {len(positions)}件" + (f"（{parts}）" if parts else ""),
              f"[holdings] 日付ごとの表 {n_days}日（最新 {as_of}）"]
+    n_lim = sum(1 for p in positions if p.targets)
+    if n_lim:
+        lines.append(f"[holdings] 指値を変えた保有 {n_lim}件")
     found = list(issues) + [p.issue for p in positions if p.issue]
     if found:
         lines.append(f"[holdings] 取引の記録で合わなかった行 {len(found)}: "

@@ -147,9 +147,30 @@ DEFAULT_LABEL = LabelConfig()
 #   高値更新日に母集団を固定すれば距離は全銘柄で同じになり、この問題が消える。
 POPULATION = "breakout"
 
+
+def _flag(raw: str) -> bool:
+    """「1 / true / on / yes」を True にする（環境変数からの差し替え用）。"""
+    return raw.strip().lower() in ("1", "true", "on", "yes")
+
+
+def _ref(raw: str) -> str:
+    """高値更新の基準の列（high / close）。それ以外は止める（黙って別の母集団にしない）。"""
+    v = raw.strip().lower()
+    if v not in ("high", "close"):
+        raise SystemExit(f"SWEEP_BREAKOUT_REF は high か close: {raw!r}")
+    return v
+
+
 # 高値更新の判定は高値ベース（終値ベースではなく）。
 # 場中に52週高値を超えた時点で候補になる、という運用の形に合わせる。
-BREAKOUT_ON_HIGH = True
+#   BREAKOUT_REF      「それまでの78週高値」を何の最大で作るか（high = 日中の高値 / close = 終値）。
+#                     high52w・high52w_prior・r_high・break_margin・base_length の基準もこれに従う
+#   BREAKOUT_ON_HIGH  その基準を何で超えたら更新日とするか（True = 日中の高値 / False = 終値）
+# 既定は high / True（2026-10-15 まで切り替えは無かった）。実験90（research/exp/e90_close_breakout.py）が
+# close / False（終値 > これまでの終値の最大）の母集団を作って比べる。環境変数 SWEEP_* か、
+# 実験の台本が B.BREAKOUT_REF / B.BREAKOUT_ON_HIGH を書き換えて build() を呼ぶ（呼ぶたびに読む）。
+BREAKOUT_REF = _sweep_override("BREAKOUT_REF", "high", _ref)
+BREAKOUT_ON_HIGH = _sweep_override("BREAKOUT_ON_HIGH", True, _flag)
 
 # 同じ上昇局面の連続した更新日を1件にまとめる。
 # 高値更新が10日続くと、ほぼ同じ特徴量・重なるラベルのサンプルが10件でき、
@@ -252,11 +273,6 @@ REQUIRE_UPTREND = True
 # 欠測を許さないと1つの欠測が窓ぶんの判定を潰すが、
 # 許しすぎると長期休止銘柄の「数点だけの高値」を基準にしてしまう。
 MIN_WINDOW_COVERAGE = 0.5
-
-
-def _flag(raw: str) -> bool:
-    """「1 / true / on / yes」を True にする（環境変数からの差し替え用）。"""
-    return raw.strip().lower() in ("1", "true", "on", "yes")
 
 
 #: TOKYO PRO MARKET（プロ向け市場）の市場区分名（master_hist の MktNm）
@@ -834,8 +850,9 @@ def price_panel(bars: pd.DataFrame, cfg: LabelConfig = DEFAULT_LABEL,
         began = ~listed | (s0.notna() & (df["Date"] >= s0))
         age = began.astype(int).groupby(df["Code"], sort=False).cumsum() - 1
         age = age.where(began, -1)
-    hi = g["high"].transform(lambda s: s.rolling(w, min_periods=1).max())
-    cov = g["high"].transform(lambda s: s.rolling(w, min_periods=1).count())
+    ref = g[BREAKOUT_REF]                 # 既定は high。実験90 は close（呼ぶたびに読む）
+    hi = ref.transform(lambda s: s.rolling(w, min_periods=1).max())
+    cov = ref.transform(lambda s: s.rolling(w, min_periods=1).count())
     enough = (age >= w - 1) & (cov >= w * MIN_WINDOW_COVERAGE)
     df["high52w"] = hi.where(enough)
     df["high52w_prior"] = hi.shift(1).where(enough.shift(1, fill_value=False)
@@ -902,10 +919,13 @@ def breakout_flags(df: pd.DataFrame, cfg: LabelConfig = DEFAULT_LABEL) -> pd.Dat
     return df
 
 
-def mark_new_highs(df: pd.DataFrame, cooldown: int = BREAKOUT_COOLDOWN,
-                   on_high: bool = BREAKOUT_ON_HIGH) -> pd.DataFrame:
+def mark_new_highs(df: pd.DataFrame, cooldown: int | None = None,
+                   on_high: bool | None = None) -> pd.DataFrame:
     """
     52週高値を更新した日に印を付ける。
+
+    cooldown / on_high を省くと、呼んだ時点の BREAKOUT_COOLDOWN / BREAKOUT_ON_HIGH を使う（定義時の値を
+    既定にすると、実験の台本が build() の前に書き換えても効かない）。
 
     判定は「それまでの52週高値」との比較（high52w_prior は当日を含まない）。
     当日を含む high52w と比べると、自分自身と比べることになって常に成立する。
@@ -915,6 +935,10 @@ def mark_new_highs(df: pd.DataFrame, cooldown: int = BREAKOUT_COOLDOWN,
     件数が水増しされるうえサンプル間が独立でなくなるため。
     直前 cooldown 営業日に更新が無い日だけを「新規のブレイク」とみなす。
     """
+    if cooldown is None:
+        cooldown = BREAKOUT_COOLDOWN
+    if on_high is None:
+        on_high = BREAKOUT_ON_HIGH
     px = df["high"] if on_high else df["close"]
     is_new_high = (px > df["high52w_prior"]) & df["high52w_prior"].notna()
     df["is_new_high"] = is_new_high
@@ -2969,6 +2993,9 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
         n_all = int(df["is_new_high"].sum())
         samples = df[df["is_fresh_break"] == True].copy()   # noqa: E712
         weeks = round(HIGH_WINDOW / 245 * 52)
+        print(f"[sample] 高値更新の判定: {'日中の高値' if BREAKOUT_ON_HIGH else '終値'} が それまでの{weeks}週の"
+              f"{'日中の高値' if BREAKOUT_REF == 'high' else '終値'}の最大を超えた日"
+              f"{'' if BREAKOUT_REF == 'high' and BREAKOUT_ON_HIGH else '（既定の high / 高値 ではない）'}")
         print(f"[sample] {weeks}週高値の更新日: {n_all:,}行")
         print(f"[sample] うち新規のブレイク（直前{BREAKOUT_COOLDOWN}営業日に更新なし）: "
               f"{len(samples):,}行")
@@ -2985,7 +3012,7 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
               f"prior={df['high52w_prior'].dtype} date={df['Date'].dtype}")
         rows = []
         for y, gy in df.groupby(_y):
-            ratio = (gy["high"] / gy["high52w_prior"]).replace(
+            ratio = (gy[BREAKOUT_REF] / gy["high52w_prior"]).replace(
                 [np.inf, -np.inf], np.nan)
             mx = f"{ratio.max():.3f}" if ratio.notna().any() else "—"
             rows.append(f"{y}:行{len(gy):,}/high有{gy['high'].notna().sum():,}"
@@ -3408,6 +3435,9 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
         "keepUnlabeled": bool(KEEP_UNLABELED),
         "nUnlabeled": int(out["label"].isna().sum()),
         "cooldown": BREAKOUT_COOLDOWN,
+        # 高値更新の判定の基準（既定 high / True。実験90 が close / False を試す）
+        "breakoutRef": BREAKOUT_REF,
+        "breakoutOnHigh": bool(BREAKOUT_ON_HIGH),
         "minTradingValue": MIN_TRADING_VALUE,
         "excludeMktCodes": list(EXCLUDE_MKT_CODES),
         "excludeNonCommon": bool(EXCLUDE_NON_COMMON),
