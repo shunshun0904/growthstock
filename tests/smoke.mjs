@@ -223,8 +223,9 @@ console.log('\n== 隠したタブ ==');
 // （src/App.jsx の TABS の hidden）。8軸オクタゴン比較の画面（と、そこにあった銘柄追加のボタン・直近決算のサンキー図）の
 // 確かめはタブと一緒に外した
 const tabNames = (await page.getByRole('tab').allTextContents()).map((t) => t.trim());
-check(tabNames.join(',') === 'ブレイク予測,再学習で加わったサンプル,タイムマシーン',
-      `タブは ブレイク予測 / 再学習で加わったサンプル / タイムマシーン の3つ (実際: ${tabNames.join(',')})`);
+// 候補の比較は左から2番目（運用者の指示 2026-10-15「別タブとして、左から2番目の位置に追加して下さい」）
+check(tabNames.join(',') === 'ブレイク予測,候補の比較,再学習で加わったサンプル,タイムマシーン',
+      `タブは ブレイク予測 / 候補の比較 / 再学習で加わったサンプル / タイムマシーン の4つ (実際: ${tabNames.join(',')})`);
 check(!tabNames.includes('決算サンキー') && !tabNames.includes('What-If シミュレーター')
         && !tabNames.includes('8軸オクタゴン比較'),
       '決算サンキー・What-If シミュレーター・8軸オクタゴン比較のタブは出ない');
@@ -232,6 +233,47 @@ check((await page.locator('.sankey').count()) === 0 && (await page.locator('.sto
       '8軸オクタゴン比較の画面（銘柄カード・サンキー図）はどのタブにも出ない');
 check(!((await page.textContent('.footer')) || '').includes('EDINET'),
       '決算サンキーを隠している間は EDINET の出典を出さない');
+
+console.log('\n== 候補の比較 ==');
+// 運用者の指示（2026-10-15）「別タブとして、左から2番目の位置に追加して下さい。3枚で良いです」。実験96 の模型の3枚
+// （候補の位置の散布図・似た過去の事例の収益の幅・近傍50件の「距離 × 収益」）。参考の表示で、選定には使わない。
+// 合成データは候補5件に近傍の集計が付いているが、1.5σ の3本の最小はどれも 85 未満（最高 83.6）なので、
+// 既定の「規則を満たす候補（95以上）」では図が出ず、「全候補」に広げると5件が描かれる。Q（近傍の25%点の最上位）は
+// 大和自動車交通（+0.4）、M（今の並べ方の先頭）は安田倉庫
+await page.getByRole('tab', { name: '候補の比較' }).click();
+await page.waitForSelector('.knn', { timeout: 10000 });
+let knnText = (await page.textContent('.knn')) || '';
+check(knnText.includes('規則を満たす候補（95以上）はありません'), '規則を満たす候補が無い日は、その旨と範囲を広げる案内が出る');
+check((await page.locator('.knn-fig').count()) === 0, '範囲に入る候補が無ければ図は出さない');
+check(knnText.includes('参考の表示です。選定には使いません'), '参考の表示で選定には使わないと書いてある');
+await page.getByRole('button', { name: '全候補', exact: true }).click();
+await page.waitForSelector('.knn-fig', { timeout: 5000 });
+check((await page.locator('.knn-fig').count()) === 3, `3枚の図 (実際: ${await page.locator('.knn-fig').count()})`);
+check((await page.locator('.knn-dot').count()) === 5, `散布図に候補5件の点 (実際: ${await page.locator('.knn-dot').count()})`);
+const dotLabels = await page.locator('.knn-dot-label').allTextContents();
+check(dotLabels.join(',') === 'A,B,C,D,E', `印は今の並べ方の順に A〜E (実際: ${dotLabels.join(',')})`);
+check((await page.locator('.knn-q').count()) === 1 && (await page.locator('.knn-q').first().getAttribute('data-label')) === 'B',
+      'Q（近傍の25%点の最上位）の二重の輪は B（大和自動車交通）');
+check((await page.locator('.knn-m').count()) === 1 && (await page.locator('.knn-m').first().getAttribute('data-label')) === 'A',
+      'M（今の並べ方の先頭）の四角は A（安田倉庫）');
+check((await page.locator('.knn-bg').count()) > 0, '散布図に過去の候補の背景（格子）が敷かれる');
+check((await page.locator('.knn-strip-row').count()) === 5, '収益の幅は候補5件の5行');
+check((await page.locator('.knn-cloud-cell').count()) === 5 * 7 * 5, `雲は候補5件 × 距離7 × 帯5 のマス (実際: ${await page.locator('.knn-cloud-cell').count()})`);
+knnText = (await page.textContent('.knn')) || '';
+check(/母集団\s*1,352\s*件/.test(knnText), '母集団の件数が出る');
+check(/Q \/ M\s*B 9082\s*\/\s*A 9324/.test(knnText), `帯に Q / M の候補が出る`);
+check(knnText.includes('最小 83.6（M）') && knnText.includes('最小 76.8（Q）'), '凡例に印・コード・3本の最小・Q / M が出る');
+check(!knnText.includes('NaN') && !knnText.includes('undefined'), '候補の比較に NaN / undefined が出ていない');
+const firstDetails = page.locator('.knn-fig').first().locator('details');
+await firstDetails.locator('summary').click();
+check((await firstDetails.locator('tbody tr').count()) === 5, '散布図の「表で見る」に候補5行');
+const firstRow = await firstDetails.locator('tbody tr').first().allTextContents();
+check((firstRow[0] || '').includes('A（M）') && (firstRow[0] || '').includes('-2.75'), `表の1行目は A（M）と近傍の25%点 (実際: ${(firstRow[0] || '').slice(0, 40)})`);
+await page.locator('.knn-fig').first().locator('.knn-hit').nth(1).hover();   // 点の上の当たり判定（.knn-hit）に乗せる
+await page.waitForTimeout(100);
+check((await page.locator('.knn-tip').count()) === 1 && ((await page.textContent('.knn-tip')) || '').includes('近傍の25%点 / 中央値'),
+      'ホバーで近傍の数字が出る');
+await page.screenshot({ path: path.join(SHOTS, 'screenshot-knn.png'), fullPage: true });
 
 console.log('\n== 再学習で加わったサンプル ==');
 // 運用者の依頼（2026-10-13）「直近追加されたサンプルのチャート（週次のリトレインで新たに追加されたサンプルのチャート）、

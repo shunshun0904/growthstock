@@ -3,6 +3,7 @@ import CompareView from './views/CompareView.jsx';
 import TimeMachineView from './views/TimeMachineView.jsx';
 import SimulatorView from './views/SimulatorView.jsx';
 import PredictionView from './views/PredictionView.jsx';
+import KnnCompareView from './views/KnnCompareView.jsx';
 import FilingsView from './views/FilingsView.jsx';
 import SamplesView from './views/SamplesView.jsx';
 import AddStockModal from './components/AddStockModal.jsx';
@@ -21,6 +22,9 @@ import { loadPredictions, loadHistory, loadFilings, loadFeatureNames, loadNewSam
  */
 const TABS = [
   { id: 'prediction', label: 'ブレイク予測' },
+  // 候補の比較（似た過去の事例の収益の分布。参考で、選定には使わない）。運用者の指示 2026-10-15
+  // 「別タブとして、左から2番目の位置に追加して下さい。3枚で良いです」
+  { id: 'knn', label: '候補の比較' },
   // 週次の再学習で加わったサンプルのチャート（運用者の依頼 2026-10-13。名前は同日夜「「例」ではなく「サンプル」」）
   { id: 'samples', label: '再学習で加わったサンプル' },
   { id: 'filings', label: '決算サンキー', hidden: true },
@@ -239,7 +243,7 @@ export default function App() {
 
         {!loading && dataset && <DataNotices dataset={dataset} />}
 
-        {!loading && rows.length === 0 && tab !== 'prediction' && tab !== 'samples' && (
+        {!loading && rows.length === 0 && tab !== 'prediction' && tab !== 'knn' && tab !== 'samples' && (
           <div className="card empty">
             分析対象の銘柄がありません。
             <div style={{ marginTop: 'var(--s4)' }}>
@@ -278,6 +282,22 @@ export default function App() {
               onSendToOctagon={sendToOctagon}
               sentIds={new Set(manual.map((s) => s.id))}
             />
+          )
+        )}
+
+        {tab === 'knn' && (
+          predError ? (
+            <div className="banner warn">
+              <span>⚠</span>
+              <div>
+                <strong>ブレイク予測データを読み込めませんでした。</strong>
+                <div style={{ marginTop: 4 }}>{predError}</div>
+              </div>
+            </div>
+          ) : !pred ? (
+            <div className="empty">予測データを読み込んでいます…</div>
+          ) : (
+            <KnnCompareView data={pred} />
           )
         )}
 

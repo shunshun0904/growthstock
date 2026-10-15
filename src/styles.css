@@ -627,3 +627,45 @@ input[type='range']::-moz-range-thumb {
 @media (max-width: 720px) {
   .samples-grid { grid-template-columns: 1fr; }
 }
+
+/* ---------------------------------------------------------------- 候補の比較（似た過去の事例。src/views/KnnCompareView.jsx） */
+
+.knn { display: flex; flex-direction: column; gap: var(--s4); }
+.knn-modes { display: flex; gap: 2px; flex-wrap: wrap; }
+.knn-modes .btn.on { color: var(--text); background: var(--bg-raised); box-shadow: inset 0 -2px 0 var(--accent); }
+.knn-note b { color: var(--text); }
+.knn-legend { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); margin-top: var(--s3); font-size: 12px; }
+.knn-legend > span { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.knn-legend .sw { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex: none; }
+.knn-legend .lab { font-weight: 700; }
+.knn-legend .name { color: var(--text-dim); max-width: 14em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.knn-grid { display: grid; gap: var(--s4); grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); }
+.knn-fig { margin: 0; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: var(--s4); min-width: 0; display: flex; flex-direction: column; gap: var(--s2); }
+.knn-fig figcaption h3 { margin: 0 0 4px; font-size: 13.5px; font-weight: 600; }
+.knn-fig figcaption .sub { margin: 0; font-size: 12px; color: var(--text-faint); line-height: 1.5; }
+.knn-svg { width: 100%; height: auto; display: block; font-family: var(--sans); }
+.knn-svg .knn-lbl { font-size: 11px; fill: var(--text-faint); paint-order: stroke; stroke: var(--bg-card); stroke-width: 3px; stroke-linejoin: round; }
+.knn-svg .knn-dl { font-size: 12px; fill: var(--text); font-weight: 600; paint-order: stroke; stroke: var(--bg-card); stroke-width: 3px; stroke-linejoin: round; }
+.knn-svg .knn-qmark { fill: var(--accent); }
+.knn-svg .knn-cell-num { font-size: 9.5px; fill: var(--text); }
+.knn-svg .knn-gl { stroke: var(--border-soft); stroke-width: 1; }
+.knn-svg .knn-ax { stroke: var(--text-faint); stroke-width: 1; }
+.knn-svg .knn-hit { fill: transparent; }
+.knn-details summary { cursor: pointer; font-size: 12px; color: var(--text-dim); }
+.knn-tbl { overflow-x: auto; margin-top: var(--s2); }
+.knn-tbl table { border-collapse: collapse; font-size: 11.5px; white-space: nowrap; }
+.knn-tbl th, .knn-tbl td { padding: 3px 8px; border-bottom: 1px solid var(--border-soft); text-align: right; }
+.knn-tbl th:first-child, .knn-tbl td:first-child, .knn-tbl th:nth-child(2), .knn-tbl td:nth-child(2) { text-align: left; }
+.knn-tbl th:nth-child(3), .knn-tbl td:nth-child(3) { text-align: left; }
+.knn-tbl th { color: var(--text-faint); font-weight: 500; }
+.knn-tbl td { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.knn-tip { position: fixed; z-index: 100; pointer-events: none; background: var(--bg-raised); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 6px 10px; font-size: 11.5px; box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  max-width: 300px; }
+.knn-tip .t { font-weight: 600; margin-bottom: 2px; }
+.knn-tip > div:not(.t) { display: flex; justify-content: space-between; gap: 12px; }
+.knn-tip span { color: var(--text-dim); }
+@media (max-width: 720px) {
+  .knn-grid { grid-template-columns: 1fr; }
+}

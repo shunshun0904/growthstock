@@ -586,11 +586,17 @@ def main(argv=None) -> int:
     generated_at = pd.Timestamp.utcnow().isoformat()
     out_path = os.path.join(args.out_dir, "predictions.json")
     day_list = [pd.Timestamp(d).date().isoformat() for d in days]
-    rows, day_info, fz = freeze_past_days(rows, day_list, load_previous(out_path),
+    prev_payload = load_previous(out_path)
+    rows, day_info, fz = freeze_past_days(rows, day_list, prev_payload,
                                           {"trainedAt": meta["trainedAt"], "generatedAt": generated_at})
     print(f"[freeze] 過去の日 {len(fz['frozen'])}日（{fz['rows_frozen']}件）は前に出した値のまま"
           f"（今回の採点 {fz['rows_dropped']}件は使わない）・採点した日 {', '.join(fz['scored'])}"
           + ("（最新の日を予測し直した）" if fz["latest_overwritten"] else ""))
+
+    # 候補の比較（似た過去の事例）。画面の「候補の比較」タブ用（research/knn_compare.py。運用者の指示 2026-10-15）。
+    # 参考の表示で、選定には使わない。過去の日は前の値のまま（固定した日の knn.byDay を引き継ぐ）。
+    # 作れなくても日次予測は止めない（build は例外を外に出さないが、念のためここでも受ける）
+    knn = knn_block(rows, day_list, fz["frozen"], (prev_payload or {}).get("knn"), args.data_dir, args.model_dir)
 
     rows.sort(key=lambda x: (x["date"], x["score"]), reverse=True)
 
@@ -618,6 +624,8 @@ def main(argv=None) -> int:
         # 12本の合意の物差し（consensus_reference）。線は過去の合意の分布の 90% / 97.5% 点（12本の平均の値）。
         # 画面には出さない（上の cons12 / consPct と同じ。確認・研究用）
         "consensus": consensus_meta,
+        # 候補の比較（似た過去の事例）。画面の「候補の比較」タブが読む（research/knn_compare.py）
+        "knn": knn,
         "notes": [
             "スコアは較正されていない生の出力。確率として読まず、"
             "同じ日の候補の中での順位と、スコア帯の過去実績で読むこと。",
@@ -671,6 +679,27 @@ def main(argv=None) -> int:
     print(f"[done] {codes_path} （画面の候補 {n_all}銘柄 / "
           f"取りに行く {len(picked)}銘柄{cut}）")
     return 0
+
+
+def knn_block(rows: List[Dict], day_list: List[str], frozen: List[str], prev_knn: Optional[Dict],
+              data_dir: str, model_dir: str) -> Optional[Dict]:
+    """
+    候補の比較（似た過去の事例）の集計（research/knn_compare.py の build）。失敗しても日次予測は止めず、
+    固定した日の分だけ前の値を引き継いで、採点した日は「出せない」として残す。
+    """
+    try:
+        import knn_compare as KC
+    except Exception as exc:                     # noqa: BLE001
+        print(f"[knn] 近傍の集計のコードを読めないので出さない: {type(exc).__name__}: {exc}")
+        return prev_knn
+    try:
+        knn = KC.build(rows, day_list, data_dir, model_dir, prev=prev_knn, frozen=frozen)
+    except Exception as exc:                     # noqa: BLE001
+        reason = f"{type(exc).__name__}: {exc}"
+        print(f"[knn] 近傍の集計を作れないので、採点した日は出せない: {reason}")
+        knn = KC.carry_over(prev_knn, day_list, frozen, reason=reason[:300])
+    print(f"[knn] {KC.summary_line(knn, day_list)}")
+    return knn
 
 
 def detail_codes(rows: List[Dict], limit: int) -> List[str]:
