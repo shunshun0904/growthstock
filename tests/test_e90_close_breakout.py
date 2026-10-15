@@ -134,6 +134,19 @@ class TestLabelsAndKeys(unittest.TestCase):
         np.testing.assert_array_equal(E.in_keys(fa, ck), [False, True, True])
         np.testing.assert_array_equal(E.in_keys(fb, ck), [True, True, False])
 
+    def test_nearby_marks_the_other_populations_breakouts(self):
+        d = pd.to_datetime
+        only = pd.DataFrame({"Code": ["10000", "10000", "20000", "30000"],
+                             "Date": d(["2024-03-01", "2024-06-03", "2024-03-01", "2024-03-01"]),
+                             "label": [1.0, 0.0, 1.0, 0.0]})
+        other = pd.DataFrame({"Code": ["10000", "10000", "20000", "30000"],
+                              "Date": d(["2024-02-20", "2024-06-20", "2024-03-01", "2024-01-05"])})
+        out = E.nearby(only, other, days=20)
+        # 10000 の 3/1: 2/20 が直前（10暦日）。10000 の 6/3: 6/20 が直後。20000: 同じ日は数えない。30000: 55日前は窓の外
+        self.assertEqual(out["before"].tolist(), [True, False, False, False])
+        self.assertEqual(out["after"].tolist(), [False, True, False, False])
+        self.assertEqual(list(out.columns), ["Code", "Date", "label", "before", "after"])
+
     def test_subset_mask_is_exact_and_seeded(self):
         fa = pd.DataFrame({"x": np.arange(100)})
         m1, m2 = E.subset_mask(fa, 37), E.subset_mask(fa, 37)
@@ -298,6 +311,9 @@ class TestReport(unittest.TestCase):
         self.assertIn("共通の行", text)
         self.assertEqual((pop["common"], pop["only_high"], pop["only_close"]), (len(fb), len(fa) - len(fb), 0))
         self.assertIn("high だけの行", text)
+        self.assertIn("片方だけの行の内訳", text)
+        self.assertEqual(sum(v["n"] for v in pop["nearby"]["high"].values()), len(fa) - len(fb))
+        self.assertNotIn("close", pop["nearby"])                                 # close だけの行は無い
 
     def test_report_prints_every_section_and_saves_the_summary(self):
         res, keysets = fake_results()

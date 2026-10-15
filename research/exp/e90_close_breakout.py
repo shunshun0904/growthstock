@@ -287,6 +287,25 @@ def prepare(rebuild: bool = False):
     return frames, stamp
 
 
+def nearby(only: pd.DataFrame, other: pd.DataFrame, days: int = B.BREAKOUT_COOLDOWN) -> pd.DataFrame:
+    """
+    片方の母集団にしかない行（only）について、もう片方の母集団（other）に同じ銘柄の更新日が 直前 days 営業日 / 直後 days
+    営業日（暦日に直して ±round(days × 営業日→暦日)）にあるか。before / after の列（真偽）を付けて返す。
+    終値の基準（終値の最大）は日中の高値の最大より低いので、終値の母集団のほうが先に抜けることがある。その行は
+    「直前に close の更新日がある」側に入り、連続更新をまとめる cooldown で片方だけになったもの。
+    """
+    tol = pd.Timedelta(days=int(round(days * WF.TRADING_TO_CALENDAR)))
+    o = only[["Code", "Date"]].copy().sort_values("Date").reset_index()
+    t = other[["Code", "Date"]].copy().sort_values("Date")
+    t["_other"] = t["Date"]
+    back = pd.merge_asof(o, t, on="Date", by="Code", direction="backward", tolerance=tol, allow_exact_matches=False)
+    fwd = pd.merge_asof(o, t, on="Date", by="Code", direction="forward", tolerance=tol, allow_exact_matches=False)
+    out = only.copy()
+    out["before"] = back.set_index("index")["_other"].notna().reindex(only.index).to_numpy()
+    out["after"] = fwd.set_index("index")["_other"].notna().reindex(only.index).to_numpy()
+    return out
+
+
 def population_report(frames_k: dict, stamp: dict, k: float) -> dict:
     """母集団の違い（件数・割合だけ）。"""
     print(f"\n■ 0. 母集団の違い（表は {stamp['built_utc']} 作成。ラベル {k:.1f}σ）")
@@ -314,6 +333,28 @@ def population_report(frames_k: dict, stamp: dict, k: float) -> dict:
     out.update(common=int(len(ck)), only_high=int(na - len(ck)), only_close=int(nb - len(ck)),
                pos_rate_high_common=float(fa.loc[inc, "label"].mean()),
                pos_rate_high_only=float(fa.loc[~inc, "label"].mean()) if (~inc).any() else None)
+    # 片方だけの行の内訳: もう片方の母集団に同じ銘柄の更新日が直前 / 直後の20営業日にあるか
+    print(f"  片方だけの行の内訳（もう片方の母集団に同じ銘柄の更新日が 直前 / 直後 {B.BREAKOUT_COOLDOWN}営業日にあるか。"
+          "件数と正例率）:")
+    out["nearby"] = {}
+    for pop, oth in (("high", "close"), ("close", "high")):
+        f = frames_k[pop]
+        only = f[~in_keys(f, ck)]
+        if not len(only):
+            continue
+        nb_ = nearby(only, frames_k[oth])
+        groups = (("直前にある（終値では先に抜けていた など）" if pop == "high" else "直前にある", nb_["before"] & ~nb_["after"]),
+                  ("直後にある", ~nb_["before"] & nb_["after"]),
+                  ("直前にも直後にもある", nb_["before"] & nb_["after"]),
+                  ("どちらにもない（終値では抜けていない など）" if pop == "high" else "どちらにもない",
+                   ~nb_["before"] & ~nb_["after"]))
+        out["nearby"][pop] = {}
+        for name, m in groups:
+            n = int(m.sum())
+            r = float(nb_.loc[m, "label"].mean()) if n else float("nan")
+            out["nearby"][pop][name] = {"n": n, "pos_rate": r}
+            print(f"    {pop} だけ {len(only):,}件のうち {name}: {n:,}（{n / len(only) * 100:.1f}%・正例率 "
+                  f"{r * 100:.1f}%）" if n else f"    {pop} だけ {len(only):,}件のうち {name}: 0")
     return out
 
 
