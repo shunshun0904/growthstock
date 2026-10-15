@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-実験95（research/exp/e95_knn_viz_data.py）: 後工程の解釈のための集計（可視化の材料）。
+実験96（research/exp/e96_knn_viz_data.py）: 後工程の解釈のための集計（可視化の材料）。
 
-- collect: 実験92 の collect と同じ候補・見積もり（p25_50 が一致）。距離の成分は 0 以上で、和が d_nn
+- collect: 実験93 の collect と同じ候補・見積もり（p25_50 が一致）。距離の成分は 0 以上で、和が d_nn
 - 度数: 合計が件数と合う。分位関数は単調。十分位の件数の合計が候補の数。マス目は MIN_CELL 未満を 0 にして消した件数を記す
 - 日の中の順位: 日の数が合い、見積もりの順位1の行は各日に1つ以上
 - 形: 60点の平均と件数。母集団の分け方（到達 / −10% 割れ / 全部）
 - @viz の行: つなぎ直すと同じ JSON。NaN は出さない
 - 報告（集計）に銘柄コードを出さない
 
-  python3 tests/test_e95_knn_viz_data.py
+  python3 tests/test_e96_knn_viz_data.py
 """
 import contextlib
 import io
@@ -25,23 +25,23 @@ sys.path.insert(0, os.path.join(ROOT, "research"))
 sys.path.insert(0, os.path.join(ROOT, "research", "exp"))
 sys.path.insert(0, os.path.join(ROOT, "tests"))
 
-import e91_expectation_monitor as E91  # noqa: E402
-import e92_knn_quantile_pick as E92  # noqa: E402
-import e95_knn_viz_data as E  # noqa: E402
-import test_e90_wasserstein_knn_pick as T90  # noqa: E402
+import e92_expectation_monitor as E92  # noqa: E402
+import e93_knn_quantile_pick as E93  # noqa: E402
+import e96_knn_viz_data as E  # noqa: E402
+import test_e91_wasserstein_knn_pick as T91  # noqa: E402
 
-LINE_T, POOL_T = T90.LINE_T, T90.POOL_T
+LINE_T, POOL_T = T91.LINE_T, T91.POOL_T
 
 
 class TestCollect(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.df, cls.dist, cls.split, cls.starts, _ = T90.case(planted=6.0)
-        cls.df = E91.attach_forward(cls.df, cls.split)
+        cls.df, cls.dist, cls.split, cls.starts, _ = T91.case(planted=6.0)
+        cls.df = E92.attach_forward(cls.df, cls.split)
         cls.c, cls.info = E.collect(cls.df, cls.dist, cls.split, cls.starts, line=LINE_T, pool_line=POOL_T)
 
     def test_same_as_e92(self):
-        c92, i92 = E92.collect(self.df, self.dist, self.split, self.starts, line=LINE_T, pool_line=POOL_T)
+        c92, i92 = E93.collect(self.df, self.dist, self.split, self.starts, line=LINE_T, pool_line=POOL_T)
         self.assertEqual(self.info["days"], i92["days"])
         m = self.c[["row", "p25_50"]].merge(c92[["row", "p25_50"]], on="row", suffixes=("", "_92"))
         self.assertEqual(len(m), len(self.c))

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-実験97（確かめだけ）: 候補の比較（research/knn_compare.py。画面の「候補の比較」タブに渡す近傍の集計）を、本番と同じデータ
+実験98（確かめだけ）: 候補の比較（research/knn_compare.py。画面の「候補の比較」タブに渡す近傍の集計）を、本番と同じデータ
 （Release の out-of-fold と日足）で試しに作る。本番・画面は変えない。判定もしない。
 
 日次予測（research/predict_daily.py）が毎日 knn_compare.build を呼ぶので、合成データのテスト（tests/test_knn_compare.py）だけで
@@ -10,7 +10,7 @@
 出すもの（集計だけ）: 日ごとの候補数・集計の付いた数・母集団の件数、尺度、文脈の件数・十分位の境・消したマス目、JSON の大きさ、
 時間。候補ごとの値・過去の事例の銘柄・日付は出さない（日付は公開の予測日だけ）。
 
-    exp=e97_knn_compare_dryrun.py
+    exp=e98_knn_compare_dryrun.py
 """
 from __future__ import annotations
 
@@ -57,7 +57,7 @@ def report(knn: dict, days: list, n_rows: int, size: int, secs: float) -> list[s
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="実験97: 候補の比較の集計を実データで試しに作る（確かめだけ）")
+    ap = argparse.ArgumentParser(description="実験98: 候補の比較の集計を実データで試しに作る（確かめだけ）")
     ap.add_argument("--pred", default=PRED, help="候補を読む predictions.json")
     ap.add_argument("--data-dir", default=DATA_DIR, help="日足（bars_*.parquet）の置き場")
     ap.add_argument("--oof-dir", default=None, help="out-of-fold の置き場（既定は --data-dir。Release の <名前>_oof.parquet の形）")

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-実験94（research/exp/e94_knn_p25_line90.py）: 後工程の候補の線を90以上に緩めて、実験92 と同じ判定を回す。
+実験95（research/exp/e95_knn_p25_line90.py）: 後工程の候補の線を90以上に緩めて、実験93 と同じ判定を回す。
 
-- 線: 後工程の候補は 90、買う規則の線（内訳）は 95、近傍の母集団は実験92 と同じ 85
+- 線: 後工程の候補は 90、買う規則の線（内訳）は 95、近傍の母集団は実験93 と同じ 85
 - 線を下げると判断日は減らない（合成データで 75 と 80 を比べる）
 - 内訳: 厳しい線以上の候補がある日の印、Q と M の3本の最小、Q が下の帯を選んだ割合
 - 報告が全部の段を出し、銘柄コードを出さない
 
-  python3 tests/test_e94_knn_p25_line90.py
+  python3 tests/test_e95_knn_p25_line90.py
 """
 import contextlib
 import io
@@ -23,11 +23,11 @@ sys.path.insert(0, os.path.join(ROOT, "research"))
 sys.path.insert(0, os.path.join(ROOT, "research", "exp"))
 sys.path.insert(0, os.path.join(ROOT, "tests"))
 
-import e92_knn_quantile_pick as E92  # noqa: E402
-import e94_knn_p25_line90 as E  # noqa: E402
-import test_e90_wasserstein_knn_pick as T90  # noqa: E402
+import e93_knn_quantile_pick as E93  # noqa: E402
+import e95_knn_p25_line90 as E  # noqa: E402
+import test_e91_wasserstein_knn_pick as T91  # noqa: E402
 
-POOL_T = T90.POOL_T
+POOL_T = T91.POOL_T
 
 
 class TestLines(unittest.TestCase):
@@ -38,9 +38,9 @@ class TestLines(unittest.TestCase):
         self.assertEqual(E.MAIN_KEY, "p25_50")
 
     def test_lower_line_gives_more_days(self):
-        df, dist, split, starts, _ = T90.case(planted=4.0, seed=2)
-        c80, i80 = E92.collect(df, dist, split, starts, line=80.0, pool_line=POOL_T)
-        c75, i75 = E92.collect(df, dist, split, starts, line=75.0, pool_line=POOL_T)
+        df, dist, split, starts, _ = T91.case(planted=4.0, seed=2)
+        c80, i80 = E93.collect(df, dist, split, starts, line=80.0, pool_line=POOL_T)
+        c75, i75 = E93.collect(df, dist, split, starts, line=75.0, pool_line=POOL_T)
         self.assertGreater(i75["days"], i80["days"])
         self.assertGreater(len(c75), len(c80))
         self.assertTrue((c75["min15"] >= 75.0).all())
@@ -52,7 +52,7 @@ class TestBreakdown(unittest.TestCase):
         d1, d2 = pd.Timestamp("2023-01-10"), pd.Timestamp("2023-01-11")
         return pd.DataFrame({"Date": [d1, d1, d1, d2, d2], "window": [5] * 5, "row": [0, 1, 2, 3, 4],
                              "min15": [96.0, 92.0, 91.0, 93.0, 90.5], "score": [0.5, 0.9, 0.1, 0.4, 0.3],
-                             E92.TP: [1.0, 10.0, -12.0, 3.0, 4.0], E92.HIT: [False, True, False, False, False],
+                             E93.TP: [1.0, 10.0, -12.0, 3.0, 4.0], E93.HIT: [False, True, False, False, False],
                              "p25_50": [0.0, 2.0, -1.0, -3.0, 1.0]})
 
     def test_flags_and_picks(self):
@@ -76,8 +76,8 @@ class TestBreakdown(unittest.TestCase):
 
 class TestReport(unittest.TestCase):
     def test_sections_and_no_codes(self):
-        df, dist, split, starts, _ = T90.case(planted=8.0)
-        c, info = E92.collect(df, dist, split, starts, line=75.0, pool_line=POOL_T)
+        df, dist, split, starts, _ = T91.case(planted=8.0)
+        c, info = E93.collect(df, dist, split, starts, line=75.0, pool_line=POOL_T)
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             s = E.report(c, info, draws=100, n_days_strict_line=10)

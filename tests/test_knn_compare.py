@@ -2,10 +2,10 @@
 """
 候補の比較（research/knn_compare.py。画面の「候補の比較」タブに渡す近傍の集計）。
 
-- 分布・W1・尺度は実験90（research/exp/e90_wasserstein_knn_pick.py）の関数と同じ値
+- 分布・W1・尺度は実験91（research/exp/e91_wasserstein_knn_pick.py）の関数と同じ値
 - 母集団の百分位は画面の物差し（models.pct_historical / live_track.pct_of）と同じ
 - 母集団は、予測日より前に結果が出そろった行だけ（先読みしない）。候補の行は自分の母集団に入らない
-- 候補の見積もり（25%点・中央値・−10% 割れ）は、実験92 の neighbor_stats で別に計算した値と一致する。雲の度数の合計は近傍の数
+- 候補の見積もり（25%点・中央値・−10% 割れ）は、実験93 の neighbor_stats で別に計算した値と一致する。雲の度数の合計は近傍の数
 - 1.5σ の3本のどれかが欠けた候補には付けない。日足の足りない候補にも付けない
 - 文脈の2次元の度数は MIN_CELL 未満のマス目を消す。出力に過去の事例の銘柄コード・日付が含まれない
 - 過去の日は前の knn のまま（引き継ぎ）。out-of-fold が無ければ例外を出さず「出せない」として返す
@@ -30,15 +30,15 @@ sys.path.insert(0, os.path.join(ROOT, "research", "exp"))
 import knn_compare as KC  # noqa: E402
 import live_track as LT  # noqa: E402
 import models as M  # noqa: E402
-import e90_wasserstein_knn_pick as E90  # noqa: E402
-import e92_knn_quantile_pick as E92  # noqa: E402
+import e91_wasserstein_knn_pick as E91  # noqa: E402
+import e93_knn_quantile_pick as E93  # noqa: E402
 
 DAY = "2025-07-01"
 N_CODES, PER_CODE = 60, 60
 
 
 def make_bars(codes, days, spiky, seed=0) -> pd.DataFrame:
-    """spiky の銘柄は右に歪んだリターンと荒い出来高、ほかは正規のリターンと穏やかな出来高（実験90 のテストと同じ作り）。"""
+    """spiky の銘柄は右に歪んだリターンと荒い出来高、ほかは正規のリターンと穏やかな出来高（実験91 のテストと同じ作り）。"""
     rng = np.random.default_rng(seed)
     n = len(days)
     parts = []
@@ -104,9 +104,9 @@ class TestHelpersMatchExperiment(unittest.TestCase):
         rng = np.random.default_rng(0)
         for _ in range(10):
             a, b = rng.standard_t(3, 80), rng.normal(0.3, 2.0, 60)
-            np.testing.assert_array_equal(KC.quantile_vector(a), E90.quantile_vector(a))
+            np.testing.assert_array_equal(KC.quantile_vector(a), E91.quantile_vector(a))
             self.assertEqual(float(KC.w1(KC.quantile_vector(a), KC.quantile_vector(b)[None, :])[0]),
-                             float(E90.w1(E90.quantile_vector(a), E90.quantile_vector(b)[None, :])[0]))
+                             float(E91.w1(E91.quantile_vector(a), E91.quantile_vector(b)[None, :])[0]))
 
     def test_distributions_and_scale(self):
         rng = np.random.default_rng(1)
@@ -114,15 +114,15 @@ class TestHelpersMatchExperiment(unittest.TestCase):
         days = pd.bdate_range("2024-01-04", periods=260)
         bars = make_bars(codes, days, {c: i % 2 == 0 for i, c in enumerate(codes)}, seed=2)
         keys = pd.DataFrame({"Code": rng.choice(codes, 40), "Date": rng.choice(days[130:240], 40)})
-        a, b = KC.event_distributions(bars, keys), E90.event_distributions(bars, keys)
+        a, b = KC.event_distributions(bars, keys), E91.event_distributions(bars, keys)
         np.testing.assert_array_equal(a["QR"], b["QR"])
         np.testing.assert_array_equal(a["QV"], b["QV"])
         np.testing.assert_array_equal(a["done"], b["done"])
-        self.assertEqual(KC.pair_median(a["QR"], 2000, 42), E90.pair_median(b["QR"], 2000, 42))
-        self.assertEqual(KC.done_before(np.sort(a["done"]), days[200]), E90.done_before(np.sort(b["done"]), days[200]))
+        self.assertEqual(KC.pair_median(a["QR"], 2000, 42), E91.pair_median(b["QR"], 2000, 42))
+        self.assertEqual(KC.done_before(np.sort(a["done"]), days[200]), E91.done_before(np.sort(b["done"]), days[200]))
         self.assertEqual((KC.K, KC.POOL_LINE, KC.CONTEXT_LINE, KC.TARGET, KC.HOLD, KC.WIN, KC.LEVELS),
-                         (E90.K_MAIN, E90.POOL_LINE, E90.LINE, E90.TARGET, E90.HOLD, E90.WIN, E90.LEVELS))
-        self.assertEqual(KC.RULE_MODELS, tuple(E90.RULE_MODELS))
+                         (E91.K_MAIN, E91.POOL_LINE, E91.LINE, E91.TARGET, E91.HOLD, E91.WIN, E91.LEVELS))
+        self.assertEqual(KC.RULE_MODELS, tuple(E91.RULE_MODELS))
 
 
 class TestBuild(unittest.TestCase):
@@ -159,7 +159,7 @@ class TestBuild(unittest.TestCase):
         pool["Date"] = pd.to_datetime(pool["Date"])
         fw = LT.forward(self.bars, pool[["Code", "Date"]], target=10.0, hold=20, fallback="close")
         pool = pool.merge(fw[["Code", "Date", "ret", "status"]], on=["Code", "Date"])
-        dist = E90.event_distributions(self.bars, pool[["Code", "Date"]])
+        dist = E91.event_distributions(self.bars, pool[["Code", "Date"]])
         ok = (np.isfinite(pool["ret"].to_numpy(dtype=float)) & np.isfinite(dist["QR"]).all(axis=1)
               & np.isfinite(dist["QV"]).all(axis=1) & ~np.isnat(dist["done"]))
         pool = pool[ok].reset_index(drop=True)
@@ -180,20 +180,20 @@ class TestBuild(unittest.TestCase):
         pool, QR, QV, done = self.direct_pool()
         order = np.argsort(done, kind="mergesort")
         pool, QR, QV, done = pool.iloc[order].reset_index(drop=True), QR[order], QV[order], done[order]
-        n0 = E90.done_before(done, pd.Timestamp("2025-06-30"))               # 尺度は最初の採点日より前の母集団
-        sR = E90.pair_median(QR[:n0], E92.N_PAIRS, E92.SEED)
-        sV = E90.pair_median(QV[:n0], E92.N_PAIRS, E92.SEED + 100)
+        n0 = E91.done_before(done, pd.Timestamp("2025-06-30"))               # 尺度は最初の採点日より前の母集団
+        sR = E91.pair_median(QR[:n0], E93.N_PAIRS, E93.SEED)
+        sV = E91.pair_median(QV[:n0], E93.N_PAIRS, E93.SEED + 100)
         self.assertEqual(self.knn["scale"], {"R": round(sR, 4), "V": round(sV, 4)})
-        n = E90.done_before(done, pd.Timestamp(DAY))
+        n = E91.done_before(done, pd.Timestamp(DAY))
         tp = pool["tp"].to_numpy(dtype=float) if "tp" in pool else pool["ret"].to_numpy(dtype=float)
         hit = pool["status"].eq(LT.HIT).to_numpy()
         keys = pd.DataFrame({"Code": [c["jqCode"] for c in self.cands], "Date": [pd.Timestamp(DAY)] * len(self.cands)})
-        cd = E90.event_distributions(self.bars, keys)
+        cd = E91.event_distributions(self.bars, keys)
         checked = 0
         for j, c in enumerate(self.cands[:4]):
             rec = self.blk["candidates"][c["jqCode"]]
-            D = E90.w1(cd["QR"][j], QR[:n]) / sR + E90.w1(cd["QV"][j], QV[:n]) / sV
-            st = E92.neighbor_stats(D, tp[:n], KC.K)
+            D = E91.w1(cd["QR"][j], QR[:n]) / sR + E91.w1(cd["QV"][j], QV[:n]) / sV
+            st = E93.neighbor_stats(D, tp[:n], KC.K)
             self.assertAlmostEqual(rec["est"]["p25"], round(st["p25"], 2), places=2)
             self.assertAlmostEqual(rec["est"]["p50"], round(st["p50"], 2), places=2)
             self.assertAlmostEqual(rec["est"]["bad"], round(st["bad"], 1), places=1)

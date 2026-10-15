@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-実験97（research/exp/e97_knn_compare_dryrun.py）: 候補の比較の集計を実データで試しに作る台本。
+実験98（research/exp/e98_knn_compare_dryrun.py）: 候補の比較の集計を実データで試しに作る台本。
 
 - 合成の out-of-fold（Release の <名前>_oof.parquet の形）と日足、候補の predictions.json から、集計を作って要約を出す
 - 出力は集計だけ（候補ごとの値・過去の事例の銘柄コードを出さない）
 - out-of-fold が無ければ「出せない」理由を出し、落ちない
 
-  python3 tests/test_e97_knn_compare_dryrun.py
+  python3 tests/test_e98_knn_compare_dryrun.py
 """
 import contextlib
 import io
@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.join(ROOT, "research"))
 sys.path.insert(0, os.path.join(ROOT, "research", "exp"))
 sys.path.insert(0, os.path.join(ROOT, "tests"))
 
-import e97_knn_compare_dryrun as E  # noqa: E402
+import e98_knn_compare_dryrun as E  # noqa: E402
 import knn_compare as KC  # noqa: E402
 import test_knn_compare as TK  # noqa: E402
 

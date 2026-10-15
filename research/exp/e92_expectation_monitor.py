@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-実験91: 期待値の見張り（ワッサーステイン距離）を、過去の前向きのデータで確かめる（検証だけ。本番・画面は変えない）。
+実験92: 期待値の見張り（ワッサーステイン距離）を、過去の前向きのデータで確かめる（検証だけ。本番・画面は変えない）。
 
-運用者の希望（2026-10-14）「直接的な予測というより、補助的にでも良いので、使いたいですね」。実験90 で同じ日の候補を
-ワッサーステイン距離の k 近傍で選んでも効かなかった（§50）ので、当てる道具ではなく見張る道具として使う案を出し、運用者が
+運用者の希望（2026-10-14）「直接的な予測というより、補助的にでも良いので、使いたいですね」。実験91 で同じ日の候補を
+ワッサーステイン距離の k 近傍で選んでも効かなかった（§51）ので、当てる道具ではなく見張る道具として使う案を出し、運用者が
 選んだ（AskUserQuestion）: 進める案 = 期待値の見張り / 進め方 = 過去データで確かめてから。
 
 見張りの中身（実運用の追跡に足す形を、そのまま過去に当てる）
 ------------------------------------------
   行: 実験88・90 と同じ（12本の out-of-fold・前向きの百分位・テスト窓 3〜11・+10% の指値・届かなければ 20営業日目の終値
       tp10c）。規則の行 = 1.5σ の lgbm_k15・xgb_k15・cat_k15 の百分位（画面と同じ丸め）がすべて95以上
-  結果が出そろう日: その銘柄の日足でブレイクの日から20本目の日（実験90 と同じ）
+  結果が出そろう日: その銘柄の日足でブレイクの日から20本目の日（実験91 と同じ）
   時点 t: 各月末
     直近の塊 Q_t = 結果が出そろった日が t の前3か月に入る規則の行
     過去 R_t   = 結果が出そろった日が t の3か月前以前の規則の行
@@ -44,10 +44,10 @@
       log_trading_value・3本の百分位の平均の W1 ÷ 過去の標準偏差。列の平均と次の3か月の平均の順位相関
   出すもの: 件数・平均・割合・月の単位の一覧。銘柄・日付ごとの値は出さない
 
-    exp=e91_expectation_monitor.py
+    exp=e92_expectation_monitor.py
     args="--draws 2000"       （既定）
 
-結果（2026-10-14、run 38535066408、08227c1、69秒。docs/MODEL_ADOPTION_RULES.md §51）
+結果（2026-10-14、run 38535066408、08227c1、69秒。docs/MODEL_ADOPTION_RULES.md §52）
 ------------------------------------------------------------------
   主: 下限の目安としての裏付けは無い。評価できた20か月で W の下限の当たり 80%（70%以上は満たす）、SE の下限の当たり 85%
       （W が下回る。差は20か月中1か月）。下限の中央 W +0.68% / SE +0.92%、ε の中央 1.46pt、次の3か月の平均の中央 +2.81%。
@@ -488,7 +488,7 @@ def report(rule: pd.DataFrame, band: pd.DataFrame | None = None, data_end=None, 
 # --------------------------------------------------------------------------- #
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="実験91: 期待値の見張り（ワッサーステイン距離）を過去の前向きのデータで確かめる")
+    ap = argparse.ArgumentParser(description="実験92: 期待値の見張り（ワッサーステイン距離）を過去の前向きのデータで確かめる")
     ap.add_argument("--draws", type=int, default=DRAWS)
     args = ap.parse_args(argv)
     t0 = time.time()
@@ -517,7 +517,7 @@ def main(argv=None) -> int:
     summary = report(rule, band, data_end=data_end, draws=args.draws)
     summary["exit_check"] = chk
     os.makedirs(OUT_DIR, exist_ok=True)
-    path = os.path.join(OUT_DIR, "e91_summary.json")
+    path = os.path.join(OUT_DIR, "e92_summary.json")
 
     def conv(o):
         if isinstance(o, (np.floating, np.integer, np.bool_)):

@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-実験92: 同じ日の候補から1件を、ワッサーステイン距離の k 近傍の「収益の下側25%点」で選び、分布で判定する（検証だけ。本番は変えない）。
+実験93: 同じ日の候補から1件を、ワッサーステイン距離の k 近傍の「収益の下側25%点」で選び、分布で判定する（検証だけ。本番は変えない）。
 
 運用者の指摘（2026-10-15）「平均での比較はあまり意味がないように思えます。分布のほうが良い気がします。…少なくとも平均だけの
 大小の比較をして良し悪しを決めるのは本質ではないですね」。平均の差は分布関数の差の面積の「上回る側 − 下回る側」で、良い側と
-悪い側を相殺した量（実験91 の cdf_areas の恒等式）。実験90 でも平均は M が上・中央値は K が上と向きが食い違っていた。運用者の
-選択（AskUserQuestion）: 次の一手 = 実験92（近傍の分布で選び、分布で判定）、分布の物差し = 下側25%点（選び方にも判定にも同じ物差し）。
+悪い側を相殺した量（実験92 の cdf_areas の恒等式）。実験91 でも平均は M が上・中央値は K が上と向きが食い違っていた。運用者の
+選択（AskUserQuestion）: 次の一手 = 実験93（近傍の分布で選び、分布で判定）、分布の物差し = 下側25%点（選び方にも判定にも同じ物差し）。
 
 比べ方（先に決めたもの。結果を見てから動かさない）
 ------------------------------------------
-  行・候補・判断日・分布・距離・近傍の母集団: 実験90 と同じ（research/exp/e90_wasserstein_knn_pick.py。前向きの百分位・+10% の
+  行・候補・判断日・分布・距離・近傍の母集団: 実験91 と同じ（research/exp/e91_wasserstein_knn_pick.py。前向きの百分位・+10% の
       指値・届かなければ20営業日目の終値、1.5σ の3本がすべて95以上の候補が同じ日に2件以上ある日、リターンの形 + 出来高の比率の
       W1、惜しい帯から上の結果が出そろった事例、近い50件）
-  見積もり: 近傍50件の tp10c の **下側25%点**（主）。参考に 中央値・−10% 割れの割合・平均（実験90 の K と同じ）、25%点の近い100件
+  見積もり: 近傍50件の tp10c の **下側25%点**（主）。参考に 中央値・−10% 割れの割合・平均（実験91 の K と同じ）、25%点の近い100件
   選び方（判断日ごとに1件）
     Q（主）: 近傍の25%点が最も高い候補（同点は今の並べ方）
     M: 今の並べ方（3本の最小の順・同点は基準モデルのスコア順。画面と同じ）
@@ -21,23 +21,23 @@
     1. Q の取引の25%点 ≥ M の取引の25%点
     2. Q の25%点が無作為の25%点の分布の上側5%に入る（片側 p < 0.05。p = 無作為の25%点が Q 以上になる割合）
     3. 下回らない: Q の 10・50・75%点がどれも無作為の同じ分位点の中央以上（下の裾を良くするために上を捨てていないか）
-    そろわなければ「今の並べ方・無作為と見分けられない」。判断日は窓に偏る（実験90: 3つの窓に72日）ので窓ごとの差は出さず、
+    そろわなければ「今の並べ方・無作為と見分けられない」。判断日は窓に偏る（実験91: 3つの窓に72日）ので窓ごとの差は出さず、
     対の差と日の復元抽出で散らばりを見る
   参考（判定に使わない）
     - 対の差（同じ日の Q − M）: 25%点・中央値・75%点、Q が上の日・同じ候補の日・下の日の割合。日を復元抽出した 2,000回の
       「25%点の差」の 5〜95% 点。判断日を前半・後半に分けたときの 25%点の差
     - 優越からのずれ: Q と M、Q と無作為（2,000回の選択をすべて合わせた分布）の分布関数の差の面積（下側 = Q が下回る量・
-      上側 = 上回る量。実験91 の cdf_areas）。平均の差 = 上側 − 下側
-    - ほかの物差しで選ぶ形（近傍の中央値・−10% 割れの少なさ・平均 = 実験90 の K・25%点の近い100件）の同じ指標
-    - 実験90 の見直し（見るだけ。結果を見た後の再集計）: 平均で選んだ K・M・無作為の 10・25・50・75%点・−10% 割れ・+10% 到達と面積
+      上側 = 上回る量。実験92 の cdf_areas）。平均の差 = 上側 − 下側
+    - ほかの物差しで選ぶ形（近傍の中央値・−10% 割れの少なさ・平均 = 実験91 の K・25%点の近い100件）の同じ指標
+    - 実験91 の見直し（見るだけ。結果を見た後の再集計）: 平均で選んだ K・M・無作為の 10・25・50・75%点・−10% 割れ・+10% 到達と面積
   出すもの: 件数・分位点・割合・面積。銘柄・日付ごとの値は出さない
 
-    exp=e92_knn_quantile_pick.py
+    exp=e93_knn_quantile_pick.py
     args="--draws 2000"       （既定）
 
-結果（2026-10-15、run 38733526689、282dcda、30秒。docs/MODEL_ADOPTION_RULES.md §52）
+結果（2026-10-15、run 38733526689、282dcda、30秒。docs/MODEL_ADOPTION_RULES.md §53）
 ------------------------------------------------------------------
-  判定: 分布で見て後工程として効く（先に決めた3条件がそろった）。判断日96日（実験90 と同じ）。
+  判定: 分布で見て後工程として効く（先に決めた3条件がそろった）。判断日96日（実験91 と同じ）。
       Q（近傍50件の25%点の最上位）25%点 +0.21・10%点 −4.89・中央 +7.53・平均 +4.62%・−10%割れ 3.1%・到達 47.9%
       M（今の並べ方）25%点 −0.90・10%点 −5.13・中央 +6.26・平均 +3.99%・−10%割れ 5.2%・到達 42.7%
       無作為（2,000回を合わせた分布）25%点 −1.04・中央 +4.96・平均 +3.49%。Q の25%点が無作為の25%点（5〜95% 点 −2.01〜−0.18）
@@ -45,9 +45,9 @@
   優越からのずれ: Q 対 M 下側 0.06 / 上側 0.69pt、Q 対 無作為 下側 0.01 / 上側 1.13pt（ほぼ優越）
   ただし: 対の差（Q − M）は 25%点 −0.13 / 中央 0 / 75%点 +1.88pt で、Q が上の日 29%・下 25%。日の復元抽出の25%点の差は
       5〜95% 点 −1.06〜+2.49pt で0をまたぐ。前半 +0.03pt・後半 +1.37pt。同じ候補を選んだ日 33.3%
-  参考: 近傍の中央値で選ぶ p = 0.136（条件 ○××）、−10% 割れの少なさ p = 0.897（×××。Q 対 M 下側 1.52pt）、平均（実験90 の K）
+  参考: 近傍の中央値で選ぶ p = 0.136（条件 ○××）、−10% 割れの少なさ p = 0.897（×××。Q 対 M 下側 1.52pt）、平均（実験91 の K）
       p = 0.397（○××）、25%点の近い100件 p = 0.090（○×○。向きは同じ）
-  実験90 の見直し（見るだけ）: 平均で選んだ K は M より下の裾が重い（K 対 M 下側 0.46 / 上側 0.08pt。25%点 −0.89 対 −0.90・
+  実験91 の見直し（見るだけ）: 平均で選んだ K は M より下の裾が重い（K 対 M 下側 0.46 / 上側 0.08pt。25%点 −0.89 対 −0.90・
       10%点 −5.16 対 −5.13・中央 +6.63 対 +6.26）
 """
 from __future__ import annotations
@@ -68,14 +68,14 @@ import live_track as LT  # noqa: E402
 import models as M  # noqa: E402
 import e79_model_clusters as E79  # noqa: E402
 import e83_tp10_rule as E83  # noqa: E402
-import e90_wasserstein_knn_pick as E90  # noqa: E402
-import e91_expectation_monitor as E91  # noqa: E402
+import e91_wasserstein_knn_pick as E91  # noqa: E402
+import e92_expectation_monitor as E92  # noqa: E402
 
-LINE, POOL_LINE = E90.LINE, E90.POOL_LINE
-K_MAIN = E90.K_MAIN                   # 50
+LINE, POOL_LINE = E91.LINE, E91.POOL_LINE
+K_MAIN = E91.K_MAIN                   # 50
 K_REF = (100,)
-MIN_POOL, N_PAIRS = E90.MIN_POOL, E90.N_PAIRS
-TARGET, TP, HIT = E90.TARGET, E90.TP, E90.HIT
+MIN_POOL, N_PAIRS = E91.MIN_POOL, E91.N_PAIRS
+TARGET, TP, HIT = E91.TARGET, E91.TP, E91.HIT
 PCTS = (10, 25, 50, 75)
 MAIN_P = 25                           # 主の物差し: 下側25%点
 DRAWS = 2000
@@ -83,7 +83,7 @@ BOOT = 2000
 SEED = 42
 #: (見積もりの列, 表示, 小さいほど良いか)
 SELECTORS = (("p25", "近傍の25%点", False), ("p50", "近傍の中央値", False), ("bad", "近傍の −10% 割れの少なさ", True),
-             ("mean", "近傍の平均（実験90 の K）", False))
+             ("mean", "近傍の平均（実験91 の K）", False))
 OUT_DIR = E79.OUT_DIR
 
 log = E79.log
@@ -106,7 +106,7 @@ def neighbor_stats(D: np.ndarray, vals: np.ndarray, k: int) -> dict:
 def collect(df: pd.DataFrame, dist: dict, split: dict, starts: dict, line: float = LINE, pool_line: float = POOL_LINE,
             k_main: int = K_MAIN, k_ref=K_REF, min_pool: int = MIN_POOL, n_pairs: int = N_PAIRS,
             seed: int = SEED) -> tuple[pd.DataFrame, dict]:
-    """実験90 の collect と同じ作りで、近傍の分布の指標（<指標>_<近傍の数>）を候補ごとに付ける。"""
+    """実験91 の collect と同じ作りで、近傍の分布の指標（<指標>_<近傍の数>）を候補ごとに付ける。"""
     QR, QV, done = dist["QR"], dist["QV"], dist["done"]
     tp = pd.to_numeric(df[TP], errors="coerce").to_numpy(dtype=float)
     hit = df[HIT].to_numpy(dtype=bool) if HIT in df.columns else tp >= TARGET
@@ -116,7 +116,7 @@ def collect(df: pd.DataFrame, dist: dict, split: dict, starts: dict, line: float
     score = pd.to_numeric(df["score"], errors="coerce").to_numpy(dtype=float)
     vol = (pd.to_numeric(df["vol_20d"], errors="coerce").to_numpy(dtype=float) if "vol_20d" in df.columns
            else np.full(len(df), np.nan))
-    mins = E90.window_min(df, split)
+    mins = E91.window_min(df, split)
     ks = (k_main,) + tuple(k for k in k_ref if k != k_main)
     info = {"rule_rows": 0, "rule_ok": 0, "days2": 0, "days_small_pool": 0, "days": 0, "pool": [], "norm": {},
             "per_window": {}}
@@ -131,9 +131,9 @@ def collect(df: pd.DataFrame, dist: dict, split: dict, starts: dict, line: float
         pool = U[(mn >= pool_line) & ok[U] & ~np.isnat(done[U])]
         pool = pool[np.argsort(done[pool], kind="mergesort")]
         pdone = done[pool]
-        base = pool[: E90.done_before(pdone, starts[w])]
-        sR = E90.pair_median(QR[base], n_pairs, seed + int(w))
-        sV = E90.pair_median(QV[base], n_pairs, seed + 100 + int(w))
+        base = pool[: E91.done_before(pdone, starts[w])]
+        sR = E91.pair_median(QR[base], n_pairs, seed + int(w))
+        sV = E91.pair_median(QV[base], n_pairs, seed + 100 + int(w))
         sR = sR if np.isfinite(sR) and sR > 0 else 1.0
         sV = sV if np.isfinite(sV) and sV > 0 else 1.0
         info["norm"][int(w)] = {"base": int(len(base)), "sR": sR, "sV": sV}
@@ -144,7 +144,7 @@ def collect(df: pd.DataFrame, dist: dict, split: dict, starts: dict, line: float
             if len(idx) < 2:
                 continue
             info["days2"] += 1
-            P = pool[: E90.done_before(pdone, d)]
+            P = pool[: E91.done_before(pdone, d)]
             if len(P) < min_pool:
                 info["days_small_pool"] += 1
                 continue
@@ -153,7 +153,7 @@ def collect(df: pd.DataFrame, dist: dict, split: dict, starts: dict, line: float
             info["pool"].append(int(len(P)))
             tpP, QRP, QVP = tp[P], QR[P], QV[P]
             for i in idx:
-                D = E90.w1(QR[i], QRP) / sR + E90.w1(QV[i], QVP) / sV
+                D = E91.w1(QR[i], QRP) / sR + E91.w1(QV[i], QVP) / sV
                 rec = {"Date": pd.Timestamp(d), "window": int(w), "row": int(i), "min15": float(mn_of[int(i)]),
                        "score": float(score[i]), TP: float(tp[i]), HIT: bool(hit[i]), "vol_20d": float(vol[i]),
                        "pool_n": int(len(P))}
@@ -188,7 +188,7 @@ def day_picks(c: pd.DataFrame, key: str, ascending: bool = False) -> pd.DataFram
 
 
 def random_draws(c: pd.DataFrame, draws: int = DRAWS, seed: int = SEED) -> np.ndarray:
-    """判断日ごとに候補から1件を無作為に選んだ収益の行列（draws × 判断日）。実験90 の random_means と同じ乱数の順。"""
+    """判断日ごとに候補から1件を無作為に選んだ収益の行列（draws × 判断日）。実験91 の random_means と同じ乱数の順。"""
     groups = [g[TP].to_numpy(dtype=float) for _, g in c.groupby("Date", sort=True) if len(g) >= 2] if len(c) else []
     rng = np.random.default_rng(seed)
     mat = np.empty((draws, len(groups)))
@@ -225,7 +225,7 @@ def evaluate(c: pd.DataFrame, key: str, ascending: bool = False, draws: int = DR
     qQ, qM = qs(Q), qs(Mv)
     null = {p: np.quantile(mat, p / 100, axis=1) for p in PCTS}
     pooled = mat.ravel()
-    p_q, p_m = E90.p_upper(null[MAIN_P], qQ[MAIN_P]), E90.p_upper(null[MAIN_P], qM[MAIN_P])
+    p_q, p_m = E91.p_upper(null[MAIN_P], qQ[MAIN_P]), E91.p_upper(null[MAIN_P], qM[MAIN_P])
     conds = {"not_below_M": bool(qQ[MAIN_P] >= qM[MAIN_P]),
              "p_random": bool(np.isfinite(p_q) and p_q < 0.05),
              "no_worse_elsewhere": bool(all(qQ[p] >= float(np.median(null[p])) for p in PCTS if p != MAIN_P))}
@@ -251,8 +251,8 @@ def evaluate(c: pd.DataFrame, key: str, ascending: bool = False, draws: int = DR
                      "up": float((d > 0).mean() * 100), "same": float((d == 0).mean() * 100), "down": float((d < 0).mean() * 100)},
             "boot": {"p5": float(np.quantile(bt, 0.05)), "p50": float(np.median(bt)), "p95": float(np.quantile(bt, 0.95))},
             "halves": halves,
-            "area_M": {k: v for k, v in E91.cdf_areas(Q, Mv, ranges=()).items() if k != "down_parts"},
-            "area_R": {k: v for k, v in E91.cdf_areas(Q, pooled, ranges=()).items() if k != "down_parts"}}
+            "area_M": {k: v for k, v in E92.cdf_areas(Q, Mv, ranges=()).items() if k != "down_parts"},
+            "area_R": {k: v for k, v in E92.cdf_areas(Q, pooled, ranges=()).items() if k != "down_parts"}}
 
 
 # --------------------------------------------------------------------------- #
@@ -297,7 +297,7 @@ def report(c: pd.DataFrame, info: dict, draws: int = DRAWS, seed: int = SEED, k_
            min_pool: int = MIN_POOL) -> dict:
     summary: dict = {"info": {k: v for k, v in info.items() if k != "pool"}}
     pool = np.array(info.get("pool", []), dtype=float)
-    print("\n■ 0. 件数（実験90 と同じ作り）")
+    print("\n■ 0. 件数（実験91 と同じ作り）")
     print(f"  今の規則の行 {info['rule_rows']}件（収益と2つの分布が出せる行 {info['rule_ok']}件）。候補が2件以上の日 "
           f"{info['days2']}日、うち近傍の母集団が{min_pool}件に満たず外した日 {info['days_small_pool']}日 → 判断日 {info['days']}日")
     if len(c):
@@ -341,7 +341,7 @@ def report(c: pd.DataFrame, info: dict, draws: int = DRAWS, seed: int = SEED, k_
                   f"条件 {mark(cd['not_below_M'])}{mark(cd['p_random'])}{mark(cd['no_worse_elsewhere'])}・"
                   f"Q 対 M 下側 {e['area_M']['down']:.2f} / 上側 {e['area_M']['up']:.2f}pt・平均 {e['Q']['mean']:+.2f}%")
 
-    print("\n■ 3. 実験90 の見直し（見るだけ。結果を見た後の再集計）: 平均で選んだ K・M・無作為の分布")
+    print("\n■ 3. 実験91 の見直し（見るだけ。結果を見た後の再集計）: 平均で選んだ K・M・無作為の分布")
     ek = summary["ref"].get(f"mean_{k_main}")
     if ek and ek["days"]:
         print(line(f"K: 近傍の平均の最上位（{ek['days']}日）", ek["Q"]))
@@ -356,7 +356,7 @@ def report(c: pd.DataFrame, info: dict, draws: int = DRAWS, seed: int = SEED, k_
               f"{ev['null_q'][MAIN_P]['p50']:+.2f}（p = {ev['p_Q']:.3f}）→ {verdict}")
     else:
         print("  判断日が0日 → 判定できない")
-    print("  注意: 確かめられるのは同じ期間の out-of-fold だけ（実験90 と同じデータ）。手数料・税・すべりは含まない")
+    print("  注意: 確かめられるのは同じ期間の out-of-fold だけ（実験91 と同じデータ）。手数料・税・すべりは含まない")
     summary["verdict"] = verdict
     return summary
 
@@ -366,7 +366,7 @@ def report(c: pd.DataFrame, info: dict, draws: int = DRAWS, seed: int = SEED, k_
 # --------------------------------------------------------------------------- #
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="実験92: 同じ日の候補から1件を、近傍の収益の25%点で選び、分布で判定する")
+    ap = argparse.ArgumentParser(description="実験93: 同じ日の候補から1件を、近傍の収益の25%点で選び、分布で判定する")
     ap.add_argument("--draws", type=int, default=DRAWS)
     args = ap.parse_args(argv)
     t0 = time.time()
@@ -377,23 +377,23 @@ def main(argv=None) -> int:
     folds = E79.make_windows(fr["Date"])
     df["window"] = E79.assign_windows(df["Date"], folds)
     df = df[df["window"] > 0].reset_index(drop=True)
-    df = E90.attach_vol(df, fr)
+    df = E91.attach_vol(df, fr)
     df["score"] = pd.to_numeric(df[f"score_{M.BASELINE}"], errors="coerce")
     del fr
     bars = LT.load_bars(lab.DATA_DIR, start=pd.to_datetime(df["Date"]).min() - pd.Timedelta(days=250),
                         extra=("C", "AdjVo", "Vo"))
     df, chk = E83.attach_exits(df, bars, targets=(TARGET,))
     log(f"出口: 20日目の終値 {chk['with_close']:,}/{chk['rows']:,}行")
-    dist = E90.event_distributions(bars, df[["Code", "Date"]])
+    dist = E91.event_distributions(bars, df[["Code", "Date"]])
     del bars
     split = E79.window_split(df, folds)
     starts = {f.index: pd.Timestamp(f.test_start) for f in folds}
     c, info = collect(df, dist, split, starts)
-    log(f"今の規則の行 {info['rule_rows']}件（実験90 は 559件）・判断日 {info['days']}日（実験90 は 96日）")
+    log(f"今の規則の行 {info['rule_rows']}件（実験91 は 559件）・判断日 {info['days']}日（実験91 は 96日）")
     summary = report(c, info, draws=args.draws)
     summary["exit_check"] = chk
     os.makedirs(OUT_DIR, exist_ok=True)
-    path = os.path.join(OUT_DIR, "e92_summary.json")
+    path = os.path.join(OUT_DIR, "e93_summary.json")
 
     def conv(o):
         if isinstance(o, (np.floating, np.integer, np.bool_)):

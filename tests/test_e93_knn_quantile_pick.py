@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-実験92（research/exp/e92_knn_quantile_pick.py）。
+実験93（research/exp/e93_knn_quantile_pick.py）。
 
 - 近傍の指標: 手で数えた例（25%点・中央値・−10% 割れ・平均）と一致する
-- 無作為の行列: 形が (回数 × 判断日) で、行ごとの平均は実験90 の random_means と同じ値（同じ乱数の順）
+- 無作為の行列: 形が (回数 × 判断日) で、行ごとの平均は実験91 の random_means と同じ値（同じ乱数の順）
 - 選び方: 同点は今の並べ方。−10% 割れの少なさは小さいほど良い向きで選ぶ
 - 判定: 仕込んだ合成データ（形の違う銘柄だけ収益を高くする）で Q が M と無作為を 25%点で上回り「効く」。仕込まなければ「効く」にならない
 - 面積の恒等式: 平均の差 = 上側 − 下側（Q 対 M）
 - 報告が全部の段を出し、銘柄コードを出さない
 
-  python3 tests/test_e92_knn_quantile_pick.py
+  python3 tests/test_e93_knn_quantile_pick.py
 """
 import contextlib
 import io
@@ -25,11 +25,11 @@ sys.path.insert(0, os.path.join(ROOT, "research"))
 sys.path.insert(0, os.path.join(ROOT, "research", "exp"))
 sys.path.insert(0, os.path.join(ROOT, "tests"))
 
-import e90_wasserstein_knn_pick as E90  # noqa: E402
-import e92_knn_quantile_pick as E  # noqa: E402
-import test_e90_wasserstein_knn_pick as T90  # noqa: E402
+import e91_wasserstein_knn_pick as E91  # noqa: E402
+import e93_knn_quantile_pick as E  # noqa: E402
+import test_e91_wasserstein_knn_pick as T91  # noqa: E402
 
-LINE_T, POOL_T = T90.LINE_T, T90.POOL_T
+LINE_T, POOL_T = T91.LINE_T, T91.POOL_T
 
 
 class TestNeighborStats(unittest.TestCase):
@@ -68,17 +68,17 @@ class TestPicksAndDraws(unittest.TestCase):
         self.assertFalse(bool(pk["same"].iat[0]))
 
     def test_random_draws_match_e90(self):
-        df, dist, split, starts, _ = T90.case(planted=4.0, seed=3)
+        df, dist, split, starts, _ = T91.case(planted=4.0, seed=3)
         c, _ = E.collect(df, dist, split, starts, line=LINE_T, pool_line=POOL_T)
         mat = E.random_draws(c, draws=300, seed=7)
         self.assertEqual(mat.shape, (300, c["Date"].nunique()))
-        np.testing.assert_allclose(mat.mean(axis=1), E90.random_means(c, draws=300, seed=7))
+        np.testing.assert_allclose(mat.mean(axis=1), E91.random_means(c, draws=300, seed=7))
 
 
 class TestPlanted(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.df, cls.dist, cls.split, cls.starts, cls.kinds = T90.case(planted=8.0)
+        cls.df, cls.dist, cls.split, cls.starts, cls.kinds = T91.case(planted=8.0)
         cls.c, cls.info = E.collect(cls.df, cls.dist, cls.split, cls.starts, line=LINE_T, pool_line=POOL_T)
 
     def test_columns_and_counts(self):
@@ -88,7 +88,7 @@ class TestPlanted(unittest.TestCase):
         self.assertGreater(self.info["days"], 40)
 
     def test_same_distances_as_e90(self):
-        c90, _ = E90.collect(self.df, self.dist, self.split, self.starts, line=LINE_T, pool_line=POOL_T)
+        c90, _ = E91.collect(self.df, self.dist, self.split, self.starts, line=LINE_T, pool_line=POOL_T)
         m = self.c[["row", "mean_50"]].merge(c90[["row", "est_RV_50"]], on="row")
         self.assertEqual(len(m), len(self.c))
         np.testing.assert_allclose(m["mean_50"].to_numpy(), m["est_RV_50"].to_numpy())
@@ -117,7 +117,7 @@ class TestPlanted(unittest.TestCase):
 
 class TestNull(unittest.TestCase):
     def test_no_plant_is_not_effective(self):
-        df, dist, split, starts, _ = T90.case(planted=0.0, seed=1)
+        df, dist, split, starts, _ = T91.case(planted=0.0, seed=1)
         c, _ = E.collect(df, dist, split, starts, line=LINE_T, pool_line=POOL_T)
         ev = E.evaluate(c, "p25_50", draws=500)
         self.assertGreater(ev["days"], 40)

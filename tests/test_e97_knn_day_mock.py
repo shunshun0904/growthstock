@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-実験96（research/exp/e96_knn_day_mock.py）: ダッシュボード案の模型のための、判断日の候補ごとの近傍の集計。
+実験97（research/exp/e97_knn_day_mock.py）: ダッシュボード案の模型のための、判断日の候補ごとの近傍の集計。
 
 - 日の選び方: 直近の候補2件・3件・4件以上（6件以下を優先）の日
 - 候補の順: 今の並べ方（3本の最小の順）に A, B, C…。picked_M は A、picked_Q は近傍の25%点の最上位
@@ -8,7 +8,7 @@
 - 文脈: 十分位の境が単調、2次元の度数は MIN_CELL 未満を消す
 - 出力に銘柄コード・日付が含まれない
 
-  python3 tests/test_e96_knn_day_mock.py
+  python3 tests/test_e97_knn_day_mock.py
 """
 import os
 import sys
@@ -22,12 +22,12 @@ sys.path.insert(0, os.path.join(ROOT, "research"))
 sys.path.insert(0, os.path.join(ROOT, "research", "exp"))
 sys.path.insert(0, os.path.join(ROOT, "tests"))
 
-import e91_expectation_monitor as E91  # noqa: E402
-import e95_knn_viz_data as E95  # noqa: E402
-import e96_knn_day_mock as E  # noqa: E402
-import test_e90_wasserstein_knn_pick as T90  # noqa: E402
+import e92_expectation_monitor as E92  # noqa: E402
+import e96_knn_viz_data as E96  # noqa: E402
+import e97_knn_day_mock as E  # noqa: E402
+import test_e91_wasserstein_knn_pick as T91  # noqa: E402
 
-LINE_T, POOL_T = T90.LINE_T, T90.POOL_T
+LINE_T, POOL_T = T91.LINE_T, T91.POOL_T
 
 
 class TestBand(unittest.TestCase):
@@ -42,9 +42,9 @@ class TestBand(unittest.TestCase):
 class TestBuild(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.df, cls.dist, cls.split, cls.starts, _ = T90.case(planted=6.0)
-        cls.df = E91.attach_forward(cls.df, cls.split)
-        cls.c, _ = E95.collect(cls.df, cls.dist, cls.split, cls.starts, line=LINE_T, pool_line=POOL_T)
+        cls.df, cls.dist, cls.split, cls.starts, _ = T91.case(planted=6.0)
+        cls.df = E92.attach_forward(cls.df, cls.split)
+        cls.c, _ = E96.collect(cls.df, cls.dist, cls.split, cls.starts, line=LINE_T, pool_line=POOL_T)
         E.LINE, E.POOL_LINE = LINE_T, POOL_T
         cls.out = E.build(cls.df, cls.dist, cls.split, cls.starts, cls.c)
 
@@ -73,7 +73,7 @@ class TestBuild(unittest.TestCase):
                 self.assertLessEqual(r["est"]["p25"], r["est"]["p50"])
 
     def test_same_estimate_as_collect(self):
-        """模型の近傍の25%点は、実験95 の collect（＝実験92）の見積もりと同じ。"""
+        """模型の近傍の25%点は、実験96 の collect（＝実験93）の見積もりと同じ。"""
         per = self.c.groupby("Date").size()
         day = per.index[(per == 2).to_numpy()][-1]
         rows = self.c[self.c["Date"] == day].sort_values(["min15", "score"], ascending=False)
@@ -90,7 +90,7 @@ class TestBuild(unittest.TestCase):
         counts = np.array(cx["density"]["counts"])
         self.assertTrue(((counts == 0) | (counts >= E.MIN_CELL)).all())
         self.assertEqual(int(counts.sum()) + cx["density"]["suppressed_rows"], cx["density"]["n"])
-        js = E95.to_json(self.out)
+        js = E96.to_json(self.out)
         for code in self.df["Code"].unique()[:80]:
             self.assertNotIn(code, js)
         for day in self.c["Date"].dt.strftime("%Y-%m-%d").unique()[:50]:

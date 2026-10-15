@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-実験90（research/exp/e90_wasserstein_knn_pick.py）。
+実験91（research/exp/e91_wasserstein_knn_pick.py）。
 
 - 分位関数: 値が60個なら並べ替えた値そのもの。W1 は「分布関数の差の面積」で別に計算した値と一致する
 - 分布: リターンの形は平均0・標準偏差1。出来高が一定なら比率の log はすべて0。履歴が足りなければ NaN。結果が出そろう日は
@@ -11,7 +11,7 @@
   ならない
 - 報告が全部の段を出し、銘柄コードを出さない
 
-  python3 tests/test_e90_wasserstein_knn_pick.py
+  python3 tests/test_e91_wasserstein_knn_pick.py
 """
 import contextlib
 import io
@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.join(ROOT, "research", "exp"))
 sys.path.insert(0, os.path.join(ROOT, "tests"))
 
 import e79_model_clusters as E79  # noqa: E402
-import e90_wasserstein_knn_pick as E  # noqa: E402
+import e91_wasserstein_knn_pick as E  # noqa: E402
 import models as M  # noqa: E402
 import test_e83_tp10_rule as T83  # noqa: E402
 

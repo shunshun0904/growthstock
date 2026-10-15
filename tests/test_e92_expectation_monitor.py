@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-実験91（research/exp/e91_expectation_monitor.py）。
+実験92（research/exp/e92_expectation_monitor.py）。
 
 - 分布の比べ方: W1 = 下側 + 上側、平均(過去) − 平均(直近) = 下側 − 上側、内訳の合計 = 下側。手で数えた例と一致する
 - 無作為の下側: 過去と同じ分布から取った直近は合図が出にくく、下にずらした直近は合図が出る
@@ -9,7 +9,7 @@
 - 見張り: 仕込んだ悪い時期の後に合図が多く出る。月末 t の数字は、t より後に出そろう結果を書き換えても変わらない（先読みしない）
 - 下限の当たり・合図の比べ・入力のずれ・報告（全部の段を出し、銘柄コードを出さない）
 
-  python3 tests/test_e91_expectation_monitor.py
+  python3 tests/test_e92_expectation_monitor.py
 """
 import contextlib
 import io
@@ -27,7 +27,7 @@ sys.path.insert(0, os.path.join(ROOT, "tests"))
 
 import e79_model_clusters as E79  # noqa: E402
 import e87_monthly_return_search as E87  # noqa: E402
-import e91_expectation_monitor as E  # noqa: E402
+import e92_expectation_monitor as E  # noqa: E402
 import test_e83_tp10_rule as T83  # noqa: E402
 
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-実験95（可視化の材料）: 後工程（ワッサーステイン距離の k 近傍の収益の下側25%点で、同じ日の候補から1件を選ぶ。実験92・94）を
+実験96（可視化の材料）: 後工程（ワッサーステイン距離の k 近傍の収益の下側25%点で、同じ日の候補から1件を選ぶ。実験93・95）を
 解釈するための集計を、候補の線 95 と 90 の両方で出す（判定はしない。本番・画面は変えない）。
 
 運用者の依頼（2026-10-15）「ワッサーステインのこの今のロジックによる選定を解釈のためにも、散布図やヒストグラム等で可視化して
@@ -21,7 +21,7 @@ JSON を分けて出す（手元で図にするため。e79 の @tag と同じ�
   distances  候補から近い50件までの距離（リターンの形・出来高の比率の成分）の度数分布
   selectors  物差しごと（25%点・中央値・平均・−10% 割れ・25%点の近い100件）の Q の分布と判定の条件
 
-    exp=e95_knn_viz_data.py
+    exp=e96_knn_viz_data.py
     args="--draws 2000"       （既定）
 """
 from __future__ import annotations
@@ -43,16 +43,16 @@ import live_track as LT  # noqa: E402
 import models as M  # noqa: E402
 import e79_model_clusters as E79  # noqa: E402
 import e83_tp10_rule as E83  # noqa: E402
-import e90_wasserstein_knn_pick as E90  # noqa: E402
-import e91_expectation_monitor as E91  # noqa: E402
-import e92_knn_quantile_pick as E92  # noqa: E402
+import e91_wasserstein_knn_pick as E91  # noqa: E402
+import e92_expectation_monitor as E92  # noqa: E402
+import e93_knn_quantile_pick as E93  # noqa: E402
 
-LINES = (95.0, 90.0)                   # 候補の線（実験92 / 実験94）
-POOL_LINE = E92.POOL_LINE              # 近傍の母集団（85以上）
-KS = (E92.K_MAIN,) + E92.K_REF         # 近傍の数（50・100）
-K_MAIN = E92.K_MAIN
-TP, HIT, TARGET = E92.TP, E92.HIT, E92.TARGET
-DRAWS, SEED = E92.DRAWS, E92.SEED
+LINES = (95.0, 90.0)                   # 候補の線（実験93 / 実験95）
+POOL_LINE = E93.POOL_LINE              # 近傍の母集団（85以上）
+KS = (E93.K_MAIN,) + E93.K_REF         # 近傍の数（50・100）
+K_MAIN = E93.K_MAIN
+TP, HIT, TARGET = E93.TP, E93.HIT, E93.TARGET
+DRAWS, SEED = E93.DRAWS, E93.SEED
 MIN_CELL = 5                           # マス目に出す最小件数
 BINS_RET = [-40.0, -30.0, -25.0, -20.0, -15.0, -12.5, -10.0, -7.5, -5.0, -2.5, 0.0, 2.5, 5.0, 7.5, 10.01]
 BINS_PAIR = [-30.0, -20.0, -15.0, -10.0, -5.0, -2.0, -0.005, 0.005, 2.0, 5.0, 10.0, 15.0, 20.0, 30.0]
@@ -71,12 +71,12 @@ log = E79.log
 
 
 # --------------------------------------------------------------------------- #
-# 候補ごとの近傍（実験92 の collect に、距離の成分を足したもの）
+# 候補ごとの近傍（実験93 の collect に、距離の成分を足したもの）
 # --------------------------------------------------------------------------- #
 
 def collect(df: pd.DataFrame, dist: dict, split: dict, starts: dict, line: float, pool_line: float = POOL_LINE,
-            ks=KS, min_pool: int = E92.MIN_POOL, n_pairs: int = E92.N_PAIRS, seed: int = SEED) -> tuple[pd.DataFrame, dict]:
-    """実験92 の collect と同じ候補・距離・近傍。近傍50件までの距離の成分（dR_nn・dV_nn・d_nn の平均）も付ける。"""
+            ks=KS, min_pool: int = E93.MIN_POOL, n_pairs: int = E93.N_PAIRS, seed: int = SEED) -> tuple[pd.DataFrame, dict]:
+    """実験93 の collect と同じ候補・距離・近傍。近傍50件までの距離の成分（dR_nn・dV_nn・d_nn の平均）も付ける。"""
     QR, QV, done = dist["QR"], dist["QV"], dist["done"]
     tp = pd.to_numeric(df[TP], errors="coerce").to_numpy(dtype=float)
     hit = df[HIT].to_numpy(dtype=bool) if HIT in df.columns else tp >= TARGET
@@ -84,7 +84,7 @@ def collect(df: pd.DataFrame, dist: dict, split: dict, starts: dict, line: float
     dates = pd.to_datetime(df["Date"]).to_numpy(dtype="datetime64[ns]")
     w_arr = df["window"].to_numpy()
     score = pd.to_numeric(df["score"], errors="coerce").to_numpy(dtype=float)
-    mins = E90.window_min(df, split)
+    mins = E91.window_min(df, split)
     info = {"rule_rows": 0, "rule_ok": 0, "days2": 0, "days_small_pool": 0, "days": 0, "pool": [], "norm": {},
             "per_window": {}}
     recs = []
@@ -98,9 +98,9 @@ def collect(df: pd.DataFrame, dist: dict, split: dict, starts: dict, line: float
         pool = U[(mn >= pool_line) & ok[U] & ~np.isnat(done[U])]
         pool = pool[np.argsort(done[pool], kind="mergesort")]
         pdone = done[pool]
-        base = pool[: E90.done_before(pdone, starts[w])]
-        sR = E90.pair_median(QR[base], n_pairs, seed + int(w))
-        sV = E90.pair_median(QV[base], n_pairs, seed + 100 + int(w))
+        base = pool[: E91.done_before(pdone, starts[w])]
+        sR = E91.pair_median(QR[base], n_pairs, seed + int(w))
+        sV = E91.pair_median(QV[base], n_pairs, seed + 100 + int(w))
         sR = sR if np.isfinite(sR) and sR > 0 else 1.0
         sV = sV if np.isfinite(sV) and sV > 0 else 1.0
         info["norm"][int(w)] = {"base": int(len(base)), "sR": sR, "sV": sV}
@@ -111,7 +111,7 @@ def collect(df: pd.DataFrame, dist: dict, split: dict, starts: dict, line: float
             if len(idx) < 2:
                 continue
             info["days2"] += 1
-            P = pool[: E90.done_before(pdone, d)]
+            P = pool[: E91.done_before(pdone, d)]
             if len(P) < min_pool:
                 info["days_small_pool"] += 1
                 continue
@@ -120,13 +120,13 @@ def collect(df: pd.DataFrame, dist: dict, split: dict, starts: dict, line: float
             info["pool"].append(int(len(P)))
             tpP, QRP, QVP = tp[P], QR[P], QV[P]
             for i in idx:
-                dR = E90.w1(QR[i], QRP) / sR
-                dV = E90.w1(QV[i], QVP) / sV
+                dR = E91.w1(QR[i], QRP) / sR
+                dV = E91.w1(QV[i], QVP) / sV
                 D = dR + dV
                 rec = {"Date": pd.Timestamp(d), "window": int(w), "row": int(i), "min15": float(mn_of[int(i)]),
                        "score": float(score[i]), TP: float(tp[i]), HIT: bool(hit[i]), "pool_n": int(len(P))}
                 for kk in ks:
-                    for name, v in E92.neighbor_stats(D, tpP, kk).items():
+                    for name, v in E93.neighbor_stats(D, tpP, kk).items():
                         rec[f"{name}_{kk}"] = v
                 k0 = int(min(K_MAIN, len(D)))
                 nn = np.argpartition(D, k0 - 1)[:k0]
@@ -160,7 +160,7 @@ def curve(x) -> list:
 
 
 def pick_rows(c: pd.DataFrame, key: str, ascending: bool = False) -> pd.DataFrame:
-    """判断日ごとの Q（見積もり key の最上位）と M（今の並べ方の先頭）の行番号・収益・到達・3本の最小（e92.day_picks と同じ並べ方）。"""
+    """判断日ごとの Q（見積もり key の最上位）と M（今の並べ方の先頭）の行番号・収益・到達・3本の最小（e93.day_picks と同じ並べ方）。"""
     out = []
     if c.empty:
         return pd.DataFrame(out)
@@ -264,7 +264,7 @@ def shapes(c: pd.DataFrame, pk: pd.DataFrame, dist: dict, pool_rows: dict) -> di
               "picked_M": pk["M_row"].to_numpy() if len(pk) else np.array([], dtype=int),
               "candidates": c["row"].to_numpy() if len(c) else np.array([], dtype=int)}
     groups.update(pool_rows)
-    out = {"probs": [round((j + 0.5) / E90.LEVELS, 4) for j in range(E90.LEVELS)]}
+    out = {"probs": [round((j + 0.5) / E91.LEVELS, 4) for j in range(E91.LEVELS)]}
     for name, rows in groups.items():
         out[name] = {"QR": shape_mean(dist["QR"], rows), "QV": shape_mean(dist["QV"], rows)}
     return out
@@ -282,7 +282,7 @@ def pool_groups(df: pd.DataFrame, dist: dict, pool_line: float = POOL_LINE) -> d
 
 
 def stats_of(x, hit=None) -> dict:
-    s = E92.dist_stats(x, hit)
+    s = E93.dist_stats(x, hit)
     return {k: (round(v, 3) if isinstance(v, float) else v) for k, v in s.items()}
 
 
@@ -316,10 +316,10 @@ def summarize_line(c: pd.DataFrame, info: dict, df: pd.DataFrame, dist: dict, dr
                                       "8+": int((per_day >= 8).sum())}
     pk = pick_rows(c, key)
     pkK = pick_rows(c, f"mean_{K_MAIN}")
-    mat = E92.random_draws(c, draws, seed)
+    mat = E93.random_draws(c, draws, seed)
     pooled = mat.ravel()
-    evQ = E92.evaluate(c, key, False, draws, seed)
-    evK = E92.evaluate(c, f"mean_{K_MAIN}", False, draws, seed)
+    evQ = E93.evaluate(c, key, False, draws, seed)
+    evK = E93.evaluate(c, f"mean_{K_MAIN}", False, draws, seed)
     Q, Mv, Kv = pk["Q"].to_numpy(dtype=float), pk["M"].to_numpy(dtype=float), pkK["Q"].to_numpy(dtype=float)
     d = Q - Mv
     out["counts"]["per_window"] = per_window(pk)
@@ -330,8 +330,8 @@ def summarize_line(c: pd.DataFrame, info: dict, df: pd.DataFrame, dist: dict, dr
         "K": {"stats": stats_of(Kv, pkK["Q_hit"]), "hist": hist(Kv, BINS_RET), "curve": curve(Kv)},
         "R": {"stats": stats_of(pooled), "hist": hist(pooled, BINS_RET), "curve": curve(pooled), "draws": int(draws)},
         "all": {"stats": stats_of(c[TP].to_numpy(dtype=float), c[HIT].to_numpy(dtype=bool))},
-        "areas": {"Q_vs_M": E91.cdf_areas(Q, Mv, ranges=()), "Q_vs_R": E91.cdf_areas(Q, pooled, ranges=()),
-                  "K_vs_M": E91.cdf_areas(Kv, Mv, ranges=()), "K_vs_R": E91.cdf_areas(Kv, pooled, ranges=())},
+        "areas": {"Q_vs_M": E92.cdf_areas(Q, Mv, ranges=()), "Q_vs_R": E92.cdf_areas(Q, pooled, ranges=()),
+                  "K_vs_M": E92.cdf_areas(Kv, Mv, ranges=()), "K_vs_R": E92.cdf_areas(Kv, pooled, ranges=())},
         "null_q": evQ["null_q"], "p_Q": evQ["p_Q"], "p_M": evQ["p_M"], "p_K": evK["p_Q"],
         "conds_Q": evQ["conds"], "conds_K": evK["conds"], "effective_Q": evQ["effective"],
         "same_share": evQ["same_share"], "boot": evQ["boot"], "halves": evQ["halves"],
@@ -345,7 +345,7 @@ def summarize_line(c: pd.DataFrame, info: dict, df: pd.DataFrame, dist: dict, dr
     for k in ("areas",):
         for name, a in out["picks"][k].items():
             out["picks"][k][name] = {kk: round(float(vv), 4) for kk, vv in a.items() if kk != "down_parts"}
-    rho = E90.within_day_rho(c, key, TP, perm=500, seed=seed)
+    rho = E91.within_day_rho(c, key, TP, perm=500, seed=seed)
     out["estimate"] = {"key": key, "calibration": calibration(c, key), "density": density2d(c, key),
                        "rank": rank_matrix(c, key), "rho": rho,
                        "est_vs_real": {"est_mean_all": round(float(c[key].mean()), 3),
@@ -359,7 +359,7 @@ def summarize_line(c: pd.DataFrame, info: dict, df: pd.DataFrame, dist: dict, dr
     for col, name, asc in SELECTORS:
         if col not in c.columns:
             continue
-        e = E92.evaluate(c, col, asc, draws, seed)
+        e = E93.evaluate(c, col, asc, draws, seed)
         sel.append({"key": col, "name": name, "ascending": asc, "Q": stats_of(pick_rows(c, col, asc)["Q"]),
                     "p_Q": round(float(e["p_Q"]), 4), "conds": e["conds"], "effective": e["effective"],
                     "area_M": {k: round(float(v), 4) for k, v in e["area_M"].items()}, "same_share": round(float(e["same_share"]), 1)})
@@ -420,7 +420,7 @@ def print_brief(line: float, s: dict) -> None:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="実験95: 後工程の解釈のための集計（可視化の材料）")
+    ap = argparse.ArgumentParser(description="実験96: 後工程の解釈のための集計（可視化の材料）")
     ap.add_argument("--draws", type=int, default=DRAWS)
     args = ap.parse_args(argv)
     t0 = time.time()
@@ -431,20 +431,20 @@ def main(argv=None) -> int:
     folds = E79.make_windows(fr["Date"])
     df["window"] = E79.assign_windows(df["Date"], folds)
     df = df[df["window"] > 0].reset_index(drop=True)
-    df = E90.attach_vol(df, fr)
+    df = E91.attach_vol(df, fr)
     df["score"] = pd.to_numeric(df[f"score_{M.BASELINE}"], errors="coerce")
     del fr
     bars = LT.load_bars(lab.DATA_DIR, start=pd.to_datetime(df["Date"]).min() - pd.Timedelta(days=250),
                         extra=("C", "AdjVo", "Vo"))
     df, chk = E83.attach_exits(df, bars, targets=(TARGET,))
     log(f"出口: 20日目の終値 {chk['with_close']:,}/{chk['rows']:,}行")
-    dist = E90.event_distributions(bars, df[["Code", "Date"]])
+    dist = E91.event_distributions(bars, df[["Code", "Date"]])
     del bars
     split = E79.window_split(df, folds)
     starts = {f.index: pd.Timestamp(f.test_start) for f in folds}
-    df = E91.attach_forward(df, split)
+    df = E92.attach_forward(df, split)
     out = {"meta": {"made": pd.Timestamp.today().strftime("%Y-%m-%d"), "draws": int(args.draws), "k_main": K_MAIN,
-                    "pool_line": POOL_LINE, "min_cell": MIN_CELL, "levels": E90.LEVELS, "rows_total": int(len(df))},
+                    "pool_line": POOL_LINE, "min_cell": MIN_CELL, "levels": E91.LEVELS, "rows_total": int(len(df))},
            "lines": {}}
     print("\n■ 集計（判定はしない）")
     for line in LINES:
@@ -457,7 +457,7 @@ def main(argv=None) -> int:
     for ln in chunk_lines(js):
         print(ln)
     os.makedirs(OUT_DIR, exist_ok=True)
-    path = os.path.join(OUT_DIR, "e95_viz.json")
+    path = os.path.join(OUT_DIR, "e96_viz.json")
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(js)
     log(f"記録: {path} / 全体 {time.time() - t0:.0f}秒")

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-実験90: 今の規則（1.5σ の3本がすべて95以上）を満たした候補が同じ日に2件以上あるとき、ワッサーステイン距離の k 近傍で
+実験91: 今の規則（1.5σ の3本がすべて95以上）を満たした候補が同じ日に2件以上あるとき、ワッサーステイン距離の k 近傍で
 1件を選ぶと、今の並べ方・無作為に選ぶより良いか（今のモデルの後工程の検証。本番は変えない）。
 
 運用者の案（2026-10-14）「新高値ブレイクでの期待値の推定にワッサーステイン距離を使えないか」。後工程として足す考え
@@ -44,10 +44,10 @@
 
 公開ログには集計だけ（件数・平均・割合・窓ごとの差）。銘柄・日付ごとの値は出さない。
 
-    exp=e90_wasserstein_knn_pick.py
+    exp=e91_wasserstein_knn_pick.py
     args="--draws 2000"       （既定）
 
-結果（2026-10-14、run 38518952184、f413c6f、62秒。docs/MODEL_ADOPTION_RULES.md §50）
+結果（2026-10-14、run 38518952184、f413c6f、62秒。docs/MODEL_ADOPTION_RULES.md §51）
 ------------------------------------------------------------------
   判定: 今の並べ方・無作為と見分けられない。判断日96日（今の規則の行 559件。判断日の候補は中央3件・最大17件。窓5・6・9 に
         72日）。K（リターンの形 + 出来高の比率・近い50件）+3.61%（中央 +6.63・勝率 70.8%・−10%割れ 5.2%）、M（今の並べ方）
@@ -543,7 +543,7 @@ def attach_vol(df: pd.DataFrame, fr: pd.DataFrame) -> pd.DataFrame:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="実験90: 同じ日の候補から1件を、ワッサーステイン距離の k 近傍で選ぶ")
+    ap = argparse.ArgumentParser(description="実験91: 同じ日の候補から1件を、ワッサーステイン距離の k 近傍で選ぶ")
     ap.add_argument("--draws", type=int, default=DRAWS)
     args = ap.parse_args(argv)
     t0 = time.time()
@@ -573,7 +573,7 @@ def main(argv=None) -> int:
     summary = report(c, info, draws=args.draws)
     summary["exit_check"] = chk
     os.makedirs(OUT_DIR, exist_ok=True)
-    path = os.path.join(OUT_DIR, "e90_summary.json")
+    path = os.path.join(OUT_DIR, "e91_summary.json")
 
     def conv(o):
         if isinstance(o, (np.floating, np.integer, np.bool_)):

@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-実験93（research/exp/e93_knn_p25_forward.py）: 実験92 の後工程を、決めたあとの判断日だけで確かめ直す。
+実験94（research/exp/e94_knn_p25_forward.py）: 実験93 の後工程を、決めたあとの判断日だけで確かめ直す。
 
 - 決めごと（決めた日・使う判断日の始まり・判定の日・延長の期限・判断日の最小・選び方・3条件）が決めたとおりであること
   （あとから動かしたら落ちる）
-- 決めた時点の値（ORIGIN）が実験92 の記録と同じ
+- 決めた時点の値（ORIGIN）が実験93 の記録と同じ
 - 判定に使う判断日: 始まりより前の日は入らない。規則の行に欠け（収益か分布が出せない候補）のある日は数えない
 - 札: 判定の日より前は途中経過、足りなければ延ばす、期限を過ぎれば打ち切り、足りれば再現 / 再現しない
 - 合成データで最後まで回り、銘柄コードを出さない
 
-  python3 tests/test_e93_knn_p25_forward.py
+  python3 tests/test_e94_knn_p25_forward.py
 """
 import contextlib
 import io
@@ -25,11 +25,11 @@ sys.path.insert(0, os.path.join(ROOT, "research"))
 sys.path.insert(0, os.path.join(ROOT, "research", "exp"))
 sys.path.insert(0, os.path.join(ROOT, "tests"))
 
-import e92_knn_quantile_pick as E92  # noqa: E402
-import e93_knn_p25_forward as X  # noqa: E402
-import test_e90_wasserstein_knn_pick as T90  # noqa: E402
+import e93_knn_quantile_pick as E93  # noqa: E402
+import e94_knn_p25_forward as X  # noqa: E402
+import test_e91_wasserstein_knn_pick as T91  # noqa: E402
 
-LINE_T, POOL_T = T90.LINE_T, T90.POOL_T
+LINE_T, POOL_T = T91.LINE_T, T91.POOL_T
 
 
 class TestDecisions(unittest.TestCase):
@@ -42,24 +42,24 @@ class TestDecisions(unittest.TestCase):
         self.assertEqual(X.MIN_DAYS, 20)
         self.assertEqual(X.RULE, {"key": "p25_50", "ascending": False})
         self.assertEqual(X.CONDS, ("not_below_M", "p_random", "no_worse_elsewhere"))
-        self.assertEqual((E92.MAIN_P, E92.K_MAIN), (25, 50))                 # 実験92 の主と同じ物差し
+        self.assertEqual((E93.MAIN_P, E93.K_MAIN), (25, 50))                 # 実験93 の主と同じ物差し
 
-    def test_origin_matches_e92_record(self):
+    def test_origin_matches_e93_record(self):
         self.assertEqual(X.ORIGIN, {"days": 96, "Q_p25": +0.21, "M_p25": -0.90, "R_p25": -1.04, "p_Q": 0.021,
                                     "down_M": 0.06, "up_M": 0.69})
 
-    def test_conditions_are_e92_conditions(self):
-        df, dist, split, starts, _ = T90.case(planted=8.0)
-        c, _ = E92.collect(df, dist, split, starts, line=LINE_T, pool_line=POOL_T)
-        ev = E92.evaluate(c, X.RULE["key"], X.RULE["ascending"], draws=100)
+    def test_conditions_are_e93_conditions(self):
+        df, dist, split, starts, _ = T91.case(planted=8.0)
+        c, _ = E93.collect(df, dist, split, starts, line=LINE_T, pool_line=POOL_T)
+        ev = E93.evaluate(c, X.RULE["key"], X.RULE["ascending"], draws=100)
         self.assertEqual(set(ev["conds"]), set(X.CONDS))
 
 
 class TestForwardDays(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.df, cls.dist, cls.split, cls.starts, _ = T90.case(planted=8.0)
-        cls.c, _ = E92.collect(cls.df, cls.dist, cls.split, cls.starts, line=LINE_T, pool_line=POOL_T)
+        cls.df, cls.dist, cls.split, cls.starts, _ = T91.case(planted=8.0)
+        cls.c, _ = E93.collect(cls.df, cls.dist, cls.split, cls.starts, line=LINE_T, pool_line=POOL_T)
         cls.counts = X.rule_counts(cls.df, cls.split, line=LINE_T)
 
     def test_counts_match_collect_when_complete(self):
@@ -93,8 +93,8 @@ class TestForwardDays(unittest.TestCase):
 class TestJudge(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        df, dist, split, starts, _ = T90.case(planted=8.0)
-        cls.c, _ = E92.collect(df, dist, split, starts, line=LINE_T, pool_line=POOL_T)
+        df, dist, split, starts, _ = T91.case(planted=8.0)
+        cls.c, _ = E93.collect(df, dist, split, starts, line=LINE_T, pool_line=POOL_T)
 
     def test_status(self):
         self.assertEqual(X.status("2027-04-15", 50), "interim")
@@ -125,11 +125,11 @@ class TestJudge(unittest.TestCase):
         with contextlib.redirect_stdout(buf):
             X.report(res, {"days_after": 60, "days_incomplete": 1, "days": 59}, draws=100)
         out = buf.getvalue()
-        for tag in ("実験93", "条件", "結果: 再現", "扱い"):
+        for tag in ("実験94", "条件", "結果: 再現", "扱い"):
             self.assertIn(tag, out)
         for code in self.c["row"].astype(str).unique()[:10]:
             pass
-        df, *_ = T90.case(planted=8.0)
+        df, *_ = T91.case(planted=8.0)
         for code in df["Code"].unique()[:80]:
             self.assertNotIn(code, out)
 
