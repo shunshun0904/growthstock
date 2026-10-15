@@ -1,0 +1,80 @@
+name: Backfill KNN
+
+# 候補の比較（似た過去の事例）の集計を、公開済みの predictions.json に埋め戻す（research/backfill_knn.py）。
+#
+# 日次予測（Predict Breakouts）は新しい日だけに knn を付け、過去の日は前の値を引き継ぐ。タブを足した時点で画面に出ている
+# 直近5営業日には knn が無いので、一度だけこれを回して全部の日に付ける（運用者の指示 2026-10-15「せめて、今週分のモデルからで
+# 良いので、ダッシュボードに出せないですか？」）。候補の値は変えない（過去の日の値を固定する約束はそのまま）。
+# 集計の作り方を変えたときに、画面の日を作り直すのにも使える。
+on:
+  workflow_dispatch:
+    inputs:
+      only_missing:
+        description: 'knn の付いていない日だけ作る（通常は false。全部の日を作り直す）'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: predict-breakouts        # 日次予測と同じ列に並べ、predictions.json を同時に書かない
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/jquants-browser-app-bwk19a      # 公開ブランチ（predict.yml と同じ）
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r research/requirements.txt
+
+      # 生データ（日足）と out-of-fold（<名前>_oof.parquet）。Release の形のまま research/_data に置く
+      - name: Download raw data (release)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p research/_data
+          bash scripts/gh_release_download.sh data-raw research/_data
+          ls research/_data | grep -c . | sed 's/^/ファイル数: /'
+
+      - name: Backfill
+        env:
+          ONLY_MISSING: ${{ inputs.only_missing && 'true' || 'false' }}
+        run: |
+          args=()
+          if [ "$ONLY_MISSING" = "true" ]; then args+=(--only-missing); fi
+          python3 research/backfill_knn.py "${args[@]}" 2>&1 | tee backfill.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Commit predictions
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/data/predictions.json
+          if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
+          git commit -m "chore(data): 候補の比較の集計（knn）を埋め戻す ($(date -u '+%Y-%m-%d %H:%M UTC'))"
+          for i in 1 2 3 4; do
+            if git push; then exit 0; fi
+            sleep $((2 ** i)); git pull --rebase
+          done
+          exit 1
+
+      - name: Summary
+        if: always()
+        run: |
+          { echo '## 候補の比較の集計の埋め戻し'
+            echo '```'
+            if [ -f backfill.log ]; then cat backfill.log; else echo "(実行せず)"; fi
+            echo '```'; } >> "$GITHUB_STEP_SUMMARY"
