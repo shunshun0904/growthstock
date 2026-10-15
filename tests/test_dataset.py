@@ -634,6 +634,24 @@ class TestBreakoutPopulation(unittest.TestCase):
         self.assertTrue(bool(on_high["is_new_high"].iloc[5]))
         self.assertFalse(bool(on_close["is_new_high"].iloc[5]))
 
+    def test_defaults_are_read_when_called(self):
+        """
+        on_high / cooldown を省くと、呼んだ時点の BREAKOUT_ON_HIGH / BREAKOUT_COOLDOWN を使う（定義時の値を既定にすると、
+        実験90 が build() の前に書き換えても効かない）。
+        """
+        import build_dataset as B
+        closes = [100, 101, 102, 103, 104, 103]
+        highs = [100, 101, 102, 103, 104, 115]
+        df = self._panel(closes, highs)
+        saved = (B.BREAKOUT_ON_HIGH, B.BREAKOUT_COOLDOWN)
+        try:
+            B.BREAKOUT_ON_HIGH, B.BREAKOUT_COOLDOWN = True, 3
+            self.assertTrue(bool(mark_new_highs(df.copy())["is_new_high"].iloc[5]))
+            B.BREAKOUT_ON_HIGH = False
+            self.assertFalse(bool(mark_new_highs(df.copy())["is_new_high"].iloc[5]))
+        finally:
+            B.BREAKOUT_ON_HIGH, B.BREAKOUT_COOLDOWN = saved
+
 
 class TestRiseLabel(unittest.TestCase):
     """到達の軸: 先 horizon 営業日以内に threshold 以上上昇したか。"""
@@ -1129,6 +1147,7 @@ class TestDefaultLabel(unittest.TestCase):
         import build_dataset as B
         self.assertEqual(B.POPULATION, "breakout")
         self.assertTrue(B.BREAKOUT_ON_HIGH)          # 高値ベースで判定
+        self.assertEqual(B.BREAKOUT_REF, "high")     # 基準も日中の高値の最大（実験90 が close を試す）
         self.assertEqual(B.BREAKOUT_COOLDOWN, 20)
 
     def test_default_rise_definition(self):
@@ -2332,6 +2351,37 @@ class TestDisclosureTiming(unittest.TestCase):
         self.assertNotIn("days_since_disc_r", F.columns("rank_all"))
         self.assertNotIn("days_since_disc", F.columns("all_no_timing"))
         self.assertEqual(len(F.columns("all")) - len(F.columns("all_no_timing")), 2)
+
+
+class TestBreakoutReference(unittest.TestCase):
+    """78週高値の基準（BREAKOUT_REF）。既定は日中の高値の最大。実験90 が終値の最大に切り替えて母集団を作る。"""
+
+    def test_ref_parser_accepts_only_high_or_close(self):
+        import build_dataset as B
+        self.assertEqual((B._ref("high"), B._ref(" Close ")), ("high", "close"))
+        with self.assertRaises(SystemExit):
+            B._ref("open")
+
+    def test_price_panel_follows_the_reference(self):
+        import build_dataset as B
+        n = 12
+        bars = make_bars([100.0] * n, [100000] * n)
+        bars.loc[6, ["H", "AdjH"]] = 120.0                 # 7日目だけ上ヒゲ（終値は 100 のまま）
+        cfg = LabelConfig(sustain_days=0, high_window=5)
+        saved = B.BREAKOUT_REF
+        try:
+            B.BREAKOUT_REF = "high"
+            on_high = price_panel(bars.copy(), cfg)
+            B.BREAKOUT_REF = "close"
+            on_close = price_panel(bars.copy(), cfg)
+        finally:
+            B.BREAKOUT_REF = saved
+        self.assertEqual(float(on_high["high52w"].iloc[8]), 120.0)       # 日中の高値の最大
+        self.assertEqual(float(on_close["high52w"].iloc[8]), 100.0)      # 終値の最大
+        self.assertEqual(float(on_high["high52w_prior"].iloc[7]), 120.0)
+        self.assertEqual(float(on_close["high52w_prior"].iloc[7]), 100.0)
+        self.assertAlmostEqual(float(on_close["r_high"].iloc[8]), 100.0)
+        self.assertAlmostEqual(float(on_high["r_high"].iloc[8]), 100.0 / 120.0 * 100.0)
 
 
 if __name__ == "__main__":
