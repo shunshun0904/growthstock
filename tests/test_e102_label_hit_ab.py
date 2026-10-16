@@ -185,6 +185,39 @@ class TestReport(unittest.TestCase):
         for code in ("10000", "10010", "15990"):
             self.assertNotIn(code, text)
 
+    def test_report_with_ul_arms_prints_4b(self):
+        """--with-ul の9腕（探索するのは CUR15・HIT15・TP10・HIT15_ULB・TP10_ULB の5腕）で 4b とまとめの UL の判定が出て、保存される。"""
+        df = label_frame()
+        df, _ = E.build_labels(df)
+        arms = E.ARMS + E.UL_ARMS
+        self.assertEqual(E.UL_ARMS, ("HIT15_ULB", "HIT15_ULC", "HIT15_ULP", "TP10_ULB", "TP10_ULC", "TP10_ULP"))
+        tuned = [a for a in arms if E.arm_spec(a)["tune"]]
+        self.assertEqual(tuned, ["CUR15", "HIT15", "TP10", "HIT15_ULB", "TP10_ULB"])
+        cv = {"mean_pr_auc": 0.33, "std": 0.02, "mean_roc_auc": 0.64, "fold_scores": [0.31, 0.32, 0.33, 0.34, 0.35]}
+        res = {"arms": arms, "recs": {a: {"params": {"learning_rate": 0.05}, "_cv": cv, "_seconds": 5} for a in tuned},
+               "params": {a: {"learning_rate": 0.05} for a in arms}, "prod": {}, "shifted": {}}
+        for j, a in enumerate(arms):
+            res["prod"][a] = synthetic_oof(10 + j, strength=0.4 + 0.02 * j)
+            for sh in (0, 2):
+                res["shifted"][(sh, a)] = synthetic_oof(100 + 10 * j + sh, strength=0.4 + 0.02 * j)
+        stamp = {"built_utc": "2026-10-16 07:00 UTC", "rows": len(df), "date_min": "2021-01-04", "date_max": "2023-06-30"}
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            s = E.report(res, df, [0, 2], stamp)
+        text = buf.getvalue()
+        self.assertIn("■ 4b.", text)
+        self.assertIn("UL の列", text)
+        self.assertEqual(set(s["judge_ul"]), set(E.UL_LABELS))
+        for L in E.UL_LABELS:
+            j = s["judge_ul"][L]
+            self.assertEqual(j["need"], j["n"] // 2 + 1)
+            self.assertEqual(j["pass"], j["positive"] and j["beats_placebo"] and j["majority"])
+            self.assertEqual(set(j["pr"]), {"B", "C", "P"})
+        with open(os.path.join(self.dir, "e102test_lgbm_summary.json"), encoding="utf-8") as fh:
+            saved = json.load(fh)
+        self.assertIn("judge_ul", saved)
+        self.assertEqual(saved["arms"], list(arms))
+
 
 if __name__ == "__main__":
     unittest.main()
