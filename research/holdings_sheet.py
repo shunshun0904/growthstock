@@ -36,8 +36,8 @@
   - 合計損益 = 売ったものの確定した損益 + 持っているものの含み損益
   - 合計損益% = 合計損益 / それまでに買った建値の総額
 
-グラフ: 合計の線と、保有中・売ってから 20 営業日以内の銘柄の線（売った日で線が終わる）。色は
-買った順に、期間の重なる銘柄どうしで違う色にする（一度決まった色は変わらない）。
+グラフ: 合計の線だけ（運用者の依頼 2026-10-16「合計のみでよく、各銘柄ごとのは不要です。線が多くなりますので見づらい」。
+それまでは保有中・売ってから 20 営業日以内の銘柄の線も重ねていた）。日付ごとの表には銘柄ごとの列が残る。
 
 公開ログには件数と最新日だけを出す（銘柄名・株価・損益の値は出さない）。
 
@@ -48,7 +48,6 @@ from __future__ import annotations
 
 import argparse
 import glob
-import itertools
 import math
 import os
 import re
@@ -82,13 +81,8 @@ SOLD = "売却済み"
 #: 予測ログで、取引の記録がある行に書く列（利用者の記入欄だったもの。記録がある行だけ書く）
 USER_WRITE_COLS = ["建値", "株数", "手仕舞い日", "手仕舞い値", "損益"]
 CHART_TITLE = "保有の損益の推移（円）"
-#: 合計の線。保有が1銘柄の間は銘柄の線と同じ値で重なるので、青の明るい段の太い帯にして下に敷く
-#: （銘柄の 2px の線が上に重なって見える）
-TOTAL_STYLE = ("#86b6ef", 6)
-#: 保有銘柄の線の色。dataviz の参照パレットの2番目から（1番目の青は合計の帯と同じ色相なので
-#: 使わない）。先頭の青・橙・緑は色覚の差の検査に全組み合わせで通る（2026-10-08 に
-#: validate_palette で確認）
-SERIES_COLORS = ["#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#4a3aa7", "#e34948"]
+#: 合計の線（グラフはこれだけ。運用者の依頼 2026-10-16）。白地に読める中くらいの青・3px
+TOTAL_STYLE = ("#2b6cb0", 3)
 #: 「売りの指値」は 建値×(1+指値%)（2026-10-14 まで「+10%の値」）、「指値%」はその % と、変えたなら効く
 #: 最初の日（保有中は最新の指値、売ったものは売った日に効いていた指値）。「20日目までの高値」はルールで
 #: 見た日中の高値の最大（売った日まで）。保有中のものがどこまで近づいたかを見るため
@@ -564,37 +558,10 @@ def daily_table(positions: List[Position], paths: Dict[int, pd.DataFrame],
 def chart_series(positions: List[Position], paths: Dict[int, pd.DataFrame],
                  days: Sequence[pd.Timestamp]) -> List[Tuple[str, str, int]]:
     """
-    グラフの系列 (日付ごとの表の列の名前, 色, 線の太さ)。先頭が合計の帯。
-
-    銘柄は、保有中のものと、売ってから HORIZON 営業日以内のもの。色は買った順に、グラフに出る期間
-    （買った日〜売ってから HORIZON 営業日。持っていれば先まで）が重なる先の銘柄が使っていない最初の
-    色にする。あとから買った銘柄で先の銘柄の色が変わらず、同時に出る銘柄どうしは必ず違う色になる。
+    グラフの系列 (日付ごとの表の列の名前, 色, 線の太さ)。合計の線だけ（運用者の依頼 2026-10-16。銘柄ごとの線は
+    多くなって見づらいのでやめた。日付ごとの表には銘柄ごとの列が残る）。引数は呼び出し側の形を保つために受ける。
     """
-    series = [("合計損益(円)", TOTAL_STYLE[0], TOTAL_STYLE[1])]
-    if not paths or not days:
-        return series
-    days = sorted(pd.Timestamp(d) for d in days)
-    as_of = days[-1]
-
-    def shown_until(p: Position) -> pd.Timestamp:
-        if p.state != SOLD or p.exit_day is None:
-            return pd.Timestamp.max
-        later = [d for d in days if d > p.exit_day]
-        return later[HORIZON - 1] if len(later) >= HORIZON else pd.Timestamp.max
-
-    order = sorted(paths, key=lambda k: (positions[k].entry_day, k))
-    until = {k: shown_until(positions[k]) for k in order}
-    color: Dict[int, int] = {}
-    for k in order:
-        used = {color[j] for j in color
-                if positions[j].entry_day <= until[k] and positions[k].entry_day <= until[j]}
-        color[k] = next(i for i in itertools.count() if i not in used)
-    labels = column_labels(positions, paths)
-    for k in order:
-        if until[k] >= as_of:
-            series.append((f"{labels[k]} 損益(円)",
-                           SERIES_COLORS[color[k] % len(SERIES_COLORS)], 2))
-    return series
+    return [("合計損益(円)", TOTAL_STYLE[0], TOTAL_STYLE[1])]
 
 
 def limit_text(p: Position) -> str:
@@ -697,7 +664,7 @@ def build_layout(as_of: str, summary: List[List], daily: pd.DataFrame, n_positio
             "して20営業日以内に日中の高値が買値の+10%に届いたら、その値で売り（指値を変えた保有は、変えた"
             "指値が効く日からその値。「指値%」の列）。届かなければ20日目の終値で"
             "売り（含み損なら売らずに持ち越し、売りの報告まで持つ）。報告の売りはルールより優先。グラフは"
-            "合計と、保有中・売ってから20営業日以内の銘柄。毎晩の予測のあとに作り直します（このタブに手で"
+            "合計だけ。毎晩の予測のあとに作り直します（このタブに手で"
             "書いた内容は消えます）")
     values: List[List] = [[_cell(f"保有の推移（{as_of} まで）")], [_cell(note)]]
     if n_positions == 0:
@@ -739,7 +706,7 @@ def chart_request(sheet_id: int, lay: Layout) -> Optional[Dict]:
             "sheetId": sheet_id, "startRowIndex": r0, "endRowIndex": r1,
             "startColumnIndex": c, "endColumnIndex": c + 1}]}}
 
-    # 先頭が合計（帯）。系列は後ろほど上に描かれるので、銘柄の線が帯の上に乗る
+    # 合計の線だけ（2026-10-16 から）
     series = [{"series": src(c), "targetAxis": "LEFT_AXIS",
                "colorStyle": {"rgbColor": _rgb(color)}, "lineStyle": {"width": width}}
               for c, color, width in lay.series]

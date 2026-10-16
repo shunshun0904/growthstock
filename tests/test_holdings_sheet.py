@@ -14,8 +14,7 @@
     前からあるタブにも右端に足される
   - 営業日は取引所のカレンダーで数える。買う日の日足が欠けていたら待つ
   - 日付ごとの表: 銘柄の列は売った日まで、合計には確定した損益が残る
-  - グラフは「損益(円)」の列だけ（軸は1本）。合計は淡い青の太い帯。銘柄は保有中と売って
-    20 営業日以内のもの。期間の重なる銘柄どうしは違う色で、あとから買っても色が変わらない
+  - グラフは合計の「損益(円)」の線だけ（軸は1本。運用者の依頼 2026-10-16。銘柄ごとの線は出さない）
   - 予測ログは保有中を赤、売却済みを青（黄色は文字が見えない。2026-10-09）、取り消した行は塗りを外す
   - 公開ログに銘柄名・株価・損益の値を出さない
 
@@ -569,9 +568,7 @@ class Daily(unittest.TestCase):
 
     def test_layout_and_chart(self):
         series = H.chart_series(self.ps, self.paths, self.days)
-        self.assertEqual(series, [("合計損益(円)", "#86b6ef", 6),
-                                  ("A社(6912) 損益(円)", "#eb6834", 2),
-                                  ("C社(7713) 損益(円)", "#1baf7a", 2)])
+        self.assertEqual(series, [("合計損益(円)", "#2b6cb0", 3)])            # 合計の線だけ（2026-10-16）
         lay = H.build_layout("2026-10-07", H.summary_rows(self.ps, self.paths), self.daily,
                              len(self.ps), series)
         self.assertEqual(lay.values[3], [H._cell(h) for h in H.SUMMARY_HEADER])
@@ -580,15 +577,13 @@ class Daily(unittest.TestCase):
         self.assertEqual([r[i] for r in lay.values[4:6]], ["'+10%", "'+10%"])   # 式と読まれないように
         self.assertEqual(lay.values[lay.daily_header_row][0], "日付")
         self.assertEqual(lay.values[lay.daily_header_row + 1][0], "2026-09-25")
-        self.assertEqual([c for c, _, _ in lay.series], [1, 4, 5])
+        self.assertEqual([c for c, _, _ in lay.series], [1])
         spec = H.chart_request(123, lay)["addChart"]["chart"]["spec"]["basicChart"]
         self.assertEqual(spec["chartType"], "LINE")
         self.assertEqual({s["targetAxis"] for s in spec["series"]}, {"LEFT_AXIS"})   # 軸は1本
-        first, second, third = spec["series"]
-        self.assertAlmostEqual(first["colorStyle"]["rgbColor"]["red"], 0x86 / 255)
-        self.assertEqual([s["lineStyle"]["width"] for s in spec["series"]], [6, 2, 2])
-        self.assertAlmostEqual(second["colorStyle"]["rgbColor"]["red"], 0xeb / 255)
-        self.assertAlmostEqual(third["colorStyle"]["rgbColor"]["green"], 0xaf / 255)
+        (first,) = spec["series"]
+        self.assertAlmostEqual(first["colorStyle"]["rgbColor"]["red"], 0x2b / 255)
+        self.assertEqual([s["lineStyle"]["width"] for s in spec["series"]], [3])
         rng = spec["domains"][0]["domain"]["sourceRange"]["sources"][0]
         self.assertEqual((rng["startRowIndex"], rng["endRowIndex"]),
                          (lay.daily_header_row, lay.daily_header_row + 1 + len(self.daily)))
@@ -616,39 +611,15 @@ class Daily(unittest.TestCase):
 
 
 class ChartSeries(unittest.TestCase):
-    @staticmethod
-    def held(code, k, name):
-        p = pos(code=code, name=name)
-        p.state, p.entry_day = "保有中", DAYS[k]
-        return p
-
-    @staticmethod
-    def sold(code, k, out, name):
-        p = pos(code=code, name=name)
-        p.state, p.entry_day, p.exit_day = H.SOLD, DAYS[k], DAYS[out]
-        return p
-
-    def test_old_sales_leave_the_chart_and_their_color_is_reused(self):
-        a = self.sold("1111", 1, 3, "A")         # 売ってから 26 営業日たった
-        b = self.held("2222", 3, "B")            # A と重なる
-        c = self.held("3333", 25, "C")           # A がグラフから消えたあとに買った
-        ps = [a, b, c]
-        paths = {0: None, 1: None, 2: None}
-        names = [s[0] for s in H.chart_series(ps, paths, DAYS)]
-        self.assertEqual(names, ["合計損益(円)", "B(2222) 損益(円)", "C(3333) 損益(円)"])
-        colors = dict((s[0][0], s[1]) for s in H.chart_series(ps, paths, DAYS)[1:])
-        self.assertEqual(colors, {"B": "#1baf7a", "C": "#eb6834"})     # B は A と重なった色のまま
-
-    def test_recent_sales_stay_and_colors_do_not_change(self):
-        a = self.sold("1111", 1, 3, "A")
-        b = self.held("2222", 3, "B")
-        days = DAYS[:23]                         # 売ってから 19 営業日 → まだ出す
-        before = H.chart_series([a, b], {0: None, 1: None}, days)
-        self.assertEqual([s[1] for s in before[1:]], ["#eb6834", "#1baf7a"])
-        c = self.held("3333", 22, "C")
-        after = H.chart_series([a, b, c], {0: None, 1: None, 2: None}, days)
-        self.assertEqual(after[:3], before)      # あとから買っても先の色は変わらない
-        self.assertEqual(after[3][1], "#eda100")
+    def test_only_the_total_line(self):
+        """銘柄が何件あっても、グラフは合計の線だけ（運用者の依頼 2026-10-16）。"""
+        a = pos(code="1111", name="A")
+        a.state, a.entry_day, a.exit_day = H.SOLD, DAYS[1], DAYS[3]
+        b = pos(code="2222", name="B")
+        b.state, b.entry_day = "保有中", DAYS[3]
+        series = H.chart_series([a, b], {0: None, 1: None}, DAYS)
+        self.assertEqual(series, [("合計損益(円)", H.TOTAL_STYLE[0], H.TOTAL_STYLE[1])])
+        self.assertEqual(H.chart_series([], {}, []), series)
 
 
 class SheetRequests(unittest.TestCase):
