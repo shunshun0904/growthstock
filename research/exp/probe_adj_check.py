@@ -30,44 +30,61 @@ DATA_DIR = lab.DATA_DIR
 def main() -> int:
     paths = sorted(glob.glob(os.path.join(DATA_DIR, "bars_*.parquet")))
     print(f"日次バーのファイル {len(paths)}件")
-    total_changed, total_rows = 0, 0
-    worst = 0.0
-    recent = []
-    print(f"  {'年':6s}{'行数':>12s}{'係数の列':>9s}{'係数≠1 の行':>12s}{'変わった行':>11s}{'最大相対差':>12s}")
+    # 係数はその日より後の全期間の分を掛けるので、年のファイルごとではなく全期間を一度に作り直して比べる
+    # （初回 run 38934573452 は年ごとに作り直していて、翌年以降の分割の分が「不一致」に数えられた）
+    parts = []
     for p in paths:
-        d = pd.read_parquet(p)
-        year = os.path.basename(p)[5:9]
-        has = data_store.FACTOR_COL in d.columns
-        n_f = int(((pd.to_numeric(d[data_store.FACTOR_COL], errors="coerce").fillna(1.0)) != 1.0).sum()) if has else 0
-        fixed, info = data_store.readjust_bars(d)
-        total_changed += info["changed"]
-        total_rows += info["rows"]
-        worst = max(worst, info["max_rel_diff"])
-        print(f"  {year:6s}{info['rows']:>12,d}{'あり' if has else 'なし':>9s}{n_f:>12,d}{info['changed']:>11,d}{info['max_rel_diff']:>12.2e}")
-        if int(year) >= 2025:
-            recent.append(d)
-    print(f"  合計 {total_rows:,}行、作り直して AdjC が変わる行 {total_changed:,}（{total_changed / max(total_rows, 1) * 100:.3f}%）、最大相対差 {worst:.2e}")
-    verdict = "一致（係数の意味は合っている）" if total_changed / max(total_rows, 1) < 0.001 else "不一致が多い（係数の意味を見直す）"
-    print(f"  判定: {verdict}")
+        d = pd.read_parquet(p, columns=["Date", "Code", "C", "AdjC", "Vo", "AdjVo"] +
+                            ([data_store.FACTOR_COL] if data_store.FACTOR_COL in pd.read_parquet(p).columns else []))
+        d["_year"] = int(os.path.basename(p)[5:9])
+        parts.append(d)
+    b = pd.concat(parts, ignore_index=True)
+    b["Date"] = pd.to_datetime(b["Date"])
+    b["Code"] = b["Code"].astype(str).str.strip()
+    for c in ("C", "AdjC"):
+        b[c] = pd.to_numeric(b[c], errors="coerce")
+    has = data_store.FACTOR_COL in b.columns
+    fixed, info = data_store.readjust_bars(b)
+    before = b["AdjC"].to_numpy(dtype=float)
+    after = pd.to_numeric(fixed["AdjC"], errors="coerce").to_numpy(dtype=float)
+    ok = np.isfinite(before) & np.isfinite(after) & (before != 0)
+    rel = np.where(ok, np.abs(after - before) / np.abs(np.where(ok, before, 1.0)), 0.0)
+    changed = rel > 1e-6
+    f = pd.to_numeric(b[data_store.FACTOR_COL], errors="coerce").fillna(1.0) if has else pd.Series(1.0, index=b.index)
+    print(f"  {'年':6s}{'行数':>12s}{'係数≠1 の行':>12s}{'変わった行':>11s}{'最大相対差':>12s}")
+    for y, g in b.groupby("_year"):
+        idx = g.index.to_numpy()
+        print(f"  {y:<6d}{len(g):>12,d}{int((f.loc[idx] != 1.0).sum()):>12,d}{int(changed[idx].sum()):>11,d}{rel[idx].max():>12.2e}")
+    n_changed = int(changed.sum())
+    print(f"  合計 {len(b):,}行、係数の列 {'あり' if has else 'なし'}、係数のある銘柄 {info['codes_with_factor']:,}、"
+          f"全期間で作り直して AdjC が変わる行 {n_changed:,}（{n_changed / max(len(b), 1) * 100:.4f}%）、最大相対差 {rel.max():.2e}")
+    print("  判定: " + ("一致（保存した調整後の値は係数から作り直した値と同じ）" if n_changed / max(len(b), 1) < 0.001
+                     else "不一致が多い（係数の意味か取り込みを見直す）"))
 
-    if recent:
-        b = pd.concat(recent, ignore_index=True)
-        b["Date"] = pd.to_datetime(b["Date"])
-        b["Code"] = b["Code"].astype(str).str.strip()
-        for c in ("C", "AdjC"):
-            b[c] = pd.to_numeric(b[c], errors="coerce")
-        print("\n■ 市場環境の ETF の AdjC の日次変化の最大（2025〜）")
-        for label, code in B.MACRO_ETFS.items():
-            s = b[b["Code"] == code].sort_values("Date").drop_duplicates("Date", keep="last")
-            r = (s["AdjC"].pct_change() * 100).abs()
-            print(f"  {label}（{code}）: {len(s):,}日、最大 {r.max():.1f}%（{s['Date'].iloc[int(r.values.argmax())].date() if len(s) else '-'}）")
-        b26 = b[b["Date"] >= pd.Timestamp("2026-01-01")].sort_values(["Code", "Date"])
-        la = np.log(b26["AdjC"]).groupby(b26["Code"]).diff()
-        lc = np.log(b26["C"]).groupby(b26["Code"]).diff()
-        both = (la.abs() > np.log(1.5)) & (lc.abs() > np.log(1.5)) & (np.sign(la) == np.sign(lc))
-        adj_only = (la.abs() > np.log(1.5)) & (lc.abs() < np.log(1.1))
-        print(f"\n■ 2026年: C と AdjC が同じ日に ±50% 超で動いた銘柄 {int(both.groupby(b26['Code']).any().sum())}件、"
-              f"AdjC だけが動いた銘柄 {int(adj_only.groupby(b26['Code']).any().sum())}件（どちらも 0 が正しい）")
+    recent = b[b["Date"] >= pd.Timestamp("2025-01-01")].copy()
+    print("\n■ 市場環境の ETF の AdjC の日次変化の最大（2025〜）")
+    for label, code in B.MACRO_ETFS.items():
+        s = recent[recent["Code"] == code].sort_values("Date").drop_duplicates("Date", keep="last")
+        r = (s["AdjC"].pct_change() * 100).abs()
+        print(f"  {label}（{code}）: {len(s):,}日、最大 {r.max():.1f}%（{s['Date'].iloc[int(r.values.argmax())].date() if len(s) else '-'}）")
+    b26 = recent[recent["Date"] >= pd.Timestamp("2026-01-01")].sort_values(["Code", "Date"])
+    la = np.log(b26["AdjC"]).groupby(b26["Code"]).diff()
+    lc = np.log(b26["C"]).groupby(b26["Code"]).diff()
+    both = (la.abs() > np.log(1.5)) & (lc.abs() > np.log(1.5)) & (np.sign(la) == np.sign(lc))
+    adj_only = (la.abs() > np.log(1.5)) & (lc.abs() < np.log(1.1))
+    both_codes = set(b26.loc[both.fillna(False).to_numpy(), "Code"])
+    # C と AdjC が同じ日に動いた銘柄に、その前後1日に係数（≠1）があるか（あれば係数の付け方が1日ずれている疑い）
+    near = 0
+    if has:
+        fb = pd.to_numeric(b26[data_store.FACTOR_COL], errors="coerce").fillna(1.0)
+        hit_days = b26.loc[both.fillna(False).to_numpy(), ["Code", "Date"]]
+        fac_days = b26.loc[(fb != 1.0).to_numpy(), ["Code", "Date"]]
+        for code, d in hit_days.itertuples(index=False):
+            fd = fac_days[fac_days["Code"] == code]["Date"]
+            if len(fd) and (fd - d).abs().min() <= pd.Timedelta(days=4):
+                near += 1
+    print(f"\n■ 2026年: C と AdjC が同じ日に ±50% 超で動いた銘柄 {len(both_codes)}件（そのうち前後4日に係数のある行 {near}件。"
+          f"0 なら係数と無関係の値動き）、AdjC だけが動いた銘柄 {int(adj_only.groupby(b26['Code']).any().sum())}件（0 が正しい）")
     return 0
 
 

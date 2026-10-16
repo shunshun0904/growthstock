@@ -849,6 +849,12 @@ class TestReadjustBars(unittest.TestCase):
             self.assertEqual(y25[y25["Code"] == "10000"]["AdjC"].round(6).tolist(), [0.5, 0.51])
             self.assertEqual(y25[y25["Code"] == "20000"]["AdjC"].tolist(), [10.0, 10.0])
             self.assertEqual(data_store.readjust_store(d, ["10000"]), [])           # 2回目は変わらない
+            # 浮動小数点の端数だけの違いでは書き換えない
+            y26p = data_store.year_path(d, "bars", 2026)
+            y26 = pd.read_parquet(y26p)
+            y26.loc[y26["Code"] == "10000", "AdjC"] = y26.loc[y26["Code"] == "10000", "AdjC"] * (1 + 1e-12)
+            y26.to_parquet(y26p, index=False)
+            self.assertEqual(data_store.readjust_store(d, ["10000"]), [])
             self.assertEqual(data_store.readjust_store(d, ["99999"]), [])           # 無い銘柄
         finally:
             shutil.rmtree(d, ignore_errors=True)

@@ -432,6 +432,7 @@ def readjust_store(data_dir: str, codes: Iterable[str]) -> List[str]:
     年別ファイルに保存した日次バーのうち、指定の銘柄の調整後の値を全期間で作り直す。
     分割・併合の係数が来た日に呼ぶ（jq_bulk の差分取得）。値が変わった年のファイルだけ書き換え、その一覧を返す。
     """
+    import numpy as np
     import pandas as pd
 
     codes = sorted({str(c).strip() for c in codes})
@@ -470,9 +471,11 @@ def readjust_store(data_dir: str, codes: Iterable[str]) -> List[str]:
         for c in cols:
             new = pd.to_numeric(grp.loc[ok, c], errors="coerce").to_numpy(dtype=float)
             old = pd.to_numeric(d.loc[idx, c], errors="coerce").to_numpy(dtype=float)
-            diff = ~((old == new) | (pd.isna(old) & pd.isna(new)))
-            if diff.any():
-                d.loc[idx, c] = new
+            # 浮動小数点の端数（J-Quants の丸めと掛け算の差）だけなら書き換えない。2026-10-16 の全期間の取り直しでは
+            # 等号の比較で 11 ファイル全部を書き換えていた
+            same = np.isclose(old, new, rtol=1e-9, atol=1e-9) | (np.isnan(old) & np.isnan(new))
+            if (~same).any():
+                d.loc[idx, c] = np.where(same, old, new)
                 changed = True
         if changed:
             d.to_parquet(p, index=False, compression="zstd")
