@@ -1,0 +1,55 @@
+name: Probe Limit Flags
+
+# ストップ高・ストップ安の自前の判定（research/price_limits.py。制限値幅の表から）が、J-Quants の
+# フラグ（/equities/bars/daily の UL / LL）とどれだけ一致するかを実測する（research/probe_limit_flags.py）。
+# 保存済みの日足にはフラグが無いので、標本の日ぶんだけ API から取って突き合わせる。
+# 出すのは件数だけで、銘柄コードと鍵はログに出さない。
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: '標本の日（YYYY-MM-DD をスペース区切り。省略すれば 2017〜2026 の各年 3月・9月と直近5営業日）'
+        required: false
+        default: ''
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r research/requirements.txt
+      - name: Probe
+        env:
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+          DAYS: ${{ inputs.days }}
+        run: |
+          # 入力は日付の形だけを通す（シェルにそのまま展開しない）
+          ARGS=()
+          if [ -n "$DAYS" ]; then
+            for d in $DAYS; do
+              [[ "$d" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || { echo "日付が不正: $d"; exit 1; }
+              ARGS+=("$d")
+            done
+            python3 research/probe_limit_flags.py --days "${ARGS[@]}" 2>&1 | tee probe.log
+          else
+            python3 research/probe_limit_flags.py 2>&1 | tee probe.log
+          fi
+          exit "${PIPESTATUS[0]}"
+      - name: Summary
+        if: always()
+        run: |
+          { echo '## ストップ高の判定と API のフラグの突き合わせ'; echo '```'
+            cat probe.log 2>/dev/null || echo '(出力なし)'
+            echo '```'; } >> "$GITHUB_STEP_SUMMARY"
