@@ -180,7 +180,7 @@ def prepare(rebuild: bool = False):
     feat, info = attach_features(frame[["Code", "Date"]], bars, HOLD, PAST)
     df = pd.concat([frame.reset_index(drop=True), feat.drop(columns=["Code", "Date"]).reset_index(drop=True)], axis=1)
     yr = df["Date"].dt.year
-    log(f"[data] 4列を付けた {len(df):,}行（付いた行 {info['attached']:,}・前250営業日がそろう行 {info['past_full']:,}）/ "
+    log(f"[data] {len(FEATURES)}列を付けた {len(df):,}行（付いた行 {info['attached']:,}・前250営業日がそろう行 {info['past_full']:,}）/ "
         f"日足 {info['rows']:,}行・ストップ高の日 {info['ul']:,} / {time.time()-t0:.0f}秒")
     stamp = {"built_utc": time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime()),
              "rows": int(len(df)), "date_min": str(df["Date"].min().date()), "date_max": str(df["Date"].max().date()),
@@ -200,7 +200,7 @@ def coverage_report(df: pd.DataFrame, stamp: dict, k: float) -> dict:
     print(f"\n■ 0. 列の付き方（表は {stamp['built_utc']} 作成・{stamp['rows']:,}行）")
     if fl:
         print(f"  日足 {fl.get('rows', 0):,}行のうち判定できた {fl.get('known_share', float('nan')):.1f}%・ストップ高の日 {fl.get('ul', 0):,}"
-              f"（高値がちょうど上限 {fl.get('exact_among_ul', float('nan')):.1f}%）。4列の付いた行 {fl.get('attached', 0):,}・"
+              f"（高値がちょうど上限 {fl.get('exact_among_ul', float('nan')):.1f}%）。{len(FEATURES)}列の付いた行 {fl.get('attached', 0):,}・"
               f"前250営業日がそろう行 {fl.get('past_full', 0):,}")
     yrs = sorted(stamp["rows_by_year"])
     print("  年別（全行・基準日がストップ高の行・前250営業日に1回以上の行）: " + "  ".join(
@@ -223,7 +223,7 @@ def coverage_report(df: pd.DataFrame, stamp: dict, k: float) -> dict:
               f"買ったあとのストップ高 {u*100:5.1f}%")
         out[name] = {"n": int(m.sum()), "pos_rate": float(r), "ul_fwd": float(u)}
     desc = df[list(FEATURES)].describe().loc[["mean", "50%", "max"]]
-    print("  4列の平均 / 中央 / 最大: " + "  ".join(f"{c} {desc.loc['mean', c]:.2f} / {desc.loc['50%', c]:.0f} / {desc.loc['max', c]:.0f}"
+    print(f"  {len(FEATURES)}列の平均 / 中央 / 最大: " + "  ".join(f"{c} {desc.loc['mean', c]:.2f} / {desc.loc['50%', c]:.0f} / {desc.loc['max', c]:.0f}"
                                             for c in FEATURES))
     out["missing_days_since"] = float(df["ul_days_since"].isna().mean())
     return out
