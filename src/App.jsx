@@ -23,8 +23,9 @@ import { loadPredictions, loadHistory, loadFilings, loadFeatureNames, loadNewSam
 const TABS = [
   { id: 'prediction', label: 'ブレイク予測' },
   // 候補の比較（似た過去の事例の収益の分布。参考で、選定には使わない）。運用者の指示 2026-10-15
-  // 「別タブとして、左から2番目の位置に追加して下さい。3枚で良いです」
-  { id: 'knn', label: '候補の比較' },
+  // 「別タブとして、左から2番目の位置に追加して下さい。3枚で良いです」。2026-10-16「候補の比較タブはいったん、
+  // なくしてください」で hidden に。画面のコード（KnnCompareView）と日次予測の knn の計算は残してあり、hidden を外せば戻る
+  { id: 'knn', label: '候補の比較', hidden: true },
   { id: 'filings', label: '決算サンキー', hidden: true },
   { id: 'compare', label: '8軸オクタゴン比較', hidden: true },
   { id: 'timemachine', label: 'タイムマシーン' },
