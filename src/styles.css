@@ -416,10 +416,14 @@ input[type='range']::-moz-range-thumb {
   white-space: nowrap; }
 .pred-mg .c { text-align: center; padding: 3px 2px; border-radius: 2px; font-weight: 600; }
 .pred-mg .c.na { color: var(--text-faint); background: var(--bg-input); font-weight: 400; }
-.pred-mg.lg { gap: 3px; font-size: 13px;
-  grid-template-columns: auto repeat(var(--mg-cols, 4), minmax(60px, 1fr)); }
+/* 詳しい欄の表は枠の幅いっぱいに広げ、列は均等に縮む（minmax(0, 1fr)）。固定の最小幅だとスマホで4列目が枠からはみ出た
+   （2026-10-16 の運用者の指摘）。百分位の表とスコアの表はどちらも幅 100% なので列もそろう */
+.pred-mg.lg { gap: 3px; font-size: 13px; display: grid; width: 100%;
+  grid-template-columns: auto repeat(var(--mg-cols, 4), minmax(0, 1fr)); }
 .pred-mg.lg .h, .pred-mg.lg .r { font-size: 11px; }
-.pred-mg.lg .c { padding: 6px 4px; }
+.pred-mg.lg .c { padding: 6px 2px; min-width: 0; overflow: hidden; }
+/* 今日の戦略の札の表は一覧の行と同じ大きさにする（.strat-metric .num の 14px をマスまで継がせない。2026-10-16） */
+.strat-metric .pred-mg .c { font-size: 11px; font-weight: 600; }
 
 .pred-detail { border-top: 1px solid var(--border-soft); padding: var(--s4);
   background: var(--bg-card); }
