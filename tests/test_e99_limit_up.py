@@ -130,8 +130,12 @@ class TestRuleTest(unittest.TestCase):
         g = frame(n_per=200, effect=0.35, seed=7)
         t = E.rule_test(g, sub=g["market_cap"].to_numpy() < E.SMALL_CAP_MAX, n_perm=200)
         self.assertEqual(t["n_rows"], int((g["market_cap"] < E.SMALL_CAP_MAX).sum()))
-        for name in E.CAP_LABELS[2:]:
+        first_out = int(np.searchsorted(E.CAP_EDGES, E.SMALL_CAP_MAX, side="left")) + 1   # 下端が線以上の帯は 0件
+        self.assertEqual(E.SMALL_CAP_MAX, 1000.0)
+        self.assertEqual(first_out, 3)
+        for name in E.CAP_LABELS[first_out:]:
             self.assertEqual(t["bands"][name]["n_yes"] + t["bands"][name]["n_no"], 0)
+        self.assertGreater(t["bands"][E.CAP_LABELS[first_out - 1]]["n_yes"] + t["bands"][E.CAP_LABELS[first_out - 1]]["n_no"], 0)
 
     def test_rows_without_cap_are_excluded(self):
         g = frame(n_per=60, seed=2)
