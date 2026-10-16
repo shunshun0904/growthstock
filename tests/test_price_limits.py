@@ -166,6 +166,19 @@ class TestLimitEvents(unittest.TestCase):
         none = ev.loc[("99990", self.t)]
         self.assertTrue(np.isnan(none["ul_fwd"]) and np.isnan(none["ul_past_n"]))
         self.assertEqual(len(ev), 3)
+        self.assertEqual(r["fwd_days"], 20.0)
+        self.assertTrue(np.isnan(late["fwd_days"]))
+
+    def test_partial_window(self):
+        # 途中の行も数える（実運用用）。late は残り4営業日ぶんだけ。最後の日の行は 0日（数えない）
+        keys = pd.DataFrame({"Code": ["50050", "50050", "50050"], "Date": [self.t, self.late, self.bars["Date"].iloc[-1]]})
+        ev = PL.limit_events(self.arrays, keys, hold=20, past=250, partial=True).set_index(["Code", "Date"])
+        r = ev.loc[("50050", self.t)]
+        self.assertEqual((r["fwd_ok"], r["fwd_days"], r["ul_fwd_n"]), (1.0, 20.0, 3.0))
+        late = ev.loc[("50050", self.late)]
+        self.assertEqual((late["fwd_ok"], late["fwd_days"], late["ul_fwd"]), (0.0, 4.0, 0.0))
+        last = ev.loc[("50050", self.bars["Date"].iloc[-1])]
+        self.assertTrue(np.isnan(last["ul_fwd"]) and np.isnan(last["fwd_days"]))
 
     def test_day_flag(self):
         got = PL.day_flag(self.arrays, ["50050", "50050", "50050", "00000"], [self.t] * 4, [3, 4, np.nan, 3])

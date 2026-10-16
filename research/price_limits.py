@@ -139,13 +139,18 @@ def _locate(arrays: Dict, code: str, day) -> Tuple[Optional[Dict], int]:
     return a, i
 
 
-def limit_events(arrays: Dict, keys: pd.DataFrame, hold: int = 20, past: int = 250) -> pd.DataFrame:
+def limit_events(arrays: Dict, keys: pd.DataFrame, hold: int = 20, past: int = 250,
+                 partial: bool = False) -> pd.DataFrame:
     """
     (Code, Date) ごとに、基準日 Date のあとの hold 営業日（翌営業日 = 1日目）と、前の past 営業日のストップ高を数える。
 
+    partial=True なら、hold 営業日がそろっていない行も、ある日までで数える（実運用の途中の候補用。fwd_days にその日数が入り、
+    fwd_ok は 0 のまま）。既定（False）はそろった行だけ数える（実験用。途中の行を数えると、指値に早く届いた側に偏る）。
+
     列（NaN = 判定できない）:
       ul_t        基準日そのものがストップ高か（1/0）
-      fwd_ok      あとの hold 営業日の日足がそろっているか（そろわなければ fwd の列は NaN）
+      fwd_ok      あとの hold 営業日の日足がそろっているか（そろわなければ fwd の列は NaN。partial なら途中まで）
+      fwd_days    数えた営業日の数（そろっていれば hold）
       ul_fwd      翌営業日から hold 営業日目までにストップ高の日があるか（1/0）、ul_fwd_n その日数、ul_fwd_first 最初の日（1 = 翌営業日）
       ulc_fwd     同じ期間に張り付き（終値がストップ高）の日があるか、ulc_fwd_n その日数
       ll_fwd      同じ期間にストップ安の日があるか
@@ -156,8 +161,8 @@ def limit_events(arrays: Dict, keys: pd.DataFrame, hold: int = 20, past: int = 2
     rows = []
     nan = float("nan")
     for code, day in need.itertuples(index=False):
-        rec = {"Code": str(code), "Date": pd.Timestamp(day), "ul_t": nan, "fwd_ok": 0.0, "ul_fwd": nan, "ul_fwd_n": nan,
-               "ul_fwd_first": nan, "ulc_fwd": nan, "ulc_fwd_n": nan, "ll_fwd": nan, "fwd_known": nan,
+        rec = {"Code": str(code), "Date": pd.Timestamp(day), "ul_t": nan, "fwd_ok": 0.0, "fwd_days": nan, "ul_fwd": nan,
+               "ul_fwd_n": nan, "ul_fwd_first": nan, "ulc_fwd": nan, "ulc_fwd_n": nan, "ll_fwd": nan, "fwd_known": nan,
                "ul_past_n": nan, "past_bars": nan, "ul_past20_n": nan}
         a, i = _locate(arrays, code, day)
         if a is None or i < 0:
@@ -165,10 +170,13 @@ def limit_events(arrays: Dict, keys: pd.DataFrame, hold: int = 20, past: int = 2
             continue
         n = len(a["dates"])
         rec["ul_t"] = float(a["ul"][i]) if a["known"][i] else nan
-        if i + hold < n:
-            sl = slice(i + 1, i + hold + 1)
+        complete = i + hold < n
+        if complete or (partial and i + 1 < n):
+            last = min(n - 1, i + hold)
+            sl = slice(i + 1, last + 1)
             ul = a["ul"][sl]
-            rec["fwd_ok"] = 1.0
+            rec["fwd_ok"] = 1.0 if complete else 0.0
+            rec["fwd_days"] = float(last - i)
             rec["fwd_known"] = float(a["known"][sl].sum())
             rec["ul_fwd"] = float(ul.any())
             rec["ul_fwd_n"] = float(ul.sum())
