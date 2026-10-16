@@ -25,7 +25,9 @@
 日経225 ETF の 1:100 で気づいた。`docs/MODEL_ADOPTION_RULES.md` §61）。係数 `AdjFactor`（権利落ち日の行に入り、その日より前の株価に
 掛ける）を保存し、差分取得で係数のある行が来た日に、その銘柄の過去の調整後の値を素の値から作り直す（`data_store.readjust_bars` /
 `readjust_store`。年別ファイルを書き換えて Release に書き戻す）。既に未調整だった分は 2026-10-16 に全期間を取り直して揃えた
-（`forget=bars`）。検算は `research/exp/probe_adj_check.py`（作り直した値と J-Quants の値が一致するか）。
+（`forget=bars`・`wait=no`、run 38912963251、2時間40分、10,138,095 行）。検算は `research/exp/probe_adj_check.py`（全期間を一度に
+作り直した値と保存した値が一致するか・ETF の段差・AdjC だけの段差。2026-10-16 の結果は全 10,172,431 行で一致、`docs/MODEL_ADOPTION_RULES.md`
+§61 の実施の記録）。
 
 ## 動く順番
 
