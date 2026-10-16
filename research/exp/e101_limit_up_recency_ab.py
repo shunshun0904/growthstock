@@ -39,6 +39,10 @@
 充足だけ見る: exp=e101_limit_up_recency_ab.py args="--dry"
 試運転:       exp=e101_limit_up_recency_ab.py args="--tag e101smoke --n-trials 2 --shifts 0"
 
+結果 1.5σ（2026-10-16、run 38856163463、66b1811、55分。docs/MODEL_ADOPTION_RULES.md §61）: 判定1・判定2 とも満たさない。32窓の PR-AUC
+  C−A −0.0002 ± 0.0013（16/32）・P−A −0.0003・C−D −0.0004 ± 0.0010。上位5% の正例率 C−A −0.61pt ± 0.50（11/32）・P−A +0.77pt、上位5% の
+  買ってからストップ高 4.86 → 5.28%（対照 P も +0.33pt）。1.2σ は下に足す。
+
 表（7列を付けた frame）は1回目に作って research/_data/oof/<tag>_* に置き、2回目は actions/cache で引き継いだそれを使う。
 --budget-min（既定 290分）を過ぎたら新しい計算を始めずに終わる（保存済みの探索・out-of-fold は次の回が続きから使う）。
 """
