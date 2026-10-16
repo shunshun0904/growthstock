@@ -49,7 +49,7 @@ def main() -> int:
     for d, n in b.loc[adj_only, "Date"].value_counts().head(8).items():
         print(f"  {d.date()}: {int(n)}件")
 
-    print("\n■ C だけが動いた日（= J-Quants 側では調整済みだが、手元の過去の行はそのまま。多い順 8日）")
+    print("\n■ C だけが動いた日（= 権利落ち日。AdjC は連続 = 手元の過去の行も調整済み。多い順 8日）")
     for d, n in b.loc[c_only, "Date"].value_counts().head(8).items():
         print(f"  {d.date()}: {int(n)}件")
 
