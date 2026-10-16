@@ -156,6 +156,7 @@ def limit_events(arrays: Dict, keys: pd.DataFrame, hold: int = 20, past: int = 2
       ll_fwd      同じ期間にストップ安の日があるか
       fwd_known   同じ期間で判定できた日の数
       ul_past_n   基準日の前 past 営業日のストップ高の日数、past_bars その期間にあった日足の数、ul_past20_n 前20営業日の日数
+      ul_days_since  基準日の前 past 営業日の中で最後のストップ高から基準日までの営業日数（1 = 前営業日。無ければ NaN）
     """
     need = keys[["Code", "Date"]].drop_duplicates()
     rows = []
@@ -163,7 +164,7 @@ def limit_events(arrays: Dict, keys: pd.DataFrame, hold: int = 20, past: int = 2
     for code, day in need.itertuples(index=False):
         rec = {"Code": str(code), "Date": pd.Timestamp(day), "ul_t": nan, "fwd_ok": 0.0, "fwd_days": nan, "ul_fwd": nan,
                "ul_fwd_n": nan, "ul_fwd_first": nan, "ulc_fwd": nan, "ulc_fwd_n": nan, "ll_fwd": nan, "fwd_known": nan,
-               "ul_past_n": nan, "past_bars": nan, "ul_past20_n": nan}
+               "ul_past_n": nan, "past_bars": nan, "ul_past20_n": nan, "ul_days_since": nan}
         a, i = _locate(arrays, code, day)
         if a is None or i < 0:
             rows.append(rec)
@@ -190,6 +191,8 @@ def limit_events(arrays: Dict, keys: pd.DataFrame, hold: int = 20, past: int = 2
         rec["past_bars"] = float(i - lo)
         rec["ul_past_n"] = float(a["ul"][lo:i].sum())
         rec["ul_past20_n"] = float(a["ul"][max(0, i - 20):i].sum())
+        hits = np.flatnonzero(a["ul"][lo:i])
+        rec["ul_days_since"] = float(i - (lo + hits[-1])) if len(hits) else nan
         rows.append(rec)
     out = pd.DataFrame(rows)
     k = keys[["Code", "Date"]].copy()

@@ -159,12 +159,17 @@ class TestLimitEvents(unittest.TestCase):
         self.assertEqual(r["ul_past_n"], 2.0)                # t−10, t−100（t 自身は入れない）
         self.assertEqual(r["past_bars"], 250.0)
         self.assertEqual(r["ul_past20_n"], 1.0)
+        self.assertEqual(r["ul_days_since"], 10.0)            # 最後は t−10
         late = ev.loc[("50050", self.late)]
+        self.assertEqual(late["ul_days_since"], float(295 - 267))   # 最後は t+7 = 267
         self.assertEqual(late["fwd_ok"], 0.0)                # 20営業日がそろわない
         self.assertTrue(np.isnan(late["ul_fwd"]))
         self.assertEqual(late["ul_past_n"], 6.0)             # t−100, t−10, t, t+3, t+5, t+7 の6つ（どれも前250営業日の中）
         none = ev.loc[("99990", self.t)]
-        self.assertTrue(np.isnan(none["ul_fwd"]) and np.isnan(none["ul_past_n"]))
+        self.assertTrue(np.isnan(none["ul_fwd"]) and np.isnan(none["ul_past_n"]) and np.isnan(none["ul_days_since"]))
+        early = PL.limit_events(self.arrays, pd.DataFrame({"Code": ["50050"], "Date": [self.bars["Date"].iloc[100]]}),
+                                hold=20, past=50).iloc[0]
+        self.assertTrue(np.isnan(early["ul_days_since"]))      # 前50営業日にストップ高が無い
         self.assertEqual(len(ev), 3)
         self.assertEqual(r["fwd_days"], 20.0)
         self.assertTrue(np.isnan(late["fwd_days"]))
