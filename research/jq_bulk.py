@@ -72,8 +72,11 @@ def clamp_start(start: dt.date, today: Optional[dt.date] = None) -> dt.date:
     floor = max(EARLIEST_DATE, subscription_start(today))
     return floor if start < floor else start
 
-# 保持する列（全列を持つとサイズが数倍になるため、必要なものだけ）
-BAR_COLS = ["Date", "Code", "O", "H", "L", "C", "Vo", "Va", "AdjO", "AdjH", "AdjL", "AdjC", "AdjVo"]
+# 保持する列（全列を持つとサイズが数倍になるため、必要なものだけ）。
+# AdjFactor（分割・併合の係数。権利落ち日の行に入り、その日より前の株価に掛ける）は 2026-10-16 から保存する。
+# 日次バーは差分で取り足すので、分割の後に J-Quants が付け直す過去の AdjC は手元に届かない。係数を持っていれば
+# 手元で付け直せる（data_store.readjust_bars）。経緯は docs/MODEL_ADOPTION_RULES.md §61
+BAR_COLS = ["Date", "Code", "O", "H", "L", "C", "Vo", "Va", "AdjO", "AdjH", "AdjL", "AdjC", "AdjVo", "AdjFactor"]
 
 #: 営業日カレンダーを何日ぶん先まで取っておくか。
 #: 下流（鮮度チェック・営業日ゲート）は「今日」がカレンダーの範囲に
@@ -907,6 +910,15 @@ def _run_incremental(client: JQuantsClient, days: List[dt.date],
               f"({time.time()-t0:.0f}秒)")
         for w in written:
             print(f"    {os.path.basename(w)} ({os.path.getsize(w)/1e6:.1f}MB)")
+        if name == "bars":
+            # 今回の行に分割・併合の係数があれば、その銘柄の過去の調整後の値を手元で付け直す。
+            # J-Quants は分割の後に過去の AdjC を付け直すが、差分取得では過去の行を取り直さない
+            # （2026-10-05 の日経225 ETF の 1:100 で気づいた。docs/MODEL_ADOPTION_RULES.md §61）
+            split_codes = data_store.split_codes(df)
+            if split_codes:
+                fixed = data_store.readjust_store(args.out_dir, split_codes)
+                print(f"[bars] 分割・併合の係数がある銘柄 {len(split_codes)}件 -> 過去の調整後の値を付け直した"
+                      f"（書き換えたファイル {len(fixed)}件）")
 
     # TOPIX は軽いので取得済み範囲の外側だけ取り直す
     if "topix" in args.what:

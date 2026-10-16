@@ -342,3 +342,139 @@ def merge_into_years(data_dir: str, kind: str, new_df, date_col: str = "Date") -
         written.append(p)
 
     return written
+
+# --------------------------------------------------------------------------- #
+# 分割・併合の後の調整後の値の付け直し
+# --------------------------------------------------------------------------- #
+
+#: 分割・併合の係数の列（J-Quants の AdjFactor）。権利落ち日の行に入り、その日より前の行の株価に掛ける
+#: （1:2 の分割なら 0.5、10:1 の併合なら 10）。係数が無い行（NaN）は 1 とみなす
+FACTOR_COL = "AdjFactor"
+#: 調整後の列 -> 素の列。株価は係数を掛け、出来高は割る
+ADJ_PRICE = {"AdjO": "O", "AdjH": "H", "AdjL": "L", "AdjC": "C"}
+ADJ_VOLUME = {"AdjVo": "Vo"}
+
+
+def split_codes(df) -> List[str]:
+    """係数が 1 でない行（分割・併合の権利落ち日）のある銘柄。"""
+    import pandas as pd
+
+    if df is None or not len(df) or FACTOR_COL not in df.columns or "Code" not in df.columns:
+        return []
+    f = pd.to_numeric(df[FACTOR_COL], errors="coerce")
+    hit = f.notna() & (f > 0) & (f != 1.0)
+    return sorted(df.loc[hit, "Code"].astype(str).str.strip().unique().tolist())
+
+
+def cumulative_factor(df):
+    """
+    行ごとの「その日より後の分割・併合の係数の積」（銘柄ごと、日付の昇順）。
+    調整後の株価 = 素の株価 × この値。係数は権利落ち日の行にあり、その日自身の行には掛けない。
+    """
+    import numpy as np
+    import pandas as pd
+
+    f = pd.to_numeric(df[FACTOR_COL], errors="coerce") if FACTOR_COL in df.columns else pd.Series(np.nan, index=df.index)
+    f = f.where(f.notna() & (f > 0), 1.0).astype(float)
+    order = df.sort_values(["Code", "Date"], kind="stable").index
+    fo = f.loc[order]
+    codes = df.loc[order, "Code"]
+    # 包含の累積積（その日まで）と銘柄の総積から、「その日より後」の積を出す
+    upto = fo.groupby(codes, sort=False).cumprod()
+    total = fo.groupby(codes, sort=False).transform("prod")
+    cum = (total / upto).reindex(df.index)
+    return cum
+
+
+def readjust_bars(df):
+    """
+    調整後の列（AdjO/AdjH/AdjL/AdjC/AdjVo）を、素の値と係数から作り直す。
+
+    差分で取り足した日次バーは、取得した時点の違いで AdjC ÷ C の比が食い違う（分割の前に取った行は未調整の
+    まま）。係数の列があれば、どの行もその日より後の係数の積で揃えられる。素の値が無い行は元のまま。
+    戻り値: (作り直した DataFrame, info)。info は行数・係数のある銘柄数・AdjC が変わった行数・変わった行の相対差の最大。
+    """
+    import numpy as np
+    import pandas as pd
+
+    out = df.copy()
+    info = {"rows": int(len(out)), "codes_with_factor": 0, "changed": 0, "max_rel_diff": 0.0}
+    if not len(out) or FACTOR_COL not in out.columns:
+        return out, info
+    out["Date"] = pd.to_datetime(out["Date"])
+    cum = cumulative_factor(out)
+    info["codes_with_factor"] = len(split_codes(out))
+    before = pd.to_numeric(out["AdjC"], errors="coerce") if "AdjC" in out.columns else None
+    for adj, raw in ADJ_PRICE.items():
+        if raw in out.columns:
+            r = pd.to_numeric(out[raw], errors="coerce")
+            new = r * cum
+            old = pd.to_numeric(out[adj], errors="coerce") if adj in out.columns else pd.Series(np.nan, index=out.index)
+            out[adj] = new.where(r.notna(), old)
+    for adj, raw in ADJ_VOLUME.items():
+        if raw in out.columns:
+            r = pd.to_numeric(out[raw], errors="coerce")
+            new = r / cum
+            old = pd.to_numeric(out[adj], errors="coerce") if adj in out.columns else pd.Series(np.nan, index=out.index)
+            out[adj] = new.where(r.notna(), old)
+    if before is not None and "AdjC" in out.columns:
+        after = pd.to_numeric(out["AdjC"], errors="coerce")
+        both = before.notna() & after.notna() & (before != 0)
+        rel = ((after - before).abs() / before.abs()).where(both, 0.0)
+        changed = rel > 1e-9
+        info["changed"] = int(changed.sum())
+        info["max_rel_diff"] = float(rel.max()) if len(rel) else 0.0
+    return out, info
+
+
+def readjust_store(data_dir: str, codes: Iterable[str]) -> List[str]:
+    """
+    年別ファイルに保存した日次バーのうち、指定の銘柄の調整後の値を全期間で作り直す。
+    分割・併合の係数が来た日に呼ぶ（jq_bulk の差分取得）。値が変わった年のファイルだけ書き換え、その一覧を返す。
+    """
+    import pandas as pd
+
+    codes = sorted({str(c).strip() for c in codes})
+    if not codes:
+        return []
+    paths = sorted(glob.glob(os.path.join(data_dir, "bars_*.parquet")))
+    parts = []
+    for p in paths:
+        d = pd.read_parquet(p)
+        if "Code" not in d.columns:
+            continue
+        sel = d[d["Code"].astype(str).str.strip().isin(codes)].copy()
+        if len(sel):
+            sel["_path"] = p
+            parts.append(sel)
+    if not parts:
+        return []
+    sub = pd.concat(parts, ignore_index=True)
+    sub["Date"] = pd.to_datetime(sub["Date"])
+    fixed, _ = readjust_bars(sub)
+    written: List[str] = []
+    cols = [c for c in list(ADJ_PRICE) + list(ADJ_VOLUME) if c in fixed.columns]
+    for p, grp in fixed.groupby("_path", sort=False):
+        d = pd.read_parquet(p)
+        d["Date"] = pd.to_datetime(d["Date"])
+        key = d["Code"].astype(str).str.strip() + "|" + d["Date"].dt.strftime("%Y-%m-%d")
+        gkey = grp["Code"].astype(str).str.strip() + "|" + grp["Date"].dt.strftime("%Y-%m-%d")
+        pos = pd.Series(d.index, index=key)
+        pos = pos[~pos.index.duplicated(keep="last")]
+        idx = pos.reindex(gkey).to_numpy()
+        ok = pd.notna(idx)
+        if not ok.any():
+            continue
+        idx = idx[ok].astype(int)
+        changed = False
+        for c in cols:
+            new = pd.to_numeric(grp.loc[ok, c], errors="coerce").to_numpy(dtype=float)
+            old = pd.to_numeric(d.loc[idx, c], errors="coerce").to_numpy(dtype=float)
+            diff = ~((old == new) | (pd.isna(old) & pd.isna(new)))
+            if diff.any():
+                d.loc[idx, c] = new
+                changed = True
+        if changed:
+            d.to_parquet(p, index=False, compression="zstd")
+            written.append(p)
+    return written

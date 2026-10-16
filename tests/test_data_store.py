@@ -780,3 +780,79 @@ class TestAlignIdColumns(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+class TestReadjustBars(unittest.TestCase):
+    """
+    分割・併合の係数（AdjFactor。権利落ち日の行に入り、その日より前の株価に掛ける）から調整後の値を作り直す。
+    差分で取り足した行は取得した時点で AdjC ÷ C の比が食い違うので、どの行も「その日より後の係数の積」で揃える。
+    """
+
+    def frame(self):
+        dates = pd.to_datetime(["2026-01-05", "2026-01-06", "2026-01-07", "2026-01-08", "2026-01-09"])
+        a = pd.DataFrame({"Date": dates, "Code": "10000", "O": 100.0, "H": 110.0, "L": 90.0, "C": [100.0, 102.0, 51.0, 52.0, 0.53],
+                          "Vo": [1000.0] * 5, "AdjO": 100.0, "AdjH": 110.0, "AdjL": 90.0,
+                          "AdjC": [100.0, 102.0, 51.0, 52.0, 0.53], "AdjVo": [1000.0] * 5,
+                          "AdjFactor": [1.0, 1.0, 0.5, float("nan"), 0.01]})   # 1:2 の分割（1/07）と 1:100（1/09）
+        b = pd.DataFrame({"Date": dates, "Code": "20000", "O": 10.0, "H": 11.0, "L": 9.0, "C": 10.0, "Vo": 5.0,
+                          "AdjO": 10.0, "AdjH": 11.0, "AdjL": 9.0, "AdjC": 10.0, "AdjVo": 5.0, "AdjFactor": 1.0})
+        return pd.concat([a, b], ignore_index=True)
+
+    def test_cumulative_factor_is_the_product_of_later_factors(self):
+        df = self.frame()
+        cum = data_store.cumulative_factor(df)
+        self.assertEqual(cum.iloc[:5].round(6).tolist(), [0.005, 0.005, 0.01, 0.01, 1.0])   # 1/07 以前は 0.5×0.01
+        self.assertEqual(cum.iloc[5:].tolist(), [1.0] * 5)
+        self.assertEqual(data_store.split_codes(df), ["10000"])
+        self.assertEqual(data_store.split_codes(df.iloc[5:]), [])
+
+    def test_readjust_recomputes_prices_and_volume(self):
+        df = self.frame()
+        out, info = data_store.readjust_bars(df)
+        self.assertEqual(out["AdjC"].iloc[:5].round(6).tolist(), [0.5, 0.51, 0.51, 0.52, 0.53])   # 段差が消える
+        self.assertEqual(out["AdjH"].iloc[:5].round(6).tolist(), [0.55, 0.55, 1.1, 1.1, 110.0])
+        self.assertEqual(out["AdjVo"].iloc[:5].round(3).tolist(), [200000.0, 200000.0, 100000.0, 100000.0, 1000.0])
+        self.assertEqual(out["AdjC"].iloc[5:].tolist(), [10.0] * 5)                           # 係数の無い銘柄はそのまま
+        self.assertEqual(info["codes_with_factor"], 1)
+        self.assertEqual(info["changed"], 4)
+        self.assertEqual(df["AdjC"].iloc[0], 100.0)                                           # 元は変えない
+
+    def test_rows_without_raw_values_keep_their_adjusted_values(self):
+        df = self.frame()
+        df.loc[0, "C"] = float("nan")
+        out, _ = data_store.readjust_bars(df)
+        self.assertEqual(out["AdjC"].iloc[0], 100.0)
+
+    def test_no_factor_column_is_a_noop(self):
+        df = self.frame().drop(columns=["AdjFactor"])
+        out, info = data_store.readjust_bars(df)
+        self.assertEqual(out["AdjC"].tolist(), df["AdjC"].tolist())
+        self.assertEqual(info["changed"], 0)
+
+    def test_order_does_not_matter(self):
+        df = self.frame().sample(frac=1.0, random_state=0)
+        out, _ = data_store.readjust_bars(df)
+        out = out.sort_values(["Code", "Date"]).reset_index(drop=True)
+        self.assertEqual(out["AdjC"].iloc[:5].round(6).tolist(), [0.5, 0.51, 0.51, 0.52, 0.53])
+
+    def test_store_rewrites_only_files_with_changes(self):
+        d = tempfile.mkdtemp()
+        try:
+            df = self.frame()
+            df.loc[:1, "Date"] = pd.to_datetime(["2025-12-29", "2025-12-30"])
+            df.loc[5:6, "Date"] = pd.to_datetime(["2025-12-29", "2025-12-30"])
+            for year, part in df.groupby(df["Date"].dt.year):
+                part.to_parquet(data_store.year_path(d, "bars", int(year)), index=False)
+            written = data_store.readjust_store(d, ["10000"])
+            self.assertEqual(sorted(os.path.basename(w) for w in written), ["bars_2025.parquet", "bars_2026.parquet"])
+            y25 = pd.read_parquet(data_store.year_path(d, "bars", 2025)).sort_values(["Code", "Date"])
+            self.assertEqual(y25[y25["Code"] == "10000"]["AdjC"].round(6).tolist(), [0.5, 0.51])
+            self.assertEqual(y25[y25["Code"] == "20000"]["AdjC"].tolist(), [10.0, 10.0])
+            self.assertEqual(data_store.readjust_store(d, ["10000"]), [])           # 2回目は変わらない
+            self.assertEqual(data_store.readjust_store(d, ["99999"]), [])           # 無い銘柄
+        finally:
+            shutil.rmtree(d, ignore_errors=True)
+
+    def test_ingestion_keeps_the_factor_column(self):
+        import jq_bulk as J
+        self.assertIn("AdjFactor", J.BAR_COLS)

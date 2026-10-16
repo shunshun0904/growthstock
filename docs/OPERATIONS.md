@@ -20,6 +20,13 @@
 | 有報の年次財務 | `edinet_fin.parquet` / `edinet_companies.parquet` / `edinet_manifest.json` | GitHub Release（`data-raw`） | 毎日 10:10 JST に Routine が起動 | EDINET DB は 100/日・900/月の枠しか無いので、毎日 85社ずつ差分で貯める（`docs/DATA_EDINETDB.md`）。**まだ研究用で、本番の特徴量には入っていない** |
 | 有報・半期報告書の損益（画面） | `public/data/filings.json`（git）/ 索引・控え `edinet_filings_index.json` / `edinet_filings_cache.json`（Release `data-raw`） | git / Release | 毎晩の予測の後に `Fetch Filings` が workflow_run で続けて走る | 金融庁 EDINET の公式 API から候補銘柄の最新の有報・半期報告書を取り、売上原価・販管費まで分けた損益を「決算サンキー」のタブに出す（`docs/DATA_EDINET_API.md`）。鍵は Secrets `EDINET_FSA_API_KEY`。**2026-10-13 からタブは画面に出していない**（運用者の指示「表示から消してくれるだけで良いです」。取り込みは続けている。`src/App.jsx` の `TABS` の `hidden` を外せば戻る） |
 
+**日次バーの分割・併合の扱い（2026-10-16 から）**: J-Quants の調整後の値（AdjO/AdjH/AdjL/AdjC/AdjVo）は「問い合わせた時点より後の
+分割・併合で割り戻した値」なので、差分で取り足した行どうしで比が食い違う（分割の前に取った過去の行は未調整のまま。2026-10-05 の
+日経225 ETF の 1:100 で気づいた。`docs/MODEL_ADOPTION_RULES.md` §61）。係数 `AdjFactor`（権利落ち日の行に入り、その日より前の株価に
+掛ける）を保存し、差分取得で係数のある行が来た日に、その銘柄の過去の調整後の値を素の値から作り直す（`data_store.readjust_bars` /
+`readjust_store`。年別ファイルを書き換えて Release に書き戻す）。既に未調整だった分は 2026-10-16 に全期間を取り直して揃えた
+（`forget=bars`）。検算は `research/exp/probe_adj_check.py`（作り直した値と J-Quants の値が一致するか）。
+
 ## 動く順番
 
 ```

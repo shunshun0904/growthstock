@@ -3643,4 +3643,9 @@ out-of-fold と日足で、公開の `predictions.json` の候補（2026-10-06�
 を手元で付け直す ＋ 既に未調整の分を一度だけ直す）。線（95）と基準の分布（OOF 全体）は今は変えず、直した後に実験100 を回し直して
 記録する。台本（e100・e100b・probe 2本）とテストは残す。規則・モデル・画面・追跡はすべてそのまま。
 
-**運用者の決定**: （未定。欠陥の直し方を提示して待つ）
+**運用者の決定（2026-10-16）: 「全期間を取り直し＋仕組みを直す」。** 実施: (1) `jq_bulk.BAR_COLS` に `AdjFactor` を足し、差分取得で
+係数のある行（権利落ち日）が来た日に、その銘柄の過去の AdjO/AdjH/AdjL/AdjC/AdjVo を素の値 × その日より後の係数の積で作り直す
+（`data_store.split_codes` / `cumulative_factor` / `readjust_bars` / `readjust_store`。テスト `tests/test_data_store.py`）。
+(2) Update Data Store を `forget=bars`・`wait=no` で起動して日次バーを全期間取り直す（契約の範囲 2016-10-17〜。約2.5時間）。
+(3) `research/exp/probe_adj_check.py` で、作り直した値と J-Quants の値が一致するか（係数の意味の検算）と、ETF の段差が消えたかを
+確かめる。(4) 直した後に実験100・100b と実運用の追跡を回し直して、この節に足す。
