@@ -14,7 +14,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { modelRows, modelGrid, pctInk, MODEL_SHORT, MODEL_FAMILY, FAMILY_JA, LABEL_JA, dayOrigin, featureLabel,
+import { modelRows, modelGrid, pctInk, scoreRange, scoreT, scoreColor, scoreInk, SCORE_COLORS, MODEL_SHORT, MODEL_FAMILY, FAMILY_JA, LABEL_JA, dayOrigin, featureLabel,
   earningsNote, earningsSummary } from '../src/lib/predictions.js';
 
 const models = [
@@ -171,4 +171,39 @@ test('earningsSummary: 持つ間に決算が来る候補の数。項目の無い
   assert.deepEqual(earningsSummary(rows, 20), { total: 3, known: 2, soon: 1 });
   assert.equal(earningsSummary([{ code: 'old' }], 20), null);
   assert.equal(earningsSummary(null, 20), null);
+});
+
+// スコアそのものの表（運用者の依頼 2026-10-16）: 色の物差しは予測ファイルの全候補・12本で1つ
+test('scoreRange: 全候補・全モデルのスコアの最小〜最大。スコアが無ければ null', () => {
+  const cands = [
+    { byModel: { lgbm: { score: 0.2, pctHistorical: 50 }, xgb_k18: { score: 0.05 } } },
+    { byModel: { cat_k15: { score: 0.61 }, logit: { score: null }, mlp: {} } },
+    { date: '2026-10-16' },
+  ];
+  assert.deepEqual(scoreRange(cands), { lo: 0.05, hi: 0.61, n: 3 });
+  assert.equal(scoreRange([]), null);
+  assert.equal(scoreRange([{ byModel: { lgbm: { pctHistorical: 90 } } }]), null);
+  assert.equal(scoreRange(null), null);
+});
+
+test('scoreColor / scoreInk: 最小は暗い青、最大は白に近い青、範囲の外は端に揃え、値が無ければ薄い地', () => {
+  const r = { lo: 0.1, hi: 0.5, n: 2 };
+  const lo = `rgb(${SCORE_COLORS.lo.join(', ')})`;
+  const hi = `rgb(${SCORE_COLORS.hi.join(', ')})`;
+  assert.equal(scoreColor(0.1, r), lo);
+  assert.equal(scoreColor(0.5, r), hi);
+  assert.equal(scoreColor(0.0, r), lo);                                   // 範囲の外は端
+  assert.equal(scoreColor(0.9, r), hi);
+  const mid = { lo: 0, hi: 0.4, n: 2 };
+  assert.equal(scoreT(0.2, mid), 0.5);
+  assert.equal(scoreColor(0.2, mid), 'rgb(125, 146, 196)');               // 中間（丸め）
+  assert.equal(scoreT(0.3, { lo: 0.3, hi: 0.3, n: 1 }), 1);               // 幅が 0 なら最大と同じ
+  assert.equal(scoreColor(NaN, r), 'var(--bg-input)');
+  assert.equal(scoreColor(0.3, null), 'var(--bg-input)');
+  assert.equal(scoreInk(0.2, mid), 'var(--bg)');                          // 上半分は暗い字
+  assert.equal(scoreInk(0.19, mid), 'var(--text)');
+  assert.equal(scoreInk(0.5, r), 'var(--bg)');
+  assert.equal(scoreInk(undefined, r), 'var(--text-faint)');
+  // 同じ範囲なら、モデルやラベルが違っても同じスコアは同じ色（横断の物差し）
+  assert.equal(scoreColor(0.42, r), scoreColor(0.42, { ...r }));
 });

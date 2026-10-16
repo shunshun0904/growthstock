@@ -396,6 +396,13 @@ input[type='range']::-moz-range-thumb {
 .pred-ms-legend i { display: inline-block; width: 7px; height: 8px; border-radius: 1px; }
 .pred-ms-legend i + i { margin-left: -2px; }
 .pct-sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; }
+/* スコアの色の物差し（最小〜最大の帯。運用者の依頼 2026-10-16）。pred-ms-legend の並びに置く */
+.pred-ms-grad { gap: 4px; }
+.pred-ms-grad i { width: 36px; height: 8px; border-radius: 2px; }
+.pred-ms-grad i + i { margin-left: 0; }
+.pred-ms-grad em { font-style: normal; font-size: 9px; color: var(--text-faint); }
+.pred-detail p.sub .pred-ms-grad { margin-left: 6px; vertical-align: middle; }
+.pred-metric .btn { padding: 2px 8px; }
 /* 表: 行 = ラベル（1.2σ = 本番 / 1.5σ / 1.8σ）、列 = 学習器。マスの地は百分位の区分の色、字の色は
    pctInk（明るい地に暗い字）。列の数は --mg-cols（古い予測ファイルは NN の列が付くことがある） */
 .pred-mg { display: inline-grid; align-items: center; gap: 2px;

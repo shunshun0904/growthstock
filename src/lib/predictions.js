@@ -301,6 +301,54 @@ export function pctInk(pct) {
   return t >= 60 ? 'var(--bg)' : 'var(--text)';
 }
 
+/**
+ * スコアそのものの色（運用者の依頼 2026-10-16「目的変数横断での比較ができないので、モデルのスコア自体も表示してほしい。
+ * 同じ形式で、青白の濃淡でモデル×目的変数横断で色付け」）。
+ *
+ * 百分位は各モデル自身の分布での位置なので、ラベル（1.2σ / 1.5σ / 1.8σ）をまたいで水準を比べられない。スコアの表は
+ * 12本すべて・予測ファイルの全候補で **1つの物差し**（最小〜最大の線形）にし、同じ色が同じスコアを表すようにする。
+ * 色相は百分位の表と同じ青の濃淡（暗い画面なので明るいほど高い）。SCORE_COLORS は --pct-0 / --pct-95 と同じ値。
+ */
+export const SCORE_COLORS = { lo: [30, 58, 138], hi: [219, 234, 254] };   // #1e3a8a → #dbeafe
+
+/** 予測ファイルの全候補・全モデルのスコアの範囲。スコアが1つも無ければ null。 */
+export function scoreRange(candidates) {
+  let lo = Infinity;
+  let hi = -Infinity;
+  let n = 0;
+  for (const c of candidates || []) {
+    for (const v of Object.values(c?.byModel || {})) {
+      const x = v?.score;
+      if (!Number.isFinite(x)) continue;
+      n += 1;
+      if (x < lo) lo = x;
+      if (x > hi) hi = x;
+    }
+  }
+  return n ? { lo, hi, n } : null;
+}
+
+/** 範囲の中の位置（0〜1）。範囲が無い・値が無ければ null。範囲の幅が 0 なら 1（最大と同じ）。 */
+export function scoreT(score, range) {
+  if (!range || !Number.isFinite(score)) return null;
+  if (range.hi <= range.lo) return 1;
+  return Math.min(1, Math.max(0, (score - range.lo) / (range.hi - range.lo)));
+}
+
+export function scoreColor(score, range) {
+  const t = scoreT(score, range);
+  if (t === null) return 'var(--bg-input)';
+  const c = SCORE_COLORS.lo.map((a, i) => Math.round(a + (SCORE_COLORS.hi[i] - a) * t));
+  return `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
+}
+
+/** スコアのマスの字の色。明るい地（上半分）は暗い字、暗い地は明るい字。 */
+export function scoreInk(score, range) {
+  const t = scoreT(score, range);
+  if (t === null) return 'var(--text-faint)';
+  return t >= 0.5 ? 'var(--bg)' : 'var(--text)';
+}
+
 /** ラベル違いの接尾辞（research/models.py の VARIANTS）。無ければ本番のラベル（1.2σ）。 */
 const LABEL_SUFFIX = [['_k15', 'k15'], ['_k18', 'k18']];
 export const LABEL_JA = { base: '1.2σ', k15: '1.5σ', k18: '1.8σ' };

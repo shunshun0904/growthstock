@@ -108,6 +108,19 @@ check((await naCells.count()) === 1 && ((await naCells.textContent()) || '').inc
 check((await page.locator('.pred-ms-i').count()) === 0, 'モデル別の縦棒は出さない');
 check(!predBody.includes('12本の合意'), '12本の合意（平均）は出さない');
 check(predBody.includes('決定木系') && predBody.includes('ラベル1.8σ'), '塊の名前が一覧パネルに出る');
+
+// 同じ表でスコアそのものに切り替えられる（運用者の依頼 2026-10-16「目的変数横断での比較ができないので、モデルのスコア自体も
+// 表示してほしい。同じ形式で、青白の濃淡でモデル×目的変数横断で色付け」）。色の物差しは全候補・12本で1つ（最小〜最大の帯）
+await page.locator('.pred-metric button', { hasText: 'スコア' }).click();
+const scoreVals = await firstGrid.locator('.c').allTextContents();
+check(scoreVals.length === 12 && scoreVals.every((v) => /^\d\.\d{2}$/.test(v)),
+      `スコアに切り替えると1件目の12マスが小数2桁のスコアになる (実際: ${scoreVals.slice(0, 3).join(',')}…)`);
+check((await page.locator('.pred-row').first().locator('.pred-ms .lab').textContent()).includes('モデル別のスコア'),
+      '見出しが「モデル別のスコア」になる');
+check((await page.locator('.pred-row').first().locator('.pred-ms-grad i').count()) === 1, 'スコアの色の物差し（最小〜最大の帯）が見出しに出る');
+await page.locator('.pred-metric button', { hasText: '百分位' }).click();
+check((await firstGrid.locator('.c').allTextContents()).join(',') === '85,96,98,56,84,97,97,54,81,94,95,51',
+      '百分位に戻すと元の値');
 check(predBody.includes('並べているモデル'), 'モデル一覧パネルが表示される');
 check(predBody.includes('LightGBM（1.5σ）') && predBody.includes('ロジスティック回帰（1.8σ）'),
   '12本の日本語名が出る');
@@ -169,8 +182,14 @@ check(detail.includes('モデル別の見立て'), '詳細にモデル別の見�
 check(detail.includes('タイムマシーンで見る') && !detail.includes('8軸オクタゴン'),
       '詳細の送るボタンはタイムマシーン行き（8軸オクタゴン比較のタブは隠した）');
 check(detail.includes('混ぜていません'), 'アンサンブルではないと明示される');
-const bigCells = await page.locator('.pred-detail .pred-mg.lg .c').allTextContents();
+const bigGrids = page.locator('.pred-detail .pred-mg.lg');
+check((await bigGrids.count()) === 2, `詳細には百分位とスコアの2つの表が出る (実際: ${await bigGrids.count()})`);
+const bigCells = await bigGrids.nth(0).locator('.c').allTextContents();
 check(bigCells.length === 12 && bigCells[0] === '85.0', `詳細に12本の表（小数1桁）が出る (実際: ${bigCells.slice(0, 3).join(',')}…)`);
+const bigScores = await bigGrids.nth(1).locator('.c').allTextContents();
+check(bigScores.length === 12 && bigScores.every((v) => /^\d\.\d{3}$/.test(v)),
+      `詳細のスコアの表は12本・小数3桁 (実際: ${bigScores.slice(0, 3).join(',')}…)`);
+check(detail.includes('スコアそのもの') && detail.includes('1つの物差し'), '詳細にスコアの表の読み方（12本・全候補で1つの物差し）が出る');
 check(detail.includes('1.2σ（本番）'), '詳細の表は 1.2σ の行に「本番」と出る');
 check(/並び順\s*1\.5σ の3本の最小\s*（83\.6）/.test(detail) && /帯の基準\s*LightGBM（1\.2σ）\s*（1 \/ 5 位）/.test(detail),
       '詳細に並び順の物差し（1.5σ の3本の最小）と帯の基準（1.2σ の LightGBM の順位）が分けて出る');
