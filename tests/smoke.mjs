@@ -189,7 +189,11 @@ check(bigCells.length === 12 && bigCells[0] === '85.0', `詳細に12本の表（
 const bigScores = await bigGrids.nth(1).locator('.c').allTextContents();
 check(bigScores.length === 12 && bigScores.every((v) => /^\d\.\d{3}$/.test(v)),
       `詳細のスコアの表は12本・小数3桁 (実際: ${bigScores.slice(0, 3).join(',')}…)`);
-check(detail.includes('スコアそのもの') && detail.includes('1つの物差し'), '詳細にスコアの表の読み方（12本・全候補で1つの物差し）が出る');
+check(detail.includes('スコアそのもの') && detail.includes('この表の12本の中の最小〜最大'),
+      '詳細にスコアの表の読み方（色はこの表の12本の中の最小〜最大）が出る');
+// 百分位の表とスコアの表は上下に並べたとき列がそろう（列の最小幅を数字の幅に依らない値にした。2026-10-16）
+const gridWidths = await bigGrids.evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
+check(gridWidths.length === 2 && gridWidths[0] === gridWidths[1], `詳細の2つの表は同じ幅 (実際: ${gridWidths.join(' / ')})`);
 check(detail.includes('1.2σ（本番）'), '詳細の表は 1.2σ の行に「本番」と出る');
 check(/並び順\s*1\.5σ の3本の最小\s*（83\.6）/.test(detail) && /帯の基準\s*LightGBM（1\.2σ）\s*（1 \/ 5 位）/.test(detail),
       '詳細に並び順の物差し（1.5σ の3本の最小）と帯の基準（1.2σ の LightGBM の順位）が分けて出る');

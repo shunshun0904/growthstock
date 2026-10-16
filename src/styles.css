@@ -341,10 +341,12 @@ input[type='range']::-moz-range-thumb {
   padding: var(--s3) 0 var(--s4);
   border-bottom: 1px solid var(--border-soft);
 }
-.pred-strip > div { display: flex; align-items: center; gap: var(--s2); }
+.pred-strip > div { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
 .pred-strip .lab, .pred-cell .lab, .pred-split .lab {
   font-size: 11px; letter-spacing: 0.04em; color: var(--text-faint);
 }
+/* 見出しは縮めない。狭い画面で項目が折り返すとき、見出しが1文字ずつ縦に割れていた（2026-10-16） */
+.pred-strip .lab { white-space: nowrap; flex: 0 0 auto; }
 .pred-strip .sep, .pred-dl .sep { color: var(--text-faint); margin: 0 6px; }
 .pred-days { display: flex; gap: 2px; flex-wrap: wrap; }
 .pred-days .btn.on {
@@ -406,7 +408,8 @@ input[type='range']::-moz-range-thumb {
 /* 表: 行 = ラベル（1.2σ = 本番 / 1.5σ / 1.8σ）、列 = 学習器。マスの地は百分位の区分の色、字の色は
    pctInk（明るい地に暗い字）。列の数は --mg-cols（古い予測ファイルは NN の列が付くことがある） */
 .pred-mg { display: inline-grid; align-items: center; gap: 2px;
-  grid-template-columns: auto repeat(var(--mg-cols, 4), minmax(26px, 1fr));
+  /* 列の最小幅は「0.68」（スコア）が入る幅（38px）。百分位の表（「100」）と同じ幅になり、上下に並べても列がそろう（2026-10-16） */
+  grid-template-columns: auto repeat(var(--mg-cols, 4), minmax(38px, 1fr));
   font-size: 11px; line-height: 1; font-variant-numeric: tabular-nums; }
 .pred-mg .h { font-size: 10px; letter-spacing: 0.02em; color: var(--text-faint); text-align: center; }
 .pred-mg .r { font-size: 10px; color: var(--text-faint); text-align: right; padding-right: 3px;
@@ -414,7 +417,7 @@ input[type='range']::-moz-range-thumb {
 .pred-mg .c { text-align: center; padding: 3px 2px; border-radius: 2px; font-weight: 600; }
 .pred-mg .c.na { color: var(--text-faint); background: var(--bg-input); font-weight: 400; }
 .pred-mg.lg { gap: 3px; font-size: 13px;
-  grid-template-columns: auto repeat(var(--mg-cols, 4), minmax(52px, 1fr)); }
+  grid-template-columns: auto repeat(var(--mg-cols, 4), minmax(60px, 1fr)); }
 .pred-mg.lg .h, .pred-mg.lg .r { font-size: 11px; }
 .pred-mg.lg .c { padding: 6px 4px; }
 
@@ -545,9 +548,12 @@ input[type='range']::-moz-range-thumb {
 .strat-metric .lab { font-size: 11px; color: var(--text-faint); }
 .strat-metric .num { font-size: 14px; font-weight: 600; }
 .strat-metric .sub { font-size: 10px; }
-/* 今日の戦略のカードの中の表。見出しは表の上の行にそろえる */
+/* 今日の戦略のカードの中の表。見出しは表の上の行にそろえる。百分位の表とスコアの表を上下に並べたとき列がそろうよう、
+   見出しの幅をそろえ、スコアの物差し（最小〜最大の帯）は見出しの下の行に置く（2026-10-16） */
 .strat-metric.strat-mg { align-items: flex-start; }
-.strat-metric.strat-mg .lab { padding-top: 2px; }
+.strat-metric.strat-mg .lab { padding-top: 2px; flex: 0 0 auto; min-width: 112px;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 3px; }
+.strat-metric.strat-mg .pred-ms-legend { margin-left: 0; }
 .strat-steps { margin: 12px 0 0; padding-left: 20px; color: var(--text-dim); font-size: 12px; }
 .strat-steps li { margin: 3px 0; }
 .strat-empty { margin-top: 4px; }

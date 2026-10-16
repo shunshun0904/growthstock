@@ -33,7 +33,6 @@ export default function PredictionView({ data, history, featureNames, onSendToOc
   // モデル別の表に出す値: 百分位（各モデル自身の分布での位置）か、スコアそのもの（運用者の依頼 2026-10-16）。
   // スコアの色の物差しは予測ファイルの全候補・12本で1つ（scoreRange）
   const [metric, setMetric] = useState('pct');
-  const range = useMemo(() => scoreRange(data?.candidates), [data]);
 
   // 1.5σ の3本の最小が高い順（orderRows）。各行に order（並び順）と ruleMin（最小）が付く
   const rows = useMemo(
@@ -53,7 +52,7 @@ export default function PredictionView({ data, history, featureNames, onSendToOc
 
   return (
     <div className="pred">
-      <StrategyPanel signal={signal} near={near} day={day} models={data?.models} metric={metric} range={range}
+      <StrategyPanel signal={signal} near={near} day={day} models={data?.models}
                      onSend={(c) => onSendToOctagon(candidateToStock(c))}
                      sentIds={sentIds} />
 
@@ -81,7 +80,7 @@ export default function PredictionView({ data, history, featureNames, onSendToOc
             <span className="lab">候補</span>
             <strong className="num">{rows.length}</strong> 銘柄
           </div>
-          <div title="モデル別の表に出す値。百分位 = 各モデル自身の過去スコア分布での位置（ラベルをまたいで水準は比べられない）。スコア = モデルが出した確率そのもの（色は12本・全候補で1つの物差し）">
+          <div title="一覧の行の表に出す値。百分位 = 各モデル自身の過去スコア分布での位置（ラベルをまたいで水準は比べられない）。スコア = モデルが出した確率そのもの（色はその表の12本の中の最小〜最大）。今日の戦略の札と行を開いた詳しい欄は両方を出す">
             <span className="lab">モデル別の表</span>
             <div className="pred-days pred-metric">
               <button className={`btn btn-ghost${metric === 'pct' ? ' on' : ''}`} onClick={() => setMetric('pct')}>百分位</button>
@@ -153,7 +152,7 @@ export default function PredictionView({ data, history, featureNames, onSendToOc
 
         <div className="pred-list">
           {rows.map((c) => (
-            <Row key={c.jqCode} c={c} models={data?.models} metric={metric} range={range} featureNames={featureNames} open={openId === c.jqCode}
+            <Row key={c.jqCode} c={c} models={data?.models} metric={metric} featureNames={featureNames} open={openId === c.jqCode}
                  onToggle={() => setOpenId(openId === c.jqCode ? null : c.jqCode)}
                  onSend={() => onSendToOctagon(candidateToStock(c))}
                  sent={sentIds?.has(`pred:${c.jqCode}`)} />
@@ -178,7 +177,7 @@ export default function PredictionView({ data, history, featureNames, onSendToOc
  * 「今日は買うのか、買うなら何を、いくらで手仕舞うのか」を1か所で
  * 言い切る場所が要る。迷いどころを毎日つくらないための画面。
  */
-function StrategyPanel({ signal, near, day, models, metric = 'pct', range = null, onSend, sentIds }) {
+function StrategyPanel({ signal, near, day, models, onSend, sentIds }) {
   const { nBreak, verdict, picks, passed, buyable } = signal;
   return (
     <section className="card strat">
@@ -216,7 +215,7 @@ function StrategyPanel({ signal, near, day, models, metric = 'pct', range = null
         <>
           <div className="strat-picks">
             {picks.map((c, i) => (
-              <PickCard key={c.jqCode} c={c} n={i + 1} models={models} metric={metric} range={range}
+              <PickCard key={c.jqCode} c={c} n={i + 1} models={models}
                         onSend={() => onSend(c)}
                         sent={sentIds?.has(`pred:${c.jqCode}`)} />
             ))}
@@ -329,7 +328,7 @@ function FundNote({ c }) {
   );
 }
 
-function PickCard({ c, n, models, metric = 'pct', range = null, onSend, sent }) {
+function PickCard({ c, n, models, onSend, sent }) {
   const plan = exitPlan(c.close);
   return (
     <div className="strat-pick">
@@ -356,10 +355,17 @@ function PickCard({ c, n, models, metric = 'pct', range = null, onSend, sent }) 
           <span className="sub">百分位</span>
         </div>
         {modelRows(c, models).length > 0 ? (
-          <div className="strat-metric strat-mg">
-            <span className="lab">{metric === 'score' ? 'モデル別のスコア' : 'モデル別の百分位'}</span>
-            <ModelGrid c={c} models={models} metric={metric} range={range} />
-          </div>
+          <>
+            <div className="strat-metric strat-mg">
+              <span className="lab">モデル別の百分位</span>
+              <ModelGrid c={c} models={models} />
+            </div>
+            <div className="strat-metric strat-mg"
+                 title="各モデルが出した確率そのもの（混ぜていない）。色はこの表の12本の中の最小〜最大の線形。ラベルをまたいで水準を比べられる（運用者の依頼 2026-10-16）">
+              <span className="lab">モデル別のスコア<ScoreLegend range={scoreRange([c])} /></span>
+              <ModelGrid c={c} models={models} metric="score" />
+            </div>
+          </>
         ) : RULE_MODELS.map((a) => (
           <div key={a} className="strat-metric">
             <span className="lab">{MODEL_SHORT[a]}</span>
@@ -416,7 +422,7 @@ function EarnBadge({ c }) {
 /** 順位の数字の色。規則の線以上は緑、惜しい・際どい範囲は黄、それ未満は薄い字。最小が出せない行は基準モデルの帯の色。 */
 const RANK_INK = { pass: 'var(--green)', near: 'var(--amber)', below: 'var(--text-dim)' };
 
-function Row({ c, models, metric = 'pct', range = null, featureNames, open, onToggle, onSend, sent }) {
+function Row({ c, models, metric = 'pct', featureNames, open, onToggle, onSend, sent }) {
   const color = bandColor(c.band);
   const mr = modelRows(c, models);
   const tier = ruleMinTier(c.ruleMin);
@@ -449,9 +455,9 @@ function Row({ c, models, metric = 'pct', range = null, featureNames, open, onTo
           <span className="pred-ms">
             <span className="lab">
               {metric === 'score' ? 'モデル別のスコア' : 'モデル別の百分位'}
-              {metric === 'score' ? <ScoreLegend range={range} /> : <PctLegend />}
+              {metric === 'score' ? <ScoreLegend range={scoreRange([c])} /> : <PctLegend />}
             </span>
-            <ModelGrid c={c} models={models} metric={metric} range={range} />
+            <ModelGrid c={c} models={models} metric={metric} />
           </span>
         ) : (
           <span className="pred-bar" title={`スコア ${fmt(c.score, 4)}`}>
@@ -480,7 +486,7 @@ function Row({ c, models, metric = 'pct', range = null, featureNames, open, onTo
         </span>
       </button>
 
-      {open && <Detail c={c} models={models} range={range} featureNames={featureNames} onSend={onSend} sent={sent} />}
+      {open && <Detail c={c} models={models} featureNames={featureNames} onSend={onSend} sent={sent} />}
     </div>
   );
 }
@@ -499,14 +505,15 @@ function PctLegend() {
 }
 
 /**
- * スコアの色の物差し（12本・予測ファイルの全候補で1つ。最小〜最大の線形）。表の見出しに添える。
+ * スコアの色の物差し（その表の12本の中の最小〜最大の線形）。表の見出しに添える。
  * 運用者の依頼（2026-10-16）: 百分位では目的変数をまたいで比べられないので、スコアそのものも同じ形式で出す。
+ * 物差しは最初は予測ファイルの全候補で1つにしたが、同日の指示「この表の中での最大最小で色付けしてほしい」で表ごとに変えた。
  */
 function ScoreLegend({ range }) {
   if (!range) return null;
   return (
     <span className="pred-ms-legend pred-ms-grad"
-          title={`スコアの色は12本すべて・この予測ファイルの全候補（${range.n}個の値）で1つの物差し（最小 ${fmt(range.lo, 3)} 〜 最大 ${fmt(range.hi, 3)} の線形。明るいほど高い）。同じ色は同じスコア`}>
+          title={`スコアの色はこの表の12本（学習器 × ラベル）の中の最小 ${fmt(range.lo, 3)} 〜 最大 ${fmt(range.hi, 3)} の線形（明るいほど高い）。表をまたいでは比べない`}>
       <em className="num">{fmt(range.lo, 2)}</em>
       <i style={{ background: `linear-gradient(90deg, ${scoreColor(range.lo, range)}, ${scoreColor(range.hi, range)})` }}
          aria-hidden="true" />
@@ -517,8 +524,8 @@ function ScoreLegend({ range }) {
 
 /**
  * モデル別の百分位の表（運用者の指示 2026-10-12「12個全てを載せてほしい。棒グラフ形式でなくてよい。
- * 大小が分かればよい」）。metric='score' ならマスにスコアそのものを出し、色は 12本・全候補で1つの物差し
- * （scoreColor。運用者の依頼 2026-10-16）。
+ * 大小が分かればよい」）。metric='score' ならマスにスコアそのものを出し、色はこの表の12本の中の最小〜最大の線形
+ * （scoreColor。運用者の依頼 2026-10-16。ラベルをまたいだ水準の比較ができるように）。
  *
  * 行 = 学習に使ったラベル（1.2σ = 本番 / 1.5σ / 1.8σ）、列 = 学習器（LGB / XGB / CAT / LR）。マスの数字は
  * **そのモデル自身の**過去スコア分布での位置（百分位）、地の色は区分（明るいほど上。pctColor）。
@@ -526,10 +533,11 @@ function ScoreLegend({ range }) {
  * （payload の models 順）。予測ファイルに無いモデルのマスは「—」。
  * large は行を開いた詳しい欄（小数1桁・行の見出しに「本番」）。
  */
-function ModelGrid({ c, models, large = false, metric = 'pct', range = null }) {
+function ModelGrid({ c, models, large = false, metric = 'pct' }) {
   const g = modelGrid(c, models);
   if (!g.rows.length) return null;
   const score = metric === 'score';
+  const range = score ? scoreRange([c]) : null;   // 色の物差しはこの表の12本の中の最小〜最大
   return (
     <span className={`pred-mg${large ? ' lg' : ''}`} style={{ '--mg-cols': g.cols.length }}
           aria-label={score ? 'モデル別のスコア（行はラベル、列は学習器。色は12本・全候補で1つの物差し）'
@@ -579,7 +587,7 @@ const NUMS = [
   ['売上成長', (c) => fmtSigned(c.salesGrowth, 1)],
 ];
 
-function Detail({ c, models, range = null, featureNames, onSend, sent }) {
+function Detail({ c, models, featureNames, onSend, sent }) {
   const g = c.contrib?.groups || {};
   const maxAbs = Math.max(...Object.values(g).map(Math.abs), 0.001);
   const top = (c.contrib?.top || []).slice(0, 10);
@@ -611,10 +619,10 @@ function Detail({ c, models, range = null, featureNames, onSend, sent }) {
             <ModelGrid c={c} models={models} large />
             <p className="sub" style={{ margin: '10px 0 4px' }}>
               同じ表で<b>スコアそのもの</b>（各モデルが出した確率。混ぜていない）。色は
-              12本すべて・全候補で1つの物差しなので、ラベルをまたいで水準を比べられます。
-              1.5σ・1.8σ は正例が少ないラベルなので、同じ銘柄でもスコアは低く出るのが普通です<ScoreLegend range={range} />
+              この表の12本の中の最小〜最大の線形で、ラベルをまたいで水準を比べられます。
+              1.5σ・1.8σ は正例が少ないラベルなので、同じ銘柄でもスコアは低く出るのが普通です<ScoreLegend range={scoreRange([c])} />
             </p>
-            <ModelGrid c={c} models={models} large metric="score" range={range} />
+            <ModelGrid c={c} models={models} large metric="score" />
             <div className="pred-split" style={{ marginTop: 10 }}>
               <span>
                 <span className="lab">上位10%と見たモデル</span>
