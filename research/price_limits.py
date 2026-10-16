@@ -139,8 +139,14 @@ def _locate(arrays: Dict, code: str, day) -> Tuple[Optional[Dict], int]:
     return a, i
 
 
+#: 減衰つきの回数の減衰率（1営業日あたり）。0.98 で半減期は約34営業日（0.98^34 ≒ 0.50）
+DECAY = 0.98
+#: 前 n 営業日の回数も出す窓（past より短いもの）
+EXTRA_WINDOWS = (60, 120)
+
+
 def limit_events(arrays: Dict, keys: pd.DataFrame, hold: int = 20, past: int = 250,
-                 partial: bool = False) -> pd.DataFrame:
+                 partial: bool = False, decay: float = DECAY, extra_windows: Sequence[int] = EXTRA_WINDOWS) -> pd.DataFrame:
     """
     (Code, Date) ごとに、基準日 Date のあとの hold 営業日（翌営業日 = 1日目）と、前の past 営業日のストップ高を数える。
 
@@ -157,6 +163,8 @@ def limit_events(arrays: Dict, keys: pd.DataFrame, hold: int = 20, past: int = 2
       fwd_known   同じ期間で判定できた日の数
       ul_past_n   基準日の前 past 営業日のストップ高の日数、past_bars その期間にあった日足の数、ul_past20_n 前20営業日の日数
       ul_days_since  基準日の前 past 営業日の中で最後のストップ高から基準日までの営業日数（1 = 前営業日。無ければ NaN）
+      ul_past<n>_n   extra_windows の n ごとに、前 n 営業日の日数（n < past）
+      ul_decay       前 past 営業日のストップ高の日に decay^（基準日までの営業日数）の重みを付けた和（直近ほど重い。基準日は含めない）
     """
     need = keys[["Code", "Date"]].drop_duplicates()
     rows = []
@@ -164,7 +172,9 @@ def limit_events(arrays: Dict, keys: pd.DataFrame, hold: int = 20, past: int = 2
     for code, day in need.itertuples(index=False):
         rec = {"Code": str(code), "Date": pd.Timestamp(day), "ul_t": nan, "fwd_ok": 0.0, "fwd_days": nan, "ul_fwd": nan,
                "ul_fwd_n": nan, "ul_fwd_first": nan, "ulc_fwd": nan, "ulc_fwd_n": nan, "ll_fwd": nan, "fwd_known": nan,
-               "ul_past_n": nan, "past_bars": nan, "ul_past20_n": nan, "ul_days_since": nan}
+               "ul_past_n": nan, "past_bars": nan, "ul_past20_n": nan, "ul_days_since": nan, "ul_decay": nan}
+        for n_win in extra_windows:
+            rec[f"ul_past{n_win}_n"] = nan
         a, i = _locate(arrays, code, day)
         if a is None or i < 0:
             rows.append(rec)
@@ -193,6 +203,9 @@ def limit_events(arrays: Dict, keys: pd.DataFrame, hold: int = 20, past: int = 2
         rec["ul_past20_n"] = float(a["ul"][max(0, i - 20):i].sum())
         hits = np.flatnonzero(a["ul"][lo:i])
         rec["ul_days_since"] = float(i - (lo + hits[-1])) if len(hits) else nan
+        rec["ul_decay"] = float(np.sum(decay ** (i - (lo + hits)))) if len(hits) else 0.0
+        for n_win in extra_windows:
+            rec[f"ul_past{n_win}_n"] = float(a["ul"][max(0, i - n_win):i].sum())
         rows.append(rec)
     out = pd.DataFrame(rows)
     k = keys[["Code", "Date"]].copy()
