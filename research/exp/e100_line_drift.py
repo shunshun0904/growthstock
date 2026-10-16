@@ -540,10 +540,10 @@ def main(argv=None) -> int:
     screen = screen_dists(PRED_PATH, args.live_from, args.live_to, list(RULE_MODELS) + ["lgbm", "xgb", "cat"])
     with open(PRED_PATH, encoding="utf-8") as fh:
         pj = json.load(fh)
-    disp = {(str(r["code"]), str(r["date"])): r["byModel"][MAIN]["pctHistorical"]
+    disp = {(str(r["code"])[:4], str(r["date"])): r["byModel"][MAIN]["pctHistorical"]
             for r in pj.get("candidates", []) if MAIN in (r.get("byModel") or {})}
     diffs = [abs(float(pc_live[MAIN][i]) - float(disp[k])) for i, k in
-             enumerate(zip(live["Code"], live["Date"].dt.strftime("%Y-%m-%d"))) if k in disp and disp[k] is not None]
+             enumerate(zip(live["Code"].str[:4], live["Date"].dt.strftime("%Y-%m-%d"))) if k in disp and disp[k] is not None]
     rescore_maxdiff = max(diffs) if diffs else np.nan
 
     # §1 OOF の時期ごと

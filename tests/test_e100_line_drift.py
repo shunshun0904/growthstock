@@ -17,6 +17,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "research"))
 sys.path.insert(0, os.path.join(ROOT, "research", "exp"))
 import e100_line_drift as E  # noqa: E402
+import e100b_nk225_fix as EB  # noqa: E402
 import lab  # noqa: E402
 import live_track as LT  # noqa: E402
 
@@ -144,6 +145,52 @@ class TestContrib(unittest.TestCase):
         self.assertTrue(np.allclose(C.sum(axis=1), np.log(p / (1 - p)), atol=1e-6))
         g = E.group_sums(tbl, ["f1"], ["f2"])
         self.assertAlmostEqual(sum(g.values()), float(tbl["diff"].sum()))
+
+
+class TestSplitFix(unittest.TestCase):
+    def test_corrected_series(self):
+        dates = pd.bdate_range("2026-09-01", periods=40)
+        price = np.full(40, 40000.0)
+        price[25:] = 420.0                               # 1:100 の分割（+5% の値動き込み）
+        s = pd.Series(price, index=dates)
+        fixed, splits = EB.corrected_series(s)
+        self.assertEqual(len(splits), 1)
+        self.assertEqual(splits[0][0], dates[25])
+        self.assertAlmostEqual(splits[0][1], 40000 / 420, places=6)
+        self.assertAlmostEqual(float(fixed.iloc[0]), 400.0)   # 100 に丸めて割る
+        self.assertAlmostEqual(float(fixed.iloc[-1]), 420.0)
+        self.assertAlmostEqual(float(fixed.pct_change(20).iloc[-1]), 0.05)
+        self.assertEqual(EB.find_splits(pd.Series([1.0, 1.1, 0.9], index=dates[:3])), [])
+        self.assertEqual(EB.nice_factor(95.2), 100.0)
+        self.assertEqual(EB.nice_factor(2.1), 2.0)
+        self.assertAlmostEqual(EB.nice_factor(0.098), 0.1)        # 併合 10:1
+
+    def test_with_fixed_and_daily_pass(self):
+        dates = pd.to_datetime(["2026-10-13", "2026-10-13", "2026-10-14"])
+        rows = pd.DataFrame({"Code": ["10000", "20000", "10000"], "Date": dates,
+                             "nk225_ret_20": [-99.0] * 3, "nk225_ret_120": [-98.8] * 3, "x": [1.0, 2.0, 3.0]})
+        after = pd.DataFrame({"Date": pd.to_datetime(["2026-10-13", "2026-10-14"]),
+                              "nk225_ret_20": [2.0, 3.0], "nk225_ret_120": [25.0, 26.0]})
+        out = EB.with_fixed(rows, after, ["nk225_ret_20", "nk225_ret_120", "x"])
+        self.assertEqual(out["nk225_ret_20"].tolist(), [2.0, 2.0, 3.0])
+        self.assertEqual(out["nk225_ret_120"].tolist(), [25.0, 25.0, 26.0])
+        self.assertEqual(out["x"].tolist(), [1.0, 2.0, 3.0])
+        self.assertEqual(rows["nk225_ret_20"].tolist(), [-99.0] * 3)           # 元は変えない
+        p = {a: np.array([96.0, 50.0, 97.0]) for a in E.RULE_MODELS}
+        d = EB.daily_pass(rows, p)
+        self.assertEqual(d["n"].tolist(), [2, 1])
+        self.assertEqual(d["passed"].tolist(), [1, 1])
+
+    def test_unadjusted_splits(self):
+        dates = pd.bdate_range("2026-03-01", periods=5)
+        b = pd.DataFrame({"Date": list(dates) * 2, "Code": ["10000"] * 5 + ["20000"] * 5,
+                          "C": [100, 100, 50, 50, 50, 100, 100, 100, 100, 100],
+                          "AdjC": [100, 100, 50, 50, 50, 100, 100, 50, 50, 50]})
+        b["C"] = b["C"].astype(float)
+        b["AdjC"] = b["AdjC"].astype(float)
+        un = EB.unadjusted_splits(b)
+        self.assertEqual(list(un.keys()), ["10000"])                            # C も動いた銘柄だけ
+        self.assertEqual(un["10000"], dates[2])
 
 
 class TestReport(unittest.TestCase):
