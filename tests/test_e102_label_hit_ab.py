@@ -52,9 +52,10 @@ def label_frame(n=600, seed=0):
 
 class TestLineup(unittest.TestCase):
     def test_decided_before_running(self):
-        self.assertEqual(E.ARMS, ("CUR15", "CUR12", "HIT15", "HIT12", "TP10"))
+        self.assertEqual(E.ARMS, ("CUR15", "HIT15", "TP10"))                   # 1.2σ の腕は外した（運用者の指示 2026-10-16）
         self.assertEqual(E.BASE, "CUR15")
-        self.assertEqual(E.JUDGED, ("HIT15", "HIT12", "TP10"))
+        self.assertEqual(E.JUDGED, ("HIT15", "TP10"))
+        self.assertIn("CUR12", E.LABEL_DEFS)                                       # 引き直しの確かめにだけ使う
         self.assertEqual(E.LABEL_DEFS["HIT15"], {"kind": "sigma", "k": 1.5, "end": False, "trend": False})
         self.assertEqual(E.LABEL_DEFS["TP10"], {"kind": "tp", "target": 10.0})
         self.assertEqual((E.OUTCOME, E.MAIN_FORM, E.MAIN_Q, E.Z_MIN), ("tp10c", "top05", 0.05, 1.64))
@@ -157,7 +158,7 @@ class TestReport(unittest.TestCase):
         df = label_frame()
         df, _ = E.build_labels(df)
         cv = {"mean_pr_auc": 0.33, "std": 0.02, "mean_roc_auc": 0.64, "fold_scores": [0.31, 0.32, 0.33, 0.34, 0.35]}
-        strength = {"CUR15": 0.4, "CUR12": 0.4, "HIT15": 0.5, "HIT12": 0.45, "TP10": 0.55}
+        strength = {"CUR15": 0.4, "HIT15": 0.5, "TP10": 0.55}
         res = {"recs": {a: {"params": {"learning_rate": 0.05}, "_cv": cv, "_seconds": 5} for a in E.ARMS},
                "params": {a: {"learning_rate": 0.05} for a in E.ARMS}, "prod": {}, "shifted": {}}
         for j, a in enumerate(E.ARMS):
