@@ -26,7 +26,6 @@
   §4 画面の 3 枠の形（今の規則・上位 2 件・同時に 3 件・先着・発火を問わない）を H = 5 / 10 / 15 / 20 で回す:
       取引数・1取引の平均・勝率・到達・資金全体の月あたり（取引の収益の合計 ÷ 3 枠 ÷ 月数。複利なし）。
       窓ごとの差 H − 20（1取引の平均と、窓の月あたり）
-  §5 参考: 2026-10-16 からの指値（時価総額 1000 億円以上は +5%）で同じことを H = 10 / 20 で
   判定（先に決めた）: 次の 2 つがそろえば「10 日の案を運用者に出す」。片方だけ・どちらも無ければ結果を見せて運用者が決める
       (a) 3 枠の形で、窓ごとの「資金全体の月あたり」の差 H10 − H20 の平均が正で、H10 が上の窓が過半（n//2 + 1 以上）
       (b) §3 の窓ごとの差 B − A の平均が正で、B が上の窓が過半（切り替えたほうが、もう 10 日待つより良い）
@@ -43,7 +42,8 @@
   待つ vs 切り替える: A +1.80%（434件・到達 23.3%・−10%割れ 1.8%）/ B +1.71%（559件・到達 22.4%・−10%割れ 5.2%）。
       B − A −0.84 ± 0.74pt（4/9）。10日目に含み損の 196件でも後半は +2.03%
   3枠の形: H10 181件 +1.42%・月 +1.62% / H20 128件 +2.19%・月 +1.76%。月あたりの差 H10 − H20 −0.12 ± 0.45pt（3/9）
-  参考（時価総額の規則）: 3枠 H10 月 +1.70% / H20 月 +1.78%。月あたりの差 −0.05 ± 0.38pt（3/9）
+  参考（当日だけあった時価総額の規則 +5%。同日に取り消したので台本からは外した）: 3枠 H10 月 +1.70% / H20 月 +1.78%。
+      月あたりの差 −0.05 ± 0.38pt（3/9）
 """
 from __future__ import annotations
 
@@ -92,25 +92,19 @@ def col(prefix: str, name: str, h: int) -> str:
     return f"{prefix}{name}_h{h}"
 
 
-def attach_holds(df: pd.DataFrame, bars: pd.DataFrame, holds=HOLDS, tp: float = TP, prefix: str = "",
-                 mcap: pd.Series | None = None) -> pd.DataFrame:
+def attach_holds(df: pd.DataFrame, bars: pd.DataFrame, holds=HOLDS, tp: float = TP, prefix: str = "") -> pd.DataFrame:
     """
     保有 H 日ごとに hitday（+tp% に届いた日。1 = 買った日。届かなければ NaN）・ret（届けば +tp%、届かなければ H 日目の
-    終値の収益 %。日足が足りなければ NaN）・close（H 日目の終値の収益 %）を足す。mcap（億円）を渡すと、行ごとの指値を
-    live_track.take_profit_of で決める（2026-10-16 からの規則。tgt 列に %）。
+    終値の収益 %。日足が足りなければ NaN）・close（H 日目の終値の収益 %）を足す。tgt 列は指値（%）。
     """
     keys = df[["Code", "Date"]].copy()
-    if mcap is not None:
-        keys["mcap"] = pd.to_numeric(mcap, errors="coerce").to_numpy(dtype=float)
     out = df.copy()
     for h in holds:
         fw = LT.forward(bars, keys, target=tp, hold=h)
-        fw = fw[["Code", "Date", "hit_day", "ret", "ret_close", "target"]].rename(columns={
-            "hit_day": col(prefix, "hitday", h), "ret": col(prefix, "ret", h), "ret_close": col(prefix, "close", h),
-            "target": f"{prefix}tgt"})
-        if f"{prefix}tgt" in out.columns:
-            fw = fw.drop(columns=[f"{prefix}tgt"])
+        fw = fw[["Code", "Date", "hit_day", "ret", "ret_close"]].rename(columns={
+            "hit_day": col(prefix, "hitday", h), "ret": col(prefix, "ret", h), "ret_close": col(prefix, "close", h)})
         out = out.merge(fw, on=["Code", "Date"], how="left")
+    out[f"{prefix}tgt"] = float(tp)
     return out
 
 
@@ -285,7 +279,7 @@ def line(name: str, s: dict, width: int = 34) -> str:
             f"{s['win']:4.1f}%{hit}  −10%割れ {s['bad10']:4.1f}%") if s["n"] else f"  {LT._l(name, width)}    0件"
 
 
-def report(ft: pd.DataFrame, bar_days, prefixes=("",)) -> dict:
+def report(ft: pd.DataFrame, bar_days) -> dict:
     summary: dict = {}
     months = int(pd.to_datetime(ft["Date"]).dt.to_period("M").nunique())
     g = rule_rows(ft)
@@ -352,27 +346,6 @@ def report(ft: pd.DataFrame, bar_days, prefixes=("",)) -> dict:
         summary["trade_diffs"][h] = {"mean": dm, "capital_pm": dc}
         print(f"  窓ごとの差 H{h} − H{BASE_HOLD}: 1取引の平均 {fmt_s(dm)} / 月あたり {fmt_s(dc)}")
 
-    # ---- 5. 参考: 時価総額の規則
-    if "cap_" in prefixes:
-        print(f"\n■ 5. 参考: 2026-10-16 からの指値（時価総額 {LT.LARGE_CAP:g}億円以上は +{LT.TAKE_PROFIT_LARGE:g}%）で同じことを")
-        summary["cap"] = {"holds": {}, "trade": {}}
-        gc = g
-        for h in (ALT_HOLD, BASE_HOLD):
-            s = stats(gc[col("cap_", "ret", h)], pd.to_numeric(gc[col("cap_", "hitday", h)], errors="coerce").notna())
-            summary["cap"]["holds"][h] = s
-            print(line(f"規則の行・H = {h}日", s))
-        for h in (ALT_HOLD, BASE_HOLD):
-            s, _ = trade(ft, bar_days, h, months, prefix="cap_")
-            summary["cap"]["trade"][h] = s
-            print(line(f"3枠の形・H = {h}日", s) + f"  資金全体で月 {s['capital_pm']:+.2f}%")
-        summary["cap"]["switch"] = wait_vs_switch(g, prefix="cap_")
-        print(f"  待つ vs 切り替える: A {summary['cap']['switch']['A']['mean']:+.2f}%（{summary['cap']['switch']['A']['n']}件）/ "
-              f"B {summary['cap']['switch']['B']['mean']:+.2f}%（{summary['cap']['switch']['B']['n']}件）/ "
-              f"窓ごとの差 B − A {fmt_s(summary['cap']['switch']['diff'])}")
-        summary["cap"]["trade_diff_capital"] = trade_diff(summary["cap"]["trade"][ALT_HOLD], summary["cap"]["trade"][BASE_HOLD],
-                                                           "capital_pm")
-        print(f"  3枠の月あたりの差 H{ALT_HOLD} − H{BASE_HOLD}: {fmt_s(summary['cap']['trade_diff_capital'])}")
-
     # ---- 6. 判定
     jd = judge(summary["trade_diffs"][ALT_HOLD]["capital_pm"], ws["diff"])
     summary["judge"] = jd
@@ -386,7 +359,6 @@ def report(ft: pd.DataFrame, bar_days, prefixes=("",)) -> dict:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="実験99: 保有期間を 10 日にしたら（規則・モデルは変えない）")
-    ap.add_argument("--no-cap", action="store_true", help="時価総額の規則の参考（§5）を出さない")
     args = ap.parse_args(argv)
     t0 = time.time()
     wide, info0 = E79.load_oofs()
@@ -398,22 +370,13 @@ def main(argv=None) -> int:
     df = df[df["window"] > 0].reset_index(drop=True)
     bars = LT.load_bars(lab.DATA_DIR, start=pd.to_datetime(df["Date"]).min() - pd.Timedelta(days=10))
     df = attach_holds(df, bars)
-    prefixes = [""]
-    if not args.no_cap and "market_cap" in fr.columns:
-        mc = fr[["Code", "Date", "market_cap"]].copy()
-        mc["Code"] = mc["Code"].astype(str)
-        mc["Date"] = pd.to_datetime(mc["Date"])
-        mc = mc.drop_duplicates(["Code", "Date"])
-        m = df[["Code", "Date"]].merge(mc, on=["Code", "Date"], how="left")["market_cap"]
-        df = attach_holds(df, bars, prefix="cap_", mcap=m)
-        prefixes.append("cap_")
     n20 = int(pd.to_numeric(df[col("", "close", BASE_HOLD)], errors="coerce").notna().sum())
     log(f"出口: {BASE_HOLD}日目の終値 {n20:,}/{len(df):,}行")
     bar_days = list(pd.to_datetime(np.sort(bars["Date"].unique())))
     split = E79.window_split(df, folds)
-    ft = build(df, [(te, Pte) for _, (tr, te, Ptr, Pte) in split.items()], prefixes=tuple(prefixes))
+    ft = build(df, [(te, Pte) for _, (tr, te, Ptr, Pte) in split.items()])
     log(f"前向きの行 {len(ft):,}件（テスト窓 {len(split)}つ）。今の規則の行 {len(rule_rows(ft)):,}件（実験88 は 559件）")
-    summary = report(ft, bar_days, prefixes=tuple(prefixes))
+    summary = report(ft, bar_days)
     os.makedirs(OUT_DIR, exist_ok=True)
     path = os.path.join(OUT_DIR, "e99_summary.json")
 

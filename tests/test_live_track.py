@@ -65,10 +65,6 @@ class RulesMatchScreen(unittest.TestCase):
         self.assertEqual(val("skipBreaks"), L.SKIP_BREAKS)
         self.assertEqual(val("topK"), L.TOP_K)
         self.assertEqual(val("takeProfit"), L.TAKE_PROFIT)
-        # 時価総額 1000 億円以上は +5%（運用者の決定 2026-10-16）。画面の largeCapOku / takeProfitLarge と同じ値
-        self.assertEqual(val("takeProfitLarge"), L.TAKE_PROFIT_LARGE)
-        self.assertEqual(val("largeCapOku"), L.LARGE_CAP)
-        self.assertEqual((L.TAKE_PROFIT_LARGE, L.LARGE_CAP), (5.0, 1000.0))
         # 届かなければ 20営業日目の終値で売る（運用者の実際の売り。2026-10-12 から。画面の手順の文言と同じ）
         self.assertEqual(L.FALLBACK, "close")
         self.assertEqual(val("holdDays"), L.HOLD)
@@ -86,39 +82,6 @@ class RulesMatchScreen(unittest.TestCase):
         got = L.pct_of(hist[:200], hist)
         want = [round(float((hist < s).mean()) * 100, 1) for s in hist[:200]]
         self.assertEqual(list(got), want)
-
-
-class LargeCapTarget(unittest.TestCase):
-    """時価総額 1000 億円以上の指値は +5%（運用者の決定 2026-10-16）。空欄・未満は +10%。"""
-
-    def test_take_profit_of(self):
-        self.assertEqual([L.take_profit_of(v) for v in (1000.0, 1500, 999.9, None, float("nan"), "", "x")],
-                         [5.0, 5.0, 10.0, 10.0, 10.0, 10.0, 10.0])
-
-    def test_forward_uses_the_rows_market_cap(self):
-        n = 30
-        h = [100.0] * n
-        h[6] = 105.0                                  # 6営業日目に +5%
-        h[12] = 110.0                                 # 12営業日目に +10%
-        b = make_bars("11110", "2026-01-05", [100.0] * n, h, [100.0] * n)
-        d = b["Date"].iloc[0]
-        big = pd.DataFrame({"Code": ["11110"], "Date": [d], "mcap": [1500.0]})
-        small = pd.DataFrame({"Code": ["11110"], "Date": [d], "mcap": [500.0]})
-        none = pd.DataFrame({"Code": ["11110"], "Date": [d]})          # mcap の列が無ければ全行 +10%
-        fb, fs, fn = (L.forward(b, k).iloc[0] for k in (big, small, none))
-        self.assertEqual((fb["status"], fb["target"], fb["hit_day"], fb["ret"]), (L.HIT, 5.0, 6, 5.0))
-        self.assertEqual((fs["status"], fs["target"], fs["hit_day"], fs["ret"]), (L.HIT, 10.0, 12, 10.0))
-        self.assertEqual((fn["target"], fn["hit_day"], fn["ret"]), (10.0, 12, 10.0))
-
-    def test_live_rows_carry_the_market_cap(self):
-        v = {"sha": "abcdef0123", "committed": pd.Timestamp("2026-01-05T09:00:00Z"),
-             "data": {"candidates": [
-                 {"date": "2026-01-05", "code": "1111", "jqCode": "11110", "score": 0.5, "marketCap": 1500.0},
-                 {"date": "2026-01-05", "code": "2222", "jqCode": "22220", "score": 0.4}]}}
-        days = [pd.Timestamp("2026-01-05").date(), pd.Timestamp("2026-01-06").date()]
-        rows = L.live_rows([v], days).set_index("code")
-        self.assertEqual(float(rows.loc["1111", "mcap"]), 1500.0)
-        self.assertTrue(np.isnan(rows.loc["2222", "mcap"]))
 
 
 class Decide(unittest.TestCase):

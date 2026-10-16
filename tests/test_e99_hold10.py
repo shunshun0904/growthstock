@@ -3,7 +3,7 @@
 実験99（research/exp/e99_hold10.py）。
 
 - 出口: 保有 H 日ごとに、+10% に届いた日・収益・H 日目の終値が live_track.forward の約束どおり（12 日目に届く行は H=10 では
-  10 日目の終値、H=20 では +10%）。時価総額の規則（+5%）は行ごとの指値で測る
+  10 日目の終値、H=20 では +10%）
 - 待つ vs 切り替える: A は 10 日目までに届かなかった行の「10 日目の終値から出口まで」、B は全行の最初の 10 日
 - 到達の時間: k 日目までの割合と、10 日までに届かなかった行のうち後半に届く割合
 - 3 枠の形: 保有を短くすると買える取引は同じか増える
@@ -51,9 +51,7 @@ class TestAttachHolds(unittest.TestCase):
     def setUpClass(cls):
         bars, days = bars_case()
         df = pd.DataFrame({"Code": ["10000", "20000", "30000"], "Date": [days[0]] * 3})
-        out = E.attach_holds(df, bars)
-        out = E.attach_holds(out, bars, prefix="cap_", mcap=pd.Series([1500.0, 1500.0, 500.0]))
-        cls.o = out.set_index("Code")
+        cls.o = E.attach_holds(df, bars).set_index("Code")
 
     def test_plus10_by_hold(self):
         o = self.o
@@ -69,12 +67,6 @@ class TestAttachHolds(unittest.TestCase):
         self.assertAlmostEqual(o.loc["30000", "ret_h20"], -1.0)
         self.assertTrue(np.isnan(o.loc["30000", "hitday_h20"]))
         self.assertEqual(o.loc["10000", "tgt"], 10.0)
-
-    def test_cap_rule_uses_the_rows_target(self):
-        o = self.o
-        self.assertEqual((o.loc["10000", "cap_tgt"], o.loc["30000", "cap_tgt"]), (5.0, 10.0))
-        self.assertEqual((o.loc["10000", "cap_hitday_h10"], o.loc["10000", "cap_ret_h10"]), (4, 5.0))
-        self.assertAlmostEqual(o.loc["30000", "cap_ret_h10"], -1.0)
 
 
 class TestPieces(unittest.TestCase):
@@ -164,7 +156,7 @@ class TestTradeAndReport(unittest.TestCase):
         out = buf.getvalue()
         for tag in ("■ 0.", "■ 1.", "■ 2.", "■ 3.", "■ 4.", "■ 6.", "判定"):
             self.assertIn(tag, out)
-        self.assertNotIn("■ 5.", out)                                        # 時価総額の列が無ければ出さない
+        self.assertNotIn("■ 5.", out)                                        # 時価総額の規則の段は外した
         for k in ("rows", "hazard", "holds", "hold_diffs", "switch", "gaps", "trade", "trade_diffs", "judge"):
             self.assertIn(k, s)
         self.assertEqual(set(s["holds"]), set(E.HOLDS))
