@@ -76,11 +76,11 @@ def with_value(n, base, changes):
 
 
 def pos(code="6912", pick="2026-09-24", buy=None, entry=None, shares=100, sell=None,
-        sell_price=None, row=2, name="A社", targets=()):
+        sell_price=None, row=2, name="A社", targets=(), market_cap=None):
     return H.Position(pick_date=pick, code=code, name=name, row=row,
                       buy_date=T(buy) if buy else None, entry_price=entry, shares=shares,
                       sell_date=T(sell) if sell else None, sell_price=sell_price,
-                      targets=[(T(d), float(v)) for d, v in targets])
+                      targets=[(T(d), float(v)) for d, v in targets], market_cap=market_cap)
 
 
 # --------------------------------------------------------------------------- #
@@ -207,6 +207,22 @@ class PositionsFromLog(unittest.TestCase):
         for text in issues:
             for word in ("6912", "9999", "A社", "2026"):
                 self.assertNotIn(word, text)
+
+    def test_market_cap_comes_from_the_prediction_row(self):
+        """時価総額（億円）は予測ログの「時価総額(億)」列（予測日時点）。1000 億円以上が規則の +5% の対象。"""
+        pred = [["予測日", "コード", "銘柄名", "時価総額(億)"],
+                ["2026-09-24", "6912", "A社", "1,234.5"],
+                ["2026-09-24", "1111", "B社", ""],
+                ["2026-09-28", "7713", "C社", "999.9"]]
+        rows = [self.rec("a1a1a1a1", "買い", pick="2026-09-24"),
+                self.rec("b2b2b2b2", "買い", code="1111", pick="2026-09-24"),
+                self.rec("c3c3c3c3", "買い", code="7713", pick="2026-09-28")]
+        ps, issues, _ = H.positions_from_log(rows, pred)
+        self.assertEqual(issues, [])
+        self.assertEqual({p.code: (p.market_cap, p.large_cap) for p in ps},
+                         {"6912": (1234.5, True), "1111": (None, False), "7713": (999.9, False)})
+        ps, _, _ = H.positions_from_log(rows[:1], self.PRED)      # 列の無い古い予測ログでも読める
+        self.assertEqual((ps[0].market_cap, ps[0].large_cap), (None, False))
 
     def test_target_goes_to_the_latest_buy_made_by_that_day(self):
         rows = [self.rec(ID_A, "買い", pick="2026-09-24"),
@@ -442,7 +458,7 @@ class Simulate(unittest.TestCase):
         H.simulate(p, b, CAL)
         self.assertEqual((p.state, p.reason, p.exit_day), (H.SOLD, "+10%に到達", DAYS[4]))
         self.assertAlmostEqual(p.target, 1100.0)
-        self.assertEqual((p.target_pct, p.target_from, H.limit_text(p)), (None, None, "+10%"))
+        self.assertEqual((p.target_pct, p.target_from, H.limit_text(p)), (10.0, None, "+10%"))
 
     def test_the_newest_target_wins_and_it_can_be_raised(self):
         """+5%（DAYS[3]〜）のあと DAYS[5] に +15% と +12%（同じ日は報告の順で後のもの = +12%）。"""
@@ -467,6 +483,57 @@ class Simulate(unittest.TestCase):
     def test_pct_text(self):
         self.assertEqual([H.pct_text(v) for v in (None, 5, 5.0, 7.5, 12.25)],
                          ["+10%", "+5%", "+5%", "+7.5%", "+12.25%"])
+
+
+class LargeCapRule(unittest.TestCase):
+    """時価総額 1000 億円以上は、指値の変更が無ければ +5%（運用者の決定 2026-10-16）。空欄・1000 億円未満は +10%。"""
+    N = len(DAYS)
+
+    def test_a_large_cap_sells_at_plus_5_percent(self):
+        b = make_bars(h=with_value(self.N, 1000, {5: 1050}))
+        p = pos(market_cap=1000.0)                               # ちょうど 1000 億円は規則の内
+        path = H.simulate(p, b, CAL)
+        self.assertEqual((p.state, p.reason, p.exit_day, p.exit_price), (H.SOLD, "+5%に到達", DAYS[5], 1050.0))
+        self.assertEqual((p.target, p.target_pct, p.target_from), (1050.0, 5.0, None))
+        self.assertTrue(p.large_cap)
+        self.assertEqual(H.limit_text(p), "+5%（時価総額1000億円以上）")
+        self.assertAlmostEqual(path["pnl_yen"].iloc[-1], 5000.0)
+
+    def test_below_the_line_or_blank_keeps_plus_10_percent(self):
+        b = make_bars(h=with_value(self.N, 1000, {5: 1050}))
+        for cap in (999.9, None):
+            q = pos(market_cap=cap)
+            H.simulate(q, b, CAL)
+            self.assertFalse(q.large_cap)
+            self.assertEqual((q.reason, q.exit_day, q.target, q.target_pct, q.target_from),
+                             ("20日目の終値", DAYS[20], 1100.0, 10.0, None))
+            self.assertEqual(H.limit_text(q), "+10%")
+
+    def test_a_reported_target_beats_the_rule(self):
+        """指値の変更があれば、時価総額の規則よりそれが効く（+8% に上げる）。効く日より前は規則の +5%。"""
+        b = make_bars(h=with_value(self.N, 1000, {5: 1079, 7: 1080}))
+        p = pos(market_cap=5000.0, targets=[(DAYS[3], 8)])
+        H.simulate(p, b, CAL)
+        self.assertEqual((p.reason, p.exit_day, p.exit_price), ("+8%に到達", DAYS[7], 1080.0))
+        self.assertEqual(H.limit_text(p), f"+8%（{DAYS[3].month}/{DAYS[3].day}〜）")
+        q = pos(market_cap=5000.0, targets=[(DAYS[3], 8)])
+        H.simulate(q, make_bars(h=with_value(self.N, 1000, {2: 1050})), CAL)
+        self.assertEqual((q.reason, q.exit_day, q.exit_price, H.limit_text(q)),
+                         ("+5%に到達", DAYS[2], 1050.0, "+5%（時価総額1000億円以上）"))
+
+    def test_summary_report_and_note_mention_the_rule(self):
+        b = make_bars(days=DAYS[:8])
+        p = pos(market_cap=2500.0)
+        paths = {0: H.simulate(p, b, CAL)}
+        line = dict(zip(H.SUMMARY_HEADER, H.summary_rows([p], paths)[0]))
+        self.assertEqual((line["状態"], line["売りの指値"], line["指値%"]),
+                         ("保有中", 1050.0, "+5%（時価総額1000億円以上）"))
+        lines = H.report(1, 0, 0, [p, pos()], [], 8, "2026-10-07")
+        self.assertIn("[holdings] 時価総額1000億円以上（指値の変更が無ければ +5%）の保有 1件", lines)
+        self.assertNotIn("指値を変えた保有", "\n".join(lines))
+        lay = H.build_layout("2026-10-07", H.summary_rows([p], paths),
+                             H.daily_table([p], paths, H.trading_days(b, paths)), 1, [])
+        self.assertIn("時価総額1000億円以上の銘柄は+5%", str(lay.values[1][0]))
 
 
 # --------------------------------------------------------------------------- #

@@ -21,6 +21,9 @@
     あれば、その日（変えた指値が効く最初の日）から 買値×(1+指値%) を指値にする。その日より前は
     元の指値のまま（さかのぼって売ったことにはしない）。同じ保有に何度あっても、その日に効くのは
     日付がいちばん新しいもの
+  - 時価総額（予測ログの「時価総額(億)」。予測日時点）が 1000 億円以上の銘柄は、指値の変更が無ければ +5%
+    （買値×1.05）で売る（運用者の決定 2026-10-16「時価総額1000億以上なら、+５%指値のルールに変更しましょう」。
+    時価総額が大きいと短期で +10% は現実的でないため）。時価総額が空欄なら +10%
   営業日は取引所のカレンダーで数える（無ければその銘柄の日足の日付）。
 
 色: 予測ログで、保有中（持ち越し・買い待ちを含む）の行を赤、売却済みの行を青に塗る（2026-10-09 まで黄色。
@@ -73,6 +76,12 @@ KIND_JA = {"buy": "買い", "sell": "売り", "cancel": "取消", "target": "指
 KIND_EN = {**{v: k for k, v in KIND_JA.items()}, **{k: k for k in KIND_JA}}
 DEFAULT_SHARES = 100
 TARGET = 1.10                     # 買値の +10% で売る（指値の変更が無いとき）
+#: 時価総額（億円）がこれ以上の銘柄は、指値の変更が無ければ TARGET_LARGE（+5%）で売る（運用者の決定 2026-10-16
+#: 「時価総額1000億以上なら、+５%指値のルールに変更しましょう」。大型株は短期で +10% が現実的でないため）。
+#: 時価総額は予測ログの CAP_COL（予測日時点。export_sheets が書く）。空欄なら TARGET
+LARGE_CAP_OKU = 1000.0
+TARGET_LARGE = 1.05
+CAP_COL = "時価総額(億)"
 HORIZON = 20                      # 買った日を1日目として 20 営業日
 RED = {"red": 1.0, "green": 0.0, "blue": 0.0}
 #: 売却済み。純粋な青（0, 0, 1）は黒い文字が読めないので、明るめの青 #4a86e8（黒い文字との
@@ -110,6 +119,7 @@ class Position:
     sell_price: Optional[float] = None
     #: 指値の変更 (効く最初の日, 買値からの %)。報告の順
     targets: List[Tuple[pd.Timestamp, float]] = field(default_factory=list)
+    market_cap: Optional[float] = None         # 予測ログの時価総額（億円。予測日時点）。無ければ None
     # 計算の結果（simulate が埋める）
     state: str = ""
     reason: str = ""
@@ -120,7 +130,7 @@ class Position:
     exit_day: Optional[pd.Timestamp] = None
     exit_price: Optional[float] = None
     target: Optional[float] = None             # 売りの指値（建値×(1+指値%)。表に出すもの）
-    target_pct: Optional[float] = None         # 変えた指値の %（変えていなければ None = +10%）
+    target_pct: Optional[float] = None         # 効いている指値の %（変えていなければ base_pct: +10%、大型株は +5%）
     target_from: Optional[pd.Timestamp] = None  # 変えた指値が効く最初の日
     peak: Optional[float] = None               # 20日目まで（売った日まで）の日中の高値の最大
     peak_day: Optional[pd.Timestamp] = None
@@ -133,6 +143,21 @@ class Position:
     @property
     def label(self) -> str:
         return f"{self.name}({self.code})" if self.name else self.code
+
+    @property
+    def large_cap(self) -> bool:
+        """時価総額が LARGE_CAP_OKU 以上（指値の変更が無ければ TARGET_LARGE で売る）。空欄なら False。"""
+        return self.market_cap is not None and self.market_cap >= LARGE_CAP_OKU
+
+    @property
+    def base_target(self) -> float:
+        """指値の変更が無いときの倍率（買値×）。"""
+        return TARGET_LARGE if self.large_cap else TARGET
+
+    @property
+    def base_pct(self) -> float:
+        """指値の変更が無いときの %（10 か 5）。"""
+        return round((self.base_target - 1.0) * 100.0, 4)
 
 
 # --------------------------------------------------------------------------- #
@@ -235,12 +260,12 @@ def positions_from_log(rows: List[Dict], pred_values: List[List[str]]
         i = idx.get(name)
         return line[i] if i is not None and i < len(line) else ""
 
-    where: Dict[Tuple[str, str], Tuple[int, str]] = {}
+    where: Dict[Tuple[str, str], Tuple[int, str, Optional[float]]] = {}
     for r, line in enumerate(pred_values[1:], start=2):
         d = _date(cell(line, "予測日"))
         c = _code(cell(line, "コード"))
         if d is not None and c:
-            where.setdefault((_ymd(d), c), (r, str(cell(line, "銘柄名")).strip()))
+            where.setdefault((_ymd(d), c), (r, str(cell(line, "銘柄名")).strip(), _num(cell(line, CAP_COL))))
 
     issues: List[str] = []
     refs = []
@@ -268,7 +293,7 @@ def positions_from_log(rows: List[Dict], pred_values: List[List[str]]
         code = _code(rec.get("コード"))
         pick = _date(rec.get("予測日"))
         day = _date(rec.get("日付"))
-        row, name = where.get((_ymd(pick), code), (None, ""))
+        row, name, cap = where.get((_ymd(pick), code), (None, "", None))
         if cancelled(rec):
             if row is not None:
                 cleared.add(row)
@@ -288,7 +313,7 @@ def positions_from_log(rows: List[Dict], pred_values: List[List[str]]
             pick_date=_ymd(pick) or None, code=code,
             name=name or str(rec.get("銘柄名", "")).strip(), row=row,
             buy_date=day, entry_price=_num(rec.get("価格")),
-            shares=shares if shares and shares > 0 else DEFAULT_SHARES))
+            shares=shares if shares and shares > 0 else DEFAULT_SHARES, market_cap=cap))
 
     def start_of(p: Position) -> pd.Timestamp:
         return p.buy_date if p.buy_date is not None else pd.Timestamp(p.pick_date)
@@ -429,8 +454,9 @@ def simulate(p: Position, bars: pd.DataFrame, cal=None) -> Optional[pd.DataFrame
     reason = ""
 
     def limit_on(day) -> Tuple[float, Optional[float], Optional[pd.Timestamp]]:
-        """その日に効いている (指値, 変えた %, 効く最初の日)。変えていなければ (建値×1.10, None, None)。"""
-        out: Tuple[float, Optional[float], Optional[pd.Timestamp]] = (entry * TARGET, None, None)
+        """その日に効いている (指値, %, 効く最初の日)。変えていなければ (建値×base_target, base_pct, None)
+        （+10%。時価総額 LARGE_CAP_OKU 億円以上なら +5%）。"""
+        out: Tuple[float, Optional[float], Optional[pd.Timestamp]] = (entry * p.base_target, p.base_pct, None)
         for d, pct in changes:
             if d <= day:
                 out = (entry * (1.0 + pct / 100.0), pct, d)
@@ -598,11 +624,16 @@ def chart_series(positions: List[Position], paths: Dict[int, pd.DataFrame],
 
 
 def limit_text(p: Position) -> str:
-    """表の「指値%」。変えていなければ +10%、変えたら その % と効く最初の日（+7%（10/1〜））。"""
-    if p.target_pct is None or p.target_from is None:
-        return pct_text(None)
-    d = pd.Timestamp(p.target_from)
-    return f"{pct_text(p.target_pct)}（{d.month}/{d.day}〜）"
+    """
+    表の「指値%」。変えたら その % と効く最初の日（+7%（10/1〜））。変えていなければ +10%、時価総額の規則で +5% なら
+    「+5%（時価総額1000億円以上）」。
+    """
+    if p.target_pct is not None and p.target_from is not None:
+        d = pd.Timestamp(p.target_from)
+        return f"{pct_text(p.target_pct)}（{d.month}/{d.day}〜）"
+    if p.large_cap:
+        return f"{pct_text(p.base_pct)}（時価総額{LARGE_CAP_OKU:g}億円以上）"
+    return pct_text(None)
 
 
 def _summary_line(vals: Dict[str, object]) -> List:
@@ -694,7 +725,8 @@ def build_layout(as_of: str, summary: List[List], daily: pd.DataFrame, n_positio
                  series: Sequence[Tuple[str, str, int]] = ()) -> Layout:
     """タブ全体の値。1〜2行目に説明、4行目から銘柄ごとの表、その下に日付ごとの表。"""
     note = ("チャットで報告した取引（このシートの「取引の記録」タブ）の損益。売りのルール: 買った日を1日目と"
-            "して20営業日以内に日中の高値が買値の+10%に届いたら、その値で売り（指値を変えた保有は、変えた"
+            f"して20営業日以内に日中の高値が買値の+10%（時価総額{LARGE_CAP_OKU:g}億円以上の銘柄は"
+            f"{pct_text(round((TARGET_LARGE - 1.0) * 100.0, 4))}）に届いたら、その値で売り（指値を変えた保有は、変えた"
             "指値が効く日からその値。「指値%」の列）。届かなければ20日目の終値で"
             "売り（含み損なら売らずに持ち越し、売りの報告まで持つ）。報告の売りはルールより優先。グラフは"
             "合計と、保有中・売ってから20営業日以内の銘柄。毎晩の予測のあとに作り直します（このタブに手で"
@@ -938,6 +970,10 @@ def report(n_events: int, n_failed: int, n_added: int, positions: List[Position]
     n_lim = sum(1 for p in positions if p.targets)
     if n_lim:
         lines.append(f"[holdings] 指値を変えた保有 {n_lim}件")
+    n_big = sum(1 for p in positions if p.large_cap)
+    if n_big:
+        lines.append(f"[holdings] 時価総額{LARGE_CAP_OKU:g}億円以上（指値の変更が無ければ "
+                     f"{pct_text(round((TARGET_LARGE - 1.0) * 100.0, 4))}）の保有 {n_big}件")
     found = list(issues) + [p.issue for p in positions if p.issue]
     if found:
         lines.append(f"[holdings] 取引の記録で合わなかった行 {len(found)}: "

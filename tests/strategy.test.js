@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   BOOST, RULE_MODELS, RULE_JA, STRATEGY, boostPcts, pctsOf, minPct, passesAgree, dayVerdict, strategySignal, exitPlan,
-  freeSlots, pctSpread, laggard, nearMisses, fundContrib, frozenNote,
+  freeSlots, pctSpread, laggard, nearMisses, fundContrib, frozenNote, takeProfitFor, isLargeCap,
   BORDER, BORDER_STATS, BORDER_WARN, borderShape, borderNote, borderWarn, orderRows, ruleMinTier,
 } from '../src/lib/strategy.js';
 
@@ -436,3 +436,24 @@ test('BORDER_STATS: probe_k15_border の数字（件数の合計が形の件数�
   assert.ok(!/NaN|undefined|null|測っていない/.test(n.text));
 });
 
+test('exitPlan / takeProfitFor: 時価総額1000億円以上は +5%（運用者の決定 2026-10-16。空欄・未満は +10%）', () => {
+  assert.equal(STRATEGY.takeProfitLarge, 5);
+  assert.equal(STRATEGY.largeCapOku, 1000);
+  assert.equal(takeProfitFor(1000), 5);          // ちょうど 1000 億円は規則の内
+  assert.equal(takeProfitFor(999.9), 10);
+  assert.equal(takeProfitFor(null), 10);
+  assert.equal(takeProfitFor(undefined), 10);
+  assert.equal(takeProfitFor(''), 10);
+  assert.equal(takeProfitFor('abc'), 10);
+  assert.equal(isLargeCap(2500), true);
+  assert.equal(isLargeCap(NaN), false);
+  const big = exitPlan(1000, STRATEGY, 1500);
+  assert.equal(big.takeProfit, 5);
+  assert.equal(big.largeCap, true);
+  assert.ok(Math.abs(big.target - 1050) < 1e-9);
+  const small = exitPlan(1000, STRATEGY, 500);
+  assert.equal(small.takeProfit, 10);
+  assert.equal(small.largeCap, false);
+  assert.ok(Math.abs(small.target - 1100) < 1e-9);
+  assert.equal(exitPlan(1000).takeProfit, 10);   // 時価総額を渡さなければ +10%
+});

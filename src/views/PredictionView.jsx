@@ -175,7 +175,8 @@ function StrategyPanel({ signal, near, day, models, onSend, sentIds }) {
         <h2>今日の戦略</h2>
         <span className="sub">
           {RULE_JA}（L15・X15・C15）がすべて{STRATEGY.agreePct}以上の銘柄を{STRATEGY.topK}件まで。
-          翌営業日の寄りで買い、+{STRATEGY.takeProfit}% の指値か
+          翌営業日の寄りで買い、+{STRATEGY.takeProfit}%（時価総額{STRATEGY.largeCapOku}億円以上は
+          +{STRATEGY.takeProfitLarge}%）の指値か
           {STRATEGY.holdDays}営業日目の終値で降りる（同時保有は{STRATEGY.maxSlots}銘柄まで。
           発火の数では見送らない）
         </span>
@@ -212,7 +213,8 @@ function StrategyPanel({ signal, near, day, models, onSend, sentIds }) {
           </div>
           <ol className="strat-steps">
             <li><b>翌営業日の寄り</b>で成行。終値では買えない（候補が分かるのが終値後）</li>
-            <li>買えたら <b>+{STRATEGY.takeProfit}% の指値</b>を置く
+            <li>買えたら <b>+{STRATEGY.takeProfit}% の指値</b>を置く（時価総額{STRATEGY.largeCapOku}億円以上の
+                銘柄は <b>+{STRATEGY.takeProfitLarge}%</b>。大型株は短期で +{STRATEGY.takeProfit}% が現実的でない）
                 （過去の予測でこの手順のとおりに買った取引のうち、届いたのは約40%、届くときの中央値は7営業日）</li>
             <li>届かなければ <b>{STRATEGY.holdDays}営業日目の終値</b>で売る</li>
             <li><b>枠は{STRATEGY.maxSlots}つまで</b>。埋まっていたら見送る。
@@ -319,7 +321,7 @@ function FundNote({ c }) {
 }
 
 function PickCard({ c, n, models, onSend, sent }) {
-  const plan = exitPlan(c.close);
+  const plan = exitPlan(c.close, STRATEGY, c.marketCap);
   return (
     <div className="strat-pick">
       <div className="strat-pick-head">
@@ -363,7 +365,7 @@ function PickCard({ c, n, models, onSend, sent }) {
           <div className="strat-metric">
             <span className="lab">+{plan.takeProfit}% の目安</span>
             <span className="num">{fmtInt(plan.target)}</span>
-            <span className="sub">終値基準。実際は寄り値から</span>
+            <span className="sub">{plan.largeCap ? `時価総額${STRATEGY.largeCapOku}億円以上。` : ''}終値基準。実際は寄り値から</span>
           </div>
         )}
       </div>

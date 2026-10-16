@@ -22,7 +22,9 @@
  *        lgbm 単体の順位で並べると2番手が +0.87% まで落ちる（最小順位なら +2.99%。以前の規則で測ったもの）
  *   4. 翌営業日の寄りで買う
  *   5. +10% の指値、届かなければ 20営業日目の終値で売る（2026-10-12 に運用者の実際の売りに合わせた。
- *      それまでは +20% の指値・届かなければ 20営業日目までの5日平均。research/live_track.py も同じ）
+ *      それまでは +20% の指値・届かなければ 20営業日目までの5日平均。research/live_track.py も同じ）。
+ *      時価総額 1000億円以上の銘柄は +5%（運用者の決定 2026-10-16「時価総額1000億以上なら、+５%指値のルールに
+ *      変更しましょう」。大型株は短期で +10% が現実的でないため。takeProfitFor）
  *   6. 同時に持つのは 3銘柄まで。枠が埋まっていたら**見送る**
  *        保有中の銘柄は、より良い候補が出ても切らない。実測（実験34）で
  *        乗り換え37回のうち24回（65%）は切らないほうが良く、切った銘柄が
@@ -75,6 +77,8 @@ export const STRATEGY = {
   quietBreaks: 8,    // これ未満は「発火が少ない日」（買うが、件数が少なく当たり外れが大きいと添える。以前の見送りの線）
   topK: 2,           // 買うのは上位何件まで
   takeProfit: 10,    // 利確の指値（%）。2026-10-12 に 20 → 10（運用者の実際の売り）
+  takeProfitLarge: 5, // 時価総額が largeCapOku 以上の銘柄の指値（%）。運用者の決定 2026-10-16（大型株は短期で +10% が現実的でない）
+  largeCapOku: 1000, // 時価総額（億円）の線。predictions.json の marketCap（億円）で見る。値が無ければ takeProfit
   holdDays: 20,      // 届かなければ何営業日目の終値で売るか
   maxSlots: 3,       // 同時に持てる銘柄数。埋まっていたら見送る
   nearLo: 85,        // 「惜しい候補」として画面に出す下限（規則の3モデルの最小が nearLo〜agreePct）
@@ -401,14 +405,34 @@ export function strategySignal(rows, s = STRATEGY) {
 }
 
 /**
+ * 時価総額（億円）が s.largeCapOku 以上か。値が無い・数でないときは false（+10% のまま）。
+ */
+export function isLargeCap(marketCapOku, s = STRATEGY) {
+  if (marketCapOku === null || marketCapOku === undefined || marketCapOku === '') return false;
+  const v = Number(marketCapOku);
+  return Number.isFinite(v) && v >= s.largeCapOku;
+}
+
+/**
+ * その候補の指値（%）。時価総額が largeCapOku（1000億円）以上なら takeProfitLarge（+5%）、それ以外（値が無いときも）は
+ * takeProfit（+10%）。運用者の決定 2026-10-16。research/live_track.py の take_profit_of と同じ。
+ */
+export function takeProfitFor(marketCapOku, s = STRATEGY) {
+  return isLargeCap(marketCapOku, s) ? s.takeProfitLarge : s.takeProfit;
+}
+
+/**
  * 想定の出口。買値は翌営業日の寄りなので当日は分からない。
  * 終値を仮の買値として指値の目安を出す（あくまで目安と画面に書く）。
+ * marketCapOku（候補の時価総額 億円）を渡すと、指値の幅がその銘柄の規則（takeProfitFor）になる。
  */
-export function exitPlan(close, s = STRATEGY) {
+export function exitPlan(close, s = STRATEGY, marketCapOku = null) {
   if (!Number.isFinite(close) || close <= 0) return null;
+  const takeProfit = takeProfitFor(marketCapOku, s);
   return {
-    target: close * (1 + s.takeProfit / 100),
-    takeProfit: s.takeProfit,
+    target: close * (1 + takeProfit / 100),
+    takeProfit,
+    largeCap: isLargeCap(marketCapOku, s),
     holdDays: s.holdDays,
   };
 }
