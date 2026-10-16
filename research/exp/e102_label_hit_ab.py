@@ -16,6 +16,17 @@ LightGBM の高スコア帯の収益（運用と同じ出口: +10% の指値に�
   ラベルの引き直しは build_dataset.rise_label_for_k（終盤・トレンドは RiseConfig で外す）。TP10 は live_track.forward と同じ
   判定（e83.attach_exits の hit10）。どのラベルも、現行のラベルが決まる行（20営業日の結果がそろう行）だけで決める
 
+追加の腕（運用者の指示 2026-10-16「目的変数の定義変更は、ストップ高の履歴を特徴量に入れると効果があるので、それを入れた検証も
+実施してください」。2回目の run で足す。1回目の探索・OOF は cache で引き継ぐ）
+  ラベル L ∈ {HIT15, TP10} ごとに、実験101 の7列（ul_t・ul_past20_n・ul_past60_n・ul_past120_n・ul_past250_n・ul_days_since・
+  ul_decay。基準日の時点で分かるストップ高の履歴）を本番の239列に足した腕:
+  L_ULB  239 + 7列で探索し直し（Optuna 50試行 × 5分割）
+  L_ULC  239 + 7列を L のパラメータで（探索なし）→ 列を足したことそのものの効果
+  L_ULP  対照: 7列を同じ日付の行どうしで入れ替えたもの（種 PERM_SEED）を L のパラメータで
+  判定（回す前に決めた）: L ごとに、窓の中の上位5% の tp10c の窓ごとの差で、C−A（L_ULC − L）の平均が正・対照 P−A（L_ULP − L）の
+      平均を上回る・C が上の窓が過半（17/32 以上）の3つ（実験100 の判定の物差しを収益にしたもの）で「列の効果あり」。
+      参考に自分のラベルで測った窓の PR-AUC の C−A・P−A、B−A（再学習で起きること）、ほかの選び方の差
+
 評価（出口は運用と同じ tp10c。選び方は LightGBM 1本で代える）
   選び方: 窓の中の上位5%（「1.5σ の3本 95以上」の代わり）・上位10%・前の窓の分布の上位5%（閾値。窓1は対象外）・月に2銘柄
   物差し: tp10c の平均（主）、ret_o1_20 の平均、+10% に届く割合、−10% 割れ（tp10c < −10）、買ってからのストップ高（price_limits）、
@@ -30,9 +41,10 @@ LightGBM の高スコア帯の収益（運用と同じ出口: +10% の指値に�
 出すもの: 件数・割合・収益・精度だけ（銘柄・値は出さない）。本番の設定（build_dataset の RiseConfig・lgbm_params.json・
 tuning_multi.VARIANTS）には書かない。
 
-    exp=e102_label_hit_ab.py
+    exp=e102_label_hit_ab.py                      （1回目: CUR15・HIT15・TP10）
+    exp=e102_label_hit_ab.py args="--with-ul"     （2回目: + ストップ高の履歴の7列の腕。1回目の探索・OOF は cache で引き継ぐ）
 充足だけ見る: exp=e102_label_hit_ab.py args="--dry"
-試運転:       exp=e102_label_hit_ab.py args="--tag e102smoke --n-trials 2 --shifts 0"
+試運転:       exp=e102_label_hit_ab.py args="--tag e102smoke --n-trials 2 --shifts 0 --with-ul"
 
 表（出口・ストップ高・各ラベルを付けた frame）は1回目に作って research/_data/oof/<tag>_* に置き、続きの回は actions/cache で
 引き継いだそれを使う。--budget-min（既定 290分）を過ぎたら新しい計算を始めずに終わる（保存済みの探索・out-of-fold は次の回が
@@ -78,6 +90,28 @@ LABEL_DEFS = {
 }
 NAMES = {"CUR15": "CUR15 現行 1.5σ 3条件", "CUR12": "CUR12 1.2σ 3条件（参考）", "HIT15": "HIT15 到達のみ 1.5σ",
          "HIT12": "HIT12 到達のみ 1.2σ", "TP10": "TP10 +10% の指値に届く"}
+#: ストップ高の履歴の7列（実験101 と同じ。基準日の時点で分かる）を足す腕。L_ULB 探索し直し / L_ULC L のパラメータ / L_ULP 対照
+UL_FEATURES = ("ul_t", "ul_past20_n", "ul_past60_n", "ul_past120_n", "ul_past250_n", "ul_days_since", "ul_decay")
+UL_LABELS = ("HIT15", "TP10")
+UL_KINDS = ("B", "C", "P")
+UL_ARMS = tuple(f"{L}_UL{x}" for L in UL_LABELS for x in UL_KINDS)
+UL_RENAME = {"ul_past_n": "ul_past250_n"}
+PERM_SEED = 20261018
+for _L in UL_LABELS:
+    NAMES[f"{_L}_ULB"] = f"{_L}+UL 7列・探索し直し"
+    NAMES[f"{_L}_ULC"] = f"{_L}+UL 7列・{_L} のパラメータ"
+    NAMES[f"{_L}_ULP"] = f"{_L}+UL 対照（入れ替え）"
+
+
+def arm_spec(arm: str) -> dict:
+    """腕 → (ラベル, 列の組, パラメータの出どころ, 探索するか)。"""
+    if arm in ARMS:
+        return {"label": arm, "colset": "base", "params_from": arm, "tune": True}
+    L, kind = arm.rsplit("_UL", 1)
+    if L not in UL_LABELS or kind not in UL_KINDS:
+        raise KeyError(f"知らない腕: {arm}")
+    return {"label": L, "colset": "perm" if kind == "P" else "ul", "params_from": arm if kind == "B" else L,
+            "tune": kind == "B"}
 TARGET = LT.TAKE_PROFIT                  # 10.0
 HOLD = LT.HOLD                           # 20
 OUTCOME = "tp10c"                        # 主の物差し（%）
@@ -122,13 +156,36 @@ def build_labels(df: pd.DataFrame, arms=ARMS) -> tuple[pd.DataFrame, list]:
 # --------------------------------------------------------------------------- #
 # データ
 # --------------------------------------------------------------------------- #
+def attach_ul(df: pd.DataFrame, bars: pd.DataFrame | None = None) -> pd.DataFrame:
+    """買ったあとのストップ高 ul_fwd（結果。特徴量にしない）と、ストップ高の履歴の7列（特徴量の候補）を日足から付ける。"""
+    if bars is None:
+        bars = LT.load_bars(lab.DATA_DIR, start=df["Date"].min() - pd.Timedelta(days=500), extra=("H", "L", "C"))
+    flags = PL.flag_limits(bars)
+    ev = PL.limit_events(PL.code_arrays(flags), df[["Code", "Date"]], hold=HOLD, past=250).rename(columns=UL_RENAME)
+    cols = ["ul_fwd"] + list(UL_FEATURES)
+    out = df.drop(columns=[c for c in cols if c in df.columns])
+    return out.merge(ev[["Code", "Date"] + cols], on=["Code", "Date"], how="left")
+
+
 def prepare(rebuild: bool = False):
     pf, ps = E68.fpath("frame.parquet"), E68.fpath("stamp.json")
     if not rebuild and os.path.exists(pf) and os.path.exists(ps):
         with open(ps, encoding="utf-8") as fh:
             stamp = json.load(fh)
+        df = pd.read_parquet(pf)
         log(f"[data] 1回目に作った表を使う（{stamp['built_utc']} 作成・{stamp['rows']:,}行・〜{stamp['date_max']}）")
-        return pd.read_parquet(pf), stamp
+        if any(c not in df.columns for c in UL_FEATURES):
+            # 1回目の表にはストップ高の履歴の7列が無い。同じ行に足すだけなので表の版（built_utc）は変えない
+            # （保存済みの探索・OOF はそのまま使える）
+            df["Date"] = pd.to_datetime(df["Date"])
+            df["Code"] = df["Code"].astype(str)
+            df = attach_ul(df)
+            df.to_parquet(pf, index=False)
+            stamp["ul_added_utc"] = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime())
+            with open(ps, "w", encoding="utf-8") as fh:
+                json.dump(stamp, fh, ensure_ascii=False, indent=1, default=float)
+            log(f"[data] 保存済みの表にストップ高の履歴の7列を足した（版は {stamp['built_utc']} のまま）")
+        return df, stamp
     os.makedirs(E68.OOF_DIR, exist_ok=True)
     t0 = time.time()
     df = lab.frame(rebuild=True)
@@ -147,9 +204,7 @@ def prepare(rebuild: bool = False):
     t0 = time.time()
     bars = LT.load_bars(lab.DATA_DIR, start=df["Date"].min() - pd.Timedelta(days=500), extra=("H", "L", "C"))
     df, chk = E83.attach_exits(df, bars, targets=(TARGET,), hold=HOLD)
-    flags = PL.flag_limits(bars)
-    ev = PL.limit_events(PL.code_arrays(flags), df[["Code", "Date"]], hold=HOLD, past=250)
-    df = df.merge(ev[["Code", "Date", "ul_fwd"]], on=["Code", "Date"], how="left")
+    df = attach_ul(df, bars)
     df, tab = build_labels(df)
     log(f"[data] 出口（20日目の終値 {chk['with_close']:,}/{chk['rows']:,}行・到達 {chk['hit_share'][E83.tp_key(TARGET)]:.1f}%）と"
         f"ストップ高、{len(ARMS)}本のラベルを付けた / {time.time()-t0:.0f}秒")
@@ -284,41 +339,63 @@ def fmt_pair(d: dict) -> str:
 # --------------------------------------------------------------------------- #
 # 本体
 # --------------------------------------------------------------------------- #
-def run(df: pd.DataFrame, cols: list, cutoff, n_trials: int, stamp: dict, shifts: list, compute: bool = True) -> dict | None:
+def run(df: pd.DataFrame, cols: list, cutoff, n_trials: int, stamp: dict, shifts: list, compute: bool = True,
+        arms: tuple = ARMS) -> dict | None:
+    """腕ごとに（必要なら）探索し、本番と同じ OOF（ずらし0・種42）と、ずらし × 種3つの OOF を作る。保存済みは読む。"""
+    colsets = {"base": list(cols), "ul": list(cols) + list(UL_FEATURES), "perm": list(cols) + list(UL_FEATURES)}
+    perm = None
     frames = {}
-    for a in ARMS:
-        f = df.copy()
-        f["label"] = f[f"y_{a}"]
+    for a in arms:
+        sp = arm_spec(a)
+        if sp["colset"] == "perm":
+            if perm is None:
+                from e44_shortsale import permuted
+                perm = permuted(df, list(UL_FEATURES), seed=PERM_SEED)
+            f = perm.copy()
+        else:
+            f = df.copy()
+        f["label"] = f[f"y_{sp['label']}"]
         f.attrs["built_utc"] = stamp["built_utc"]
         frames[a] = f
     recs, params = {}, {}
-    for a in ARMS:
-        recs[a] = E68.tune(ALGO, a, frames[a], cols, cutoff, n_trials, stamp, compute)
+    for a in arms:
+        sp = arm_spec(a)
+        if not sp["tune"]:
+            continue
+        recs[a] = E68.tune(ALGO, a, frames[a], colsets[sp["colset"]], cutoff, n_trials, stamp, compute)
         if recs[a] is None:
             return None
         params[a] = recs[a]["params"]
+    for a in arms:
+        src = arm_spec(a)["params_from"]
+        if src not in params:
+            return None                      # 元のラベルの探索がまだ
+        params[a] = params[src]
     prod = {}
-    for a in ARMS:
-        o = E68.oof(ALGO, a, frames[a], cols, params[a], 0, (E68.PROD_SEED,), compute)
+    for a in arms:
+        sp = arm_spec(a)
+        o = E68.oof(ALGO, a, frames[a], colsets[sp["colset"]], params[a], 0, (E68.PROD_SEED,), compute)
         if o is None:
             return None
         prod[a] = attach_eval(o, df)
     shifted = {}
     for sh in shifts:
-        for a in ARMS:
-            o = E68.oof(ALGO, a, frames[a], cols, params[a], sh, E68.SEEDS[ALGO], compute)
+        for a in arms:
+            sp = arm_spec(a)
+            o = E68.oof(ALGO, a, frames[a], colsets[sp["colset"]], params[a], sh, E68.SEEDS[ALGO], compute)
             if o is None:
                 return None
             shifted[(sh, a)] = attach_eval(o, df)
-    return {"recs": recs, "params": params, "prod": prod, "shifted": shifted}
+    return {"recs": recs, "params": params, "prod": prod, "shifted": shifted, "arms": tuple(arms)}
 
 
 def form_tables(res: dict, shifts: list) -> dict:
     """選び方 × 腕 → 窓ごとの成績（shift, fold 付き）。"""
     out = {}
+    arms = res.get("arms", ARMS)
     for key, _, fn in FORMS:
         out[key] = {}
-        for a in ARMS:
+        for a in arms:
             parts = []
             for sh in shifts:
                 t = fn(res["shifted"][(sh, a)])
@@ -330,43 +407,54 @@ def form_tables(res: dict, shifts: list) -> dict:
 
 
 def report(res: dict, df: pd.DataFrame, shifts: list, stamp: dict) -> dict:
+    arms = tuple(res.get("arms", ARMS))
     ycols = [f"y_{a}" for a in ARMS]
     summary = {"data": {k: v for k, v in stamp.items() if k != "labels"}, "labels": label_report(df), "tuning": {},
-               "production_oof": {}, "forms": {}, "judge": {}, "per_window": {}}
+               "production_oof": {}, "forms": {}, "judge": {}, "judge_ul": {}, "per_window": {}, "arms": list(arms)}
 
-    print(f"\n■ 2. 探索の CV（{E68.CV_SCHEME} 5分割・自分のラベル。楽観側に出る）と本番と同じ OOF（ずらし0・種42）の PR-AUC を各ラベルで")
-    print(f"  {'腕':<26}{'CV PR':>8}{'±SD':>8}{'CV ROC':>8}{'秒':>6}  " + "  ".join(f"[{a}] PR/リフト" for a in ARMS))
-    for a in ARMS:
-        cv = res["recs"][a]["_cv"]
+    print(f"\n■ 2. 探索の CV（{E68.CV_SCHEME} 5分割・自分のラベル。楽観側に出る。探索しない腕は元のラベルの値）と本番と同じ OOF"
+          f"（ずらし0・種42）の PR-AUC を各ラベルで")
+    print(f"  {'腕':<30}{'CV PR':>8}{'±SD':>8}{'CV ROC':>8}{'秒':>6}  " + "  ".join(f"[{a}] PR/リフト" for a in ARMS))
+    for a in arms:
+        src = a if a in res["recs"] else arm_spec(a)["params_from"]
+        cv = res["recs"][src]["_cv"]
         summary["tuning"][a] = {k: cv.get(k) for k in ("mean_pr_auc", "std", "mean_roc_auc", "fold_scores")}
         summary["tuning"][a]["params"] = res["params"][a]
+        summary["tuning"][a]["tuned"] = a in res["recs"]
         cl = E78.cross_label(res["prod"][a], ycols)
         summary["production_oof"][a] = {c: cl[c] for c in ycols}
-        print(f"  {NAMES[a]:<26}{cv['mean_pr_auc']:>8.4f}{cv['std']:>8.4f}{cv['mean_roc_auc']:>8.4f}{res['recs'][a].get('_seconds', 0):>6}  "
+        print(f"  {NAMES[a]:<30}{cv['mean_pr_auc']:>8.4f}{cv['std']:>8.4f}{cv['mean_roc_auc']:>8.4f}"
+              f"{res['recs'][src].get('_seconds', 0) if a in res['recs'] else 0:>6}  "
               + "  ".join(f"{cl[f'y_{b}']['pr']:.4f}/{cl[f'y_{b}']['lift']:.2f}x" for b in ARMS))
-    for a in ARMS:
-        print(f"  {NAMES[a]:<26}パラメータ {E68.short(res['params'][a])}")
+    for a in arms:
+        if a in res["recs"]:
+            print(f"  {NAMES[a]:<30}パラメータ {E68.short(res['params'][a])}")
 
     tables = form_tables(res, shifts)
     print(f"\n■ 3. 選び方ごとの成績（ずらし {'/'.join(map(str, shifts))}か月 × 種3つの平均。出口 = +10% の指値・届かなければ20日目の終値。"
           f"差は {BASE} に対する窓ごとの差）")
     for key, name, _ in FORMS:
-        print(f"  ◆ {name}: 1窓の件数 / tp10c / ret20 / +10% 到達 / −10%割れ / 買ってからストップ高 / {BASE}の正例率 ｜ tp10c の差 ｜ ret20 の差")
+        print(f"  ◆ {name}: 1窓の件数 / tp10c / ret20 / +10% 到達 / −10%割れ / 買ってからストップ高 / {BASE}の正例率 ｜ tp10c の差 ｜ ret20 の差"
+              f"（差は {BASE} に対して。UL の腕は元のラベルの腕に対して）")
         base = tables[key][BASE]
         summary["forms"][key] = {}
-        for a in ARMS:
+        for a in arms:
+            ref = BASE if a in ARMS else arm_spec(a)["label"]
+            base = tables[key][ref]
             t = tables[key][a]
             if not len(t):
                 print(f"    {NAMES[a]:<26}（窓なし）")
                 continue
             d_tp = paired(base, t, "tp") if a != BASE else {}
             d_r = paired(base, t, "ret20") if a != BASE else {}
+            if a != BASE and not len(base):
+                d_tp, d_r = {"n": 0}, {"n": 0}
             summary["forms"][key][a] = {"n_per_window": float(t["n"].mean()), "tp": float(t["tp"].mean()), "ret20": float(t["ret20"].mean()),
                                         "hit": float(t["hit"].mean()), "bad": float(t["bad"].mean()), "ul": float(t["ul"].mean()),
                                         "pos_base": float(t["pos_base"].mean()), "windows": int(len(t)),
                                         "diff_tp": {k: v for k, v in d_tp.items() if k != "per_window"},
                                         "diff_ret20": {k: v for k, v in d_r.items() if k != "per_window"}}
-            print(f"    {NAMES[a]:<26}{t['n'].mean():>5.0f}件 {t['tp'].mean():>+6.2f}% {t['ret20'].mean():>+6.2f}% {t['hit'].mean():>5.1f}% "
+            print(f"    {NAMES[a]:<30}{t['n'].mean():>5.0f}件 {t['tp'].mean():>+6.2f}% {t['ret20'].mean():>+6.2f}% {t['hit'].mean():>5.1f}% "
                   f"{t['bad'].mean():>5.1f}% {t['ul'].mean():>5.1f}% {t['pos_base'].mean():>5.1f}%（{len(t)}窓）"
                   + (f" ｜ {fmt_pair(d_tp)} ｜ {fmt_pair(d_r)}" if a != BASE else ""))
 
@@ -385,6 +473,44 @@ def report(res: dict, df: pd.DataFrame, shifts: list, stamp: dict) -> dict:
     passed = [a for a in JUDGED if summary["judge"].get(a, {}).get("pass")]
     print("  → " + (f"支持した腕: {', '.join(passed)}。本番に入れる案を運用者に出す" if passed else "支持した腕は無い。この線は閉じる"))
 
+    ul_done = [L for L in UL_LABELS if all(f"{L}_UL{x}" in arms for x in UL_KINDS)]
+    if ul_done:
+        print(f"\n■ 4b. 判定（ストップ高の履歴の7列。窓の中の上位5% の tp10c。元のラベルの腕に対する窓ごとの差）: "
+              "C−A の平均が正 / 対照 P−A を上回る / C が上の窓が過半")
+        for L in ul_done:
+            base_t = tables[MAIN_FORM][L]
+            d_c = paired(base_t, tables[MAIN_FORM][f"{L}_ULC"], "tp")
+            d_p = paired(base_t, tables[MAIN_FORM][f"{L}_ULP"], "tp")
+            d_b = paired(base_t, tables[MAIN_FORM][f"{L}_ULB"], "tp")
+            n = d_c.get("n", 0)
+            need = n // 2 + 1
+            j = {"n": n, "need": need, "positive": bool(n and d_c["mean"] > 0),
+                 "beats_placebo": bool(n and d_c["mean"] > d_p["mean"]), "majority": bool(n and d_c["wins"] >= need)}
+            j["pass"] = j["positive"] and j["beats_placebo"] and j["majority"]
+            # 参考: 自分のラベルで測った窓の PR-AUC
+            pr = {}
+            for kind in ("B", "C", "P"):
+                parts_b, parts_c = [], []
+                for sh in shifts:
+                    wb = E78.windows_cross(res["shifted"][(sh, L)], f"y_{L}").assign(shift=sh)
+                    wc = E78.windows_cross(res["shifted"][(sh, f"{L}_UL{kind}")], f"y_{L}").assign(shift=sh)
+                    parts_b.append(wb)
+                    parts_c.append(wc)
+                m = pd.concat(parts_b).merge(pd.concat(parts_c), on=["shift", "fold"], suffixes=("_b", "_c"))
+                d = (m["pr_c"] - m["pr_b"]).to_numpy(dtype=float)
+                pr[kind] = {"mean": float(d.mean()) if len(d) else float("nan"),
+                            "se": float(d.std(ddof=1) / np.sqrt(len(d))) if len(d) > 1 else float("nan"),
+                            "wins": int((d > 0).sum()), "n": int(len(d))}
+            summary["judge_ul"][L] = {**j, "diff_c": {k: v for k, v in d_c.items() if k != "per_window"},
+                                      "diff_p": {k: v for k, v in d_p.items() if k != "per_window"},
+                                      "diff_b": {k: v for k, v in d_b.items() if k != "per_window"}, "pr": pr}
+            print(f"  {L}: C−A {fmt_pair(d_c)} / P−A {fmt_pair(d_p)} / B−A {fmt_pair(d_b)}")
+            print(f"       平均>0 {'○' if j['positive'] else '×'} / 対照を上回る {'○' if j['beats_placebo'] else '×'} / 上の窓 "
+                  f"{d_c.get('wins', 0)}/{n}（{need} 以上）{'○' if j['majority'] else '×'} → "
+                  f"{'列の効果あり' if j['pass'] else '列の効果なし'}")
+            print("       参考: 自分のラベルの窓の PR-AUC " + " / ".join(
+                f"{k}−A {v['mean']:+.4f} ± {v['se']:.4f}（{v['wins']}/{v['n']}）" for k, v in pr.items()))
+
     print(f"\n■ 5. 窓ごとの値（窓の中の上位5% の tp10c。{BASE} と各腕、差）")
     for sh in shifts:
         b = tables[MAIN_FORM][BASE]
@@ -392,7 +518,8 @@ def report(res: dict, df: pd.DataFrame, shifts: list, stamp: dict) -> dict:
         if not len(b):
             continue
         print(f"  ずらし{sh}か月（{len(b)}窓）")
-        print(f"    {'窓':>2}{'件数':>6}" + "".join(f"{a:>10}" for a in ARMS) + "".join(f"{a + '−' + BASE:>13}" for a in ARMS if a != BASE))
+        print(f"    {'窓':>2}{'件数':>6}" + "".join(f"{a:>10}" for a in ARMS) + "".join(f"{a + '−' + BASE:>13}" for a in ARMS if a != BASE)
+              + ("  （UL の腕は summary.json / by_window.csv）" if len(arms) > len(ARMS) else ""))
         for _, rb in b.iterrows():
             vals, diffs = [], []
             for a in ARMS:
@@ -405,7 +532,7 @@ def report(res: dict, df: pd.DataFrame, shifts: list, stamp: dict) -> dict:
             print(f"    {int(rb['fold']):>2}{int(rb['n']):>6}" + "".join(f"{v:>+9.2f}%" for v in vals) + "".join(f"{d:>+12.2f}pt" for d in diffs))
     rows = []
     for key, _, _ in FORMS:
-        for a in ARMS:
+        for a in arms:
             t = tables[key][a]
             for _, r in t.iterrows():
                 rows.append({"form": key, "arm": a, **{k: (float(v) if isinstance(v, (int, float, np.floating)) else v) for k, v in r.items()}})
@@ -415,7 +542,9 @@ def report(res: dict, df: pd.DataFrame, shifts: list, stamp: dict) -> dict:
         json.dump(summary, fh, ensure_ascii=False, indent=1, default=float)
     print("\n■ まとめ: " + " / ".join(
         f"{a} {fmt_pair(summary['judge'][a]['diff']) if a in summary['judge'] else '—'}"
-        f"{'（支持）' if summary['judge'].get(a, {}).get('pass') else ''}" for a in ARMS if a != BASE))
+        f"{'（支持）' if summary['judge'].get(a, {}).get('pass') else ''}" for a in ARMS if a != BASE)
+        + ("" if not summary["judge_ul"] else " ｜ UL の列: " + " / ".join(
+            f"{L} C−A {fmt_pair(v['diff_c'])}{'（効果あり）' if v['pass'] else ''}" for L, v in summary["judge_ul"].items())))
     return summary
 
 
@@ -427,7 +556,9 @@ def main(argv=None) -> int:
     ap.add_argument("--rebuild", action="store_true")
     ap.add_argument("--budget-min", type=float, default=290.0)
     ap.add_argument("--dry", action="store_true", help="ラベルの付き方だけ出して終わる")
+    ap.add_argument("--with-ul", action="store_true", help="ストップ高の履歴の7列を足した腕（HIT15・TP10 の B/C/P）も計算する")
     args = ap.parse_args(argv)
+    arms = ARMS + (UL_ARMS if args.with_ul else ())
     E68.TAG = args.tag
     E68.RUN = f"{args.tag}_lgbm"
     E68.DEADLINE = time.time() + args.budget_min * 60 if args.budget_min > 0 else None
@@ -437,7 +568,7 @@ def main(argv=None) -> int:
 
     print("=" * 78)
     print("実験102 目的変数の定義を変えたモデル（到達のみ・+10% の指値）の高スコア帯の収益（LightGBM・腕ごとに探索し直し・本番と同じ OOF・32窓）")
-    print("  腕: " + " / ".join(NAMES[a] for a in ARMS) + f" / 列 {F.DEFAULT_PRESET} {len(cols)} / 探索 {args.n_trials}試行 × {E68.N_SPLITS}分割"
+    print("  腕: " + " / ".join(NAMES[a] for a in arms) + f" / 列 {F.DEFAULT_PRESET} {len(cols)} / 探索 {args.n_trials}試行 × {E68.N_SPLITS}分割"
           f"（{E68.CV_SCHEME}）/ ずらし {shifts}か月 / 種 {E68.SEEDS[ALGO]} / 判定 = 窓の中の上位5% の tp10c（平均>0・過半・z≥{Z_MIN}）/ "
           f"保存 {E68.RUN}_*")
     print("=" * 78)
@@ -453,7 +584,7 @@ def main(argv=None) -> int:
     print(f"  行 {len(df):,}（{df['Date'].min().date()} 〜 {df['Date'].max().date()}）。探索の期間（〜{cutoff.date()}）では "
           f"{(df['Date'] <= cutoff).sum():,}行")
     t0 = time.time()
-    res = run(df, cols, cutoff, args.n_trials, stamp, shifts)
+    res = run(df, cols, cutoff, args.n_trials, stamp, shifts, arms=arms)
     log(f"[{ALGO}] {'そろった' if res else '途中（続きは次の回）'} / {time.time()-t0:.0f}秒")
     if res is None:
         label_report(df)
