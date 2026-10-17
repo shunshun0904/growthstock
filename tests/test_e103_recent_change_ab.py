@@ -74,6 +74,9 @@ class TestRecent(unittest.TestCase):
         got = E.recent_columns(keys, panel().drop(columns=["open"])).iloc[0]
         self.assertTrue(np.isnan(got["gap_open"]))
         self.assertAlmostEqual(got["ret_1d"], (120 / 108 - 1) * 100)
+        got = E.recent_columns(keys, panel().drop(columns=["open", "vol"])).iloc[0]     # 出来高も無い表
+        self.assertTrue(np.isnan(got["vol_chg_1d"]))
+        self.assertAlmostEqual(got["ret_5d"], (120 / 100 - 1) * 100)
 
 
 class TestConstants(unittest.TestCase):

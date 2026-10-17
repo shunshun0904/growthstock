@@ -795,7 +795,8 @@ def price_panel(bars: pd.DataFrame, cfg: LabelConfig = DEFAULT_LABEL,
     df = df.sort_values(["Code", "Date"]).reset_index(drop=True)
 
     close = df["AdjC"].fillna(df["C"])
-    # 始値は目的変数の基準（翌営業日の寄り、LABEL_ENTRY）にだけ使う。特徴量には使わない
+    # 始値は目的変数の基準（翌営業日の寄り、LABEL_ENTRY）と、当日の寄り付きのギャップ（gap_open・vol_gap_ratio。
+    # 当日の引けまでに分かる値）に使う。翌営業日の始値を特徴量に使ってはいけない
     if "O" in df.columns:
         df["open"] = (df["AdjO"].fillna(df["O"]) if "AdjO" in df.columns else df["O"])
     high = df["AdjH"].fillna(df["H"])
@@ -1547,6 +1548,42 @@ def _drawdown(df: pd.DataFrame, last_nh: pd.Series,
     return base, pull, mdd
 
 
+def _pct_change(num: pd.Series, den: pd.Series) -> np.ndarray:
+    """(num ÷ den − 1) × 100。den が 0 以下・欠測なら欠測。"""
+    n = num.to_numpy(dtype=float)
+    d = den.to_numpy(dtype=float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.where(d > 0, (n / d - 1.0) * 100.0, np.nan)
+
+
+def _recent_change(df: pd.DataFrame, g) -> Dict[str, np.ndarray]:
+    """
+    直近の増減の5列（全行）。g は df の銘柄ごとの groupby。
+
+      ret_1d      前の行の終値 → 当日の終値の騰落率（%）
+      ret_2d      2行前の終値 → 当日の終値（%）
+      gap_open    前の行の終値 → 当日の始値（%）。始値の無い足では欠測
+      ret_5d      5行前の終値 → 当日の終値（%）
+      vol_chg_1d  当日の出来高 ÷ 前の行の出来高（%）。前の行の出来高が 0 以下・欠測なら欠測。出来高の無い足では欠測
+    前の行の価格が 0 以下・欠測なら欠測。
+
+    実験103（research/exp/e103_recent_change_ab.py の recent_columns）と同じ値になる（tests/test_breakout_shape.py が突き合わせる）。
+    """
+    c1 = g["close"].shift(1)
+    out = {"ret_1d": _pct_change(df["close"], c1),
+           "ret_2d": _pct_change(df["close"], g["close"].shift(2)),
+           "gap_open": (_pct_change(df["open"], c1) if "open" in df.columns else np.full(len(df), np.nan)),
+           "ret_5d": _pct_change(df["close"], g["close"].shift(5))}
+    if "vol" not in df.columns:                                 # 出来高の無い足（テストの合成データなど）
+        out["vol_chg_1d"] = np.full(len(df), np.nan)
+        return out
+    v1 = g["vol"].shift(1).to_numpy(dtype=float)
+    v0 = df["vol"].to_numpy(dtype=float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        out["vol_chg_1d"] = np.where(v1 > 0, v0 / v1 * 100.0, np.nan)
+    return out
+
+
 def add_breakout_context(df: pd.DataFrame) -> pd.DataFrame:
     """
     ブレイクそのものの性質を表す特徴量。
@@ -1585,6 +1622,12 @@ def add_breakout_context(df: pd.DataFrame) -> pd.DataFrame:
 
     # 直近20営業日の上昇率。すでに走った後か、静かなところからの初動か
     df["ret_20d"] = (df["close"] / g["close"].shift(20) - 1.0) * 100.0
+
+    # 直近の増減（実験103 で検証、2026-10-17 に運用者の決定で本番へ。docs/MODEL_ADOPTION_RULES.md §64）。
+    # 前日比・前々日比・寄り付きのギャップ・5営業日の騰落・出来高の前日比。どれも当日の引けまでに分かる値
+    # （目的変数の基準は翌営業日の寄り）。前の行は同じ銘柄の中だけで数える（ret_20d と同じ）
+    for col, val in _recent_change(df, g).items():
+        df[col] = val
     # vol_20d は price_panel で作る（ラベルのしきい値に使うので、
     # ラベル計算より前に存在している必要がある）。ここでは作り直さない。
     if "vol_20d" not in df.columns:

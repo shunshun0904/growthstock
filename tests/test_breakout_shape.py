@@ -13,6 +13,8 @@ docs/MODEL_ADOPTION_RULES.md §62）と、下げの深さの3列（build_dataset
   - 日次予測の採点は、モデルごとに学習した列で行う（列の組が違うモデルも飛ばさない。学習した列が無いモデルだけ飛ばす）
   - 下げの深さの3列: 手で数えた値、実験102 の drawdown_columns と更新日の全行で同じ値、更新日でない行は欠測、
     244列の組 = 241列の後ろに3列
+  - 直近の増減の5列（build_dataset._recent_change。実験103、§64）: 手で数えた値、実験103 の recent_columns と全行で同じ値、
+    銘柄の切れ目をまたがない、249列の組 = 244列の後ろに5列
 
   python3 tests/test_breakout_shape.py
 """
@@ -31,6 +33,7 @@ sys.path.insert(0, os.path.join(ROOT, "research", "exp"))
 import build_dataset as B  # noqa: E402
 import e101_base_shape_ab as E  # noqa: E402
 import e102_drawdown_ab as E102  # noqa: E402
+import e103_recent_change_ab as E103  # noqa: E402
 import feature_dict as FD  # noqa: E402
 import features as F  # noqa: E402
 import importance_report as IR  # noqa: E402
@@ -40,6 +43,7 @@ import predict_daily as PD  # noqa: E402
 
 NEW = ["broken_high_age", "prev_nh_ratio"]
 DD = ["base_depth", "pullback_depth", "max_dd_120"]
+RC = ["ret_1d", "ret_2d", "gap_open", "ret_5d", "vol_chg_1d"]
 
 
 def panel(highs_by_code, w):
@@ -257,6 +261,84 @@ class TestDrawdownSameAsExperiment102(unittest.TestCase):
             self.assertIn(c, FD.COL_JA)
             self.assertEqual(IR.macro_of(c), "price")
         self.assertEqual(LP.unclassified(dd), [])
+
+
+def with_open_vol(df, rng):
+    """始値・出来高を足す（出来高 0・欠測の行も混ぜる）。"""
+    df = df.copy()
+    df["open"] = df["low"] + (df["high"] - df["low"]) * rng.uniform(0, 1, len(df))
+    vol = rng.integers(0, 5000, len(df)).astype(float)
+    vol[rng.random(len(df)) < 0.05] = 0.0
+    vol[rng.random(len(df)) < 0.03] = np.nan
+    df["vol"] = vol
+    return df
+
+
+class TestRecentChange(unittest.TestCase):
+    def test_hand_counted(self):
+        rows = []
+        for i, (c, o, v) in enumerate(zip([100, 102, 101, 110, 108, 120], [99, 101, 102, 104, 109, 115],
+                                          [10, 20, 0, 30, 15, 45])):
+            rows.append({"Code": "10010", "Date": pd.Timestamp("2024-01-01") + pd.Timedelta(days=i), "high": c + 1.0,
+                         "low": c - 1.0, "close": float(c), "open": float(o), "vol": float(v), "vol_20d": 2.0,
+                         "high52w_prior": np.nan, "is_new_high": False})
+        df = context(pd.DataFrame(rows), 3)
+        r = df.iloc[5]
+        self.assertAlmostEqual(r["ret_1d"], (120 / 108 - 1) * 100)
+        self.assertAlmostEqual(r["ret_2d"], (120 / 110 - 1) * 100)
+        self.assertAlmostEqual(r["gap_open"], (115 / 108 - 1) * 100)
+        self.assertAlmostEqual(r["ret_5d"], (120 / 100 - 1) * 100)
+        self.assertAlmostEqual(r["vol_chg_1d"], 45 / 15 * 100)
+        self.assertTrue(np.isnan(df.iloc[3]["vol_chg_1d"]))               # 前の行の出来高が 0
+        self.assertTrue(df.iloc[0][RC].isna().all())                      # 銘柄の先頭
+
+    def test_same_as_experiment103(self):
+        rng = np.random.default_rng(20261019)
+        df = context(with_open_vol(rich_panel(rng, 4, 80, 5), rng), 5)
+        want = E103.recent_columns(df[["Code", "Date"]], df)
+        for c in RC:
+            a = df[c].to_numpy()
+            b = want[c].to_numpy()
+            same = (a == b) | (np.isnan(a) & np.isnan(b))
+            self.assertTrue(same.all(), (c, a[~same][:5], b[~same][:5]))
+            self.assertGreater(int(np.isfinite(a).sum()), 100, c)
+        # 銘柄の切れ目をまたがない: 各銘柄の先頭行は5列とも欠測
+        first = df.groupby("Code").head(1)
+        self.assertTrue(first[RC].isna().all().all())
+
+    def test_without_open_or_volume(self):
+        rng = np.random.default_rng(3)
+        df = context(rich_panel(rng, 2, 30, 5), 5)                         # 始値・出来高の無い足
+        self.assertTrue(df["gap_open"].isna().all())
+        self.assertTrue(df["vol_chg_1d"].isna().all())
+        self.assertGreater(int(df["ret_1d"].notna().sum()), 20)
+
+    def test_future_rows_do_not_change_values(self):
+        rng = np.random.default_rng(11)
+        base = with_open_vol(rich_panel(rng, 2, 40, 5), rng)
+        a = context(base, 5)
+        later = base.copy()
+        tail = later.index[later["Code"] == "10010"][-2:]
+        later.loc[tail, ["high", "low", "close", "open", "vol"]] = [[500.0, 1.0, 300.0, 250.0, 1e7]] * 2
+        b = context(later, 5)
+        keep = a.index[(a["Code"] == "10010")][:-2]
+        pd.testing.assert_frame_equal(a.loc[keep, RC], b.loc[keep, RC])
+
+    def test_column_set(self):
+        dd = F.columns("all_plus_prog_listing_vol_book_shape_dd")
+        rc = F.columns("all_plus_prog_listing_vol_book_shape_dd_recent")
+        self.assertEqual(len(rc), 249)
+        self.assertEqual(rc, dd + RC)                                     # 実験103 の腕 C と同じ並び
+        self.assertEqual(F.GROUPS["recent_change"], RC)
+        self.assertEqual(list(E103.NEW_COLS), RC)
+        self.assertTrue(set(RC) <= set(F.all_columns()))
+        self.assertFalse(set(RC) & set(F.RAW_FOR_RANK))
+        for c in RC:
+            self.assertEqual(LP.kind_of(c), "pos_heavy" if c == "vol_chg_1d" else "signed_heavy")
+            self.assertIn(c, FD.NAME_JA)
+            self.assertIn(c, FD.COL_JA)
+            self.assertEqual(IR.macro_of(c), "price")
+        self.assertEqual(LP.unclassified(rc), [])
 
 
 class FakeModel:

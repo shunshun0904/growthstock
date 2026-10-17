@@ -62,6 +62,9 @@ SIGNED_HEAVY = (
     "sales_growth_q2", "sales_growth_q3", "shares_yoy", "shares_yoy_p1",
     "sustainable_growth", "sustainable_growth_chg1", "sustainable_growth_chg2", "xh_net",
     "xh_net_mc",
+    # 直近の増減（%。実験103）。実測（学習データ 2026-10-17）の 5% / 中央値 / 95% / 最大: ret_1d −0.7 / 3.0 / 18.1 / 148.8、
+    # ret_2d 0.4 / 4.7 / 25.8 / 224.2、gap_open −0.8 / 0.8 / 14.7 / 147.9、ret_5d 1.3 / 7.1 / 34.2 / 361.2
+    "ret_1d", "ret_2d", "gap_open", "ret_5d",
 )
 
 SIGNED = (
@@ -81,6 +84,8 @@ POSITIVE_HEAVY = (
     "vol_gap_ratio", "vol_rel_mkt", "vol_rel_sector", "vol_updown",
     "volume_trend", "xh_bookval", "xh_bookval_mc", "xh_dec_amt",
     "xh_inc_cost", "xh_iss",
+    # 出来高の前日比（%。実験103）。中央値 162・95% 1,599・最大 675,933（前の日の出来高がごく少ない行）
+    "vol_chg_1d",
 )
 
 POSITIVE = (

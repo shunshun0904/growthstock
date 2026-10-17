@@ -46,8 +46,8 @@ MACRO = [
                       "turnaround", "efficiency", "progress", "cashflow",
                       "guidance"}),
     ("val", "バリュエーション・配当", {"valuation", "dividend"}),
-    ("price", "株価・需給・市場", {"price", "breakout", "breakout_shape", "drawdown", "volume",
-                                   "liquidity", "supply", "market", "sector"}),
+    ("price", "株価・需給・市場", {"price", "breakout", "breakout_shape", "drawdown", "recent_change",
+                                   "volume", "liquidity", "supply", "market", "sector"}),
 ]
 
 TOP_N = 30

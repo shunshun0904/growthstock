@@ -37,7 +37,9 @@
 
 結果（2026-10-17。lgbm 1.5σ、run 39061630220。docs/MODEL_ADOPTION_RULES.md §64）: 32窓の PR-AUC で C−A +0.0021（SE 0.0020、
 上の窓 16/32）・対照 P−A +0.0032・C−P −0.0012（上の窓 11/32）→ §7 の1モデル分の3条件のうち「対照を上回る」「上の窓が過半」を
-満たさない。本番の設定には書いていない。
+満たさない。
+運用者の決定（2026-10-17）: 本番に入れる。5列は build_dataset._recent_change が作るようになった（この台本の recent_columns と
+同じ値。tests/test_breakout_shape.py・research/exp/probe_breakout_shape.py）。この台本は当時の比べ方の記録として残す。
 
 出すもの: 5列の分布と、値の区切りごとの正例率（件数・割合だけ）、既存の近い列との順位相関、探索の CV（分割ごと）、本番と同じ OOF
 （種42・ずらし0）、窓ごとの差の平均・SE・上の窓の数、§7 の判定、窓ごとの値の一覧。公開ログには件数・割合・日付・精度だけ
@@ -176,9 +178,10 @@ def _pct(num: pd.Series, den: pd.Series) -> pd.Series:
 def recent_columns(keys: pd.DataFrame, panel: pd.DataFrame) -> pd.DataFrame:
     """
     keys（Code, Date）の行ごとに5列を作る（keys の並びのまま）。panel は銘柄・日付の順に並んだ日足の表で、Code・Date・
-    close・vol（と、あれば open）を持つこと。前の行は同じ銘柄の中だけで数える。panel に無い行は欠測。
+    close（と、あれば open・vol）を持つこと。始値・出来高の無い表ではその列が欠測。前の行は同じ銘柄の中だけで数える。
+    panel に無い行は欠測。
     """
-    cols = ["Code", "Date", "close", "vol"] + (["open"] if "open" in panel.columns else [])
+    cols = ["Code", "Date", "close"] + [c for c in ("open", "vol") if c in panel.columns]
     p = panel[cols].copy()
     p["Code"] = p["Code"].astype(str)
     p["Date"] = pd.to_datetime(p["Date"])
@@ -189,10 +192,13 @@ def recent_columns(keys: pd.DataFrame, panel: pd.DataFrame) -> pd.DataFrame:
     out["ret_2d"] = _pct(p["close"], c2)
     out["gap_open"] = _pct(p["open"], c1) if "open" in p.columns else np.nan
     out["ret_5d"] = _pct(p["close"], c5)
-    v1 = g["vol"].shift(1).to_numpy(dtype=float)
-    v0 = p["vol"].to_numpy(dtype=float)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        out["vol_chg_1d"] = np.where(v1 > 0, v0 / v1 * 100.0, np.nan)
+    if "vol" in p.columns:
+        v1 = g["vol"].shift(1).to_numpy(dtype=float)
+        v0 = p["vol"].to_numpy(dtype=float)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            out["vol_chg_1d"] = np.where(v1 > 0, v0 / v1 * 100.0, np.nan)
+    else:
+        out["vol_chg_1d"] = np.nan
     k = keys[["Code", "Date"]].copy()
     k["Code"] = k["Code"].astype(str)
     k["Date"] = pd.to_datetime(k["Date"])

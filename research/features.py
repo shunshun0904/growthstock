@@ -237,6 +237,12 @@ GROUPS: Dict[str, List[str]] = {
     #   pullback_depth  今回抜いた78週高値を付けた日の高値から、その後の安値の最小までの下げ（押しの深さ）
     #   max_dd_120      直近120営業日の終値の最大ドローダウン
     "drawdown": ["base_depth", "pullback_depth", "max_dd_120"],
+    # --- 直近の増減（実験103、2026-10-17 運用者の決定で本番へ。docs/MODEL_ADOPTION_RULES.md §64）---
+    # build_dataset._recent_change。順位版は作らない（実験103 に無い）
+    #   ret_1d / ret_2d / ret_5d  1・2・5営業日前の終値 → 当日の終値（%）
+    #   gap_open                  前の営業日の終値 → 当日の始値（%）
+    #   vol_chg_1d                当日の出来高 ÷ 前の営業日の出来高（%）
+    "recent_change": ["ret_1d", "ret_2d", "gap_open", "ret_5d", "vol_chg_1d"],
 }
 
 #: 横断面正規化（同じ日付内でのパーセンタイル順位）を作る対象の列。
@@ -377,10 +383,16 @@ PRESETS: Dict[str, List[str]] = {
                                              for g in ALL_GROUPS] + EXTRA_GROUPS
                                             + ["listing", "vol_factors", "fund_book", "breakout_shape"],
     # --- 2026-10-17 の運用者の決定（実験102 §63）。241列 + 下げの深さ3列。244列 --- #
-    # 並びは実験102 の腕 C と同じ（241列の後ろに3列）。既定への切り替えは日曜 10/18 の再学習の後
+    # 並びは実験102 の腕 C と同じ（241列の後ろに3列）。既定にはしない（同じ日に実験103 の5列も入れることになり、既定は下の249列）
     "all_plus_prog_listing_vol_book_shape_dd": [("progress_seasonal_pct" if g == "progress" else g)
                                                 for g in ALL_GROUPS] + EXTRA_GROUPS
                                                + ["listing", "vol_factors", "fund_book", "breakout_shape", "drawdown"],
+    # --- 2026-10-17 の運用者の決定（実験103 §64）。244列 + 直近の増減5列。249列 --- #
+    # 並びは実験103 の腕 C と同じ（244列の後ろに5列）。既定への切り替えは日曜 10/18 の再学習の後
+    "all_plus_prog_listing_vol_book_shape_dd_recent": [("progress_seasonal_pct" if g == "progress" else g)
+                                                       for g in ALL_GROUPS] + EXTRA_GROUPS
+                                                      + ["listing", "vol_factors", "fund_book", "breakout_shape",
+                                                         "drawdown", "recent_change"],
     "all_plus_prog_listing": [("progress_seasonal_pct" if g == "progress" else g)
                               for g in ALL_GROUPS] + EXTRA_GROUPS + ["listing"],
 

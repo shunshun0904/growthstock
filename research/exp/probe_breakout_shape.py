@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
 """
-probe: 本番に入れる2列（broken_high_age・prev_nh_ratio。build_dataset._breakout_shape。§62）と、下げの深さの3列
-（base_depth・pullback_depth・max_dd_120。build_dataset._drawdown。§63）を全期間のデータで確かめる（2026-10-17、
-運用者の決定「本番に入れる」。docs/MODEL_ADOPTION_RULES.md）。
+probe: 本番に入れる2列（broken_high_age・prev_nh_ratio。build_dataset._breakout_shape。§62）、下げの深さの3列
+（base_depth・pullback_depth・max_dd_120。build_dataset._drawdown。§63）、直近の増減の5列（ret_1d・ret_2d・gap_open・ret_5d・
+vol_chg_1d。build_dataset._recent_change。§64）を全期間のデータで確かめる（2026-10-17、運用者の決定「本番に入れる」。
+docs/MODEL_ADOPTION_RULES.md）。
 
 Run Experiment が先に作った学習用のデータセット（research/_data/dataset.parquet。週次の再学習と同じ
 `python3 research/build_dataset.py`）と、日次の予測と同じ作り（--keep-unlabeled）について:
 
   1. 一致     2列が実験101 の作り方（e101_base_shape_ab.shape_columns）と、3列が実験102 の作り方
-              （e102_drawdown_ab.drawdown_columns）と一致するか（どちらも組み直した日足から銘柄ごとに別に数える）。
+              （e102_drawdown_ab.drawdown_columns）と、5列が実験103 の作り方（e103_recent_change_ab.recent_columns）と
+              一致するか（どれも組み直した日足から別に数える）。
               日足の更新日の全行と、データセット（学習用・予測用）の全行で。base_length も日足と一致するか
   2. 付き方   欠測の数（broken_high_age は無いはず。prev_nh_ratio は base_length が欠測の行だけのはず）・分位・範囲
   3. 性質     base_length が窓（368）以下の行: broken_high_age = base_length の割合・prev_nh_ratio が 100 を超える割合
               （前回の更新日の高値が窓の中にあるので、超えたはず）。窓より長い行: prev_nh_ratio が 100 未満の割合
   4. 予測用   --keep-unlabeled で作り直したデータセットにも2列が付くか（ラベル未確定の行・直近の日の欠測の数）
-  5. 列の組   239列の組は変わっていないか（指紋）。241列の組 = 239列の後ろに2列、244列の組 = 241列の後ろに3列で、
-              その列がすべてデータセットにあるか
+  5. 列の組   239列の組は変わっていないか（指紋）。241列の組 = 239列の後ろに2列、244列の組 = 241列の後ろに3列、
+              249列の組 = 244列の後ろに5列で、その列がすべてデータセットにあるか
   6. 両端     prev_nh_ratio の両端の行（130 超・30 未満）の内訳。その日の上げ（前日終値から +30% 超）・前回の更新日の後に
               前回の高値を超えていた（窓の値が半分未満で更新日にならなかった）・分割や併合（調整の倍率が変わった）・
               1日で2倍超か半分未満の終値（調整漏れの疑い）の件数。日足の誤りか本物の値動きかの手がかり
@@ -42,15 +44,18 @@ sys.path.insert(0, HERE)
 import build_dataset as B  # noqa: E402
 import e101_base_shape_ab as E  # noqa: E402
 import e102_drawdown_ab as E102  # noqa: E402
+import e103_recent_change_ab as E103  # noqa: E402
 import features as F  # noqa: E402
 import lab  # noqa: E402
 
 DATA_DIR = lab.DATA_DIR
 NEW = ["broken_high_age", "prev_nh_ratio"]
 DD = ["base_depth", "pullback_depth", "max_dd_120"]
+RC = ["ret_1d", "ret_2d", "gap_open", "ret_5d", "vol_chg_1d"]
 BASE_PRESET = "all_plus_prog_listing_vol_book"
 SHAPE_PRESET = "all_plus_prog_listing_vol_book_shape"
 DD_PRESET = "all_plus_prog_listing_vol_book_shape_dd"
+RC_PRESET = "all_plus_prog_listing_vol_book_shape_dd_recent"
 #: 239列の組の指紋（2026-09-26 から 2026-10-17 の決定までの既定。日曜 10/18 の再学習はこの列）
 BASE_SIG = "2cf1283a9de5"
 QS = (0.0, 0.01, 0.05, 0.25, 0.5, 0.75, 0.95, 0.99, 1.0)
@@ -163,11 +168,13 @@ def main(argv: Sequence[str] = None) -> int:
     base = F.columns(BASE_PRESET)
     shape = F.columns(SHAPE_PRESET)
     ddp = F.columns(DD_PRESET)
+    rcp = F.columns(RC_PRESET)
     print(f"■ 5. 既定 {F.DEFAULT_PRESET}（{len(F.columns(F.DEFAULT_PRESET))}列）/ {BASE_PRESET} {len(base)}列・指紋 "
           f"{F.signature(base)}（期待 {BASE_SIG}）/ {SHAPE_PRESET} {len(shape)}列・指紋 {F.signature(shape)}・"
           f"239列の後ろに2列: {shape == base + NEW} / {DD_PRESET} {len(ddp)}列・指紋 {F.signature(ddp)}・"
-          f"241列の後ろに3列: {ddp == shape + DD}")
-    ok &= F.signature(base) == BASE_SIG and shape == base + NEW and ddp == shape + DD
+          f"241列の後ろに3列: {ddp == shape + DD} / {RC_PRESET} {len(rcp)}列・指紋 {F.signature(rcp)}・"
+          f"244列の後ろに5列: {rcp == ddp + RC}")
+    ok &= F.signature(base) == BASE_SIG and shape == base + NEW and ddp == shape + DD and rcp == ddp + RC
 
     # 4. 予測用（日次の予測と同じ作り）。日足を組む前に別のプロセスで作る（2つを同時にメモリに置かない）
     pr = None
@@ -179,7 +186,7 @@ def main(argv: Sequence[str] = None) -> int:
         if r.returncode != 0:
             print(f"  作れなかった（終了コード {r.returncode}）: {r.stderr.strip().splitlines()[-1:]}")
             return 1
-        pr = pd.read_parquet(out, columns=["Code", "Date", "label", "base_length"] + NEW + DD)
+        pr = pd.read_parquet(out, columns=["Code", "Date", "label", "base_length"] + NEW + DD + RC)
         os.remove(out)
         pr["Code"] = pr["Code"].astype(str)
         pr["Date"] = pd.to_datetime(pr["Date"])
@@ -187,7 +194,7 @@ def main(argv: Sequence[str] = None) -> int:
         last = pr[pr["Date"] == pr["Date"].max()]
         print(f"  {len(pr):,}行・ラベル未確定 {len(un):,}行（{un['Date'].min().date() if len(un) else '-'} 〜 "
               f"{un['Date'].max().date() if len(un) else '-'}）・直近の日 {pr['Date'].max().date()} {len(last):,}行")
-        for c in NEW + DD:
+        for c in NEW + DD + RC:
             print(f"  {c}: ラベル未確定の行の欠測 {int(un[c].isna().sum()):,} / 直近の日の欠測 {int(last[c].isna().sum()):,}")
         ok &= int(un["broken_high_age"].isna().sum()) == 0
         if len(un):
@@ -202,6 +209,7 @@ def main(argv: Sequence[str] = None) -> int:
     print(f"■ 1. 一致（日足の更新日 {int(nh.sum()):,}行。build_dataset の2列・3列 と 実験101・102 の数え方）")
     ok &= compare("更新日", panel.loc[nh, NEW], want)
     ok &= compare("更新日", panel.loc[nh, DD], E102.drawdown_columns(panel.loc[nh, ["Code", "Date"]], panel), DD)
+    ok &= compare("更新日", panel.loc[nh, RC], E103.recent_columns(panel.loc[nh, ["Code", "Date"]], panel), RC)
     off = int(panel.loc[~nh, NEW + DD].notna().sum().sum())
     print(f"  更新日でない行に値がある: {off:,}（無いはず）")
     ok &= off == 0
@@ -210,13 +218,14 @@ def main(argv: Sequence[str] = None) -> int:
     ds = pd.read_parquet(os.path.join(args.data_dir, "dataset.parquet"))
     ds["Code"] = ds["Code"].astype(str)
     ds["Date"] = pd.to_datetime(ds["Date"])
-    miss = [c for c in ddp if c not in ds.columns]
-    print(f"■ 5. {DD_PRESET} の列でデータセットに無いもの: {len(miss)}（{', '.join(miss[:5])}）")
+    miss = [c for c in rcp if c not in ds.columns]
+    print(f"■ 5. {RC_PRESET} の列でデータセットに無いもの: {len(miss)}（{', '.join(miss[:5])}）")
     if miss:
         return 1
     print(f"■ 1. 一致（学習用のデータセット {len(ds):,}行・{ds['Date'].min().date()} 〜 {ds['Date'].max().date()}）")
     ok &= compare("データセット", ds[NEW], E.shape_columns(ds[["Code", "Date"]], panel, w=w))
     ok &= compare("データセット", ds[DD], E102.drawdown_columns(ds[["Code", "Date"]], panel), DD)
+    ok &= compare("データセット", ds[RC], E103.recent_columns(ds[["Code", "Date"]], panel), RC)
     m = ds[["Code", "Date", "base_length"]].merge(panel[["Code", "Date", "base_length"]], on=["Code", "Date"],
                                                   how="left", suffixes=("", "_panel"))
     n = same(m["base_length"], m["base_length_panel"])
@@ -225,12 +234,17 @@ def main(argv: Sequence[str] = None) -> int:
     if pr is not None:
         ok &= compare("予測用", pr[NEW], E.shape_columns(pr[["Code", "Date"]], panel, w=w))
         ok &= compare("予測用", pr[DD], E102.drawdown_columns(pr[["Code", "Date"]], panel), DD)
+        ok &= compare("予測用", pr[RC], E103.recent_columns(pr[["Code", "Date"]], panel), RC)
     ok &= report("学習用のデータセット", ds, w)
     for c in DD:
         v = pd.to_numeric(ds[c], errors="coerce")
         bad = int(((v < 0) | (v > 100)).sum())
         print(f"  {c}: 欠測 {int(v.isna().sum()):,}・0〜100 の外 {bad}・分位 {quantiles(v)}")
         ok &= bad == 0
+    for c in RC:
+        v = pd.to_numeric(ds[c], errors="coerce")
+        print(f"  {c}: 欠測 {int(v.isna().sum()):,}・無限大 {int(np.isinf(v).sum())}・分位 {quantiles(v)}")
+        ok &= int(np.isinf(v).sum()) == 0
     nb = int((ds["base_depth"].isna() != ds["base_length"].isna()).sum())
     print(f"  base_depth の欠測と base_length の欠測が食い違う行: {nb}（無いはず）")
     ok &= nb == 0
