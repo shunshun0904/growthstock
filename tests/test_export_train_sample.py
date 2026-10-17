@@ -56,12 +56,17 @@ def dataset(per_day=(("2026-09-10", 3), ("2026-09-11", 4), ("2026-09-14", 5)), u
 
 
 class FakeWS:
+    """書いた値を覚え、読み戻しで返す（Sheets のように、行末の空欄は返さず、数は数・文字は文字のまま）。"""
+
     def __init__(self, title, rows, cols):
         self.title, self.rows, self.cols = title, rows, cols
         self.calls = []
+        self.grid = {}
+        self.tamper = None                                       # 読み戻しで1セルだけ変える（食い違いの確かめ）
 
     def clear(self):
         self.calls.append(("clear",))
+        self.grid = {}
 
     def resize(self, rows, cols):
         self.rows, self.cols = rows, cols
@@ -69,6 +74,25 @@ class FakeWS:
 
     def update(self, values, rng, value_input_option=None):
         self.calls.append(("update", rng, len(values), value_input_option))
+        top = int(rng[1:]) - 1
+        for i, row in enumerate(values):
+            for j, v in enumerate(row):
+                self.grid[(top + i, j)] = v
+
+    def get_values(self, value_render_option=None):
+        self.calls.append(("get_values", value_render_option))
+        if not self.grid:
+            return []
+        out = []
+        for i in range(max(r for r, _ in self.grid) + 1):
+            row = [self.grid.get((i, j), "") for j in range(max(c for _, c in self.grid) + 1)]
+            while row and row[-1] == "":
+                row.pop()
+            out.append(row)
+        if self.tamper:
+            (i, j), v = self.tamper
+            out[i][j] = v
+        return out
 
     def freeze(self, rows=None, cols=None):
         self.calls.append(("freeze", rows, cols))
@@ -191,6 +215,25 @@ class TestWrite(unittest.TestCase):
         self.assertNotIn("freeze", [c[0] for c in ws.calls])
 
 
+class TestVerify(unittest.TestCase):
+    def test_same(self):
+        self.assertTrue(X.same(1, 1.0))
+        self.assertTrue(X.same(0.1 + 0.2, 0.30000000000000004))
+        self.assertFalse(X.same(0.1, 0.1000001))
+        self.assertTrue(X.same("", ""))
+        self.assertTrue(X.same("inf", "inf"))
+        self.assertFalse(X.same("7203", 7203))                  # コードは文字のまま書く（数にならない）
+        self.assertFalse(X.same("", 0))
+
+    def test_readback(self):
+        book = FakeBook()
+        values = [["日付", "コード", "x"], ["Date", "Code", "x"], ["2026-09-14", "7203", 0.5], ["2026-09-14", "285A", ""]]
+        ws = X.write_tab(book, "T", values)
+        self.assertEqual(X.verify_tab(ws, values), (12, 0, None))
+        ws.tamper = ((2, 2), 0.25)
+        self.assertEqual(X.verify_tab(ws, values), (12, 1, (3, 3)))
+
+
 class TestMain(unittest.TestCase):
     def run_main(self, argv, book=None):
         with tempfile.TemporaryDirectory() as d:
@@ -220,6 +263,25 @@ class TestMain(unittest.TestCase):
         self.assertIn(("freeze", 2, 3), book.sheets[X.SAMPLE_TITLE].calls)
         self.assertIn(("clear",), book.sheets[X.NOTES_TITLE].calls)
         self.assertIn(f"タブ「{X.SAMPLE_TITLE}」に 12行", log)
+        self.assertIn("[check] 1.2σ のラベルを引き直すと学習データのラベルと一致: 12 / 12", log)
+        self.assertIn("[check] 銘柄名の分からない行（今の銘柄一覧に無い）: 10", log)
+        self.assertIn(f"[verify] 「{X.SAMPLE_TITLE}」を読み戻して {14 * (6 + len(COLS)):,}セルを比べた: 食い違い 0", log)
+        self.assertIn(f"[verify] 「{X.NOTES_TITLE}」を読み戻して", log)
+
+    def test_label_mismatch_stops(self):
+        """引き直したラベルが学習データと合わなければ書かない。"""
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "dataset.parquet")
+            ds = dataset()
+            ds.loc[0, "label"] = 1.0 - ds.loc[0, "label"]
+            ds.to_parquet(path, index=False)
+            book = FakeBook()
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                rc = X.main(["--dataset", path, "--data-dir", d, "--rows", "1000"], book=book)
+        self.assertEqual(rc, 1)
+        self.assertEqual(book.added, [])
+        self.assertIn("[fatal]", out.getvalue())
 
     def test_rows_limit(self):
         with self.assertRaises(SystemExit):

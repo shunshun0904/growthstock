@@ -13,8 +13,12 @@
                                値は学習器に渡す値のまま（欠測は空欄、無限大は inf）
   タブ「学習データの列の説明」 行の選び方・ラベルの定義・今のモデルの学習期間と、列ごとの日本語名・大区分・グループ・説明
 
-どちらのタブも書くたびに中身を入れ替える（ほかのタブには触らない）。銘柄ごとの値は非公開のスプレッドシートにだけ書く。
-Actions のログは公開なので、行数・日付の範囲・正例の数だけを出す（銘柄コード・銘柄名・値は出さない）。
+どちらのタブも書くたびに中身を入れ替える（ほかのタブには触らない）。書く前に、1.2σ のラベルを到達・終盤・トレンドの列から
+引き直して学習データのラベルと全行一致することを確かめ（1.5σ・1.8σ の引き直しと同じ式）、書いた後に両方のタブを読み戻して
+全セルが書いた値と一致することを確かめる（どちらも食い違えば失敗で終わる）。
+
+銘柄ごとの値は非公開のスプレッドシートにだけ書く。Actions のログは公開なので、行数・日付の範囲・正例の数・確かめの件数
+だけを出す（銘柄コード・銘柄名・値は出さない）。
 
   GOOGLE_SERVICE_ACCOUNT_JSON='{...}' GSHEET_ID=... python3 research/export_train_sample.py [--rows 1000]
   python3 research/export_train_sample.py --dry-run    # 書かずに件数だけ
@@ -158,6 +162,33 @@ def notes(sample: pd.DataFrame, cols: Sequence[str], rows: int, meta: Optional[d
     return lines
 
 
+def same(a, b) -> bool:
+    """書いた値と読み戻した値が同じか（数は倍精度の丸めの範囲で、ほかは文字として）。"""
+    def num(v):
+        return isinstance(v, (int, float)) and not isinstance(v, bool)
+    if num(a) and num(b):
+        return math.isclose(float(a), float(b), rel_tol=1e-12, abs_tol=0.0)
+    if num(a) or num(b):
+        return False                                             # 数と文字（コードが数になった、など）は食い違い
+    return str(a) == str(b)
+
+
+def verify_tab(ws, values: List[List]):
+    """タブを読み戻して全セルを比べる: (比べたセルの数, 食い違いの数, 最初の食い違いの (行, 列) か None)。"""
+    got = ws.get_values(value_render_option="UNFORMATTED_VALUE")
+    cells = bad = 0
+    first = None
+    for i in range(max(len(values), len(got))):
+        exp = values[i] if i < len(values) else []
+        row = got[i] if i < len(got) else []
+        for j in range(max(len(exp), len(row))):
+            cells += 1
+            if not same(exp[j] if j < len(exp) else "", row[j] if j < len(row) else ""):
+                bad += 1
+                first = first or (i + 1, j + 1)
+    return cells, bad, first
+
+
 def write_tab(book, title: str, values: List[List], freeze_rows: int = 0, freeze_cols: int = 0,
               bold_rows: int = 0, chunk: int = CHUNK):
     """タブの中身を入れ替える（無ければ作る）。大きさは中身に合わせる。"""
@@ -236,10 +267,19 @@ def main(argv: Optional[Sequence[str]] = None, book=None) -> int:
     sample = attach_labels(pick_recent(ds, args.rows))
     for line in summary(sample, cols):
         print(line)
+    # 1.5σ・1.8σ と同じ式で 1.2σ を引き直し、学習データのラベルと全行一致するか（引き直しの式が学習と同じかの確かめ）
+    again = B.rise_label_for_k(sample, 1.2)
+    hit = int((again == sample["label"]).sum())
+    print(f"[check] 1.2σ のラベルを引き直すと学習データのラベルと一致: {hit:,} / {len(sample):,}")
+    if hit != len(sample):
+        print("[fatal] ラベルの引き直しが学習データと合わないので書かない")
+        return 1
 
     built_at = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    data = table(sample, load_names(args.data_dir), cols)
+    names = load_names(args.data_dir)
+    data = table(sample, names, cols)
     info = notes(sample, cols, args.rows, load_meta(), built_at)
+    print(f"[check] 銘柄名の分からない行（今の銘柄一覧に無い）: {sum(1 for r in data[2:] if not r[2]):,}")
     if args.dry_run:
         print(f"[dry-run] 書かない（見本 {len(data)}行 × {len(data[0])}列、説明 {len(info)}行）")
         return 0
@@ -248,11 +288,17 @@ def main(argv: Optional[Sequence[str]] = None, book=None) -> int:
             raise SystemExit("GSHEET_ID が設定されていません（シートの URL の /d/ と /edit の間）")
         import export_sheets as ES
         book = ES.open_sheet(args.sheet_id)
-    write_tab(book, SAMPLE_TITLE, data, freeze_rows=2, freeze_cols=3, bold_rows=2)
-    write_tab(book, NOTES_TITLE, info, bold_rows=1)
+    ws = write_tab(book, SAMPLE_TITLE, data, freeze_rows=2, freeze_cols=3, bold_rows=2)
+    wn = write_tab(book, NOTES_TITLE, info, bold_rows=1)
     print(f"[sheet] タブ「{SAMPLE_TITLE}」に {len(data) - 2:,}行 × {len(data[0])}列、"
           f"「{NOTES_TITLE}」に {len(info)}行を書いた")
-    return 0
+    rc = 0
+    for title, w, values in ((SAMPLE_TITLE, ws, data), (NOTES_TITLE, wn, info)):
+        cells, bad, first = verify_tab(w, values)
+        print(f"[verify] 「{title}」を読み戻して {cells:,}セルを比べた: 食い違い {bad:,}"
+              + (f"（最初は {first[0]}行目・{first[1]}列目）" if first else ""))
+        rc |= int(bad > 0)
+    return rc
 
 
 if __name__ == "__main__":
