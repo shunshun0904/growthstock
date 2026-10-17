@@ -5,7 +5,7 @@
 - same: 両方欠測も同じと数える
 - properties: base_length が窓以内・窓より長い行の数え分け（窓以内なら古さ = base_length・比は 100 超、が本物の形）
 - extremes: 両端の行の内訳（その日の上げ・前回の高値を超えていた日・分割や併合・1日で2倍超か半分未満の終値）
-- 列の組: 239列の組の指紋が台本の期待値と同じ、241列の組はその後ろに2列
+- 列の組: 239列の組の指紋が台本の期待値と同じ、241列の組はその後ろに2列、244列の組はさらに3列
 
   python3 tests/test_probe_breakout_shape.py
 """
@@ -64,6 +64,7 @@ class TestParts(unittest.TestCase):
         base = F.columns(P.BASE_PRESET)
         self.assertEqual(F.signature(base), P.BASE_SIG)
         self.assertEqual(F.columns(P.SHAPE_PRESET), base + P.NEW)
+        self.assertEqual(F.columns(P.DD_PRESET), base + P.NEW + P.DD)
 
 
 if __name__ == "__main__":

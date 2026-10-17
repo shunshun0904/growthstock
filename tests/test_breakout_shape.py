@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 抜けた土台の形の2列（build_dataset._breakout_shape。実験101 で検証し、2026-10-17 に運用者の決定で本番へ。
-docs/MODEL_ADOPTION_RULES.md §62）。データには触らない（小さな日足の表で確かめる）。
+docs/MODEL_ADOPTION_RULES.md §62）と、下げの深さの3列（build_dataset._drawdown。実験102、§63）。データには触らない
+（小さな日足の表で確かめる）。
 
 固定すること
   - 手で数えた値: 抜いた高値の古さ（同じ値なら一番新しい行）・前回の更新日の高値に対する今回の高値・長い下げの後の戻り
@@ -10,6 +11,8 @@ docs/MODEL_ADOPTION_RULES.md §62）。データには触らない（小さな�
   - 241列の組 = 239列の組の後ろに2列（実験101 の腕 C と同じ並び）。順位版は作らない
   - 線形の前処理の型（日数・正の比率）、日本語名、重要度の大区分
   - 日次予測の採点は、モデルごとに学習した列で行う（列の組が違うモデルも飛ばさない。学習した列が無いモデルだけ飛ばす）
+  - 下げの深さの3列: 手で数えた値、実験102 の drawdown_columns と更新日の全行で同じ値、更新日でない行は欠測、
+    244列の組 = 241列の後ろに3列
 
   python3 tests/test_breakout_shape.py
 """
@@ -27,6 +30,7 @@ sys.path.insert(0, os.path.join(ROOT, "research", "exp"))
 
 import build_dataset as B  # noqa: E402
 import e101_base_shape_ab as E  # noqa: E402
+import e102_drawdown_ab as E102  # noqa: E402
 import feature_dict as FD  # noqa: E402
 import features as F  # noqa: E402
 import importance_report as IR  # noqa: E402
@@ -35,6 +39,7 @@ import models as M  # noqa: E402
 import predict_daily as PD  # noqa: E402
 
 NEW = ["broken_high_age", "prev_nh_ratio"]
+DD = ["base_depth", "pullback_depth", "max_dd_120"]
 
 
 def panel(highs_by_code, w):
@@ -159,6 +164,99 @@ class TestColumnSet(unittest.TestCase):
             self.assertIn(c, FD.COL_JA)
             self.assertEqual(IR.macro_of(c), "price")
         self.assertIn("breakout_shape", [g for _, gs, _ in FD.MACRO for g in gs])
+
+
+class TestDrawdownHandCounted(unittest.TestCase):
+    """窓 3 行・安値 = 高値 × 0.98 で手で数えた値。"""
+
+    def setUp(self):
+        self.df = context(panel({"10010": [5, 7, 6, 8, 4, 9, 9, 10],
+                                 "10020": [5, 7, 6, 8, 4, 3, 2, 3, 3.5, 3.6]}, 3), 3)
+
+    def row(self, code, i):
+        return self.df[self.df["Code"] == code].iloc[i]
+
+    def test_depths(self):
+        r = self.row("10010", 5)                 # 前回の更新日（高値8）の後の安値 3.92 → 51%。抜いた高値も同じ日
+        self.assertAlmostEqual(r["base_depth"], (1 - 4 * 0.98 / 8) * 100)
+        self.assertAlmostEqual(r["pullback_depth"], (1 - 4 * 0.98 / 8) * 100)
+        r = self.row("10010", 7)                 # 前回の更新日（高値9）の翌日の安値 8.82 → 2%。抜いた高値は前日 → 0
+        self.assertAlmostEqual(r["base_depth"], (1 - 9 * 0.98 / 9) * 100)
+        self.assertEqual(r["pullback_depth"], 0.0)
+        r = self.row("10020", 8)                 # 高値8 の後に 2（安値 1.96）まで下げた → 75.5%。抜いた高値（3）は前日 → 0
+        self.assertAlmostEqual(r["base_depth"], (1 - 2 * 0.98 / 8) * 100)
+        self.assertEqual(r["pullback_depth"], 0.0)
+        r = self.row("10010", 3)                 # 銘柄の最初の更新日: 底の深さは欠測、押しの深さはある
+        self.assertTrue(np.isnan(r["base_depth"]))
+        self.assertAlmostEqual(r["pullback_depth"], (1 - 6 * 0.98 / 7) * 100)
+        self.assertTrue(self.df["max_dd_120"].isna().all())               # 終値が60に足りない
+        self.assertTrue(self.df.loc[~self.df["is_new_high"], DD].isna().all().all())
+
+
+def rich_panel(rng, n_codes, n_rows, w):
+    """乱数の日足（安値・終値は高値より下。欠測・同じ値の高値あり）。"""
+    rows = []
+    for k in range(n_codes):
+        h = np.round(100 * np.exp(np.cumsum(rng.normal(0, 0.03, n_rows))))
+        lo = h * (1 - rng.uniform(0, 0.06, n_rows))
+        cl = lo + (h - lo) * rng.uniform(0, 1, n_rows)
+        miss = rng.random(n_rows) < 0.04
+        h[miss], lo[miss], cl[miss] = np.nan, np.nan, np.nan
+        for i in range(n_rows):
+            rows.append({"Code": f"{10010 + k * 10}", "Date": pd.Timestamp("2023-01-02") + pd.Timedelta(days=i),
+                         "high": h[i], "low": lo[i], "close": cl[i], "vol_20d": 2.0})
+    df = pd.DataFrame(rows)
+    g = df.groupby("Code", sort=False)
+    prior = g["high"].transform(lambda s_: s_.rolling(w, min_periods=1).max().shift(1))
+    df["high52w_prior"] = prior.where(g.cumcount() >= w)
+    df["is_new_high"] = (df["high"] > df["high52w_prior"]) & df["high52w_prior"].notna()
+    return df
+
+
+class TestDrawdownSameAsExperiment102(unittest.TestCase):
+    def test_constants(self):
+        self.assertEqual((B.DD_DAYS, B.DD_MIN_CLOSES), (E102.DD_DAYS, E102.DD_MIN_CLOSES))
+
+    def test_random_panels(self):
+        rng = np.random.default_rng(20261018)
+        for w in (5, 20):
+            df = context(rich_panel(rng, 5, 220, w), w)
+            nh = df["is_new_high"].to_numpy()
+            self.assertGreater(int(nh.sum()), 30)
+            want = E102.drawdown_columns(df[["Code", "Date"]], df)
+            for c in DD:
+                a = df[c].to_numpy()[nh]
+                b = want[c].to_numpy()[nh]
+                same = (a == b) | (np.isnan(a) & np.isnan(b))
+                self.assertTrue(same.all(), (w, c, a[~same][:5], b[~same][:5]))
+                self.assertGreater(int(np.isfinite(a).sum()), 10, (w, c))    # 値のある行を比べている
+            self.assertTrue(df.loc[~nh, DD].isna().all().all())
+
+    def test_future_rows_do_not_change_values(self):
+        rng = np.random.default_rng(7)
+        base = rich_panel(rng, 2, 150, 5)
+        a = context(base, 5)
+        later = base.copy()
+        tail = later.index[later["Code"] == "10010"][-3:]
+        later.loc[tail, ["high", "low", "close"]] = [[500.0, 1.0, 300.0]] * 3
+        b = context(later, 5)
+        keep = a.index[(a["Code"] == "10010")][:-3]
+        pd.testing.assert_frame_equal(a.loc[keep, DD], b.loc[keep, DD])
+
+    def test_column_set(self):
+        shape = F.columns("all_plus_prog_listing_vol_book_shape")
+        dd = F.columns("all_plus_prog_listing_vol_book_shape_dd")
+        self.assertEqual(len(dd), 244)
+        self.assertEqual(dd, shape + DD)                                    # 実験102 の腕 C と同じ並び
+        self.assertEqual(F.GROUPS["drawdown"], DD)
+        self.assertTrue(set(DD) <= set(F.all_columns()))
+        self.assertFalse(set(DD) & set(F.RAW_FOR_RANK))
+        for c in DD:
+            self.assertEqual(LP.kind_of(c), "pos")
+            self.assertIn(c, FD.NAME_JA)
+            self.assertIn(c, FD.COL_JA)
+            self.assertEqual(IR.macro_of(c), "price")
+        self.assertEqual(LP.unclassified(dd), [])
 
 
 class FakeModel:

@@ -231,6 +231,12 @@ GROUPS: Dict[str, List[str]] = {
     #   broken_high_age  今回抜いた78週高値を付けた日から何営業日か（1〜368）
     #   prev_nh_ratio    1つ前の更新日の高値に対する今回の高値（%）。前回の更新がデータに無ければ欠測
     "breakout_shape": ["broken_high_age", "prev_nh_ratio"],
+    # --- 下げの深さ（実験102、2026-10-17 運用者の決定で本番へ。docs/MODEL_ADOPTION_RULES.md §63）---
+    # どれも「下げた幅」（%、0 以上）。build_dataset._drawdown。順位版は作らない（実験102 に無い）
+    #   base_depth      1つ前の更新日の高値から、その後の安値の最小までの下げ（底の深さ）
+    #   pullback_depth  今回抜いた78週高値を付けた日の高値から、その後の安値の最小までの下げ（押しの深さ）
+    #   max_dd_120      直近120営業日の終値の最大ドローダウン
+    "drawdown": ["base_depth", "pullback_depth", "max_dd_120"],
 }
 
 #: 横断面正規化（同じ日付内でのパーセンタイル順位）を作る対象の列。
@@ -366,10 +372,15 @@ PRESETS: Dict[str, List[str]] = {
                                        for g in ALL_GROUPS] + EXTRA_GROUPS
                                       + ["listing", "vol_factors", "fund_book"],
     # --- 2026-10-17 の運用者の決定（実験101 §62）。239列 + 抜けた土台の形2列。241列 --- #
-    # 並びは実験101 の腕 C と同じ（239列の後ろに2列）。既定への切り替えは日曜 10/18 の再学習の後
+    # 並びは実験101 の腕 C と同じ（239列の後ろに2列）。既定にはしない（同じ日に実験102 の3列も入れることになり、既定は下の244列）
     "all_plus_prog_listing_vol_book_shape": [("progress_seasonal_pct" if g == "progress" else g)
                                              for g in ALL_GROUPS] + EXTRA_GROUPS
                                             + ["listing", "vol_factors", "fund_book", "breakout_shape"],
+    # --- 2026-10-17 の運用者の決定（実験102 §63）。241列 + 下げの深さ3列。244列 --- #
+    # 並びは実験102 の腕 C と同じ（241列の後ろに3列）。既定への切り替えは日曜 10/18 の再学習の後
+    "all_plus_prog_listing_vol_book_shape_dd": [("progress_seasonal_pct" if g == "progress" else g)
+                                                for g in ALL_GROUPS] + EXTRA_GROUPS
+                                               + ["listing", "vol_factors", "fund_book", "breakout_shape", "drawdown"],
     "all_plus_prog_listing": [("progress_seasonal_pct" if g == "progress" else g)
                               for g in ALL_GROUPS] + EXTRA_GROUPS + ["listing"],
 

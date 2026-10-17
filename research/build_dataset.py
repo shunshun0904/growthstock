@@ -1488,6 +1488,65 @@ def _breakout_shape(df: pd.DataFrame, last_nh: pd.Series) -> Tuple[np.ndarray, n
     return age, ratio
 
 
+#: 直近の最大ドローダウン（max_dd_120）の日数と、要る終値の数（実験102。docs/MODEL_ADOPTION_RULES.md §63）
+DD_DAYS = 120
+DD_MIN_CLOSES = 60
+
+
+def _depth(high: np.ndarray, low: np.ndarray, top: int, p: int, first: int) -> float:
+    """行 top の高値から、top の翌日〜p の前日の安値の最小までの下げ（%）。間の日が無ければ 0、安値が全部欠測なら欠測。"""
+    if not (first <= top < p) or not np.isfinite(high[top]) or high[top] <= 0:
+        return np.nan
+    seg = low[top + 1:p]
+    if not len(seg):
+        return 0.0
+    seg = seg[~np.isnan(seg)]
+    if not len(seg):
+        return np.nan
+    return float((1.0 - seg.min() / high[top]) * 100.0)
+
+
+def _drawdown(df: pd.DataFrame, last_nh: pd.Series,
+              age: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    更新日（is_new_high）の行ごとの、下げの深さの3列（%。どれも「下げた幅」で 0 以上）。df は銘柄・日付の順に並んでいること。
+    last_nh は1つ前の更新日の行の位置（base_length の起点）、age は broken_high_age。
+
+      base_depth      1つ前の更新日の高値から、その翌日〜前日の安値の最小までの下げ。1つ前の更新日がデータに無ければ欠測
+      pullback_depth  今回抜いた78週高値を付けた行（行 − broken_high_age）の高値から、同じく翌日〜前日の安値の最小までの下げ
+      max_dd_120      当日を含む直近 DD_DAYS 行の終値の最大ドローダウン（その日までの終値の最大からの下げの最大）。
+                      終値が DD_MIN_CLOSES 未満なら欠測
+    間の日が無ければ 0、間の安値が全部欠測なら欠測。
+
+    実験102（research/exp/e102_drawdown_ab.py の drawdown_columns）と同じ値になる（tests/test_breakout_shape.py が突き合わせる）。
+    """
+    n = len(df)
+    base = np.full(n, np.nan)
+    pull = np.full(n, np.nan)
+    mdd = np.full(n, np.nan)
+    rows = np.flatnonzero(df["is_new_high"].fillna(False).to_numpy(dtype=bool))
+    if not len(rows):
+        return base, pull, mdd
+    code = df["Code"].to_numpy()
+    starts = np.flatnonzero(np.r_[True, code[1:] != code[:-1]])        # 銘柄の先頭の行（銘柄ごとに続いて並ぶ）
+    first = starts[np.searchsorted(starts, rows, side="right") - 1]
+    high = df["high"].to_numpy(dtype=float)
+    low = df["low"].to_numpy(dtype=float)
+    close = df["close"].to_numpy(dtype=float)
+    prev = last_nh.to_numpy(dtype=float)[rows]
+    ages = np.asarray(age, dtype=float)[rows]
+    for i, (p, f) in enumerate(zip(rows, first)):
+        if not np.isnan(prev[i]):
+            base[p] = _depth(high, low, int(prev[i]), p, f)
+        if not np.isnan(ages[i]):
+            pull[p] = _depth(high, low, p - int(ages[i]), p, f)
+        seg = close[max(f, p - DD_DAYS + 1):p + 1]
+        seg = seg[~np.isnan(seg)]
+        if len(seg) >= DD_MIN_CLOSES and not np.any(seg <= 0):
+            mdd[p] = float((1.0 - seg / np.maximum.accumulate(seg)).max() * 100.0)
+    return base, pull, mdd
+
+
 def add_breakout_context(df: pd.DataFrame) -> pd.DataFrame:
     """
     ブレイクそのものの性質を表す特徴量。
@@ -1509,6 +1568,11 @@ def add_breakout_context(df: pd.DataFrame) -> pd.DataFrame:
     # base_length は前回の更新からの日数しか持たず、上限が無い（長く下げて戻った日は何年にもなる）。
     # その間に何が起きたかを2列で足す。どちらも更新日の行だけ（他の行は欠測）
     df["broken_high_age"], df["prev_nh_ratio"] = _breakout_shape(df, last_nh)
+
+    # 下げの深さ（実験102 で検証、2026-10-17 に運用者の決定で本番へ。docs/MODEL_ADOPTION_RULES.md §63）。
+    # 前回の天井・抜いた高値からどこまで下げたか（底・押しの深さ）と、直近120営業日の最大ドローダウン。更新日の行だけ
+    df["base_depth"], df["pullback_depth"], df["max_dd_120"] = _drawdown(
+        df, last_nh, df["broken_high_age"].to_numpy(dtype=float))
 
     # 抜けの大きさ: それまでの高値をどれだけ上回ったか（%）
     df["break_margin"] = (df["close"] / df["high52w_prior"] - 1.0) * 100.0
