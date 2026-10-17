@@ -34,7 +34,7 @@ test('規則のモデル: 2026-10-12 から 1.5σ の3本・線 95', () => {
   assert.equal(RULE_JA, '1.5σ の3本');
 });
 
-test('minPct: 規則の3モデルの最小を返す（本番の1.2σ の値は見ない）', () => {
+test('minPct: 規則の3モデルの最小を返す（1.2σ の値は見ない）', () => {
   const c = rule('A', [95, 91, 99]);
   c.byModel.lgbm = { score: 0.1, pctHistorical: 10 };       // 1.2σ の値が低くても規則には効かない
   assert.equal(minPct(c), 91);

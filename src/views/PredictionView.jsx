@@ -17,7 +17,7 @@ import { STRATEGY, RULE_MODELS, RULE_JA, BORDER, strategySignal, exitPlan, nearM
  * スコアはモデルごとに並べる。混ぜて1つにはしない（アンサンブルにしない）。
  * 学習器が違えばスコアのスケールも意味も違うので、各モデル自身の過去スコア
  * 分布での位置に揃えて並べ、買うかどうかは人間が統合して決める。
- * 12本（本番の4モデル + ラベル違いの8本）は、ラベル × 学習器の表に数字と色で出す
+ * 12本（1.2σ・1.5σ・1.8σ のラベルで各4本。どれも毎日の予測に使う）は、ラベル × 学習器の表に数字と色で出す
  * （運用者の指示 2026-10-12「12本の平均ではなく、12個全てを載せてほしい。棒グラフ形式でなくてよい。
  * 大小が分かればよい」。同じ日に出した「12本の合意の百分位」の欄はこの指示で外した）。
  * 一覧の並び順は、今日の戦略の規則と同じ 1.5σ の3本の百分位の最小が高い順（運用者の決定 2026-10-13
@@ -527,11 +527,12 @@ function ScoreLegend({ range }) {
  * 大小が分かればよい」）。metric='score' ならマスにスコアそのものを出し、色はこの表の12本の中の最小〜最大の線形
  * （scoreColor。運用者の依頼 2026-10-16。ラベルをまたいだ水準の比較ができるように）。
  *
- * 行 = 学習に使ったラベル（1.2σ = 本番 / 1.5σ / 1.8σ）、列 = 学習器（LGB / XGB / CAT / LR）。マスの数字は
+ * 行 = 学習に使ったラベル（1.2σ / 1.5σ / 1.8σ）、列 = 学習器（LGB / XGB / CAT / LR）。マスの数字は
  * **そのモデル自身の**過去スコア分布での位置（百分位）、地の色は区分（明るいほど上。pctColor）。
  * モデルをまたいで生スコアを比べられないので、位置に揃えてある。並び順は行をまたいで固定
  * （payload の models 順）。予測ファイルに無いモデルのマスは「—」。
- * large は行を開いた詳しい欄（小数1桁・行の見出しに「本番」）。
+ * large は行を開いた詳しい欄（小数1桁・1.5σ の行の見出しに「規則」）。
+ * 12本とも本番で使うモデルなので、1.2σ を「本番」とは呼ばない（運用者の指示 2026-10-17）。
  */
 function ModelGrid({ c, models, large = false, metric = 'pct' }) {
   const g = modelGrid(c, models);
@@ -547,9 +548,10 @@ function ModelGrid({ c, models, large = false, metric = 'pct' }) {
       {g.rows.map((r) => (
         <React.Fragment key={r.label}>
           <span className="r"
-                title={r.label === 'base' ? '本番のラベル（到達しきい値 1.2σ）で学習したモデル'
-                  : `ラベル違い（到達しきい値 ${r.labelJa}）で学習したモデル。本番の判定には使わない`}>
-            {r.labelJa}{large && r.label === 'base' ? '（本番）' : ''}
+                title={`到達しきい値 ${r.labelJa} のラベルで学習したモデル`
+                  + (r.label === 'base' ? '。スコア帯・較正・追跡の基準はこの行の LightGBM'
+                    : r.label === 'k15' ? '。今日の戦略の規則はこの行の木の3本（L15・X15・C15）がすべて95以上' : '')}>
+            {r.labelJa}{large && r.label === 'k15' ? '（規則）' : ''}
           </span>
           {r.cells.map((x, i) => (x && Number.isFinite(score ? x.score : x.pct) ? (
             <span key={g.cols[i].learner} className="c num"
@@ -626,9 +628,9 @@ function Detail({ c, models, featureNames, onSend, sent }) {
             <div className="pred-split" style={{ marginTop: 10 }}>
               <span>
                 <span className="lab">上位10%と見たモデル</span>
-                <b className="num">{c.agree90}/{c.nModels}</b>
+                <span className="sub">1.2σ </span><b className="num">{c.agree90}/{c.nModels}</b>
                 {Number.isFinite(c.agreeK90) && c.nK > 0 && (
-                  <span className="sub">（ラベル違い {c.agreeK90}/{c.nK}）</span>
+                  <span className="sub">（1.5σ・1.8σ {c.agreeK90}/{c.nK}）</span>
                 )}
               </span>
               <span>
@@ -643,8 +645,8 @@ function Detail({ c, models, featureNames, onSend, sent }) {
               </span>
             </div>
             <p className="sub" style={{ margin: '8px 0 0' }}>
-              行は学習に使ったラベルで、1.2σ が本番（帯の基準）です。1.5σ・1.8σ は、より大きく上がった
-              銘柄だけを正例にして学習したもの。今日の戦略の規則は、2026-10-12 から 1.5σ の木の3本
+              行は学習に使ったラベル（到達しきい値）で、12本とも毎日の予測に使っています。スコア帯の基準は 1.2σ の
+              LightGBM です。1.5σ・1.8σ は、より大きく上がった銘柄だけを正例にして学習したもの。今日の戦略の規則は、2026-10-12 から 1.5σ の木の3本
               （L15・X15・C15）がすべて95以上です（運用者の決定）。
               一覧はこの3本の最小が高い順です（2026-10-13 から。それまでは 1.2σ の LightGBM のスコア順）。
               同じ行・同じ列のモデルは似た見方をするので、そろって高くても独立した票ではありません。
@@ -840,7 +842,7 @@ function ModelLineup({ models }) {
       </div>
       <p className="sub">
         探索PR-AUC は探索時の内側検証（5分割・50試行・木200本固定）の値です。
-        ラベル違い（1.5σ / 1.8σ。記号の末尾が 15 / 18）はラベルが違うので、この値を本番のモデルと比べられません。
+        1.5σ / 1.8σ のモデル（記号の末尾が 15 / 18）はラベルが違うので、この値を 1.2σ のモデルと比べられません。
         運用は上位だけを買うので、この順位がそのまま運用の優劣にはなりません。
         どのモデルを重く見るかは、上の「スコア帯の実績」と
         「過去に出した銘柄のその後」で確かめてください。

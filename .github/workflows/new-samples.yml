@@ -42,7 +42,7 @@ jobs:
           # 前回の学習期間の終わりを meta.json の履歴から取るので、履歴をすべて取る
           fetch-depth: 0
 
-      # 土曜のラベル違いだけの再学習（only=）でも Retrain Weekly は終わるので、ここが走る。本番の基準モデルの
+      # 土曜のラベル違いだけの再学習（only=）でも Retrain Weekly は終わるので、ここが走る。基準モデル（1.2σ の LightGBM）の
       # 学習日（meta.json の trainedAt）が、画面のファイルを作ったときと同じなら何もしない（手で起動したときは作り直す）
       - name: Check whether the production model changed
         id: check

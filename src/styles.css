@@ -411,7 +411,7 @@ input[type='range']::-moz-range-thumb {
 .pred-ms-grad em { font-style: normal; font-size: 9px; color: var(--text-faint); }
 .pred-detail p.sub .pred-ms-grad { margin-left: 6px; vertical-align: middle; }
 .pred-metric .btn { padding: 2px 8px; }
-/* 表: 行 = ラベル（1.2σ = 本番 / 1.5σ / 1.8σ）、列 = 学習器。マスの地は百分位の区分の色、字の色は
+/* 表: 行 = ラベル（1.2σ / 1.5σ / 1.8σ）、列 = 学習器。マスの地は百分位の区分の色、字の色は
    pctInk（明るい地に暗い字）。列の数は --mg-cols（古い予測ファイルは NN の列が付くことがある） */
 .pred-mg { display: inline-grid; align-items: center; gap: 2px;
   /* 列の最小幅は「0.68」（スコア）が入る幅（38px）。百分位の表（「100」）と同じ幅になり、上下に並べても列がそろう（2026-10-16） */

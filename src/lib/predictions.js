@@ -180,9 +180,9 @@ export const MODEL_FAMILY = {
   lgbm: 'tree', xgb: 'tree', cat: 'tree', rf: 'tree',
   logit: 'other', mlp: 'other',
   // ラベル違い（到達しきい値 1.5σ / 1.8σ のラベルで学習した4学習器。research/models.py の VARIANTS）。
-  // 本番の「上位10%と見たモデル」の数え上げ（agree90）には入れない（ラベル違いは agreeK90 で別に数える）。
+  // 1.2σ の4本の「上位10%と見たモデル」の数え上げ（agree90）には入れない（1.5σ・1.8σ は agreeK90 で別に数える）。
   // 2026-10-12 から、今日の戦略の規則は 1.5σ の木3本（strategy.js の RULE_MODELS）がすべて95以上。
-  // k ごとに塊を分ける（1.5σ の4本、1.8σ の4本。同じ k の中の並びは本番と同じ LGB / XGB / CAT / LR）
+  // k ごとに塊を分ける（1.5σ の4本、1.8σ の4本。同じ k の中の並びは 1.2σ と同じ LGB / XGB / CAT / LR）
   lgbm_k15: 'k15', xgb_k15: 'k15', cat_k15: 'k15', logit_k15: 'k15',
   lgbm_k18: 'k18', xgb_k18: 'k18', cat_k18: 'k18', logit_k18: 'k18',
 };
@@ -351,13 +351,13 @@ export function scoreInk(score, range) {
   return t >= 0.5 ? 'var(--bg)' : 'var(--text)';
 }
 
-/** ラベル違いの接尾辞（research/models.py の VARIANTS）。無ければ本番のラベル（1.2σ）。 */
+/** ラベル違いの接尾辞（research/models.py の VARIANTS）。無ければ 1.2σ のラベル。 */
 const LABEL_SUFFIX = [['_k15', 'k15'], ['_k18', 'k18']];
 export const LABEL_JA = { base: '1.2σ', k15: '1.5σ', k18: '1.8σ' };
 
 /**
  * モデル別の百分位を表の形にする（運用者の指示 2026-10-12「12個全てを載せてほしい。棒グラフ形式でなくてよい。
- * 大小が分かればよい」）。行 = 学習に使ったラベル（1.2σ = 本番 / 1.5σ / 1.8σ）、列 = 学習器（LGB / XGB / CAT / LR）。
+ * 大小が分かればよい」）。行 = 学習に使ったラベル（1.2σ / 1.5σ / 1.8σ）、列 = 学習器（LGB / XGB / CAT / LR）。
  *
  * 列の並びは payload の models の順で、学習器が最初に出た順。予測ファイルに無いモデルのマスは null。
  * 古い予測ファイル（ラベル違いが無い4本・5本）は 1.2σ の1行だけになり、MLP がある日は NN の列が付く。

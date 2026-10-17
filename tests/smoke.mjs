@@ -194,14 +194,15 @@ check(detail.includes('スコアそのもの') && detail.includes('この表の1
 // 百分位の表とスコアの表は上下に並べたとき列がそろう（列の最小幅を数字の幅に依らない値にした。2026-10-16）
 const gridWidths = await bigGrids.evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
 check(gridWidths.length === 2 && gridWidths[0] === gridWidths[1], `詳細の2つの表は同じ幅 (実際: ${gridWidths.join(' / ')})`);
-check(detail.includes('1.2σ（本番）'), '詳細の表は 1.2σ の行に「本番」と出る');
+// 12本とも本番で使うので、1.2σ を「本番」と呼ばない（運用者の指示 2026-10-17）。規則の 1.5σ の行に「規則」と添える
+check(detail.includes('1.5σ（規則）') && !detail.includes('本番'), '詳細の表は 1.5σ の行に「規則」と出て、どこにも「本番」と出ない');
 check(/並び順\s*1\.5σ の3本の最小\s*（83\.6）/.test(detail) && /帯の基準\s*LightGBM（1\.2σ）\s*（1 \/ 5 位）/.test(detail),
       '詳細に並び順の物差し（1.5σ の3本の最小）と帯の基準（1.2σ の LightGBM の順位）が分けて出る');
 check(detail.includes('基準モデルの見立ての内訳') && detail.includes('基準モデル（1.2σ の LightGBM）の出力を')
         && detail.includes('一覧の並び順（1.5σ の3本の最小）の内訳ではありません'),
       '寄与の欄は 1.2σ の LightGBM のものと明示される');
-check(detail.includes('上位10%と見たモデル') && detail.includes('2/4') && detail.includes('ラベル違い 4/8'),
-      '詳細に上位10%と見たモデルの数（本番・ラベル違い）が出る');
+check(detail.includes('上位10%と見たモデル') && /1\.2σ\s*2\/4/.test(detail) && detail.includes('1.5σ・1.8σ 4/8'),
+      '詳細に上位10%と見たモデルの数（1.2σ の4本と、1.5σ・1.8σ の8本）が出る');
 check(detail.includes('実験82'), '詳細に「1.5σ・1.8σ も95以上」を足しても安定しない（実験82）と出る');
 check(!detail.includes('12本の合意'), '詳細にも12本の合意（平均）は出さない');
 // 次の決算発表（予測日までに公表済みの予定）。合成データの1件目は7営業日後（持つ20営業日の中 → 黄）、
