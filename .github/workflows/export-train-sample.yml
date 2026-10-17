@@ -1,0 +1,63 @@
+name: Export Training Sample
+
+# 学習データの見本を、いつものスプレッドシート（GSHEET_ID）のタブ「学習データの見本」「学習データの列の説明」に書き出す
+# （research/export_train_sample.py。運用者の依頼 2026-10-17「学習データの一部を見たいです。ブラウザ上のエディターとかで
+# 実際にテーブル形式で見たいです。サンプルは１０００サンプル程度で良いです」、決定「いつものシートに新しいタブ」
+# 「直近の1000行」）。週次の再学習と同じ手順でデータセットを作り、ラベルが確定している直近の日から約1,000行を出す。
+# 手で起動するだけ（予約の起動は無い）。起動するたびに2つのタブの中身を入れ替える（ほかのタブには触らない）。
+#
+# ログは公開なので、行数・日付の範囲・正例の数だけを出す（銘柄ごとの値は非公開のスプレッドシートにだけ書く）。
+on:
+  workflow_dispatch:
+    inputs:
+      rows:
+        description: '行数の目安（ラベルが確定している直近の日から、日をまたがずにこの数に届くまで）'
+        required: false
+        default: '1000'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: export-train-sample
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash -e -o pipefail {0}
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r research/requirements.txt
+
+      - name: Download raw data (release)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p research/_data
+          bash scripts/gh_release_download.sh data-raw research/_data
+
+      # 学習用と同じ作り方（--keep-unlabeled を付けない。retrain-weekly.yml の Build dataset と同じ）
+      - name: Build dataset
+        run: python3 research/build_dataset.py 2>&1 | tail -20
+
+      - name: Export to sheet
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GSHEET_ID: ${{ secrets.GSHEET_ID }}
+          ROWS: ${{ inputs.rows }}
+        run: |
+          if [ -z "$GOOGLE_SERVICE_ACCOUNT_JSON" ] || [ -z "$GSHEET_ID" ]; then
+            echo "GOOGLE_SERVICE_ACCOUNT_JSON / GSHEET_ID が未設定です"; exit 1
+          fi
+          # 入力はそのままシェルに展開しない。数字だけを通す
+          if ! [[ "$ROWS" =~ ^[0-9]{1,5}$ ]]; then echo "行数は数字で: $ROWS"; exit 1; fi
+          python3 research/export_train_sample.py --rows "$ROWS"
