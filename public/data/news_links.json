@@ -1,5 +1,5 @@
 {
- "checkedAt": "2026-10-17T10:32:02Z",
+ "checkedAt": "2026-10-17T11:55:47Z",
  "asOf": "2026-10-16",
  "rule": {
   "models": [
@@ -596,67 +596,14 @@
    ]
   }
  },
- "market": [
-  {
-   "id": "yahoo_newslist",
-   "site": "Yahoo!ファイナンス",
-   "label": "経済ニュース",
-   "href": "https://finance.yahoo.co.jp/news",
-   "state": "ok",
-   "reason": ""
-  },
-  {
-   "id": "jpx_short",
-   "site": "JPX",
-   "label": "空売り集計",
-   "href": "https://www.jpx.co.jp/markets/statistics-equities/short-selling/index.html",
-   "state": "ok",
-   "reason": ""
-  },
-  {
-   "id": "jpx_investor",
-   "site": "JPX",
-   "label": "投資部門別売買状況",
-   "href": "https://www.jpx.co.jp/markets/statistics-equities/investor-type/index.html",
-   "state": "ok",
-   "reason": ""
-  },
-  {
-   "id": "nikkei_markets",
-   "site": "日経",
-   "label": "マーケットのニュース",
-   "href": "https://www.nikkei.com/markets/",
-   "state": "unchecked",
-   "reason": "日経は、自動化された手段での取得を規約（著作権について）で禁じている"
-  },
-  {
-   "id": "nk225vi",
-   "site": "日経",
-   "label": "日経平均VI（変動の大きさの予想）",
-   "href": "https://indexes.nikkei.co.jp/nkave/index/profile?idx=nk225vi",
-   "state": "unchecked",
-   "reason": "日経は、自動化された手段での取得を規約（著作権について）で禁じている"
-  },
-  {
-   "id": "minkabu_rank",
-   "site": "みんかぶ",
-   "label": "買い予想数の上昇ランキング",
-   "href": "https://minkabu.jp/financial_item_ranking/buy_picks_rise",
-   "state": "unchecked",
-   "reason": "みんかぶは、自動の接続を断る（HTTP 405）"
-  }
- ],
  "summary": {
   "stocks": 5,
   "links": 50,
   "ok": 20,
   "ng": 0,
   "unchecked": 30,
-  "market": 6,
-  "marketOk": 3,
-  "marketNg": 0,
-  "requests": 23,
-  "decoyTried": 86,
+  "requests": 20,
+  "decoyTried": 80,
   "decoyPassed": 0
  }
 }
