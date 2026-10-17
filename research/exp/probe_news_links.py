@@ -31,6 +31,9 @@ import urllib.parse
 import urllib.request
 from typing import Dict, List, Optional, Sequence, Tuple
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import news_links as NL  # noqa: E402
+
 SAMPLE_CODE = "7203"
 SAMPLE_NAME = "トヨタ自動車"
 SAMPLE_HINT = "トヨタ"            # 本文にこの語があるか（社名の表記ゆれを避けて短く）
@@ -209,7 +212,13 @@ def last_weekdays(today: dt.date, n: int = 3) -> List[dt.date]:
 # --------------------------------------------------------------------------- #
 
 def fetch(url: str) -> Tuple[int, str, str, bytes]:
-    """(状態, 最後の URL, Content-Type, 本文)。失敗は状態 0 で、本文に理由。"""
+    """
+    (状態, 最後の URL, Content-Type, 本文)。失敗は状態 0 で、本文に理由。
+    自動では開かないホスト（news_links.NO_AUTO。日経は規約で自動取得を禁じ、株予報Pro は robots.txt で 20時間の間隔を
+    求めている。2026-10-17 の規約の確認 run 39022372591 の後に足した）は開かず、状態 -1 を返す。
+    """
+    if not NL.auto_ok(url):
+        return -1, url, "", f"自動では開かない: {NL.NO_AUTO[NL.host_of(url)]}".encode()
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Accept-Language": "ja,en;q=0.5"})
     try:
         with urllib.request.urlopen(req, timeout=TIMEOUT) as r:

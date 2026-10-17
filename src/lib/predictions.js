@@ -28,6 +28,7 @@ const BUILD = typeof __BUILD_ID__ === 'string' ? __BUILD_ID__ : 'dev';
 const PRED_URL = () => `${base()}data/predictions.json?v=${BUILD}`;
 const HIST_URL = () => `${base()}data/prediction_history.json?v=${BUILD}`;
 const SAMPLES_URL = () => `${base()}data/new_samples.json?v=${BUILD}`;
+const NEWS_LINKS_URL = () => `${base()}data/news_links.json?v=${BUILD}`;
 
 async function getJson(url) {
   const res = await fetch(url, { cache: 'no-cache' });
@@ -93,6 +94,24 @@ export async function loadNewSamples() {
   try {
     const d = await getJson(SAMPLES_URL());
     return d && Array.isArray(d.cases) ? d : { ...(d || {}), cases: [] };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 候補銘柄のニュースのリンクを確かめた結果（public/data/news_links.json。Check News Links が research/news_links.py で
+ * 毎晩の予測の後に書く）。無ければ null（まだ確かめていない）。形が違えば stocks / market を空に。
+ */
+export async function loadNewsLinks() {
+  try {
+    const d = await getJson(NEWS_LINKS_URL());
+    if (!d || typeof d !== 'object') return null;
+    return {
+      ...d,
+      stocks: d.stocks && typeof d.stocks === 'object' ? d.stocks : {},
+      market: Array.isArray(d.market) ? d.market : [],
+    };
   } catch {
     return null;
   }

@@ -713,9 +713,17 @@ input[type='range']::-moz-range-thumb {
 .news-link:hover { border-color: var(--accent-dim); background: #182032; }
 .news-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .news-link .site { font-size: 10.5px; color: var(--text-faint); }
-.news-link .ext { font-size: 10px; color: var(--text-faint); }
-.news-market { padding-top: var(--s2); }
+/* 確かめた（候補ごとに開いて確かめた）は緑の印、未確認（自動では開かないサイト。URL の形だけ確かめた）は破線の枠と黄の印。
+   運用者の決定 2026-10-17「確かめられないものも印つきで出す」 */
+.news-link .mark { font-size: 10px; font-weight: 600; }
+.news-link.is-checked .mark { color: var(--green); }
+.news-link.is-unchecked { border-style: dashed; background: transparent; color: var(--text-dim); }
+.news-link.is-unchecked .mark { color: var(--amber); }
+.news-unchecked .lab { color: var(--amber); }
+.news-failed { font-size: 11px; color: var(--text-faint); }
+.news-check .num { font-size: 12px; }
 .news-foot { margin: var(--s3) 2px 0; font-size: 11.5px; color: var(--text-faint); line-height: 1.6; }
+.news-foot p { margin: 0 0 4px; }
 @media (max-width: 900px) {
   .news-list { grid-template-columns: minmax(0, 1fr); }
 }

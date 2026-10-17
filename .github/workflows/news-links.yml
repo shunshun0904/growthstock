@@ -1,0 +1,71 @@
+name: Check News Links
+
+# 候補銘柄のニュースのタブのリンクを、候補ごとに実際に開いて確かめる（research/news_links.py。運用者の指示 2026-10-17
+# 「取得対象は、候補銘柄のみで良いです…ウソのリンクや無効なリンクがないことのバリデーションに時間をかけてください」）。
+#
+# 毎晩の予測（Predict Breakouts）が終わったら workflow_run で続けて走り、予測ファイルの日の候補（今日の戦略の規則を
+# 通った銘柄）のリンクを開いて public/data/news_links.json に書く。画面は確かめて開けたリンクに印を付けて出し、
+# 開けなかったリンクは出さない。日経・株予報Pro・株探・みんかぶは規約・robots.txt・接続の拒否のため開かず、
+# 「未確認」として URL だけ置く（docs/OPERATIONS.md「候補銘柄のニュース」）。手でも起動できる。
+#
+# ログは公開なので、件数と理由の内訳だけを出す（銘柄コード・銘柄名は出さない）。
+on:
+  workflow_run:
+    workflows: ['Predict Breakouts']
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: news-links
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash -e -o pipefail {0}
+
+jobs:
+  check:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 予測が積んだ predictions.json のコミットを含む公開ブランチの先頭（deploy-pages.yml と同じ理由）
+          ref: ${{ github.event_name == 'workflow_run' && 'claude/jquants-browser-app-bwk19a' || github.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      # 規則の定数（live_track.RULE_MODELS / AGREE_PCT）を読むのに numpy と pandas が要る。版は research/requirements.txt と同じ
+      - name: Install
+        run: pip install $(grep -E '^(numpy|pandas)==' research/requirements.txt)
+
+      - name: Check links
+        run: python3 research/news_links.py 2>&1 | tee news_links.log
+
+      - name: Commit
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/data/news_links.json
+          if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
+          git commit -m "chore(data): 候補銘柄のニュースのリンクを確かめた ($(date -u '+%Y-%m-%d %H:%M UTC'))"
+          for i in 1 2 3 4; do
+            if git push; then exit 0; fi
+            sleep $((2 ** i)); git pull --rebase
+          done
+          exit 1
+
+      - name: Summary
+        if: always()
+        run: |
+          { echo '## 候補銘柄のニュースのリンク'; echo '```'
+            cat news_links.log 2>/dev/null || echo '(出力なし)'
+            echo '```'; } >> "$GITHUB_STEP_SUMMARY"

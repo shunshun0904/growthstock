@@ -14,7 +14,9 @@ import {
   loadDataset, loadManualStocks, saveManualStocks, loadVisibility, saveVisibility,
   manualStockFromForm, mergeStocks, resetSavedState,
 } from './lib/store.js';
-import { loadPredictions, loadHistory, loadFilings, loadFeatureNames, loadNewSamples } from './lib/predictions.js';
+import {
+  loadPredictions, loadHistory, loadFilings, loadFeatureNames, loadNewSamples, loadNewsLinks,
+} from './lib/predictions.js';
 
 /*
  * hidden のタブは画面に出さない（運用者の指示 2026-10-13「決算サンキーとWhat-Ifシミュレーターのタブは消してください。
@@ -60,6 +62,8 @@ export default function App() {
   const [featureNames, setFeatureNames] = useState({});
   // 再学習で加わったサンプル。undefined = 読み込み中、null = まだ無い
   const [newSamples, setNewSamples] = useState(undefined);
+  // 候補銘柄のニュースのリンクを確かめた結果。undefined = 読み込み中、null = まだ無い
+  const [newsLinks, setNewsLinks] = useState(undefined);
   const [tab, setTab] = useState('prediction');
   const [visibleIds, setVisibleIds] = useState(() => new Set());
   const [selectedId, setSelectedId] = useState(null);
@@ -86,6 +90,7 @@ export default function App() {
     // 特徴量の日本語名（効いた特徴量の表示）。読めなければ元の列名のまま
     loadFeatureNames().then((n) => { if (!cancelled) setFeatureNames(n); });
     loadNewSamples().then((d) => { if (!cancelled) setNewSamples(d); });
+    loadNewsLinks().then((d) => { if (!cancelled) setNewsLinks(d); });
     return () => { cancelled = true; };
   }, []);
 
@@ -319,7 +324,7 @@ export default function App() {
           ) : !pred ? (
             <div className="empty">予測データを読み込んでいます…</div>
           ) : (
-            <NewsView data={pred} />
+            <NewsView data={pred} links={newsLinks} />
           )
         )}
 
