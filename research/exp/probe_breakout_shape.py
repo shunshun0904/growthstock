@@ -13,6 +13,9 @@ Run Experiment が先に作った学習用のデータセット（research/_data
               （前回の更新日の高値が窓の中にあるので、超えたはず）。窓より長い行: prev_nh_ratio が 100 未満の割合
   4. 予測用   --keep-unlabeled で作り直したデータセットにも2列が付くか（ラベル未確定の行・直近の日の欠測の数）
   5. 列の組   239列の組は変わっていないか（指紋）。241列の組 = 239列の後ろに2列で、その列がすべてデータセットにあるか
+  6. 両端     prev_nh_ratio の両端の行（130 超・30 未満）の内訳。その日の上げ（前日終値から +30% 超）・前回の更新日の後に
+              前回の高値を超えていた（窓の値が半分未満で更新日にならなかった）・分割や併合（調整の倍率が変わった）・
+              1日で2倍超か半分未満の終値（調整漏れの疑い）の件数。日足の誤りか本物の値動きかの手がかり
 
 出すのは件数・割合・分位・日付だけ（Actions のログは公開。銘柄ごとの値は出さない）。食い違いがあれば終了コード 1。
 
@@ -101,6 +104,47 @@ def report(name: str, df: pd.DataFrame, w: int) -> bool:
     return p["age_out_of_range"] == 0 and p["ratio_with_no_base"] == 0 and p["near_age_gt"] == 0
 
 
+def extremes(ds: pd.DataFrame, panel: pd.DataFrame, hi: float = 130.0, lo: float = 30.0) -> Dict[str, Dict[str, int]]:
+    """
+    prev_nh_ratio の両端の行（hi 超・lo 未満）の内訳の件数（6. 両端）。panel は銘柄・日付の順の日足（high・close・close_raw）。
+
+      day      その日の高値が、前の終値（欠測なら、その前で一番近い終値）の 1.3倍を超えた
+      exceed   前回の更新日の後・今回より前に、前回の更新日の高値を超えた日がある（更新日にならなかった）
+      action   前回の更新日と今回で、調整の倍率（調整後終値 ÷ 素の終値）が違う（その間に分割・併合）
+      jump     その間（両端を含む）に、終値が前の終値の2倍超か半分未満になった日がある
+    """
+    p = panel[["Code", "Date", "high", "close", "close_raw"]].copy()
+    p["Code"] = p["Code"].astype(str)
+    p["_pos"] = p.groupby("Code", sort=False).cumcount()
+    arrs = {c: (g["high"].to_numpy(dtype=float), g["close"].to_numpy(dtype=float),
+                g["close_raw"].to_numpy(dtype=float)) for c, g in p.groupby("Code", sort=False)}
+    k = ds[["Code", "Date", "base_length", "prev_nh_ratio"]].copy()
+    k["Code"] = k["Code"].astype(str)
+    m = k.merge(p[["Code", "Date", "_pos"]], on=["Code", "Date"], how="left")
+    out = {}
+    for name, sel in (("hi", m["prev_nh_ratio"] > hi), ("lo", m["prev_nh_ratio"] < lo)):
+        rows = m[sel & m["_pos"].notna() & m["base_length"].notna()]
+        cnt = {"rows": int(len(rows)), "day": 0, "exceed": 0, "action": 0, "jump": 0, "far": 0}
+        for code, pos, bl in zip(rows["Code"], rows["_pos"], rows["base_length"]):
+            h, c, cr = arrs[code]
+            pos = int(pos)
+            q = pos - int(bl)
+            cnt["far"] += int(bl > B.HIGH_WINDOW)
+            before = c[:pos][~np.isnan(c[:pos])]
+            cnt["day"] += int(len(before) > 0 and before[-1] > 0 and h[pos] / before[-1] > 1.3)
+            mid = h[q + 1:pos]
+            cnt["exceed"] += int(len(mid) > 0 and np.any(mid[~np.isnan(mid)] > h[q]))
+            with np.errstate(divide="ignore", invalid="ignore"):
+                aq, ap = c[q] / cr[q], c[pos] / cr[pos]
+            cnt["action"] += int(np.isfinite(aq) and np.isfinite(ap) and not np.isclose(aq, ap, rtol=1e-6))
+            seg = c[q:pos + 1]
+            seg = seg[~np.isnan(seg) & (seg > 0)]
+            ch = seg[1:] / seg[:-1]
+            cnt["jump"] += int(np.any((ch > 2.0) | (ch < 0.5)))
+        out[name] = cnt
+    return out
+
+
 def main(argv: Sequence[str] = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data-dir", default=DATA_DIR)
@@ -178,6 +222,14 @@ def main(argv: Sequence[str] = None) -> int:
         rows = [f"{iv} {int(g.notna().sum()):,}行 {g.mean() * 100:.1f}%" for iv, g in lab_.groupby(cut, observed=False)
                 if g.notna().sum()]
         print(f"  {c} の区切りごとの正例率（1.2σ）: " + "  ".join(rows))
+
+    # 6. 両端（学習用のデータセットの行）
+    ex = extremes(ds, panel)
+    for name, ja in (("hi", "130 を超える"), ("lo", "30 未満")):
+        e = ex[name]
+        print(f"■ 6. prev_nh_ratio が {ja} {e['rows']:,}行（base_length が{w}より長い {e['far']:,}）: その日の上げが +30% 超 "
+              f"{e['day']:,} / 前回の更新日の後に前回の高値を超えていた {e['exceed']:,} / その間に分割・併合 {e['action']:,} / "
+              f"その間に終値が1日で2倍超か半分未満 {e['jump']:,}")
 
     print(f"\n[結論] {'すべて一致・想定どおり' if ok else '食い違いあり（上の行）'}")
     return 0 if ok else 1
