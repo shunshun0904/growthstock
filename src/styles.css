@@ -92,6 +92,12 @@ input, select, textarea { font: inherit; color: inherit; }
 }
 .tabs button:hover { color: var(--text); }
 .tabs button[aria-selected='true'] { background: var(--accent-dim); color: #fff; }
+/* 狭い画面では、タブの名前を途中で折らずにタブごと次の行へ送る。4つ目の「候補銘柄のニュース」を足した日（2026-10-17）に、
+   スマホの幅で名前が1〜2文字ずつ縦に折れた */
+@media (max-width: 720px) {
+  .tabs { flex-wrap: wrap; }
+  .tabs button { white-space: nowrap; padding: 6px 10px; }
+}
 
 .main { flex: 1; padding: var(--s5); max-width: 1600px; width: 100%; margin: 0 auto; }
 
@@ -685,4 +691,35 @@ input[type='range']::-moz-range-thumb {
 .knn-tip span { color: var(--text-dim); }
 @media (max-width: 720px) {
   .knn-grid { grid-template-columns: 1fr; }
+}
+
+/* ------------------------------------------------------------------ 候補銘柄のニュース
+   候補ごとの外部サイトへのリンク（運用者の依頼 2026-10-17。左から2番目のタブ）。カードは広い画面で2列、狭い画面で1列 */
+.news-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: var(--s4); }
+.news-card { border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--bg-raised);
+  padding: var(--s3) var(--s4); display: flex; flex-direction: column; gap: var(--s3); min-width: 0; }
+.news-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--s3); flex-wrap: wrap; }
+.news-id { display: flex; flex-direction: column; line-height: 1.35; min-width: 0; }
+.news-id strong { overflow-wrap: anywhere; }
+.news-id .sub { font-size: 11px; color: var(--text-faint); }
+.news-badges { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
+.news-groups { display: flex; flex-direction: column; gap: 6px; }
+.news-group { display: grid; grid-template-columns: 116px minmax(0, 1fr); align-items: baseline; gap: var(--s2); }
+.news-group .lab { font-size: 11px; letter-spacing: 0.04em; color: var(--text-faint); white-space: nowrap; }
+.news-links { display: flex; flex-wrap: wrap; gap: 4px; min-width: 0; }
+.news-link { display: inline-flex; align-items: baseline; gap: 5px; padding: 3px 8px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--bg-card); color: var(--text); text-decoration: none;
+  font-size: 12px; line-height: 1.4; white-space: nowrap; }
+.news-link:hover { border-color: var(--accent-dim); background: #182032; }
+.news-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.news-link .site { font-size: 10.5px; color: var(--text-faint); }
+.news-link .ext { font-size: 10px; color: var(--text-faint); }
+.news-market { padding-top: var(--s2); }
+.news-foot { margin: var(--s3) 2px 0; font-size: 11.5px; color: var(--text-faint); line-height: 1.6; }
+@media (max-width: 900px) {
+  .news-list { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 520px) {
+  .news-group { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+  .news-link { white-space: normal; }
 }

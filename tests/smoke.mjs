@@ -249,8 +249,10 @@ const tabNames = (await page.getByRole('tab').allTextContents()).map((t) => t.tr
 // 候補の比較（2026-10-15 に左から2番目に足した）は、運用者の指示 2026-10-16「候補の比較タブはいったん、なくしてください」で
 // 隠している（src/App.jsx の hidden。画面のコードと日次予測の knn の計算は残す）。
 // 再学習で加わったサンプルは一番右（運用者の指示 2026-10-14「一番右側に持ってきてください」）
-check(tabNames.join(',') === 'ブレイク予測,タイムマシーン,再学習で加わったサンプル',
-      `タブは ブレイク予測 / タイムマシーン / 再学習で加わったサンプル の3つ (実際: ${tabNames.join(',')})`);
+// 候補銘柄のニュースは左から2番目（運用者の依頼 2026-10-17「候補銘柄のニュース として新たにタブを追加してほしいです。
+// 左から2番目で」）
+check(tabNames.join(',') === 'ブレイク予測,候補銘柄のニュース,タイムマシーン,再学習で加わったサンプル',
+      `タブは ブレイク予測 / 候補銘柄のニュース / タイムマシーン / 再学習で加わったサンプル の4つ (実際: ${tabNames.join(',')})`);
 check(!tabNames.includes('決算サンキー') && !tabNames.includes('What-If シミュレーター')
         && !tabNames.includes('8軸オクタゴン比較') && !tabNames.includes('候補の比較'),
       '決算サンキー・What-If シミュレーター・8軸オクタゴン比較・候補の比較のタブは出ない');
@@ -262,6 +264,48 @@ check(!((await page.textContent('.footer')) || '').includes('EDINET'),
 
 // 候補の比較の画面の確かめ（3枚の図・Q / M・母集団の件数・ホバー）は、タブを隠している間は外してある。純粋な計算の
 // テストは tests/knn.test.js に残っている。タブを戻すときは git の履歴（2026-10-16 より前の smoke.mjs）から戻す
+
+console.log('\n== 候補銘柄のニュース ==');
+// 候補ごとに外部サイトのページへのリンク（src/lib/news.js。URL の形は実在を確かめたものだけ）。合成データの候補は5件
+await page.getByRole('tab', { name: '候補銘柄のニュース' }).click();
+await page.waitForSelector('.news-card', { timeout: 10000 });
+const newsText = (await page.textContent('.news')) || '';
+check((await page.locator('.news-card').count()) === 5, `合成データの候補5件のカード (実際: ${await page.locator('.news-card').count()})`);
+check((await page.locator('.news-card').first().locator('.news-link').count()) === 10,
+      '1件のカードにリンクが10本（ニュース3・適時開示1・アナリスト予想と業績4・個人投資家の声2）');
+check((await page.locator('.news-market .news-link').count()) === 6, '市場全体のリンクが6本');
+check(await page.locator('.news-card a[href="https://kabutan.jp/stock/news?code=9324"]').count() === 1,
+      '株探のニュースのリンクが候補のコードで作られる');
+check(await page.locator('.news-card a[href="https://finance.yahoo.co.jp/quote/9324.T/forum"]').count() === 1,
+      'Yahoo!ファイナンスの掲示板のリンクが「<コード>.T」で作られる');
+const newsLinkAttrs = await page.locator('.news a.news-link').evaluateAll((as) => as.map((a) => [a.target, a.rel, a.href]));
+check(newsLinkAttrs.length > 0 && newsLinkAttrs.every(([t, r, h]) => t === '_blank' && r.includes('noopener')
+        && r.includes('noreferrer') && h.startsWith('https://')),
+      'リンクはすべて新しいタブで開き（noopener noreferrer）、https');
+check(newsText.includes('ニュース') && newsText.includes('適時開示') && newsText.includes('アナリスト予想・業績')
+        && newsText.includes('個人投資家の声'), 'リンクの塊の見出しが4つ出る');
+check(newsText.includes('モデルの特徴量に入っていない材料') && newsText.includes('中身を取り込んでいません'),
+      'リンク集の目的と、中身を取り込んでいないことが書いてある');
+check(newsText.includes('決算 7営業日後'), '決算までの営業日の印が出る（合成データの1件目は7営業日後）');
+check(!newsText.includes('NaN') && !newsText.includes('undefined'), '候補銘柄のニュースに NaN / undefined が出ていない');
+// 規則を通った候補だけに絞る（合成データは1.5σ の百分位が無いので0件になり、その旨を出す）
+await page.locator('.news .pred-metric .btn').nth(1).click();
+check((await page.locator('.news-card').count()) === 0 && ((await page.textContent('.news')) || '').includes('の候補がありません'),
+      '「95以上」に絞ると、通った候補が無い日はその旨を出す');
+await page.locator('.news .pred-metric .btn').nth(0).click();
+check((await page.locator('.news-card').count()) === 5, '「すべての候補」に戻すと5件に戻る');
+// スマホの幅でもカードが枠に収まる（横にはみ出さない）
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(200);
+const newsOverflow = await page.evaluate(() => {
+  const card = document.querySelector('.news-card');
+  const r = card.getBoundingClientRect();
+  return { right: r.right, vw: document.documentElement.clientWidth,
+           scroll: document.documentElement.scrollWidth > document.documentElement.clientWidth };
+});
+check(newsOverflow.right <= newsOverflow.vw + 0.5 && !newsOverflow.scroll,
+      `スマホの幅（390px）でカードが画面に収まり、横に崩れない (右端 ${newsOverflow.right.toFixed(1)} / 幅 ${newsOverflow.vw})`);
+await page.setViewportSize({ width: 1440, height: 1000 });
 
 console.log('\n== 再学習で加わったサンプル ==');
 // 運用者の依頼（2026-10-13）「直近追加されたサンプルのチャート（週次のリトレインで新たに追加されたサンプルのチャート）、
