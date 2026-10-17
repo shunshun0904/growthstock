@@ -225,6 +225,12 @@ GROUPS: Dict[str, List[str]] = {
                   "equity_turnover", "equity_turnover_chg1", "equity_turnover_chg2",
                   "div_growth_sym", "div_growth_sym_p1", "div_up",
                   "bps_yoy", "bps_yoy_p1", "shares_yoy", "shares_yoy_p1", "acct_ifrs"],
+    # --- 抜けた土台の形（実験101、2026-10-17 運用者の決定で本番へ。docs/MODEL_ADOPTION_RULES.md §62）---
+    # base_length（前回の更新からの日数）は上限が無く、長く下げて戻った日も何年という1つの数になる。
+    # その間の形を2列で足す（build_dataset._breakout_shape）。順位版は作らない（実験101 に無い）
+    #   broken_high_age  今回抜いた78週高値を付けた日から何営業日か（1〜368）
+    #   prev_nh_ratio    1つ前の更新日の高値に対する今回の高値（%）。前回の更新がデータに無ければ欠測
+    "breakout_shape": ["broken_high_age", "prev_nh_ratio"],
 }
 
 #: 横断面正規化（同じ日付内でのパーセンタイル順位）を作る対象の列。
@@ -359,6 +365,11 @@ PRESETS: Dict[str, List[str]] = {
     "all_plus_prog_listing_vol_book": [("progress_seasonal_pct" if g == "progress" else g)
                                        for g in ALL_GROUPS] + EXTRA_GROUPS
                                       + ["listing", "vol_factors", "fund_book"],
+    # --- 2026-10-17 の運用者の決定（実験101 §62）。239列 + 抜けた土台の形2列。241列 --- #
+    # 並びは実験101 の腕 C と同じ（239列の後ろに2列）。既定への切り替えは日曜 10/18 の再学習の後
+    "all_plus_prog_listing_vol_book_shape": [("progress_seasonal_pct" if g == "progress" else g)
+                                             for g in ALL_GROUPS] + EXTRA_GROUPS
+                                            + ["listing", "vol_factors", "fund_book", "breakout_shape"],
     "all_plus_prog_listing": [("progress_seasonal_pct" if g == "progress" else g)
                               for g in ALL_GROUPS] + EXTRA_GROUPS + ["listing"],
 

@@ -20,7 +20,7 @@ import json
 import os
 import sys
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -1444,6 +1444,50 @@ def report_rise_funnel(samples: pd.DataFrame,
         prev = k
 
 
+def _breakout_shape(df: pd.DataFrame, last_nh: pd.Series) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    更新日（is_new_high）の行ごとの2列。df は銘柄・日付の順に並んでいること（base_length と同じ前提）。
+    last_nh は行ごとの「1つ前の更新日の行の位置」（base_length の起点）。
+
+      broken_high_age  今回抜いた「それまでの HIGH_WINDOW 行の最大」（high52w_prior と同じ BREAKOUT_REF の列）を
+                       付けた行から何行か。同じ値が複数なら一番新しい行。1〜HIGH_WINDOW
+      prev_nh_ratio    1つ前の更新日の高値に対する今回の高値（%）。1つ前の更新日がデータに無い・その高値が
+                       0 以下か欠測なら欠測
+
+    実験101（research/exp/e101_base_shape_ab.py の shape_columns）と同じ値になる（既定の BREAKOUT_REF = high で。
+    tests/test_breakout_shape.py が突き合わせる）。回すのは更新日の行だけ。
+    """
+    n = len(df)
+    age = np.full(n, np.nan)
+    ratio = np.full(n, np.nan)
+    rows = np.flatnonzero(df["is_new_high"].fillna(False).to_numpy(dtype=bool))
+    if not len(rows):
+        return age, ratio
+    # 全行ぶんの作業用の配列は作らない（パネルは全銘柄の全営業日。更新日の行だけで数える）
+    code = df["Code"].to_numpy()
+    starts = np.flatnonzero(np.r_[True, code[1:] != code[:-1]])        # 銘柄の先頭の行（銘柄ごとに続いて並ぶ）
+    first = starts[np.searchsorted(starts, rows, side="right") - 1]
+    w = HIGH_WINDOW
+    ref = df[BREAKOUT_REF].to_numpy(dtype=float)
+    high = df["high"].to_numpy(dtype=float)
+    for p, f in zip(rows, first):
+        win = ref[max(f, p - w):p]
+        mx = np.fmax.reduce(win) if len(win) else np.nan    # 欠測を飛ばした最大（全部欠測なら欠測）
+        if np.isnan(mx):
+            continue
+        age[p] = float(len(win) - np.flatnonzero(win == mx)[-1])
+    prev = last_nh.to_numpy(dtype=float)[rows]
+    has = ~np.isnan(prev)
+    q = np.where(has, prev, -1).astype(np.int64)
+    has &= q >= first                                       # 前の銘柄の行は使わない
+    num, den = high[rows[has]], high[q[has]]
+    r = np.full(len(num), np.nan)
+    good = (den > 0) & np.isfinite(num)
+    r[good] = num[good] / den[good] * 100.0
+    ratio[rows[has]] = r
+    return age, ratio
+
+
 def add_breakout_context(df: pd.DataFrame) -> pd.DataFrame:
     """
     ブレイクそのものの性質を表す特徴量。
@@ -1460,6 +1504,11 @@ def add_breakout_context(df: pd.DataFrame) -> pd.DataFrame:
     last_nh = idx.where(df["is_new_high"].fillna(False)).groupby(
         df["Code"], sort=False).ffill().shift(1)
     df["base_length"] = (idx - last_nh).where(df["is_new_high"].fillna(False))
+
+    # 抜けた土台の形（実験101 で検証、2026-10-17 に運用者の決定で本番へ。docs/MODEL_ADOPTION_RULES.md §62）。
+    # base_length は前回の更新からの日数しか持たず、上限が無い（長く下げて戻った日は何年にもなる）。
+    # その間に何が起きたかを2列で足す。どちらも更新日の行だけ（他の行は欠測）
+    df["broken_high_age"], df["prev_nh_ratio"] = _breakout_shape(df, last_nh)
 
     # 抜けの大きさ: それまでの高値をどれだけ上回ったか（%）
     df["break_margin"] = (df["close"] / df["high52w_prior"] - 1.0) * 100.0

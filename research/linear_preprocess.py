@@ -90,6 +90,9 @@ POSITIVE = (
     "mjr_indiv", "mjr_top1", "mjr_top10", "mjr_trust",
     "r_high", "r_high_3m", "r_high_6m", "short_ratio",
     "short_ratio_20", "vol_rel_long", "vol_rel_short",
+    # 前回の更新日の高値に対する今回の高値（%。実験101）。上の裾は短い（前回の更新から後の高値は前回の高値を
+    # まず超えないので、100 を超える分はおおむねその日の上げ幅）。下は昔の天井からの戻りの深さ
+    "prev_nh_ratio",
 )
 
 COUNT_DAYS = (
@@ -97,6 +100,7 @@ COUNT_DAYS = (
     "days_since_fy", "days_since_rev", "days_to_earn", "listing_years",
     "lvs_days", "lvs_n_20", "lvs_n_250", "lvs_n_60",
     "mjr_days", "xh_days",
+    "broken_high_age",          # 抜いた78週高値の古さ（1〜368営業日。実験101）
 )
 
 SMALL_INT = (

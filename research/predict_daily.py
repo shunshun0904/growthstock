@@ -293,10 +293,13 @@ def score_others(cand: pd.DataFrame, cols: List[str],
 
     1モデルの読込や採点が失敗しても他を止めない。週次学習で1つだけ
     転んだ日に、日次予測まで落とさないため。
+
+    各モデルは**自分が学習した列**（meta の features。並びもそのとき）で採点する。列の組を切り替える週は
+    土曜に 1.5σ・1.8σ、日曜に 1.2σ を学習し直すので、どちらかが失敗するとモデルごとに列が違う週ができる
+    （2026-10-17、241列への切り替えで足した）。学習した列がデータに無いモデルだけ飛ばす。
     """
     import models as M
 
-    X = cand[cols].to_numpy(dtype=float)
     scores: Dict[str, np.ndarray] = {}
     info: List[Dict] = []
     for algo in M.available(model_dir):
@@ -310,14 +313,15 @@ def score_others(cand: pd.DataFrame, cols: List[str],
             model, meta = M.load(algo, model_dir)
             if model is None:
                 continue
-            want = meta.get("features") or cols
-            if list(want) != list(cols):
-                # 特徴量セットが違うモデルは、同じ X を食わせられない。
-                # 黙って別の列で採点すると意味のないスコアが画面に出る
-                print(f"  [{algo}] 特徴量が一致しないため飛ばす "
-                      f"({len(want)}列 vs {len(cols)}列)")
+            want = list(meta.get("features") or cols)
+            miss = [c for c in want if c not in cand.columns]
+            if miss:
+                # 学習した列が無いまま別の列で採点すると、意味のないスコアが画面に出る
+                print(f"  [{algo}] 学習した列のうち {len(miss)}列がデータに無いため飛ばす（例: {', '.join(miss[:3])}）")
                 continue
-            scores[algo] = M.predict(model, X)
+            if want != list(cols):
+                print(f"  [{algo}] 学習した {len(want)}列で採点（基準モデルは {len(cols)}列）")
+            scores[algo] = M.predict(model, cand[want].to_numpy(dtype=float))
             info.append({
                 "algo": algo, "name": meta.get("name", algo),
                 "short": M.SHORT.get(algo, algo[:3].upper()),

@@ -46,7 +46,9 @@ research/multi_params.json）と build_dataset.py には書かない。2列は�
 
 結果（2026-10-17。lgbm 1.5σ、run 39045199490。docs/MODEL_ADOPTION_RULES.md §62）: 32窓の PR-AUC で C−A +0.0019（SE 0.0018、
 上の窓 21/32）・対照 P−A +0.0015 → §7 の1モデル分の3条件は字面では満たす。ただし本物と入れ替えの差 C−P は +0.0004（SE 0.0014、
-18/32）で、2列そのものの情報は見えない。本番と同じ OOF でも C−A +0.0023・P−A +0.0022。本番の設定には書いていない。
+18/32）で、2列そのものの情報は見えない。本番と同じ OOF でも C−A +0.0023・P−A +0.0022。
+運用者の決定（2026-10-17）: 本番に入れる。2列は build_dataset._breakout_shape が作るようになった（この台本の shape_columns と
+同じ値。tests/test_breakout_shape.py・research/exp/probe_breakout_shape.py）。この台本は当時の比べ方の記録として残す。
 
 出すもの: 2列の分布と、値の区切りごとの正例率（件数・割合だけ）、探索の CV（分割ごと）、本番と同じ OOF（種42・ずらし0）、
 窓ごとの差の平均・SE・上の窓の数、§7 の判定、窓ごとの値の一覧（運用者の指示「各cv（異なる窓）でもみたいです」）。
@@ -240,6 +242,8 @@ def prepare(rebuild: bool = False):
     if same != len(frame):
         raise SystemExit(f"組み直した日足の base_length が表と合わない: {len(frame) - same:,}行（作りが違う）")
     shape = shape_columns(frame[["Code", "Date"]], panel)
+    # 2026-10-17 からはデータセットにも同じ2列がある（build_dataset._breakout_shape）。この台本の数え方で付け直す
+    frame = frame.drop(columns=[c for c in NEW_COLS if c in frame.columns])
     df = pd.concat([frame.reset_index(drop=True), shape], axis=1)
     yr = df["Date"].dt.year
     log(f"[data] 2列を付けた {len(df):,}行（base_length が表と全行一致）/ {time.time()-t0:.0f}秒")
