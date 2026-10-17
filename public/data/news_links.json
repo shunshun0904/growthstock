@@ -1,5 +1,5 @@
 {
- "checkedAt": "2026-10-17T10:06:38Z",
+ "checkedAt": "2026-10-17T10:32:02Z",
  "asOf": "2026-10-16",
  "rule": {
   "models": [
@@ -655,6 +655,8 @@
   "market": 6,
   "marketOk": 3,
   "marketNg": 0,
-  "requests": 23
+  "requests": 23,
+  "decoyTried": 86,
+  "decoyPassed": 0
  }
 }
