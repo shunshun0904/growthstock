@@ -3,7 +3,7 @@
 probe: リンクの確かめ（research/news_links.py）が、本物のサイトで無効なリンク・ウソのリンクを本当に弾くか。
 
 単体テスト（tests/test_news_links.py）は偽の取得でしか確かめていない。ここでは本物のページで、毎晩と同じ判定
-（news_links.check_source / check_market）に、わざと間違えた組み合わせを渡す:
+（news_links.check_source）に、わざと間違えた組み合わせを渡す:
 
   対照       見本の銘柄（7203。テストで使っている見本）の Yahoo!ファイナンスの4ページを、正しい見出しで → ok
   取り違え   その4ページを、ほかの3つの見出しで確かめる（例: ニュースのページを「掲示板」として）→ ng
@@ -13,10 +13,11 @@ probe: リンクの確かめ（research/news_links.py）が、本物のサイト
   別の銘柄2  見本の銘柄のページを、候補の別の銘柄のリンクとして（コード・名前ともその銘柄）→ ng
   別の銘柄3  候補の別の銘柄のページに、見本の銘柄の名前 → ng。正しい名前なら → ok
   形         英字入りのコード（候補にあれば）→ ok
-  市場       市場全体の3ページを正しい見出しで → ok。互いの見出しで → ng
 
-同じ URL は1回だけ開く（取り違えは、開いた結果を使い回して判定だけ変える）。開くのは Yahoo!ファイナンスと JPX の
-20ページほど（news_links の Opener。名乗った User-Agent・間を空ける・自動では開かないホストは開かない）。
+同じ URL は1回だけ開く（取り違えは、開いた結果を使い回して判定だけ変える）。開くのは Yahoo!ファイナンスの
+15ページほど（news_links の Opener。名乗った User-Agent・間を空ける・自動では開かないホストは開かない）。
+2026-10-17 の run 39024430457 は、市場全体の3ページ（Yahoo!ファイナンスの経済ニュース・JPX の2ページ）の対照と取り違え
+9通りも含めた 48通りで回した（食い違い 0件）。市場全体のリンクは同じ日に画面から外したので、ここからも外した。
 公開のログに出すのは、組み合わせの種類・状態・理由だけ（候補の銘柄のコード・名前は出さない）。
 
   $ python3 research/exp/probe_news_links_negative.py
@@ -40,10 +41,6 @@ MISSING_URL = "https://finance.yahoo.co.jp/quote/{code}.T/no-such-page"
 
 def src(sid: str) -> N.Source:
     return next(s for s in N.SOURCES if s.id == sid)
-
-
-def mkt(mid: str) -> N.Market:
-    return next(m for m in N.MARKET if m.id == mid)
 
 
 def as_label(page: N.Source, label: N.Source) -> N.Source:
@@ -86,9 +83,9 @@ def others(pred: dict) -> Tuple[Optional[Tuple[str, str]], Optional[Tuple[str, s
     return other, alnum
 
 
-def cases(other: Optional[Tuple[str, str]], alnum: Optional[Tuple[str, str]]) -> List[Tuple[str, object, str, str, str]]:
-    """(種類, 確かめるもの（Source か Market）, コード, 名前, 期待)。種類はログに出す（コード・名前は出さない）。"""
-    out: List[Tuple[str, object, str, str, str]] = []
+def cases(other: Optional[Tuple[str, str]], alnum: Optional[Tuple[str, str]]) -> List[Tuple[str, N.Source, str, str, str]]:
+    """(種類, 確かめるリンク, コード, 名前, 期待)。種類はログに出す（コード・名前は出さない）。"""
+    out: List[Tuple[str, N.Source, str, str, str]] = []
     for p in YAHOO:
         out.append((f"対照 {p}", src(p), SAMPLE_CODE, SAMPLE_NAME, N.OK))
     for p in YAHOO:
@@ -111,20 +108,13 @@ def cases(other: Optional[Tuple[str, str]], alnum: Optional[Tuple[str, str]]) ->
     if alnum:
         for p in ("yahoo_news", "yahoo_forum"):
             out.append((f"形 英字入りのコード {p}", src(p), alnum[0], alnum[1], N.OK))
-    ids = ("yahoo_newslist", "jpx_short", "jpx_investor")
-    for m in ids:
-        out.append((f"市場 対照 {m}", mkt(m), "", "", N.OK))
-        for lab in ids:
-            if lab != m:
-                out.append((f"市場 取り違え {m} を {lab} として",
-                            replace(mkt(m), id=f"{m}->{lab}", title_words=mkt(lab).title_words), "", "", N.NG))
     return out
 
 
 def run(op: N.Opener, items) -> Tuple[List[str], int]:
     lines, bad = [], 0
     for label, s, code, name, want in items:
-        rec = N.check_market(op, s) if isinstance(s, N.Market) else N.check_source(op, s, code, name)
+        rec = N.check_source(op, s, code, name)
         hit = rec["state"] == want
         bad += not hit
         lines.append(f"  {label}: {rec['state']}（期待 {want}）{'' if hit else ' ← 食い違い'}"

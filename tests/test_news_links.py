@@ -5,8 +5,8 @@
 - 候補は規則（1.5σ の3本すべて95以上）を通った銘柄だけ。1本でも百分位が無ければ通さない。日は予測ファイルの dates の中だけ
 - 1本のページの判定: HTTP 200・同じページ（転送でトップや検索に飛ばされていない）・題名にそのサイトの書き方のコード・
   題名にリンクの中身を表す言葉・題名に候補の銘柄名（全角・半角と「(株)」はそろえる）。理由の文
-- 自動では開かないホスト（日経・株予報Pro・株探・みんかぶ）へは1件も接続しない（「未確認」として URL だけ置く）。
-  安全網として、取得の一番下の層でも断る
+- 自動では開かないホスト（日経・株予報Pro・株探・みんかぶ）へは1件も接続しない（unchecked として URL だけ置く）。
+  安全網として、取得の一番下の層でも断る。市場全体のリンクは置かない（2026-10-17 に画面から外した）
 - 同じホストは間を空けて開く。一時的な失敗（接続できない・5xx・429）だけ1回やり直す
 - 確かめ方そのものの確かめ: 通ったページを、わざと間違えた見出し・ほかの銘柄のコードで判定し直し、通ってしまったら出さない
   （題名がどの見出しの言葉も含むようなサイトの変化に気づく）。追加の接続はしない
@@ -59,19 +59,13 @@ class FakeWeb:
 
 
 def yahoo_ok(url):
-    """Yahoo!ファイナンス・JPX のページを、それらしい題名で返す（コードは URL から）。"""
+    """Yahoo!ファイナンスの銘柄のページを、それらしい題名で返す（コードは URL から）。"""
     p = urllib.parse.urlsplit(url)
     if p.netloc == "finance.yahoo.co.jp" and p.path.startswith("/quote/"):
         code = p.path.split("/")[2].split(".")[0]
         kind = {"news": "ニュース・最新情報", "disclosure": "適時開示情報", "performance": "業績・財務・アナリスト予想",
                 "forum": "掲示板"}[p.path.rsplit("/", 1)[1]]
         return 200, url, "text/html", page(f"テスト(株)【{code}】：{kind} - Yahoo!ファイナンス")
-    if url == "https://finance.yahoo.co.jp/news":
-        return 200, url, "text/html", page("経済・ファイナンス関連のニュース・コラム - Yahoo!ファイナンス")
-    if "short-selling" in url:
-        return 200, url, "text/html", page("日次集計 | 空売り集計 | 日本取引所グループ")
-    if "investor-type" in url:
-        return 200, url, "text/html", page("週間 | 株式 | 投資部門別売買状況 | 日本取引所グループ")
     return 404, url, "", b""
 
 
@@ -105,10 +99,10 @@ class TestRuleCodes(unittest.TestCase):
 class TestJudge(unittest.TestCase):
     URL = "https://finance.yahoo.co.jp/quote/7203.T/news"
 
-    def j(self, st=200, final=None, title="トヨタ(株)【7203】：ニュース", body="", **kw):
+    def j(self, st=200, final=None, title="トヨタ(株)【7203】：ニュース", **kw):
         kw.setdefault("mark", "【7203】")
         kw.setdefault("title_words", ("ニュース",))
-        return N.judge(self.URL, st, final or self.URL, title, body, **kw)
+        return N.judge(self.URL, st, final or self.URL, title, **kw)
 
     def test_ok(self):
         self.assertEqual(self.j(), (True, ""))
@@ -124,8 +118,6 @@ class TestJudge(unittest.TestCase):
         self.assertEqual(self.j(title="トヨタ(株)【7203】：株価・株式情報"), (False, "題名に「ニュース」が無い"))
         # コードが別の書き方（検索の結果の一覧など）では通さない
         self.assertEqual(self.j(title="「7203」の検索結果 ニュース"), (False, "題名に銘柄コードが無い"))
-        self.assertEqual(N.judge("https://a.jp/x", 200, "https://a.jp/x", "t", "abc", body_words=("VI",)),
-                         (False, "本文に「VI」が無い"))
 
     def test_name(self):
         self.assertEqual(self.j(name="トヨタ"), (True, ""))
@@ -150,7 +142,7 @@ class TestNoAuto(unittest.TestCase):
         self.assertFalse(N.auto_ok("https://www.nikkei.com/markets/"))
 
     def test_sources_are_consistent(self):
-        ids = [s.id for s in N.SOURCES] + [m.id for m in N.MARKET]
+        ids = [s.id for s in N.SOURCES]
         self.assertEqual(len(ids), len(set(ids)))
         groups = {g for g, _ in N.GROUPS}
         for s in N.SOURCES:
@@ -161,8 +153,10 @@ class TestNoAuto(unittest.TestCase):
                 # 自動で確かめるリンクは、題名のコードの書き方と中身の言葉を必ず持つ
                 self.assertTrue(s.mark and s.words, s.id)
         # 置かないサイト
-        hosts = {N.host_of(s.url.format(code="7203")) for s in N.SOURCES} | {N.host_of(m.url) for m in N.MARKET}
+        hosts = {N.host_of(s.url.format(code="7203")) for s in N.SOURCES}
         self.assertFalse(hosts & {"news.google.com", "x.com", "twitter.com", "shikiho.toyokeizai.net", "irbank.net"})
+        # 自動で開くのは Yahoo!ファイナンスだけ（市場全体の JPX などは置かない）
+        self.assertEqual({h for h in hosts if N.auto_ok(f"https://{h}/")}, {"finance.yahoo.co.jp"})
 
     def test_opener_refuses(self):
         op, _ = opener(FakeWeb(default=yahoo_ok))
@@ -212,7 +206,7 @@ class TestBuild(unittest.TestCase):
         self.assertEqual(sorted(res["stocks"]), ["285A", "7203"])
         # 自動では開かないホストには1件も接続していない。規則を通らない銘柄も開いていない
         hosts = {N.host_of(u) for u in web.calls}
-        self.assertEqual(hosts, {"finance.yahoo.co.jp", "www.jpx.co.jp"})
+        self.assertEqual(hosts, {"finance.yahoo.co.jp"})
         self.assertFalse(any("9999" in u for u in web.calls))
         links = res["stocks"]["7203"]["links"]
         st = {l["id"]: l["state"] for l in links}
@@ -226,9 +220,8 @@ class TestBuild(unittest.TestCase):
         self.assertEqual(res["stocks"]["285A"]["links"][0]["href"], "https://finance.yahoo.co.jp/quote/285A.T/news")
         s = res["summary"]
         self.assertEqual((s["stocks"], s["links"], s["ok"], s["ng"], s["unchecked"]), (2, 20, 8, 0, 12))
-        self.assertEqual((s["market"], s["marketOk"], s["marketNg"]), (6, 3, 0))
-        self.assertEqual(s["requests"], 11)                 # 2銘柄 × 4本 + 市場 3本
-        self.assertEqual({m["id"]: m["state"] for m in res["market"]}["nk225vi"], N.UNCHECKED)
+        self.assertEqual(s["requests"], 8)                  # 2銘柄 × 4本
+        self.assertNotIn("market", res)
 
     def test_name_mismatch_is_ng(self):
         pred = {"asOf": "2026-10-16", "dates": ["2026-10-16"],
@@ -259,37 +252,32 @@ class TestBuild(unittest.TestCase):
         self.assertNotIn("7203", out)
         self.assertNotIn("285A", out)
         self.assertIn("確かめて開けた 8", out)
-        self.assertIn("38通り判定し直し、通ってしまったのは 0通り", out)
+        self.assertIn("32通り判定し直し、通ってしまったのは 0通り", out)
 
     def test_decoys(self):
         # 同じ銘柄のほかの3本の見出しと、ほかの銘柄のコード
         self.assertEqual(N.source_decoys(N.SOURCES[0], "7203", "285A"),
                          [("【7203】", ("適時開示",)), ("【7203】", ("業績",)), ("【7203】", ("掲示板",)),
                           ("【285A】", ("ニュース",))])
-        self.assertEqual(N.market_decoys(N.MARKET[1]), [("ニュース",), ("投資部門別",)])
 
     def test_decoys_rejected_without_extra_requests(self):
         res, web = self.run_build(FakeWeb(default=yahoo_ok))
         s = res["summary"]
-        # 2銘柄 × 4ページ × 4通り + 市場 3ページ × 2通り。どれも弾き、リンクの状態は変わらない
-        self.assertEqual((s["decoyTried"], s["decoyPassed"]), (38, 0))
-        self.assertEqual((s["ok"], s["marketOk"]), (8, 3))
-        self.assertEqual(len(web.calls), 11)                 # 判定し直すだけで、開き直さない
+        # 2銘柄 × 4ページ × 4通り。どれも弾き、リンクの状態は変わらない
+        self.assertEqual((s["decoyTried"], s["decoyPassed"]), (32, 0))
+        self.assertEqual(s["ok"], 8)
+        self.assertEqual(len(web.calls), 8)                  # 判定し直すだけで、開き直さない
 
     def test_lenient_titles_fail_closed(self):
         """どの見出しの言葉も題名にあるページ（見分けられない）は、1〜5 を通っても出さない。"""
         def lenient(url):
             st, final, ct, body = yahoo_ok(url)
-            if "/quote/" in url or "jpx.co.jp" in url:
-                body = body.replace("</title>".encode(), " ニュース 適時開示 業績 掲示板 空売り 投資部門別</title>".encode())
+            body = body.replace("</title>".encode(), " ニュース 適時開示 業績 掲示板</title>".encode())
             return st, final, ct, body
 
         res, _ = self.run_build(FakeWeb(default=lenient))
         links = [l for v in res["stocks"].values() for l in v["links"] if l["state"] != N.UNCHECKED]
         self.assertEqual({(l["state"], l["reason"]) for l in links}, {(N.NG, N.LIE_REASON)})
-        st = {m["id"]: (m["state"], m["reason"]) for m in res["market"]}
-        self.assertEqual(st["jpx_short"], (N.NG, N.LIE_REASON))
-        self.assertEqual(st["yahoo_newslist"], (N.OK, ""))   # 題名の見分けがついている市場のページはそのまま
         self.assertEqual((res["summary"]["ok"], res["summary"]["ng"]), (0, 8))
         self.assertGreater(res["summary"]["decoyPassed"], 0)
 
@@ -322,7 +310,7 @@ class TestBuild(unittest.TestCase):
             with open(out_p, encoding="utf-8") as fh:
                 d2 = json.load(fh)
             self.assertEqual(sorted(d2), sorted(["checkedAt", "asOf", "rule", "groups", "noAuto", "excluded", "stocks",
-                                                 "market", "summary"]))
+                                                 "summary"]))
             self.assertEqual(d2["rule"], {"models": list(RULE), "agreePct": 95.0})
             self.assertEqual([g["id"] for g in d2["groups"]], ["news", "disclosure", "forecast", "voice"])
 

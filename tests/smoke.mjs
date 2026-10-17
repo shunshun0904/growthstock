@@ -298,7 +298,7 @@ await page.screenshot({ path: path.join(SHOTS, 'screenshot-samples.png'), fullPa
 console.log('\n== 候補銘柄のニュース ==');
 // 出すのは今日の戦略の候補（1.5σ の3本すべて95以上）だけ（運用者の指示 2026-10-17「取得対象は、候補銘柄のみで良いです」）。
 // 合成の予測データには規則を通る候補が無いので、9324・9434・9082 の 1.5σ の3本の百分位を上書きして配り直す
-// （tests/fixtures/synthetic-news-links.json は同じ値から research/news_links.py の書き出しで作った。9082 は確かめた記録が無い）
+// （tests/fixtures/synthetic-news-links.json は同じ値から research/news_links.py の書き出しで作った。9082 はリンクの記録が無い）
 const PASS = { 9324: [98.1, 97.1, 97.4], 9434: [97.1, 96.5, 95.2], 9082: [96.0, 100.0, 95.0] };
 const predPass = JSON.parse(fs.readFileSync(PRED_FIXTURE, 'utf8'));
 for (const c of predPass.candidates) {
@@ -317,34 +317,29 @@ const c1 = (await cards.nth(0).textContent()) || '';
 const c3 = (await cards.nth(2).textContent()) || '';
 check(c1.includes('9324') && c1.includes('買う候補') && c3.includes('9082') && c3.includes('95以上'),
       '並びは最小の百分位が高い順で、上位2件に「買う候補」、枠の外に「95以上」');
-check((await cards.nth(0).locator('.news-link.is-checked').count()) === 3
-        && (await cards.nth(1).locator('.news-link.is-checked').count()) === 4,
-      '確かめて開けたリンクだけを「確かめた」で出す（9324 は掲示板が開けなかったので3本、9434 は4本）');
-check((await cards.nth(0).locator('.news-link.is-unchecked').count()) === 6, '自動では開かないサイトのリンク6本は「未確認」で分けて出す');
-check(c1.includes('開けなかったので出していないリンク: Yahoo!ファイナンス 掲示板（題名に銘柄コードが無い）')
-        && (await cards.nth(0).locator('a[href="https://finance.yahoo.co.jp/quote/9324.T/forum"]').count()) === 0,
-      '開けなかったリンクは出さず、理由だけを出す');
-check(c3.includes('まだ確かめていません') && (await cards.nth(2).locator('a').count()) === 0,
-      '確かめた記録の無い銘柄はリンクを1本も出さない');
-check((await cards.nth(0).locator('a.is-checked[href="https://finance.yahoo.co.jp/quote/9324.T/news"]').count()) === 1
-        && (await cards.nth(0).locator('a.is-unchecked[href="https://kabutan.jp/stock/news?code=9324"]').count()) === 1
-        && (await cards.nth(0).locator('a.is-unchecked[href="https://www.nikkei.com/nkd/company/news/?scode=9324"]').count()) === 1,
-      'リンクの URL は確かめた結果のファイルのまま（Yahoo!ファイナンスは確かめた、株探・日経は未確認）');
-const marks = await page.locator('.news-card .news-link').evaluateAll((as) => as.map((a) => [a.className, a.textContent]));
-check(marks.every(([cls, t]) => (cls.includes('is-checked') ? t.includes('✓ 確かめた') : t.includes('未確認'))),
-      'どのリンクにも「確かめた」か「未確認」の印が付く');
-check((await page.locator('.news a.news-link.is-checked').count()) === 10 && (await page.locator('.news a.news-link').count()) === 25,
-      '市場全体は確かめた3本・未確認3本（候補の 7 + 12 と合わせて 25本）');
+// 確かめは裏でやり、画面には印や状態を出さない（運用者の指示 2026-10-17「確かめた、未確認などの表示はいらないです」）。
+// 9324 は掲示板が確かめを通らなかったので、Yahoo!ファイナンスの3本と自動では開かないサイトの6本で9本。9434 は10本
+check((await cards.nth(0).locator('a.news-link').count()) === 9 && (await cards.nth(1).locator('a.news-link').count()) === 10,
+      '確かめを通らなかったリンクだけを出さない（9324 は9本、9434 は10本）');
+check((await cards.nth(0).locator('a[href="https://finance.yahoo.co.jp/quote/9324.T/forum"]').count()) === 0
+        && (await cards.nth(0).locator('a[href="https://finance.yahoo.co.jp/quote/9324.T/news"]').count()) === 1
+        && (await cards.nth(0).locator('a[href="https://kabutan.jp/stock/news?code=9324"]').count()) === 1
+        && (await cards.nth(0).locator('a[href="https://www.nikkei.com/nkd/company/news/?scode=9324"]').count()) === 1,
+      'リンクの URL は確かめた結果のファイルのまま（通らなかった掲示板は出ず、株探・日経は同じ塊に並ぶ）');
+const groups1 = await cards.nth(0).locator('.news-group').evaluateAll((gs) => gs.map((g) => [
+  g.querySelector('.lab').textContent, g.querySelectorAll('a').length]));
+check(JSON.stringify(groups1) === JSON.stringify([['ニュース', 3], ['適時開示', 1], ['アナリスト予想・業績', 4], ['個人投資家の声', 1]]),
+      `リンクは見出しの塊ごとに、自動では開かないサイトのものも同じ塊に並ぶ (実際: ${JSON.stringify(groups1)})`);
+check(c3.includes('まだありません') && (await cards.nth(2).locator('a').count()) === 0,
+      'リンクの記録の無い銘柄はリンクを1本も出さない');
+check(['確かめた', '未確認', '出していないリンク', '判定し直し', '市場全体'].every((w) => !newsText.includes(w))
+        && (await page.locator('.news .mark, .news .is-checked, .news .is-unchecked').count()) === 0,
+      '確かめた・未確認の印、確かめの状態、市場全体のカードは出さない');
+check((await page.locator('.news a.news-link').count()) === 19, '画面のリンクは候補の2銘柄ぶんの19本だけ');
 const newsAttrs = await page.locator('.news a.news-link').evaluateAll((as) => as.map((a) => [a.target, a.rel, a.href]));
 check(newsAttrs.length > 0 && newsAttrs.every(([t, r, h]) => t === '_blank' && r.includes('noopener') && r.includes('noreferrer')
         && h.startsWith('https://')), 'リンクはすべて新しいタブで開き（noopener noreferrer）、https');
-check(newsText.includes('開いて確かめた 7本・開けなかった 1本・未確認 12本') && newsText.includes('2025/07/29'),
-      '上の帯に確かめた日時と本数が出る');
-check(newsText.includes('「確かめた」の条件') && newsText.includes('日経は、自動化された手段での取得を規約')
-        && newsText.includes('株予報Pro は、robots.txt'), '下に確かめる条件と、自動で開かない理由が出る');
-check(newsText.includes('(5) 題名にその銘柄の名前がある') && newsText.includes('(6) 同じページを')
-        && newsText.includes('(6) の判定し直しを 34通り行い、すべて弾けました。'),
-      '条件に銘柄名と判定し直しが入り、直近の判定し直しの結果（34通り・すべて弾けた）が出る');
+check(newsText.includes('有料の記事やログインが要るページがあります'), '下に有料の記事の注意が出る');
 check(!newsText.includes('NaN') && !newsText.includes('undefined'), '候補銘柄のニュースに NaN / undefined が出ていない');
 await page.setViewportSize({ width: 390, height: 844 });
 await page.waitForTimeout(200);

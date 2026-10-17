@@ -3,7 +3,7 @@
 本物のページで弾けるかの probe（research/exp/probe_news_links_negative.py）の組み立て。ネットには出ない（偽の取得）。
 
 - 取り違えは、URL はそのままで見出し（題名に要る言葉）だけを差し替えたもの
-- 開くのは自動で開いてよいホスト（Yahoo!ファイナンス・JPX）だけ。同じ URL は1回だけ開く
+- 開くのは自動で開いてよいホスト（Yahoo!ファイナンス）だけ。同じ URL は1回だけ開く
 - 偽のサイトが本物どおりなら、期待との食い違いは 0件。ログに候補の銘柄のコード・名前を出さない
 
   python3 tests/test_probe_news_links_negative.py
@@ -33,11 +33,6 @@ def fake(url):
     """本物の題名の書き方をまねた偽のサイト。無いコード・無いページは 404。"""
     u = urllib.parse.urlsplit(url)
     html = "text/html; charset=utf-8"
-    if u.netloc == "finance.yahoo.co.jp" and u.path == "/news":
-        return 200, url, html, "<title>経済ニュース - Yahoo!ファイナンス</title>".encode()
-    if u.netloc == "www.jpx.co.jp":
-        word = "空売り" if "short-selling" in u.path else "投資部門別"
-        return 200, url, html, f"<title>{word}の集計 | 日本取引所グループ</title>".encode()
     m = re.match(r"^/quote/([0-9A-Z]{4})\.T/([a-z-]+)$", u.path)
     if u.netloc != "finance.yahoo.co.jp" or not m or m.group(1) not in NAMES or m.group(2) not in KINDS:
         return 404, url, html, b"<title>404</title>"
@@ -72,12 +67,12 @@ class TestShapes(unittest.TestCase):
     def test_cases_only_auto_hosts(self):
         items = P.cases(*P.others(pred()))
         for _, s, code, _, _ in items:
-            url = s.url if isinstance(s, N.Market) else s.url.format(code=code)
+            url = s.url.format(code=code)
             self.assertTrue(N.auto_ok(url), url)
-            self.assertIn(N.host_of(url), ("finance.yahoo.co.jp", "www.jpx.co.jp"))
-        # 対照4・取り違え12・無効1 4・無効2 1・作った名前4・別の銘柄2 4・別の銘柄3 8・英字2・市場 9
-        self.assertEqual(len(items), 48)
-        self.assertEqual(sum(1 for x in items if x[4] == N.OK), 4 + 4 + 2 + 3)
+            self.assertEqual(N.host_of(url), "finance.yahoo.co.jp")
+        # 対照4・取り違え12・無効1 4・無効2 1・作った名前4・別の銘柄2 4・別の銘柄3 8・英字2
+        self.assertEqual(len(items), 39)
+        self.assertEqual(sum(1 for x in items if x[4] == N.OK), 4 + 4 + 2)
 
 
 class TestMemo(unittest.TestCase):
@@ -107,8 +102,8 @@ class TestRun(unittest.TestCase):
         self.assertEqual(rc, 0, log)
         self.assertIn("食い違い 0件", log)
         self.assertNotIn("←", log)
-        # 7203 の4ページ + 0000 の4ページ + 無いページ1 + 候補の4ページ + 英字2 + 市場3 = 18
-        self.assertIn("ネットで開いたページ 18件", log)
+        # 7203 の4ページ + 0000 の4ページ + 無いページ1 + 候補の4ページ + 英字2 = 15
+        self.assertIn("ネットで開いたページ 15件", log)
         for s in ("9999", "285A", "285a", NAMES["9999"], NAMES["285A"]):
             self.assertNotIn(s, log)
 

@@ -18,29 +18,30 @@ AGREE_PCT。画面の strategy.js と同じ）について、リンクを1本ず
      コードが合っていても別の会社のページへのリンクを出さない
   6. 確かめ方そのものの確かめ: 1〜5 を通ったページを、わざと間違えた見出し（同じ銘柄のほかのリンクの言葉）と、ほかの銘柄の
      コードで判定し直し、どれも通らない（追加の接続はしない）。通ってしまったら、題名で見分けられていないので、そのリンクも
-     出さない。サイトが題名の書き方を変えて確かめが甘くなったときに、気づかないまま「確かめた」と出さないため
+     出さない。サイトが題名の書き方を変えて確かめが甘くなったときに、気づかないまま出し続けないため
 
 本物のサイトに、わざと間違えた組み合わせ 48通り（見出しの取り違え・存在しないコード・存在しないページ・違う銘柄名・別の
 銘柄のページ）を渡し、すべて期待どおりに弾き、正しい組み合わせはすべて通ることを確かめた（2026-10-17。
 research/exp/probe_news_links_negative.py、run 39024430457）。
 
-結果は public/data/news_links.json（銘柄コードごとに、リンクと結果・理由）。**URL の正本はこのファイル**（SOURCES /
-MARKET）で、画面（src/views/NewsView.jsx）は書き写さない。画面は、確かめて開けたリンクに「確かめた」の印を付けて出し、
-開けなかったリンクは出さない。
+結果は public/data/news_links.json（銘柄コードごとに、リンクと結果・理由）。**URL の正本はこのファイル**（SOURCES）で、
+画面（src/views/NewsView.jsx）は書き写さない。画面は、確かめて弾いたリンク（ng）を出さず、ほかは印を付けずに見出しの
+塊ごとに並べる（運用者の指示 2026-10-17「確かめた、未確認などの表示はいらないです。バックでやってくれれば良いので」）。
 
 自動では開かないサイト（NO_AUTO。各サイトの規約・robots.txt を全文で読んだ結果。research/exp/probe_news_terms.py、
-run 39022372591）は、URL の形だけ確かめたリンクとして「未確認」の印を付けて分けて出す（運用者の決定 2026-10-17
-「確かめられないものも印つきで出す」）:
+run 39022372591）は、URL の形だけ確かめたリンク（unchecked）として置き、画面ではほかのリンクと同じ塊に印なしで並べる
+（運用者の決定 2026-10-17「全部を印なしで出す」。それまでは「未確認」の印を付けて分けていた）:
   - 日経（www.nikkei.com・indexes.nikkei.co.jp）… 著作権のページが、スクレイピング・クローリング・ボットなど自動化された
     手段での取得を禁じている
   - 株予報Pro（kabuyoho.jp）… robots.txt が自動アクセスの間隔を 72000秒（20時間）と求めている（Crawl-delay）
   - 株探・みんかぶ … 自動の接続を断る（HTTP 405）
 Google ニュースは robots.txt が全体を禁止し、URL の形も確かめられていないので置かない。
 
-自動で開くのは Yahoo!ファイナンス（robots.txt は対象のページを禁止していない。規約が禁じるのは BOT による不正な操作と
-転載など）と JPX（高頻度・高負荷の自動取得を控えるよう求めている。1晩に2ページだけ）。名乗った User-Agent（ブラウザを
-装わない）で、同じホストは間を空けて1件ずつ。1晩に開くのは候補の数 × 4本と市場の3本だけ。ログは公開なので、件数と
-理由の内訳だけを出す（銘柄コード・銘柄名は出さない）。
+自動で開くのは Yahoo!ファイナンスだけ（robots.txt は対象のページを禁止していない。規約が禁じるのは BOT による不正な
+操作と転載など）。名乗った User-Agent（ブラウザを装わない）で、同じホストは間を空けて1件ずつ。1晩に開くのは候補の数 ×
+4本だけ。市場全体のリンク（Yahoo!ファイナンスの経済ニュース・JPX の空売り集計と投資部門別売買状況など）は、画面から
+外した（運用者の指示 2026-10-17「市場全体のカードも不要です」）ので置かず、開かない。ログは公開なので、件数と理由の
+内訳だけを出す（銘柄コード・銘柄名は出さない）。
 
   $ python3 research/news_links.py [--pred public/data/predictions.json] [--out public/data/news_links.json]
 """
@@ -87,7 +88,7 @@ GROUPS: Sequence[Tuple[str, str]] = (
 )
 
 
-#: 自動では開かないホストと理由（画面の「未確認」の説明にも出す）。ここにあるホストへは、このファイルも probe も開かない
+#: 自動では開かないホストと理由（news_links.json にも残す）。ここにあるホストへは、このファイルも probe も開かない
 NO_AUTO: Dict[str, str] = {
     "www.nikkei.com": "日経は、自動化された手段での取得を規約（著作権について）で禁じている",
     "indexes.nikkei.co.jp": "日経は、自動化された手段での取得を規約（著作権について）で禁じている",
@@ -110,7 +111,7 @@ def auto_ok(url: str) -> bool:
 class Source:
     """
     銘柄ごとのリンク。url の {code} は4桁のコード。mark は題名の中のコードの書き方、words は題名に要る言葉。
-    ホストが NO_AUTO なら開かず「未確認」（URL の形は 2026-10-17 に見本の銘柄で確かめたもの）。
+    ホストが NO_AUTO なら開かず unchecked（URL の形は 2026-10-17 に見本の銘柄で確かめたもの）。
     """
     id: str
     group: str
@@ -122,22 +123,11 @@ class Source:
     note: str
 
 
-@dataclass(frozen=True)
-class Market:
-    """市場全体のリンク。title_words は題名に、body_words は本文に要る言葉。ホストが NO_AUTO なら「未確認」。"""
-    id: str
-    site: str
-    label: str
-    url: str
-    title_words: Tuple[str, ...] = ()
-    body_words: Tuple[str, ...] = ()
-
-
 #: 題名の書き方は 2026-10-17 に見本の銘柄で実際に開いて確かめたもの（probe_news_links、run 39017769927）:
 #:   Yahoo!ファイナンス「トヨタ自動車(株)【7203】：ニュース・最新情報 - Yahoo!ファイナンス」
-#: 未確認のリンク（NO_AUTO のホスト）の URL の形は、同じ run で見本の銘柄のページを開いて（日経・株予報Pro。規約を読む前）、
-#: 株探・みんかぶは検索結果に実在するページ（株探 stock/news?code=5185・6594・285A、みんかぶ stock/285A/analyst_consensus・
-#: stock/285A/pick・financial_item_ranking/buy_picks_rise）で確かめた。候補の銘柄ごとには開いていない
+#: 自動では開かないホスト（NO_AUTO）のリンクの URL の形は、同じ run で見本の銘柄のページを開いて（日経・株予報Pro。規約を
+#: 読む前）、株探・みんかぶは検索結果に実在するページ（株探 stock/news?code=5185・6594・285A、みんかぶ
+#: stock/285A/analyst_consensus・stock/285A/pick）で確かめた。候補の銘柄ごとには開いていない
 SOURCES: Sequence[Source] = (
     Source("yahoo_news", "news", "Yahoo!ファイナンス", "ニュース",
            "https://finance.yahoo.co.jp/quote/{code}.T/news", "【{code}】", ("ニュース",),
@@ -171,20 +161,7 @@ SOURCES: Sequence[Source] = (
            "個人投資家の買い・売りの予想と予想株価"),
 )
 
-MARKET: Sequence[Market] = (
-    Market("yahoo_newslist", "Yahoo!ファイナンス", "経済ニュース", "https://finance.yahoo.co.jp/news", ("ニュース",)),
-    Market("jpx_short", "JPX", "空売り集計",
-           "https://www.jpx.co.jp/markets/statistics-equities/short-selling/index.html", ("空売り",)),
-    Market("jpx_investor", "JPX", "投資部門別売買状況",
-           "https://www.jpx.co.jp/markets/statistics-equities/investor-type/index.html", ("投資部門別",)),
-    Market("nikkei_markets", "日経", "マーケットのニュース", "https://www.nikkei.com/markets/"),
-    Market("nk225vi", "日経", "日経平均VI（変動の大きさの予想）",
-           "https://indexes.nikkei.co.jp/nkave/index/profile?idx=nk225vi"),
-    Market("minkabu_rank", "みんかぶ", "買い予想数の上昇ランキング",
-           "https://minkabu.jp/financial_item_ranking/buy_picks_rise"),
-)
-
-#: 置いていないサイト（画面に理由を出す）
+#: 置いていないサイト（news_links.json に理由を残す）
 EXCLUDED: Sequence[Dict[str, str]] = (
     {"site": "Google ニュース", "reason": "robots.txt が自動のアクセスを全体で禁止し、URL の形も確かめられていない"},
     {"site": "X", "reason": "検索はログインが要り、robots.txt も自動のアクセスを全体で禁止している"},
@@ -255,11 +232,6 @@ def page_title(text: str) -> str:
     return re.sub(r"\s+", " ", html.unescape(m.group(1))).strip() if m else ""
 
 
-def body_text(text: str) -> str:
-    t = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", text)
-    return html.unescape(re.sub(r"<[^>]+>", " ", t))
-
-
 def same_page(asked: str, final: str) -> bool:
     """最後の URL が開いた URL と同じページか（ホスト・道・クエリの値。末尾の / と http/https は問わない）。"""
     a, f = urllib.parse.urlsplit(asked), urllib.parse.urlsplit(final)
@@ -294,8 +266,8 @@ def name_in_title(name: str, title: str) -> bool:
     return n in t or (len(n) >= 8 and n[:8] in t)
 
 
-def judge(asked: str, status: int, final: str, title: str, body: str, *, mark: str = "",
-          title_words: Sequence[str] = (), body_words: Sequence[str] = (), name: str = "") -> Tuple[bool, str]:
+def judge(asked: str, status: int, final: str, title: str, *, mark: str = "", title_words: Sequence[str] = (),
+          name: str = "") -> Tuple[bool, str]:
     """(開けたか, 理由)。理由は画面とログに出す短い文。"""
     if status == 0:
         return False, "接続できない"
@@ -310,9 +282,6 @@ def judge(asked: str, status: int, final: str, title: str, body: str, *, mark: s
             return False, f"題名に「{w}」が無い"
     if name and not name_in_title(name, title):
         return False, "題名に銘柄名が無い"
-    for w in body_words:
-        if w not in body:
-            return False, f"本文に「{w}」が無い"
     return True, ""
 
 
@@ -366,17 +335,18 @@ class Opener:
         return res
 
 
-#: リンクの状態。ok = 開いて確かめた / ng = 開いたが条件を満たさない（画面に出さない） / unchecked = 自動では開かない（未確認）
+#: リンクの状態。ok = 開いて確かめた / ng = 開いたが条件を満たさない（画面に出さない） / unchecked = 自動では開かない
+#: （URL の形だけ確かめた。画面には ok と同じく印なしで出す）
 OK, NG, UNCHECKED = "ok", "ng", "unchecked"
 
-#: 開いたページ: (状態, 最後の URL, 題名, 本文の文字)。本文は要るときだけ
-Page = Tuple[int, str, str, str]
+#: 開いたページ: (状態, 最後の URL, 題名)
+Page = Tuple[int, str, str]
 
 
-def open_page(op: Opener, url: str, body: bool = False) -> Page:
+def open_page(op: Opener, url: str) -> Page:
     st, final, ctype, raw = op.open(url)
     text = decode(raw, ctype) if st == 200 else ""
-    return st, final, page_title(text), (body_text(text) if body else "")
+    return st, final, page_title(text)
 
 
 def check_source(op: Opener, src: Source, code: str, name: str = "", page: Optional[Page] = None) -> dict:
@@ -385,18 +355,8 @@ def check_source(op: Opener, src: Source, code: str, name: str = "", page: Optio
     rec = {"id": src.id, "group": src.group, "site": src.site, "label": src.label, "href": url, "note": src.note}
     if not auto_ok(url):
         return {**rec, "state": UNCHECKED, "reason": NO_AUTO[host_of(url)]}
-    st, final, title, _ = page if page is not None else open_page(op, url)
-    ok, reason = judge(url, st, final, title, "", mark=src.mark.format(code=code), title_words=src.words, name=name)
-    return {**rec, "state": OK if ok else NG, "reason": reason}
-
-
-def check_market(op: Opener, m: Market, page: Optional[Page] = None) -> dict:
-    """page は開いた結果（無ければここで開く）。"""
-    rec = {"id": m.id, "site": m.site, "label": m.label, "href": m.url}
-    if not auto_ok(m.url):
-        return {**rec, "state": UNCHECKED, "reason": NO_AUTO[host_of(m.url)]}
-    st, final, title, body = page if page is not None else open_page(op, m.url, body=bool(m.body_words))
-    ok, reason = judge(m.url, st, final, title, body, title_words=m.title_words, body_words=m.body_words)
+    st, final, title = page if page is not None else open_page(op, url)
+    ok, reason = judge(url, st, final, title, mark=src.mark.format(code=code), title_words=src.words, name=name)
     return {**rec, "state": OK if ok else NG, "reason": reason}
 
 
@@ -423,11 +383,6 @@ def source_decoys(src: Source, code: str, decoy: str) -> List[Tuple[str, Tuple[s
     return out
 
 
-def market_decoys(m: Market) -> List[Tuple[str, ...]]:
-    """市場のページを判定し直す、ほかの自動で確かめる市場のリンクの題名の言葉。どれも通ってはいけない。"""
-    return [o.title_words for o in MARKET if o.id != m.id and o.title_words and auto_ok(o.url)]
-
-
 def build(pred: dict, op: Opener, now: Optional[dt.datetime] = None) -> dict:
     """予測ファイルから候補を選び、全部のリンクを確かめた結果（news_links.json の中身）を返す。"""
     now = now or dt.datetime.now(dt.timezone.utc)
@@ -452,20 +407,11 @@ def build(pred: dict, op: Opener, now: Optional[dt.datetime] = None) -> dict:
             page = open_page(op, url) if auto_ok(url) else None
             rec = check_source(op, s, code, name, page=page)
             if rec["state"] == OK:
-                st, final, title, _ = page
-                rec = recheck(rec, [judge(url, st, final, title, "", mark=mk, title_words=w, name=name)[0]
+                st, final, title = page
+                rec = recheck(rec, [judge(url, st, final, title, mark=mk, title_words=w, name=name)[0]
                                     for mk, w in source_decoys(s, code, decoy)])
             links.append(rec)
         stocks[code] = {"dates": dates, "links": links}
-    market = []
-    for m in MARKET:
-        page = open_page(op, m.url, body=bool(m.body_words)) if auto_ok(m.url) else None
-        rec = check_market(op, m, page=page)
-        if rec["state"] == OK:
-            st, final, title, body = page
-            rec = recheck(rec, [judge(m.url, st, final, title, body, title_words=w, body_words=m.body_words)[0]
-                                for w in market_decoys(m)])
-        market.append(rec)
     links = [l for v in stocks.values() for l in v["links"]]
 
     def count(rows: List[dict], state: str) -> int:
@@ -479,10 +425,8 @@ def build(pred: dict, op: Opener, now: Optional[dt.datetime] = None) -> dict:
         "noAuto": [{"host": h, "reason": r} for h, r in NO_AUTO.items()],
         "excluded": list(EXCLUDED),
         "stocks": stocks,
-        "market": market,
         "summary": {"stocks": len(stocks), "links": len(links), "ok": count(links, OK), "ng": count(links, NG),
-                    "unchecked": count(links, UNCHECKED), "market": len(market), "marketOk": count(market, OK),
-                    "marketNg": count(market, NG), "requests": op.requests,
+                    "unchecked": count(links, UNCHECKED), "requests": op.requests,
                     "decoyTried": tried, "decoyPassed": passed},
     }
 
@@ -492,12 +436,11 @@ def report(res: dict) -> List[str]:
     s = res["summary"]
     links = [l for v in res["stocks"].values() for l in v["links"]]
     lines = [f"[news-links] 候補 {s['stocks']}銘柄（予測ファイルの {res.get('asOf')} までの日）、リンク {s['links']}本: "
-             f"確かめて開けた {s['ok']} / 開けなかった {s['ng']} / 未確認（自動では開かないサイト） {s['unchecked']}。"
-             f"市場 {s['market']}本: 開けた {s['marketOk']} / 開けなかった {s['marketNg']}。開いたページ {s['requests']}件",
+             f"確かめて開けた {s['ok']} / 開けなかった {s['ng']} / 自動では開かないサイト {s['unchecked']}。"
+             f"開いたページ {s['requests']}件",
              f"[news-links] 確かめ方の確かめ: 開けたページを、わざと間違えた見出し・ほかの銘柄のコードで "
              f"{s['decoyTried']}通り判定し直し、通ってしまったのは {s['decoyPassed']}通り（通ったページのリンクは出さない）"]
     bad = Counter((l["id"], l["reason"]) for l in links if l["state"] == NG)
-    bad.update((m["id"], m["reason"]) for m in res["market"] if m["state"] == NG)
     for (sid, reason), n in sorted(bad.items()):
         lines.append(f"[news-links]   弾いた: {sid} {reason} ×{n}")
     return lines
