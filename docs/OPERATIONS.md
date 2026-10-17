@@ -79,10 +79,9 @@
                                      探索・学習し直す。1.2σ の4本（基準モデルを含む）は触らない
                                      （2026-10-11 夜から。docs/MODEL_LINEUP.md「ラベル違いのモデル」）
 
-月〜土 07:40 JST 朝の確認（Routine だけ） 前日の取り込み・予測・保有の推移・リンクの確かめ・
-                                     日証金・EDINET DB の run の結論を確かめる。取り込みが
-                                     無ければ Update Data Store を起動し直す。月曜は日曜の
-                                     学習と土曜の検査を見る
+月〜土 07:40 JST 朝の確認（Routine だけ） 前日の取り込み・予測・日証金・EDINET DB の run の
+                                     結論を確かめる。取り込みが無ければ Update Data Store を
+                                     起動し直す。月曜は日曜の学習と土曜の検査を見る
 
 手動            Refresh Stock Details  画面の銘柄データ（stocks.json）だけを作り直す。
                                      予測はしない。対象は公開中の predictions.json から
@@ -116,7 +115,7 @@
 | ラベル違い 1.5σ | 土曜 09:10 | Retrain Weekly | `tune=yes` `only=lgbm_k15,xgb_k15,cat_k15,logit_k15`（2026-10-11 夜に追加） | `trig_0127nfERdx9RyirNCkFp4BXn` |
 | ラベル違い 1.8σ | 土曜 14:10 | Retrain Weekly | `tune=yes` `only=lgbm_k18,xgb_k18,cat_k18,logit_k18`（同上。09:10 の回が長引けば待ってから走る） | `trig_01JHXTaxZLmDgfUBF3CYbTqe` |
 | 保存データの検査 | 土曜 10:40 | Check Data Store | 既定（5日） | `trig_01G4KY6RJMAsFgY7t57khocW` |
-| 朝の確認 | 月〜土 07:40 | （確かめるだけ） | 前日の run の結論を見る。取り込みの run が無ければ Update Data Store を起動し直す。取り込みは済んで予測だけ無ければ Predict Breakouts を起動する。予測の後の保有の推移・リンクの確かめ（Check News Links）が無ければ、それぞれ1回だけ起動する。月曜は日曜の学習と土曜の検査を見る | `trig_01Pscq9oSei7otJrCjgfxgEc` |
+| 朝の確認 | 月〜土 07:40 | （確かめるだけ） | 前日の run の結論を見る。取り込みの run が無ければ Update Data Store を起動し直す。取り込みは済んで予測だけ無ければ Predict Breakouts を起動する。月曜は日曜の学習と土曜の検査を見る | `trig_01Pscq9oSei7otJrCjgfxgEc` |
 
 Routine はすべて、この運用を続けている Claude のセッション（`session_01HavkjgQwRz5mTV8cGj4KJp`、
 claude.ai の「jquants APIブラウザアプリ」）に届き、そのセッションが `curl` で workflow_dispatch を送る
@@ -847,10 +846,9 @@ XGBoost 25分 / CatBoost 22分。`logit` は153列で70分だったので、そ�
   X（ログインが要り、robots.txt も全体を禁止）、四季報オンライン（銘柄のページか確かめられない）、IR BANK（403）
 - **見出しや本文は取り込まない**（公開の画面なので）。リンクの規則: 日経はリンクポリシーに従えば可（出典の明記、フレーム内
   リンクは不可）。株予報Pro は原則自由（フレーム内の表示など不可）。JPX は株価検索サイトへの直接リンクを除き自由
-- **Routine の報告**（運用者の決定 2026-10-17「夜と朝の両方に足す」）: 平日 18:40 の取り込みの Routine は、予測の後の
-  Check News Links の完了も待ち、ログの `[news-links]` の2行の数（候補・確かめた・開けなかった・未確認、判定し直した数と
-  通ってしまった数）を報告する。朝の確認は、前夜の Check News Links が無ければ1回だけ起動し、失敗が一時的なら1回だけ
-  やり直す
+- **Routine の報告には入れない**（運用者の決定 2026-10-17「報告には含めなくて良いです」。一度足して、同じ日に戻した）。
+  確かめた日時と本数は画面の上の帯、判定し直しの結果は画面の下に出る。1晩失敗しても、画面は前の晩の結果（確かめた日時
+  つき）のままで、新しい候補は「まだ確かめていません」になる（確かめていないリンクは出さない）。次の晩の予測の後にまた走る
 - ログは件数と理由の内訳だけ（銘柄コード・銘柄名は出さない）。開けなくなったリンクが続くときは `news_links.json` の
   `reason` を見る。URL の形を確かめ直すときは `research/exp/probe_news_links.py`（自動で開かないサイトは飛ばす）
 
