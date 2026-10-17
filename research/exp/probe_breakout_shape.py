@@ -206,7 +206,7 @@ def main(argv: Sequence[str] = None) -> int:
     print(f"\n[panel] {len(panel):,}行・{panel['Code'].nunique():,}銘柄・窓 {w}行・更新の判定 {B.BREAKOUT_REF}")
     nh = panel["is_new_high"].fillna(False).astype(bool)
     want = E.shape_columns(panel.loc[nh, ["Code", "Date"]], panel, w=w)
-    print(f"■ 1. 一致（日足の更新日 {int(nh.sum()):,}行。build_dataset の2列・3列 と 実験101・102 の数え方）")
+    print(f"■ 1. 一致（日足の更新日 {int(nh.sum()):,}行。build_dataset の2列・3列・5列 と 実験101・102・103 の数え方）")
     ok &= compare("更新日", panel.loc[nh, NEW], want)
     ok &= compare("更新日", panel.loc[nh, DD], E102.drawdown_columns(panel.loc[nh, ["Code", "Date"]], panel), DD)
     ok &= compare("更新日", panel.loc[nh, RC], E103.recent_columns(panel.loc[nh, ["Code", "Date"]], panel), RC)
