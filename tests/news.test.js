@@ -39,7 +39,7 @@ const DATA = {
     { id: 'nk225vi', site: '日経', label: 'VI', href: 'https://indexes.nikkei.co.jp/x', state: 'unchecked', reason: 'r' },
     { id: 'jpx_investor', site: 'JPX', label: '投資部門別', href: 'https://www.jpx.co.jp/y.html', state: 'ng', reason: 'HTTP 404' },
   ],
-  summary: { stocks: 2, links: 8, ok: 4, ng: 1, unchecked: 1 },
+  summary: { stocks: 2, links: 8, ok: 4, ng: 1, unchecked: 1, decoyTried: 12, decoyPassed: 0 },
 };
 
 test('stockCode: 4桁（英字入りも）だけを大文字で返す', () => {
@@ -79,9 +79,12 @@ test('marketLinks / linkSummary / noAutoReasons', () => {
   assert.deepEqual([m.checked.map((l) => l.id), m.unchecked.map((l) => l.id), m.failed.map((l) => l.id)],
     [['jpx_short'], ['nk225vi'], ['jpx_investor']]);
   assert.deepEqual(marketLinks(undefined), { checked: [], failed: [], unchecked: [] });
-  assert.deepEqual(linkSummary(DATA), { checkedAt: '2026-10-17T10:05:00Z', stocks: 2, ok: 4, ng: 1, unchecked: 1 });
+  assert.deepEqual(linkSummary(DATA),
+    { checkedAt: '2026-10-17T10:05:00Z', stocks: 2, ok: 4, ng: 1, unchecked: 1, decoyTried: 12, decoyPassed: 0 });
   assert.equal(linkSummary(null), null);
-  assert.deepEqual(linkSummary({}), { checkedAt: null, stocks: 0, ok: 0, ng: 0, unchecked: 0 });
+  // 古いファイル（判定し直しの数が無い）や壊れた数は 0
+  assert.deepEqual(linkSummary({ summary: { ok: 'x' } }),
+    { checkedAt: null, stocks: 0, ok: 0, ng: 0, unchecked: 0, decoyTried: 0, decoyPassed: 0 });
   // 同じ理由は1つに
   assert.deepEqual(noAutoReasons(DATA), ['日経は、自動化された手段での取得を規約で禁じている',
     '株予報Pro は、robots.txt で 20時間の間隔を求めている']);

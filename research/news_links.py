@@ -16,6 +16,13 @@ AGREE_PCT。画面の strategy.js と同じ）について、リンクを1本ず
      見出しと違うページへのリンク（ウソのリンク）を出さない
   5. ページの題名に、その候補の銘柄名（予測ファイルの名前。全角・半角と「(株)」「株式会社」の違いはそろえて比べる）がある。
      コードが合っていても別の会社のページへのリンクを出さない
+  6. 確かめ方そのものの確かめ: 1〜5 を通ったページを、わざと間違えた見出し（同じ銘柄のほかのリンクの言葉）と、ほかの銘柄の
+     コードで判定し直し、どれも通らない（追加の接続はしない）。通ってしまったら、題名で見分けられていないので、そのリンクも
+     出さない。サイトが題名の書き方を変えて確かめが甘くなったときに、気づかないまま「確かめた」と出さないため
+
+本物のサイトに、わざと間違えた組み合わせ 48通り（見出しの取り違え・存在しないコード・存在しないページ・違う銘柄名・別の
+銘柄のページ）を渡し、すべて期待どおりに弾き、正しい組み合わせはすべて通ることを確かめた（2026-10-17。
+research/exp/probe_news_links_negative.py、run 39024430457）。
 
 結果は public/data/news_links.json（銘柄コードごとに、リンクと結果・理由）。**URL の正本はこのファイル**（SOURCES /
 MARKET）で、画面（src/views/NewsView.jsx）は書き写さない。画面は、確かめて開けたリンクに「確かめた」の印を付けて出し、
@@ -362,28 +369,63 @@ class Opener:
 #: リンクの状態。ok = 開いて確かめた / ng = 開いたが条件を満たさない（画面に出さない） / unchecked = 自動では開かない（未確認）
 OK, NG, UNCHECKED = "ok", "ng", "unchecked"
 
+#: 開いたページ: (状態, 最後の URL, 題名, 本文の文字)。本文は要るときだけ
+Page = Tuple[int, str, str, str]
 
-def check_source(op: Opener, src: Source, code: str, name: str = "") -> dict:
+
+def open_page(op: Opener, url: str, body: bool = False) -> Page:
+    st, final, ctype, raw = op.open(url)
+    text = decode(raw, ctype) if st == 200 else ""
+    return st, final, page_title(text), (body_text(text) if body else "")
+
+
+def check_source(op: Opener, src: Source, code: str, name: str = "", page: Optional[Page] = None) -> dict:
+    """page は開いた結果（無ければここで開く）。"""
     url = src.url.format(code=urllib.parse.quote(code))
     rec = {"id": src.id, "group": src.group, "site": src.site, "label": src.label, "href": url, "note": src.note}
     if not auto_ok(url):
         return {**rec, "state": UNCHECKED, "reason": NO_AUTO[host_of(url)]}
-    st, final, ctype, body = op.open(url)
-    text = decode(body, ctype) if st == 200 else ""
-    ok, reason = judge(url, st, final, page_title(text), "", mark=src.mark.format(code=code), title_words=src.words,
-                       name=name)
+    st, final, title, _ = page if page is not None else open_page(op, url)
+    ok, reason = judge(url, st, final, title, "", mark=src.mark.format(code=code), title_words=src.words, name=name)
     return {**rec, "state": OK if ok else NG, "reason": reason}
 
 
-def check_market(op: Opener, m: Market) -> dict:
+def check_market(op: Opener, m: Market, page: Optional[Page] = None) -> dict:
+    """page は開いた結果（無ければここで開く）。"""
     rec = {"id": m.id, "site": m.site, "label": m.label, "href": m.url}
     if not auto_ok(m.url):
         return {**rec, "state": UNCHECKED, "reason": NO_AUTO[host_of(m.url)]}
-    st, final, ctype, body = op.open(m.url)
-    text = decode(body, ctype) if st == 200 else ""
-    ok, reason = judge(m.url, st, final, page_title(text), body_text(text) if m.body_words else "",
-                       title_words=m.title_words, body_words=m.body_words)
+    st, final, title, body = page if page is not None else open_page(op, m.url, body=bool(m.body_words))
+    ok, reason = judge(m.url, st, final, title, body, title_words=m.title_words, body_words=m.body_words)
     return {**rec, "state": OK if ok else NG, "reason": reason}
+
+
+# --------------------------------------------------------------------------- #
+# 確かめ方そのものの確かめ（毎晩。開いたページを判定し直すだけで、追加の接続はしない）
+# --------------------------------------------------------------------------- #
+
+#: ほかに候補が無いときの、わざと間違えた銘柄のコード（存在しないコード）
+DECOY_CODE = "0000"
+#: 判定し直して通ってしまったリンクの理由（画面とログに出す）
+LIE_REASON = "確かめ方で見分けられない（ほかの見出し・ほかの銘柄でも通った）"
+
+
+def source_decoys(src: Source, code: str, decoy: str) -> List[Tuple[str, Tuple[str, ...]]]:
+    """
+    src のページを判定し直す、わざと間違えた見出し: (題名に要るコードの書き方, 題名に要る言葉) の組。
+    同じ銘柄のほかの自動で確かめるリンクの見出しと、ほかの銘柄（decoy）のコード。どれも通ってはいけない。
+    """
+    q = urllib.parse.quote(code)
+    out = [(o.mark.format(code=code), o.words) for o in SOURCES
+           if o.id != src.id and o.words and auto_ok(o.url.format(code=q))]
+    if src.mark:
+        out.append((src.mark.format(code=decoy), src.words))
+    return out
+
+
+def market_decoys(m: Market) -> List[Tuple[str, ...]]:
+    """市場のページを判定し直す、ほかの自動で確かめる市場のリンクの題名の言葉。どれも通ってはいけない。"""
+    return [o.title_words for o in MARKET if o.id != m.id and o.title_words and auto_ok(o.url)]
 
 
 def build(pred: dict, op: Opener, now: Optional[dt.datetime] = None) -> dict:
@@ -392,10 +434,38 @@ def build(pred: dict, op: Opener, now: Optional[dt.datetime] = None) -> dict:
     stamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
     codes = rule_codes(pred)
     names = names_of(pred)
+    tried = passed = 0
+
+    def recheck(rec: dict, hits: List[bool]) -> dict:
+        # 1〜5 を通ったページを、わざと間違えた見出しで判定し直した結果。1つでも通ったら見分けられていないので出さない
+        nonlocal tried, passed
+        tried, passed = tried + len(hits), passed + sum(hits)
+        return {**rec, "state": NG, "reason": LIE_REASON} if any(hits) else rec
+
     stocks = {}
     for code, dates in codes.items():
-        stocks[code] = {"dates": dates, "links": [check_source(op, s, code, names.get(code, "")) for s in SOURCES]}
-    market = [check_market(op, m) for m in MARKET]
+        name = names.get(code, "")
+        decoy = next((c for c in codes if c != code), DECOY_CODE)
+        links = []
+        for s in SOURCES:
+            url = s.url.format(code=urllib.parse.quote(code))
+            page = open_page(op, url) if auto_ok(url) else None
+            rec = check_source(op, s, code, name, page=page)
+            if rec["state"] == OK:
+                st, final, title, _ = page
+                rec = recheck(rec, [judge(url, st, final, title, "", mark=mk, title_words=w, name=name)[0]
+                                    for mk, w in source_decoys(s, code, decoy)])
+            links.append(rec)
+        stocks[code] = {"dates": dates, "links": links}
+    market = []
+    for m in MARKET:
+        page = open_page(op, m.url, body=bool(m.body_words)) if auto_ok(m.url) else None
+        rec = check_market(op, m, page=page)
+        if rec["state"] == OK:
+            st, final, title, body = page
+            rec = recheck(rec, [judge(m.url, st, final, title, body, title_words=w, body_words=m.body_words)[0]
+                                for w in market_decoys(m)])
+        market.append(rec)
     links = [l for v in stocks.values() for l in v["links"]]
 
     def count(rows: List[dict], state: str) -> int:
@@ -412,7 +482,8 @@ def build(pred: dict, op: Opener, now: Optional[dt.datetime] = None) -> dict:
         "market": market,
         "summary": {"stocks": len(stocks), "links": len(links), "ok": count(links, OK), "ng": count(links, NG),
                     "unchecked": count(links, UNCHECKED), "market": len(market), "marketOk": count(market, OK),
-                    "marketNg": count(market, NG), "requests": op.requests},
+                    "marketNg": count(market, NG), "requests": op.requests,
+                    "decoyTried": tried, "decoyPassed": passed},
     }
 
 
@@ -422,7 +493,9 @@ def report(res: dict) -> List[str]:
     links = [l for v in res["stocks"].values() for l in v["links"]]
     lines = [f"[news-links] 候補 {s['stocks']}銘柄（予測ファイルの {res.get('asOf')} までの日）、リンク {s['links']}本: "
              f"確かめて開けた {s['ok']} / 開けなかった {s['ng']} / 未確認（自動では開かないサイト） {s['unchecked']}。"
-             f"市場 {s['market']}本: 開けた {s['marketOk']} / 開けなかった {s['marketNg']}。開いたページ {s['requests']}件"]
+             f"市場 {s['market']}本: 開けた {s['marketOk']} / 開けなかった {s['marketNg']}。開いたページ {s['requests']}件",
+             f"[news-links] 確かめ方の確かめ: 開けたページを、わざと間違えた見出し・ほかの銘柄のコードで "
+             f"{s['decoyTried']}通り判定し直し、通ってしまったのは {s['decoyPassed']}通り（通ったページのリンクは出さない）"]
     bad = Counter((l["id"], l["reason"]) for l in links if l["state"] == NG)
     bad.update((m["id"], m["reason"]) for m in res["market"] if m["state"] == NG)
     for (sid, reason), n in sorted(bad.items()):

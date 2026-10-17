@@ -334,6 +334,8 @@
   "market": 6,
   "marketOk": 3,
   "marketNg": 0,
-  "requests": 15
+  "requests": 11,
+  "decoyTried": 34,
+  "decoyPassed": 0
  }
 }

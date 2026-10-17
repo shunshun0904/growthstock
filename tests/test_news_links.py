@@ -8,6 +8,8 @@
 - 自動では開かないホスト（日経・株予報Pro・株探・みんかぶ）へは1件も接続しない（「未確認」として URL だけ置く）。
   安全網として、取得の一番下の層でも断る
 - 同じホストは間を空けて開く。一時的な失敗（接続できない・5xx・429）だけ1回やり直す
+- 確かめ方そのものの確かめ: 通ったページを、わざと間違えた見出し・ほかの銘柄のコードで判定し直し、通ってしまったら出さない
+  （題名がどの見出しの言葉も含むようなサイトの変化に気づく）。追加の接続はしない
 - ログの行に銘柄コードを出さない。書き出すファイルの形
 
   python3 tests/test_news_links.py
@@ -257,6 +259,56 @@ class TestBuild(unittest.TestCase):
         self.assertNotIn("7203", out)
         self.assertNotIn("285A", out)
         self.assertIn("確かめて開けた 8", out)
+        self.assertIn("38通り判定し直し、通ってしまったのは 0通り", out)
+
+    def test_decoys(self):
+        # 同じ銘柄のほかの3本の見出しと、ほかの銘柄のコード
+        self.assertEqual(N.source_decoys(N.SOURCES[0], "7203", "285A"),
+                         [("【7203】", ("適時開示",)), ("【7203】", ("業績",)), ("【7203】", ("掲示板",)),
+                          ("【285A】", ("ニュース",))])
+        self.assertEqual(N.market_decoys(N.MARKET[1]), [("ニュース",), ("投資部門別",)])
+
+    def test_decoys_rejected_without_extra_requests(self):
+        res, web = self.run_build(FakeWeb(default=yahoo_ok))
+        s = res["summary"]
+        # 2銘柄 × 4ページ × 4通り + 市場 3ページ × 2通り。どれも弾き、リンクの状態は変わらない
+        self.assertEqual((s["decoyTried"], s["decoyPassed"]), (38, 0))
+        self.assertEqual((s["ok"], s["marketOk"]), (8, 3))
+        self.assertEqual(len(web.calls), 11)                 # 判定し直すだけで、開き直さない
+
+    def test_lenient_titles_fail_closed(self):
+        """どの見出しの言葉も題名にあるページ（見分けられない）は、1〜5 を通っても出さない。"""
+        def lenient(url):
+            st, final, ct, body = yahoo_ok(url)
+            if "/quote/" in url or "jpx.co.jp" in url:
+                body = body.replace("</title>".encode(), " ニュース 適時開示 業績 掲示板 空売り 投資部門別</title>".encode())
+            return st, final, ct, body
+
+        res, _ = self.run_build(FakeWeb(default=lenient))
+        links = [l for v in res["stocks"].values() for l in v["links"] if l["state"] != N.UNCHECKED]
+        self.assertEqual({(l["state"], l["reason"]) for l in links}, {(N.NG, N.LIE_REASON)})
+        st = {m["id"]: (m["state"], m["reason"]) for m in res["market"]}
+        self.assertEqual(st["jpx_short"], (N.NG, N.LIE_REASON))
+        self.assertEqual(st["yahoo_newslist"], (N.OK, ""))   # 題名の見分けがついている市場のページはそのまま
+        self.assertEqual((res["summary"]["ok"], res["summary"]["ng"]), (0, 8))
+        self.assertGreater(res["summary"]["decoyPassed"], 0)
+
+    def test_code_decoy(self):
+        """題名にほかの銘柄のコードも出るページ（どの銘柄か見分けられない）は出さない。候補が1つなら存在しないコードで試す。"""
+        def many_codes(url):
+            st, final, ct, body = yahoo_ok(url)
+            return st, final, ct, body.replace("】".encode(), "】【285A】【7203】【0000】".encode(), 1)
+
+        res, _ = self.run_build(FakeWeb(default=many_codes))
+        self.assertEqual({l["reason"] for l in res["stocks"]["7203"]["links"] if l["state"] != N.UNCHECKED},
+                         {N.LIE_REASON})
+        pred = {"asOf": "2026-10-16", "dates": ["2026-10-16"],
+                "candidates": [cand("7203", "2026-10-16", [99.0, 98.0, 97.0])]}
+        op, _ = opener(FakeWeb(default=many_codes))
+        one = N.build(pred, op)
+        self.assertEqual(one["summary"]["ok"], 0)
+        op, _ = opener(FakeWeb(default=yahoo_ok))
+        self.assertEqual(N.build(pred, op)["summary"]["ok"], 4)
 
     def test_main_writes_file(self):
         with tempfile.TemporaryDirectory() as d:

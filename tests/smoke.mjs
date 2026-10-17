@@ -342,6 +342,9 @@ check(newsText.includes('開いて確かめた 7本・開けなかった 1本・
       '上の帯に確かめた日時と本数が出る');
 check(newsText.includes('「確かめた」の条件') && newsText.includes('日経は、自動化された手段での取得を規約')
         && newsText.includes('株予報Pro は、robots.txt'), '下に確かめる条件と、自動で開かない理由が出る');
+check(newsText.includes('(5) 題名にその銘柄の名前がある') && newsText.includes('(6) 同じページを')
+        && newsText.includes('(6) の判定し直しを 34通り行い、すべて弾けました。'),
+      '条件に銘柄名と判定し直しが入り、直近の判定し直しの結果（34通り・すべて弾けた）が出る');
 check(!newsText.includes('NaN') && !newsText.includes('undefined'), '候補銘柄のニュースに NaN / undefined が出ていない');
 await page.setViewportSize({ width: 390, height: 844 });
 await page.waitForTimeout(200);

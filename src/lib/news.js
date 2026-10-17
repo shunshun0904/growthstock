@@ -70,7 +70,10 @@ export function marketLinks(data) {
   return { checked: ok, failed, unchecked };
 }
 
-/** 確かめた日時と本数（画面の上の帯）。ファイルが無ければ null。 */
+/**
+ * 確かめた日時と本数（画面の上の帯）と、確かめ方そのものの確かめ（開けたページを、わざと間違えた見出し・ほかの銘柄の
+ * コードで判定し直した数 decoyTried と、通ってしまった数 decoyPassed）。ファイルが無ければ null。
+ */
 export function linkSummary(data) {
   if (!data || typeof data !== 'object') return null;
   const s = data.summary || {};
@@ -81,6 +84,8 @@ export function linkSummary(data) {
     ok: num(s.ok),
     ng: num(s.ng),
     unchecked: num(s.unchecked),
+    decoyTried: num(s.decoyTried),
+    decoyPassed: num(s.decoyPassed),
   };
 }
 
