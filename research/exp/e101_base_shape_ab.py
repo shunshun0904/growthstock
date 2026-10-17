@@ -39,16 +39,17 @@ research/multi_params.json）と build_dataset.py には書かない。2列は�
   窓ごとの PR-AUC の差 C−A の平均が正・対照 P−A の平均を上回る・C が上の窓が過半（n//2 + 1 以上）。
   本番に入れる案として運用者に出すのは、1.5σ と 1.2σ の両方で §7 を満たすとき。片方だけなら、結果を見せて運用者が決める。
   logit は同じ表に並べる（§7 の票には入れない。決定的なので種は1つ）。B は日曜がやることの参考。
+  **変更（2026-10-17、結果を見る前）**: 運用者の指示「検証は、lgbmの1.5σのみでよいです」により、回すのは
+  `--k 1.5 --algos lgbm` の1本だけ（2本目の xgb は待ちのうちに取り消した）。判定は lgbm 1.5σ が §7 の1モデル分の3条件
+  （窓ごとの C−A の平均が正・対照 P−A の平均を上回る・C が上の窓が過半）を満たすか。木3モデルの票は数えられないので、
+  本番に入れるかは結果を見て運用者が決める（ログの「木3モデルがそろってから判定」の行はこの回では使わない）。
 
 出すもの: 2列の分布と、値の区切りごとの正例率（件数・割合だけ）、探索の CV（分割ごと）、本番と同じ OOF（種42・ずらし0）、
 窓ごとの差の平均・SE・上の窓の数、§7 の判定、窓ごとの値の一覧（運用者の指示「各cv（異なる窓）でもみたいです」）。
 公開ログには件数・割合・日付・精度だけ（銘柄・値は出さない）。
 
-    exp=e101_base_shape_ab.py args="--k 1.5 --algos lgbm"
-    exp=e101_base_shape_ab.py args="--k 1.5 --algos xgb"
-    exp=e101_base_shape_ab.py args="--k 1.5 --algos cat"
-    exp=e101_base_shape_ab.py args="--k 1.5 --algos logit"
-    （同じく --k 1.2 で4回）
+    exp=e101_base_shape_ab.py args="--k 1.5 --algos lgbm"      ← 回すのはこの1本（上の変更）
+    （もとの計画: 同じく xgb・cat・logit と、--k 1.2 で4回）
 列の付き方だけ見る: exp=e101_base_shape_ab.py args="--dry"
 試運転:             exp=e101_base_shape_ab.py args="--tag e101smoke --algos lgbm --n-trials 2 --shifts 0"
 
