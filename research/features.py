@@ -395,14 +395,14 @@ PRESETS: Dict[str, List[str]] = {
                                                 for g in ALL_GROUPS] + EXTRA_GROUPS
                                                + ["listing", "vol_factors", "fund_book", "breakout_shape", "drawdown"],
     # --- 2026-10-17 の運用者の決定（実験103 §64）。244列 + 直近の増減5列。249列 --- #
-    # 並びは実験103 の腕 C と同じ（244列の後ろに5列）。2026-10-18（日曜の再学習の後）から既定（DEFAULT_PRESET）
+    # 並びは実験103 の腕 C と同じ（244列の後ろに5列）。2026-10-18（日曜の再学習の後）から既定（DEFAULT_PRESET）。同じ日の夕方に
+    # 下の360列へ切り替えたので、249列で探索・学習した週は無い
     "all_plus_prog_listing_vol_book_shape_dd_recent": [("progress_seasonal_pct" if g == "progress" else g)
                                                        for g in ALL_GROUPS] + EXTRA_GROUPS
                                                       + ["listing", "vol_factors", "fund_book", "breakout_shape",
                                                          "drawdown", "recent_change"],
     # --- 2026-10-18 の運用者の決定（実験105 §68「入れる（2段階）」）。249列 + テクニカル指標111列。360列 --- #
-    # 並びは実験105 の腕 C と同じ（249列の後ろに111列。指紋 a0638dfd0880）。既定への切り替えは第2段階（249列で初めて学習する
-    # 週末の再学習の後）
+    # 並びは実験105 の腕 C と同じ（249列の後ろに111列。指紋 a0638dfd0880）。2026-10-18 の夕方から既定（DEFAULT_PRESET。第2段階）
     "all_plus_prog_listing_vol_book_shape_dd_recent_tx": [("progress_seasonal_pct" if g == "progress" else g)
                                                           for g in ALL_GROUPS] + EXTRA_GROUPS
                                                          + ["listing", "vol_factors", "fund_book", "breakout_shape",
@@ -520,7 +520,15 @@ PRESETS: Dict[str, List[str]] = {
 #: 選んだ（分離力の足切りで決めたのではない）。切り替えたのは日曜 10/18 の 1.2σ の再学習（239列）が終わった後。249列の探索・
 #: 学習は 土曜 10/24 の 1.5σ・1.8σ と日曜 10/25 の 1.2σ から（それまでのモデルは239列のまま、日次の予測はモデルごとに学習した
 #: 列で採点する）。
-DEFAULT_PRESET = "all_plus_prog_listing_vol_book_shape_dd_recent"
+#:
+#: 2026-10-18 の夕方、249列 -> 360列（all_plus_prog_listing_vol_book_shape_dd_recent_tx）に切り替えた（運用者の決定
+#: 2026-10-18「入れる（2段階）」・第2段階の時期「今すぐ（今週末から）」。docs/MODEL_ADOPTION_RULES.md §68）。249列の後ろに
+#: テクニカル指標111列（tech_indicators。build_dataset.attach_technicals。実験105）: lgbm の32窓の PR-AUC で 1.5σ C−A +0.0016
+#: （上の窓 18/32）・P−A −0.0016・C−P +0.0032・探索し直した B−A +0.0051、1.2σ C−A +0.0046（17/32）・P−A +0.0018・
+#: C−P +0.0028・B−A +0.0011。§7 の1モデル分の3条件はどちらのラベルでも満たす。勧めは「1.5σ の xgb・cat でも確かめてから」、
+#: 時期の勧めは「249列の再学習を1回通してから」だった。249列で探索・学習した週は無く、360列の探索・学習は 土曜 10/24 の
+#: 1.5σ・1.8σ と日曜 10/25 の 1.2σ から（それまでのモデルは239列のまま、日次の予測はモデルごとに学習した列で採点する）。
+DEFAULT_PRESET = "all_plus_prog_listing_vol_book_shape_dd_recent_tx"
 
 #: 値の定義を変えた列と、その日（予測日）。学習と予測の一致チェック（check_train_serve）は、
 #: この日より前に控えた行をその列では比べない。前の定義で控えた値と新しい定義で作り直した

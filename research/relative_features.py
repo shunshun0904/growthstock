@@ -41,7 +41,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_dataset as B  # noqa: E402
 
-#: 相対位置に直す指標（データセットの列名。すべて本番の列（239列。2026-10-18 からは249列）に入っている）。
+#: 相対位置に直す指標（データセットの列名。すべて本番の列（239列。2026-10-18 からは249列、同じ日の夕方から360列）に入っている）。
 #: 成長率・利益率・ROE/ROA・財務の安全性・会社予想・バリュエーションの 10本
 METRICS = ["sales_growth_sym_q0", "eps_growth_sym_q0", "op_margin_q0", "net_margin",
            "ROE_q0", "ROA_q0", "equity_ratio_q0", "guidance_op_growth", "per", "pbr"]

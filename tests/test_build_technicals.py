@@ -8,7 +8,7 @@ docs/MODEL_ADOPTION_RULES.md §68）。データには触らない（作りも�
 - 銘柄を細かく分けて数えても、値は1ビットも変わらない（TECH_CODES_PER_CHUNK。移動和・分散は銘柄ごとに数える。
   technicals._Panel.roll）。株価の桁が大きく違う銘柄が前に並び、値動きの無い期間があっても同じ
 - 同じ名前の列がすでにあれば止まる。日足に要る列が無ければ止まる。売買代金が無くても動く（終値 × 出来高）
-- 360列の組（249列 + 111列）は既定ではない（第1段階）。データセットに作る列（features.all_columns）に111列が入る
+- 360列の組（249列 + 111列）が既定（第2段階。2026-10-18 の夕方から）。データセットに作る列（features.all_columns）に111列が入る
 
   python3 tests/test_build_technicals.py
 """
@@ -105,7 +105,7 @@ class TestAttach(unittest.TestCase):
 
 
 class TestPresets(unittest.TestCase):
-    def test_first_stage(self):
+    def test_presets(self):
         base = F.columns("all_plus_prog_listing_vol_book_shape_dd_recent")
         tx = F.columns("all_plus_prog_listing_vol_book_shape_dd_recent_tx")
         self.assertEqual(F.GROUPS["tech_indicators"], TX.COLUMNS)
@@ -114,7 +114,7 @@ class TestPresets(unittest.TestCase):
         self.assertEqual(tx[249:], TX.COLUMNS)
         self.assertEqual(F.signature(base), "5ffd7c53c80f")
         self.assertEqual(F.signature(tx), "a0638dfd0880")                        # 実験105 の腕 C と同じ並び
-        self.assertEqual(F.DEFAULT_PRESET, "all_plus_prog_listing_vol_book_shape_dd_recent")
+        self.assertEqual(F.DEFAULT_PRESET, "all_plus_prog_listing_vol_book_shape_dd_recent_tx")
         self.assertFalse(set(TX.COLUMNS) - set(F.all_columns()))
 
 

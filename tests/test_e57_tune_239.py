@@ -34,11 +34,12 @@ class TestArms(unittest.TestCase):
         self.assertEqual(E.arm_cols("B"), E.arm_cols("A") + F.GROUPS["vol_factors"] + F.GROUPS["fund_book"])
 
     def test_new_preset_is_production(self):
-        # 実験57 の時点の本番（239列）。2026-10-18 から既定は249列（2列 + 3列 + 5列。docs/MODEL_ADOPTION_RULES.md §62〜§64）
+        # 実験57 の時点の本番（239列）。2026-10-18 から既定は249列（2列 + 3列 + 5列。docs/MODEL_ADOPTION_RULES.md §62〜§64）、
+        # 同じ日の夕方から360列（+ テクニカル指標111列。§68）
         self.assertEqual(E.NEW_PRESET, "all_plus_prog_listing_vol_book")
         self.assertEqual(F.columns(F.DEFAULT_PRESET),
                          F.columns(E.NEW_PRESET) + F.GROUPS["breakout_shape"] + F.GROUPS["drawdown"]
-                         + F.GROUPS["recent_change"])
+                         + F.GROUPS["recent_change"] + F.GROUPS["tech_indicators"])
 
     def test_tuning_matches_weekly(self):
         self.assertEqual(E.N_SPLITS, 5)

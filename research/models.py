@@ -80,7 +80,7 @@ BASELINE = "lgbm"
 EXTRA = tuple(a for a in ALGOS if a != BASELINE)
 
 #: ラベル違いのモデル（tuning_multi.VARIANTS。運用者の指示 2026-10-11「画面にも 1.5σ・1.8σ の予測を」。同日夜に
-#: 「切り替えではなく追加」で xgb / cat / logit の版も足して8本）。本番と同じ学習器・同じ列（2026-10-24 からは249列）で、目的変数の到達
+#: 「切り替えではなく追加」で xgb / cat / logit の版も足して8本）。本番と同じ学習器・同じ列（2026-10-24 からは360列）で、目的変数の到達
 #: しきい値 k だけ変えたラベルで学習したもの。本番の合議（ALGOS。画面の BOOST と live_track の規則）には入れない。
 #: 画面・スプレッドシートに並べ、「厳しいラベルでも上位か」を見るためのもの。本番のラベルは変えない
 #: （docs/MODEL_ADOPTION_RULES.md §34、docs/MODEL_LINEUP.md）

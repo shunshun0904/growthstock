@@ -1430,12 +1430,22 @@ class 本番のプリセット(unittest.TestCase):
     進捗期待を新しい定義（progress_vs_base -> progress_pct）にし、上場からの年数を足す。
     """
 
-    def test_本番は_all_plus_prog_listing_vol_book_shape_dd_recent(self):
-        """2026-10-18、239列 -> 249列（抜けた土台の形2列 + 下げの深さ3列 + 直近の増減5列）。運用者の決定（2026-10-17、§62〜§64）。"""
+    def test_本番は_all_plus_prog_listing_vol_book_shape_dd_recent_tx(self):
+        """2026-10-18 の夕方、249列 -> 360列（テクニカル指標111列）。運用者の決定（2026-10-18「入れる（2段階）」「今すぐ」、§68）。"""
         import features as F
-        self.assertEqual(F.DEFAULT_PRESET, "all_plus_prog_listing_vol_book_shape_dd_recent")
-        self.assertEqual(len(F.columns(F.DEFAULT_PRESET)), 249)
+        import technicals as TX
+        self.assertEqual(F.DEFAULT_PRESET, "all_plus_prog_listing_vol_book_shape_dd_recent_tx")
+        self.assertEqual(len(F.columns(F.DEFAULT_PRESET)), 360)
         self.assertEqual(F.columns(F.DEFAULT_PRESET),
+                         F.columns("all_plus_prog_listing_vol_book_shape_dd_recent") + TX.COLUMNS)
+        self.assertEqual(F.signature(F.columns(F.DEFAULT_PRESET)), "a0638dfd0880")
+
+    def test_249列は_all_plus_prog_listing_vol_book_shape_dd_recent(self):
+        """2026-10-18、239列 -> 249列（抜けた土台の形2列 + 下げの深さ3列 + 直近の増減5列）。運用者の決定（2026-10-17、§62〜§64）。
+        同じ日の夕方に360列へ切り替えたので、249列で探索・学習した週は無い。"""
+        import features as F
+        self.assertEqual(len(F.columns("all_plus_prog_listing_vol_book_shape_dd_recent")), 249)
+        self.assertEqual(F.columns("all_plus_prog_listing_vol_book_shape_dd_recent"),
                          F.columns("all_plus_prog_listing_vol_book") + ["broken_high_age", "prev_nh_ratio", "base_depth", "pullback_depth", "max_dd_120", "ret_1d", "ret_2d", "gap_open", "ret_5d", "vol_chg_1d"])
 
     def test_239列は_all_plus_prog_listing_vol_book(self):

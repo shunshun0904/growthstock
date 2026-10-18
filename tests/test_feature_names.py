@@ -47,7 +47,7 @@ class Names(unittest.TestCase):
         self.assertEqual(dup, [])
 
     def test_technical_columns_have_names(self):
-        # 第2段階で既定にする360列（249列 + テクニカル指標111列。§68）も、すべて日本語名があり重ならない
+        # 既定の360列（249列 + テクニカル指標111列。2026-10-18 の夕方から。§68）は、すべて日本語名があり重ならない
         sys.path.insert(0, os.path.join(ROOT, "research"))
         import features as F
         cols = F.columns("all_plus_prog_listing_vol_book_shape_dd_recent_tx")
