@@ -148,8 +148,32 @@ class _Panel:
         return out
 
     def roll(self, x, n: int, fn: str = "mean", **kw) -> np.ndarray:
-        """直近 n 行（当日を含む）の集計。銘柄の取引日が n 日そろうまでは欠測。"""
-        r = getattr(pd.Series(np.asarray(x, dtype=float)).rolling(n, min_periods=n), fn)(**kw)
+        """
+        直近 n 行（当日を含む）の集計。銘柄の取引日が n 日そろうまでは欠測。窓に欠測があれば欠測。
+
+        値が前の行から積もる集計（和・平均・分散）は銘柄ごとに数える。つないだ配列の上で pandas の rolling を使うと、前に
+        並んだ銘柄の丸めが混ざって値が銘柄の組で変わり、株価の桁が大きい銘柄の後ろでは、値動きのほとんど無い期間の標準偏差が
+        崩れた（2026-10-18、probe_technical_dataset で学習用 21,957行のうちボリンジャーの3列・14行）。和・平均は銘柄ごとの
+        累積和の差、分散・標準偏差は窓ごとに平均を引いてから数える。最大・最小・順位は窓の値だけで決まるので rolling のまま
+        """
+        x = np.asarray(x, dtype=float)
+        if fn in ("sum", "mean"):
+            ok = np.isfinite(x)
+            cs = self.cumsum(np.where(ok, x, 0.0))
+            cnt = self.cumsum(ok.astype(float))
+            ps, pc = self.shift(cs, n), self.shift(cnt, n)
+            first = self.pos == n - 1                           # 窓が銘柄の最初の行から始まる
+            ps[first] = 0.0
+            pc[first] = 0.0
+            out = np.where(cnt - pc == n, cs - ps, np.nan)
+            return self.mask(out / n if fn == "mean" else out, n - 1)
+        if fn in ("std", "var"):
+            ddof = kw.get("ddof", 1)
+            return self.windows(x, n, (lambda w: w.std(axis=1, ddof=ddof)) if fn == "std"
+                                else (lambda w: w.var(axis=1, ddof=ddof)))
+        if fn not in ("max", "min", "rank"):
+            raise ValueError(f"使えない集計: {fn}")
+        r = getattr(pd.Series(x).rolling(n, min_periods=n), fn)(**kw)
         return self.mask(r.to_numpy(dtype=float), n - 1)
 
     def ewm(self, x, *, span: float | None = None, alpha: float | None = None) -> np.ndarray:
@@ -159,10 +183,9 @@ class _Panel:
         return e.reset_index(level=0, drop=True).sort_index().to_numpy(dtype=float)
 
     def cumsum(self, x) -> np.ndarray:
+        """銘柄ごとの累積和（欠測は 0 として足す）。銘柄ごとに 0 から足す（前に並んだ銘柄の丸めが混ざらない）。"""
         x = np.nan_to_num(np.asarray(x, dtype=float))
-        c = np.cumsum(x)
-        base = np.r_[0.0, c][self.starts]
-        return c - base[self.gid]
+        return pd.Series(x).groupby(self.gid, sort=False).cumsum().to_numpy(dtype=float)
 
     def windows(self, x, n: int, fn) -> np.ndarray:
         """直近 n 行の窓ごとに fn（窓の2次元配列 → 1次元）を当てる。銘柄をまたぐ窓は欠測。"""
@@ -431,10 +454,10 @@ def compute(panel: pd.DataFrame) -> pd.DataFrame:
     f["tx_ichi_sanyaku"] = san
 
     y = np.log(C)
-    x = P.pos.astype(float)
     for n in (20, 60):
-        cov = pd.Series(y).rolling(n, min_periods=n).cov(pd.Series(x), ddof=0).to_numpy(dtype=float)
-        cov = P.mask(cov, n - 1)
+        # 窓の中の時間（0〜n−1）との共分散（母分散の形）。Σ(y − 平均)(k − 平均) = Σ y (k − 平均)。窓ごとに数える（roll と同じ理由）
+        kc = np.arange(n, dtype=float) - (n - 1) / 2.0
+        cov = P.windows(y, n, lambda w, kc=kc: w @ kc / len(kc))
         varx = (n * n - 1) / 12.0
         f[f"tx_linreg_slope_{n}"] = cov / varx * 100.0
         if n == 60:

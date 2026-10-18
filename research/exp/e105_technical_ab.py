@@ -206,8 +206,8 @@ def attach_technicals(keys: pd.DataFrame, panel: pd.DataFrame) -> pd.DataFrame:
 def compare_columns(have: pd.DataFrame, want: pd.DataFrame, cols=NEW_COLS, rtol: float = 1e-6, atol: float = 1e-9) -> dict:
     """
     列ごとに、欠測の位置か値が食い違う行の数。have・want は同じ行の並び。値の許しは学習と予測の突き合わせ
-    （check_train_serve.compare）と同じ相対 1e-6・絶対 1e-9。technicals.compute_at は銘柄の組ごとに数えるので、組が違うと
-    移動和の丸めが変わり、同じ行でも相対 1e-10 ほど違う（作りもので最大 3e-10。欠測の位置は変わらない）。
+    （check_train_serve.compare）と同じ相対 1e-6・絶対 1e-9（technicals は銘柄ごとに数えるので、同じ日足なら値は1ビットも
+    変わらないはず）。
     """
     out = {}
     for c in cols:

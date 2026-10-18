@@ -5,8 +5,8 @@ docs/MODEL_ADOPTION_RULES.md §68）。データには触らない（作りも�
 
 - 値は technicals.compute（日足の全行で数えたもの）の同じ行と一致する
 - 行の並び・index は samples のまま（並べ替えた・飛び飛びの index でも位置で付く）。日足に無い行は欠測
-- 銘柄を細かく分けて数えても同じ（TECH_CODES_PER_CHUNK）。欠測の位置は同じで、値は丸めの差だけ（銘柄の組が変わると移動和の
-  丸めが変わる。学習と予測の突き合わせ check_train_serve と同じ相対 1e-6・絶対 1e-9 の内側）
+- 銘柄を細かく分けて数えても、値は1ビットも変わらない（TECH_CODES_PER_CHUNK。移動和・分散は銘柄ごとに数える。
+  technicals._Panel.roll）。株価の桁が大きく違う銘柄が前に並び、値動きの無い期間があっても同じ
 - 同じ名前の列がすでにあれば止まる。日足に要る列が無ければ止まる。売買代金が無くても動く（終値 × 出来高）
 - 360列の組（249列 + 111列）は既定ではない（第1段階）。データセットに作る列（features.all_columns）に111列が入る
 
@@ -67,7 +67,22 @@ class TestAttach(unittest.TestCase):
 
     def test_chunks(self):
         with mock.patch.object(B, "TECH_CODES_PER_CHUNK", 1):
-            self.check_values(B.attach_technicals(self.s, self.p), rtol=1e-6, atol=1e-9)
+            self.check_values(B.attach_technicals(self.s, self.p), rtol=0.0, atol=0.0)
+
+    def test_chunks_exact_with_flat_prices(self):
+        # 値の桁が大きい銘柄の後ろに、値動きの無い期間がある安い銘柄（標準偏差 0）。銘柄の組で値が変わらない
+        big = bars("10010", 300, 0)
+        big[["open", "high", "low", "close"]] *= 1000.0
+        flat = bars("10020", 120, 1)
+        flat.loc[40:80, ["open", "high", "low", "close"]] = 123.0
+        p = pd.concat([big, flat], ignore_index=True)
+        p["Date"] = p["Date"].astype("datetime64[ns]")
+        keys = p[["Code", "Date"]]
+        together = TX.compute_at(p, keys, codes_per_chunk=2)
+        alone = TX.compute_at(p, keys, codes_per_chunk=1)
+        self.assertTrue(np.array_equal(together.to_numpy(), alone.to_numpy(), equal_nan=True))
+        i = 300 + 70                                                              # 値動きの無い期間の中
+        self.assertEqual(together.loc[i, "tx_bb_width"], 0.0)
 
     def test_without_trading_value(self):
         p = self.p.drop(columns=["trading_value"])
