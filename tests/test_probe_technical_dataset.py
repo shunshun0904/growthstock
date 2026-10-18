@@ -6,12 +6,15 @@ probe_technical_dataset（research/exp/probe_technical_dataset.py）の部品。
 - 付き方: 列ごとの欠測の数・分位（0.1%〜99.9%）・裾の目安・線形の前処理の型
 - 予測用の突き合わせ: 実験105 の作り方で数え直した値と全行を比べ、食い違い・いちばん新しい日の欠測を数える
   （作りものの日足を build_panel の代わりに渡す）
+- main が最後まで通る（表の作り直し・予測用の作り直しを作りもので置き換える）。一致なら 0、食い違いがあれば 1
 
   python3 tests/test_probe_technical_dataset.py
 """
+import io
 import os
 import sys
 import unittest
+from contextlib import redirect_stdout
 from unittest import mock
 
 import numpy as np
@@ -85,6 +88,48 @@ class TestCheckPredict(unittest.TestCase):
     def test_missing_columns(self):
         with self.assertRaises(SystemExit):
             self.run_check(self.pred.drop(columns=["tx_rsi_14"]))
+
+
+class TestMain(unittest.TestCase):
+    def setUp(self):
+        p = pd.concat([bars("10010", 300, 0), bars("10020", 260, 1)], ignore_index=True)
+        p["Date"] = p["Date"].astype("datetime64[ns]")
+        self.p = p
+        rows = p.iloc[[100, 200, 299, 400, 559]][["Code", "Date"]].reset_index(drop=True)
+        tx = TX.compute_at(p, rows)
+        rest = pd.DataFrame({c: 0.0 for c in P.F.columns(P.TX_PRESET) if c not in tx.columns}, index=rows.index)
+        self.full = pd.concat([rows, tx, rest], axis=1)
+        self.pred = self.full[["Code", "Date"] + P.NEW].assign(label=pd.array([1, 0, pd.NA, 0, pd.NA], dtype="Int64"))
+        self.stamp = {"checks": {"dataset_columns": {"rows": 5, "bad_cells": 0, "bad_columns": 0}}}
+
+    def run_main(self, argv, stamp=None, pred=None):
+        buf = io.StringIO()
+        with mock.patch.object(P.E105, "prepare", return_value=(self.full, stamp or self.stamp)), \
+                mock.patch.object(P.E105, "build_panel", return_value=self.p), \
+                mock.patch.object(P, "predict_table", return_value=self.pred if pred is None else pred), \
+                redirect_stdout(buf):
+            code = P.main(argv)
+        return code, buf.getvalue()
+
+    def test_all_match(self):
+        code, out = self.run_main([])
+        self.assertEqual(code, 0, out)
+        self.assertIn("すべて一致", out)
+        self.assertIn("◆ ローソク足", out)
+        self.assertIn("いちばん新しい日", out)
+
+    def test_skip_predict(self):
+        code, out = self.run_main(["--skip-predict"])
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("■ 2.", out)
+
+    def test_mismatch(self):
+        bad = {"checks": {"dataset_columns": {"rows": 5, "bad_cells": 3, "bad_columns": 1}}}
+        self.assertEqual(self.run_main(["--skip-predict"], stamp=bad)[0], 1)
+        pred = self.pred.copy()
+        pred.loc[0, "tx_rsi_14"] += 1.0
+        self.assertEqual(self.run_main([], pred=pred)[0], 1)
+        self.assertEqual(self.run_main(["--skip-predict"], stamp={"checks": {}})[0], 1)   # データセットに111列が無い
 
 
 if __name__ == "__main__":

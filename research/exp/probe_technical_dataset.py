@@ -77,6 +77,17 @@ def distribution(df: pd.DataFrame, cols: Sequence[str] = tuple(NEW)) -> pd.DataF
     return pd.DataFrame(rows)
 
 
+def print_distribution(d: pd.DataFrame, n_rows: int) -> None:
+    """distribution の表を系統ごとに出す（列名に「.」があるので itertuples ではなく辞書で読む）。"""
+    for g in TX.GROUPS:
+        print(f"  ◆ {TX.GROUP_JA[g]}")
+        for r in d[d["group"] == g].to_dict("records"):
+            qs = " / ".join(f"{r[f'q{k}']:.4g}" for k in QS)
+            print(f"    {r['col']:<24}{r['kind']:<14}欠測 {r['missing']:>4}  {qs}  裾 上 {r['tail_up']:5.1f} 下 {r['tail_dn']:5.1f}")
+    print(f"  欠測のいちばん多い列 {d['missing'].max():,}行 / {n_rows:,}行。型の内訳: "
+          + " / ".join(f"{k} {v}" for k, v in d["kind"].value_counts().items()))
+
+
 def predict_table(out_path: str) -> pd.DataFrame:
     """日次の予測と同じ作り（--keep-unlabeled）でデータセットを作り直して読む。[tech] と [result] の行だけ見せる。"""
     cmd = [sys.executable, os.path.join(os.path.dirname(HERE), "build_dataset.py"), "--keep-unlabeled", "--out", out_path]
@@ -145,14 +156,7 @@ def main(argv: Sequence[str] = None) -> int:
     ok &= not have
 
     print("\n■ 3. 付き方（学習用。分位は 0.1% / 1% / 5% / 50% / 95% / 99% / 99.9%。裾は上・下の目安）")
-    d = distribution(full)
-    for g in TX.GROUPS:
-        print(f"  ◆ {TX.GROUP_JA[g]}")
-        for r in d[d["group"] == g].itertuples(index=False):
-            qs = " / ".join(f"{getattr(r, f'q{k}'):.4g}" for k in QS)
-            print(f"    {r.col:<24}{r.kind:<14}欠測 {r.missing:>4}  {qs}  裾 上 {r.tail_up:5.1f} 下 {r.tail_dn:5.1f}")
-    print(f"  欠測のいちばん多い列 {d['missing'].max():,}行 / {len(full):,}行。型の内訳: "
-          + " / ".join(f"{k} {v}" for k, v in d["kind"].value_counts().items()))
+    print_distribution(distribution(full), len(full))
 
     if not args.skip_predict:
         print("\n■ 2. 予測用（--keep-unlabeled。日次の予測と同じ作り）")
