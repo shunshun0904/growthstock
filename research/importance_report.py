@@ -47,7 +47,7 @@ MACRO = [
                       "guidance"}),
     ("val", "バリュエーション・配当", {"valuation", "dividend"}),
     ("price", "株価・需給・市場", {"price", "breakout", "breakout_shape", "drawdown", "recent_change",
-                                   "volume", "liquidity", "supply", "market", "sector"}),
+                                   "tech_indicators", "volume", "liquidity", "supply", "market", "sector"}),
 ]
 
 TOP_N = 30

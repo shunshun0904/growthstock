@@ -630,7 +630,11 @@ def compute_at(panel: pd.DataFrame, keys: pd.DataFrame, codes_per_chunk: int = 3
         tx.insert(0, "Code", sub["Code"].astype(str).to_numpy())
         tx.insert(1, "Date", pd.to_datetime(sub["Date"]).astype("datetime64[ns]").to_numpy())
         parts.append(k[k["Code"].isin(chunk)].merge(tx, on=["Code", "Date"], how="inner"))
-    got = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=["Code", "Date"] + COLUMNS)
+    if parts:
+        got = pd.concat(parts, ignore_index=True)
+    else:                                                       # keys が無い・日足に無い銘柄だけ（型をそろえて空の表）
+        got = pd.DataFrame({"Code": pd.Series(dtype=str), "Date": pd.Series(dtype="datetime64[ns]"),
+                            **{c: pd.Series(dtype=float) for c in COLUMNS}})
     if got.duplicated(["Code", "Date"]).any():
         raise ValueError("日足の Code・Date が重なっている")
     m = k.merge(got, on=["Code", "Date"], how="left")

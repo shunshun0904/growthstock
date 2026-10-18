@@ -46,6 +46,16 @@ class Names(unittest.TestCase):
         dup = sorted({n for n in names if names.count(n) > 1})
         self.assertEqual(dup, [])
 
+    def test_technical_columns_have_names(self):
+        # 第2段階で既定にする360列（249列 + テクニカル指標111列。§68）も、すべて日本語名があり重ならない
+        sys.path.insert(0, os.path.join(ROOT, "research"))
+        import features as F
+        cols = F.columns("all_plus_prog_listing_vol_book_shape_dd_recent_tx")
+        names = [FD.name_ja(c) for c in cols]
+        self.assertEqual([c for c, n in zip(cols, names) if n == c or "_" in n], [])
+        self.assertEqual(len(set(names)), len(names))
+        self.assertTrue(all(FD.describe(c).startswith("テクニカル指標（") for c in F.GROUPS["tech_indicators"]))
+
     def test_axis_and_suffix(self):
         self.assertEqual(FD.name_ja("eps_growth_q1"), "EPS成長率（1期前）")
         self.assertEqual(FD.name_ja("eps_growth_sym_q0"), "EPS成長率・対称版（直近）")

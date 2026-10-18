@@ -58,8 +58,10 @@ tests/test_technicals.py）。運用者の指示「パラメータチューニ�
 試運転:             exp=e105_technical_ab.py args="--tag e105smoke --n-trials 2 --shifts 0 --arms A,C,P"
 
 Run Experiment は同じ実験を同時に1本しか走らせない。表（111列を付けた frame）は1回目に作って research/_data/oof/<tag>_* に置き、
-以降の回は actions/cache で引き継いだそれを使う。--budget-min（既定 290分）を過ぎたら新しい計算を始めずに終わる（保存済みの
-探索・out-of-fold は次の回が続きから使う）。判定の腕（A・C・P）を先に、B と系統ごとの腕を後に計算する。
+以降の回は actions/cache で引き継いだそれを使う。本番導入の第1段階（2026-10-18、§68）からはデータセットにも111列があるので、
+表を作り直すときは、この台本の計算と全行一致することを確かめてから使う（compare_columns）。--budget-min（既定 290分）を過ぎたら
+新しい計算を始めずに終わる（保存済みの探索・out-of-fold は次の回が続きから使う）。判定の腕（A・C・P）を先に、B と系統ごとの腕を
+後に計算する。
 """
 from __future__ import annotations
 
@@ -201,6 +203,24 @@ def attach_technicals(keys: pd.DataFrame, panel: pd.DataFrame) -> pd.DataFrame:
     return TX.compute_at(panel, keys)
 
 
+def compare_columns(have: pd.DataFrame, want: pd.DataFrame, cols=NEW_COLS, rtol: float = 1e-6, atol: float = 1e-9) -> dict:
+    """
+    列ごとに、欠測の位置か値が食い違う行の数。have・want は同じ行の並び。値の許しは学習と予測の突き合わせ
+    （check_train_serve.compare）と同じ相対 1e-6・絶対 1e-9。technicals.compute_at は銘柄の組ごとに数えるので、組が違うと
+    移動和の丸めが変わり、同じ行でも相対 1e-10 ほど違う（作りもので最大 3e-10。欠測の位置は変わらない）。
+    """
+    out = {}
+    for c in cols:
+        a = pd.to_numeric(have[c], errors="coerce").to_numpy(dtype=float)
+        b = pd.to_numeric(want[c], errors="coerce").to_numpy(dtype=float)
+        na, nb = np.isnan(a), np.isnan(b)
+        both = ~na & ~nb
+        close = np.zeros(len(a), dtype=bool)
+        close[both] = np.isclose(a[both], b[both], rtol=rtol, atol=atol)
+        out[c] = int(((na != nb) | (both & ~close)).sum())
+    return out
+
+
 def check_alignment(frame: pd.DataFrame, panel: pd.DataFrame) -> dict:
     """日足から数え直した当日の値幅の中の位置（close_position）が、学習データの値と全行一致するか（並び・調整の確かめ）。"""
     p = panel[["Code", "Date", "high", "low", "close"]].copy()
@@ -242,9 +262,9 @@ def prepare(cols: list, rebuild: bool = False):
     miss = [c for c in cols + ["close_position", "ret_o1_20", "ret_o1_40"] if c not in frame.columns]
     if miss:
         raise SystemExit(f"表に無い列: {miss[:8]}")
-    dup = sorted(set(NEW_COLS) & set(frame.columns))
-    if dup:
-        raise SystemExit(f"学習データにすでに同じ名前の列がある: {dup[:5]}")
+    have = [c for c in NEW_COLS if c in frame.columns]
+    if have and len(have) != len(NEW_COLS):
+        raise SystemExit(f"学習データに111列の一部だけがある: {have[:5]}")
     log(f"[data] lab.frame {len(frame):,}行 × {frame.shape[1]}列 / {time.time()-t0:.0f}秒")
     t0 = time.time()
     panel = build_panel(lab.DATA_DIR, frame["Code"].unique())
@@ -257,6 +277,19 @@ def prepare(cols: list, rebuild: bool = False):
     all_nan = int(tx.isna().all(axis=1).sum())
     checks["rows_all_nan"] = all_nan
     log(f"[data] 111列 / {time.time()-t0:.0f}秒（111列がすべて欠測の行 {all_nan:,}）")
+    if have:
+        # 本番導入の第1段階（2026-10-18、§68）からはデータセットにも111列がある（build_dataset.attach_technicals）。
+        # この台本の計算と全行一致することを確かめてから、台本の値を使う
+        bad = compare_columns(frame[list(NEW_COLS)].reset_index(drop=True), tx)
+        n_bad = sum(bad.values())
+        checks["dataset_columns"] = {"rows": int(len(frame)), "bad_cells": int(n_bad),
+                                     "bad_columns": int(sum(v > 0 for v in bad.values()))}
+        print(f"  確かめ: データセットの111列とこの台本の計算の一致 {len(frame):,}行 × 111列 → 食い違い {n_bad:,}セル"
+              f"（{checks['dataset_columns']['bad_columns']}列）")
+        if n_bad:
+            raise SystemExit("データセットの111列がこの台本の計算と合わない: "
+                             + ", ".join(f"{c} {v}" for c, v in bad.items() if v)[:300])
+        frame = frame.drop(columns=list(NEW_COLS))
     df = pd.concat([frame.reset_index(drop=True), tx], axis=1)
 
     t0 = time.time()

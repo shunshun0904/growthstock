@@ -16,6 +16,9 @@ from __future__ import annotations
 import hashlib
 from typing import Dict, List
 
+#: テクニカル指標111列の名前と並び（research/technicals.py。列を作るのは build_dataset.attach_technicals）
+from technicals import COLUMNS as TECH_COLUMNS
+
 # 決算の軸。build_dataset.py が各軸について q0/q1/q2/chg/chg1/slope を作る。
 #
 # 充足率は docs/DATA_FIELDS.md と docs/MODEL_FUNDAMENTAL_COVERAGE.md を参照。
@@ -243,6 +246,10 @@ GROUPS: Dict[str, List[str]] = {
     #   gap_open                  前の営業日の終値 → 当日の始値（%）
     #   vol_chg_1d                当日の出来高 ÷ 前の営業日の出来高（%）
     "recent_change": ["ret_1d", "ret_2d", "gap_open", "ret_5d", "vol_chg_1d"],
+    # --- テクニカル指標111列（実験105、2026-10-18 運用者の決定で本番へ。docs/MODEL_ADOPTION_RULES.md §68）---
+    # build_dataset.attach_technicals（research/technicals.py）。トレンド系41・オシレーター26・ボラティリティ14・出来高系18・
+    # ローソク足12。どれも t の引けまでの日足だけから数える。並びは technicals.COLUMNS（実験105 の腕 C と同じ）。順位版は作らない
+    "tech_indicators": list(TECH_COLUMNS),
 }
 
 #: 横断面正規化（同じ日付内でのパーセンタイル順位）を作る対象の列。
@@ -393,6 +400,13 @@ PRESETS: Dict[str, List[str]] = {
                                                        for g in ALL_GROUPS] + EXTRA_GROUPS
                                                       + ["listing", "vol_factors", "fund_book", "breakout_shape",
                                                          "drawdown", "recent_change"],
+    # --- 2026-10-18 の運用者の決定（実験105 §68「入れる（2段階）」）。249列 + テクニカル指標111列。360列 --- #
+    # 並びは実験105 の腕 C と同じ（249列の後ろに111列。指紋 a0638dfd0880）。既定への切り替えは第2段階（249列で初めて学習する
+    # 週末の再学習の後）
+    "all_plus_prog_listing_vol_book_shape_dd_recent_tx": [("progress_seasonal_pct" if g == "progress" else g)
+                                                          for g in ALL_GROUPS] + EXTRA_GROUPS
+                                                         + ["listing", "vol_factors", "fund_book", "breakout_shape",
+                                                            "drawdown", "recent_change", "tech_indicators"],
     "all_plus_prog_listing": [("progress_seasonal_pct" if g == "progress" else g)
                               for g in ALL_GROUPS] + EXTRA_GROUPS + ["listing"],
 

@@ -65,6 +65,16 @@ SIGNED_HEAVY = (
     # 直近の増減（%。実験103）。実測（学習データ 2026-10-17）の 5% / 中央値 / 95% / 最大: ret_1d −0.7 / 3.0 / 18.1 / 148.8、
     # ret_2d 0.4 / 4.7 / 25.8 / 224.2、gap_open −0.8 / 0.8 / 14.7 / 147.9、ret_5d 1.3 / 7.1 / 34.2 / 361.2
     "ret_1d", "ret_2d", "gap_open", "ret_5d",
+    # テクニカル指標（実験105 §68。research/technicals.py）。型は定義と学習データの 5% / 中央値 / 95% 点（2026-10-18、run 39125832391）
+    # から決めた。乖離率・騰落・傾き・MACD 系など、% で符号つき・右の裾が長いもの（例: 10日乖離率 1.5 / 6.0 / 26.2、
+    # ROC250 7.6 / 36.5 / 146、出来高オシレーター −24.8 / 29.1 / 208）
+    "tx_ma_gap_5", "tx_ma_gap_10", "tx_ma_gap_25", "tx_ma_gap_50", "tx_ma_gap_75", "tx_ma_gap_100", "tx_ma_gap_200",
+    "tx_ma_slope_25", "tx_ma_slope_75", "tx_ma_slope_200", "tx_ma_ratio_5_25", "tx_ma_ratio_25_75", "tx_ma_ratio_50_200",
+    "tx_macd", "tx_macd_signal", "tx_macd_hist", "tx_psar_gap", "tx_ichi_tk", "tx_ichi_kijun_gap", "tx_ichi_cloud_pos",
+    "tx_ichi_cloud_thick", "tx_ichi_chikou", "tx_linreg_slope_20", "tx_linreg_slope_60", "tx_trix_15", "tx_supertrend_gap",
+    "tx_cci_20", "tx_roc_10", "tx_roc_60", "tx_roc_120", "tx_roc_250", "tx_dpo_20", "tx_kst", "tx_awesome_osc",
+    "tx_elder_bull", "tx_elder_bear", "tx_chaikin_vol_10", "tx_chaikin_osc", "tx_force_13", "tx_eom_14", "tx_vwap_gap_20",
+    "tx_vwap_gap_60", "tx_pvt_chg_20", "tx_vol_osc_5_20", "tx_klinger", "tx_nvi_chg_60",
 )
 
 SIGNED = (
@@ -74,6 +84,12 @@ SIGNED = (
     "nk225_ret_120", "nk225_ret_20", "risk_off_20", "sector_ret_120",
     "sector_ret_20", "sector_vs_topix_20", "topix_ma200_gap", "topix_ret_120",
     "topix_ret_20",
+    # テクニカル指標（実験105 §68。research/technicals.py）。型は定義と学習データの 5% / 中央値 / 95% 点（2026-10-18、run 39125832391）
+    # から決めた。上下に幅の決まった・裾の短いもの（RCI −100〜100、ウィリアムズ %R −100〜0、CMF・BOP・実体比 −1〜1、
+    # %B・ケルトナーの位置、OBV・A/D の変化 ÷ 出来高）と、符号つきの日数（交差・反転から上なら＋）
+    "tx_ma_cross_days", "tx_psar_days", "tx_williams_r_14", "tx_cmo_14", "tx_tsi", "tx_rci_9", "tx_rci_26", "tx_fisher_10",
+    "tx_bop_14", "tx_bb_pctb", "tx_keltner_pos", "tx_obv_chg_20", "tx_obv_ma_gap", "tx_ad_ma_gap", "tx_cmf_20",
+    "tx_body_ratio",
 )
 
 POSITIVE_HEAVY = (
@@ -86,6 +102,11 @@ POSITIVE_HEAVY = (
     "xh_inc_cost", "xh_iss",
     # 出来高の前日比（%。実験103）。中央値 162・95% 1,599・最大 675,933（前の日の出来高がごく少ない行）
     "vol_chg_1d",
+    # テクニカル指標（実験105 §68。research/technicals.py）。型は定義と学習データの 5% / 中央値 / 95% 点（2026-10-18、run 39125832391）
+    # から決めた。ボラ・比率など正で右の裾が長いもの（例: ATR ÷ 終値 1.36 / 2.61 / 5.7、バンド幅 5.2 / 13.8 / 46.8、
+    # VR 88 / 176 / 572）
+    "tx_natr_14", "tx_atr_ratio_14_50", "tx_bb_width", "tx_vol_parkinson_20", "tx_vol_gk_20", "tx_vol_60", "tx_ulcer_14",
+    "tx_vr_25", "tx_vol_ratio_60_250", "tx_tv_ratio_20_120", "tx_range_atr",
 )
 
 POSITIVE = (
@@ -102,6 +123,14 @@ POSITIVE = (
     # 下げの深さ（%、0〜100。実験102）。実測（学習データ 2026-10-17）の中央値 / 95%点: base_depth 19.8 / 63.9、
     # pullback_depth 18.3 / 51.6、max_dd_120 14.2 / 33.5
     "base_depth", "pullback_depth", "max_dd_120",
+    # テクニカル指標（実験105 §68。research/technicals.py）。型は定義と学習データの 5% / 中央値 / 95% 点（2026-10-18、run 39125832391）
+    # から決めた。0〜100（RSI・ストキャスティクス・ADX・アルーン・MFI など）・0〜1（決定係数・効率レシオ・ヒゲ）の
+    # 有界なものと、1 前後に集まる比（ボルテックス 0.94 / 1.12 / 1.31、マス・インデックス 23.5 / 25.3 / 28）
+    "tx_adx_14", "tx_pdi_14", "tx_mdi_14", "tx_aroon_up_25", "tx_aroon_down_25", "tx_linreg_r2_60", "tx_kaufman_er_20",
+    "tx_vortex_pos_14", "tx_vortex_neg_14", "tx_donchian_pos_20", "tx_donchian_pos_55", "tx_rsi_9", "tx_rsi_14", "tx_rsi_25",
+    "tx_stoch_k", "tx_stoch_d", "tx_stoch_rsi_14", "tx_ultimate_osc", "tx_psy_12", "tx_connors_rsi", "tx_bb_width_rank_120",
+    "tx_mass_index_25", "tx_chop_14", "tx_mfi_14", "tx_up_vol_share_20", "tx_upper_shadow", "tx_lower_shadow",
+    "tx_bull_share_20", "tx_body_mean_20",
 )
 
 COUNT_DAYS = (
@@ -119,11 +148,16 @@ SMALL_INT = (
     "op_margin_pos_ratio", "op_margin_up_streak", "rev_dn_n_250", "rev_n_250",
     "rev_n_60", "rev_up_n_250", "sales_growth_pos_ratio", "sales_growth_sym_pos_ratio",
     "sales_growth_sym_up_streak", "sales_growth_up_streak",
+    # テクニカル指標（実験105 §68）の小さい整数: パーフェクトオーダーの段数・三役好転の数（0〜3）、陽線・終値の連続日数
+    # （符号つき）、20日の上への窓開けの回数、包み足（−1・0・1）
+    "tx_perfect_order", "tx_ichi_sanyaku", "tx_candle_streak", "tx_close_streak", "tx_gap_up_count_20", "tx_engulfing",
 )
 
 FLAGS = (
     "acct_ifrs", "div_up", "eps_growth_turn", "fund_complete",
     "has_dividend", "rev_up", "sales_growth_turn",
+    # テクニカル指標（実験105 §68）の 0 / 1: スクイーズ・NR7・赤三兵に近い形
+    "tx_squeeze", "tx_nr7", "tx_three_soldiers",
 )
 
 RANK = (

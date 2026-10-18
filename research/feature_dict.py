@@ -24,6 +24,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import features as F  # noqa: E402
 import build_dataset as B  # noqa: E402
+import technicals as TX  # noqa: E402
 
 CSS = os.path.join(HERE, "viewer", "eda_style.css")
 FONTS = ('<link rel="preconnect" href="https://fonts.googleapis.com">'
@@ -45,6 +46,9 @@ MACRO: List[tuple] = [
      "株価と決算の比。割高・割安と、利益の質"),
     ("株価・ブレイク", ["price", "breakout", "breakout_shape", "drawdown", "recent_change"],
      "高値からの位置と、その日の抜け方・抜けた土台の形・下げの深さ・直近の増減"),
+    ("テクニカル指標", ["tech_indicators"],
+     "トレンド系・オシレーター・ボラティリティ・出来高系・ローソク足の一般的な指標111列（実験105）。"
+     "日足の t の引けまでの値だけから数える"),
     ("需給・流動性・市場", ["volume", "liquidity", "supply", "market", "sector"],
      "出来高・売買代金・信用・相場環境・業種"),
     ("業種指数", ["sector_index"],
@@ -499,6 +503,13 @@ NAME_JA = {
     "vol_rel_short": "ボラティリティの短期比（5日÷20日）",
     "vol_gap_ratio": "寄り付きギャップと日中値幅のボラティリティ比",
 }
+
+
+# テクニカル指標111列（実験105 §68）。短い名前は research/technicals.py の JA をそのまま使う（辞書を二か所に持たない）。
+# 説明は系統と名前から作る
+NAME_JA.update({c: TX.JA[c] for c in TX.COLUMNS})
+COL_JA.update({c: f"テクニカル指標（{TX.GROUP_JA[TX.GROUP_OF[c]]}）: {TX.JA[c]}。日足の t の引けまでの値だけから数える"
+                  f"（research/technicals.py。実験105）" for c in TX.COLUMNS})
 
 
 def name_ja(col: str) -> str:

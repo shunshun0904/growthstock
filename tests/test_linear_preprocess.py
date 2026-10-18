@@ -35,6 +35,15 @@ class TestClassification(unittest.TestCase):
         self.assertEqual(len(cols), 249)
         self.assertEqual(LP.unclassified(cols), [])
 
+    def test_technical_columns_are_classified(self):
+        # 第2段階で既定にする360列（249列 + テクニカル指標111列。§68）も、既定落ちが無い
+        cols = F.columns("all_plus_prog_listing_vol_book_shape_dd_recent_tx")
+        self.assertEqual(len(cols), 360)
+        self.assertEqual(LP.unclassified(cols), [])
+        kinds = [LP.kind_of(c) for c in F.GROUPS["tech_indicators"]]
+        self.assertEqual({k: kinds.count(k) for k in set(kinds)},
+                         {"signed_heavy": 46, "signed": 16, "pos_heavy": 11, "pos": 29, "small_int": 6, "flag": 3})
+
     def test_categorical_matches_the_tuner(self):
         self.assertEqual(set(LP.CATEGORICAL), set(TM.CATEGORICAL))
 

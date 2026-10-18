@@ -95,6 +95,22 @@ class TestPanel(unittest.TestCase):
                 E.check_alignment(bad.assign(close_position=cp), self.p)
 
 
+class TestCompareColumns(unittest.TestCase):
+    def test_counts(self):
+        rng = np.random.default_rng(5)
+        a = pd.DataFrame({c: rng.normal(size=20) for c in TX.COLUMNS})
+        b = a.copy()
+        self.assertEqual(sum(E.compare_columns(a, b).values()), 0)
+        b.loc[0, "tx_rsi_14"] *= 1 + 1e-9                                       # 丸めの差は同じとみなす
+        self.assertEqual(sum(E.compare_columns(a, b).values()), 0)
+        b.loc[1, "tx_rsi_14"] += 0.01                                              # 値が違う
+        b.loc[2, "tx_macd"] = np.nan                                               # 欠測の位置が違う
+        got = E.compare_columns(a, b)
+        self.assertEqual(got["tx_rsi_14"], 1)
+        self.assertEqual(got["tx_macd"], 1)
+        self.assertEqual(sum(got.values()), 2)
+
+
 class TestLabelK12(unittest.TestCase):
     def frame(self):
         rng = np.random.default_rng(3)

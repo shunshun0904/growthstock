@@ -19,6 +19,7 @@ import glob
 import json
 import os
 import sys
+import time
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -33,6 +34,7 @@ import availability as AV  # noqa: E402
 import features  # noqa: E402
 import extra_features  # noqa: E402
 import jquants_data_fetcher as JF  # noqa: E402
+import technicals as TX  # noqa: E402
 import trading_calendar  # noqa: E402
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_data")
@@ -1582,6 +1584,36 @@ def _recent_change(df: pd.DataFrame, g) -> Dict[str, np.ndarray]:
     with np.errstate(divide="ignore", invalid="ignore"):
         out["vol_chg_1d"] = np.where(v1 > 0, v0 / v1 * 100.0, np.nan)
     return out
+
+
+#: テクニカル指標111列（research/technicals.py）の計算に使う日足の列（price_panel の列名）。売買代金は無ければ終値 × 出来高
+TECH_PANEL_COLS = ["Code", "Date", "open", "high", "low", "close", "vol", "trading_value"]
+#: テクニカル指標を一度に計算する銘柄の数。多いほど少し速いがメモリを食う（実験105 の 300銘柄で山が約2.5GB）
+TECH_CODES_PER_CHUNK = 200
+
+
+def attach_technicals(samples: pd.DataFrame, panel: pd.DataFrame) -> pd.DataFrame:
+    """
+    テクニカル指標111列（research/technicals.py の COLUMNS。トレンド系41・オシレーター26・ボラティリティ14・出来高系18・
+    ローソク足12）を samples の行に付ける。実験105 で検証し、2026-10-18 に運用者の決定で本番へ（docs/MODEL_ADOPTION_RULES.md §68）。
+
+    panel は price_panel の日足（銘柄・日付の順。分割を調整した値。一般市場に移ってからの行）。各銘柄の売買の成立した行だけで、
+    t の引けまでの値から数える（目的変数の基準は翌営業日の寄りなので重ならない）。実験105 の表（e105_technical_ab.attach_technicals
+    = technicals.compute_at）と同じ計算で、銘柄を TECH_CODES_PER_CHUNK ずつに分けて samples の行だけを残す（全銘柄の日足の
+    全行に111列を作るとメモリに乗らない）。日足に無い行は欠測。行の並び・index は samples のまま。
+    """
+    dup = sorted(set(TX.COLUMNS) & set(samples.columns))
+    if dup:
+        raise SystemExit(f"テクニカル指標と同じ名前の列がすでにある: {dup[:5]}")
+    miss = [c for c in TECH_PANEL_COLS if c != "trading_value" and c not in panel.columns]
+    if miss:
+        raise SystemExit(f"日足にテクニカル指標の計算に要る列が無い: {miss}")
+    cols = [c for c in TECH_PANEL_COLS if c in panel.columns]
+    tx = TX.compute_at(panel[cols], samples[["Code", "Date"]], codes_per_chunk=TECH_CODES_PER_CHUNK)
+    if len(tx) != len(samples):
+        raise SystemExit("テクニカル指標の行数が合わない")
+    tx.index = samples.index
+    return pd.concat([samples, tx], axis=1)
 
 
 def add_breakout_context(df: pd.DataFrame) -> pd.DataFrame:
@@ -3477,6 +3509,14 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     samples = apply_fund_requirement(samples)
     report_fund_quality(samples)
     samples = apply_fund_quality(samples)
+
+    # --- テクニカル指標111列（実験105、2026-10-18 に運用者の決定で本番へ。docs/MODEL_ADOPTION_RULES.md §68） --- #
+    # 行を絞り終えてから付ける（全銘柄の日足から、残った行だけを数える）。順位版は作らない（実験105 に無い）
+    t0 = time.time()
+    samples = attach_technicals(samples, df)
+    tx_miss = samples[TX.COLUMNS].isna()
+    print(f"[tech] テクニカル指標 {len(TX.COLUMNS)}列 / {time.time() - t0:.0f}秒 / {len(samples):,}行 / "
+          f"すべて欠測の行 {int(tx_miss.all(axis=1).sum()):,} / 欠測のいちばん多い列 {tx_miss.mean().max() * 100:.2f}%")
 
     print("\n[rank] 横断面正規化（同一日付内のパーセンタイル順位）")
     samples = add_cross_sectional_ranks(samples, features.RAW_FOR_RANK)
