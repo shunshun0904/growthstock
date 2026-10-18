@@ -2,9 +2,13 @@
 """
 上位2% を5つの条件で絞る probe（research/exp/probe_top2_filters.py）。データには触らない（小さな合成データで確かめる）。
 
-- 決算発表からの営業日数: (開示日, 基準日] に入る営業日の数。基準日の開示は 0、休日の開示はその後の最初の営業日が 1。
+- 開示からの営業日数（確かめ用）: (開示日, 基準日] に入る営業日の数。基準日の開示は 0、休日の開示はその後の最初の営業日が 1。
   同じ銘柄の、基準日以前で一番新しい開示を使う（ほかの銘柄の開示は見ない）。開示が無ければ欠測
-- 条件の境目（500億円・20営業日・配当 1・信用倍率 10倍・実績PER 30倍はちょうどなら満たす）。欠測・赤字（PER なし）は満たさない
+- 目的変数の期間内の決算: 発表の日（休日ならその後の最初の営業日）が基準日の何営業日先か。実際の開示日は基準日より後
+  （同じ日は含まない）で一番早いもの、予定日は基準日までに公表済み（PubDate ≤ 基準日）で基準日より後の一番早いもの
+  （days_to_earn と同じ規則なら基準日を含む）。営業日の表より先は数えない
+- 条件の境目（500億円・1〜20営業日先・配当 1・信用倍率 10倍・実績PER 30倍はちょうどなら満たす）。欠測・赤字（PER なし）・
+  基準日当日の決算（0営業日先）は満たさない。5つすべては決算の条件を実際の開示日・予定日で数えた2通り
 - 百分位は画面と同じ（同点は数えない）。Wilson の幅
 - 合成データで最後まで走り、報告に銘柄コードが出ない
 
@@ -58,23 +62,64 @@ class TestTradingDays(unittest.TestCase):
         self.assertEqual(cal.tolist(), [1.0])
 
 
+class TestAhead(unittest.TestCase):
+    DAYS = TestTradingDays.DAYS
+
+    def test_trading_days_ahead(self):
+        t = pd.to_datetime(["2024-01-08", "2024-01-12", "2024-01-12", "2024-01-08", "2024-01-08", "2024-01-08"]).to_numpy()
+        e = pd.to_datetime(["2024-01-09", "2024-01-13", "2024-01-16", "2024-01-17", None, "2024-01-20"]).to_numpy()
+        got = E.trading_days_ahead(t, e, self.DAYS)
+        # 翌営業日は1 / 金曜の後の土曜は翌月曜で1 / 休場日（1/16）は次の営業日 1/17 で2 / 6営業日先 / 欠測 / 表の外は数えない
+        np.testing.assert_array_equal(got, [1, 1, 2, 6, np.nan, np.nan])
+
+    def test_next_disclosure(self):
+        disc = pd.DataFrame({"Code": ["10010", "10010", "10020"],
+                             "DiscDate": pd.to_datetime(["2024-01-09", "2024-01-12", "2024-01-13"])})
+        keys = pd.DataFrame({"Code": ["10010", "10010", "10010", "10020", "10030"],
+                             "Date": pd.to_datetime(["2024-01-09", "2024-01-12", "2024-01-08", "2024-01-10",
+                                                     "2024-01-10"])})
+        got = pd.to_datetime(E.next_disclosure(keys, disc))
+        # 同じ日の開示は含まない / 先に開示が無ければ欠測 / 翌日の開示 / ほかの銘柄の開示は見ない
+        self.assertEqual([None if pd.isna(x) else x.strftime("%m-%d") for x in got],
+                         ["01-12", None, "01-09", "01-13", None])
+
+    def test_next_scheduled_known_only(self):
+        sched = pd.DataFrame({"Code": ["10010", "10010", "10010"],
+                              "PubDate": pd.to_datetime(["2024-01-05", "2024-01-10", "2024-01-09"]),
+                              "SchDate": pd.to_datetime(["2024-01-12", "2024-01-11", "2024-01-17"])})
+        keys = pd.DataFrame({"Code": ["10010", "10010", "10020"],
+                             "Date": pd.to_datetime(["2024-01-09", "2024-01-12", "2024-01-09"])})
+        fmt = (lambda a: [None if pd.isna(x) else x.strftime("%m-%d") for x in pd.to_datetime(a)])
+        # 1/9 の時点で 1/11 の予定はまだ公表されていない（1/10 公表）→ 1/12 / 1/12 当日の予定は含まない → 1/17 / 予定なし
+        self.assertEqual(fmt(E.next_scheduled(keys, sched, strict=True)), ["01-12", "01-17", None])
+        # days_to_earn と同じ規則（当日を含む）
+        self.assertEqual(fmt(E.next_scheduled(keys, sched, strict=False)), ["01-12", "01-12", None])
+
+
 class TestFilters(unittest.TestCase):
     def test_boundaries_and_missing(self):
         f = pd.DataFrame({"market_cap": [500.0, 500.1, np.nan, 10.0, 10.0],
-                          "earn_td": [20.0, 21.0, np.nan, 0.0, 0.0],
+                          "earn_ahead_act": [1.0, 21.0, np.nan, 20.0, 0.0],
+                          "earn_ahead_sch": [20.0, 0.0, np.nan, np.nan, 1.0],
                           "has_dividend": [1.0, 0.0, np.nan, 1.0, 1.0],
                           "credit_ratio": [10.0, 10.01, np.nan, 0.5, 0.5],
-                          "per": [30.0, 30.1, np.nan, 0.0, -5.0]})
+                          "per": [30.0, 30.1, np.nan, 0.0, 5.0]})
         m = E.filter_masks(f)
-        self.assertEqual(set(m), set(E.FILTERS))
+        self.assertEqual(set(m), set(E.FILTERS) | set(E.ALL_SETS))
         self.assertEqual(m["cap"].tolist(), [True, False, False, True, True])
-        self.assertEqual(m["earn"].tolist(), [True, False, False, True, True])
+        self.assertEqual(m["earn_act"].tolist(), [True, False, False, True, False])    # 0営業日先（当日）は満たさない
+        self.assertEqual(m["earn_sch"].tolist(), [True, False, False, False, True])
         self.assertEqual(m["div"].tolist(), [True, False, False, True, True])
         self.assertEqual(m["credit"].tolist(), [True, False, False, True, True])
-        self.assertEqual(m["per"].tolist(), [True, False, False, False, False])     # 0 以下・欠測は満たさない
+        self.assertEqual(m["per"].tolist(), [True, False, False, False, True])         # 0 以下・欠測は満たさない
+        self.assertEqual(m["all_act"].tolist(), [True, False, False, False, False])
+        self.assertEqual(m["all_sch"].tolist(), [True, False, False, False, True])
 
     def test_constants(self):
-        self.assertEqual((E.LINE, E.CAP_MAX, E.EARN_TD, E.CREDIT_MAX, E.PER_MAX), (98.0, 500.0, 20, 10.0, 30.0))
+        self.assertEqual((E.LINE, E.CAP_MAX, E.EARN_WINDOW, E.CREDIT_MAX, E.PER_MAX), (98.0, 500.0, 20, 10.0, 30.0))
+        self.assertEqual(E.EARN_WINDOW, E.LT.HOLD)                  # 目的変数の期間 = +10% の判定の期間
+        self.assertEqual(E.ALL_SETS["all_act"], ("cap", "earn_act", "div", "credit", "per"))
+        self.assertEqual(E.ALL_SETS["all_sch"], ("cap", "earn_sch", "div", "credit", "per"))
         self.assertEqual(E.RULE_MODELS, ("lgbm_k15", "xgb_k15", "cat_k15"))
         self.assertEqual(len(E79.MODELS), 12)
 
@@ -134,6 +179,17 @@ def synthetic(dir_: str, seed: int = 3) -> None:
     ds["has_dividend"] = rng.choice([0.0, 1.0, np.nan], len(ds), p=[0.3, 0.65, 0.05])
     ds["credit_ratio"] = np.where(rng.random(len(ds)) < 0.2, np.nan, rng.uniform(0.2, 30, len(ds)))
     ds["per"] = np.where(rng.random(len(ds)) < 0.15, np.nan, rng.uniform(3, 80, len(ds)))
+    # 決算発表予定: 実際の開示日の40日前に公表、1割は予定が出ない。days_to_earn は特徴量と同じ規則（公表済み・当日以降の一番早い
+    # 予定までの暦日、0〜120）で作る
+    sch = real[["Code", "DiscDate"]].rename(columns={"DiscDate": "SchDate"}).copy()
+    sch["PubDate"] = sch["SchDate"] - pd.Timedelta(days=40)
+    sch = sch[rng.random(len(sch)) >= 0.1]
+    sch.to_parquet(os.path.join(dir_, "earndate_2021.parquet"))
+    j = ds[["Code", "Date"]].reset_index().merge(sch, on="Code")
+    j = j[(j["PubDate"] <= j["Date"]) & (j["SchDate"] >= j["Date"])]
+    nxt = j.groupby("index")["SchDate"].min()
+    ds["days_to_earn"] = np.nan
+    ds.loc[nxt.index, "days_to_earn"] = ((nxt - ds.loc[nxt.index, "Date"]).dt.days.astype(float)).clip(0, 120)
     ds.to_parquet(os.path.join(dir_, "dataset.parquet"))
 
 
@@ -147,7 +203,10 @@ class TestEndToEnd(unittest.TestCase):
             out = buf.getvalue()
         self.assertEqual(rc, 0)
         self.assertIn("■ 2.", out)
-        self.assertIn("days_since_disc と一致", out)
+        self.assertIn("days_since_disc と 一致", out)
+        self.assertIn("days_to_earn と 一致", out)
+        self.assertIn("5つすべて（予定日）", out)
+        self.assertIn("5つすべて（実際の開示日）", out)
         self.assertIn("ret_o1_20 と一致", out)
         self.assertIn("に届いた割合", out)
         self.assertIn(f"[{M.BASELINE}]", out)
