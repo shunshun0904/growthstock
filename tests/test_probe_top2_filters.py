@@ -93,22 +93,31 @@ class TestStats(unittest.TestCase):
 
 
 def synthetic(dir_: str, seed: int = 3) -> None:
-    """12本の OOF・学習データ・決算・日足を、窓（2021-05〜2026-09）に収まる日付で作る。"""
+    """
+    12本の OOF・学習データ・決算・日足を、窓（2021-05〜2026-09）に収まる日付で作る。日足は銘柄ごとの乱歩で、
+    OOF の実収益（ret_o1_20）は lab と同じ作り（翌営業日の寄り → 20営業日目の5日平均終値）で日足から計算する。
+    """
     rng = np.random.default_rng(seed)
     days = pd.bdate_range("2021-01-04", "2026-09-30")
-    pd.DataFrame({"Date": days, "Code": "10010"}).to_parquet(os.path.join(dir_, "bars_2021.parquet"))
-    span = days[(days >= D("2021-05-06")) & (days <= D("2026-09-14"))]
     codes = [f"{10010 + 10 * i}" for i in range(20)]
-    keys = pd.DataFrame([(c, d) for c in codes for d in rng.choice(span, 110, replace=False)], columns=["Code", "Date"])
-    keys["Date"] = pd.to_datetime(keys["Date"])
-    keys = keys.drop_duplicates().sort_values(["Date", "Code"]).reset_index(drop=True)
+    bars, keys = [], []
+    for c in codes:
+        close = 100.0 * np.exp(np.cumsum(rng.normal(0, 0.025, len(days))))
+        open_ = np.r_[close[0], close[:-1]] * (1 + rng.normal(0, 0.005, len(days)))
+        high = np.maximum(open_, close) * (1 + np.abs(rng.normal(0, 0.02, len(days))))
+        bars.append(pd.DataFrame({"Date": days, "Code": c, "AdjO": open_, "AdjH": high, "AdjC": close}))
+        ma5 = pd.Series(close).rolling(5, min_periods=1).mean().to_numpy()
+        ok = np.flatnonzero((days >= D("2021-05-06")) & (days <= D("2026-08-31")))
+        for i in rng.choice(ok, 110, replace=False):
+            keys.append((c, days[i], ma5[i + 20] / open_[i + 1] - 1.0))
+    pd.concat(bars, ignore_index=True).to_parquet(os.path.join(dir_, "bars_2021.parquet"))
+    keys = pd.DataFrame(keys, columns=["Code", "Date", "ret_o1_20"]).sort_values(["Date", "Code"]).reset_index(drop=True)
     n = len(keys)
     base = rng.normal(size=n)
     for a in E79.MODELS:
         o = keys.copy()
         o["score"] = base + rng.normal(scale=0.5, size=n)
         o["label"] = (rng.random(n) < 0.15 + 0.1 * (o["score"] > 1.5)).astype(float)
-        o["ret_o1_20"] = rng.normal(size=n)
         o.to_parquet(E79.oof_path(a, dir_))
     disc = pd.DataFrame([(c, d) for c in codes for d in pd.date_range("2020-11-10", "2026-09-30", freq="91D")],
                         columns=["Code", "DiscDate"])
@@ -117,8 +126,8 @@ def synthetic(dir_: str, seed: int = 3) -> None:
     disc.loc[disc.index % 7 == 0, ["Sales", "NP"]] = np.nan          # 実績の無い開示（予想の修正だけ）は数えない
     disc.to_parquet(os.path.join(dir_, "fins_2021.parquet"))
     real = disc.dropna(subset=["Sales", "NP"], how="all").sort_values("DiscDate")
-    m = pd.merge_asof(keys.sort_values("Date"), real[["Code", "DiscDate"]], left_on="Date", right_on="DiscDate",
-                      by="Code", direction="backward", allow_exact_matches=True)
+    m = pd.merge_asof(keys[["Code", "Date"]].sort_values("Date"), real[["Code", "DiscDate"]], left_on="Date",
+                      right_on="DiscDate", by="Code", direction="backward", allow_exact_matches=True)
     ds = m[["Code", "Date"]].copy()
     ds["days_since_disc"] = ((m["Date"] - m["DiscDate"]).dt.days.astype(float)).clip(upper=400)
     ds["log_market_cap"] = np.log1p(rng.uniform(50, 2000, len(ds)))
@@ -139,6 +148,8 @@ class TestEndToEnd(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("■ 2.", out)
         self.assertIn("days_since_disc と一致", out)
+        self.assertIn("ret_o1_20 と一致", out)
+        self.assertIn("に届いた割合", out)
         self.assertIn(f"[{M.BASELINE}]", out)
         for c in [f"{10010 + 10 * i}" for i in range(20)]:
             self.assertNotIn(c, out)                                       # 銘柄コードを出さない

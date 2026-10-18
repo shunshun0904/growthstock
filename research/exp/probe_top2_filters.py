@@ -4,9 +4,14 @@
 
 運用者の問い（2026-10-18）「上位2%の中で、時価総額500億以内、直近20日以内に決算発表あり、配当金あり、信用倍率10倍以内、
 PER30倍以内のものに限定するとどうなりますか？」。運用者の決定（同日）: PER は実績PER、20日は営業日で数える。
+続けて「目的変数の定義ではなく、売り指値到達の+10%に到達したかどうかで、Precisionを算出すると、80%は行くのではないか」
+→ ラベルの Precision に並べて、+10% の指値に届いた割合（実験83 の tp10c と同じ判定）も数える。
 本番の設定・規則・画面には何も書かない。
 
-- 行: 12本の out-of-fold（Release の data-raw。oof.parquet / <名前>_oof.parquet）。Precision は各モデル自身のラベルで数える
+- 行: 12本の out-of-fold（Release の data-raw。oof.parquet / <名前>_oof.parquet）。Precision は2通り:
+  ラベル = 各モデル自身のラベル（到達しきい値に届いたか）、+10% = 翌営業日の寄りで買い、1〜20営業日目（1 = 買った日）の
+  高値が買値の 1.10倍以上になったか（実験83 の hit10。live_track.forward）。1取引の平均は +10% に届けば +10%、届かなければ
+  20営業日目の終値で売った収益（tp10c。手数料・税・すべりは含まない）
 - 上位2%: 画面と同じ百分位（同点は数えない。小数1桁に丸める）で LINE 以上。物差しは2通り:
   全体 = OOF 全体の分布（今の画面と同じ）、前向き = その窓より前の窓の OOF の分布（実験88・90 と同じ。窓3〜11）
 - 条件（学習データ research/_data/dataset.parquet の列と決算の開示日。どれも基準日 t の引けで分かる値）:
@@ -41,6 +46,8 @@ import models as M  # noqa: E402
 import walkforward as WF  # noqa: E402
 import e79_model_clusters as E79  # noqa: E402
 import e82_and_rule_variants as E82  # noqa: E402
+import e83_tp10_rule as E83  # noqa: E402
+import live_track as LT  # noqa: E402
 
 #: 上位の線（百分位）。98 = 上位2%
 LINE = 98.0
@@ -55,6 +62,8 @@ FILTER_JA = {"cap": f"時価総額 {CAP_MAX:g}億円以下", "earn": f"決算発
 #: 規則の3本（画面と同じ。src/lib/strategy.js の RULE_MODELS）
 RULE_MODELS = ("lgbm_k15", "xgb_k15", "cat_k15")
 OUTCOME = lab.OUTCOME
+#: 売りの指値（%）。運用と同じ（live_track.TAKE_PROFIT）
+TP = LT.TAKE_PROFIT
 MODEL_META = os.path.join(os.path.dirname(HERE), "model", "meta.json")
 
 
@@ -144,16 +153,19 @@ def pct_forward(dates: pd.Series, score: np.ndarray, meta: dict) -> Tuple[np.nda
     return out, w
 
 
-def cell(y: np.ndarray, r: np.ndarray, m: np.ndarray) -> str:
-    """行数・Precision（95% の幅）・平均の実収益。"""
+def cell(y: np.ndarray, hit: np.ndarray, tp: np.ndarray, m: np.ndarray) -> str:
+    """行数・ラベルの Precision（95% の幅）・+10% に届いた割合（95% の幅）・1取引の平均（tp10c）。"""
     n = int(m.sum())
     if n == 0:
-        return f"{0:>5}行  {'—':>22}  {'—':>7}"
+        return f"{0:>5}行  {'—':>20}  {'—':>20}  {'—':>7}"
     k = int(np.nansum(y[m]))
+    h = int(np.sum(hit[m]))
     lo, hi = wilson(k, n)
-    rr = r[m]
-    mr = float(np.nanmean(rr)) * 100.0 if np.isfinite(rr).any() else np.nan      # ret_o1_20 は比率 → %
-    return f"{n:>5}行  {k / n * 100:>5.1f}%（{lo * 100:>4.1f}〜{hi * 100:>4.1f}）  {mr:>+6.2f}%"
+    hlo, hhi = wilson(h, n)
+    t = tp[m]
+    mt = float(np.nanmean(t)) if np.isfinite(t).any() else np.nan
+    return (f"{n:>5}行  {k / n * 100:>5.1f}%（{lo * 100:>4.1f}〜{hi * 100:>4.1f}）  "
+            f"{h / n * 100:>5.1f}%（{hlo * 100:>4.1f}〜{hhi * 100:>4.1f}）  {mt:>+6.2f}%")
 
 
 def load_frame(data_dir: str) -> Tuple[pd.DataFrame, dict]:
@@ -209,6 +221,10 @@ def load_frame(data_dir: str) -> Tuple[pd.DataFrame, dict]:
         dtype="datetime64[ns]") for p in bars]))
     info["trading_days"] = int(len(days))
     f["earn_td"], f["earn_cal"] = trading_days_since(f, disc, days)
+    # +10% の指値の出口（実験83 と同じ。1 = 買った日〜20営業日目の高値）。確かめに使う 5日平均は ret_o1_20 と一致するはず
+    bars_px = LT.load_bars(data_dir, start=f["Date"].min() - pd.Timedelta(days=10))
+    f, chk = E83.attach_exits(f, bars_px, targets=(TP,))
+    info["exit_check"] = chk
     return f, info
 
 
@@ -238,6 +254,12 @@ def main(argv=None) -> int:
           f"（開示が無い行 {int(np.isnan(cal).sum()):,}）")
     if int(same.sum()) != int(ok.sum()):
         raise SystemExit("開示日の突き合わせが学習データと合わない")
+    chk = info["exit_check"]
+    k = E83.tp_key(TP)
+    print(f"  確かめ: 20営業日目の5日平均が ret_o1_20 と一致 {chk['hold5_match']:,} / {chk['hold5_both']:,}行、"
+          f"20営業日目の終値がある行 {chk['with_close']:,} / {chk['rows']:,}、+{TP:g}% に届いた行 {chk['hit_share'][k]:.1f}%")
+    if chk["hold5_match"] != chk["hold5_both"]:
+        raise SystemExit("出口の値動きが学習データの実収益と合わない")
     td = f["earn_td"].to_numpy(dtype=float)
     q = np.nanpercentile(td, [0, 25, 50, 75, 100])
     print(f"  開示からの営業日数: 分位 0/25/50/75/100% = {' / '.join(f'{v:.0f}' for v in q)}、"
@@ -246,7 +268,8 @@ def main(argv=None) -> int:
     masks = filter_masks(f)
     masks["all"] = np.logical_and.reduce([masks[c] for c in FILTERS])
     names = {**FILTER_JA, "all": "5つすべて"}
-    r = f[OUTCOME].to_numpy(dtype=float)
+    hit = f[f"hit{E83.tp_key(TP)}"].to_numpy(dtype=bool)
+    tp = pd.to_numeric(f[f"tp{E83.tp_key(TP)}c"], errors="coerce").to_numpy(dtype=float)
 
     print("\n■ 0. 条件だけ（モデルの線なし。OOF の全行）: 行の割合と、ラベルごとの正例率")
     for c in FILTERS:
@@ -257,7 +280,7 @@ def main(argv=None) -> int:
     for lab_algo, ja in ((M.BASELINE, "1.2σ"), ("lgbm_k15", "1.5σ"), ("lgbm_k18", "1.8σ")):
         y = f[f"label_{lab_algo}"].to_numpy(dtype=float)
         everyone = np.ones(n, dtype=bool)
-        print(f"  {ja} のラベル: 全行 {cell(y, r, everyone)} / 5つすべて {cell(y, r, masks['all'])}")
+        print(f"  {ja} のラベル: 全行 {cell(y, hit, tp, everyone)} / 5つすべて {cell(y, hit, tp, masks['all'])}")
 
     yardsticks = {}
     for a in E79.MODELS:
@@ -269,9 +292,9 @@ def main(argv=None) -> int:
     months = (fd.max() - fd.min()).days / 30.4375
     print(f"\n  前向きの物差しが付く行 {int(fwd_ok.sum()):,}（{fd.min().date()}〜{fd.max().date()}、{months:.1f}か月）")
 
-    print(f"\n■ 1. モデルごと: 百分位 {args.line:g} 以上の行を条件で絞る（Precision は各モデル自身のラベル。"
-          f"実収益は {OUTCOME} の平均）")
-    print(f"  {'条件':<22}  {'全体の物差し: 行・Precision（95%の幅）・実収益':<44}  前向きの物差し")
+    print(f"\n■ 1. モデルごと: 百分位 {args.line:g} 以上の行を条件で絞る")
+    print(f"  各セル: 行 / ラベルの Precision（95%の幅）/ +{TP:g}% に届いた割合（95%の幅）/ 1取引の平均"
+          f"（+{TP:g}% の指値・届かなければ20営業日目の終値）。左が全体の物差し、右が前向きの物差し")
     for a in E79.MODELS:
         y = f[f"label_{a}"].to_numpy(dtype=float)
         pa, pf = yardsticks[a]
@@ -279,7 +302,7 @@ def main(argv=None) -> int:
         print(f"\n  [{a}] 正例率 {np.mean(y) * 100:.1f}%")
         for c in ("none",) + FILTERS + ("all",):
             m = masks.get(c, np.ones(n, dtype=bool))
-            print(f"  {('（条件なし）' if c == 'none' else names[c]):<22}  {cell(y, r, top_a & m)}  |  {cell(y, r, top_f & m)}")
+            print(f"  {('（条件なし）' if c == 'none' else names[c]):<22}  {cell(y, hit, tp, top_a & m)}  |  {cell(y, hit, tp, top_f & m)}")
         print(f"  {'前向き・月あたりの行':<22}  条件なし {int(top_f.sum()) / months:.1f} / 5つすべて "
               f"{int((top_f & masks['all']).sum()) / months:.1f}")
 
@@ -291,7 +314,7 @@ def main(argv=None) -> int:
         print(f"\n  3本とも {line:g} 以上")
         for c in ("none",) + FILTERS + ("all",):
             m = masks.get(c, np.ones(n, dtype=bool))
-            print(f"  {('（条件なし）' if c == 'none' else names[c]):<22}  {cell(y, r, all3_a & m)}  |  {cell(y, r, all3_f & m)}")
+            print(f"  {('（条件なし）' if c == 'none' else names[c]):<22}  {cell(y, hit, tp, all3_a & m)}  |  {cell(y, hit, tp, all3_f & m)}")
         print(f"  {'前向き・月あたりの行':<22}  条件なし {int(all3_f.sum()) / months:.1f} / 5つすべて "
               f"{int((all3_f & masks['all']).sum()) / months:.1f}")
     return 0
