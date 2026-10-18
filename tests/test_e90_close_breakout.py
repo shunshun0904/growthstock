@@ -51,7 +51,7 @@ class TestLineup(unittest.TestCase):
         self.assertEqual((E.RULE_LINE, E.TP, E.MIN_BREAK), (95.0, 10.0, 1))      # 画面の規則と同じ
         self.assertEqual((E.MIN_TRAIN_WINDOWS, E.MIN_GROUP), (2, 5))
         self.assertEqual((E.k_tag(1.5), E.k_tag(1.2)), ("k15", "k12"))
-        self.assertEqual(len(F.columns(F.DEFAULT_PRESET)), 239)
+        self.assertEqual(len(F.columns(F.DEFAULT_PRESET)), 249)    # 2026-10-18 から（実験90 の時点は239列）
 
     def test_production_default_is_untouched(self):
         self.assertEqual((B.BREAKOUT_REF, B.BREAKOUT_ON_HIGH), E.POP_DEF["high"])

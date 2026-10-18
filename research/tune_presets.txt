@@ -1,4 +1,4 @@
-all_plus_prog_listing_vol_book
+all_plus_prog_listing_vol_book_shape_dd_recent
 all_no_sector_index
 all_no_market
 # 探索するプリセット。1行1つ。
@@ -9,6 +9,9 @@ all_no_market
 # 使ったモデルでお願いします。でないとチューニングするいみがないので。
 # oofで最良にすることがチューニングの目的ではないです」。
 # 153列 -> 205列 に切り替えたとき、ここだけ all（153列）のまま残っていた。
+# 2026-10-18 に 239列（all_plus_prog_listing_vol_book）-> 249列（all_plus_prog_listing_vol_book_shape_dd_recent）に切り替えた
+# （運用者の決定 2026-10-17。抜けた土台の形の2列・下げの深さの3列・直近の増減の5列。docs/MODEL_ADOPTION_RULES.md §62〜§64）。
+# 日曜 10/18 の探索は239列で済ませ、その後に切り替えた。249列の最初の探索は 日曜 10/25（1.5σ・1.8σ は土曜 10/24 の e15_tune_all）。
 # 2026-09-26 に 206列（all_plus_prog_listing）-> 239列（all_plus_prog_listing_vol_book）に切り替えた
 # （運用者の決定。ボラの分解6列 + 本の第2・3章の抜け27列。docs/MODEL_ADOPTION_RULES.md §20）。
 # 206列は一度も週次で探索しないまま外した（9/27 の日曜が最初の探索になる予定だった）。
@@ -18,7 +21,7 @@ all_no_market
 # 後、日曜の再学習がまだ回っていなかった。いま動いている本番モデルは 2026-09-20 に
 # all の151列で学習したもの）。
 #
-#   all_plus_prog_listing_vol_book 本番（239列）
+#   all_plus_prog_listing_vol_book_shape_dd_recent 本番（249列。2026-10-18 から）
 #   all_no_sector_index  研究用の比較（153列から業種指数4列を抜いた版）
 #   all_no_market        研究用の比較（153列から市場環境11列を抜いた版）
 #

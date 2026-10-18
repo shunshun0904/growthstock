@@ -47,7 +47,7 @@ class TestLineup(unittest.TestCase):
 
     def test_new_columns_are_not_production_columns(self):
         base = F.columns(F.DEFAULT_PRESET)
-        self.assertEqual(len(base), 239)
+        self.assertEqual(len(base), 249)            # 2026-10-18 から（実験89 の時点は239列）
         self.assertFalse(set(base) & set(I.COLUMNS))
         self.assertFalse(any(c.startswith("inst_") for c in base))         # 本番の設定には書いていない
 

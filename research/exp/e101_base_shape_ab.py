@@ -111,6 +111,8 @@ MIN_WINDOW_ROWS = 100
 KS = (1.5, 1.2)
 #: 判定に使う評価の行（回す前に決めた。2列は全行で作れるので全行）
 PRIMARY_ROWS = "all"
+#: 比べる土台。回した時点の本番の239列（2026-10-18 から既定は249列に変わったので、名前で固定する）
+BASE_PRESET = "all_plus_prog_listing_vol_book"
 #: 足す2列（下の shape_columns が作る）と、画面・ログ用の名前
 NEW_COLS = ("broken_high_age", "prev_nh_ratio")
 NEW_JA = {"broken_high_age": "抜いた78週高値の古さ（営業日）", "prev_nh_ratio": "前回の更新日の高値に対する今回の高値（%）"}
@@ -562,7 +564,7 @@ def main(argv=None) -> int:
     if bad:
         raise SystemExit(f"知らないモデル: {bad}")
     shifts = [int(x) for x in args.shifts.split(",") if x.strip()]
-    base = F.columns(F.DEFAULT_PRESET)
+    base = F.columns(BASE_PRESET)
     new = list(NEW_COLS)
     dup = sorted(set(base) & set(new))
     if dup:
@@ -572,7 +574,7 @@ def main(argv=None) -> int:
     print("=" * 78)
     print("実験101 抜いた78週高値の古さ・前回の更新日の高値に対する今回の高値の2列を本番の239列に足す前後"
           "（5分割 CV の探索 + OOF + 32窓・対照 P）")
-    print(f"  列: {F.DEFAULT_PRESET} {len(base)}列 指紋 {F.signature(base)} / + {', '.join(new)} → {len(base) + len(new)}列 "
+    print(f"  列: {BASE_PRESET} {len(base)}列 指紋 {F.signature(base)} / + {', '.join(new)} → {len(base) + len(new)}列 "
           f"指紋 {F.signature(base + new)}")
     for arm in ARMS:
         print(f"  {LABELS[arm]}")

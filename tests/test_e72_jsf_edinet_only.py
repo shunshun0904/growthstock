@@ -36,7 +36,7 @@ class TestColumns(unittest.TestCase):
     def test_sets(self):
         s = E.column_sets()
         self.assertEqual(s["base"], F.columns(F.DEFAULT_PRESET))
-        self.assertEqual(len(s["base"]), 239)
+        self.assertEqual(len(s["base"]), 249)       # 2026-10-18 から（それまでは239列）
         self.assertEqual(s["jsf"], JF.columns("all"))
         self.assertEqual(len(s["jsf"]), 17)
         self.assertEqual(len(s["ed"]), len(EF.columns("all")) - len(EF.columns("mcap")))

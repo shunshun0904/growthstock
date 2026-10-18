@@ -388,7 +388,7 @@ PRESETS: Dict[str, List[str]] = {
                                                 for g in ALL_GROUPS] + EXTRA_GROUPS
                                                + ["listing", "vol_factors", "fund_book", "breakout_shape", "drawdown"],
     # --- 2026-10-17 の運用者の決定（実験103 §64）。244列 + 直近の増減5列。249列 --- #
-    # 並びは実験103 の腕 C と同じ（244列の後ろに5列）。既定への切り替えは日曜 10/18 の再学習の後
+    # 並びは実験103 の腕 C と同じ（244列の後ろに5列）。2026-10-18（日曜の再学習の後）から既定（DEFAULT_PRESET）
     "all_plus_prog_listing_vol_book_shape_dd_recent": [("progress_seasonal_pct" if g == "progress" else g)
                                                        for g in ALL_GROUPS] + EXTRA_GROUPS
                                                       + ["listing", "vol_factors", "fund_book", "breakout_shape",
@@ -493,7 +493,20 @@ PRESETS: Dict[str, List[str]] = {
 #: どちらも LightGBM は改善せず、xgb / cat は対照（列を日付内で入れ替えたもの）を上回った。
 #: 運用の選定は3モデルの合議なので、2モデルの改善で採用する。239列の探索・学習は 2026-09-27（日曜）の
 #: 定時の週次実行から（research/tune_presets.txt の先頭。実験57 §21 と同じ結果になった）。
-DEFAULT_PRESET = "all_plus_prog_listing_vol_book"
+#:
+#: 2026-10-18、239列（all_plus_prog_listing_vol_book）-> 249列（all_plus_prog_listing_vol_book_shape_dd_recent）に切り替えた
+#: （運用者の決定 2026-10-17「本番に入れる」×3。docs/MODEL_ADOPTION_RULES.md §62〜§64）。239列の後ろに:
+#:   - 抜けた土台の形の2列（broken_high_age・prev_nh_ratio。build_dataset._breakout_shape。実験101）: lgbm 1.5σ の
+#:     32窓の PR-AUC で C−A +0.0019（上の窓 21/32）・対照 P−A +0.0015・C−P +0.0004（SE 0.0014）
+#:   - 下げの深さの3列（base_depth・pullback_depth・max_dd_120。build_dataset._drawdown。実験102）: 同じく
+#:     C−A −0.0012（上の窓 15/32）・P−A −0.0008・C−P −0.0005
+#:   - 直近の増減の5列（ret_1d・ret_2d・gap_open・ret_5d・vol_chg_1d。build_dataset._recent_change。実験103）: 同じく
+#:     C−A +0.0021（上の窓 16/32）・P−A +0.0032・C−P −0.0012
+#: 実験102・103 は §7 の1モデル分の3条件を満たさず、勧めは「入れない」だった。どれも運用者が結果を見たうえで本番に入れることを
+#: 選んだ（分離力の足切りで決めたのではない）。切り替えたのは日曜 10/18 の 1.2σ の再学習（239列）が終わった後。249列の探索・
+#: 学習は 土曜 10/24 の 1.5σ・1.8σ と日曜 10/25 の 1.2σ から（それまでのモデルは239列のまま、日次の予測はモデルごとに学習した
+#: 列で採点する）。
+DEFAULT_PRESET = "all_plus_prog_listing_vol_book_shape_dd_recent"
 
 #: 値の定義を変えた列と、その日（予測日）。学習と予測の一致チェック（check_train_serve）は、
 #: この日より前に控えた行をその列では比べない。前の定義で控えた値と新しい定義で作り直した

@@ -1430,13 +1430,20 @@ class 本番のプリセット(unittest.TestCase):
     進捗期待を新しい定義（progress_vs_base -> progress_pct）にし、上場からの年数を足す。
     """
 
-    def test_本番は_all_plus_prog_listing_vol_book(self):
-        """2026-09-26、206列 -> 239列（ボラの分解6列 + 本の27列）。運用者の決定（§20）。"""
+    def test_本番は_all_plus_prog_listing_vol_book_shape_dd_recent(self):
+        """2026-10-18、239列 -> 249列（抜けた土台の形2列 + 下げの深さ3列 + 直近の増減5列）。運用者の決定（2026-10-17、§62〜§64）。"""
         import features as F
-        self.assertEqual(F.DEFAULT_PRESET, "all_plus_prog_listing_vol_book")
-        self.assertEqual(len(F.columns(F.DEFAULT_PRESET)), 239)
-        base = F.columns("all_plus_prog_listing")
+        self.assertEqual(F.DEFAULT_PRESET, "all_plus_prog_listing_vol_book_shape_dd_recent")
+        self.assertEqual(len(F.columns(F.DEFAULT_PRESET)), 249)
         self.assertEqual(F.columns(F.DEFAULT_PRESET),
+                         F.columns("all_plus_prog_listing_vol_book") + ["broken_high_age", "prev_nh_ratio", "base_depth", "pullback_depth", "max_dd_120", "ret_1d", "ret_2d", "gap_open", "ret_5d", "vol_chg_1d"])
+
+    def test_239列は_all_plus_prog_listing_vol_book(self):
+        """2026-09-26、206列 -> 239列（ボラの分解6列 + 本の27列）。運用者の決定（§20）。2026-10-18 まで本番。"""
+        import features as F
+        self.assertEqual(len(F.columns("all_plus_prog_listing_vol_book")), 239)
+        base = F.columns("all_plus_prog_listing")
+        self.assertEqual(F.columns("all_plus_prog_listing_vol_book"),
                          base + F.GROUPS["vol_factors"] + F.GROUPS["fund_book"])
         self.assertEqual(len(base), 206)
 

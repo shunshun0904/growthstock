@@ -3,7 +3,7 @@
 線形・MLP 用の前処理 v2（research/linear_preprocess.py）のテスト。
 
 固定すること
-  - 本番の239列はすべて型の表にあり、既定（符号つき・切るだけ）に落ちる列が無い
+  - 本番の249列（2026-10-18 から。それまでは239列）はすべて型の表にあり、既定（符号つき・切るだけ）に落ちる列が無い
   - 統計（分位点・四分位範囲・中央値・最大）は fit に渡した訓練側だけで決まる
   - 切る / asinh / log1p は NaN を素通しし、単調
   - 欠損の埋め方: 意味で 0 / 上限 / 最頻値 / 中央値。指示子は訓練側に欠損があった列だけ
@@ -32,7 +32,7 @@ import tuning_multi as TM  # noqa: E402
 class TestClassification(unittest.TestCase):
     def test_every_production_column_is_classified(self):
         cols = F.columns(F.DEFAULT_PRESET)
-        self.assertEqual(len(cols), 239)
+        self.assertEqual(len(cols), 249)
         self.assertEqual(LP.unclassified(cols), [])
 
     def test_categorical_matches_the_tuner(self):

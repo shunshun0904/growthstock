@@ -5,6 +5,7 @@
 - broken_high_age: 今回抜いた「それまでの w 行の高値の最大」を付けた行から何行か（同じ値なら一番新しい行。1〜w）
 - prev_nh_ratio:   1つ前の更新日（base_length の起点）の高値に対する今回の高値（%）。base_length が欠測なら欠測
 - keys の並びのまま返す。日足の表に無い行は欠測。t より先の行は見ない
+- 比べる土台は239列（名前で固定。2026-10-18 から既定は249列）で、2列はそこに無い
 
   python3 tests/test_e101_base_shape_ab.py
 """
@@ -20,6 +21,7 @@ sys.path.insert(0, os.path.join(ROOT, "research"))
 sys.path.insert(0, os.path.join(ROOT, "research", "exp"))
 
 import e101_base_shape_ab as E  # noqa: E402
+import features as F  # noqa: E402
 
 
 def panel():
@@ -71,6 +73,9 @@ class TestShape(unittest.TestCase):
         self.assertEqual(E.PRIMARY_ROWS, "all")
         self.assertEqual(E.KS, (1.5, 1.2))
         self.assertEqual(E.JUDGE_ALGOS, ("lgbm", "xgb", "cat"))
+        base = F.columns(E.BASE_PRESET)                 # 回した時点の本番の239列（2026-10-18 から既定は249列）
+        self.assertEqual(len(base), 239)
+        self.assertFalse(set(base) & set(E.NEW_COLS))
 
 
 if __name__ == "__main__":

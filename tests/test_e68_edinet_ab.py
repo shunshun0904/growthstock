@@ -47,7 +47,7 @@ class TestColumnSets(unittest.TestCase):
 
     def test_no_overlap_with_production_columns(self):
         base = set(F.columns(F.DEFAULT_PRESET))
-        self.assertEqual(len(base), 239)
+        self.assertEqual(len(base), 249)            # 2026-10-18 から（それまでは239列）
         self.assertFalse(base & set(E.column_set("all")))
 
     def test_unknown_name(self):
