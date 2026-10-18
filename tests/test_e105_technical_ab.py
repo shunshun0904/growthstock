@@ -6,6 +6,8 @@
   系統ごとの参考の腕は5つ（列は 249 + その系統）
 - 日足の突き合わせ: 学習データの行の順のまま111列を付け、日足に無い行は欠測。close_position が合わなければ止める
 - 報告の一通り: 保存済みの探索（A・B）から、全部の腕の out-of-fold・寄与・報告が最後まで通る（種1つ・ずらし0 と 2）
+- 1.2σ の回: --k 1.2 で保存の頭が e105_k12 になり、1.2 と 1.5 以外は受け付けない。1.2σ に引き直したラベルがデータセットの
+  label と食い違えば（値・決まる決まらない）止める。1.5σ では確かめない
 
   python3 tests/test_e105_technical_ab.py
 """
@@ -16,7 +18,8 @@ import shutil
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
+from unittest import mock
 
 import numpy as np
 import pandas as pd
@@ -25,6 +28,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "research"))
 sys.path.insert(0, os.path.join(ROOT, "research", "exp"))
 
+import build_dataset as B  # noqa: E402
 import e105_technical_ab as E  # noqa: E402
 import features as F  # noqa: E402
 import technicals as TX  # noqa: E402
@@ -52,6 +56,7 @@ class TestColumns(unittest.TestCase):
         self.assertEqual(E.PRIMARY, ("A", "C", "P"))
         self.assertEqual({a for a in E.ARMS if E.PARAMS_OF[a] != "A"}, {"B"})
         self.assertEqual(E.K, 1.5)
+        self.assertEqual(E.K_DEFAULT, 1.5)
         self.assertEqual(E.SEEDS, (42, 7, 123))
 
 
@@ -88,6 +93,53 @@ class TestPanel(unittest.TestCase):
                 bad = keys.copy()
                 bad.loc[0, "Date"] = pd.Timestamp("2030-01-01")                  # 日足に無い行
                 E.check_alignment(bad.assign(close_position=cp), self.p)
+
+
+class TestLabelK12(unittest.TestCase):
+    def frame(self):
+        rng = np.random.default_rng(3)
+        n = 400
+        df = pd.DataFrame({"vol_20d": rng.uniform(1, 5, n), "future_rise": rng.normal(0.08, 0.1, n),
+                           "end_level": rng.normal(0.05, 0.08, n), "uptrend_end": (rng.random(n) < 0.7).astype(float),
+                           "label": 0.0})
+        df["label"] = B.rise_label_for_k(df, 1.2)
+        df.loc[[3, 7], "label"] = np.nan                                         # 未確定の行
+        return df
+
+    def test_same(self):
+        df = self.frame()
+        with redirect_stdout(io.StringIO()):
+            out = E.check_label(df, 1.2)
+        self.assertEqual(out["same"], out["both"])
+        self.assertEqual(out["both"], 398)
+        self.assertEqual(out["defined_mismatch"], 0)
+        self.assertGreater(df["label"].sum(), 0)
+        self.assertIsNone(E.check_label(df, 1.5))                                 # 1.5σ では確かめない
+
+    def test_stops_on_mismatch(self):
+        df = self.frame()
+        i = int(np.flatnonzero(df["label"].to_numpy() == 0)[0])
+        bad = df.copy()
+        bad.loc[i, "label"] = 1.0                                                # 値が違う
+        with redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
+            E.check_label(bad, 1.2)
+        bad = df.copy()
+        bad.loc[10, "vol_20d"] = np.nan                                          # 引き直すと決まらない行
+        with redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
+            E.check_label(bad, 1.2)
+
+    def test_k_option(self):
+        old = (E.K, E.RUN, E.TAG, E.DEADLINE)
+        try:
+            with mock.patch.object(E, "prepare", side_effect=RuntimeError("stop")):
+                with redirect_stdout(io.StringIO()), self.assertRaises(RuntimeError):
+                    E.main(["--k", "1.2", "--arms", "A,C,P,B", "--tag", "e105t"])
+            self.assertEqual(E.K, 1.2)
+            self.assertEqual(E.RUN, "e105t_k12")
+            with redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+                E.main(["--k", "1.8"])                                           # 回す予定の無い値は受け付けない
+        finally:
+            E.K, E.RUN, E.TAG, E.DEADLINE = old
 
 
 PARAMS = {"n_estimators": 20, "num_leaves": 7, "learning_rate": 0.1, "min_child_samples": 20, "verbose": -1, "n_jobs": 1}

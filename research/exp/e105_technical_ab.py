@@ -37,13 +37,20 @@ tests/test_technicals.py）。運用者の指示「パラメータチューニ�
 情報が見え、探索し直した B−A は +0.0051（SE 0.0021、22/32）。系統ごとの腕はどれも単独ではほぼ変わらない（−0.0015〜+0.0014）。
 窓の中の上位2% の +10% 到達は A 40.6% → C 38.6%・B 39.3%（Precision は B 34.7% と +2.6pt）。寄与（gain）は111列で 22%。
 
+1.2σ の回（2026-10-18 追加。運用者の指示「lgbm 1.2σでも、確認したいです」。回す前に決めた）
+  同じ表・同じ腕の作りで、ラベルだけ 1.2σ（データセットの label。基準モデルの目的変数）に替える（--k 1.2。保存は e105_k12_*。
+  表は 1.5σ の回と同じもの（e105_frame.parquet）を使う）。腕は A・C・P・B（系統ごとの腕は 1.5σ でどれも単独ではほぼ変わらな
+  かったので省く）。判定は 1.5σ と同じ §7 の1モデル分の3条件を 1.2σ のラベルの32窓の PR-AUC に当てる。最初に、1.2σ に引き直した
+  ラベルがデータセットの label と全行一致することを確かめ、違えば止める（check_label）。
+
 出すもの（公開ログには件数・割合・日付・精度だけ。銘柄・値は出さない）
   0. 111列の付き方（欠測の割合・分位）、既存の249列との順位相関の最大（重なりの多い列の数）、学習の寄与（gain）の系統ごとの割合と
      上位の列
   1. 探索の CV（A・B）  2. 本番と同じ作りの OOF（ずらし0・種42）  3. 32窓の差  4. §7 の判定
   5. 窓の中の上位2% の Precision・+10% の指値に届いた割合・1取引の平均（実験83 の出口。参考）  6. 窓ごとの値
 
-    exp=e105_technical_ab.py                       ← 回すのはこの1本（lgbm 1.5σ）
+    exp=e105_technical_ab.py                       ← lgbm 1.5σ（run 39118153360）
+    exp=e105_technical_ab.py args="--k 1.2 --arms A,C,P,B"   ← lgbm 1.2σ
 列の付き方だけ見る: exp=e105_technical_ab.py args="--dry"
 試運転:             exp=e105_technical_ab.py args="--tag e105smoke --n-trials 2 --shifts 0 --arms A,C,P"
 
@@ -87,8 +94,9 @@ CV_OBJECTIVE = tuning.PRODUCTION_OBJECTIVE
 ALGO = "lgbm"
 SEEDS = (42, 7, 123)
 PROD_SEED = 42
-#: ラベルの到達しきい値（σ の倍数）。運用者の指示で 1.5σ だけ
-K = 1.5
+#: ラベルの到達しきい値（σ の倍数）。既定は 1.5σ（運用者の指示）。--k 1.2 で基準モデルの 1.2σ（2026-10-18 追加）
+K_DEFAULT = 1.5
+K = K_DEFAULT
 #: 比べる土台。回した時点の既定（249列）を名前で固定する
 BASE_PRESET = "all_plus_prog_listing_vol_book_shape_dd_recent"
 NEW_COLS = tuple(TX.COLUMNS)
@@ -137,6 +145,25 @@ def time_left() -> bool:
         TIMED_OUT = True
         log("[time] --budget-min を過ぎたので、新しい計算は始めない（保存済みの分だけで報告。続きは次の回）")
     return False
+
+
+def check_label(full: pd.DataFrame, k: float) -> dict | None:
+    """
+    k が基準モデルの倍数（DEFAULT_RISE.vol_norm_k = 1.2）のとき、引き直したラベルがデータセットの label と全行一致するか
+    （決まる・決まらないも含めて）。違えば止める。ほかの k では何もしない（None）。
+    """
+    if abs(float(k) - float(B.DEFAULT_RISE.vol_norm_k)) > 1e-9:
+        return None
+    a = B.rise_label_for_k(full, k)
+    b = pd.to_numeric(full["label"], errors="coerce")
+    both = a.notna() & b.notna()
+    out = {"rows": int(len(full)), "both": int(both.sum()), "same": int((a[both] == b[both]).sum()),
+           "defined_mismatch": int((a.notna() != b.notna()).sum())}
+    print(f"  確かめ: {k:.1f}σ に引き直したラベルとデータセットの label の一致 {out['same']:,} / {out['both']:,}行"
+          f"（決まる・決まらないの食い違い {out['defined_mismatch']:,}行）")
+    if out["same"] != out["both"] or out["defined_mismatch"]:
+        raise SystemExit(f"{k:.1f}σ に引き直したラベルがデータセットの label と合わない")
+    return out
 
 
 def with_label(df: pd.DataFrame, k: float) -> pd.DataFrame:
@@ -511,7 +538,7 @@ def report(res: dict, shifts: list, stamp: dict, extra: dict) -> dict:
     if all(a in arms for a in ("A", "C", "P")):
         j = judge7((s["pr_C"] - s["pr_A"]).to_numpy(), (s["pr_P"] - s["pr_A"]).to_numpy())
         summary["judge7"] = j
-        print(f"  lgbm 1.5σ: C−A {j['mean_ca']:>+8.4f} {'○' if j['positive'] else '×'} / P−A {j['mean_pa']:>+8.4f} "
+        print(f"  lgbm {K:.1f}σ: C−A {j['mean_ca']:>+8.4f} {'○' if j['positive'] else '×'} / P−A {j['mean_pa']:>+8.4f} "
               f"{'○' if j['beats_placebo'] else '×'} / 上の窓 {j['wins']}/{j['n']}（{j['need']} 以上）"
               f"{'○' if j['majority'] else '×'} → {'満たす' if j['pass'] else '満たさない'}")
     else:
@@ -560,8 +587,9 @@ def report(res: dict, shifts: list, stamp: dict, extra: dict) -> dict:
 
 
 def main(argv=None) -> int:
-    global TAG, RUN, DEADLINE
-    ap = argparse.ArgumentParser(description="実験105: テクニカル指標111列を249列に足す前後（lgbm 1.5σ。検証だけ）")
+    global TAG, RUN, DEADLINE, K
+    ap = argparse.ArgumentParser(description="実験105: テクニカル指標111列を249列に足す前後（lgbm 1.5σ・1.2σ。検証だけ）")
+    ap.add_argument("--k", type=float, default=K_DEFAULT, choices=(1.2, 1.5), help="ラベルの到達しきい値（σ の倍数）。既定 1.5")
     ap.add_argument("--arms", default=",".join(ARMS), help="この回に計算する腕（A は必ず含める）")
     ap.add_argument("--n-trials", type=int, default=50)
     ap.add_argument("--shifts", default="0,2,4")
@@ -571,6 +599,7 @@ def main(argv=None) -> int:
     ap.add_argument("--dry", action="store_true", help="111列の付き方だけ出して終わる")
     args = ap.parse_args(argv)
     TAG = args.tag
+    K = float(args.k)
     RUN = f"{TAG}_k{int(round(K * 10)):02d}"
     if args.budget_min > 0:
         DEADLINE = time.time() + args.budget_min * 60
@@ -603,9 +632,10 @@ def main(argv=None) -> int:
     full, stamp = prepare(base, args.rebuild)
     full["Date"] = pd.to_datetime(full["Date"])
     full["Code"] = full["Code"].astype(str)
+    label_check = check_label(full, K)
     df = with_label(full, K)
     df.attrs["built_utc"] = stamp["built_utc"]      # out-of-fold の名前に表の版を入れる（作り直しの前の結果を混ぜない）
-    extra = {"coverage": coverage_report(df, base)}
+    extra = {"coverage": coverage_report(df, base), "label_check": label_check}
     cutoff, _, _ = T.holdout_bounds(df["Date"], T.HOLDOUT_MONTHS, T.EMBARGO_DAYS)
     print(f"\n  この回の行 {len(df):,}（ラベル {K:.1f}σ の正例率 {df['label'].mean()*100:.1f}%・{df['Date'].min().date()} 〜 "
           f"{df['Date'].max().date()}）。探索の期間（〜{cutoff.date()}）では {(df['Date'] <= cutoff).sum():,}行")
