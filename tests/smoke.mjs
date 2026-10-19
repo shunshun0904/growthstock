@@ -366,7 +366,8 @@ console.log('\n== リカレンス・ネットワーク ==');
 // 購入条件を満たした銘柄です」）。元の合成データ（2026-09-11 の5件。どれも満たさない）では図を出さずに理由を書く
 await page.reload({ waitUntil: 'networkidle' });
 await page.getByRole('tab', { name: 'リカレンス・ネットワーク' }).click();
-await page.waitForSelector('.net .card.empty', { timeout: 10000 });
+// 読み込み中の文言も同じ枠（.card.empty）に出るので、理由の文言が出るまで待つ（枠だけを待つと読み込み中を読んでしまう）
+await page.locator('.net .card.empty', { hasText: '購入条件' }).waitFor({ timeout: 10000 }).catch(() => {});
 const netEmpty = (await page.locator('.net .card.empty').textContent()) || '';
 check(netEmpty.includes('購入条件') && netEmpty.includes('高値更新 5 銘柄のうち'),
       `購入条件を満たした銘柄が無い日は、図を出さずに理由を書く (実際: ${netEmpty.slice(0, 70)})`);
