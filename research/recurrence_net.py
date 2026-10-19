@@ -7,8 +7,8 @@
 してほしい。市場全体よりも、その日の各候補銘柄単体で。指数リカレントネットワークが良いと思う。特徴量はいったん、重要度の高い
 テクニカル系のみ」。運用者の選択（AskUserQuestion）: ε-リカレンス・ネットワーク / 実験105 の gain 上位9列 / 取れる全期間 /
 画面の新しいタブ / データは Release に置く（全期間だと1日あたり約0.7〜1.6MB になり、毎日コミットすると履歴が年に数百MB 膨らむ。
-モデル本体を Release に置くのと同じ考え方。この見込みは高値更新の全銘柄で作る前提で、下の対象に絞った後は 2026-10-09〜16 の
-5日で5銘柄・0.5MB）。
+モデル本体を Release に置くのと同じ考え方。この見込みは高値更新の全銘柄で作る前提で、下の対象に絞り色付けの値を足した後は
+2026-10-09〜16 の5日で5銘柄・0.7MB）。
 対象（同日の運用者の指定「候補といったのは、予測サンプルではなく、その中でも購入条件を満たした銘柄です」）: その日の高値更新の
 銘柄（予測ファイルの候補）のうち、購入条件（今日の戦略の規則。1.5σ の3本 RULE_MODELS の百分位がすべて AGREE_PCT 以上）を
 満たした銘柄だけ。画面の strategy.js の strategySignal の passed・候補銘柄のニュース（news_links.rule_codes）と同じ。
@@ -32,6 +32,13 @@
      l12 / l15 … 目的変数（1.2σ・1.5σ。build_dataset.attach_rise_label・rise_label_for_k。20営業日たつまでは未確定）
      fresh … 78週高値の更新日（直前20営業日に更新なし。build_dataset.mark_new_highs の is_fresh_break。モデルの母集団の日。
              流動性・市場区分の除外は掛けていない）
+     rise / fall … 先20営業日の最大上昇率・最大下落率（%）。t+1〜t+20 の終値の最大・最小 ÷ 翌営業日の始値 − 1。rise は目的変数の
+             到達を測る build_dataset の future_rise そのもの（運用者の選択 2026-10-19「終値・翌日寄り基準」）。20営業日たつまでは
+             未確定
+     r20  … 20営業日目の騰落率（%）。t+20 の終値 ÷ 翌営業日の始値 − 1（live_track.forward の ret_close。指値なしで持ち切った
+             ときの値）。20営業日たつまでは未確定。20営業日目に売買が成立しなかった日（2020-10-01 の終日の売買停止・売買の
+             少ない銘柄）も分からない（ret と同じ。rise / fall は窓の中の売買の無い日を飛ばして数える）。画面はこの3つでも
+             ノードを色分けする（5段・4段と未確定）
   要約（summary）: 今日のノードの次数（ε の中にある過去の日の数。タイラー窓のぶん、近傍はすべて結果が出そろった日）と、その銘柄の
         ノードの中での位置（中位の順位の百分位）、今日の近傍の結果（+10% 到達・目的変数の正例の割合・収益の中央値）と銘柄の全期間の
         割合、今日に近い過去の更新日（母集団の日）。画面は辺の密度を変えるたびに同じ式で数え直す（src/lib/recurrence.js。
@@ -43,7 +50,7 @@
 
 出すもの（--out-dir。archive は --archive）
   index.json            日ごとの購入条件を満たした銘柄と要約・その日の高値更新の件数（nBreak）。画面は最初にこれだけ読む
-  <日付>_<jqCode>.json  銘柄ごとのノード（状態・結果・終値）。約2,200ノードの銘柄で約100KB（日足の短い銘柄は小さい）
+  <日付>_<jqCode>.json  銘柄ごとのノード（状態・結果・色付けの値・終値）。約2,200ノードの銘柄で約130KB（日足の短い銘柄は小さい）
 
 作れなくても日次予測は止めない（predict.yml の段は continue-on-error。銘柄ごとの失敗は理由を残して先へ進む）。
 
@@ -73,7 +80,7 @@ import linear_preprocess as LP  # noqa: E402
 import live_track as LT  # noqa: E402
 import technicals as TX  # noqa: E402
 
-VERSION = 1
+VERSION = 2                         # 2: 先20営業日の値動き（rise・fall・r20）を足した
 #: 状態の9列。実験105 の学習の寄与（gain。360列の lgbm）の上位で、1.5σ の上位8列（360列中 28・31・32・38・40・42・44・50位）と、
 #: 1.2σ でだけ上位に入った出来高の60日 ÷ 250日（37位）。docs/MODEL_ADOPTION_RULES.md §68
 FEATURES: Tuple[str, ...] = ("tx_vol_60", "tx_mdi_14", "tx_vortex_pos_14", "tx_atr_ratio_14_50", "tx_ichi_kijun_gap",
@@ -299,7 +306,8 @@ def load_bars(data_dir: str, codes: Iterable[str]) -> pd.DataFrame:
 def build_panel(bars: pd.DataFrame, segments: Optional[pd.DataFrame] = None) -> pd.DataFrame:
     """
     日足（予測日で切ったもの）から、学習データと同じ作りの日足パネル（build_dataset.price_panel。一般市場で数え始める日も同じ）に
-    78週高値の更新日・目的変数（LABEL_KS）・テクニカル指標9列を付ける。予測日より後の行は渡さないこと（目的変数が先を見る）。
+    78週高値の更新日・目的変数（LABEL_KS）・先20営業日の最大上昇率（future_rise）と最大下落率（future_fall）・テクニカル指標9列を
+    付ける。予測日より後の行は渡さないこと（目的変数が先を見る）。
     """
     gm = B.general_market_start(bars, segments)
     start = gm.loc[gm["tpm"]].set_index("Code")["start"] if B.GENERAL_MARKET_START else None
@@ -308,10 +316,22 @@ def build_panel(bars: pd.DataFrame, segments: Optional[pd.DataFrame] = None) -> 
     df = B.attach_rise_label(df)
     for key, k in LABEL_KS:
         df[key] = B.rise_label_for_k(df, k)
+    # 最大下落率: future_rise（attach_rise_label）と同じ窓（t+1〜t+horizon の終値。売買不成立の日は飛ばす）・同じ基準
+    # （entry_price = 翌営業日の始値）・同じ「先の行が horizon あるか」の判定で、最大を最小にしたもの
+    h = int(B.RISE_HORIZON)
+    g = df.groupby("Code", sort=False)
+    have_forward = g.cumcount(ascending=False) >= h
+    fmin = g["close"].transform(lambda s: s[::-1].rolling(h, min_periods=1).min()[::-1].shift(-1)).where(have_forward)
+    df["future_fall"] = fmin / df["entry_price"] - 1.0
     tx = TX.compute(df[[c for c in B.TECH_PANEL_COLS if c in df.columns]])
     for c in FEATURES:
         df[c] = tx[c].to_numpy()
     return df
+
+
+def _pct_list(a: np.ndarray) -> List[Optional[float]]:
+    """% の値（0.1 刻みに丸めたもの）を書き出す形に（分からない日は None、整数は int）。"""
+    return [None if not np.isfinite(x) else (int(round(x)) if float(x).is_integer() else float(x)) for x in a]
 
 
 def _sig(x: float, digits: int = 4) -> Optional[float]:
@@ -343,6 +363,10 @@ def candidate_payload(g: pd.DataFrame, bars_code: pd.DataFrame, cand: dict, as_o
     fw = LT.forward(bars_code, pd.DataFrame({"Code": str(cand["jqCode"]), "Date": pd.to_datetime(g["Date"]).to_numpy()}),
                     target=TARGET, hold=HOLD, fallback="close")
     ret = np.round(pd.to_numeric(fw["ret"], errors="coerce").to_numpy(dtype=float), 1)
+    # 色付けの値（要約には使わない）: 先20営業日の最大上昇率・最大下落率（パネル）と20営業日目の騰落率（live_track.forward）
+    fwd = {"rise": np.round(100.0 * pd.to_numeric(g["future_rise"], errors="coerce").to_numpy(dtype=float), 1),
+           "fall": np.round(100.0 * pd.to_numeric(g["future_fall"], errors="coerce").to_numpy(dtype=float), 1),
+           "r20": np.round(pd.to_numeric(fw["ret_close"], errors="coerce").to_numpy(dtype=float), 1)}
     labels = {key: pd.to_numeric(g[key], errors="coerce").to_numpy(dtype=float) for key, _ in LABEL_KS}
     fresh = np.flatnonzero(g["is_fresh_break"].fillna(False).to_numpy(dtype=bool)).tolist()
     summ = summarize(zq, ret, labels, fresh, dates)
@@ -356,8 +380,9 @@ def candidate_payload(g: pd.DataFrame, bars_code: pd.DataFrame, cand: dict, as_o
         "q": Q, "features": list(FEATURES),
         "scale": [round_summary(p, 6) for p in params],
         "z": zq.reshape(-1).astype(int).tolist(),
-        "ret": [None if not np.isfinite(x) else (int(round(x)) if float(x).is_integer() else float(x)) for x in ret],
+        "ret": _pct_list(ret),
         **{key: [None if not np.isfinite(x) else int(x) for x in labels[key]] for key, _ in LABEL_KS},
+        **{key: _pct_list(v) for key, v in fwd.items()},
         "fresh": [int(i) for i in fresh],
         "raw": [_sig(float(x), 6) for x in X[-1]],             # 今日の9列の生の値（有効数字6桁。画面の説明）
         "summary": round_summary(summ),

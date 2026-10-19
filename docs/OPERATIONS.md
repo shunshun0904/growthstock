@@ -15,7 +15,7 @@
 | 画面用の追跡 | `public/data/prediction_history.json`（上位5件/日・400日で削除） | git | 平日夜 | 画面に出すぶんだけ。**長期の台帳ではない** |
 | 再学習で加わったサンプル | `public/data/new_samples.json`（週次の再学習で新しく学習に入ったサンプルから正例・負例を最大5件ずつ。日足（更新日の78週前〜判定の20営業日の後5日）・到達の線・終盤の線・成否の内訳） | git → GitHub Pages | 日曜の Retrain Weekly の後に `New Training Samples` が workflow_run で続けて走る（基準モデル（1.2σ の LightGBM）の学習日が変わったときだけ作り直す。手で起動すると今の週を作り直す） | 画面のタブ「再学習で加わったサンプル」（運用者の依頼 2026-10-13。同日夜に名前を「例」から「サンプル」に、チャートを78週に）。加わったサンプル = 前回の学習期間の終わり（meta.json の git の履歴）より後・今回の終わりまでの更新日。選び方は学習期間の終わりを種にした無作為抽出。線は学習のラベルと同じ式（`research/new_samples.py` → `export_label_samples.build_case`）。内訳から引き直したラベルがデータセットと食い違えば止まる |
 | 候補銘柄のニュースのリンク | `public/data/news_links.json`（候補ごとのリンクと、開いて確かめた結果・理由） | git → GitHub Pages | 平日の Predict Breakouts の後に `Check News Links` が workflow_run で続けて走る（手でも起動できる） | 画面のタブ「候補銘柄のニュース」。今日の戦略の候補（1.5σ の3本すべて95以上）のリンクを毎晩開いて確かめ、通らなかったものは出さない（画面に確かめの印は出さない）。URL の正本は `research/news_links.py` |
-| リカレンス・ネットワーク | `recurrence.tar.gz`（中は `recurrence/index.json` と、購入条件を満たした銘柄ごとの `recurrence/<日付>_<コード>.json`。予測ファイルの5日ぶん・1銘柄 約100KB） | **GitHub Release（`data-raw`）** → デプロイで `dist/data/recurrence/` | 平日の Predict Breakouts の中（予測の後） | 画面のタブ「リカレンス・ネットワーク」（運用者の依頼 2026-10-19）。取れる全期間（1銘柄 約2,200営業日 × テクニカル指標9列）で作るので git に入れない（運用者の選択「Release に置く」。選んだときは高値更新の全銘柄で1日あたり約1MB の見込みだった。同日に対象を購入条件を満たした銘柄だけに絞り、10/09〜16 の5日で5銘柄・0.5MB、archive 0.1MB）。過去の日は前の archive から引き継ぐ。下の「リカレンス・ネットワーク」 |
+| リカレンス・ネットワーク | `recurrence.tar.gz`（中は `recurrence/index.json` と、購入条件を満たした銘柄ごとの `recurrence/<日付>_<コード>.json`。予測ファイルの5日ぶん・1銘柄 約130KB） | **GitHub Release（`data-raw`）** → デプロイで `dist/data/recurrence/` | 平日の Predict Breakouts の中（予測の後） | 画面のタブ「リカレンス・ネットワーク」（運用者の依頼 2026-10-19）。取れる全期間（1銘柄 約2,200営業日 × テクニカル指標9列）で作るので git に入れない（運用者の選択「Release に置く」。選んだときは高値更新の全銘柄で1日あたり約1MB の見込みだった。同日に対象を購入条件を満たした銘柄だけに絞り、色付けの値を足した後で、10/09〜16 の5日で5銘柄・0.7MB、archive 0.2MB）。過去の日は前の archive から引き継ぐ。下の「リカレンス・ネットワーク」 |
 | 特徴量の日本語名 | `public/data/feature_names.json`（列名 → 短い日本語名と説明） | git → GitHub Pages | 特徴量を足したとき（手で） | 画面の「効いた特徴量」を日本語名で出す。正本は `research/feature_dict.py`（`NAME_JA`・軸 × 接尾辞）で、`python3 research/feature_dict.py --names-json public/data/feature_names.json` で書き出す。辞書とずれると `tests/test_feature_names.py` が落ちる |
 | **長期の台帳** | 予測ログ（全候補・1行1銘柄） | **Google スプレッドシート** | 平日夜 | 手売買の記録を同じ行に書き足せる。実績の検証はここを正本にする |
 | 保有の推移 | チャットで報告した取引の、売りのルールでの日ごとの損益とグラフ。予測ログの行を保有中は赤・売却済みは青に塗る | Google スプレッドシートの別タブ「保有の推移」（取引は「取引の記録」タブ） | 平日夜（予測のあと） | 予測ログは手書きの欄を壊さないよう追記だけにしているので、毎日作り直す表は別のタブに置く（下の「保有の推移と取引の記録」） |
@@ -915,7 +915,7 @@ XGBoost 25分 / CatBoost 22分。`logit` は153列で70分だったので、そ�
   5日（5銘柄）を初めて作ると4秒、2回目は全日を引き継いだ（ログの作る時間 0秒。ファイルは前と同じバイト列）
 - **画面に入れる**: Deploy to GitHub Pages の段「Recurrence networks (release)」が archive を取って `dist/data/recurrence/` に
   展開する。中の名前が `recurrence/index.json` と `recurrence/<日付>_<コード>.json` 以外なら展開しない。画面はタブを開いたとき
-  に目次（`index.json`）を読み、銘柄を選ぶとその銘柄のファイル（約100KB）を読む
+  に目次（`index.json`）を読み、銘柄を選ぶとその銘柄のファイル（約130KB）を読む
 - **止めない**: どちらの段も continue-on-error。作れなかった日は画面に理由を出し（`status: error`）、archive が無ければタブは
   「まだネットワークのデータがありません」と出す。銘柄ごとの失敗（日足が無い・ノードが少ない）は目次の `skipped` に理由が残る
 - **初めて入れたとき**: Release に archive がまだ無ければ、予測済みの日（Trading-day gate が飛ばす日）でも作る段だけは走る。

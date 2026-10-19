@@ -366,6 +366,27 @@ class TestBuild(unittest.TestCase):
             # 1.2σ の目的変数は本番のラベル（attach_rise_label の label）と同じ
             base = g["label"].to_numpy(dtype=float)
             np.testing.assert_array_equal(np.isnan(base), np.isnan(labels["l12"]))
+            # 色付けの値: 日足から数え直す（t+1〜t+20 の終値の最大・最小と t+20 の終値 ÷ 翌営業日の始値 − 1）
+            b = cut[cut["Code"] == c["jqCode"]].sort_values("Date").reset_index(drop=True)
+            pos = {d: k for k, d in enumerate(b["Date"])}
+            o, cl = b["AdjO"].to_numpy(dtype=float), b["AdjC"].to_numpy(dtype=float)
+            for i, d in enumerate(g["Date"]):
+                k = pos[d]
+                got = [p["rise"][i], p["fall"][i], p["r20"][i]]
+                if k + RN.THEILER >= len(b):                     # 先の20営業日がまだ無い（最後の20営業日）
+                    self.assertEqual(got, [None, None, None], d)
+                    continue
+                e, w = o[k + 1], cl[k + 1:k + 21]
+                want = [100 * (w.max() / e - 1), 100 * (w.min() / e - 1), 100 * (cl[k + 20] / e - 1)]
+                for x, y, key in zip(got, want, ("rise", "fall", "r20")):
+                    self.assertLessEqual(abs(x - y), 0.05 + 1e-9, f"{c['jqCode']} {d} {key}")
+                self.assertLessEqual(got[1], got[2] + 1e-9)               # 最小 ≤ 20営業日目 ≤ 最大
+                self.assertLessEqual(got[2], got[0] + 1e-9)
+            self.assertEqual(sum(v is None for v in p["rise"][-B.RISE_HORIZON:]), B.RISE_HORIZON)
+            # 最大上昇率は目的変数の到達を測る future_rise そのもの（基準は翌営業日の寄り。運用者の選択「終値・翌日寄り基準」）
+            fr = np.round(100 * g["future_rise"].to_numpy(dtype=float), 1)
+            np.testing.assert_array_equal(np.array([np.nan if v is None else v for v in p["rise"]], dtype=float), fr)
+        self.assertEqual(B.LABEL_ENTRY, "next_open")
 
     def test_skips_with_reason(self):
         bars = fixture_bars()
