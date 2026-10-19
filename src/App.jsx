@@ -7,6 +7,7 @@ import KnnCompareView from './views/KnnCompareView.jsx';
 import FilingsView from './views/FilingsView.jsx';
 import SamplesView from './views/SamplesView.jsx';
 import NewsView from './views/NewsView.jsx';
+import NetworkView from './views/NetworkView.jsx';
 import AddStockModal from './components/AddStockModal.jsx';
 import { computeScores } from './lib/scoring.js';
 import { SERIES_COLORS, fmtDateTime } from './lib/format.js';
@@ -28,6 +29,10 @@ const TABS = [
   // 候補銘柄のニュース（候補ごとのニュース・適時開示・アナリスト予想・個人投資家の声へのリンク）。運用者の依頼 2026-10-17
   // 「候補銘柄のニュース として新たにタブを追加してほしいです。左から2番目で」
   { id: 'news', label: '候補銘柄のニュース' },
+  // 候補ごとのリカレンス・ネットワーク（点 = その銘柄の1営業日、線 = テクニカル指標9列の状態が似た日どうし。参考で、選定には
+  // 使わない）。運用者の依頼 2026-10-19「Obsidian の球状のプロットのようなことを、ノードを1営業日として…その日の各候補銘柄単体で」。
+  // データは Release の recurrence.tar.gz（research/recurrence_net.py）をデプロイで dist/data/recurrence/ に置く
+  { id: 'network', label: 'リカレンス・ネットワーク' },
   // 候補の比較（似た過去の事例の収益の分布。参考で、選定には使わない）。運用者の指示 2026-10-15
   // 「別タブとして、左から2番目の位置に追加して下さい。3枚で良いです」。2026-10-16「候補の比較タブはいったん、
   // なくしてください」で hidden に。画面のコード（KnnCompareView）と日次予測の knn の計算は残してあり、hidden を外せば戻る
@@ -254,7 +259,8 @@ export default function App() {
 
         {!loading && dataset && <DataNotices dataset={dataset} />}
 
-        {!loading && rows.length === 0 && tab !== 'prediction' && tab !== 'news' && tab !== 'knn' && tab !== 'samples' && (
+        {!loading && rows.length === 0 && tab !== 'prediction' && tab !== 'news' && tab !== 'knn' && tab !== 'samples'
+          && tab !== 'network' && (
           <div className="card empty">
             分析対象の銘柄がありません。
             <div style={{ marginTop: 'var(--s4)' }}>
@@ -327,6 +333,9 @@ export default function App() {
             <NewsView data={pred} links={newsLinks} />
           )
         )}
+
+        {/* 予測ファイルは候補の並び（今日の戦略の順）にだけ使う。読めなくてもネットワークの目次の順で出す */}
+        {tab === 'network' && <NetworkView data={pred} />}
 
         {tab === 'samples' && <SamplesView data={newSamples} />}
 

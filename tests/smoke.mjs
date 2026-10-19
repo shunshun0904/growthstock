@@ -21,6 +21,10 @@ const FILINGS_FIXTURE = path.join(ROOT, 'tests', 'fixtures', 'synthetic-filings.
 const SAMPLES_FIXTURE = path.join(ROOT, 'tests', 'fixtures', 'synthetic-new-samples.json');
 // 候補銘柄のニュースのリンクを確かめた結果。research/news_links.py の書き出しで作った（偽の取得。9324 の掲示板は開けない）
 const NEWS_FIXTURE = path.join(ROOT, 'tests', 'fixtures', 'synthetic-news-links.json');
+// リカレンス・ネットワーク（目次と候補ごとのファイル）。tests/test_recurrence_net.py --write-fixtures が作りものの日足から作る
+// （日付・銘柄コードは synthetic-predictions.json と同じ 2026-09-11 の 9324・9434）
+const RECURRENCE_FIXTURES = path.join(ROOT, 'tests', 'fixtures', 'recurrence');
+const RECURRENCE_EXPECTED = JSON.parse(fs.readFileSync(path.join(ROOT, 'tests', 'fixtures', 'recurrence-expected.json'), 'utf8'));
 const SHOTS = path.join(ROOT, 'docs');
 fs.mkdirSync(SHOTS, { recursive: true });
 
@@ -40,7 +44,8 @@ const server = http.createServer((req, res) => {
     '/data/new_samples.json': SAMPLES_FIXTURE,
     '/data/news_links.json': NEWS_FIXTURE,
   };
-  const file = fixtures[rel] || path.join(DIST, rel);
+  const rec = rel.startsWith('/data/recurrence/') ? path.join(RECURRENCE_FIXTURES, path.basename(rel)) : null;
+  const file = fixtures[rel] || rec || path.join(DIST, rel);
   if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
     res.writeHead(404).end('not found');
     return;
@@ -255,8 +260,10 @@ const tabNames = (await page.getByRole('tab').allTextContents()).map((t) => t.tr
 // 再学習で加わったサンプルは一番右（運用者の指示 2026-10-14「一番右側に持ってきてください」）
 // 候補銘柄のニュースは左から2番目（運用者の依頼 2026-10-17「候補銘柄のニュース として新たにタブを追加してほしいです。
 // 左から2番目で」）
-check(tabNames.join(',') === 'ブレイク予測,候補銘柄のニュース,タイムマシーン,再学習で加わったサンプル',
-      `タブは ブレイク予測 / 候補銘柄のニュース / タイムマシーン / 再学習で加わったサンプル の4つ (実際: ${tabNames.join(',')})`);
+// リカレンス・ネットワークは候補銘柄のニュースの右（運用者の依頼 2026-10-19。場所の指定は無かったので、候補ごとに見る
+// タブどうしを並べた。再学習で加わったサンプルは一番右のまま）
+check(tabNames.join(',') === 'ブレイク予測,候補銘柄のニュース,リカレンス・ネットワーク,タイムマシーン,再学習で加わったサンプル',
+      `タブは ブレイク予測 / 候補銘柄のニュース / リカレンス・ネットワーク / タイムマシーン / 再学習で加わったサンプル の5つ (実際: ${tabNames.join(',')})`);
 check(!tabNames.includes('決算サンキー') && !tabNames.includes('What-If シミュレーター')
         && !tabNames.includes('8軸オクタゴン比較') && !tabNames.includes('候補の比較'),
       '決算サンキー・What-If シミュレーター・8軸オクタゴン比較・候補の比較のタブは出ない');
@@ -352,6 +359,64 @@ check(newsFit.right <= newsFit.vw + 0.5 && !newsFit.scroll,
       `スマホの幅（390px）でカードが画面に収まり、横に崩れない (右端 ${newsFit.right.toFixed(1)} / 幅 ${newsFit.vw})`);
 await page.setViewportSize({ width: 1440, height: 1000 });
 await page.unroute('**/data/predictions.json*');
+
+console.log('\n== リカレンス・ネットワーク ==');
+// 運用者の依頼（2026-10-19）「Obsidian の球状のプロットのようなことを、ノードを1営業日として…その日の各候補銘柄単体で」。
+// 合成の予測ファイル（2026-09-11 の5件）のうち、ネットワークのフィクスチャがあるのは 9324・9434 の2件。候補の並びは今日の
+// 戦略の物差し（1.5σ の3本の最小の順）: 9324（83.6）・9082（76.8）・9434（70.5）・1671（59.9）・1699（35.5）。
+// 上の候補銘柄のニュースは予測ファイルを差し替えて読み込んだままなので、元の合成データで読み込み直してから見る
+await page.reload({ waitUntil: 'networkidle' });
+await page.getByRole('tab', { name: 'リカレンス・ネットワーク' }).click();
+await page.waitForSelector('.net-canvas canvas', { timeout: 10000 });
+const exp = (code, bp) => RECURRENCE_EXPECTED[`2026-09-11_${code}.json`][String(bp)];
+const crows = page.locator('.net-crow:not(.head)');
+check((await crows.count()) === 5, `候補の一覧は予測ファイルの5件 (実際: ${await crows.count()})`);
+const crowCodes = await crows.locator('.id b').allTextContents();
+check(crowCodes.join(',') === '9324,9082,9434,1671,1699', `候補は今日の戦略の順 (実際: ${crowCodes.join(',')})`);
+check((await page.locator('.net-crow:not(.head):not([disabled])').count()) === 2, 'ネットワークのある2件だけ選べる');
+check((await crows.first().getAttribute('aria-selected')) === 'true', '最初はネットワークのある先頭の候補（9324）を出す');
+const netSide = async () => (await page.locator('.net-side').innerText()) || '';
+let side = await netSide();
+check(side.includes(`${exp('93240', 100).deg} 日`) && side.includes('珍しい状態'),
+      `9324 の今日に似た日は ${exp('93240', 100).deg} 日（Python の要約と同じ）で、珍しい状態の説明が出る`);
+const inked = await page.evaluate(() => {
+  const c = document.querySelector('.net-canvas canvas');
+  const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+  let n = 0;
+  for (let i = 0; i < d.length; i += 4 * 7) if (d[i] > 40 || d[i + 1] > 40 || d[i + 2] > 60) n += 1;
+  return n;
+});
+check(inked > 200, `図に点と線が描かれている（明るい画素 ${inked}）`);
+await page.locator('.net-crow', { hasText: '9434' }).click();
+await page.waitForFunction(() => document.querySelector('.net-head strong')?.textContent.includes('9434'));
+await page.locator('.net-seg button', { hasText: '2%' }).click();
+side = await netSide();
+check(side.includes(`${exp('94340', 200).deg} 日`), `9434 を辺の密度 2% で数え直すと今日に似た日 ${exp('94340', 200).deg} 日（Python と同じ）`);
+const foot = (await page.locator('.net-foot').textContent()) || '';
+check(foot.includes(`線 ${exp('94340', 200).edges.toLocaleString('ja-JP')} 本`), `線の本数も Python と同じ（${exp('94340', 200).edges}）`);
+await page.locator('label', { hasText: '回転' }).click();
+await page.waitForSelector('.net-canvas[data-settled="1"]', { timeout: 20000 });
+const [todayX, todayY] = ((await page.locator('.net-canvas').getAttribute('data-today')) || '0,0').split(',').map(Number);
+await page.locator('.net-canvas canvas').scrollIntoViewIfNeeded();    // 図の下が画面の外だと、そこにある点に触れられない
+const cbox = await page.locator('.net-canvas canvas').boundingBox();
+await page.mouse.move(cbox.x + todayX, cbox.y + todayY);
+await page.waitForSelector('.net-tip', { timeout: 3000 }).catch(() => {});
+const netTip = (await page.locator('.net-tip').textContent().catch(() => '')) || '';
+check(netTip.includes('（今日）') && netTip.includes('2026/09/11'), `今日の点に触れると日付と（今日）が出る (実際: ${netTip.slice(0, 40)})`);
+await page.mouse.move(cbox.x + 2, cbox.y + 2);
+await page.locator('.net-seg button', { hasText: '時期' }).click();
+check((await page.locator('.net-legend .net-ramp').count()) === 1, '時期の色にすると凡例が古い → 新しいの帯になる');
+await page.locator('.net-seg button', { hasText: '2D' }).click();
+await page.locator('.net-seg button', { hasText: '力の調整' }).click();
+check((await page.locator('.net-forces input[type=range]').count()) === 4, '力の調整は Obsidian と同じ4つのつまみ');
+side = await netSide();
+check(!side.includes('NaN') && !side.includes('undefined'), 'ネットワークの欄に NaN / undefined が出ていない');
+await page.screenshot({ path: path.join(SHOTS, 'screenshot-network.png') });
+await page.setViewportSize({ width: 390, height: 844 });
+await page.waitForTimeout(200);
+const netFit = await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
+check(netFit, 'スマホの幅（390px）で横にはみ出さない');
+await page.setViewportSize({ width: 1440, height: 1000 });
 
 console.log('\n== コンソールエラー ==');
 check(consoleErrors.length === 0, `JS エラーなし (${consoleErrors.length}件)`);
