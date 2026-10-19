@@ -525,6 +525,15 @@ const r20Got = await legendOf();
 check(Object.keys(r20Got).join(',') === '+10% 以上,0〜+10%,−10〜0%,−10% 未満,未確定'
         && r20Got['未確定'] === fx94.r20.filter((v) => v === null).length,
       `20営業日目の騰落率は結果と同じ区切りの4段と未確定 (実際: ${JSON.stringify(r20Got)})`);
+// 色の向きはどの付け方も同じ（低い・届かない = 青、高い・届いた = 赤。運用者の指定 2026-10-20「揃えたいです」→ 目的変数も正例 = 赤）
+const swatches = () => page.locator('.net-legend .sw').evaluateAll((els) => els.map((e) => getComputedStyle(e).backgroundColor));
+const outcomeWant = [BWR[4], BWR[3], BWR[1], BWR[0], NA_VALUE].map(rgbOf).join(',');
+check((await swatches()).join(',') === outcomeWant, `20営業日目の段は +10% 以上 = 赤 → 薄い赤 → 薄い青 → −10% 未満 = 青 (実際: ${(await swatches()).join(' ')})`);
+await page.locator('.net-seg button', { hasText: '結果（+10% / 20営業日目）' }).click();
+check((await swatches()).join(',') === outcomeWant, `結果の段も同じ向き（+10% 到達 = 赤・−10% 未満 = 青） (実際: ${(await swatches()).join(' ')})`);
+await page.locator('.net-seg button', { hasText: '目的変数 1.5σ' }).click();
+check((await swatches()).join(',') === [BWR[4], '#64748b', '#334155'].map(rgbOf).join(','),
+      `目的変数は正例 = 赤・負例 = 灰 (実際: ${(await swatches()).join(' ')})`);
 // 並べ方は力学だけ（運用者の指定 2026-10-19「3種のプロット方法がありますが、今のデフォルトのみのもので良いです」。状態の地図・
 // 時間のらせんのボタンは無い）。並べ直す・力の調整はいつも出す
 check((await page.locator('.net-seg[aria-label="並べ方"]').count()) === 0

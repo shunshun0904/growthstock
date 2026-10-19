@@ -306,42 +306,14 @@ export function todayNeighbors(dec, net) {
 }
 
 // --------------------------------------------------------------------------- //
-// 色（結果・目的変数・時期）。暗い面（#0a0e17）で確かめた並び（dataviz の validate_palette.js。結果の4区分は青 ↔ 赤の発散で、
-// 各腕は順序の検査を通る。全組の色覚の差 10.2・通常の見え方 17.5。−10〜0% の濃い赤は面との差 2.98:1 なので凡例と表を必ず添える）
+// 色。どの色の付け方も、低い・古い・届かない = 青、高い・新しい・届いた = 赤（運用者の指定 2026-10-19「青白ではなく、青白赤で」
+// → 選択「高い・新しい方を赤」、2026-10-20「揃えたいです」→ 選択「目的変数も（正例 = 赤）」）。暗い面（#0a0e17）で dataviz の
+// validate_palette.js の式で確かめた値をそれぞれに書く
 // --------------------------------------------------------------------------- //
 
-export const OUTCOME_CLASSES = [
-  { id: 'hit', label: '+10% 到達', color: '#93c5fd' },
-  { id: 'up', label: '0〜+10%', color: '#2563eb' },
-  { id: 'down', label: '−10〜0%', color: '#b91c1c' },
-  { id: 'bad', label: '−10% 未満', color: '#f87171' },
-  { id: 'na', label: '未確定', color: '#64748b' },
-];
-
-/** 収益（%）の区分。+10 以上 = 指値に届いた。 */
-export function outcomeOf(ret, target = DEFAULTS.target) {
-  if (!Number.isFinite(ret)) return 'na';
-  if (ret >= target - 1e-9) return 'hit';
-  if (ret >= 0) return 'up';
-  if (ret >= -10) return 'down';
-  return 'bad';
-}
-
-export const LABEL_CLASSES = [
-  { id: 'pos', label: '正例', color: '#93c5fd' },
-  { id: 'neg', label: '負例', color: '#64748b' },
-  { id: 'na', label: '未確定', color: '#334155' },
-];
-
-export function labelClassOf(v) {
-  if (!Number.isFinite(v)) return 'na';
-  return v >= 0.5 ? 'pos' : 'neg';
-}
-
 /**
- * 値で色分けするときの未確定（先20営業日がまだ無い日）。下の2つの段（RISE / R20）のどの色とも、通常の見え方で
- * ΔE 24.7 以上・色覚の3型で 8.6 以上離れる（dataviz の validate_palette.js の deltaE。暗い面 #0a0e17。いちばん近いのは R20 の
- * −10〜0% の濃い赤。青白赤の段とは 31.8 以上・18.2 以上）
+ * 値で色分けするときの未確定（先20営業日がまだ無い日）。下の段（結果・最高値まで・20営業日目）のどの色とも、通常の見え方で
+ * ΔE 31.8 以上・色覚の3型で 18.2 以上離れる（いちばん近いのは青 #3a7bf0 と赤 #e3463f）。面との差 1.70:1 と暗いので、凡例の件数を添える
  */
 export const NA_VALUE = '#3a3a3a';
 
@@ -353,6 +325,43 @@ export const NA_VALUE = '#3a3a3a';
  * ΔE 17.0 以上・色覚の1型2型で 15.0 以上。どの色も面との差 4.79:1 以上
  */
 export const BWR = ['#3a7bf0', '#86b0f2', '#ececec', '#f2988e', '#e3463f'];
+
+/**
+ * 結果（+10% の指値か20営業日目の終値）の4区分。青白赤の両端と白の隣の4色で、0% のところが白の境目（−10% 未満 = 青・
+ * −10〜0% = 薄い青・0〜+10% = 薄い赤・+10% 到達 = 赤。2026-10-20 に向きをそろえた。前は +10% 到達が明るい青・下げが赤）。
+ * 未確定を含めて全組で通常の見え方 ΔE 17.0 以上・色覚の3型で 12.8 以上（いちばん近いのは青と薄い青）
+ */
+export const OUTCOME_CLASSES = [
+  { id: 'hit', label: '+10% 到達', color: BWR[4] },
+  { id: 'up', label: '0〜+10%', color: BWR[3] },
+  { id: 'down', label: '−10〜0%', color: BWR[1] },
+  { id: 'bad', label: '−10% 未満', color: BWR[0] },
+  { id: 'na', label: '未確定', color: NA_VALUE },
+];
+
+/** 収益（%）の区分。+10 以上 = 指値に届いた。 */
+export function outcomeOf(ret, target = DEFAULTS.target) {
+  if (!Number.isFinite(ret)) return 'na';
+  if (ret >= target - 1e-9) return 'hit';
+  if (ret >= 0) return 'up';
+  if (ret >= -10) return 'down';
+  return 'bad';
+}
+
+/**
+ * 目的変数の区分。正例 = 赤（2026-10-20 の選択「目的変数も（正例 = 赤）」。前は明るい青）・負例 = 灰。全組で通常の見え方
+ * ΔE 18.3 以上・色覚の3型で 11.0 以上
+ */
+export const LABEL_CLASSES = [
+  { id: 'pos', label: '正例', color: BWR[4] },
+  { id: 'neg', label: '負例', color: '#64748b' },
+  { id: 'na', label: '未確定', color: '#334155' },
+];
+
+export function labelClassOf(v) {
+  if (!Number.isFinite(v)) return 'na';
+  return v >= 0.5 ? 'pos' : 'neg';
+}
 
 /**
  * 最高値までの上昇率（%）の5段（運用者の選択 2026-10-19「5段＋未確定」）。最高到達価格（t+1〜t+20 の高値の最大）÷ 翌営業日の寄り
@@ -384,10 +393,10 @@ export function riseOf(v) {
  * 結果（OUTCOME_CLASSES）と同じで、違うのは +10% の指値で売らないことだけ
  */
 export const R20_CLASSES = [
-  { id: 'hit', label: '+10% 以上', color: '#93c5fd' },
-  { id: 'up', label: '0〜+10%', color: '#2563eb' },
-  { id: 'down', label: '−10〜0%', color: '#b91c1c' },
-  { id: 'bad', label: '−10% 未満', color: '#f87171' },
+  { id: 'hit', label: '+10% 以上', color: BWR[4] },
+  { id: 'up', label: '0〜+10%', color: BWR[3] },
+  { id: 'down', label: '−10〜0%', color: BWR[1] },
+  { id: 'bad', label: '−10% 未満', color: BWR[0] },
   { id: 'na', label: '未確定', color: NA_VALUE },
 ];
 

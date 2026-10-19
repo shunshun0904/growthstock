@@ -9,7 +9,8 @@
  * - 色の区分（+10% 到達 / 0〜+10 / −10〜0 / −10 未満 / 未確定、正例 / 負例 / 未確定）と、丸めた z から生の値の目安への戻し方
  * - 先20営業日の値動きの色（最高値までの上昇率の5段、20営業日目の騰落率の4段。区切りは下の端を含む。最安値までの色は運用者の
  *   指定で外した。値はツールチップに出すので読む）。値の無いファイル（版 1）は未確定、終値で測っていた版 2 の上昇率・下落率は
- *   読まない。今日に似た日だけの件数。最高値までと時期の色は青白赤（低い・古い = 青 → 白 → 高い・新しい = 赤。運用者の選択）
+ *   読まない。今日に似た日だけの件数。最高値までと時期の色は青白赤（低い・古い = 青 → 白 → 高い・新しい = 赤。運用者の選択）。
+ *   結果・20営業日目・目的変数も向きをそろえる（+10% 到達・正例 = 赤、下げ = 青。運用者の指定 2026-10-20「揃えたいです」）
  * - 今日に似た日の表（todayNeighbors）は図で光らせる日（neighborsOf の今日）と同じ日・同じ順（運用者の指定「プロット上の近傍の
  *   日付で統一」。要約に「今日に近い過去の更新日」は無い）
  *
@@ -22,7 +23,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   decode, knnLists, network, summarize, neighborsOf, todayNeighbors, periodsOf, outcomeOf, labelClassOf, nodeColors, classCounts,
-  rawOf, methodOf, timeColor, riseOf, classesOf, OUTCOME_CLASSES, RISE_CLASSES, R20_CLASSES,
+  rawOf, methodOf, timeColor, riseOf, classesOf, OUTCOME_CLASSES, RISE_CLASSES, R20_CLASSES, LABEL_CLASSES,
   NA_VALUE, COLOR_MODES, BWR, TIME_STOPS,
 } from '../src/lib/recurrence.js';
 
@@ -218,6 +219,11 @@ test('色の区分', () => {
   assert.deepEqual(classCounts(dec, 'l15'), { pos: 1, neg: 1, na: 2 });
   const of = Object.fromEntries(OUTCOME_CLASSES.map((c) => [c.id, c.color]));
   assert.deepEqual(nodeColors(dec, 'outcome'), [of.hit, of.up, of.down, of.na]);
+  // 向きは最高値まで・時期と同じ（低い = 青 → 高い = 赤。0% のところが白の境目）。未確定は値の色の付け方と同じ灰
+  assert.deepEqual(['bad', 'down', 'up', 'hit'].map((k) => of[k]), [BWR[0], BWR[1], BWR[3], BWR[4]]);
+  assert.equal(of.na, NA_VALUE);
+  const lf = Object.fromEntries(LABEL_CLASSES.map((c) => [c.id, c.color]));
+  assert.deepEqual([lf.pos, lf.neg], [BWR[4], '#64748b']);           // 正例 = 赤・負例 = 灰
   assert.equal(nodeColors(dec, 'time')[0], timeColor(0));
   // 時期は青白赤（運用者の選択 2026-10-19: 古い = 青・真ん中 = 白・新しい = 赤）
   assert.deepEqual(TIME_STOPS, BWR);
