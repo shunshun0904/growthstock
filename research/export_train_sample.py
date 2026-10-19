@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
 """
 学習データの見本を Google スプレッドシートに書き出す（運用者の依頼 2026-10-17「学習データの一部を見たいです。ブラウザ上の
-エディターとかで実際にテーブル形式で見たいです。サンプルは１０００サンプル程度で良いです」。置き場所は「いつものシートに
-新しいタブ」、選び方は「直近の1000行」）。
+エディターとかで実際にテーブル形式で見たいです。サンプルは１０００サンプル程度で良いです」。選び方は「直近の1000行」）。
+置き場所は、最初は「いつものシートに新しいタブ」だったが、運用者の依頼 2026-10-20「このスプレッドシートはよく開くのですが、
+同じスプレッドシートの中にあると重くて開けないので」「別なスプレッドシートを作成してそっちに移してほしい」で、別の
+スプレッドシート（GSHEET_SAMPLE_ID。ドライブの「growthstock 学習データの見本」。いつものシートと同じサービスアカウントに
+編集の権限）に移した。いつものシート（GSHEET_ID）には書かない（同じ ID なら止まる）。書いて読み戻しが全セル一致したときだけ、
+いつものシートに残っている2つのタブを消す（移す。食い違えば消さない）。
 
 学習データ = build_dataset.py（--keep-unlabeled なし）が作る research/_data/dataset.parquet。週次の再学習と同じ作り方なので、
 次の週次の再学習が学習するのと同じ行と値になる。ラベルが確定している最新の日からさかのぼり、日をまたがずに --rows 行に
@@ -13,14 +17,15 @@
                                値は学習器に渡す値のまま（欠測は空欄、無限大は inf）
   タブ「学習データの列の説明」 行の選び方・ラベルの定義・今のモデルの学習期間と、列ごとの日本語名・大区分・グループ・説明
 
-どちらのタブも書くたびに中身を入れ替える（ほかのタブには触らない）。書く前に、1.2σ のラベルを到達・終盤・トレンドの列から
+どちらのタブも書くたびに中身を入れ替える（ほかのタブには触らない。ただし新しいスプレッドシートの、作ったときからある空の
+「シート1」は消す）。書く前に、1.2σ のラベルを到達・終盤・トレンドの列から
 引き直して学習データのラベルと全行一致することを確かめ（1.5σ・1.8σ の引き直しと同じ式）、書いた後に両方のタブを読み戻して
 全セルが書いた値と一致することを確かめる（どちらも食い違えば失敗で終わる）。
 
 銘柄ごとの値は非公開のスプレッドシートにだけ書く。Actions のログは公開なので、行数・日付の範囲・正例の数・確かめの件数
 だけを出す（銘柄コード・銘柄名・値は出さない）。
 
-  GOOGLE_SERVICE_ACCOUNT_JSON='{...}' GSHEET_ID=... python3 research/export_train_sample.py [--rows 1000]
+  GOOGLE_SERVICE_ACCOUNT_JSON='{...}' GSHEET_SAMPLE_ID=... GSHEET_ID=... python3 research/export_train_sample.py [--rows 1000]
   python3 research/export_train_sample.py --dry-run    # 書かずに件数だけ
 """
 from __future__ import annotations
@@ -30,6 +35,7 @@ import datetime as dt
 import json
 import math
 import os
+import re
 import sys
 from dataclasses import replace
 from typing import Dict, List, Optional, Sequence
@@ -54,6 +60,8 @@ CHUNK = 200
 LABELS = (("label", 1.2), ("label_k15", 1.5), ("label_k18", 1.8))
 #: 先頭の列（列名, 日本語名）
 ID_COLS = (("Date", "日付"), ("Code", "コード"), ("CoName", "銘柄名"))
+#: 新しいスプレッドシートを作ったときからある既定のタブの名前（中身が空なら書き出しの後に消す）
+DEFAULT_TAB = re.compile(r"^(Sheet|シート)\d+$")
 
 
 def code4(code) -> str:
@@ -212,6 +220,30 @@ def write_tab(book, title: str, values: List[List], freeze_rows: int = 0, freeze
     return ws
 
 
+def drop_empty_default_tabs(book) -> List[str]:
+    """既定の名前（シート1 など）で中身が空のタブを消す（書き出しのタブがあるときだけ。消した名前を返す）。"""
+    tabs = book.worksheets()
+    if not any(w.title in (SAMPLE_TITLE, NOTES_TITLE) for w in tabs):
+        return []
+    gone = []
+    for w in tabs:
+        if DEFAULT_TAB.match(w.title or "") and not any(any(str(v).strip() for v in row) for row in w.get_values()):
+            book.del_worksheet(w)
+            gone.append(w.title)
+    return gone
+
+
+def remove_old_tabs(main_book) -> List[str]:
+    """いつものスプレッドシートに残っている学習データの見本の2タブを消す（無ければ何もしない。消した名前を返す）。"""
+    have = {w.title: w for w in main_book.worksheets()}
+    gone = []
+    for title in (SAMPLE_TITLE, NOTES_TITLE):
+        if title in have:
+            main_book.del_worksheet(have[title])
+            gone.append(title)
+    return gone
+
+
 def load_names(data_dir: str) -> Dict[str, str]:
     """5桁のコード → 最新の銘柄名（master.parquet。無い銘柄は空欄）。"""
     path = os.path.join(data_dir, "master.parquet")
@@ -247,17 +279,26 @@ def summary(sample: pd.DataFrame, cols: Sequence[str]) -> List[str]:
     return lines
 
 
-def main(argv: Optional[Sequence[str]] = None, book=None) -> int:
-    """book はテスト用（既定は GSHEET_ID のシートをサービスアカウントで開く）。"""
+def main(argv: Optional[Sequence[str]] = None, book=None, main_book=None) -> int:
+    """
+    book・main_book はテスト用（既定は GSHEET_SAMPLE_ID・GSHEET_ID のシートをサービスアカウントで開く）。main_book は
+    いつものスプレッドシートで、書き出しを確かめた後に古い2タブを消すときだけ使う。
+    """
     ap = argparse.ArgumentParser()
     ap.add_argument("--dataset", default=os.path.join(DATA_DIR, "dataset.parquet"))
     ap.add_argument("--data-dir", default=DATA_DIR)
     ap.add_argument("--rows", type=int, default=ROWS)
-    ap.add_argument("--sheet-id", default=os.environ.get("GSHEET_ID", ""))
+    ap.add_argument("--sheet-id", default=os.environ.get("GSHEET_SAMPLE_ID", ""),
+                    help="書き出し先（学習データの見本のスプレッドシート。既定は GSHEET_SAMPLE_ID）")
+    ap.add_argument("--main-sheet-id", default=os.environ.get("GSHEET_ID", ""),
+                    help="いつものスプレッドシート（ここには書かない。古い2タブが残っていれば、書き出しを確かめた後に消す）")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
     if not 1 <= args.rows <= 20000:
         raise SystemExit(f"--rows は 1〜20000: {args.rows}")
+    if args.sheet_id and args.sheet_id == args.main_sheet_id:
+        raise SystemExit("学習データの見本は、いつものスプレッドシート（GSHEET_ID）には書きません（重くて開けなくなるので別の"
+                         "スプレッドシートに。GSHEET_SAMPLE_ID を確かめてください）")
 
     cols = F.columns(F.DEFAULT_PRESET)
     ds = pd.read_parquet(args.dataset)
@@ -285,7 +326,7 @@ def main(argv: Optional[Sequence[str]] = None, book=None) -> int:
         return 0
     if book is None:
         if not args.sheet_id:
-            raise SystemExit("GSHEET_ID が設定されていません（シートの URL の /d/ と /edit の間）")
+            raise SystemExit("GSHEET_SAMPLE_ID が設定されていません（学習データの見本のスプレッドシートの URL の /d/ と /edit の間）")
         import export_sheets as ES
         book = ES.open_sheet(args.sheet_id)
     ws = write_tab(book, SAMPLE_TITLE, data, freeze_rows=2, freeze_cols=3, bold_rows=2)
@@ -298,6 +339,21 @@ def main(argv: Optional[Sequence[str]] = None, book=None) -> int:
         print(f"[verify] 「{title}」を読み戻して {cells:,}セルを比べた: 食い違い {bad:,}"
               + (f"（最初は {first[0]}行目・{first[1]}列目）" if first else ""))
         rc |= int(bad > 0)
+    if rc:
+        print("[move] 読み戻しが食い違ったので、いつものスプレッドシートのタブは消さない")
+        return rc
+    gone = drop_empty_default_tabs(book)
+    if gone:
+        print(f"[sheet] 作ったときからある空のタブを消した: {len(gone)}枚")
+    if main_book is None and args.main_sheet_id:
+        import export_sheets as ES
+        main_book = ES.open_sheet(args.main_sheet_id)
+    if main_book is None:
+        print("[move] いつものスプレッドシート（GSHEET_ID）が分からないので、古いタブは確かめていない")
+    else:
+        moved = remove_old_tabs(main_book)
+        print("[move] いつものスプレッドシートから古いタブを消した: " + "・".join(f"「{t}」" for t in moved)
+              if moved else "[move] いつものスプレッドシートに古いタブは無い（消すものなし）")
     return rc
 
 

@@ -6,6 +6,9 @@
 - 列は 日付・コード・銘柄名・ラベル3種・学習に使う特徴量（DEFAULT_PRESET の並びのまま）。1行目に日本語名、2行目に列名
 - 値は学習器に渡す値のまま（欠測は空欄、無限大は inf）。1.5σ・1.8σ のラベルは引き直し（1.2σ ⊇ 1.5σ ⊇ 1.8σ）
 - タブは中身を入れ替える（無ければ作る）。書き込みは小分け。ログに銘柄コード・銘柄名を出さない
+- 書き出し先は学習データの見本の別のスプレッドシート（運用者の依頼 2026-10-20「同じスプレッドシートの中にあると重くて開けない」）。
+  いつものスプレッドシートと同じ ID なら止まる。書いて読み戻しが一致したときだけ、いつものスプレッドシートの古い2タブを消す
+  （食い違えば消さない）。新しいスプレッドシートの空の「シート1」は消すが、中身のあるタブ・ほかの名前のタブには触らない
 
   python3 tests/test_export_train_sample.py
 """
@@ -105,6 +108,15 @@ class FakeBook:
     def __init__(self, existing=()):
         self.sheets = {t: FakeWS(t, 5, 5) for t in existing}
         self.added = []
+        self.deleted = []
+
+    def worksheets(self):
+        return list(self.sheets.values())
+
+    def del_worksheet(self, ws):
+        assert len(self.sheets) > 1, "スプレッドシートのタブを全部は消せない"
+        del self.sheets[ws.title]
+        self.deleted.append(ws.title)
 
     def worksheet(self, title):
         import gspread
@@ -235,15 +247,31 @@ class TestVerify(unittest.TestCase):
 
 
 class TestMain(unittest.TestCase):
-    def run_main(self, argv, book=None):
+    def setUp(self):
+        # 手元の環境変数で本物のスプレッドシートを開かない
+        self._env = {k: os.environ.pop(k) for k in ("GSHEET_ID", "GSHEET_SAMPLE_ID") if k in os.environ}
+
+    def tearDown(self):
+        os.environ.update(self._env)
+
+    def run_main(self, argv, book=None, main_book=None, tamper=None):
         with tempfile.TemporaryDirectory() as d:
             path = os.path.join(d, "dataset.parquet")
             dataset().to_parquet(path, index=False)
             pd.DataFrame({"Code": ["90000", "90010"], "CoName": ["テスト工業", "見本商事"]}).to_parquet(
                 os.path.join(d, "master.parquet"), index=False)
+            if tamper:
+                orig = book.add_worksheet
+
+                def add(title, rows, cols):
+                    ws = orig(title, rows, cols)
+                    if title == X.SAMPLE_TITLE:
+                        ws.tamper = tamper
+                    return ws
+                book.add_worksheet = add
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
-                rc = X.main(["--dataset", path, "--data-dir", d] + argv, book=book)
+                rc = X.main(["--dataset", path, "--data-dir", d] + argv, book=book, main_book=main_book)
         return rc, out.getvalue()
 
     def test_dry_run_logs_no_codes(self):
@@ -286,6 +314,47 @@ class TestMain(unittest.TestCase):
     def test_rows_limit(self):
         with self.assertRaises(SystemExit):
             self.run_main(["--rows", "0", "--dry-run"])
+
+    def test_moves_tabs_from_main(self):
+        """別のスプレッドシートに書いて確かめた後、いつものスプレッドシートの古い2タブを消す（ほかのタブは残す）。"""
+        book = FakeBook(existing=["シート1"])
+        main = FakeBook(existing=["予測", X.SAMPLE_TITLE, X.NOTES_TITLE, "保有の推移"])
+        rc, log = self.run_main(["--rows", "1000"], book=book, main_book=main)
+        self.assertEqual(rc, 0)
+        self.assertEqual(sorted(book.sheets), sorted([X.SAMPLE_TITLE, X.NOTES_TITLE]))   # 空のシート1は消した
+        self.assertEqual(book.deleted, ["シート1"])
+        self.assertEqual(sorted(main.sheets), ["予測", "保有の推移"])
+        self.assertEqual(main.deleted, [X.SAMPLE_TITLE, X.NOTES_TITLE])
+        self.assertEqual(main.added, [])                                                  # いつものシートには書かない
+        self.assertIn(f"[move] いつものスプレッドシートから古いタブを消した: 「{X.SAMPLE_TITLE}」・「{X.NOTES_TITLE}」", log)
+        self.assertIn("[sheet] 作ったときからある空のタブを消した: 1枚", log)
+        # 2回目: 消すものは無い
+        rc, log = self.run_main(["--rows", "1000"], book=book, main_book=main)
+        self.assertEqual(rc, 0)
+        self.assertIn("[move] いつものスプレッドシートに古いタブは無い（消すものなし）", log)
+
+    def test_keeps_main_tabs_when_readback_differs(self):
+        """読み戻しが食い違えば、いつものスプレッドシートのタブは消さない。"""
+        book = FakeBook()
+        main = FakeBook(existing=["予測", X.SAMPLE_TITLE, X.NOTES_TITLE])
+        rc, log = self.run_main(["--rows", "1000"], book=book, main_book=main, tamper=((3, 0), "ちがう"))
+        self.assertEqual(rc, 1)
+        self.assertEqual(main.deleted, [])
+        self.assertIn("[move] 読み戻しが食い違ったので、いつものスプレッドシートのタブは消さない", log)
+
+    def test_default_tab_with_content_is_kept(self):
+        """既定の名前でも中身のあるタブ・ほかの名前のタブは消さない。"""
+        book = FakeBook(existing=["シート1", "メモ"])
+        book.sheets["シート1"].grid[(0, 0)] = "手で書いたメモ"
+        rc, _ = self.run_main(["--rows", "1000"], book=book)
+        self.assertEqual(rc, 0)
+        self.assertEqual(book.deleted, [])
+
+    def test_refuses_main_sheet(self):
+        """書き出し先がいつものスプレッドシートと同じ ID なら止まる（重くて開けなくなるので）。"""
+        with self.assertRaises(SystemExit) as cm:
+            self.run_main(["--rows", "6", "--sheet-id", "abc", "--main-sheet-id", "abc"])
+        self.assertIn("いつものスプレッドシート", str(cm.exception))
 
 
 if __name__ == "__main__":

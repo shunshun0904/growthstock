@@ -1,9 +1,12 @@
 name: Export Training Sample
 
-# 学習データの見本を、いつものスプレッドシート（GSHEET_ID）のタブ「学習データの見本」「学習データの列の説明」に書き出す
-# （research/export_train_sample.py。運用者の依頼 2026-10-17「学習データの一部を見たいです。ブラウザ上のエディターとかで
-# 実際にテーブル形式で見たいです。サンプルは１０００サンプル程度で良いです」、決定「いつものシートに新しいタブ」
-# 「直近の1000行」）。週次の再学習と同じ手順でデータセットを作り、ラベルが確定している直近の日から約1,000行を出す。
+# 学習データの見本を、学習データの見本のスプレッドシート（GSHEET_SAMPLE_ID。ドライブの「growthstock 学習データの見本」）の
+# タブ「学習データの見本」「学習データの列の説明」に書き出す（research/export_train_sample.py。運用者の依頼 2026-10-17
+# 「学習データの一部を見たいです。ブラウザ上のエディターとかで実際にテーブル形式で見たいです。サンプルは１０００サンプル程度で
+# 良いです」、決定「直近の1000行」）。週次の再学習と同じ手順でデータセットを作り、ラベルが確定している直近の日から約1,000行を出す。
+# 置き場所は最初は「いつものシートに新しいタブ」だったが、運用者の依頼 2026-10-20「同じスプレッドシートの中にあると重くて
+# 開けないので」「別なスプレッドシートを作成してそっちに移してほしい」で別のスプレッドシートにした。書いて読み戻しが一致したら、
+# いつものスプレッドシート（GSHEET_ID）に残っている古い2タブを消す（いつものシートには書かない）。
 # 手で起動するだけ（予約の起動は無い）。起動するたびに2つのタブの中身を入れ替える（ほかのタブには触らない）。
 #
 # ログは公開なので、行数・日付の範囲・正例の数だけを出す（銘柄ごとの値は非公開のスプレッドシートにだけ書く）。
@@ -52,11 +55,13 @@ jobs:
       - name: Export to sheet
         env:
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GSHEET_SAMPLE_ID: ${{ secrets.GSHEET_SAMPLE_ID }}
           GSHEET_ID: ${{ secrets.GSHEET_ID }}
           ROWS: ${{ inputs.rows }}
         run: |
-          if [ -z "$GOOGLE_SERVICE_ACCOUNT_JSON" ] || [ -z "$GSHEET_ID" ]; then
-            echo "GOOGLE_SERVICE_ACCOUNT_JSON / GSHEET_ID が未設定です"; exit 1
+          if [ -z "$GOOGLE_SERVICE_ACCOUNT_JSON" ] || [ -z "$GSHEET_SAMPLE_ID" ]; then
+            echo "GOOGLE_SERVICE_ACCOUNT_JSON / GSHEET_SAMPLE_ID が未設定です（GSHEET_SAMPLE_ID は学習データの見本のスプレッドシートの"
+            echo "URL の /d/ と /edit の間。いつものシートと同じサービスアカウントに編集の権限が要る）"; exit 1
           fi
           # 入力はそのままシェルに展開しない。数字だけを通す
           if ! [[ "$ROWS" =~ ^[0-9]{1,5}$ ]]; then echo "行数は数字で: $ROWS"; exit 1; fi
