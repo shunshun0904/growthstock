@@ -52,6 +52,28 @@ jobs:
       - run: npm test
       - run: npm run build
 
+      # リカレンス・ネットワーク（日次予測が Release に上げた recurrence.tar.gz。research/recurrence_net.py）を
+      # dist/data/recurrence/ に置く。全期間で1日あたり約1MB になるのでリポジトリには入れていない（運用者の選択
+      # 「Release に置く」、2026-10-19）。中の名前は recurrence/index.json と recurrence/<日付>_<コード>.json だけのはずなので、
+      # それ以外が混ざっていたら展開しない。無い・取れなくてもデプロイは止めない（画面のタブが「まだデータがありません」と出す）
+      - name: Recurrence networks (release)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/rn"
+          bash scripts/gh_release_download.sh data-raw "$RUNNER_TEMP/rn" 'recurrence.tar.gz'
+          a="$RUNNER_TEMP/rn/recurrence.tar.gz"
+          if [ ! -f "$a" ]; then
+            echo "Release に recurrence.tar.gz が無い（画面のタブはデータ待ちと出す）"; exit 0
+          fi
+          if tar -tzf "$a" | grep -qvE '^recurrence/(index|[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9A-Za-z]+)\.json$'; then
+            echo "::error::recurrence.tar.gz に想定外の名前がある（展開しない）"; exit 1
+          fi
+          mkdir -p dist/data
+          tar -xzf "$a" -C dist/data
+          echo "展開した: $(ls dist/data/recurrence | wc -l) ファイル・$(du -sh dist/data/recurrence | cut -f1)"
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
