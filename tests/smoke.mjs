@@ -10,6 +10,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { decode, knnLists, network, todayNeighbors, methodOf, BWR, NA_VALUE } from '../src/lib/recurrence.js';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const DIST = path.join(ROOT, 'dist');
@@ -437,6 +438,21 @@ check(foot.includes(`線 ${exp('94340', 5).edges.toLocaleString('ja-JP')} 本`),
 await page.waitForFunction((want) => document.querySelector('.net-canvas')?.dataset.focus === want,
   `${netN('94340') - 1}:${exp('94340', 5).deg}`, { timeout: 5000 }).catch(() => {});
 check(await netFocus() === `${netN('94340') - 1}:${exp('94340', 5).deg}`, `k = 5 なら光らせる似た日も 5 日 (実際: ${await netFocus()})`);
+// 右の一覧は図で光らせる日と同じ近い k 日（運用者の指定 2026-10-19「プロット上の近傍の日付で統一してほしい」）。日付を
+// フィクスチャから同じ式で数えた今日の近い5日（近い順）と比べる。更新日だけから選んだ「今日に近い過去の更新日」の欄は無い
+const nearWant = (() => {
+  const idx = JSON.parse(fs.readFileSync(path.join(RECURRENCE_FIXTURES, 'index.json'), 'utf8'));
+  const m = methodOf(idx);
+  const dec = decode(JSON.parse(fs.readFileSync(path.join(RECURRENCE_FIXTURES, '2026-09-11_94340.json'), 'utf8')), m.labels);
+  const net = network(dec, m.theiler, 5, knnLists(dec, m.theiler, 5));
+  return todayNeighbors(dec, net).map((r) => dec.dates[r.i].replace(/-/g, '/') + (dec.isFresh[r.i] ? ' ○' : ''));   // ○ = 更新日
+})();
+const nearDates = await page.locator('.net-near tbody tr td:first-child').allTextContents();
+check(nearDates.join(',') === nearWant.join(',') && nearDates.length === exp('94340', 5).deg,
+      `「今日に似た日」の表は図で光らせる近い5日と同じ日・同じ順 (実際: ${nearDates.join(',')} / 期待: ${nearWant.join(',')})`);
+check((await page.locator('.net-near h3').textContent()).includes(`図で今日と結んだ ${exp('94340', 5).deg} 日`)
+        && !(await netSide()).includes('今日に近い過去の更新日') && (await page.locator('.net-details').count()) === 0,
+      '「今日に近い過去の更新日」の欄と、同じ中身だった「表で見る」は無い（一覧は1つ）');
 await page.locator('label', { hasText: '回転' }).click();
 await page.waitForSelector('.net-canvas[data-settled="1"]', { timeout: 20000 });
 const [todayX, todayY] = ((await page.locator('.net-canvas').getAttribute('data-today')) || '0,0').split(',').map(Number);
@@ -451,6 +467,12 @@ check(netTip.includes('20日以内の最高値まで未確定') && netTip.includ
 await page.mouse.move(cbox.x + 2, cbox.y + 2);
 await page.locator('.net-seg button', { hasText: '時期' }).click();
 check((await page.locator('.net-legend .net-ramp').count()) === 1, '時期の色にすると凡例が古い → 新しいの帯になる');
+// 時期・最高値までの色は青白赤（運用者の指定「青白ではなく、青白赤で」→ 選択「高い・新しい方を赤」）
+const rgbOf = (h) => `rgb(${parseInt(h.slice(1, 3), 16)}, ${parseInt(h.slice(3, 5), 16)}, ${parseInt(h.slice(5, 7), 16)})`;
+const rampBg = await page.locator('.net-legend .net-ramp i').evaluate((e) => getComputedStyle(e).backgroundImage);
+const rampStops = rampBg.match(/rgb\([^)]*\)/g) || [];
+check(rampStops.join(',') === BWR.map(rgbOf).join(','),
+      `時期の帯は古い = 青 → 白 → 新しい = 赤 (実際: ${rampStops.join(' ')})`);
 // ノードの色付け（運用者の依頼 2026-10-19「先20日間の最大上昇率は最低限」→「その日から最高到達価格（20日以内最高高値）
 // までの上昇率」）: 凡例の5段と未確定の件数が、フィクスチャの値をここで数え直した件数と同じ。今日に似た日の内訳・表の列も出る
 await page.locator('.net-seg button', { hasText: '最高値までの上昇率（20日以内）' }).click();
@@ -466,14 +488,15 @@ const legendOf = async () => Object.fromEntries((await page.locator('.net-legend
 const riseGot = await legendOf();
 check(JSON.stringify(riseGot) === JSON.stringify(riseWant),
       `最高値までの上昇率の凡例（高い順の5段と未確定）の件数がファイルの値と同じ (実際: ${JSON.stringify(riseGot)})`);
+const riseSw = await page.locator('.net-legend .sw').evaluateAll((els) => els.map((e) => getComputedStyle(e).backgroundColor));
+check(riseSw.join(',') === [...BWR].reverse().concat(NA_VALUE).map(rgbOf).join(','),
+      `最高値までの段は高い順に 赤・薄い赤・白（5〜10%）・薄い青・青 と未確定の灰 (実際: ${riseSw.join(' ')})`);
 const nbrMix = (await page.locator('.net-nbrmix').textContent()) || '';
 check(nbrMix.includes(`今日に似た日 ${exp('94340', 5).deg} 日の内訳`), `凡例の下に今日に似た日の内訳 (実際: ${nbrMix.slice(0, 60)})`);
-await page.locator('.net-details summary').click();
-const riseHead = await page.locator('.net-details thead th').allTextContents();
-const riseCells = await page.locator('.net-details tbody tr td:nth-child(4)').allTextContents();
+const riseHead = await page.locator('.net-near thead th').allTextContents();
+const riseCells = await page.locator('.net-near tbody tr td:nth-child(4)').allTextContents();
 check(riseHead.includes('最高値まで') && riseCells.length === exp('94340', 5).deg && riseCells.every((t) => /^[+-]?\d+\.\d%$/.test(t)),
-      `表に最高値までの列（今日に似た日はどれも結果が出そろっているので値がある） (実際: ${riseCells.slice(0, 3).join(' ')})`);
-await page.locator('.net-details summary').click();
+      `今日に似た日の表に最高値までの列（どれも結果が出そろっているので値がある） (実際: ${riseCells.slice(0, 3).join(' ')})`);
 // 最安値までの色は外した（運用者の指定「安値の色付けは、なしで良いです」）。軌跡は直近20営業日（「軌跡は直近20営業日で良いです」）
 const colorBtns = await page.locator('.net-seg[aria-label="点の色"] button').allTextContents();
 check(colorBtns.length === 6 && !colorBtns.some((t) => t.includes('最安値')),
@@ -509,7 +532,8 @@ await page.locator('.net-seg button', { hasText: '力の調整' }).click();
 check((await page.locator('.net-forces input[type=range]').count()) === 4, '力の調整は Obsidian と同じ4つのつまみ');
 side = await netSide();
 check(!side.includes('NaN') && !side.includes('undefined'), 'ネットワークの欄に NaN / undefined が出ていない');
-await page.screenshot({ path: path.join(SHOTS, 'screenshot-network.png') });
+// README の画像（docs/screenshot-network.png）は実データで撮るので、ここでは別の名前に書く（.gitignore。CI の画像には入る）
+await page.screenshot({ path: path.join(SHOTS, 'screenshot-network-smoke.png') });
 await page.setViewportSize({ width: 390, height: 844 });
 await page.waitForTimeout(200);
 const netFit = await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);

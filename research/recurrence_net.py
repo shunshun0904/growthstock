@@ -47,8 +47,9 @@ k近傍の網にした（版 4。docs/MODEL_ADOPTION_RULES.md §69）。k は続
              分からない（2020-10-01 の終日の売買停止・売買の少ない銘柄。ret と同じ）。画面はこの3つでもノードを色分けする
   要約（byK。k ごと）: 今日の近い k 日（似た日）の結果（+10% 到達・目的変数の正例の割合・収益の中央値）と銘柄の全期間の割合、
         k 番目に近い日までの距離とその銘柄の日の中での位置（中位の順位の百分位。高いほど似た日の少ない珍しい状態）、似た日が
-        いくつの時期に固まっているか（20営業日より離れたところで区切った塊の数）、今日に近い過去の更新日（母集団の日）。
-        画面は k を変えるたびに同じ式で数え直す（src/lib/recurrence.js。tests/recurrence.test.js と tests/test_recurrence_net.py が
+        いくつの時期に固まっているか（20営業日より離れたところで区切った塊の数）。似た日の一覧は画面が近傍の並びから出す
+        （図で光らせる日と同じ。版 4 までの「今日に近い過去の更新日」は運用者の指定 2026-10-19「プロット上の近傍の日付で
+        統一してほしい」でやめた）。画面は k を変えるたびに同じ式で数え直す（src/lib/recurrence.js。tests/recurrence.test.js と tests/test_recurrence_net.py が
         同じフィクスチャで一致を確かめる）
   過去の日: その日に作った値のまま（前の archive にある日は引き継ぐ。knn_compare と同じ考え方）。前の archive に無い過去の日は
         その日までの日足で作る（builtAt でいつ作ったか分かる）
@@ -88,8 +89,9 @@ import linear_preprocess as LP  # noqa: E402
 import live_track as LT  # noqa: E402
 import technicals as TX  # noqa: E402
 
-VERSION = 4                         # 2: 先20営業日の値動き（rise・fall・r20）を足した。3: rise・fall を高値・安値で測る。
-                                    # 4: ε をやめて k近傍の網に（要約は k ごとの byK）
+VERSION = 5                         # 2: 先20営業日の値動き（rise・fall・r20）を足した。3: rise・fall を高値・安値で測る。
+                                    # 4: ε をやめて k近傍の網に（要約は k ごとの byK）。
+                                    # 5: 要約から今日に近い過去の更新日（nearestFresh）を外した（似た日は近い k 日だけ）
 #: 状態の9列。実験105 の学習の寄与（gain。360列の lgbm）の上位で、1.5σ の上位8列（360列中 28・31・32・38・40・42・44・50位）と、
 #: 1.2σ でだけ上位に入った出来高の60日 ÷ 250日（37位）。docs/MODEL_ADOPTION_RULES.md §68
 FEATURES: Tuple[str, ...] = ("tx_vol_60", "tx_mdi_14", "tx_vortex_pos_14", "tx_atr_ratio_14_50", "tx_ichi_kijun_gap",
@@ -113,7 +115,6 @@ MIN_NODES = 100                     # ノードがこれより少ない銘柄は
 TARGET = float(LT.TAKE_PROFIT)      # +10% の指値
 HOLD = int(LT.HOLD)                 # 20営業日目の終値
 LABEL_KS = (("l12", 1.2), ("l15", 1.5))  # 目的変数（到達しきい値の σ の倍数）
-N_NEAREST = 5                       # 今日に近い過去の更新日を何件出すか
 #: 対象にする銘柄の規則（今日の戦略の購入条件）。live_track と同じ値（画面の strategy.js の RULE_MODELS・STRATEGY.agreePct と
 #: 同じことは tests/test_live_track.py が確かめる）
 RULE_MODELS: Tuple[str, ...] = tuple(LT.RULE_MODELS)
@@ -256,7 +257,7 @@ def periods_of(idx: Sequence[int], theiler: int = THEILER) -> int:
 
 
 def summarize(zq: np.ndarray, ret: np.ndarray, labels: Dict[str, np.ndarray], fresh: Sequence[int],
-              dates: Sequence[str], theiler: int = THEILER, k: int = K_DEFAULT, q: int = Q,
+              theiler: int = THEILER, k: int = K_DEFAULT, q: int = Q,
               s: Optional[np.ndarray] = None, knn: Optional[Tuple[np.ndarray, np.ndarray]] = None) -> dict:
     """
     k近傍の網の要約。今日 = 最後のノード。ret・labels は丸めた後の値（ファイルに書く値。画面と同じ数になるように）。
@@ -268,6 +269,7 @@ def summarize(zq: np.ndarray, ret: np.ndarray, labels: Dict[str, np.ndarray], fr
                 似た日の少ない珍しい状態）
       periods   似た日がいくつの時期に固まっているか（theiler より離れたところで区切る）
       edges / isolated / degMed  網の線の数（どちらかが選べば1本）・線の無い日の数・次数の中央値
+      nbr / base / nbrFresh / baseFresh  今日の似た日・全期間・似た日のうち更新日・全期間の更新日の結果（outcome_stats）
     """
     n = len(zq)
     if s is None:
@@ -289,18 +291,7 @@ def summarize(zq: np.ndarray, ret: np.ndarray, labels: Dict[str, np.ndarray], fr
                if len(nb) and len(kth_all) else None)
     fresh = np.asarray(sorted(set(int(i) for i in fresh)), dtype=int)
     fr_set = set(fresh.tolist())
-    nb_set = set(int(i) for i in nb)
     nb_fresh = np.array([i for i in nb if int(i) in fr_set], dtype=int)
-    # 今日に近い過去の更新日（タイラー窓より前。近い k 日の外でも近い順に出す。同じ距離は古い日が先）
-    past_fresh = fresh[fresh < today - theiler]
-    near = past_fresh[np.argsort(s[today, past_fresh], kind="stable")][:N_NEAREST] if n else past_fresh
-    nearest = []
-    for i in near:
-        rec = {"i": int(i), "date": dates[i], "d": float(np.sqrt(s[today, i]) / q), "inKnn": int(i) in nb_set,
-               "ret": None if not np.isfinite(ret[i]) else float(ret[i])}
-        for key, lab in labels.items():
-            rec[key] = None if not np.isfinite(lab[i]) else int(lab[i])
-        nearest.append(rec)
     return {
         "k": int(k), "theiler": int(theiler),
         "edges": int(A.sum() // 2), "isolated": int((deg == 0).sum()), "degMed": float(np.median(deg)) if n else None,
@@ -308,16 +299,15 @@ def summarize(zq: np.ndarray, ret: np.ndarray, labels: Dict[str, np.ndarray], fr
         "periods": periods_of(nb, theiler),
         "nbr": outcome_stats(nb, ret, labels), "base": outcome_stats(np.arange(n), ret, labels),
         "nbrFresh": outcome_stats(nb_fresh, ret, labels), "baseFresh": outcome_stats(fresh, ret, labels),
-        "nearestFresh": nearest,
     }
 
 
 def summaries(zq: np.ndarray, ret: np.ndarray, labels: Dict[str, np.ndarray], fresh: Sequence[int],
-              dates: Sequence[str], ks: Sequence[int] = K_CHOICES, theiler: int = THEILER, q: int = Q) -> Dict[str, dict]:
+              ks: Sequence[int] = K_CHOICES, theiler: int = THEILER, q: int = Q) -> Dict[str, dict]:
     """k ごとの要約（{"5": …, "10": …}）。距離と近傍の並びは一度だけ数える。"""
     s = sq_dist(zq)
     knn = knn_order(s, theiler, max(ks))
-    return {str(k): summarize(zq, ret, labels, fresh, dates, theiler, k, q, s=s, knn=knn) for k in ks}
+    return {str(k): summarize(zq, ret, labels, fresh, theiler, k, q, s=s, knn=knn) for k in ks}
 
 
 def round_summary(x, nd: int = 4):
@@ -447,7 +437,7 @@ def candidate_payload(g: pd.DataFrame, bars_code: pd.DataFrame, cand: dict, as_o
     fwd = forward_moves(bars_code, g["Date"])
     labels = {key: pd.to_numeric(g[key], errors="coerce").to_numpy(dtype=float) for key, _ in LABEL_KS}
     fresh = np.flatnonzero(g["is_fresh_break"].fillna(False).to_numpy(dtype=bool)).tolist()
-    by_k = summaries(zq, ret, labels, fresh, dates)
+    by_k = summaries(zq, ret, labels, fresh)
     d = pd.to_datetime(g["Date"]).to_numpy(dtype="datetime64[D]")
     gaps = np.diff(d).astype(int).tolist()
     payload = {

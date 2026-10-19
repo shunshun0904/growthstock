@@ -243,14 +243,6 @@ export function outcomeStats(dec, idx, target = DEFAULTS.target, labels = DEFAUL
   return out;
 }
 
-/** 今日（最後のノード）から各ノードへの距離の2乗。 */
-export function todayDist(dec) {
-  const today = dec.n - 1;
-  const out = new Int32Array(dec.n);
-  for (let i = 0; i < dec.n; i += 1) out[i] = sqDist(dec, today, i);
-  return out;
-}
-
 /** ノードの集まりが、theiler より離れたところで区切るといくつの時期（塊）になるか（Python の periods_of と同じ。空なら 0） */
 export function periodsOf(idx, theiler) {
   const v = [...idx].sort((a, b) => a - b);
@@ -265,9 +257,10 @@ export function periodsOf(idx, theiler) {
  *   kth / kthPct … k 番目に近い日までの距離（σ）と、どのノードも自分の k 番目までの距離で比べたときの今日の位置（中位の順位の
  *                  百分位。高いほど似た日の少ない珍しい状態）
  *   periods      … 似た日がいくつの時期に固まっているか（20営業日より離れたところで区切る）
- *   nearestFresh … 今日に近い過去の更新日（タイラー窓より前。近い k 日の外も近い順。同じ距離は古い日が先）
+ * 似た日の一覧は todayNeighbors（図で光らせる日と同じ）。版 4 までの「今日に近い過去の更新日」（更新日だけから近い順に5日。
+ * 近い k 日の外の日も入った）は、運用者の指定 2026-10-19「プロット上の近傍の日付で統一してほしい」でやめた
  */
-export function summarize(dec, net, theiler, k, { target = DEFAULTS.target, labels = DEFAULT_LABELS, nNearest = 5 } = {}) {
+export function summarize(dec, net, theiler, k, { target = DEFAULTS.target, labels = DEFAULT_LABELS } = {}) {
   const { n, q } = dec;
   const today = n - 1;
   const L = net.lists;
@@ -285,22 +278,7 @@ export function summarize(dec, net, theiler, k, { target = DEFAULTS.target, labe
     if (v < kth2) below += 1;
     else if (v === kth2) same += 1;
   }
-  const nbSet = new Set(nb);
   const nbFresh = nb.filter((i) => dec.isFresh[i]);
-  const d2 = todayDist(dec);
-  const pastFresh = [...dec.fresh].filter((i) => i < today - theiler)
-    .sort((a, b) => (d2[a] - d2[b]) || (a - b)).slice(0, nNearest);
-  const nearest = pastFresh.map((i) => {
-    const rec = {
-      i, date: dec.dates[i], d: Math.sqrt(d2[i]) / q, inKnn: nbSet.has(i),
-      ret: Number.isFinite(dec.ret[i]) ? dec.ret[i] : null,
-    };
-    for (const { key } of labels) {
-      const v = dec.labels[key]?.[i];
-      rec[key] = Number.isFinite(v) ? v : null;
-    }
-    return rec;
-  });
   const all = Array.from({ length: n }, (_, i) => i);
   let isolated = 0;
   for (let i = 0; i < n; i += 1) if (net.deg[i] === 0) isolated += 1;
@@ -313,11 +291,10 @@ export function summarize(dec, net, theiler, k, { target = DEFAULTS.target, labe
     base: outcomeStats(dec, all, target, labels),
     nbrFresh: outcomeStats(dec, nbFresh, target, labels),
     baseFresh: outcomeStats(dec, [...dec.fresh], target, labels),
-    nearestFresh: nearest,
   };
 }
 
-/** 今日の似た日（近い k 日）の一覧（表で見る用）。近い順（同じ距離は古い日が先）。 */
+/** 今日の似た日（近い k 日）の一覧（画面の「今日に似た日」の表。図で光らせる日と同じ）。近い順（同じ距離は古い日が先）。 */
 export function todayNeighbors(dec, net) {
   const today = dec.n - 1;
   const L = net.lists;
@@ -363,23 +340,32 @@ export function labelClassOf(v) {
 
 /**
  * 値で色分けするときの未確定（先20営業日がまだ無い日）。下の2つの段（RISE / R20）のどの色とも、通常の見え方で
- * ΔE 15.3 以上・色覚の3型で 8.6 以上離れる（dataviz の validate_palette.js の deltaE。暗い面 #0a0e17。外した最安値までの
- * 赤の段も含めて測った値）
+ * ΔE 24.7 以上・色覚の3型で 8.6 以上離れる（dataviz の validate_palette.js の deltaE。暗い面 #0a0e17。いちばん近いのは R20 の
+ * −10〜0% の濃い赤。青白赤の段とは 31.8 以上・18.2 以上）
  */
 export const NA_VALUE = '#3a3a3a';
 
 /**
+ * 青白赤の5色（低い・古い = 青 → 白 → 高い・新しい = 赤）。運用者の指定（2026-10-19）「リカレンスプロット内の色のコンターは
+ * 青白ではなく、青白赤で」→ 選択（AskUserQuestion）: 対象「最高値までの上昇率」「時期」・向き「高い・新しい方を赤」。
+ * 暗い面 #0a0e17 で dataviz の validate_palette.js の式で確かめた: 青の腕・赤の腕はそれぞれ順序の段の検査を通る（明度が単調・
+ * 隣の段の明度差 0.06 以上・1色相）。白からの明度差は両腕でほぼ同じ（0.19 / 0.17 と 0.34 / 0.33）。隣どうしは通常の見え方で
+ * ΔE 17.0 以上・色覚の1型2型で 15.0 以上。どの色も面との差 4.79:1 以上
+ */
+export const BWR = ['#3a7bf0', '#86b0f2', '#ececec', '#f2988e', '#e3463f'];
+
+/**
  * 最高値までの上昇率（%）の5段（運用者の選択 2026-10-19「5段＋未確定」）。最高到達価格（t+1〜t+20 の高値の最大）÷ 翌営業日の寄り
  * − 1（運用者の指定「その日から最高到達価格（20日以内最高高値）までの上昇率」・選択「基準は翌営業日の始値」。10% 以上なら +10% の
- * 指値に届いた）。青の段で、低いほど暗く高いほど明るい（順序の段の検査を暗い面 #0a0e17 で通る。いちばん暗い段は面との差 2.38:1
- * なので、凡例の件数と表を添える）。並びは高い順（凡例も同じ）
+ * 指値に届いた）。色は青白赤（BWR）: 5〜10% が白、それより低いほど青、+10% の指値に届いた段（10〜20%・20% 以上）が赤。
+ * 0% 未満は高値で測るのでほぼ出ない（買値の日の高値は寄り以上）。並びは高い順（凡例も同じ）
  */
 export const RISE_CLASSES = [
-  { id: 'r20p', label: '20% 以上', color: '#cde2fb' },
-  { id: 'r20', label: '10〜20%', color: '#86b6ef' },
-  { id: 'r10', label: '5〜10%', color: '#5598e7' },
-  { id: 'r5', label: '0〜5%', color: '#2a78d6' },
-  { id: 'r0', label: '0% 未満', color: '#184f95' },
+  { id: 'r20p', label: '20% 以上', color: BWR[4] },
+  { id: 'r20', label: '10〜20%', color: BWR[3] },
+  { id: 'r10', label: '5〜10%', color: BWR[2] },
+  { id: 'r5', label: '0〜5%', color: BWR[1] },
+  { id: 'r0', label: '0% 未満', color: BWR[0] },
   { id: 'na', label: '未確定', color: NA_VALUE },
 ];
 
@@ -405,8 +391,8 @@ export const R20_CLASSES = [
   { id: 'na', label: '未確定', color: NA_VALUE },
 ];
 
-/** 時期の色（古い → 新しい。暗い面では新しいほど明るい。画面の百分位の濃淡と同じ青の段） */
-export const TIME_STOPS = ['#1e3a8a', '#1d4ed8', '#3b82f6', '#60a5fa', '#93c5fd', '#dbeafe'];
+/** 時期の色（古い → 新しい。青白赤 BWR: 古い = 青・真ん中の時期 = 白・新しい = 赤。運用者の選択 2026-10-19。前は青 → 白） */
+export const TIME_STOPS = BWR;
 
 const hex = (h) => [1, 3, 5].map((k) => parseInt(h.slice(k, k + 2), 16));
 

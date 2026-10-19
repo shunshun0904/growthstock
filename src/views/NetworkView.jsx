@@ -23,7 +23,10 @@ import {
  * 決めていた）。同じ夜の依頼「指で拡大縮小」「対象日と似ている（紐づく）サンプルもハイライト」「無理に球状にしなくても3次元
  * ネットワーク構造でかっこよく」は src/components/RecurrenceGraph.jsx。
  * 点の色はその日に候補になっていたら、の結果（+10% の指値か20営業日目の終値・目的変数 1.5σ / 1.2σ。予測日までに分かったものだけ）。
- * 今日（候補の日）の似た日は、その銘柄の過去で今日と状態の近い k 日で、どれも結果が出そろっている（図で光らせる）。
+ * 今日（候補の日）の似た日は、その銘柄の過去で今日と状態の近い k 日で、どれも結果が出そろっている（図で光らせる）。右の一覧も
+ * 同じ k 日（運用者の指定 2026-10-19「今日に近い過去の更新日の日付とプロット上のkで選ばれる近い日付の概念は別物ですか？
+ * もし違うなら、プロット上の近傍の日付で統一してほしい」。それまでは更新日だけから近い順に5日を別に出していた）。
+ * 最高値までの上昇率と時期の色は青白赤（同日の指定「青白ではなく、青白赤で」→ 選択「高い・新しい方を赤」。src/lib/recurrence.js の BWR）。
  * 図の力は Obsidian のグラフ表示と同じ4つのつまみ（中心の力・反発の力・リンクの力・リンクの長さ）で変えられる。
  * **参考の表示で、選定には使わない。** 買う銘柄は今日の戦略（1.5σ の3本の最小の順）のまま。
  */
@@ -330,6 +333,7 @@ export default function NetworkView({ data }) {
                   + `+${fmt(method.target, 0)}% の指値か${method.hold}営業日目の終値・目的変数）で、予測日までに分かったものだけ。`
                   + '上の「色」で、翌営業日の寄り（買値）から見た20営業日以内の最高値までの上昇率（高値の最大。10% 以上なら'
                   + ' +10% の指値に届いた）・20営業日目の騰落率（指値なし）・目的変数・時期にも変えられる。'
+                  + '最高値までと時期は青 → 白 → 赤（低い・古いほど青、高い・新しいほど赤。結果と20営業日目は +10% 以上が明るい青）。'
                   + '今日（白い大きな点）に似た日（光る線で結んだ k 日）は、この銘柄の過去で今日と状態の近い日で、どれも結果が出そろっている。'
                   + '似た日の色が偏っていれば、この銘柄はこの状態のあとにそうなりやすかった、という読み方になる（件数が少なく、同じ時期の日は'
                   + '結果の期間が重なるので目安）。点に触れる・選ぶと、その日に似た日に光が移る。塊は似た状態が繰り返し現れた時期。'
@@ -441,7 +445,7 @@ export default function NetworkView({ data }) {
                   seedKey={`${dec.jqCode}-${dec.date}-k${k}`} selected={selected} onSelect={setSelected} tipOf={tipOf}
                   zoomCmd={zoomCmd} forces={forces} highlightToday={lightToday} layout={layout}
                   ariaLabel={`${dec.code} ${dec.name} の ${dec.n} 営業日のリカレンス・ネットワーク。今日に似た過去の日は ${summary.deg} 日。`
-                    + '右の「表で見る」に同じ内容があります'}
+                    + '右の「今日に似た日」の表に同じ日があります'}
                 />
                 <div className="net-foot">
                   {`点 ${fmtInt(dec.n)}・線 ${fmtInt(summary.edges)} 本（各日に近い ${k} 日を選び、どちらかが選べば結ぶ）・`
@@ -509,30 +513,38 @@ export default function NetworkView({ data }) {
                 </p>
               </section>
 
-              <section className="net-panel">
-                <h3>今日に近い過去の更新日</h3>
-                {summary.nearestFresh.length === 0 ? (
-                  <p className="net-hint">結果の出そろった過去の更新日がありません。</p>
+              <section className="net-panel net-near">
+                <h3>{`今日に似た日（図で今日と結んだ ${fmtInt(nearList.length)} 日）`}</h3>
+                {nearList.length === 0 ? (
+                  <p className="net-hint">{`今日に似た過去の日がありません（${method.theiler}営業日より前の日がありません）。`}</p>
                 ) : (
                   <div className="net-tbl">
                     <table>
-                      <thead><tr><th>日付</th><th>距離</th><th>結果</th><th>1.5σ</th><th>1.2σ</th></tr></thead>
+                      <thead>
+                        <tr>
+                          <th>日付</th><th>距離</th><th>結果</th>
+                          {valueMode && <th title={valueMode.title}>{valueMode.short}</th>}
+                          <th>1.5σ</th><th>1.2σ</th>
+                        </tr>
+                      </thead>
                       <tbody>
-                        {summary.nearestFresh.map((r) => (
+                        {nearList.map((r) => (
                           <tr key={r.i} className={`pick${r.i === selected ? ' on' : ''}`}
                               onClick={() => setSelected(r.i === selected ? null : r.i)}>
-                            <td>{fmtDate(r.date)}{r.inKnn ? ' ●' : ''}</td>
-                            <td>{`${fmt(r.d, 2)}σ`}</td>
-                            <td>{retText(r.ret, method.target)}</td>
-                            <td>{labelText(r.l15)}</td>
-                            <td>{labelText(r.l12)}</td>
+                            <td>{fmtDate(dec.dates[r.i])}{dec.isFresh[r.i] ? ' ○' : ''}</td><td>{`${fmt(r.d, 2)}σ`}</td>
+                            <td>{retText(dec.ret[r.i], method.target)}</td>
+                            {valueMode && <td>{fwdText(dec[valueMode.value][r.i])}</td>}
+                            <td>{labelText(dec.labels.l15?.[r.i])}</td><td>{labelText(dec.labels.l12?.[r.i])}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
                 )}
-                <p className="net-hint">{`● = 今日に似た ${k} 日に入る。行をクリックすると図の中でその日を選びます`}</p>
+                <p className="net-hint">
+                  {`図で今日と光る線で結んだ日と同じ（今日に状態の近い ${k} 日。近い順で、同じ距離なら古い日が先）。`
+                    + '○ = 78週高値の更新日。行をクリックするとその日を選び、光はその日に似た日へ移ります（もう一度クリックで今日に戻る）'}
+                </p>
               </section>
 
               <section className="net-panel">
@@ -572,31 +584,6 @@ export default function NetworkView({ data }) {
                 </section>
               )}
 
-              <details className="net-details net-panel">
-                <summary>{`表で見る（今日に似た日 ${fmtInt(nearList.length)} 日）`}</summary>
-                <div className="net-tbl net-tbl-scroll">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>日付</th><th>距離</th><th>結果</th>
-                        {valueMode && <th title={valueMode.title}>{valueMode.short}</th>}
-                        <th>1.5σ</th><th>1.2σ</th><th>更新日</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {nearList.map((r) => (
-                        <tr key={r.i}>
-                          <td>{fmtDate(dec.dates[r.i])}</td><td>{`${fmt(r.d, 2)}σ`}</td>
-                          <td>{retText(dec.ret[r.i], method.target)}</td>
-                          {valueMode && <td>{fwdText(dec[valueMode.value][r.i])}</td>}
-                          <td>{labelText(dec.labels.l15?.[r.i])}</td><td>{labelText(dec.labels.l12?.[r.i])}</td>
-                          <td>{dec.isFresh[r.i] ? '○' : ''}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </details>
             </aside>
           )}
         </div>

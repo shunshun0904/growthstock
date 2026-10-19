@@ -9,7 +9,9 @@
  * - 色の区分（+10% 到達 / 0〜+10 / −10〜0 / −10 未満 / 未確定、正例 / 負例 / 未確定）と、丸めた z から生の値の目安への戻し方
  * - 先20営業日の値動きの色（最高値までの上昇率の5段、20営業日目の騰落率の4段。区切りは下の端を含む。最安値までの色は運用者の
  *   指定で外した。値はツールチップに出すので読む）。値の無いファイル（版 1）は未確定、終値で測っていた版 2 の上昇率・下落率は
- *   読まない。今日に似た日だけの件数
+ *   読まない。今日に似た日だけの件数。最高値までと時期の色は青白赤（低い・古い = 青 → 白 → 高い・新しい = 赤。運用者の選択）
+ * - 今日に似た日の表（todayNeighbors）は図で光らせる日（neighborsOf の今日）と同じ日・同じ順（運用者の指定「プロット上の近傍の
+ *   日付で統一」。要約に「今日に近い過去の更新日」は無い）
  *
  *   node --test tests/recurrence.test.js
  */
@@ -21,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 import {
   decode, knnLists, network, summarize, neighborsOf, todayNeighbors, periodsOf, outcomeOf, labelClassOf, nodeColors, classCounts,
   rawOf, methodOf, timeColor, riseOf, classesOf, OUTCOME_CLASSES, RISE_CLASSES, R20_CLASSES,
-  NA_VALUE, COLOR_MODES,
+  NA_VALUE, COLOR_MODES, BWR, TIME_STOPS,
 } from '../src/lib/recurrence.js';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
@@ -65,7 +67,12 @@ test('フィクスチャの要約が Python と一致する（k ごと）', () =
     assert.deepEqual(Object.keys(expected[f]), method.kChoices.map(String));
     for (const [k, want] of Object.entries(expected[f])) {
       const net = network(dec, method.theiler, Number(k), lists);
-      near(summarize(dec, net, method.theiler, Number(k), { target: method.target, labels: method.labels }), want, `${f} k=${k}`);
+      const s = summarize(dec, net, method.theiler, Number(k), { target: method.target, labels: method.labels });
+      near(s, want, `${f} k=${k}`);
+      // 表に出す今日に似た日は、図で光らせる日（今日の近い k 日）と同じ日・同じ順で、数は要約の deg と同じ
+      const table = todayNeighbors(dec, net).map((r) => r.i);
+      assert.deepEqual(table, Array.from(neighborsOf(net).of(dec.n - 1)), `${f} k=${k}: 表と図の似た日`);
+      assert.equal(table.length, s.deg, `${f} k=${k}: 表の日数`);
       // 一度にまとめて数えた近傍（kMax = 50）から切っても、その k だけで数えても同じ
       const alone = network(dec, method.theiler, Number(k));
       assert.deepEqual(Array.from(alone.edges), Array.from(net.edges), `${f} k=${k}: 線`);
@@ -108,8 +115,9 @@ test('k近傍: 手で数えた例（Python の test_hand_example_k2 と同じ）
   assert.equal(s.nbrFresh.n, 1);
   assert.equal(s.base.known, 6);
   assert.equal(s.base.retMed, 1.25);
-  assert.deepEqual(s.nearestFresh.map((r) => [r.i, r.inKnn, r.date]),
-    [[0, true, '2026-01-05'], [4, false, '2026-01-09'], [5, false, '2026-01-10']]);
+  // 似た日は近い k 日だけ（更新日だけから選んだ近い日の一覧は持たない。Python の要約と同じ項目）
+  assert.deepEqual(Object.keys(s).sort(), ['base', 'baseFresh', 'deg', 'degMed', 'edges', 'isolated', 'k', 'kth', 'kth2', 'kthPct',
+    'nbr', 'nbrFresh', 'periods', 'theiler']);
   assert.deepEqual(Array.from(neighborsOf(net).of(7)), [0, 2]);           // 今日の似た日（近い順）
   assert.deepEqual(Array.from(neighborsOf(net).of(1)), [6, 4]);           // 線は 1-3・1-5 もあるが、1 が選んだのは 6・4
   assert.deepEqual(todayNeighbors(dec, net).map((r) => [r.i, r.d]), [[0, 0], [2, 1]]);
@@ -117,7 +125,8 @@ test('k近傍: 手で数えた例（Python の test_hand_example_k2 と同じ）
   const s3 = summarize(dec, network(dec, 1, 3), 1, 3);
   assert.deepEqual([s3.deg, s3.kth2, s3.periods], [3, 4, 3]);
   assert.deepEqual(s3.nbr, { n: 3, known: 2, hit: 1, retMed: 10, l12: 1, l12N: 2, l15: 0.5, l15N: 2 });
-  assert.deepEqual(s3.nearestFresh.map((r) => r.inKnn), [true, true, false]);
+  assert.equal(s3.nbrFresh.n, 2);                                         // 近い3日 0・2・4 のうち更新日（0・4）
+  assert.deepEqual(todayNeighbors(dec, network(dec, 1, 3)).map((r) => r.i), [0, 2, 4]);
 });
 
 /** 決まった種の乱数（-r〜r の整数）。 */
@@ -210,8 +219,12 @@ test('色の区分', () => {
   const of = Object.fromEntries(OUTCOME_CLASSES.map((c) => [c.id, c.color]));
   assert.deepEqual(nodeColors(dec, 'outcome'), [of.hit, of.up, of.down, of.na]);
   assert.equal(nodeColors(dec, 'time')[0], timeColor(0));
-  assert.equal(timeColor(0), 'rgb(30, 58, 138)');
-  assert.equal(timeColor(1), 'rgb(219, 234, 254)');
+  // 時期は青白赤（運用者の選択 2026-10-19: 古い = 青・真ん中 = 白・新しい = 赤）
+  assert.deepEqual(TIME_STOPS, BWR);
+  assert.equal(timeColor(0), 'rgb(58, 123, 240)');          // #3a7bf0
+  assert.equal(timeColor(0.5), 'rgb(236, 236, 236)');       // #ececec
+  assert.equal(timeColor(1), 'rgb(227, 70, 63)');           // #e3463f
+  assert.deepEqual(nodeColors(dec, 'time').at(-1), timeColor(1));
 });
 
 test('丸めた z から生の値の目安へ戻す', () => {
@@ -251,6 +264,9 @@ test('先20営業日の値動きの色（最高値まで・20営業日目）', (
   for (const c of R20_CLASSES.filter((x) => x.id !== 'na')) assert.equal(c.color, color(OUTCOME_CLASSES)[c.id]);
   for (const cl of [RISE_CLASSES, R20_CLASSES]) assert.equal(color(cl).na, NA_VALUE);
   assert.equal(classesOf('rise'), RISE_CLASSES);
+  // 最高値までは青白赤（低い = 青 → 5〜10% = 白 → +10% の指値に届いた段 = 赤）
+  assert.deepEqual(['r0', 'r5', 'r10', 'r20', 'r20p'].map((k) => color(RISE_CLASSES)[k]), BWR);
+  assert.deepEqual(BWR, ['#3a7bf0', '#86b0f2', '#ececec', '#f2988e', '#e3463f']);
   assert.equal(classesOf('time'), null);
   assert.deepEqual(COLOR_MODES.filter((m) => m.value).map((m) => m.value), ['rise', 'r20']);
   // 最安値までの色は外した（運用者の指定「安値の色付けは、なしで良いです」）。値は読む（ツールチップ・選んだ日）
@@ -262,11 +278,11 @@ test('先20営業日の値動きの色（最高値まで・20営業日目）', (
   const v2 = tiny([0, 1, 2], { v: 2, rise: [5, 6, 7], fall: [-1, -2, -3], r20: [1, 2, 3] });
   assert.ok([...v2.rise, ...v2.fall].every(Number.isNaN));
   assert.deepEqual(Array.from(v2.r20), [1, 2, 3]);
-  // フィクスチャ（版 4。値は版 3 と同じ高値・安値の物差し）には値がある。最後の20営業日は未確定、分かる日は
+  // フィクスチャ（版 5。値は版 3 と同じ高値・安値の物差し）には値がある。最後の20営業日は未確定、分かる日は
   // 最安値 ≤ 20営業日目の終値 ≤ 最高値（0.1% の丸めの幅）
   const p = read(path.join(FIX, index.days[0].candidates[0].file));
   const fx = decode(p, method.labels);
-  assert.equal(p.v, 4);
+  assert.equal(p.v, 5);
   assert.ok(Array.from(fx.rise.slice(-20)).every(Number.isNaN));
   // （実データでは20営業日目に売買が無い日は 20営業日目だけが分からない。最大・最小はその日を飛ばして数える）
   let known = 0;

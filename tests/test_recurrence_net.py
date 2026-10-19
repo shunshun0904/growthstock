@@ -7,8 +7,9 @@
 - 距離の2乗は整数で、素朴に数えた値と一致する。近傍は各ノードの、タイラー窓より離れた日のうち距離の近い k 日（同じ距離は古い日が先。
   同じ距離がたくさんある例で素朴な並べ方と一致）。結べる日が k より少なければその数。結べる日が無ければ近傍なし
 - 辺はどちらかが相手を近い k 日に選んでいれば結ぶ（対称・タイラー窓の中は結ばない）
-- 要約（k ごと）: 今日の近い k 日の結果（分かった日だけで数える）・k 番目の距離とその位置（中位の百分位）・時期の数・線の数・
-  近い更新日の並び（近い k 日の外も近い順）が、小さな例で手で数えた値と一致（k = 3 は版 3 の ε の例と同じ近傍になる）
+- 要約（k ごと）: 今日の近い k 日の結果（分かった日だけで数える）・k 番目の距離とその位置（中位の百分位）・時期の数・線の数が、
+  小さな例で手で数えた値と一致（k = 3 は版 3 の ε の例と同じ近傍になる）。似た日は近い k 日だけ（版 4 までの「今日に近い過去の
+  更新日」は運用者の指定 2026-10-19「プロット上の近傍の日付で統一」でやめた。要約に無い）
 - 先読みしない: 予測日より後の日足があってもなくても、同じファイルになる。目的変数は最後の20営業日が未確定、+10% の到達は予測日までの
   高値だけで決まる
 - 結果は live_track.forward・build_dataset の目的変数（1.2σ・1.5σ）・78週高値の更新日と同じ
@@ -141,7 +142,7 @@ def make_fixtures(out_dir: str = FIX_DIR, expected_path: str = FIX_EXPECTED) -> 
     expected = {}
     for f, p in files.items():
         zq, ret, labels, fresh, dates = decode({k: v for k, v in p.items() if not k.startswith("_")})
-        expected[f] = {str(k): RN.round_summary(RN.summarize(zq, ret, labels, fresh, dates, k=k))
+        expected[f] = {str(k): RN.round_summary(RN.summarize(zq, ret, labels, fresh, k=k))
                        for k in RN.K_CHOICES}
     with open(expected_path, "w", encoding="utf-8") as fh:
         json.dump(expected, fh, ensure_ascii=False, indent=1)
@@ -275,8 +276,7 @@ class TestSummary(unittest.TestCase):
         labels = {"l12": np.array([1, 0, np.nan, 0, 1, 0, 0, np.nan], dtype=float),
                   "l15": np.array([1, 0, np.nan, 0, 0, 0, 0, np.nan], dtype=float)}
         fresh = [0, 4, 5, 6]
-        dates = [f"2026-01-{d:02d}" for d in range(5, 13)]
-        return RN.summarize(zq, ret, labels, fresh, dates, theiler=1, k=k, q=1)
+        return RN.summarize(zq, ret, labels, fresh, theiler=1, k=k, q=1)
 
     def test_hand_example_k2(self):
         s = self.hand(2)
@@ -297,12 +297,10 @@ class TestSummary(unittest.TestCase):
         self.assertAlmostEqual(s["base"]["hit"], 2 / 6)
         self.assertAlmostEqual(s["base"]["retMed"], (0.0 + 2.5) / 2)
         self.assertEqual(s["baseFresh"]["n"], 4)
-        # 近い更新日: 今日（7）より 1 日より前の更新日 0, 4, 5 を近い順（6 はタイラー窓の中）。近い2日に入るのは 0 だけ
-        self.assertEqual([r["i"] for r in s["nearestFresh"]], [0, 4, 5])
-        self.assertEqual([r["inKnn"] for r in s["nearestFresh"]], [True, False, False])
-        self.assertEqual(s["nearestFresh"][0]["date"], "2026-01-05")
-        self.assertEqual(s["nearestFresh"][2]["ret"], -12.0)
-        self.assertEqual(s["nearestFresh"][1]["l12"], 1)
+        # 似た日は図で光らせる近い k 日だけ（更新日だけから選んだ近い日の一覧は持たない）。うち更新日は近い k 日の中の更新日
+        self.assertNotIn("nearestFresh", s)
+        self.assertEqual(sorted(s), ["base", "baseFresh", "deg", "degMed", "edges", "isolated", "k", "kth", "kth2", "kthPct",
+                                     "nbr", "nbrFresh", "periods", "theiler"])
 
     def test_hand_example_k3_same_as_eps_example(self):
         # k = 3 の近傍は、版 3 の ε の例（ε² = 4）と同じ 0・2・4
@@ -310,8 +308,7 @@ class TestSummary(unittest.TestCase):
         self.assertEqual((s["deg"], s["kth2"], s["periods"]), (3, 4, 3))
         self.assertEqual(s["nbr"], {"n": 3, "known": 2, "hit": 1.0, "retMed": 10.0,
                                     "l12": 1.0, "l12N": 2, "l15": 0.5, "l15N": 2})
-        self.assertEqual(s["nbrFresh"]["n"], 2)                 # 0 と 4
-        self.assertEqual([r["inKnn"] for r in s["nearestFresh"]], [True, True, False])
+        self.assertEqual(s["nbrFresh"]["n"], 2)                 # 0 と 4（近い3日 0・2・4 のうち更新日）
 
     def test_summaries_same_as_one_by_one(self):
         rng = np.random.default_rng(8)
@@ -319,12 +316,11 @@ class TestSummary(unittest.TestCase):
         ret = np.where(rng.random(120) < 0.2, np.nan, np.round(rng.normal(0, 8, 120), 1))
         labels = {"l12": rng.integers(0, 2, 120).astype(float), "l15": rng.integers(0, 2, 120).astype(float)}
         fresh = sorted(rng.choice(100, 15, replace=False).tolist())
-        dates = [f"d{i}" for i in range(120)]
-        allk = RN.summaries(zq, ret, labels, fresh, dates)
+        allk = RN.summaries(zq, ret, labels, fresh)
         self.assertEqual(list(allk), [str(k) for k in RN.K_CHOICES])
         for k in RN.K_CHOICES:
             self.assertEqual(json.dumps(allk[str(k)], sort_keys=True),
-                             json.dumps(RN.summarize(zq, ret, labels, fresh, dates, k=k), sort_keys=True))
+                             json.dumps(RN.summarize(zq, ret, labels, fresh, k=k), sort_keys=True))
             self.assertEqual(allk[str(k)]["deg"], k)
 
     def test_rare_today(self):
@@ -332,16 +328,15 @@ class TestSummary(unittest.TestCase):
         zq[:, 0] = np.arange(60) % 7
         zq[-1, 0] = 100                                          # 今日だけ遠い（似た日はあるが、どれも遠い）
         nan = np.full(60, np.nan)
-        s = RN.summarize(zq, nan, {"l12": nan, "l15": nan}, [], [f"d{i}" for i in range(60)], theiler=5, k=5)
+        s = RN.summarize(zq, nan, {"l12": nan, "l15": nan}, [], theiler=5, k=5)
         self.assertEqual(s["deg"], 5)
         self.assertAlmostEqual(s["kthPct"], 100.0 * (59 + 0.5) / 60)   # k 番目の距離がいちばん遠い
         self.assertEqual(s["nbr"], {"n": 5, "known": 0, "hit": None, "retMed": None,
                                     "l12": None, "l12N": 0, "l15": None, "l15N": 0})
-        self.assertEqual(s["nearestFresh"], [])
 
     def test_too_few_nodes(self):
         nan = np.full(5, np.nan)
-        s = RN.summarize(np.zeros((5, 9), dtype=int), nan, {"l12": nan, "l15": nan}, [], [f"d{i}" for i in range(5)])
+        s = RN.summarize(np.zeros((5, 9), dtype=int), nan, {"l12": nan, "l15": nan}, [])
         self.assertEqual((s["deg"], s["kth2"], s["kth"], s["kthPct"], s["periods"], s["edges"], s["isolated"]),
                          (0, -1, None, None, 0, 0, 5))
         self.assertEqual(s["nbr"]["n"], 0)
@@ -579,7 +574,7 @@ class TestFixtures(unittest.TestCase):
             self.assertEqual(dates[-1], p["date"])
             self.assertEqual(list(expected[f]), [str(k) for k in RN.K_CHOICES])
             for k, want in expected[f].items():
-                got = RN.round_summary(RN.summarize(zq, ret, labels, fresh, dates, k=int(k)))
+                got = RN.round_summary(RN.summarize(zq, ret, labels, fresh, k=int(k)))
                 self.assertEqual(got, want, f"{f} k={k}")
             self.assertEqual(p["byK"], expected[f])
 
