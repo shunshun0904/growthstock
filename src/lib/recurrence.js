@@ -45,6 +45,8 @@ export function decode(p, labels = DEFAULT_LABELS) {
   if (z.length !== n * dims) throw new Error(`状態の数が合いません（${z.length} / ${n} × ${dims}）`);
   if (p.gaps.length !== n - 1) throw new Error('日付の数が合いません');
   const ret = Float64Array.from(p.ret, nanOf);
+  // 先20営業日の値動き（色付け用。無いファイル（版 1）はすべて未確定）
+  const fwd = (k) => (Array.isArray(p[k]) && p[k].length === n ? Float64Array.from(p[k], nanOf) : new Float64Array(n).fill(NaN));
   const lab = {};
   for (const { key } of labels) lab[key] = Float64Array.from(p[key] || [], nanOf);
   const dates = new Array(n);
@@ -58,7 +60,7 @@ export function decode(p, labels = DEFAULT_LABELS) {
   const isFresh = new Uint8Array(n);
   for (const i of fresh) isFresh[i] = 1;
   return {
-    n, dims, q: p.q, z, ret, labels: lab, dates, fresh, isFresh,
+    n, dims, q: p.q, z, ret, rise: fwd('rise'), fall: fwd('fall'), r20: fwd('r20'), labels: lab, dates, fresh, isFresh,
     close: Float64Array.from(p.close || [], nanOf),
     scale: p.scale || [], features: p.features, raw: p.raw || [],
     code: p.code, jqCode: p.jqCode, name: p.name, date: p.date,
@@ -288,6 +290,71 @@ export function labelClassOf(v) {
   return v >= 0.5 ? 'pos' : 'neg';
 }
 
+/**
+ * 値で色分けするときの未確定（先20営業日がまだ無い日）。下の3つの段（RISE / FALL / R20）のどの色とも、通常の見え方で
+ * ΔE 15.3 以上・色覚の3型で 8.6 以上離れる（dataviz の validate_palette.js の deltaE。暗い面 #0a0e17）
+ */
+export const NA_VALUE = '#3a3a3a';
+
+/**
+ * 先20営業日の最大上昇率（%）の5段（運用者の選択 2026-10-19「5段＋未確定」）。t+1〜t+20 の終値の最大 ÷ 翌営業日の寄り − 1
+ * （目的変数の到達と同じ物差し）。青の段で、低いほど暗く高いほど明るい（順序の段の検査を暗い面 #0a0e17 で通る。いちばん暗い段は
+ * 面との差 2.38:1 なので、凡例の件数と表を添える）。並びは高い順（凡例も同じ）
+ */
+export const RISE_CLASSES = [
+  { id: 'r20p', label: '20% 以上', color: '#cde2fb' },
+  { id: 'r20', label: '10〜20%', color: '#86b6ef' },
+  { id: 'r10', label: '5〜10%', color: '#5598e7' },
+  { id: 'r5', label: '0〜5%', color: '#2a78d6' },
+  { id: 'r0', label: '0% 未満', color: '#184f95' },
+  { id: 'na', label: '未確定', color: NA_VALUE },
+];
+
+/** 最大上昇率（%）の段。下の端を含む（5.0 は「5〜10%」） */
+export function riseOf(v) {
+  if (!Number.isFinite(v)) return 'na';
+  if (v >= 20) return 'r20p';
+  if (v >= 10) return 'r20';
+  if (v >= 5) return 'r10';
+  if (v >= 0) return 'r5';
+  return 'r0';
+}
+
+/**
+ * 先20営業日の最大下落率（%）の5段。t+1〜t+20 の終値の最小 ÷ 翌営業日の寄り − 1。赤の段で、浅いほど暗く深いほど明るい
+ * （深い下げが目に付く。順序の段の検査を暗い面で通る）。並びは浅い順
+ */
+export const FALL_CLASSES = [
+  { id: 'f0', label: '下げなし（0% 以上）', color: '#b91c1c' },
+  { id: 'f5', label: '0〜−5%', color: '#dc2626' },
+  { id: 'f10', label: '−5〜−10%', color: '#f87171' },
+  { id: 'f20', label: '−10〜−20%', color: '#fca5a5' },
+  { id: 'f20p', label: '−20% 以下', color: '#fee2e2' },
+  { id: 'na', label: '未確定', color: NA_VALUE },
+];
+
+/** 最大下落率（%）の段。最大上昇率と左右対称（−5.0 は「−5〜−10%」） */
+export function fallOf(v) {
+  if (!Number.isFinite(v)) return 'na';
+  if (v >= 0) return 'f0';
+  if (v > -5) return 'f5';
+  if (v > -10) return 'f10';
+  if (v > -20) return 'f20';
+  return 'f20p';
+}
+
+/**
+ * 20営業日目の騰落率（%）の4段。20営業日目の終値 ÷ 翌営業日の寄り − 1（指値なしで持ち切り）。区切り（+10・0・−10）と色は
+ * 結果（OUTCOME_CLASSES）と同じで、違うのは +10% の指値で売らないことだけ
+ */
+export const R20_CLASSES = [
+  { id: 'hit', label: '+10% 以上', color: '#93c5fd' },
+  { id: 'up', label: '0〜+10%', color: '#2563eb' },
+  { id: 'down', label: '−10〜0%', color: '#b91c1c' },
+  { id: 'bad', label: '−10% 未満', color: '#f87171' },
+  { id: 'na', label: '未確定', color: NA_VALUE },
+];
+
 /** 時期の色（古い → 新しい。暗い面では新しいほど明るい。画面の百分位の濃淡と同じ青の段） */
 export const TIME_STOPS = ['#1e3a8a', '#1d4ed8', '#3b82f6', '#60a5fa', '#93c5fd', '#dbeafe'];
 
@@ -304,34 +371,59 @@ export function timeColor(f) {
   return `rgb(${c[0]}, ${c[1]}, ${c[2]})`;
 }
 
-/** 色の付け方。outcome = 結果、l15 / l12 = 目的変数、time = 時期 */
+/**
+ * 色の付け方。outcome = 結果、rise / fall / r20 = 先20営業日の値動き（運用者の依頼 2026-10-19「ノードの色付け機能がほしい。
+ * 先20日間の最大上昇率は最低限」→ 選択「終値・翌日寄り基準」「5段＋未確定」「最大下落率」「20営業日目の騰落率」）、
+ * l15 / l12 = 目的変数、time = 時期。value があるものは、ノードの値を表やツールチップに出す（short は表の見出し）
+ */
 export const COLOR_MODES = [
-  { id: 'outcome', label: '結果（+10% / 20営業日目）' },
+  { id: 'outcome', label: '結果（+10% / 20営業日目）',
+    title: '翌営業日の寄りで買い、+10% の指値か20営業日目の終値で売ったときの収益' },
+  { id: 'rise', label: '最大上昇率（先20日）', short: '最大上昇', value: 'rise',
+    title: '先20営業日の終値の最大 ÷ 翌営業日の寄り − 1（目的変数の到達と同じ物差し）' },
+  { id: 'fall', label: '最大下落率（先20日）', short: '最大下落', value: 'fall',
+    title: '先20営業日の終値の最小 ÷ 翌営業日の寄り − 1' },
+  { id: 'r20', label: '20営業日目の騰落率', short: '20日目', value: 'r20',
+    title: '20営業日目の終値 ÷ 翌営業日の寄り − 1（指値なしで持ち切ったとき。20営業日目に売買が無かった日は未確定）' },
   { id: 'l15', label: '目的変数 1.5σ' },
   { id: 'l12', label: '目的変数 1.2σ' },
   { id: 'time', label: '時期' },
 ];
 
+/** 区分で塗る色の付け方: 区分の並び（凡例）と、ノード i の区分。time は区分なし（連続の色） */
+const BINS = {
+  outcome: { classes: OUTCOME_CLASSES, of: (dec, i, target) => outcomeOf(dec.ret[i], target) },
+  rise: { classes: RISE_CLASSES, of: (dec, i) => riseOf(dec.rise[i]) },
+  fall: { classes: FALL_CLASSES, of: (dec, i) => fallOf(dec.fall[i]) },
+  r20: { classes: R20_CLASSES, of: (dec, i, target) => outcomeOf(dec.r20[i], target) },
+};
+const binOf = (mode) => BINS[mode]
+  || (mode === 'time' ? null : { classes: LABEL_CLASSES, of: (dec, i) => labelClassOf(dec.labels[mode]?.[i]) });
+
+/** 色の付け方の区分の並び（凡例に出す順）。区分の無い付け方（時期）は null */
+export function classesOf(mode) {
+  return binOf(mode)?.classes ?? null;
+}
+
 /** ノードごとの色（文字列の配列）。 */
 export function nodeColors(dec, mode, target = DEFAULTS.target) {
   const out = new Array(dec.n);
-  const of = Object.fromEntries(OUTCOME_CLASSES.map((c) => [c.id, c.color]));
-  const lab = Object.fromEntries(LABEL_CLASSES.map((c) => [c.id, c.color]));
+  const bin = binOf(mode);
+  const color = bin ? Object.fromEntries(bin.classes.map((c) => [c.id, c.color])) : null;
   for (let i = 0; i < dec.n; i += 1) {
-    if (mode === 'time') out[i] = timeColor(dec.n > 1 ? i / (dec.n - 1) : 1);
-    else if (mode === 'outcome') out[i] = of[outcomeOf(dec.ret[i], target)];
-    else out[i] = lab[labelClassOf(dec.labels[mode]?.[i])];
+    out[i] = bin ? color[bin.of(dec, i, target)] : timeColor(dec.n > 1 ? i / (dec.n - 1) : 1);
   }
   return out;
 }
 
-/** 色の区分ごとの件数（凡例に出す）。 */
-export function classCounts(dec, mode, target = DEFAULTS.target) {
+/** 色の区分ごとの件数（凡例に出す）。idx を渡すとそのノードだけ数える（今日に似た日の内訳）。区分の無い付け方は {} */
+export function classCounts(dec, mode, target = DEFAULTS.target, idx = null) {
   const counts = {};
-  for (let i = 0; i < dec.n; i += 1) {
-    const c = mode === 'outcome' ? outcomeOf(dec.ret[i], target) : labelClassOf(dec.labels[mode]?.[i]);
-    counts[c] = (counts[c] || 0) + 1;
-  }
+  const bin = binOf(mode);
+  if (!bin) return counts;
+  const add = (i) => { const c = bin.of(dec, i, target); counts[c] = (counts[c] || 0) + 1; };
+  if (idx) for (const i of idx) add(i);
+  else for (let i = 0; i < dec.n; i += 1) add(i);
   return counts;
 }
 

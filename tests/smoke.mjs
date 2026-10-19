@@ -420,9 +420,44 @@ await page.mouse.move(cbox.x + todayX, cbox.y + todayY);
 await page.waitForSelector('.net-tip', { timeout: 3000 }).catch(() => {});
 const netTip = (await page.locator('.net-tip').textContent().catch(() => '')) || '';
 check(netTip.includes('（今日）') && netTip.includes('2026/09/11'), `今日の点に触れると日付と（今日）が出る (実際: ${netTip.slice(0, 40)})`);
+check(netTip.includes('先20日の最大上昇率未確定') && netTip.includes('20営業日目の騰落率未確定'),
+      '今日の点の先20営業日の値動きは未確定（予測日より後の日足は読まない）');
 await page.mouse.move(cbox.x + 2, cbox.y + 2);
 await page.locator('.net-seg button', { hasText: '時期' }).click();
 check((await page.locator('.net-legend .net-ramp').count()) === 1, '時期の色にすると凡例が古い → 新しいの帯になる');
+// ノードの色付け（運用者の依頼 2026-10-19「先20日間の最大上昇率は最低限」）: 凡例の5段と未確定の件数が、フィクスチャの値を
+// ここで数え直した件数と同じ。今日に似た日の内訳・表の列も出る
+await page.locator('.net-seg button', { hasText: '最大上昇率（先20日）' }).click();
+const fx94 = JSON.parse(fs.readFileSync(path.join(ROOT, 'tests', 'fixtures', 'recurrence', '2026-09-11_94340.json'), 'utf8'));
+const riseWant = { '20% 以上': 0, '10〜20%': 0, '5〜10%': 0, '0〜5%': 0, '0% 未満': 0, '未確定': 0 };
+for (const v of fx94.rise) {
+  riseWant[v === null ? '未確定' : v >= 20 ? '20% 以上' : v >= 10 ? '10〜20%' : v >= 5 ? '5〜10%' : v >= 0 ? '0〜5%' : '0% 未満'] += 1;
+}
+const legendOf = async () => Object.fromEntries((await page.locator('.net-legend > span:has(.sw)').allInnerTexts()).map((t) => {
+  const m = t.replace(/\s+/g, ' ').trim().match(/^(.*) ([\d,]+)$/);
+  return m ? [m[1], Number(m[2].replace(/,/g, ''))] : [t, NaN];
+}));
+const riseGot = await legendOf();
+check(JSON.stringify(riseGot) === JSON.stringify(riseWant),
+      `最大上昇率の凡例（高い順の5段と未確定）の件数がファイルの値と同じ (実際: ${JSON.stringify(riseGot)})`);
+const nbrMix = (await page.locator('.net-nbrmix').textContent()) || '';
+check(nbrMix.includes(`今日に似た日 ${exp('94340', 200).deg} 日の内訳`), `凡例の下に今日に似た日の内訳 (実際: ${nbrMix.slice(0, 60)})`);
+await page.locator('.net-details summary').click();
+const riseHead = await page.locator('.net-details thead th').allTextContents();
+const riseCells = await page.locator('.net-details tbody tr td:nth-child(4)').allTextContents();
+check(riseHead.includes('最大上昇') && riseCells.length === exp('94340', 200).deg && riseCells.every((t) => /^[+-]?\d+\.\d%$/.test(t)),
+      `表に最大上昇の列（今日に似た日はどれも結果が出そろっているので値がある） (実際: ${riseCells.slice(0, 3).join(' ')})`);
+await page.locator('.net-details summary').click();
+await page.locator('.net-seg button', { hasText: '最大下落率（先20日）' }).click();
+const fallGot = await legendOf();
+check(Object.keys(fallGot).join(',') === '下げなし（0% 以上）,0〜−5%,−5〜−10%,−10〜−20%,−20% 以下,未確定'
+        && Object.values(fallGot).reduce((a, b) => a + b, 0) === fx94.n,
+      `最大下落率は浅い順の5段と未確定で、件数の合計はノードの数 (実際: ${JSON.stringify(fallGot)})`);
+await page.locator('.net-seg button', { hasText: '20営業日目の騰落率' }).click();
+const r20Got = await legendOf();
+check(Object.keys(r20Got).join(',') === '+10% 以上,0〜+10%,−10〜0%,−10% 未満,未確定'
+        && r20Got['未確定'] === fx94.r20.filter((v) => v === null).length,
+      `20営業日目の騰落率は結果と同じ区切りの4段と未確定 (実際: ${JSON.stringify(r20Got)})`);
 await page.locator('.net-seg button', { hasText: '2D' }).click();
 await page.locator('.net-seg button', { hasText: '力の調整' }).click();
 check((await page.locator('.net-forces input[type=range]').count()) === 4, '力の調整は Obsidian と同じ4つのつまみ');

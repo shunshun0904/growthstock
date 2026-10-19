@@ -7,7 +7,7 @@ import { loadRecurrenceIndex, loadRecurrenceFile } from '../lib/predictions.js';
 import { FORCE_DEFAULTS } from '../lib/forcegraph.js';
 import {
   methodOf, decode, network, neighborsOf, summarize, todayNeighbors, nodeColors, classCounts, outcomeStats, sqDist,
-  zOf, OUTCOME_CLASSES, LABEL_CLASSES, COLOR_MODES, TIME_STOPS,
+  zOf, classesOf, COLOR_MODES, TIME_STOPS,
 } from '../lib/recurrence.js';
 
 /**
@@ -47,6 +47,11 @@ function retText(r, target) {
   if (!Number.isFinite(r)) return '未確定';
   if (r >= target - 1e-9) return `+${fmt(target, 0)}% 到達`;
   return fmtSigned(r, 1);
+}
+
+/** 先20営業日の値動き（%）。分からない日は「未確定」 */
+function fwdText(v) {
+  return Number.isFinite(v) ? fmtSigned(v, 1) : '未確定';
 }
 
 function rawText(v) {
@@ -156,7 +161,13 @@ export default function NetworkView({ data }) {
   );
   const colors = useMemo(() => (ok ? nodeColors(dec, mode, method.target) : null), [dec, ok, mode, method]);
   const counts = useMemo(() => (ok && mode !== 'time' ? classCounts(dec, mode, method.target) : null), [dec, ok, mode, method]);
+  // 今日に似た日（ε の中の日）の色の区分ごとの件数（凡例の下に文字で出す。色だけに頼らない）
+  const nbrCounts = useMemo(
+    () => (nbrs && mode !== 'time' ? classCounts(dec, mode, method.target, nbrs.of(dec.n - 1)) : null),
+    [nbrs, dec, mode, method],
+  );
   const nearList = useMemo(() => (net ? todayNeighbors(dec, net, method.theiler) : []), [net, dec, method]);
+  const valueMode = COLOR_MODES.find((m) => m.id === mode && m.value) || null;   // 表に値の列を足す色の付け方
 
   const tipOf = (i) => {
     if (!ok || !net) return null;
@@ -167,6 +178,9 @@ export default function NetworkView({ data }) {
         ['結果', retText(dec.ret[i], method.target)],
         ['目的変数 1.5σ', labelText(dec.labels.l15?.[i])],
         ['目的変数 1.2σ', labelText(dec.labels.l12?.[i])],
+        ['先20日の最大上昇率', fwdText(dec.rise[i])],
+        ['先20日の最大下落率', fwdText(dec.fall[i])],
+        ['20営業日目の騰落率', fwdText(dec.r20[i])],
         ['似た日（次数）', `${fmtInt(net.deg[i])} 日`],
         ['今日との距離', `${fmt(Math.sqrt(sqDist(dec, i, today)) / dec.q, 2)}σ`],
         ['終値（調整後）', fmt(dec.close[i], dec.close[i] >= 1000 ? 0 : 1)],
@@ -261,7 +275,7 @@ export default function NetworkView({ data }) {
             <div className="net-seg" role="group" aria-label="点の色">
               {COLOR_MODES.map((m) => (
                 <button key={m.id} className={`btn btn-ghost${m.id === mode ? ' on' : ''}`} aria-pressed={m.id === mode}
-                        onClick={() => setMode(m.id)}>
+                        onClick={() => setMode(m.id)} title={m.title}>
                   {m.label}
                 </button>
               ))}
@@ -298,6 +312,8 @@ export default function NetworkView({ data }) {
               <p>
                 {'点の色は、その日に候補になっていたら、の結果（翌営業日の寄りで買い、'
                   + `+${fmt(method.target, 0)}% の指値か${method.hold}営業日目の終値・目的変数）で、予測日までに分かったものだけ。`
+                  + '上の「色」で、先20営業日の最大上昇率・最大下落率（t+1〜t+20 の終値の最大・最小 ÷ 翌営業日の寄り − 1。'
+                  + '最大上昇率は目的変数の到達と同じ物差し）・20営業日目の騰落率（指値なし）・目的変数・時期にも変えられる。'
                   + '今日（白い大きな点）の近傍は、この銘柄の過去で今日と似た状態だった日で、どれも結果が出そろっている。近傍の色が偏っていれば、'
                   + 'この銘柄はこの状態のあとにそうなりやすかった、という読み方になる（件数が少ないので目安）。塊は似た状態が繰り返し現れた時期、'
                   + '外側の殻は似た日の無い珍しい状態の日。黄色の線は直近の日付の順の道筋（今日の状態へどこから入ってきたか）。'
@@ -392,7 +408,7 @@ export default function NetworkView({ data }) {
             )}
             {showGraph ? (
               <>
-                <Legend mode={mode} counts={counts} dec={dec} />
+                <Legend mode={mode} counts={counts} nbrCounts={nbrCounts} nbrN={summary.deg} dec={dec} />
                 <RecurrenceGraph
                   dec={dec} net={net} nbrs={nbrs} colors={colors} dim={dim} spin={spin} trail={trail ? TRAIL_DAYS : 0}
                   seedKey={`${dec.jqCode}-${dec.date}-${bp}`} selected={selected} onSelect={setSelected} tipOf={tipOf}
@@ -511,6 +527,9 @@ export default function NetworkView({ data }) {
                   <dl className="net-dl">
                     <dt>結果</dt><dd>{retText(dec.ret[selected], method.target)}</dd>
                     <dt>目的変数</dt><dd>{`1.5σ ${labelText(dec.labels.l15?.[selected])}・1.2σ ${labelText(dec.labels.l12?.[selected])}`}</dd>
+                    <dt>先20日</dt>
+                    <dd>{`最大上昇 ${fwdText(dec.rise[selected])}・最大下落 ${fwdText(dec.fall[selected])}・`
+                      + `20営業日目 ${fwdText(dec.r20[selected])}`}</dd>
                     <dt>78週高値の更新日</dt><dd>{dec.isFresh[selected] ? 'はい' : 'いいえ'}</dd>
                     <dt>今日との距離</dt><dd>{`${fmt(Math.sqrt(sqDist(dec, selected, dec.n - 1)) / dec.q, 2)}σ`}</dd>
                     <dt>この日に似た日</dt>
@@ -524,12 +543,19 @@ export default function NetworkView({ data }) {
                 <summary>{`表で見る（今日に似た日 ${fmtInt(nearList.length)} 日）`}</summary>
                 <div className="net-tbl net-tbl-scroll">
                   <table>
-                    <thead><tr><th>日付</th><th>距離</th><th>結果</th><th>1.5σ</th><th>1.2σ</th><th>更新日</th></tr></thead>
+                    <thead>
+                      <tr>
+                        <th>日付</th><th>距離</th><th>結果</th>
+                        {valueMode && <th title={valueMode.title}>{valueMode.short}</th>}
+                        <th>1.5σ</th><th>1.2σ</th><th>更新日</th>
+                      </tr>
+                    </thead>
                     <tbody>
                       {nearList.map((r) => (
                         <tr key={r.i}>
                           <td>{fmtDate(dec.dates[r.i])}</td><td>{`${fmt(r.d, 2)}σ`}</td>
                           <td>{retText(dec.ret[r.i], method.target)}</td>
+                          {valueMode && <td>{fwdText(dec[valueMode.value][r.i])}</td>}
                           <td>{labelText(dec.labels.l15?.[r.i])}</td><td>{labelText(dec.labels.l12?.[r.i])}</td>
                           <td>{dec.isFresh[r.i] ? '○' : ''}</td>
                         </tr>
@@ -552,12 +578,12 @@ function zPos(z) {
   return Math.max(0, Math.min(100, ((z + 3) / 6) * 100));
 }
 
-/** 凡例（色の区分と件数・印）。色だけに頼らないよう、図の上に必ず出す。 */
-function Legend({ mode, counts, dec }) {
-  let items;
-  if (mode === 'outcome') items = OUTCOME_CLASSES;
-  else if (mode === 'time') items = null;
-  else items = LABEL_CLASSES;
+/**
+ * 凡例（色の区分と件数・印）。色だけに頼らないよう、図の上に必ず出す。区分のある色の付け方では、今日に似た日の区分ごとの
+ * 件数も文字で添える。
+ */
+function Legend({ mode, counts, nbrCounts, nbrN, dec }) {
+  const items = classesOf(mode);
   return (
     <div className="net-legend" aria-label="凡例">
       {items ? items.map((c) => (
@@ -577,6 +603,12 @@ function Legend({ mode, counts, dec }) {
       <span><i className="mk fresh" aria-hidden="true" />78週高値の更新日</span>
       <span><i className="mk trail" aria-hidden="true" />直近の軌跡</span>
       <span><i className="mk focus" aria-hidden="true" />触れた日の近傍</span>
+      {items && nbrCounts && (
+        <span className="net-nbrmix">
+          {`今日に似た日 ${fmtInt(nbrN)} 日の内訳: `
+            + (items.filter((c) => nbrCounts[c.id]).map((c) => `${c.label} ${fmtInt(nbrCounts[c.id])}`).join('・') || 'なし')}
+        </span>
+      )}
     </div>
   );
 }
