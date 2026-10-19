@@ -910,7 +910,7 @@ XGBoost 25分 / CatBoost 22分。`logit` は153列で70分だったので、そ�
   引き継いだ（ログの作る時間 0秒）
 - **画面に入れる**: Deploy to GitHub Pages の段「Recurrence networks (release)」が archive を取って `dist/data/recurrence/` に
   展開する。中の名前が `recurrence/index.json` と `recurrence/<日付>_<コード>.json` 以外なら展開しない。画面はタブを開いたとき
-  に目次（`index.json`）を読み、候補を選ぶとその候補のファイル（約100KB。Pages が圧縮して送る）を読む
+  に目次（`index.json`）を読み、候補を選ぶとその候補のファイル（約100KB）を読む
 - **止めない**: どちらの段も continue-on-error。作れなかった日は画面に理由を出し（`status: error`）、archive が無ければタブは
   「まだネットワークのデータがありません」と出す。候補ごとの失敗（日足が無い・ノードが少ない）は目次の `skipped` に理由が残る
 - **初めて入れたとき**: Release に archive がまだ無ければ、予測済みの日（Trading-day gate が飛ばす日）でも作る段だけは走る。
