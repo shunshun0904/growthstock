@@ -366,27 +366,30 @@ class TestBuild(unittest.TestCase):
             # 1.2σ の目的変数は本番のラベル（attach_rise_label の label）と同じ
             base = g["label"].to_numpy(dtype=float)
             np.testing.assert_array_equal(np.isnan(base), np.isnan(labels["l12"]))
-            # 色付けの値: 日足から数え直す（t+1〜t+20 の終値の最大・最小と t+20 の終値 ÷ 翌営業日の始値 − 1）
+            # 色付けの値: 日足から数え直す（買値 = 翌営業日の始値。t+1〜t+20 の高値の最大・安値の最小と t+20 の終値 ÷ 買値 − 1）。
+            # 0.1% 刻みで、最高値までは切り下げ・最安値までは切り上げ（届いていない幅を届いたと見せない）・20営業日目は四捨五入
             b = cut[cut["Code"] == c["jqCode"]].sort_values("Date").reset_index(drop=True)
             pos = {d: k for k, d in enumerate(b["Date"])}
-            o, cl = b["AdjO"].to_numpy(dtype=float), b["AdjC"].to_numpy(dtype=float)
+            o, hi, lo, cl = (b[k].to_numpy(dtype=float) for k in ("AdjO", "AdjH", "AdjL", "AdjC"))
+            fwr = pd.to_numeric(fw["ret_close"], errors="coerce").to_numpy(dtype=float)
             for i, d in enumerate(g["Date"]):
                 k = pos[d]
                 got = [p["rise"][i], p["fall"][i], p["r20"][i]]
-                if k + RN.THEILER >= len(b):                     # 先の20営業日がまだ無い（最後の20営業日）
+                if k + RN.HOLD >= len(b):                        # 先の20営業日がまだ無い（最後の20営業日）
                     self.assertEqual(got, [None, None, None], d)
                     continue
-                e, w = o[k + 1], cl[k + 1:k + 21]
-                want = [100 * (w.max() / e - 1), 100 * (w.min() / e - 1), 100 * (cl[k + 20] / e - 1)]
-                for x, y, key in zip(got, want, ("rise", "fall", "r20")):
-                    self.assertLessEqual(abs(x - y), 0.05 + 1e-9, f"{c['jqCode']} {d} {key}")
-                self.assertLessEqual(got[1], got[2] + 1e-9)               # 最小 ≤ 20営業日目 ≤ 最大
-                self.assertLessEqual(got[2], got[0] + 1e-9)
-            self.assertEqual(sum(v is None for v in p["rise"][-B.RISE_HORIZON:]), B.RISE_HORIZON)
-            # 最大上昇率は目的変数の到達を測る future_rise そのもの（基準は翌営業日の寄り。運用者の選択「終値・翌日寄り基準」）
-            fr = np.round(100 * g["future_rise"].to_numpy(dtype=float), 1)
-            np.testing.assert_array_equal(np.array([np.nan if v is None else v for v in p["rise"]], dtype=float), fr)
-        self.assertEqual(B.LABEL_ENTRY, "next_open")
+                e = o[k + 1]
+                rise, fall = 100 * (hi[k + 1:k + 21].max() / e - 1), 100 * (lo[k + 1:k + 21].min() / e - 1)
+                r20 = 100 * (cl[k + 20] / e - 1)
+                self.assertTrue(rise - 0.1 - 1e-9 < got[0] <= rise + 1e-9, f"{c['jqCode']} {d} rise {got[0]} vs {rise}")
+                self.assertTrue(fall - 1e-9 <= got[1] < fall + 0.1 + 1e-9, f"{c['jqCode']} {d} fall {got[1]} vs {fall}")
+                self.assertLessEqual(abs(got[2] - r20), 0.05 + 1e-9, f"{c['jqCode']} {d} r20")
+                self.assertLessEqual(abs(got[2] - fwr[i]), 0.05 + 1e-9)             # live_track.forward の ret_close と同じ
+                self.assertLessEqual(got[1], got[2] + 0.1)                           # 最安値 ≤ 20営業日目の終値 ≤ 最高値
+                self.assertLessEqual(got[2], got[0] + 0.1)
+                # 最高値までの上昇率が 10 以上 ⟺ +10% の指値に届いた（結果が +10）
+                self.assertEqual(got[0] >= 10, p["ret"][i] == 10, f"{c['jqCode']} {d} {got[0]} {p['ret'][i]}")
+            self.assertEqual(sum(v is None for v in p["rise"][-RN.HOLD:]), RN.HOLD)
 
     def test_skips_with_reason(self):
         bars = fixture_bars()
