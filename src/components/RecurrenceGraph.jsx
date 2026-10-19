@@ -13,13 +13,15 @@ import { createSim, tick, setDim, setForces, reheat, extent, project, pick, seed
  *   にじみは通常の重ね方で描く（足し算の重ね方 lighter は、GPU の無い描画で線 1.6万本が約8倍遅かった。足し算は強調する
  *   少しの線と光だけに使う）
  * - 強調（同日の依頼「対象日と似ている（紐づく）サンプルもハイライト」）: 触れた日 → 選んだ日 → 今日 の順に、その日の似た日
- *   （その日に近い k 日）へ光る線を引き、ほかの点を暗くする。今日の強調は highlightToday で消せる
+ *   （その日に近い k 日）へ光る線を引き、似た日に光の輪を付ける。ほかの点と線は暗くしない（2026-10-20 の依頼「他の日付が暗く
+ *   なるのですが、相対的な差がわからなくなるので、他はくらくしないでそのままに」。前は強調中にほかを暗くしていた）。今日の強調は
+ *   highlightToday で消せる
  * - 直近の軌跡（同日の依頼「単純に線で結ぶよりも、日付の順方向に流れているような（流れがわかるような）可視化」「動的にするので
  *   あれば、色自体はもう少し暗くてもよい」、2026-10-20「ビュンビュンしすぎなので、もう少し落ち着かせてほしい」「モーションさえ
- *   つければ若干他よりも線を太くする程度で、色自体は暗いままで良い」）: 暗めの橙の線（ほかの線より少し太い。古い日ほど薄い）の
- *   上を、同じ暗い橙の破線が古い日から今日の向きへゆっくり動く（画面の上で一定の速さ FLOW_PX_PER_S。前は光の粒が1日を同じ
- *   時間で進み、日の間の長いところで速く飛んでいた）。点の下に描く。動きを減らす設定（prefers-reduced-motion。flow = false）
- *   では、破線を動かさず向きの矢印を置く
+ *   つければ若干他よりも線を太くする程度で、色自体は暗いままで良い」、続けて「破線もなしでよいです。モーションさえあればよい」）:
+ *   暗めの橙の実線（ほかの線より少し太い。古い日ほど薄い）の上を、同じ暗い橙のやわらかい明るみが古い日から今日の向きへゆっくり
+ *   流れる（画面の上で一定の速さ FLOW_PX_PER_S。前は光の粒が1日を同じ時間で進み、日の間の長いところで速く飛んでいた。その次は
+ *   破線）。点の下に描く。動きを減らす設定（prefers-reduced-motion。flow = false）では、流さずに向きの矢印を置く
  * - 操作: ドラッグで回す（2D・Shift・右ボタンはずらす）。ホイール・2本指でつまんで拡大縮小（同日の依頼「指で拡大縮小」。指の
  *   間・カーソルの位置を中心に）。2本指を動かすとずらす。点に触れる（タップ）とその日の値と似た日を出し、クリックで選ぶ
  *   （もう一度・何も無いところで外す）。ダブルクリックで元の大きさ。矢印キーで回し、＋ − で拡大、0 で元に戻す
@@ -31,14 +33,15 @@ const BG_OUT = '#04060c';
 /** 線の色。奥・手前・強調中で濃さを変える */
 const EDGE_RGB_BACK = '96, 165, 250';
 const EDGE_RGB_FRONT = '147, 197, 253';
-const EDGE_ALPHA = { back: 0.06, front: 0.12, backDim: 0.03, frontDim: 0.055 };
+const EDGE_ALPHA = { back: 0.06, front: 0.12 };
 const LINK_GLOW = 'rgba(125, 211, 252, 0.16)';
 const LINK_CORE = 'rgba(224, 242, 254, 0.92)';
-/** 直近の軌跡: 暗めの橙の線（前は明るい黄 251, 191, 36）と、その上をゆっくり今日の向きへ動く同じ色の破線 */
+/** 直近の軌跡: 暗めの橙の実線（前は明るい黄 251, 191, 36）と、その上をゆっくり今日の向きへ流れる同じ色の明るみ */
 const TRAIL_RGB = '217, 119, 6';
-const FLOW_DASH = [5, 7];    // 破線の長さと間（px）
-const FLOW_PX_PER_S = 10;    // 破線が今日の向きへ動く速さ（px/秒。画面の上で一定なので、日の間が長いところでも速くならない）
-const FLOW_FRAME_MS = 50;    // 破線だけが動くとき（回していない）の描き直しの間隔（約20コマ/秒）
+const FLOW_PX_PER_S = 12;    // 明るみが今日の向きへ流れる速さ（px/秒。画面の上で一定なので、日の間が長いところでも速くならない）
+const FLOW_GAP_PX = 60;      // 明るみの間隔（px）
+const FLOW_TAIL_PX = 30;     // 明るみの長さ（px。後ろほど薄い）
+const FLOW_FRAME_MS = 50;    // 明るみだけが動くとき（回していない）の描き直しの間隔（約20コマ/秒）
 const ARROW_EVERY = 4;       // 動きを減らす設定のときの矢印の間隔（日）
 const RING = '#a78bfa';
 const TEXT = '#e8edf6';
@@ -143,7 +146,7 @@ export default function RecurrenceGraph({
         const idle = !s.drag && !s.pinch && s.hover < 0;
         if (p.spin && idle) { s.view.yaw += p.dim === 3 ? 0.0022 : 0.0010; s.dirty = true; }
         if (ran) { s.dirty = true; s.fit = true; }
-        // 軌跡の破線だけが動くとき（回していない）は約20コマ/秒で描き直す
+        // 軌跡の明るみだけが動くとき（回していない）は約20コマ/秒で描き直す
         if (p.trail > 0 && p.flow && performance.now() - s.flowAt >= FLOW_FRAME_MS) s.dirty = true;
         if (s.dirty) { draw(); s.dirty = false; s.flowAt = performance.now(); }
       }
@@ -222,7 +225,7 @@ export default function RecurrenceGraph({
     const lit = (i) => i === focus || (nbSet && nbSet.has(i));
     const depth = (i) => (three ? Math.min(1, Math.max(0, (sc[4 * i + 3] + 1) / 2)) : 0.75);
 
-    // 線（薄い明るい線を重ねる。密な塊ほど明るい。奥と手前で濃さを変え、強調中は控えめに）
+    // 線（薄い明るい線を重ねる。密な塊ほど明るい。奥と手前で濃さを変える。強調中も同じ濃さ）
     ctx.globalCompositeOperation = 'source-over';
     ctx.lineWidth = 0.7;
     for (let pass = 0; pass < (three ? 2 : 1); pass += 1) {
@@ -235,7 +238,7 @@ export default function RecurrenceGraph({
         ctx.lineTo(sc[4 * b], sc[4 * b + 1]);
       }
       const front = !three || pass === 1;
-      const al = EDGE_ALPHA[`${front ? 'front' : 'back'}${nbSet ? 'Dim' : ''}`];
+      const al = EDGE_ALPHA[front ? 'front' : 'back'];
       ctx.strokeStyle = `rgba(${front ? EDGE_RGB_FRONT : EDGE_RGB_BACK}, ${al.toFixed(4)})`;
       ctx.stroke();
     }
@@ -257,8 +260,8 @@ export default function RecurrenceGraph({
       ctx.stroke();
     }
     ctx.globalCompositeOperation = 'source-over';
-    // 直近の軌跡（日付の順。今日へどう入ってきたか）: 暗めの橙の線と、今日の向きへゆっくり動く破線（動きを減らす設定では矢印）。
-    // 点の下に描く
+    // 直近の軌跡（日付の順。今日へどう入ってきたか）: 暗めの橙の実線と、今日の向きへゆっくり流れる明るみ（動きを減らす設定では
+    // 矢印）。点の下に描く
     const span = p.trail > 0 && n > 1 ? { from: Math.max(0, n - 1 - p.trail), L: n - 1 - Math.max(0, n - 1 - p.trail) } : null;
     let flowTag = '';
     if (span) {
@@ -278,12 +281,11 @@ export default function RecurrenceGraph({
       if (i === today || lit(i)) continue;              // 強調する日と今日は上に重ねて描く
       const dz = depth(i);
       const r = radius(i);
-      let a = three ? 0.22 + 0.78 * dz : 0.92;
-      if (nbSet) a *= 0.32;
+      const a = three ? 0.22 + 0.78 * dz : 0.92;          // 強調中も暗くしない（相対的な差が分かるように）
       const x = sc[4 * i];
       const y = sc[4 * i + 1];
       ctx.fillStyle = p.colors[i];
-      if (dz > 0.45 && !nbSet) {
+      if (dz > 0.45) {
         ctx.globalAlpha = a * 0.14;
         ctx.beginPath();
         ctx.arc(x, y, r * 2.6, 0, 2 * Math.PI);
@@ -357,13 +359,13 @@ export default function RecurrenceGraph({
       if (wrap.dataset.focus !== lf) wrap.dataset.focus = lf;
       const zm = s.view.zoom.toFixed(3);
       if (wrap.dataset.zoom !== zm) wrap.dataset.zoom = zm;
-      if (wrap.dataset.flow !== flowTag) wrap.dataset.flow = flowTag;     // 破線の進んだ位置（px）か arrows。軌跡なしは空
+      if (wrap.dataset.flow !== flowTag) wrap.dataset.flow = flowTag;     // 明るみの進んだ位置（px）か arrows。軌跡なしは空
       if (s.sim.alpha < s.sim.opts.alphaMin) wrap.dataset.settled = '1';
       else delete wrap.dataset.settled;
     }
   }
 
-  /** 軌跡の線（暗めの橙。ほかの線より少し太い。古い日 → 今日で薄い → 濃い） */
+  /** 軌跡の実線（暗めの橙。ほかの線より少し太い。古い日 → 今日で薄い → 濃い） */
   function trailBase(ctx, sc, span) {
     ctx.lineCap = 'round';
     ctx.lineWidth = 1.8;
@@ -373,33 +375,55 @@ export default function RecurrenceGraph({
       ctx.beginPath();
       ctx.moveTo(sc[4 * i], sc[4 * i + 1]);
       ctx.lineTo(sc[4 * (i + 1)], sc[4 * (i + 1) + 1]);
-      ctx.strokeStyle = `rgba(${TRAIL_RGB}, ${(0.16 + 0.22 * t).toFixed(3)})`;
+      ctx.strokeStyle = `rgba(${TRAIL_RGB}, ${(0.3 + 0.3 * t).toFixed(3)})`;
       ctx.stroke();
     }
     ctx.lineCap = 'butt';
   }
 
   /**
-   * 軌跡の上を今日の向きへゆっくり動く破線（同じ暗い橙。画面の上で FLOW_PX_PER_S の一定の速さ）。戻り値は破線の進んだ位置
-   * （0〜破線の1周期 px。ブラウザのテストが今日の向きへ動くことを確かめる）
+   * 軌跡の実線の上を今日の向きへゆっくり流れる明るみ（同じ暗い橙。画面の上で FLOW_PX_PER_S の一定の速さで、FLOW_GAP_PX おきに
+   * 長さ FLOW_TAIL_PX。前が濃く後ろほど薄い）。古い端で生まれ、今日の点へ薄れて消える。戻り値は明るみの進んだ位置（0〜FLOW_GAP_PX px。
+   * ブラウザのテストが今日の向きへ動くことを確かめる）
    */
   function trailFlow(ctx, sc, span, now) {
-    const period = FLOW_DASH[0] + FLOW_DASH[1];
-    const shift = ((now / 1000) * FLOW_PX_PER_S) % period;
-    ctx.beginPath();
-    for (let a = 0; a <= span.L; a += 1) {
+    // 軌跡の上の距離（px）。日の間の長さを足していく
+    const cum = new Float64Array(span.L + 1);
+    for (let a = 0; a < span.L; a += 1) {
       const i = span.from + a;
-      if (a === 0) ctx.moveTo(sc[4 * i], sc[4 * i + 1]);
-      else ctx.lineTo(sc[4 * i], sc[4 * i + 1]);
+      cum[a + 1] = cum[a] + Math.hypot(sc[4 * (i + 1)] - sc[4 * i], sc[4 * (i + 1) + 1] - sc[4 * i + 1]);
     }
-    ctx.setLineDash(FLOW_DASH);
-    ctx.lineDashOffset = -shift;      // 負にすると破線が線を引いた向き（古い日 → 今日）へ進む
+    const total = cum[span.L];
+    const at = (d) => {
+      let a = 0;
+      while (a < span.L - 1 && cum[a + 1] < d) a += 1;
+      const len = cum[a + 1] - cum[a];
+      const f = len > 0 ? Math.max(0, Math.min(1, (d - cum[a]) / len)) : 0;
+      const i = span.from + a;
+      return [sc[4 * i] + (sc[4 * (i + 1)] - sc[4 * i]) * f, sc[4 * i + 1] + (sc[4 * (i + 1) + 1] - sc[4 * i + 1]) * f, a];
+    };
+    const shift = ((now / 1000) * FLOW_PX_PER_S) % FLOW_GAP_PX;
+    ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    ctx.strokeStyle = `rgba(${TRAIL_RGB}, 0.8)`;
-    ctx.lineWidth = 1.8;
-    ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.lineDashOffset = 0;
+    ctx.lineWidth = 2.2;
+    for (let head = shift; head - FLOW_TAIL_PX < total; head += FLOW_GAP_PX) {
+      const d1 = Math.min(head, total);
+      const d0 = Math.max(0, head - FLOW_TAIL_PX);
+      if (d1 - d0 < 1) continue;
+      const [x0, y0, a0] = at(d0);
+      const [x1, y1, a1] = at(d1);
+      const g = ctx.createLinearGradient(x0, y0, x1, y1);
+      g.addColorStop(0, `rgba(${TRAIL_RGB}, 0)`);
+      // 今日を越えた明るみは前が切れるので、残った後ろの濃さで終える（今日の点へ吸い込まれるように薄れる）
+      g.addColorStop(1, `rgba(${TRAIL_RGB}, ${(0.85 * (1 - (head - d1) / FLOW_TAIL_PX)).toFixed(3)})`);
+      ctx.beginPath();
+      ctx.moveTo(x0, y0);
+      for (let a = a0 + 1; a <= a1; a += 1) ctx.lineTo(sc[4 * (span.from + a)], sc[4 * (span.from + a) + 1]);
+      ctx.lineTo(x1, y1);
+      ctx.strokeStyle = g;
+      ctx.stroke();
+    }
+    ctx.lineCap = 'butt';
     return shift;
   }
 

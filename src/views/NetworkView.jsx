@@ -35,9 +35,9 @@ import {
  */
 
 const pct = (v) => (Number.isFinite(v) ? `${fmt(v * 100, 0)}%` : '—');
-// 直近の軌跡の長さ（運用者の指定 2026-10-19「軌跡は直近20営業日で良いです」。前は60営業日）。見せ方は、暗い橙の破線が古い日から
-// 今日へゆっくり流れる（同日の依頼「日付の順方向に流れているような（流れがわかるような）可視化」、2026-10-20「ビュンビュンしすぎ
-// なので、もう少し落ち着かせて」。src/components/RecurrenceGraph.jsx）
+// 直近の軌跡の長さ（運用者の指定 2026-10-19「軌跡は直近20営業日で良いです」。前は60営業日）。見せ方は、暗い橙の実線の上を同じ色の
+// 明るみが古い日から今日へゆっくり流れる（同日の依頼「日付の順方向に流れているような（流れがわかるような）可視化」、2026-10-20
+// 「ビュンビュンしすぎなので、もう少し落ち着かせて」「破線もなしでよいです。モーションさえあればよい」。src/components/RecurrenceGraph.jsx）
 const TRAIL_DAYS = 20;
 const reducedMotion = () => typeof window !== 'undefined' && Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 
@@ -107,7 +107,7 @@ export default function NetworkView({ data }) {
   const [mode, setMode] = useState('outcome');
   const [dim, setDim] = useState(3);
   const [spin, setSpin] = useState(() => !reducedMotion());
-  const [flow] = useState(() => !reducedMotion());       // 軌跡の破線を流す（動きを減らす設定では向きの矢印）
+  const [flow] = useState(() => !reducedMotion());       // 軌跡の明るみを流す（動きを減らす設定では向きの矢印）
   const [trail, setTrail] = useState(true);
   const [lightToday, setLightToday] = useState(true);   // 今日に似た日を光らせる（運用者の依頼 2026-10-19）
   const [selected, setSelected] = useState(null);
@@ -337,7 +337,7 @@ export default function NetworkView({ data }) {
                   + '今日（白い大きな点）に似た日（光る線で結んだ k 日）は、この銘柄の過去で今日と状態の近い日で、どれも結果が出そろっている。'
                   + '似た日の色が偏っていれば、この銘柄はこの状態のあとにそうなりやすかった、という読み方になる（件数が少なく、同じ時期の日は'
                   + '結果の期間が重なるので目安）。点に触れる・選ぶと、その日に似た日に光が移る。塊は似た状態が繰り返し現れた時期。'
-                  + '暗い橙の線は直近20営業日の日付の順の道筋で、破線が古い日から今日へゆっくり流れる（今日の状態へどこから入って'
+                  + '暗い橙の線は直近20営業日の日付の順の道筋で、同じ色の明るみが古い日から今日へゆっくり流れる（今日の状態へどこから入って'
                   + 'きたか。動きを減らす設定では矢印で向きを出す）。'
                   + '過去の日は、その日に作った値のまま。'}
               </p>

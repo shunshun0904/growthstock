@@ -419,18 +419,24 @@ check(crowCells[1] === pctTxt(exp('93240', K0).nbr.hit) && crowCells[2] === pctT
 await page.waitForFunction(() => document.querySelector('.net-canvas')?.dataset.focus);
 check(await netFocus() === `${netN('93240') - 1}:${exp('93240', K0).deg}`,
       `開いたときから今日（最後の点）と似た ${exp('93240', K0).deg} 日を光らせている (実際: ${await netFocus()})`);
-await page.locator('label', { hasText: '今日に似た日を光らせる' }).click();
-await page.waitForFunction(() => document.querySelector('.net-canvas')?.dataset.focus === '');
-check(await netFocus() === '', '「今日に似た日を光らせる」を外すと強調しない');
-await page.locator('label', { hasText: '今日に似た日を光らせる' }).click();
-const inked = await page.evaluate(() => {
+const inkOf = () => page.evaluate(() => {
   const c = document.querySelector('.net-canvas canvas');
   const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
   let n = 0;
   for (let i = 0; i < d.length; i += 4 * 7) if (d[i] > 40 || d[i + 1] > 40 || d[i + 2] > 60) n += 1;
   return n;
 });
+await page.locator('label', { hasText: '今日に似た日を光らせる' }).click();
+await page.waitForFunction(() => document.querySelector('.net-canvas')?.dataset.focus === '');
+check(await netFocus() === '', '「今日に似た日を光らせる」を外すと強調しない');
+const inkOff = await inkOf();
+await page.locator('label', { hasText: '今日に似た日を光らせる' }).click();
+await page.waitForFunction(() => document.querySelector('.net-canvas')?.dataset.focus);
+const inked = await inkOf();
 check(inked > 200, `図に点と線が描かれている（明るい画素 ${inked}）`);
+// 強調しても、ほかの点と線は暗くしない（運用者の依頼 2026-10-20「他の日付が暗くなるのですが、相対的な差がわからなくなるので、
+// 他はくらくしないでそのままに」）。前は強調中にほかを暗くしていたので、明るい画素が半分ほどに減っていた
+check(inked >= inkOff * 0.85, `今日に似た日を光らせても、ほかの点と線は暗くならない（明るい画素 外す ${inkOff} → 光らせる ${inked}）`);
 await page.locator('.net-crow', { hasText: '9434' }).click();
 await page.waitForFunction(() => document.querySelector('.net-head strong')?.textContent.includes('9434'));
 await kBtn(K2).click();
@@ -507,15 +513,16 @@ check(colorBtns.length === 6 && !colorBtns.some((t) => t.includes('最安値')),
       `色の付け方に最安値までは無い（6通り） (実際: ${colorBtns.join(' / ')})`);
 check((await page.locator('label', { hasText: '直近20営業日の軌跡' }).count()) === 1, '軌跡は直近20営業日');
 // 直近の軌跡は古い日から今日へ流れる（運用者の依頼 2026-10-19「日付の順方向に流れているような（流れがわかるような）可視化」）。
-// 2026-10-20「ビュンビュンしすぎなので、もう少し落ち着かせて」で、暗い橙の破線が毎秒 10px でゆっくり進む見せ方にした。
-// 破線の進んだ位置（px。破線の1周期 12px で一回り）が、0.6 秒で約 6px 今日の向きへ進む
+// 2026-10-20「ビュンビュンしすぎなので、もう少し落ち着かせて」「破線もなしでよいです。モーションさえあればよい」で、暗い橙の実線の
+// 上を同じ色の明るみが毎秒 12px でゆっくり流れる見せ方にした。明るみの進んだ位置（px。60px で一回り）が、0.6 秒で約 7px 今日の
+// 向きへ進む
 const flowAt = async () => (await page.locator('.net-canvas').getAttribute('data-flow')) ?? '';
 const flow1 = Number(await flowAt());
 await page.waitForTimeout(600);
 const flow2 = Number(await flowAt());
-const flowAdv = (flow2 - flow1 + 12) % 12;
-check(Number.isFinite(flow1) && Number.isFinite(flow2) && flowAdv > 3 && flowAdv < 9.5,
-      `軌跡の破線が古い日から今日の向きへゆっくり進む（0.6 秒で ${flowAdv.toFixed(1)}px）`);
+const flowAdv = (flow2 - flow1 + 60) % 60;
+check(Number.isFinite(flow1) && Number.isFinite(flow2) && flowAdv > 4 && flowAdv < 13,
+      `軌跡の明るみが古い日から今日の向きへゆっくり流れる（0.6 秒で ${flowAdv.toFixed(1)}px）`);
 check((await page.locator('.net-legend').innerText()).includes('直近の軌跡（古い日 → 今日へ流れる）'), '凡例に流れる向きを書く');
 await page.locator('label', { hasText: '直近20営業日の軌跡' }).click();
 await page.waitForFunction(() => document.querySelector('.net-canvas')?.dataset.flow === '', null, { timeout: 3000 }).catch(() => {});
@@ -561,7 +568,7 @@ await page.getByRole('tab', { name: 'リカレンス・ネットワーク' }).cl
 await page.waitForSelector('.net-canvas canvas', { timeout: 10000 });
 await page.waitForFunction(() => document.querySelector('.net-canvas')?.dataset.flow === 'arrows', null, { timeout: 5000 }).catch(() => {});
 check(await flowAt() === 'arrows' && !(await page.locator('label', { hasText: '回転' }).locator('input').isChecked()),
-      `動きを減らす設定では、軌跡は向きの矢印（破線を動かさない）で、回転も止めて開く (実際: ${await flowAt()})`);
+      `動きを減らす設定では、軌跡は向きの矢印（流さない）で、回転も止めて開く (実際: ${await flowAt()})`);
 await page.emulateMedia({ reducedMotion: 'no-preference' });
 await page.unroute('**/data/predictions.json*');
 // 指で拡大縮小（運用者の依頼 2026-10-19「指で拡大縮小できるようにしたい」）: 触れる画面で、2本指を 60px → 220px に広げると
