@@ -773,7 +773,8 @@ input[type='range']::-moz-range-thumb {
 .net-legend .mk { display: inline-block; flex: none; }
 .net-legend .mk.today { width: 12px; height: 12px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 2px var(--bg-card), 0 0 0 3px #fff; }
 .net-legend .mk.fresh { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--violet); }
-.net-legend .mk.trail { width: 16px; height: 0; border-top: 2px solid rgba(251, 191, 36, 0.85); }
+.net-legend .mk.trail { position: relative; width: 18px; height: 0; border-top: 2px solid rgba(217, 119, 6, 0.75); }
+.net-legend .mk.trail::after { content: ''; position: absolute; right: 1px; top: -3.5px; width: 5px; height: 5px; border-radius: 50%; background: #fffbeb; box-shadow: 0 0 5px 1px rgba(253, 230, 138, 0.85); }
 .net-legend .mk.focus { width: 16px; height: 0; border-top: 2px solid rgba(224, 242, 254, 0.92); box-shadow: 0 0 6px 1px rgba(125, 211, 252, 0.55); }
 .net-ramp { gap: 6px; }
 .net-ramp i { display: inline-block; width: 120px; height: 8px; border-radius: 4px; }

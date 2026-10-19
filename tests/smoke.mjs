@@ -506,6 +506,20 @@ const colorBtns = await page.locator('.net-seg[aria-label="点の色"] button').
 check(colorBtns.length === 6 && !colorBtns.some((t) => t.includes('最安値')),
       `色の付け方に最安値までは無い（6通り） (実際: ${colorBtns.join(' / ')})`);
 check((await page.locator('label', { hasText: '直近20営業日の軌跡' }).count()) === 1, '軌跡は直近20営業日');
+// 直近の軌跡は古い日から今日へ流れる（運用者の依頼 2026-10-19「日付の順方向に流れているような（流れがわかるような）可視化」）。
+// 先頭の光の粒の位置（日。0〜4）が時間とともに前へ進む（1日 180ms なので 0.3 秒で約 1.7 日）
+const flowAt = async () => (await page.locator('.net-canvas').getAttribute('data-flow')) ?? '';
+const flow1 = Number(await flowAt());
+await page.waitForTimeout(300);
+const flow2 = Number(await flowAt());
+const flowAdv = (flow2 - flow1 + 4) % 4;
+check(Number.isFinite(flow1) && Number.isFinite(flow2) && flowAdv > 0.6 && flowAdv < 3.2,
+      `軌跡の光の粒が古い日から今日の向きへ進む（0.3 秒で ${flowAdv.toFixed(2)} 日）`);
+check((await page.locator('.net-legend').innerText()).includes('直近の軌跡（古い日 → 今日へ流れる）'), '凡例に流れる向きを書く');
+await page.locator('label', { hasText: '直近20営業日の軌跡' }).click();
+await page.waitForFunction(() => document.querySelector('.net-canvas')?.dataset.flow === '', null, { timeout: 3000 }).catch(() => {});
+check(await flowAt() === '', '軌跡を外すと流れも消える');
+await page.locator('label', { hasText: '直近20営業日の軌跡' }).click();
 await page.locator('.net-seg button', { hasText: '20営業日目の騰落率' }).click();
 const r20Got = await legendOf();
 check(Object.keys(r20Got).join(',') === '+10% 以上,0〜+10%,−10〜0%,−10% 未満,未確定'
@@ -530,6 +544,15 @@ await page.waitForTimeout(200);
 const netFit = await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 check(netFit, 'スマホの幅（390px）で横にはみ出さない');
 await page.setViewportSize({ width: 1440, height: 1000 });
+// 動きを減らす設定（prefers-reduced-motion）では粒を流さず、向きの矢印にする（回転も止めて開く）
+await page.emulateMedia({ reducedMotion: 'reduce' });
+await page.reload({ waitUntil: 'networkidle' });
+await page.getByRole('tab', { name: 'リカレンス・ネットワーク' }).click();
+await page.waitForSelector('.net-canvas canvas', { timeout: 10000 });
+await page.waitForFunction(() => document.querySelector('.net-canvas')?.dataset.flow === 'arrows', null, { timeout: 5000 }).catch(() => {});
+check(await flowAt() === 'arrows' && !(await page.locator('label', { hasText: '回転' }).locator('input').isChecked()),
+      `動きを減らす設定では、軌跡は向きの矢印（粒を流さない）で、回転も止めて開く (実際: ${await flowAt()})`);
+await page.emulateMedia({ reducedMotion: 'no-preference' });
 await page.unroute('**/data/predictions.json*');
 // 指で拡大縮小（運用者の依頼 2026-10-19「指で拡大縮小できるようにしたい」）: 触れる画面で、2本指を 60px → 220px に広げると
 // 3.67 倍になる（指の間を中心に）。CDP の触る操作を Chromium が pointer イベントにする

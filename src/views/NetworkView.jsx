@@ -34,7 +34,9 @@ import {
  */
 
 const pct = (v) => (Number.isFinite(v) ? `${fmt(v * 100, 0)}%` : '—');
-const TRAIL_DAYS = 20;   // 直近の軌跡の長さ（運用者の指定 2026-10-19「軌跡は直近20営業日で良いです」。前は60営業日）
+// 直近の軌跡の長さ（運用者の指定 2026-10-19「軌跡は直近20営業日で良いです」。前は60営業日）。見せ方は、古い日から今日へ光の粒が
+// 流れる（同日の依頼「日付の順方向に流れているような（流れがわかるような）可視化」。src/components/RecurrenceGraph.jsx）
+const TRAIL_DAYS = 20;
 const reducedMotion = () => typeof window !== 'undefined' && Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 
 /** 力のつまみ（Obsidian のグラフ表示の Forces と同じ4つ）。反発は画面では正の数で見せる */
@@ -103,6 +105,7 @@ export default function NetworkView({ data }) {
   const [mode, setMode] = useState('outcome');
   const [dim, setDim] = useState(3);
   const [spin, setSpin] = useState(() => !reducedMotion());
+  const [flow] = useState(() => !reducedMotion());       // 軌跡の光の粒を流す（動きを減らす設定では向きの矢印）
   const [trail, setTrail] = useState(true);
   const [lightToday, setLightToday] = useState(true);   // 今日に似た日を光らせる（運用者の依頼 2026-10-19）
   const [selected, setSelected] = useState(null);
@@ -331,7 +334,9 @@ export default function NetworkView({ data }) {
                   + '今日（白い大きな点）に似た日（光る線で結んだ k 日）は、この銘柄の過去で今日と状態の近い日で、どれも結果が出そろっている。'
                   + '似た日の色が偏っていれば、この銘柄はこの状態のあとにそうなりやすかった、という読み方になる（件数が少なく、同じ時期の日は'
                   + '結果の期間が重なるので目安）。点に触れる・選ぶと、その日に似た日に光が移る。塊は似た状態が繰り返し現れた時期。'
-                  + '黄色の線は直近の日付の順の道筋（今日の状態へどこから入ってきたか）。過去の日は、その日に作った値のまま。'}
+                  + '橙の線は直近20営業日の日付の順の道筋で、光の粒が古い日から今日へ流れる（今日の状態へどこから入ってきたか。'
+                  + '1日を同じ時間で進むので、状態が大きく変わった日ほど粒が速い。動きを減らす設定では矢印で向きを出す）。'
+                  + '過去の日は、その日に作った値のまま。'}
               </p>
             </details>
           </div>
@@ -425,7 +430,7 @@ export default function NetworkView({ data }) {
               <>
                 <Legend mode={mode} counts={counts} nbrCounts={nbrCounts} nbrN={summary.deg} dec={dec} />
                 <RecurrenceGraph
-                  dec={dec} net={net} nbrs={nbrs} colors={colors} dim={dim} spin={spin} trail={trail ? TRAIL_DAYS : 0}
+                  dec={dec} net={net} nbrs={nbrs} colors={colors} dim={dim} spin={spin} trail={trail ? TRAIL_DAYS : 0} flow={flow}
                   seedKey={`${dec.jqCode}-${dec.date}-k${k}`} selected={selected} onSelect={setSelected} tipOf={tipOf}
                   zoomCmd={zoomCmd} forces={forces} highlightToday={lightToday}
                   ariaLabel={`${dec.code} ${dec.name} の ${dec.n} 営業日のリカレンス・ネットワーク。今日に似た過去の日は ${summary.deg} 日。`
@@ -605,7 +610,7 @@ function Legend({ mode, counts, nbrCounts, nbrN, dec }) {
       )}
       <span><i className="mk today" aria-hidden="true" />今日（候補の日）</span>
       <span><i className="mk fresh" aria-hidden="true" />78週高値の更新日</span>
-      <span><i className="mk trail" aria-hidden="true" />直近の軌跡</span>
+      <span><i className="mk trail" aria-hidden="true" />直近の軌跡（古い日 → 今日へ流れる）</span>
       <span><i className="mk focus" aria-hidden="true" />似た日（今日・触れた日・選んだ日）</span>
       {items && nbrCounts && (
         <span className="net-nbrmix">
