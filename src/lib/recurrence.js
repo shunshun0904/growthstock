@@ -294,8 +294,9 @@ export function labelClassOf(v) {
 }
 
 /**
- * 値で色分けするときの未確定（先20営業日がまだ無い日）。下の3つの段（RISE / FALL / R20）のどの色とも、通常の見え方で
- * ΔE 15.3 以上・色覚の3型で 8.6 以上離れる（dataviz の validate_palette.js の deltaE。暗い面 #0a0e17）
+ * 値で色分けするときの未確定（先20営業日がまだ無い日）。下の2つの段（RISE / R20）のどの色とも、通常の見え方で
+ * ΔE 15.3 以上・色覚の3型で 8.6 以上離れる（dataviz の validate_palette.js の deltaE。暗い面 #0a0e17。外した最安値までの
+ * 赤の段も含めて測った値）
  */
 export const NA_VALUE = '#3a3a3a';
 
@@ -322,29 +323,6 @@ export function riseOf(v) {
   if (v >= 5) return 'r10';
   if (v >= 0) return 'r5';
   return 'r0';
-}
-
-/**
- * 最安値までの下落率（%）の5段。最安値（t+1〜t+20 の安値の最小）÷ 翌営業日の寄り − 1（最高値までと同じ基準・同じ形。運用者の
- * 選択「そろえる」）。赤の段で、浅いほど暗く深いほど明るい（深い下げが目に付く。順序の段の検査を暗い面で通る）。並びは浅い順
- */
-export const FALL_CLASSES = [
-  { id: 'f0', label: '下げなし（0% 以上）', color: '#b91c1c' },
-  { id: 'f5', label: '0〜−5%', color: '#dc2626' },
-  { id: 'f10', label: '−5〜−10%', color: '#f87171' },
-  { id: 'f20', label: '−10〜−20%', color: '#fca5a5' },
-  { id: 'f20p', label: '−20% 以下', color: '#fee2e2' },
-  { id: 'na', label: '未確定', color: NA_VALUE },
-];
-
-/** 最安値までの下落率（%）の段。最高値までと左右対称（−5.0 は「−5〜−10%」。値は 0.1% 刻みに切り上げてある） */
-export function fallOf(v) {
-  if (!Number.isFinite(v)) return 'na';
-  if (v >= 0) return 'f0';
-  if (v > -5) return 'f5';
-  if (v > -10) return 'f10';
-  if (v > -20) return 'f20';
-  return 'f20p';
 }
 
 /**
@@ -376,9 +354,10 @@ export function timeColor(f) {
 }
 
 /**
- * 色の付け方。outcome = 結果、rise / fall / r20 = 翌営業日の寄り（買値）から見た先20営業日の値動き（運用者の依頼 2026-10-19
+ * 色の付け方。outcome = 結果、rise / r20 = 翌営業日の寄り（買値）から見た先20営業日の値動き（運用者の依頼 2026-10-19
  * 「ノードの色付け機能がほしい。先20日間の最大上昇率は最低限」→「最大上昇率というより、その日から最高到達価格（20日以内最高
- * 高値）までの上昇率」。選択「5段＋未確定」「基準は翌営業日の始値」「最安値までの下落率・20営業日目も同じ基準にそろえる」）、
+ * 高値）までの上昇率」。選択「5段＋未確定」「基準は翌営業日の始値」「最安値までの下落率・20営業日目も同じ基準にそろえる」。
+ * そのあと「安値の色付けは、なしで良いです」で最安値までの色を外した（値はツールチップと選んだ日に出す））、
  * l15 / l12 = 目的変数、time = 時期。value があるものは、ノードの値を表やツールチップに出す（short は表の見出し）
  */
 export const COLOR_MODES = [
@@ -386,8 +365,6 @@ export const COLOR_MODES = [
     title: '翌営業日の寄りで買い、+10% の指値か20営業日目の終値で売ったときの収益' },
   { id: 'rise', label: '最高値までの上昇率（20日以内）', short: '最高値まで', value: 'rise',
     title: '20営業日以内の最高値（高値の最大）÷ 翌営業日の寄り − 1（10% 以上なら +10% の指値に届いた）' },
-  { id: 'fall', label: '最安値までの下落率（20日以内）', short: '最安値まで', value: 'fall',
-    title: '20営業日以内の最安値（安値の最小）÷ 翌営業日の寄り − 1' },
   { id: 'r20', label: '20営業日目の騰落率', short: '20日目', value: 'r20',
     title: '20営業日目の終値 ÷ 翌営業日の寄り − 1（指値なしで持ち切ったとき。20営業日目に売買が無かった日は未確定）' },
   { id: 'l15', label: '目的変数 1.5σ' },
@@ -399,7 +376,6 @@ export const COLOR_MODES = [
 const BINS = {
   outcome: { classes: OUTCOME_CLASSES, of: (dec, i, target) => outcomeOf(dec.ret[i], target) },
   rise: { classes: RISE_CLASSES, of: (dec, i) => riseOf(dec.rise[i]) },
-  fall: { classes: FALL_CLASSES, of: (dec, i) => fallOf(dec.fall[i]) },
   r20: { classes: R20_CLASSES, of: (dec, i, target) => outcomeOf(dec.r20[i], target) },
 };
 const binOf = (mode) => BINS[mode]

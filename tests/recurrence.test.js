@@ -6,8 +6,9 @@
  * - ε² は結べる組（タイラー窓より離れた組）の距離の2乗の m 番目（0.5 は切り上げ）。同じ値は全部結ぶ。タイラー窓の中は結ばない
  * - 日付は start に gaps の暦日を足していく（最後の日が予測日）
  * - 色の区分（+10% 到達 / 0〜+10 / −10〜0 / −10 未満 / 未確定、正例 / 負例 / 未確定）と、丸めた z から生の値の目安への戻し方
- * - 先20営業日の値動きの色（最高値までの上昇率・最安値までの下落率の5段、20営業日目の騰落率の4段。区切りは下の端を含む）。
- *   値の無いファイル（版 1）は未確定、終値で測っていた版 2 の上昇率・下落率は読まない。今日に似た日だけの件数
+ * - 先20営業日の値動きの色（最高値までの上昇率の5段、20営業日目の騰落率の4段。区切りは下の端を含む。最安値までの色は運用者の
+ *   指定で外した。値はツールチップに出すので読む）。値の無いファイル（版 1）は未確定、終値で測っていた版 2 の上昇率・下落率は
+ *   読まない。今日に似た日だけの件数
  *
  *   node --test tests/recurrence.test.js
  */
@@ -18,7 +19,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   decode, network, summarize, neighborsOf, todayNeighbors, outcomeOf, labelClassOf, nodeColors, classCounts,
-  rawOf, methodOf, timeColor, riseOf, fallOf, classesOf, OUTCOME_CLASSES, RISE_CLASSES, FALL_CLASSES, R20_CLASSES,
+  rawOf, methodOf, timeColor, riseOf, classesOf, OUTCOME_CLASSES, RISE_CLASSES, R20_CLASSES,
   NA_VALUE, COLOR_MODES,
 } from '../src/lib/recurrence.js';
 
@@ -168,31 +169,29 @@ test('丸めた z から生の値の目安へ戻す', () => {
   });
 });
 
-test('先20営業日の値動きの色（最高値まで・最安値まで・20営業日目）', () => {
+test('先20営業日の値動きの色（最高値まで・20営業日目）', () => {
   // 最高値までの上昇率: 0% 未満 / 0〜5 / 5〜10 / 10〜20 / 20% 以上（下の端を含む）
   assert.deepEqual([-0.1, 0, 4.9, 5, 9.9, 10, 19.9, 20, 85, NaN].map(riseOf),
     ['r0', 'r5', 'r5', 'r10', 'r10', 'r20', 'r20', 'r20p', 'r20p', 'na']);
-  // 最安値までの下落率: 左右対称（−5.0 は「−5〜−10%」）
-  assert.deepEqual([0.3, 0, -0.1, -4.9, -5, -9.9, -10, -19.9, -20, -60, NaN].map(fallOf),
-    ['f0', 'f0', 'f5', 'f5', 'f10', 'f10', 'f20', 'f20', 'f20p', 'f20p', 'na']);
   const dec = tiny([0, 1, 2, 3, 4], {
     v: 3, rise: [25, 12, 3, -1, null], fall: [0.5, -3, -7, -25, null], r20: [15, 4, -2, -12, null],
   });
   assert.deepEqual(classCounts(dec, 'rise'), { r20p: 1, r20: 1, r5: 1, r0: 1, na: 1 });
-  assert.deepEqual(classCounts(dec, 'fall'), { f0: 1, f5: 1, f10: 1, f20p: 1, na: 1 });
   assert.deepEqual(classCounts(dec, 'r20'), { hit: 1, up: 1, down: 1, bad: 1, na: 1 });
   assert.deepEqual(classCounts(dec, 'rise', 10, [0, 1]), { r20p: 1, r20: 1 });      // 渡したノードだけ数える
   assert.deepEqual(classCounts(dec, 'time'), {});
   const color = (cl) => Object.fromEntries(cl.map((c) => [c.id, c.color]));
   assert.deepEqual(nodeColors(dec, 'rise'), ['r20p', 'r20', 'r5', 'r0', 'na'].map((k) => color(RISE_CLASSES)[k]));
-  assert.deepEqual(nodeColors(dec, 'fall'), ['f0', 'f5', 'f10', 'f20p', 'na'].map((k) => color(FALL_CLASSES)[k]));
   assert.deepEqual(nodeColors(dec, 'r20'), ['hit', 'up', 'down', 'bad', 'na'].map((k) => color(R20_CLASSES)[k]));
   // 20営業日目は結果と同じ区切り・同じ色（未確定の色だけ値の色の付け方にそろえる）
   for (const c of R20_CLASSES.filter((x) => x.id !== 'na')) assert.equal(c.color, color(OUTCOME_CLASSES)[c.id]);
-  for (const cl of [RISE_CLASSES, FALL_CLASSES, R20_CLASSES]) assert.equal(color(cl).na, NA_VALUE);
+  for (const cl of [RISE_CLASSES, R20_CLASSES]) assert.equal(color(cl).na, NA_VALUE);
   assert.equal(classesOf('rise'), RISE_CLASSES);
   assert.equal(classesOf('time'), null);
-  assert.deepEqual(COLOR_MODES.filter((m) => m.value).map((m) => m.value), ['rise', 'fall', 'r20']);
+  assert.deepEqual(COLOR_MODES.filter((m) => m.value).map((m) => m.value), ['rise', 'r20']);
+  // 最安値までの色は外した（運用者の指定「安値の色付けは、なしで良いです」）。値は読む（ツールチップ・選んだ日）
+  assert.ok(!COLOR_MODES.some((m) => m.id === 'fall'));
+  assert.deepEqual(Array.from(dec.fall).slice(0, 4), [0.5, -3, -7, -25]);
   // 値の無いファイル（版 1）はすべて未確定。版 2 の上昇率・下落率（終値で測った別の物差し）は読まず、20営業日目は同じなので読む
   const old = tiny([0, 1, 2]);
   assert.ok([...old.rise, ...old.fall, ...old.r20].every(Number.isNaN));

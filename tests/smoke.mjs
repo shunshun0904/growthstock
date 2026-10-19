@@ -449,11 +449,11 @@ const riseCells = await page.locator('.net-details tbody tr td:nth-child(4)').al
 check(riseHead.includes('最高値まで') && riseCells.length === exp('94340', 200).deg && riseCells.every((t) => /^[+-]?\d+\.\d%$/.test(t)),
       `表に最高値までの列（今日に似た日はどれも結果が出そろっているので値がある） (実際: ${riseCells.slice(0, 3).join(' ')})`);
 await page.locator('.net-details summary').click();
-await page.locator('.net-seg button', { hasText: '最安値までの下落率（20日以内）' }).click();
-const fallGot = await legendOf();
-check(Object.keys(fallGot).join(',') === '下げなし（0% 以上）,0〜−5%,−5〜−10%,−10〜−20%,−20% 以下,未確定'
-        && Object.values(fallGot).reduce((a, b) => a + b, 0) === fx94.n,
-      `最安値までの下落率は浅い順の5段と未確定で、件数の合計はノードの数 (実際: ${JSON.stringify(fallGot)})`);
+// 最安値までの色は外した（運用者の指定「安値の色付けは、なしで良いです」）。軌跡は直近20営業日（「軌跡は直近20営業日で良いです」）
+const colorBtns = await page.locator('.net-seg[aria-label="点の色"] button').allTextContents();
+check(colorBtns.length === 6 && !colorBtns.some((t) => t.includes('最安値')),
+      `色の付け方に最安値までは無い（6通り） (実際: ${colorBtns.join(' / ')})`);
+check((await page.locator('label', { hasText: '直近20営業日の軌跡' }).count()) === 1, '軌跡は直近20営業日');
 await page.locator('.net-seg button', { hasText: '20営業日目の騰落率' }).click();
 const r20Got = await legendOf();
 check(Object.keys(r20Got).join(',') === '+10% 以上,0〜+10%,−10〜0%,−10% 未満,未確定'
