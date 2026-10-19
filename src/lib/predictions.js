@@ -117,6 +117,28 @@ export async function loadNewsLinks() {
   }
 }
 
+const RECURRENCE_URL = (f) => `${base()}data/recurrence/${f}?v=${BUILD}`;
+const RECURRENCE_FILE = /^\d{4}-\d{2}-\d{2}_[0-9A-Za-z]+\.json$/;
+
+/**
+ * リカレンス・ネットワークの目次（research/recurrence_net.py が日次予測で作って Release に上げ、デプロイで
+ * dist/data/recurrence/ に置く）。無ければ null（まだ作っていない・デプロイで取り込めなかった）。
+ */
+export async function loadRecurrenceIndex() {
+  try {
+    const d = await getJson(RECURRENCE_URL('index.json'));
+    return d && Array.isArray(d.days) ? d : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 候補1件のノード（目次の file）。読めなければ例外（画面が理由を出す）。 */
+export async function loadRecurrenceFile(file) {
+  if (!RECURRENCE_FILE.test(file || '')) throw new Error(`ファイル名が不正です: ${file}`);
+  return getJson(RECURRENCE_URL(file));
+}
+
 /** 追跡ファイルは初回実行時にはまだ薄い。読めなくても空で返す。 */
 export async function loadHistory() {
   try {
