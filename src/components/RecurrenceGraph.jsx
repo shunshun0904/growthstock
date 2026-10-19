@@ -15,9 +15,11 @@ import { createSim, tick, setDim, setForces, reheat, extent, project, pick, seed
  * - 強調（同日の依頼「対象日と似ている（紐づく）サンプルもハイライト」）: 触れた日 → 選んだ日 → 今日 の順に、その日の似た日
  *   （その日に近い k 日）へ光る線を引き、ほかの点を暗くする。今日の強調は highlightToday で消せる
  * - 直近の軌跡（同日の依頼「単純に線で結ぶよりも、日付の順方向に流れているような（流れがわかるような）可視化」「動的にするので
- *   あれば、色自体はもう少し暗くてもよい」）: 下の線は暗めの橙で、古い日ほど薄い。その上を光の粒が古い日から今日へ、1日を
- *   FLOW_MS で流れる（日と日の間の時間はどこでも同じなので、状態が大きく変わった日ほど粒が速く動く）。動きを減らす設定
- *   （prefers-reduced-motion。flow = false）では、粒の代わりに向きの矢印を置く
+ *   あれば、色自体はもう少し暗くてもよい」、2026-10-20「ビュンビュンしすぎなので、もう少し落ち着かせてほしい」「モーションさえ
+ *   つければ若干他よりも線を太くする程度で、色自体は暗いままで良い」）: 暗めの橙の線（ほかの線より少し太い。古い日ほど薄い）の
+ *   上を、同じ暗い橙の破線が古い日から今日の向きへゆっくり動く（画面の上で一定の速さ FLOW_PX_PER_S。前は光の粒が1日を同じ
+ *   時間で進み、日の間の長いところで速く飛んでいた）。点の下に描く。動きを減らす設定（prefers-reduced-motion。flow = false）
+ *   では、破線を動かさず向きの矢印を置く
  * - 操作: ドラッグで回す（2D・Shift・右ボタンはずらす）。ホイール・2本指でつまんで拡大縮小（同日の依頼「指で拡大縮小」。指の
  *   間・カーソルの位置を中心に）。2本指を動かすとずらす。点に触れる（タップ）とその日の値と似た日を出し、クリックで選ぶ
  *   （もう一度・何も無いところで外す）。ダブルクリックで元の大きさ。矢印キーで回し、＋ − で拡大、0 で元に戻す
@@ -32,13 +34,12 @@ const EDGE_RGB_FRONT = '147, 197, 253';
 const EDGE_ALPHA = { back: 0.06, front: 0.12, backDim: 0.03, frontDim: 0.055 };
 const LINK_GLOW = 'rgba(125, 211, 252, 0.16)';
 const LINK_CORE = 'rgba(224, 242, 254, 0.92)';
-/** 直近の軌跡: 下の線（暗めの橙。前は明るい黄 251, 191, 36）と、流れる光の粒 */
+/** 直近の軌跡: 暗めの橙の線（前は明るい黄 251, 191, 36）と、その上をゆっくり今日の向きへ動く同じ色の破線 */
 const TRAIL_RGB = '217, 119, 6';
-const FLOW_RGB = '253, 230, 138';
-const FLOW_MS = 180;         // 粒が1日（隣の日の点まで）進む時間
-const FLOW_GAP = 4;          // 粒の間隔（日）
-const FLOW_TAIL = 1.6;       // 粒の尾の長さ（日）
-const FLOW_FRAME_MS = 33;    // 粒だけが動くとき（回していない）の描き直しの間隔（約30コマ/秒）
+const FLOW_DASH = [5, 7];    // 破線の長さと間（px）
+const FLOW_PX_PER_S = 10;    // 破線が今日の向きへ動く速さ（px/秒。画面の上で一定なので、日の間が長いところでも速くならない）
+const FLOW_FRAME_MS = 50;    // 破線だけが動くとき（回していない）の描き直しの間隔（約20コマ/秒）
+const ARROW_EVERY = 4;       // 動きを減らす設定のときの矢印の間隔（日）
 const RING = '#a78bfa';
 const TEXT = '#e8edf6';
 const ZOOM_MIN = 0.35;
@@ -142,7 +143,7 @@ export default function RecurrenceGraph({
         const idle = !s.drag && !s.pinch && s.hover < 0;
         if (p.spin && idle) { s.view.yaw += p.dim === 3 ? 0.0022 : 0.0010; s.dirty = true; }
         if (ran) { s.dirty = true; s.fit = true; }
-        // 軌跡の光の粒だけが動くとき（回していない）は約30コマ/秒で描き直す
+        // 軌跡の破線だけが動くとき（回していない）は約20コマ/秒で描き直す
         if (p.trail > 0 && p.flow && performance.now() - s.flowAt >= FLOW_FRAME_MS) s.dirty = true;
         if (s.dirty) { draw(); s.dirty = false; s.flowAt = performance.now(); }
       }
@@ -256,9 +257,15 @@ export default function RecurrenceGraph({
       ctx.stroke();
     }
     ctx.globalCompositeOperation = 'source-over';
-    // 直近の軌跡の下の線（日付の順。今日へどう入ってきたか。古い日ほど薄い）。流れる粒は点の上に描く
+    // 直近の軌跡（日付の順。今日へどう入ってきたか）: 暗めの橙の線と、今日の向きへゆっくり動く破線（動きを減らす設定では矢印）。
+    // 点の下に描く
     const span = p.trail > 0 && n > 1 ? { from: Math.max(0, n - 1 - p.trail), L: n - 1 - Math.max(0, n - 1 - p.trail) } : null;
-    if (span) trailBase(ctx, sc, span);
+    let flowTag = '';
+    if (span) {
+      trailBase(ctx, sc, span);
+      if (p.flow) flowTag = trailFlow(ctx, sc, span, performance.now()).toFixed(2);
+      else { trailArrows(ctx, sc, span); flowTag = 'arrows'; }
+    }
 
     // 点（奥から手前へ。奥ほど小さく暗い。手前はうっすら光る）
     const order = s.order;
@@ -318,12 +325,6 @@ export default function RecurrenceGraph({
     }
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = 1;
-    // 直近の軌跡の流れ（古い日 → 今日。光の粒。動きを減らす設定では向きの矢印）
-    let flowTag = '';
-    if (span) {
-      if (p.flow) flowTag = trailFlow(ctx, sc, span, performance.now()).toFixed(2);
-      else { trailArrows(ctx, sc, span); flowTag = 'arrows'; }
-    }
     // 触れている・選んだ日
     if (focus >= 0 && focus !== today) {
       const x = sc[4 * focus];
@@ -356,81 +357,58 @@ export default function RecurrenceGraph({
       if (wrap.dataset.focus !== lf) wrap.dataset.focus = lf;
       const zm = s.view.zoom.toFixed(3);
       if (wrap.dataset.zoom !== zm) wrap.dataset.zoom = zm;
-      if (wrap.dataset.flow !== flowTag) wrap.dataset.flow = flowTag;     // 先頭の粒の位置（日）か arrows。軌跡なしは空
+      if (wrap.dataset.flow !== flowTag) wrap.dataset.flow = flowTag;     // 破線の進んだ位置（px）か arrows。軌跡なしは空
       if (s.sim.alpha < s.sim.opts.alphaMin) wrap.dataset.settled = '1';
       else delete wrap.dataset.settled;
     }
   }
 
-  /** 軌跡の上の位置（span.from から u 日。日と日の間は線の上をまっすぐ進む） */
-  function trailAt(sc, span, u) {
-    const a = Math.max(0, Math.min(span.L - 1, Math.floor(u)));
-    const f = Math.max(0, Math.min(1, u - a));
-    const i = span.from + a;
-    return [sc[4 * i] + (sc[4 * (i + 1)] - sc[4 * i]) * f, sc[4 * i + 1] + (sc[4 * (i + 1) + 1] - sc[4 * i + 1]) * f];
-  }
-
-  /** 軌跡の下の線（暗めの橙。古い日 → 今日で薄い → 濃い） */
+  /** 軌跡の線（暗めの橙。ほかの線より少し太い。古い日 → 今日で薄い → 濃い） */
   function trailBase(ctx, sc, span) {
     ctx.lineCap = 'round';
+    ctx.lineWidth = 1.8;
     for (let a = 0; a < span.L; a += 1) {
       const i = span.from + a;
       const t = (a + 1) / span.L;
       ctx.beginPath();
       ctx.moveTo(sc[4 * i], sc[4 * i + 1]);
       ctx.lineTo(sc[4 * (i + 1)], sc[4 * (i + 1) + 1]);
-      ctx.strokeStyle = `rgba(${TRAIL_RGB}, ${(0.05 + 0.13 * t).toFixed(3)})`;
-      ctx.lineWidth = 4;
-      ctx.stroke();
-      ctx.strokeStyle = `rgba(${TRAIL_RGB}, ${(0.22 + 0.48 * t).toFixed(3)})`;
-      ctx.lineWidth = 1.3;
+      ctx.strokeStyle = `rgba(${TRAIL_RGB}, ${(0.16 + 0.22 * t).toFixed(3)})`;
       ctx.stroke();
     }
     ctx.lineCap = 'butt';
   }
 
   /**
-   * 軌跡を流れる光の粒（古い日 → 今日。FLOW_GAP 日おきに、1日を FLOW_MS で進む。尾は FLOW_TAIL 日）。古い端で現れ、今日の
-   * 手前で消える。戻り値は先頭の粒の位置（0〜FLOW_GAP 日。ブラウザのテストが流れる向きを確かめる）
+   * 軌跡の上を今日の向きへゆっくり動く破線（同じ暗い橙。画面の上で FLOW_PX_PER_S の一定の速さ）。戻り値は破線の進んだ位置
+   * （0〜破線の1周期 px。ブラウザのテストが今日の向きへ動くことを確かめる）
    */
   function trailFlow(ctx, sc, span, now) {
-    const phase = (now / FLOW_MS) % FLOW_GAP;
-    ctx.lineCap = 'round';
-    for (let u = phase; u < span.L; u += FLOW_GAP) {
-      const fade = Math.max(0, Math.min(1, u / 0.6, (span.L - u) / 0.6));
-      if (fade <= 0) continue;
-      const u0 = Math.max(0, u - FLOW_TAIL);
-      const [hx, hy] = trailAt(sc, span, u);
-      const [tx, ty] = trailAt(sc, span, u0);
-      const g = ctx.createLinearGradient(tx, ty, hx, hy);
-      g.addColorStop(0, `rgba(${FLOW_RGB}, 0)`);
-      g.addColorStop(1, `rgba(${FLOW_RGB}, ${(0.9 * fade).toFixed(3)})`);
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.beginPath();
-      ctx.moveTo(tx, ty);
-      for (let a = Math.floor(u0) + 1; a < u; a += 1) ctx.lineTo(sc[4 * (span.from + a)], sc[4 * (span.from + a) + 1]);
-      ctx.lineTo(hx, hy);
-      ctx.strokeStyle = g;
-      ctx.lineWidth = 2;
-      ctx.stroke();
-      glow(ctx, hx, hy, 8, `rgba(${FLOW_RGB}, ${(0.55 * fade).toFixed(3)})`);
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.fillStyle = `rgba(255, 251, 235, ${fade.toFixed(3)})`;
-      ctx.beginPath();
-      ctx.arc(hx, hy, 1.9, 0, 2 * Math.PI);
-      ctx.fill();
+    const period = FLOW_DASH[0] + FLOW_DASH[1];
+    const shift = ((now / 1000) * FLOW_PX_PER_S) % period;
+    ctx.beginPath();
+    for (let a = 0; a <= span.L; a += 1) {
+      const i = span.from + a;
+      if (a === 0) ctx.moveTo(sc[4 * i], sc[4 * i + 1]);
+      else ctx.lineTo(sc[4 * i], sc[4 * i + 1]);
     }
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.lineCap = 'butt';
-    return phase;
+    ctx.setLineDash(FLOW_DASH);
+    ctx.lineDashOffset = -shift;      // 負にすると破線が線を引いた向き（古い日 → 今日）へ進む
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = `rgba(${TRAIL_RGB}, 0.8)`;
+    ctx.lineWidth = 1.8;
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.lineDashOffset = 0;
+    return shift;
   }
 
-  /** 動きを減らす設定のときの向きの矢印（今日に近い線から FLOW_GAP 日おき。短い線には描かない） */
+  /** 動きを減らす設定のときの向きの矢印（同じ暗い橙。今日に近い線から ARROW_EVERY 日おき。短い線には描かない） */
   function trailArrows(ctx, sc, span) {
-    ctx.strokeStyle = `rgba(${FLOW_RGB}, 0.9)`;
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = `rgba(${TRAIL_RGB}, 0.85)`;
+    ctx.lineWidth = 1.6;
     ctx.lineJoin = 'round';
-    for (let a = span.L - 1; a >= 0; a -= FLOW_GAP) {
+    for (let a = span.L - 1; a >= 0; a -= ARROW_EVERY) {
       const i = span.from + a;
       const x0 = sc[4 * i];
       const y0 = sc[4 * i + 1];

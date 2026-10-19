@@ -507,14 +507,15 @@ check(colorBtns.length === 6 && !colorBtns.some((t) => t.includes('最安値')),
       `色の付け方に最安値までは無い（6通り） (実際: ${colorBtns.join(' / ')})`);
 check((await page.locator('label', { hasText: '直近20営業日の軌跡' }).count()) === 1, '軌跡は直近20営業日');
 // 直近の軌跡は古い日から今日へ流れる（運用者の依頼 2026-10-19「日付の順方向に流れているような（流れがわかるような）可視化」）。
-// 先頭の光の粒の位置（日。0〜4）が時間とともに前へ進む（1日 180ms なので 0.3 秒で約 1.7 日）
+// 2026-10-20「ビュンビュンしすぎなので、もう少し落ち着かせて」で、暗い橙の破線が毎秒 10px でゆっくり進む見せ方にした。
+// 破線の進んだ位置（px。破線の1周期 12px で一回り）が、0.6 秒で約 6px 今日の向きへ進む
 const flowAt = async () => (await page.locator('.net-canvas').getAttribute('data-flow')) ?? '';
 const flow1 = Number(await flowAt());
-await page.waitForTimeout(300);
+await page.waitForTimeout(600);
 const flow2 = Number(await flowAt());
-const flowAdv = (flow2 - flow1 + 4) % 4;
-check(Number.isFinite(flow1) && Number.isFinite(flow2) && flowAdv > 0.6 && flowAdv < 3.2,
-      `軌跡の光の粒が古い日から今日の向きへ進む（0.3 秒で ${flowAdv.toFixed(2)} 日）`);
+const flowAdv = (flow2 - flow1 + 12) % 12;
+check(Number.isFinite(flow1) && Number.isFinite(flow2) && flowAdv > 3 && flowAdv < 9.5,
+      `軌跡の破線が古い日から今日の向きへゆっくり進む（0.6 秒で ${flowAdv.toFixed(1)}px）`);
 check((await page.locator('.net-legend').innerText()).includes('直近の軌跡（古い日 → 今日へ流れる）'), '凡例に流れる向きを書く');
 await page.locator('label', { hasText: '直近20営業日の軌跡' }).click();
 await page.waitForFunction(() => document.querySelector('.net-canvas')?.dataset.flow === '', null, { timeout: 3000 }).catch(() => {});
@@ -560,7 +561,7 @@ await page.getByRole('tab', { name: 'リカレンス・ネットワーク' }).cl
 await page.waitForSelector('.net-canvas canvas', { timeout: 10000 });
 await page.waitForFunction(() => document.querySelector('.net-canvas')?.dataset.flow === 'arrows', null, { timeout: 5000 }).catch(() => {});
 check(await flowAt() === 'arrows' && !(await page.locator('label', { hasText: '回転' }).locator('input').isChecked()),
-      `動きを減らす設定では、軌跡は向きの矢印（粒を流さない）で、回転も止めて開く (実際: ${await flowAt()})`);
+      `動きを減らす設定では、軌跡は向きの矢印（破線を動かさない）で、回転も止めて開く (実際: ${await flowAt()})`);
 await page.emulateMedia({ reducedMotion: 'no-preference' });
 await page.unroute('**/data/predictions.json*');
 // 指で拡大縮小（運用者の依頼 2026-10-19「指で拡大縮小できるようにしたい」）: 触れる画面で、2本指を 60px → 220px に広げると
