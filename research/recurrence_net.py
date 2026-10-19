@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
 """
-候補ごとのリカレンス・ネットワーク（ε-recurrence network）。画面の「リカレンス・ネットワーク」タブ（src/views/NetworkView.jsx）
-に渡す（Release data-raw の recurrence.tar.gz。デプロイのときに dist/data/recurrence/ へ展開する）。
+購入条件を満たした銘柄ごとのリカレンス・ネットワーク（ε-recurrence network）。画面の「リカレンス・ネットワーク」タブ
+（src/views/NetworkView.jsx）に渡す（Release data-raw の recurrence.tar.gz。デプロイのときに dist/data/recurrence/ へ展開する）。
 
 運用者の依頼（2026-10-19）「Obsidian の球状のプロットのようなことを、ノードを1営業日として、本予測モデルに使えそうな可視化を
 してほしい。市場全体よりも、その日の各候補銘柄単体で。指数リカレントネットワークが良いと思う。特徴量はいったん、重要度の高い
 テクニカル系のみ」。運用者の選択（AskUserQuestion）: ε-リカレンス・ネットワーク / 実験105 の gain 上位9列 / 取れる全期間 /
 画面の新しいタブ / データは Release に置く（全期間だと1日あたり約0.7〜1.6MB になり、毎日コミットすると履歴が年に数百MB 膨らむ。
-モデル本体を Release に置くのと同じ考え方）。
+モデル本体を Release に置くのと同じ考え方。この見込みは高値更新の全銘柄で作る前提で、下の対象に絞った後は 2026-10-09〜16 の
+5日で5銘柄・0.5MB）。
+対象（同日の運用者の指定「候補といったのは、予測サンプルではなく、その中でも購入条件を満たした銘柄です」）: その日の高値更新の
+銘柄（予測ファイルの候補）のうち、購入条件（今日の戦略の規則。1.5σ の3本 RULE_MODELS の百分位がすべて AGREE_PCT 以上）を
+満たした銘柄だけ。画面の strategy.js の strategySignal の passed・候補銘柄のニュース（news_links.rule_codes）と同じ。
 
 **参考の表示であって、選定には使わない。** 買う銘柄は今日の戦略（1.5σ の3本の最小の順）のまま。
 
 手法（Marwan ほか 2009 Phys. Lett. A 373:4246・Donner ほか 2010 New J. Phys. 12:033025 の recurrence network）
-  ノード: 候補の銘柄の、予測日までの各営業日（売買が成立し、下の9列がそろった日。いちばん長い窓の指標（出来高の250日平均）が
+  ノード: 対象の銘柄の、予測日までの各営業日（売買が成立し、下の9列がそろった日。いちばん長い窓の指標（出来高の250日平均）が
         そろうまでの約250取引日は入らない）。予測日（候補の日）が最後のノード
   状態: テクニカル指標9列（FEATURES。research/technicals.py の値そのもの）を、列の型（linear_preprocess の型と同じ。正で裾が
         重い列は上の0.5%で切って log1p、符号つきで裾が重い列は上下0.5%で切って asinh、ほかは上下0.1%で切る）で変換し、その銘柄の
@@ -38,10 +42,10 @@
         （check_train_serve と同じ許し。相対 1e-6・絶対 1e-9）
 
 出すもの（--out-dir。archive は --archive）
-  index.json            日ごとの候補と要約（画面は最初にこれだけ読む）
-  <日付>_<jqCode>.json  候補ごとのノード（状態・結果・終値）。1候補あたり約2,200ノードで 60〜90KB
+  index.json            日ごとの購入条件を満たした銘柄と要約・その日の高値更新の件数（nBreak）。画面は最初にこれだけ読む
+  <日付>_<jqCode>.json  銘柄ごとのノード（状態・結果・終値）。約2,200ノードの銘柄で約100KB（日足の短い銘柄は小さい）
 
-作れなくても日次予測は止めない（predict.yml の段は continue-on-error。候補ごとの失敗は理由を残して先へ進む）。
+作れなくても日次予測は止めない（predict.yml の段は continue-on-error。銘柄ごとの失敗は理由を残して先へ進む）。
 
   python3 research/recurrence_net.py --data-dir research/_data --predictions public/data/predictions.json \\
       --out-dir research/_data/recurrence --archive research/_data/recurrence.tar.gz
@@ -52,6 +56,7 @@ import argparse
 import glob
 import io
 import json
+import math
 import os
 import re
 import sys
@@ -86,11 +91,15 @@ RR_BP = 100                         # 既定の辺の密度（1万分率。100 =
 RR_CHOICES_BP = (50, 100, 200, 300)  # 画面で選べる密度
 Q = 20                              # 状態を 1/Q σ 刻みの整数で持つ
 Z_CAP = 6.0                         # |z| をここで切る（Q 倍して ±120。int8 に収まる）
-MIN_NODES = 100                     # ノードがこれより少ない候補は作らない
+MIN_NODES = 100                     # ノードがこれより少ない銘柄は作らない
 TARGET = float(LT.TAKE_PROFIT)      # +10% の指値
 HOLD = int(LT.HOLD)                 # 20営業日目の終値
 LABEL_KS = (("l12", 1.2), ("l15", 1.5))  # 目的変数（到達しきい値の σ の倍数）
 N_NEAREST = 5                       # 今日に近い過去の更新日を何件出すか
+#: 対象にする銘柄の規則（今日の戦略の購入条件）。live_track と同じ値（画面の strategy.js の RULE_MODELS・STRATEGY.agreePct と
+#: 同じことは tests/test_live_track.py が確かめる）
+RULE_MODELS: Tuple[str, ...] = tuple(LT.RULE_MODELS)
+AGREE_PCT = float(LT.AGREE_PCT)
 BARS_COLS = ["Date", "Code", "O", "H", "L", "C", "Vo", "AdjO", "AdjH", "AdjL", "AdjC", "AdjVo"]
 ARCHIVE_DIR = "recurrence"          # archive の中のフォルダ名（デプロイで dist/data/ の下に展開する）
 
@@ -314,7 +323,7 @@ def _sig(x: float, digits: int = 4) -> Optional[float]:
 
 def candidate_payload(g: pd.DataFrame, bars_code: pd.DataFrame, cand: dict, as_of: str) -> Tuple[Optional[dict], str]:
     """
-    1候補のファイルの中身。g はその銘柄のパネルの行（予測日まで）、bars_code はその銘柄の日足（予測日まで）。
+    1銘柄のファイルの中身。g はその銘柄のパネルの行（予測日まで）、bars_code はその銘柄の日足（予測日まで）。
     作れなければ (None, 理由)。
     """
     day = pd.Timestamp(as_of)
@@ -358,6 +367,39 @@ def candidate_payload(g: pd.DataFrame, bars_code: pd.DataFrame, cand: dict, as_o
 
 
 # --------------------------------------------------------------------------- #
+# 対象（購入条件を満たした銘柄）
+# --------------------------------------------------------------------------- #
+
+def rule_min(cand: dict, models: Sequence[str] = RULE_MODELS) -> Optional[float]:
+    """
+    規則の3本の百分位（byModel の pctHistorical）の最小。1本でも無い（数でない・有限でない）なら None。画面の strategy.js の
+    minPct と同じ（どれか1本でも欠けたまま「満たした」としない）。
+    """
+    per = cand.get("byModel")
+    if not isinstance(per, dict):
+        return None
+    vals = []
+    for a in models:
+        m = per.get(a)
+        v = m.get("pctHistorical") if isinstance(m, dict) else None
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+            return None
+        vals.append(float(v))
+    return min(vals) if vals else None
+
+
+def rule_candidates(cands: Sequence[dict], models: Sequence[str] = RULE_MODELS, line: float = AGREE_PCT) -> List[dict]:
+    """
+    購入条件を満たした候補（規則の3本の最小が line 以上）だけを、strategy.js の strategySignal の passed と同じ並び
+    （最小の降順、同点は基準モデルのスコアの降順）で返す。
+    """
+    got = [(rule_min(c, models), i, c) for i, c in enumerate(cands)]
+    got = [(m, i, c) for m, i, c in got if m is not None and m >= line]
+    got.sort(key=lambda x: (-x[0], -float(x[2].get("score") or 0.0), x[1]))
+    return [c for _, _, c in got]
+
+
+# --------------------------------------------------------------------------- #
 # 日ごと・全体
 # --------------------------------------------------------------------------- #
 
@@ -373,8 +415,8 @@ def index_entry(payload: dict, file: str) -> dict:
 
 def build_day(day: str, cands: List[dict], bars: pd.DataFrame, segments: Optional[pd.DataFrame]) -> Tuple[dict, Dict[str, dict]]:
     """
-    1日ぶん。bars は候補の銘柄の日足（全期間。ここで予測日で切る）。戻り値: (index の日の項目, {ファイル名: 中身})。
-    候補ごとの失敗は理由を残して先へ進む。
+    1日ぶん。cands は作る銘柄（build では購入条件を満たした銘柄だけ）、bars はその銘柄の日足（全期間。ここで予測日で切る）。
+    戻り値: (index の日の項目, {ファイル名: 中身})。銘柄ごとの失敗は理由を残して先へ進む。
     """
     t0 = time.time()
     built_at = pd.Timestamp.utcnow().isoformat()
@@ -392,9 +434,10 @@ def build_day(day: str, cands: List[dict], bars: pd.DataFrame, segments: Optiona
     for cand in cands:
         jq = str(cand["jqCode"])
         try:
-            if jq not in by_code:
-                raise ValueError("日足が無い")
-            payload, why = candidate_payload(by_code[jq], bars_by_code[jq], cand, day)
+            if jq in by_code:
+                payload, why = candidate_payload(by_code[jq], bars_by_code[jq], cand, day)
+            else:
+                payload, why = None, "日足が無い"
         except Exception as exc:                 # noqa: BLE001
             payload, why = None, f"{type(exc).__name__}: {exc}"[:200]
         if payload is None:
@@ -405,8 +448,8 @@ def build_day(day: str, cands: List[dict], bars: pd.DataFrame, segments: Optiona
         blk["candidates"].append(index_entry(payload, f))
     if blk["skipped"]:
         blk["status"] = "partial" if blk["candidates"] else "unavailable"
-    # ログ（公開）には銘柄コードを出さない（理由だけ。どの候補かは目次の skipped にある）
-    log(f"{day}: 候補 {len(cands)}件のうち {len(blk['candidates'])}件を作った"
+    # ログ（公開）には銘柄コードを出さない（理由だけ。どの銘柄かは目次の skipped にある）
+    log(f"{day}: 購入条件を満たした {len(cands)}件のうち {len(blk['candidates'])}件を作った"
         + (f"（作れない {len(blk['skipped'])}件: " + "・".join(sorted({s['reason'] for s in blk["skipped"]}))[:300] + "）"
            if blk["skipped"] else "") + f" / {time.time() - t0:.1f}秒")
     return blk, files
@@ -420,9 +463,10 @@ def method_block() -> dict:
                       "gainRank": GAIN_RANK.get(c, {})} for c in FEATURES],
         "theiler": THEILER, "rrBp": RR_BP, "rrChoicesBp": list(RR_CHOICES_BP), "q": Q, "zCap": Z_CAP,
         "target": TARGET, "hold": HOLD, "labels": [{"key": k, "k": v} for k, v in LABEL_KS], "minNodes": MIN_NODES,
-        "note": ("参考の表示。候補の銘柄ごとに、各営業日のテクニカル指標9列の状態が似た日どうし（タイラー窓 20営業日より離れた組の"
-                 "うち、距離の近い順に辺の密度ぶん）を結んだリカレンス・ネットワーク。選定には使わない（今日の戦略の並べ方のまま）。"
-                 "過去の日は、その日に作った値のまま"),
+        "rule": {"models": list(RULE_MODELS), "agreePct": AGREE_PCT},
+        "note": ("参考の表示。購入条件（1.5σ の3本の百分位がすべて95以上）を満たした銘柄ごとに、各営業日のテクニカル指標9列の"
+                 "状態が似た日どうし（タイラー窓 20営業日より離れた組のうち、距離の近い順に辺の密度ぶん）を結んだリカレンス・"
+                 "ネットワーク。選定には使わない（今日の戦略の並べ方のまま）。過去の日は、その日に作った値のまま"),
     }
 
 
@@ -453,7 +497,7 @@ def read_archive(path: Optional[str]) -> Tuple[Optional[dict], Dict[str, dict]]:
 
 
 def carry(prev_index: Optional[dict], prev_files: Dict[str, dict], day: str, cands: List[dict]) -> Optional[Tuple[dict, Dict[str, dict]]]:
-    """前の archive にこの日があり、候補の銘柄が同じで、ファイルがそろっていれば、そのまま引き継ぐ。"""
+    """前の archive にこの日があり、作る銘柄（購入条件を満たした銘柄）が同じで、ファイルがそろっていれば、そのまま引き継ぐ。"""
     if not prev_index:
         return None
     blk = next((d for d in prev_index.get("days", []) if d.get("date") == day), None)
@@ -504,15 +548,20 @@ def check_dataset(files: Dict[str, dict], dataset_path: Optional[str]) -> Option
 def build(pred: dict, data_dir: str, prev_archive: Optional[str] = None, dataset_path: Optional[str] = None,
           days: Optional[Sequence[str]] = None) -> Tuple[dict, Dict[str, dict]]:
     """
-    predictions.json（pred）の日ごとの候補にネットワークを作る。前の archive にある日は引き継ぐ。
+    predictions.json（pred）の日ごとの候補のうち、購入条件を満たした銘柄（rule_candidates）にネットワークを作る。前の archive に
+    ある日は引き継ぐ。日の項目の nBreak はその日の高値更新の件数（予測ファイルの候補の数。満たさなかった銘柄も数える）。
     戻り値: (index, {ファイル名: 中身})。
     """
     t0 = time.time()
     days = list(days or pred.get("dates") or [])
     by_day: Dict[str, List[dict]] = {d: [] for d in days}
-    for c in pred.get("candidates", []):
+    for c in pred.get("candidates") or []:
         if c.get("date") in by_day:
             by_day[c["date"]].append(c)
+    n_break = {d: len(v) for d, v in by_day.items()}
+    by_day = {d: rule_candidates(v) for d, v in by_day.items()}
+    log("購入条件（" + " / ".join(RULE_MODELS) + f" がすべて{AGREE_PCT:g}以上）を満たした銘柄: "
+        + ("・".join(f"{d} {len(by_day[d])}件（高値更新 {n_break[d]}件のうち）" for d in days) or "日なし"))
     prev_index, prev_files = read_archive(prev_archive)
     index = {"v": VERSION, "generatedAt": pd.Timestamp.utcnow().isoformat(), "asOf": pred.get("asOf") or (days[-1] if days else None),
              "method": method_block(), "days": []}
@@ -522,7 +571,7 @@ def build(pred: dict, data_dir: str, prev_archive: Optional[str] = None, dataset
         got = carry(prev_index, prev_files, d, by_day[d])
         if got is not None:
             blk, fs = got
-            blk = dict(blk, carried=True)
+            blk = dict(blk, carried=True, nBreak=n_break[d])
             index["days"].append(blk)
             files.update(fs)
         else:
@@ -541,6 +590,7 @@ def build(pred: dict, data_dir: str, prev_archive: Optional[str] = None, dataset
                 log(f"{d}: 作れない: {reason}")
                 blk, fs = {"date": d, "builtAt": pd.Timestamp.utcnow().isoformat(), "status": "error",
                            "reason": reason, "candidates": [], "skipped": []}, {}
+            blk["nBreak"] = n_break[d]
             i = next(k for k, x in enumerate(index["days"]) if x["date"] == d)
             index["days"][i] = blk
             files.update(fs)
@@ -559,7 +609,7 @@ FILE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}_[0-9A-Za-z]+\.json$")
 
 def write(index: dict, files: Dict[str, dict], out_dir: Optional[str], archive: Optional[str]) -> None:
     """
-    index.json と候補ごとのファイルを out_dir に、同じものを archive（tar.gz。中は recurrence/）に書く。
+    index.json と銘柄ごとのファイルを out_dir に、同じものを archive（tar.gz。中は recurrence/）に書く。
     out_dir に前からある自分のファイル（index.json と <日付>_<コード>.json）は消してから書く（ほかのファイルには触らない）。
     「_」で始まる項目（突き合わせ用の丸めない値）は書き出さない。
     """
@@ -597,16 +647,17 @@ def summary_line(index: dict) -> str:
     parts = []
     for d in index.get("days", []):
         tag = "引き継ぎ" if d.get("carried") else d.get("status")
-        parts.append(f"{d['date']} {len(d.get('candidates', []))}件（{tag}）")
+        nb = f"高値更新 {d['nBreak']}件のうち・" if isinstance(d.get("nBreak"), int) else ""
+        parts.append(f"{d['date']} {len(d.get('candidates', []))}件（{nb}{tag}）")
     return "・".join(parts) or "日なし"
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    ap = argparse.ArgumentParser(description="候補ごとのリカレンス・ネットワーク（画面の「リカレンス・ネットワーク」タブ用）")
+    ap = argparse.ArgumentParser(description="購入条件を満たした銘柄ごとのリカレンス・ネットワーク（画面の「リカレンス・ネットワーク」タブ用）")
     ap.add_argument("--data-dir", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), "_data"))
     ap.add_argument("--predictions", default=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                                           "public", "data", "predictions.json"))
-    ap.add_argument("--out-dir", default=None, help="index.json と候補ごとのファイルを書くフォルダ（中身は作り直す）")
+    ap.add_argument("--out-dir", default=None, help="index.json と銘柄ごとのファイルを書くフォルダ（中身は作り直す）")
     ap.add_argument("--archive", default=None, help="同じものを tar.gz に書く（Release に上げる。中は recurrence/）")
     ap.add_argument("--prev", default=None, help="前の archive（過去の日を引き継ぐ。既定は --archive と同じ場所）")
     ap.add_argument("--dataset", default=None, help="予測用のデータセット（候補の日の9列を突き合わせる）。既定は data-dir の dataset_predict.parquet")

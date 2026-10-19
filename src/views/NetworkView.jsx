@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import RecurrenceGraph from '../components/RecurrenceGraph.jsx';
 import { fmt, fmtDate, fmtDateTime, fmtInt, fmtSigned } from '../lib/format.js';
-import { orderRows, RULE_JA } from '../lib/strategy.js';
+import { orderRows, strategySignal, RULE_JA, STRATEGY } from '../lib/strategy.js';
 import { labelOf } from '../lib/knn.js';
 import { loadRecurrenceIndex, loadRecurrenceFile } from '../lib/predictions.js';
 import { FORCE_DEFAULTS } from '../lib/forcegraph.js';
@@ -11,10 +11,12 @@ import {
 } from '../lib/recurrence.js';
 
 /**
- * リカレンス・ネットワーク（候補ごと）。運用者の依頼（2026-10-19）「Obsidian の球状のプロットのようなことを、ノードを1営業日と
- * して、本予測モデルに使えそうな可視化を。市場全体よりも、その日の各候補銘柄単体で。指数リカレントネットワークが良い。特徴量は
- * いったん、重要度の高いテクニカル系のみ」→ 運用者の選択: ε-リカレンス・ネットワーク / 実験105 の gain 上位9列 / 取れる全期間 /
- * 画面の新しいタブ / データは Release に置く（research/recurrence_net.py）。
+ * リカレンス・ネットワーク（購入条件を満たした銘柄ごと）。運用者の依頼（2026-10-19）「Obsidian の球状のプロットのようなことを、
+ * ノードを1営業日として、本予測モデルに使えそうな可視化を。市場全体よりも、その日の各候補銘柄単体で。指数リカレントネットワークが
+ * 良い。特徴量はいったん、重要度の高いテクニカル系のみ」→ 運用者の選択: ε-リカレンス・ネットワーク / 実験105 の gain 上位9列 /
+ * 取れる全期間 / 画面の新しいタブ / データは Release に置く（research/recurrence_net.py）。
+ * 対象は同日の指定「候補といったのは、予測サンプルではなく、その中でも購入条件を満たした銘柄です」のとおり、その日の高値更新の
+ * 銘柄のうち購入条件（1.5σ の3本がすべて95以上。今日の戦略の strategySignal の passed）を満たした銘柄だけ。
  *
  * 点 = その銘柄の1営業日、線 = テクニカル指標9列の状態が似た日どうし（20営業日より離れた日だけ。辺の密度で ε を決める）。
  * 点の色はその日に候補になっていたら、の結果（+10% の指値か20営業日目の終値・目的変数 1.5σ / 1.2σ。予測日までに分かったものだけ）。
@@ -52,20 +54,31 @@ function rawText(v) {
   return fmt(v, Math.abs(v) >= 10 ? 1 : 2);
 }
 
-/** 候補の並び（今日の戦略と同じ物差し: 1.5σ の3本の最小の順）に、目次の項目・作れなかった理由を付ける。 */
+/**
+ * 一覧に出す銘柄: その日の高値更新の銘柄（予測ファイルの候補）のうち、購入条件（1.5σ の3本がすべて95以上）を満たした銘柄だけ。
+ * 今日の戦略（strategySignal）の passed と同じ銘柄・同じ並び（3本の最小の順）で、上位の枠に入った銘柄（picks）は pick = true
+ * （「買う候補」の印。候補銘柄のニュースのタブと同じ）。目次の項目と作れなかった理由を付ける。
+ * 戻り値: { rows, nBreak }。nBreak はその日の高値更新の件数（予測ファイルにその日が無ければ目次の値、それも無ければ null）。
+ */
 export function candidateRows(data, block, day) {
   const entries = new Map((block?.candidates || []).map((c) => [c.jqCode, c]));
   const skipped = new Map((block?.skipped || []).map((s) => [s.jqCode, s.reason]));
-  const fromPred = orderRows((data?.candidates || []).filter((c) => c.date === day));
-  const rows = fromPred.map((c) => ({
-    code: c.code, jqCode: c.jqCode, name: c.name, ruleMin: c.ruleMin,
+  const all = orderRows((data?.candidates || []).filter((c) => c.date === day));
+  const signal = strategySignal(all);
+  const picks = new Set(signal.picks.map((c) => c.jqCode));
+  const rows = signal.passed.map((c) => ({
+    code: c.code, jqCode: c.jqCode, name: c.name, ruleMin: c.minPct, pick: picks.has(c.jqCode),
     entry: entries.get(c.jqCode) || null, reason: skipped.get(c.jqCode) || null,
   }));
-  // 予測ファイルに無い候補（予測ファイルが先に新しい日へ進んだ・読めなかった）も、目次にあれば後ろに出す
+  // 予測ファイルに無い銘柄（予測ファイルが先に新しい日へ進んだ・読めなかった）も、目次にあれば後ろに出す（目次の銘柄は、作った
+  // ときに購入条件を満たした銘柄）。予測ファイルにあって条件を満たさない銘柄は出さない
+  const known = new Set(all.map((c) => c.jqCode));
   for (const [jq, e] of entries) {
-    if (!rows.some((r) => r.jqCode === jq)) rows.push({ code: e.code, jqCode: jq, name: e.name, ruleMin: null, entry: e, reason: null });
+    if (!known.has(jq)) rows.push({ code: e.code, jqCode: jq, name: e.name, ruleMin: null, pick: false, entry: e, reason: null });
   }
-  return rows.map((r, i) => ({ ...r, label: labelOf(i) }));
+  const inPred = all.length > 0 || (data?.dates || []).includes(day);
+  const nBreak = inPred ? all.length : (Number.isInteger(block?.nBreak) ? block.nBreak : null);
+  return { rows: rows.map((r, i) => ({ ...r, label: labelOf(i) })), nBreak };
 }
 
 export default function NetworkView({ data }) {
@@ -100,7 +113,7 @@ export default function NetworkView({ data }) {
   }, [index]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const block = days.find((d) => d.date === day) || null;
-  const rows = useMemo(() => candidateRows(data, block, day), [data, block, day]);
+  const { rows, nBreak } = useMemo(() => candidateRows(data, block, day), [data, block, day]);
 
   useEffect(() => {
     if (!rows.some((r) => r.jqCode === jq && r.entry)) setJq(rows.find((r) => r.entry)?.jqCode ?? null);
@@ -169,8 +182,21 @@ export default function NetworkView({ data }) {
     }
     if (!block) return { kind: 'noday', text: 'この日のネットワークはありません。' };
     if (block.status === 'error') return { kind: 'error', text: `この日はネットワークを作れませんでした（${block.reason || '理由は記録されていません'}）。` };
-    if (block.status === 'no_candidates') return { kind: 'empty', text: 'この日は候補がありません。' };
-    if (!rows.some((r) => r.entry)) return { kind: 'empty', text: 'この日はネットワークを作れた候補がありません。' };
+    if (rows.length === 0) {
+      if (nBreak === 0) return { kind: 'empty', text: 'この日は新規の高値更新がありません。' };
+      return {
+        kind: 'empty',
+        text: `この日は購入条件（${RULE_JA}がすべて${STRATEGY.agreePct}以上）を満たした銘柄がありません`
+          + (Number.isInteger(nBreak) ? `（高値更新 ${nBreak} 銘柄のうち）。` : '。'),
+      };
+    }
+    if (!rows.some((r) => r.entry)) {
+      return {
+        kind: 'empty',
+        text: `この日は購入条件を満たした ${rows.length} 銘柄のネットワークを作れませんでした（`
+          + rows.map((r) => `${r.code} ${r.reason || '理由は記録されていません'}`).join('・') + '）。',
+      };
+    }
     return { kind: 'ok' };
   })();
   // 候補の単位（読み込み中・読めない）は、候補の一覧を出したまま図の枠に書く
@@ -193,9 +219,10 @@ export default function NetworkView({ data }) {
     <div className="net">
       <section className="card">
         <div className="card-head">
-          <h2>リカレンス・ネットワーク（候補ごと）</h2>
+          <h2>リカレンス・ネットワーク（購入条件を満たした銘柄ごと）</h2>
           <span className="sub">
-            {'点 = その銘柄の1営業日、線 = テクニカル指標9列の状態が似た日どうし。今日（候補の日）に似た過去の日がその後どうなったかを見ます'}
+            {`購入条件（${RULE_JA}がすべて${STRATEGY.agreePct}以上）を満たした銘柄ごとに、点 = その銘柄の1営業日、`
+              + '線 = テクニカル指標9列の状態が似た日どうし。今日（候補の日）に似た過去の日がその後どうなったかを見ます'}
           </span>
         </div>
 
@@ -210,6 +237,13 @@ export default function NetworkView({ data }) {
               ))}
             </div>
           </div>
+          {block && (
+            <div>
+              <span className="lab">購入条件を満たした銘柄</span>
+              <strong className="num">{rows.length}</strong> 銘柄
+              {Number.isInteger(nBreak) && <span className="sub">{`（この日の高値更新 ${nBreak} 銘柄のうち）`}</span>}
+            </div>
+          )}
           <div>
             <span className="lab">辺の密度</span>
             <div className="net-seg" role="group" aria-label="辺の密度（リカレンス率）">
@@ -279,8 +313,8 @@ export default function NetworkView({ data }) {
       ) : (
         <div className="net-main">
           <section className="net-panel net-cpanel">
-            <h3>候補（今日の戦略の順）</h3>
-            <div className="net-clist" role="listbox" aria-label="候補">
+            <h3>購入条件を満たした銘柄（今日の戦略の順）</h3>
+            <div className="net-clist" role="listbox" aria-label="購入条件を満たした銘柄">
               <div className="net-crow head" aria-hidden="true">
                 <span />
                 <span>銘柄</span>
@@ -295,7 +329,11 @@ export default function NetworkView({ data }) {
                           className={`net-crow${r.jqCode === jq ? ' on' : ''}`} onClick={() => setJq(r.jqCode)}
                           title={r.entry ? `${r.name}（${fmtInt(r.entry.n)} 日）` : `作れなかった: ${r.reason || ''}`}>
                     <span className="mark">{r.label}</span>
-                    <span className="id"><b className="num">{r.code}</b> <span className="name">{r.name}</span></span>
+                    <span className="id">
+                      <b className="num">{r.code}</b>
+                      {r.pick && <span className="badge green net-pick" title="今日の戦略で買う候補（上位の枠に入った）">買う候補</span>}
+                      {' '}<span className="name">{r.name}</span>
+                    </span>
                     <span className="num">{r.ruleMin === null ? '—' : fmt(r.ruleMin, 1)}</span>
                     <span className="num">{r.entry ? fmtInt(s?.deg) : '—'}</span>
                     <span className="num">{r.entry ? pct(s?.nbr?.hit) : '作れず'}</span>
@@ -303,7 +341,10 @@ export default function NetworkView({ data }) {
                 );
               })}
             </div>
-            <p className="net-hint">{`似た日と +10% は辺の密度 ${bpText(method.rrBp)} のとき。行を選ぶと図が変わります`}</p>
+            <p className="net-hint">
+              {`買う候補 = 今日の戦略で上位${STRATEGY.topK}件の枠に入った銘柄（候補銘柄のニュースのタブと同じ）。`
+                + `似た日と +10% は辺の密度 ${bpText(method.rrBp)} のとき。行を選ぶと図が変わります`}
+            </p>
           </section>
 
           <section className="net-stage">

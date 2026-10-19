@@ -362,19 +362,36 @@ await page.unroute('**/data/predictions.json*');
 
 console.log('\n== リカレンス・ネットワーク ==');
 // 運用者の依頼（2026-10-19）「Obsidian の球状のプロットのようなことを、ノードを1営業日として…その日の各候補銘柄単体で」。
-// 合成の予測ファイル（2026-09-11 の5件）のうち、ネットワークのフィクスチャがあるのは 9324・9434 の2件。候補の並びは今日の
-// 戦略の物差し（1.5σ の3本の最小の順）: 9324（83.6）・9082（76.8）・9434（70.5）・1671（59.9）・1699（35.5）。
-// 上の候補銘柄のニュースは予測ファイルを差し替えて読み込んだままなので、元の合成データで読み込み直してから見る
+// 対象は購入条件（1.5σ の3本がすべて95以上）を満たした銘柄だけ（同日の指定「候補といったのは、予測サンプルではなく、その中でも
+// 購入条件を満たした銘柄です」）。元の合成データ（2026-09-11 の5件。どれも満たさない）では図を出さずに理由を書く
+await page.reload({ waitUntil: 'networkidle' });
+await page.getByRole('tab', { name: 'リカレンス・ネットワーク' }).click();
+await page.waitForSelector('.net .card.empty', { timeout: 10000 });
+const netEmpty = (await page.locator('.net .card.empty').textContent()) || '';
+check(netEmpty.includes('購入条件') && netEmpty.includes('高値更新 5 銘柄のうち'),
+      `購入条件を満たした銘柄が無い日は、図を出さずに理由を書く (実際: ${netEmpty.slice(0, 70)})`);
+check((await page.locator('.net-canvas canvas').count()) === 0 && (await page.locator('.net-crow').count()) === 0,
+      '満たさない銘柄（高値更新の5件）は一覧にも図にも出さない');
+// 上の候補銘柄のニュースと同じ predPass（9324・9434・9082 が満たす）で読み込み直す。ネットワークのフィクスチャは購入条件を
+// 満たした3件のうち 9324・9434 の2件（9082 は日足が無いので作れない。tests/test_recurrence_net.py の fixture_build）
+await page.route('**/data/predictions.json*',
+  (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(predPass) }));
 await page.reload({ waitUntil: 'networkidle' });
 await page.getByRole('tab', { name: 'リカレンス・ネットワーク' }).click();
 await page.waitForSelector('.net-canvas canvas', { timeout: 10000 });
 const exp = (code, bp) => RECURRENCE_EXPECTED[`2026-09-11_${code}.json`][String(bp)];
 const crows = page.locator('.net-crow:not(.head)');
-check((await crows.count()) === 5, `候補の一覧は予測ファイルの5件 (実際: ${await crows.count()})`);
+check((await crows.count()) === 3, `一覧は購入条件を満たした3件だけ（高値更新の5件ではない） (実際: ${await crows.count()})`);
 const crowCodes = await crows.locator('.id b').allTextContents();
-check(crowCodes.join(',') === '9324,9082,9434,1671,1699', `候補は今日の戦略の順 (実際: ${crowCodes.join(',')})`);
+check(crowCodes.join(',') === '9324,9434,9082', `今日の戦略の順（3本の最小 97.1・95.2・95.0） (実際: ${crowCodes.join(',')})`);
+const pickMarks = await crows.evaluateAll((els) => els.map((e) => Boolean(e.querySelector('.net-pick'))));
+check(pickMarks.join(',') === 'true,true,false', `上位2件（9324・9434）に「買う候補」の印 (実際: ${pickMarks.join(',')})`);
 check((await page.locator('.net-crow:not(.head):not([disabled])').count()) === 2, 'ネットワークのある2件だけ選べる');
-check((await crows.first().getAttribute('aria-selected')) === 'true', '最初はネットワークのある先頭の候補（9324）を出す');
+check(((await crows.nth(2).getAttribute('title')) || '').includes('日足が無い'), '作れなかった 9082 は理由（日足が無い）を出す');
+const netStrip = (await page.locator('.net .pred-strip').innerText()) || '';
+check(netStrip.includes('購入条件を満たした銘柄') && netStrip.includes('高値更新 5 銘柄のうち'),
+      `件数の欄に「購入条件を満たした銘柄 3（高値更新 5 銘柄のうち）」 (実際: ${netStrip.replace(/\s+/g, ' ').slice(0, 90)})`);
+check((await crows.first().getAttribute('aria-selected')) === 'true', '最初はネットワークのある先頭の銘柄（9324）を出す');
 const netSide = async () => (await page.locator('.net-side').innerText()) || '';
 let side = await netSide();
 check(side.includes(`${exp('93240', 100).deg} 日`) && side.includes('珍しい状態'),
@@ -417,6 +434,7 @@ await page.waitForTimeout(200);
 const netFit = await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 check(netFit, 'スマホの幅（390px）で横にはみ出さない');
 await page.setViewportSize({ width: 1440, height: 1000 });
+await page.unroute('**/data/predictions.json*');
 
 console.log('\n== コンソールエラー ==');
 check(consoleErrors.length === 0, `JS エラーなし (${consoleErrors.length}件)`);
