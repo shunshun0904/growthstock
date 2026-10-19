@@ -15,6 +15,7 @@
 | 画面用の追跡 | `public/data/prediction_history.json`（上位5件/日・400日で削除） | git | 平日夜 | 画面に出すぶんだけ。**長期の台帳ではない** |
 | 再学習で加わったサンプル | `public/data/new_samples.json`（週次の再学習で新しく学習に入ったサンプルから正例・負例を最大5件ずつ。日足（更新日の78週前〜判定の20営業日の後5日）・到達の線・終盤の線・成否の内訳） | git → GitHub Pages | 日曜の Retrain Weekly の後に `New Training Samples` が workflow_run で続けて走る（基準モデル（1.2σ の LightGBM）の学習日が変わったときだけ作り直す。手で起動すると今の週を作り直す） | 画面のタブ「再学習で加わったサンプル」（運用者の依頼 2026-10-13。同日夜に名前を「例」から「サンプル」に、チャートを78週に）。加わったサンプル = 前回の学習期間の終わり（meta.json の git の履歴）より後・今回の終わりまでの更新日。選び方は学習期間の終わりを種にした無作為抽出。線は学習のラベルと同じ式（`research/new_samples.py` → `export_label_samples.build_case`）。内訳から引き直したラベルがデータセットと食い違えば止まる |
 | 候補銘柄のニュースのリンク | `public/data/news_links.json`（候補ごとのリンクと、開いて確かめた結果・理由） | git → GitHub Pages | 平日の Predict Breakouts の後に `Check News Links` が workflow_run で続けて走る（手でも起動できる） | 画面のタブ「候補銘柄のニュース」。今日の戦略の候補（1.5σ の3本すべて95以上）のリンクを毎晩開いて確かめ、通らなかったものは出さない（画面に確かめの印は出さない）。URL の正本は `research/news_links.py` |
+| リカレンス・ネットワーク | `recurrence.tar.gz`（中は `recurrence/index.json` と候補ごとの `recurrence/<日付>_<コード>.json`。予測ファイルの5日ぶん・1候補 約100KB） | **GitHub Release（`data-raw`）** → デプロイで `dist/data/recurrence/` | 平日の Predict Breakouts の中（予測の後） | 画面のタブ「リカレンス・ネットワーク」（運用者の依頼 2026-10-19）。取れる全期間（1候補 約2,200営業日 × テクニカル指標9列）で1日あたり約1MB になり、毎日コミットすると履歴が年に数百MB 膨らむので git に入れない（運用者の選択「Release に置く」）。過去の日は前の archive から引き継ぐ。下の「リカレンス・ネットワーク」 |
 | 特徴量の日本語名 | `public/data/feature_names.json`（列名 → 短い日本語名と説明） | git → GitHub Pages | 特徴量を足したとき（手で） | 画面の「効いた特徴量」を日本語名で出す。正本は `research/feature_dict.py`（`NAME_JA`・軸 × 接尾辞）で、`python3 research/feature_dict.py --names-json public/data/feature_names.json` で書き出す。辞書とずれると `tests/test_feature_names.py` が落ちる |
 | **長期の台帳** | 予測ログ（全候補・1行1銘柄） | **Google スプレッドシート** | 平日夜 | 手売買の記録を同じ行に書き足せる。実績の検証はここを正本にする |
 | 保有の推移 | チャットで報告した取引の、売りのルールでの日ごとの損益とグラフ。予測ログの行を保有中は赤・売却済みは青に塗る | Google スプレッドシートの別タブ「保有の推移」（取引は「取引の記録」タブ） | 平日夜（予測のあと） | 予測ログは手書きの欄を壊さないよう追記だけにしているので、毎日作り直す表は別のタブに置く（下の「保有の推移と取引の記録」） |
@@ -46,9 +47,12 @@
                 Predict Breakouts    Release からモデルと生データを取得
                                      → 鮮度チェック（1営業日より古ければ停止）
                                      → 予測データセット構築 → 採点
+                                     → 候補ごとのリカレンス・ネットワーク（recurrence.tar.gz を
+                                       Release へ。作れなくても先へ進む）
                                      → 画面の候補（最大120銘柄）の詳細を取得（stocks.json）
                                      → スプレッドシートへ追記
-                                     → コミット → Pages 再デプロイ
+                                     → コミット → Pages 再デプロイ（デプロイが
+                                       recurrence.tar.gz を dist/data/recurrence/ に展開する）
       ↓ 完了で起動
                 Update Holdings Sheet 報告した取引を「取引の記録」タブに写し、売りのルールで
                                      損益の推移を「保有の推移」タブに作り直す（日付ごとの
@@ -891,6 +895,29 @@ XGBoost 25分 / CatBoost 22分。`logit` は153列で70分だったので、そ�
   次の晩の予測の後にまた走る
 - ログは件数と理由の内訳だけ（銘柄コード・銘柄名は出さない）。開けなくなったリンクが続くときは `news_links.json` の
   `reason` を見る。URL の形を確かめ直すときは `research/exp/probe_news_links.py`（自動で開かないサイトは飛ばす）
+
+### リカレンス・ネットワーク（2026-10-19。左から3番目のタブ）
+
+運用者の依頼「Obsidian の球状のプロットのようなことを、ノードを1営業日として、本予測モデルに使えそうな可視化をしてほしい。
+市場全体よりも、その日の各候補銘柄単体で。指数リカレントネットワークが良いと思う。特徴量はいったん、重要度の高いテクニカル系の
+み」→ 運用者の選択（AskUserQuestion）: ε-リカレンス・ネットワーク / 実験105 の gain 上位9列 / 取れる全期間 / 画面の新しいタブ /
+データは Release に置く。手法・確かめ・数字は `docs/MODEL_ADOPTION_RULES.md` §69。**参考の表示で、選定には使わない。**
+
+- **作る**: Predict Breakouts の段「Build recurrence networks (release)」が `research/recurrence_net.py` を回し、予測ファイルの5日の
+  候補ごとに作って `recurrence.tar.gz` を Release（`data-raw`）に上げる。過去の日は前の archive（最初の Download raw data で
+  `research/_data` に来ている）から引き継ぐ（候補の組が同じ日だけ。作れなかった日は作り直す）。前の archive に無い過去の日は、
+  その日までの日足だけで作る（`builtAt` でいつ作ったか分かる）。手元の実測で、5日（76候補）を初めて作ると31秒、2回目は全日を
+  引き継いだ（ログの作る時間 0秒）
+- **画面に入れる**: Deploy to GitHub Pages の段「Recurrence networks (release)」が archive を取って `dist/data/recurrence/` に
+  展開する。中の名前が `recurrence/index.json` と `recurrence/<日付>_<コード>.json` 以外なら展開しない。画面はタブを開いたとき
+  に目次（`index.json`）を読み、候補を選ぶとその候補のファイル（約100KB。Pages が圧縮して送る）を読む
+- **止めない**: どちらの段も continue-on-error。作れなかった日は画面に理由を出し（`status: error`）、archive が無ければタブは
+  「まだネットワークのデータがありません」と出す。候補ごとの失敗（日足が無い・ノードが少ない）は目次の `skipped` に理由が残る
+- **確かめ**: 最新の日の候補の9列が、予測用のデータセット（`dataset_predict.parquet`）の同じ行の値と一致するかを数え、
+  食い違えば画面に警告を出す（目次の `datasetCheck`。check_train_serve と同じ許し）。ログは Summary の「リカレンス・
+  ネットワーク」
+- **手元で見る**: `python3 research/recurrence_net.py --data-dir research/_data --predictions public/data/predictions.json
+  --out-dir public/data/recurrence` で書き出してから `npm run dev`（`public/data/recurrence/` は .gitignore に入れてある）
 
 ### ロジスティック回帰と MLP を画面と実験から外した（2026-10-09 昼。夜にロジスティック回帰だけ戻した）
 

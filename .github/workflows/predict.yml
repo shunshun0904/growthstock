@@ -170,6 +170,25 @@ jobs:
             echo "控えが無い（候補が無かった日）"
           fi
 
+      # 候補ごとのリカレンス・ネットワーク（画面の「リカレンス・ネットワーク」タブ。research/recurrence_net.py。
+      # 運用者の依頼 2026-10-19）。取れる全期間（1候補 約2,200営業日 × テクニカル指標9列）で1日あたり約1MB になるので、
+      # リポジトリにはコミットせず Release に1つの archive（recurrence.tar.gz）で上げ、デプロイ（deploy-pages.yml）が
+      # dist/data/recurrence/ に展開する（運用者の選択「Release に置く」）。過去の日は前の archive（最初の
+      # Download raw data で research/_data に来ている）から引き継ぐ。参考の表示で選定には使わないので、作れなくても
+      # 日次予測は止めない（continue-on-error。失敗は赤で残り、Summary にも出る）
+      - name: Build recurrence networks (release)
+        id: recurrence
+        if: steps.gate.outputs.run != 'false'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 research/recurrence_net.py --data-dir research/_data \
+            --predictions public/data/predictions.json \
+            --archive research/_data/recurrence.tar.gz 2>&1 | tee recurrence.log | tail -20
+          [ "${PIPESTATUS[0]}" -eq 0 ] || exit 1
+          bash scripts/gh_release_upload.sh data-raw research/_data/recurrence.tar.gz
+
       # その日の上位銘柄を、既存の取得スクリプトに通して stocks.json を作る。
       #
       # これが無いと、予測タブで見つけた銘柄をオクタゴンへ送っても
@@ -252,6 +271,12 @@ jobs:
             if [ "${{ steps.sheets.outcome }}" = "failure" ]; then
               echo '> ⚠ **スプレッドシートへの追記に失敗しました。**'
               echo '> 画面は更新済みですが、台帳にはこの日の行が入っていません。'
+            fi
+            if [ "${{ steps.recurrence.outcome }}" = "failure" ]; then
+              echo '> ⚠ **リカレンス・ネットワークを作れませんでした**（画面のタブは前の日までの値のまま）。'
+            fi
+            if [ -f recurrence.log ]; then
+              echo '### リカレンス・ネットワーク'; echo '```'; tail -12 recurrence.log; echo '```'
             fi
             echo '```'
             if [ -f predict.log ]; then cat predict.log; else echo "(実行せず)"; fi
