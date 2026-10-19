@@ -176,11 +176,17 @@ jobs:
       # dist/data/recurrence/ に展開する（運用者の選択「Release に置く」）。過去の日は前の archive（最初の
       # Download raw data で research/_data に来ている）から引き継ぐ。参考の表示で選定には使わないので、作れなくても
       # 日次予測は止めない（continue-on-error。失敗は赤で残り、Summary にも出る）。
-      # 予測済みの日（ゲートが飛ばす日）でも、Release に archive がまだ無ければ作る（入れた直後に手で起動すれば、次の営業日を
-      # 待たずに画面に出せる。使うのは日足と、リポジトリの predictions.json だけ。予測用のデータセットとの突き合わせは飛ばす）
+      # 予測済みの日（ゲートが飛ばす日）でも、Release の archive が無いか版が古ければ（作り方を変えて版を上げたとき）作り直す
+      # （入れた直後や版を上げた直後に手で起動すれば、次の営業日を待たずに画面に出せる。使うのは日足と、リポジトリの
+      # predictions.json だけ。予測用のデータセットとの突き合わせは飛ばす）。判定の段が落ちても作る側に倒れる
+      - name: Check recurrence archive
+        id: rnarchive
+        continue-on-error: true
+        run: python3 research/recurrence_net.py --archive-ok research/_data/recurrence.tar.gz >> "$GITHUB_OUTPUT"
+
       - name: Build recurrence networks (release)
         id: recurrence
-        if: steps.gate.outputs.run != 'false' || hashFiles('research/_data/recurrence.tar.gz') == ''
+        if: steps.gate.outputs.run != 'false' || steps.rnarchive.outputs.ok != 'true'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

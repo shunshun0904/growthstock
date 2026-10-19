@@ -61,6 +61,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import glob
 import io
 import json
@@ -545,6 +546,16 @@ def read_archive(path: Optional[str]) -> Tuple[Optional[dict], Dict[str, dict]]:
         return None, {}
 
 
+def archive_ok(path: Optional[str]) -> bool:
+    """
+    archive が今の版で読めるか（無い・読めない・版が違うなら False）。日次予測の段は、予測済みの日でも False なら作り直す
+    （作り方を変えて版を上げたとき、次の起動で入れ替わるように）。read_archive のログは標準エラーに出す。
+    """
+    with contextlib.redirect_stdout(sys.stderr):
+        index, _ = read_archive(path)
+    return index is not None
+
+
 def carry(prev_index: Optional[dict], prev_files: Dict[str, dict], day: str, cands: List[dict]) -> Optional[Tuple[dict, Dict[str, dict]]]:
     """前の archive にこの日があり、作る銘柄（購入条件を満たした銘柄）が同じで、ファイルがそろっていれば、そのまま引き継ぐ。"""
     if not prev_index:
@@ -711,7 +722,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--prev", default=None, help="前の archive（過去の日を引き継ぐ。既定は --archive と同じ場所）")
     ap.add_argument("--dataset", default=None, help="予測用のデータセット（候補の日の9列を突き合わせる）。既定は data-dir の dataset_predict.parquet")
     ap.add_argument("--days", nargs="*", default=None, help="作る日（既定は predictions.json の dates）")
+    ap.add_argument("--archive-ok", default=None, metavar="PATH",
+                    help="作らずに、archive が今の版で読めるかだけを ok=true / ok=false で出す（日次予測の段の判定。$GITHUB_OUTPUT 用）")
     args = ap.parse_args(argv)
+    if args.archive_ok:
+        print(f"ok={'true' if archive_ok(args.archive_ok) else 'false'}")
+        return 0
     if not args.out_dir and not args.archive:
         ap.error("--out-dir か --archive のどちらかを指定してください")
     with open(args.predictions, encoding="utf-8") as fh:
