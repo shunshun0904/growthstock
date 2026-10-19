@@ -22,6 +22,8 @@
   python3 tests/test_recurrence_net.py
   python3 tests/test_recurrence_net.py --write-fixtures   # 式を変えたらフィクスチャを作り直す
 """
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -455,6 +457,24 @@ class TestBuild(unittest.TestCase):
         RN.write(dict(index, v=RN.VERSION + 1), files, None, bad)
         self.assertEqual(RN.read_archive(bad), (None, {}))
         self.assertEqual(RN.read_archive(os.path.join(self.tmp, "none.tar.gz")), (None, {}))
+
+    def test_archive_ok_cli(self):
+        # 日次予測の段の判定: 予測済みの日でも、archive が無いか版が古ければ作り直す（$GITHUB_OUTPUT に ok= の1行だけを出す）
+        cur, old = os.path.join(self.tmp, "cur.tar.gz"), os.path.join(self.tmp, "old.tar.gz")
+        RN.write({"v": RN.VERSION, "days": []}, {}, None, cur)
+        RN.write({"v": RN.VERSION - 1, "days": []}, {}, None, old)
+
+        def run(path):
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                self.assertEqual(RN.main(["--archive-ok", path]), 0)
+            return out.getvalue(), err.getvalue()
+
+        self.assertEqual(run(cur), ("ok=true\n", ""))
+        out, err = run(old)
+        self.assertEqual(out, "ok=false\n")
+        self.assertIn("版が違う", err)                                  # ログは標準エラーへ（出力の行を壊さない）
+        self.assertEqual(run(os.path.join(self.tmp, "none.tar.gz"))[0], "ok=false\n")
 
     def test_dataset_check(self):
         _, files = self.build(fixture_bars())

@@ -918,9 +918,11 @@ XGBoost 25分 / CatBoost 22分。`logit` は153列で70分だったので、そ�
   に目次（`index.json`）を読み、銘柄を選ぶとその銘柄のファイル（約130KB）を読む
 - **止めない**: どちらの段も continue-on-error。作れなかった日は画面に理由を出し（`status: error`）、archive が無ければタブは
   「まだネットワークのデータがありません」と出す。銘柄ごとの失敗（日足が無い・ノードが少ない）は目次の `skipped` に理由が残る
-- **初めて入れたとき**: Release に archive がまだ無ければ、予測済みの日（Trading-day gate が飛ばす日）でも作る段だけは走る。
-  既定ブランチに入れた後に Predict Breakouts を手で起動すれば（`force` は付けない。予測はし直さない）、次の営業日を待たずに
-  画面に出る（終わると Pages の再デプロイが続けて走る）
+- **初めて入れたとき・作り方を変えたとき**: Release の archive が無いか版が古ければ（`recurrence_net.VERSION` を上げたとき）、
+  予測済みの日（Trading-day gate が飛ばす日）でも作る段だけは走る（段「Check recurrence archive」が `--archive-ok` で版を見る。
+  2026-10-19 に版 3 を入れた直後の手での起動は、前の判定（archive が無いときだけ）だったので作る段が飛ばされた。そのため
+  判定を足した）。既定ブランチに入れた後に Predict Breakouts を手で起動すれば（`force` は付けない。予測はし直さない）、次の
+  営業日を待たずに画面に出る（終わると Pages の再デプロイが続けて走る）。版が同じなら手で起動しても作り直さない
 - **確かめ**: 最新の日の銘柄の9列が、予測用のデータセット（`dataset_predict.parquet`）の同じ行の値と一致するかを数え、
   食い違えば画面に警告を出す（目次の `datasetCheck`。check_train_serve と同じ許し）。ログは Summary の「リカレンス・
   ネットワーク」
