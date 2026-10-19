@@ -1,13 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
-import {
-  createSim, tick, setDim, setForces, reheat, extent, project, pick, seedOf, statePositions, helixPositions,
-} from '../lib/forcegraph.js';
+import { createSim, tick, setDim, setForces, reheat, extent, project, pick, seedOf } from '../lib/forcegraph.js';
 
 /**
  * リカレンス・ネットワークの描画（canvas 2D。力学レイアウトで3次元に並べて回す）。
  *
  * - 点 = 1営業日（大きさは次数 = 似た日として選ばれた数を含む線の数）、線 = 状態の似た日どうし（k近傍）。今日（候補の日）は
  *   白い大きな点、78週高値の更新日は紫の輪
+ * - 並べ方は力学だけ（運用者の指定 2026-10-19「3種のプロット方法がありますが、今のデフォルトのみのもので良いです」。状態の
+ *   地図・時間のらせんは外した）
  * - 見た目（運用者の依頼 2026-10-19「無理に球状にしなくても3次元ネットワーク構造でかっこよく」）: 暗い面に、薄い明るい線を
  *   重ねる（密な塊ほど明るく見える）、点は奥ほど小さく暗く（霧）、手前の点はうっすら光る。似た日は光の輪で強調。線と点の
  *   にじみは通常の重ね方で描く（足し算の重ね方 lighter は、GPU の無い描画で線 1.6万本が約8倍遅かった。足し算は強調する
@@ -22,11 +22,10 @@ import {
 
 const BG_IN = '#101a33';
 const BG_OUT = '#04060c';
-/** 線の色（足し算で重ねる）。奥・手前・強調中で濃さを変える。らせんは長い線が真ん中で重なるので薄くする */
+/** 線の色。奥・手前・強調中で濃さを変える */
 const EDGE_RGB_BACK = '96, 165, 250';
 const EDGE_RGB_FRONT = '147, 197, 253';
 const EDGE_ALPHA = { back: 0.06, front: 0.12, backDim: 0.03, frontDim: 0.055 };
-const EDGE_GAIN = { force: 1, state: 0.8, helix: 0.42 };
 const LINK_GLOW = 'rgba(125, 211, 252, 0.16)';
 const LINK_CORE = 'rgba(224, 242, 254, 0.92)';
 const TRAIL_GLOW = 'rgba(251, 191, 36, 0.2)';
@@ -38,22 +37,9 @@ const ZOOM_MAX = 12;
 
 const clampZoom = (z) => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
 
-/**
- * 決まった位置に置く並べ方（force 以外）の位置を入れる。力学は動かさない（alpha を 0 に）。
- *   state … 状態の地図（9列の状態の主成分。似た日は近くに来る）
- *   helix … 時間のらせん（1年で1周。3次元は上へ、2次元は外へ。今日がいちばん上・外）
- */
-function placeStatic(sim, dec, layout, dim) {
-  const pos = layout === 'state' ? statePositions(dec.z, dec.n, dec.dims, dim).pos : helixPositions(dec.n, dim);
-  sim.pos.set(pos);
-  sim.vel.fill(0);
-  sim.alpha = 0;
-  sim.dim = dim;
-}
-
 export default function RecurrenceGraph({
   dec, net, nbrs, colors, dim, spin, trail, seedKey, selected, onSelect, tipOf, ariaLabel, zoomCmd, forces,
-  highlightToday = true, layout = 'force',
+  highlightToday = true,
 }) {
   const wrapRef = useRef(null);
   const canvasRef = useRef(null);
@@ -63,15 +49,14 @@ export default function RecurrenceGraph({
     nbSet: null, nbFor: -2, nbNet: null, bg: null,
   });
   const props = useRef({});
-  props.current = { dec, net, nbrs, colors, dim, spin, trail, selected, highlightToday, layout };
+  props.current = { dec, net, nbrs, colors, dim, spin, trail, selected, highlightToday };
   const [tip, setTip] = useState(null);
 
-  // ネットワーク・並べ方が変わったら並べ直す（同じ候補・同じ k・同じ並べ方ならいつも同じ形。力学の種は銘柄・日付・k）
+  // ネットワークが変わったら並べ直す（同じ候補・同じ k ならいつも同じ形。力学の種は銘柄・日付・k）
   useEffect(() => {
     const s = st.current;
     if (!dec || !net) { s.sim = null; return; }
     s.sim = createSim(dec.n, net.edges, net.deg, { dim, seed: seedOf(seedKey || ''), ...(forces || {}) });
-    if (layout !== 'force') placeStatic(s.sim, dec, layout, dim);
     s.screen = new Float64Array(4 * dec.n);
     s.order = new Int32Array(dec.n).map((_, i) => i);
     s.hover = -1;
@@ -79,15 +64,11 @@ export default function RecurrenceGraph({
     s.nbFor = -2;
     s.dirty = true;
     setTip(null);
-  }, [dec, net, layout]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [dec, net]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const s = st.current;
-    if (!s.sim) return;
-    if (props.current.layout === 'force') setDim(s.sim, dim);
-    else placeStatic(s.sim, props.current.dec, props.current.layout, dim);
-    s.ext = null;
-    s.dirty = true;
+    if (s.sim) { setDim(s.sim, dim); s.ext = null; s.dirty = true; }
   }, [dim]);
 
   useEffect(() => { st.current.dirty = true; }, [colors, trail, selected, highlightToday, nbrs]);
@@ -95,7 +76,7 @@ export default function RecurrenceGraph({
   // 力のつまみ（中心の力・反発の力・リンクの力・リンクの長さ）。変えた分だけ動かし直す
   useEffect(() => {
     const s = st.current;
-    if (s.sim && forces && props.current.layout === 'force' && setForces(s.sim, forces)) { s.fit = true; s.dirty = true; }
+    if (s.sim && forces && setForces(s.sim, forces)) { s.fit = true; s.dirty = true; }
   }, [forces]);
 
   // 外からの拡大・元に戻す（＋ − ボタン）
@@ -105,7 +86,7 @@ export default function RecurrenceGraph({
     if (zoomCmd.kind === 'in') v.zoom = clampZoom(v.zoom * 1.25);
     else if (zoomCmd.kind === 'out') v.zoom = clampZoom(v.zoom / 1.25);
     else if (zoomCmd.kind === 'reset') Object.assign(v, { zoom: 1, panX: 0, panY: 0, yaw: 0.6, pitch: -0.3 });
-    else if (zoomCmd.kind === 'reheat' && st.current.sim && props.current.layout === 'force') reheat(st.current.sim, 0.9);
+    else if (zoomCmd.kind === 'reheat' && st.current.sim) reheat(st.current.sim, 0.9);
     st.current.dirty = true;
   }, [zoomCmd]);
 
@@ -242,8 +223,7 @@ export default function RecurrenceGraph({
         ctx.lineTo(sc[4 * b], sc[4 * b + 1]);
       }
       const front = !three || pass === 1;
-      const gain = EDGE_GAIN[p.layout] ?? 1;
-      const al = EDGE_ALPHA[`${front ? 'front' : 'back'}${nbSet ? 'Dim' : ''}`] * gain;
+      const al = EDGE_ALPHA[`${front ? 'front' : 'back'}${nbSet ? 'Dim' : ''}`];
       ctx.strokeStyle = `rgba(${front ? EDGE_RGB_FRONT : EDGE_RGB_BACK}, ${al.toFixed(4)})`;
       ctx.stroke();
     }

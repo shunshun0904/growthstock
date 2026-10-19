@@ -11,7 +11,8 @@
 2026-10-09〜16 の5日で5銘柄・0.7MB）。
 同日の夜、運用者の選択（AskUserQuestion）「k近傍だけにする」「5・10・20・30・50（既定10）」で、ε（辺の密度で結ぶ）をやめて
 k近傍の網にした（版 4。docs/MODEL_ADOPTION_RULES.md §69）。k は続けて運用者の指定「正直なところ、kは1〜10までで良いです」で
-1〜10 にした（既定10 のまま）。
+1〜10 にした。既定は続けて運用者の指定「初期状態のkは5でお願いします」で 5（版 6）。並べ方は画面の力学だけ（同じ指定
+「3種のプロット方法がありますが、今のデフォルトのみのもので良いです」）。
 対象（同日の運用者の指定「候補といったのは、予測サンプルではなく、その中でも購入条件を満たした銘柄です」）: その日の高値更新の
 銘柄（予測ファイルの候補）のうち、購入条件（今日の戦略の規則。1.5σ の3本 RULE_MODELS の百分位がすべて AGREE_PCT 以上）を
 満たした銘柄だけ。画面の strategy.js の strategySignal の passed・候補銘柄のニュース（news_links.rule_codes）と同じ。
@@ -89,9 +90,10 @@ import linear_preprocess as LP  # noqa: E402
 import live_track as LT  # noqa: E402
 import technicals as TX  # noqa: E402
 
-VERSION = 5                         # 2: 先20営業日の値動き（rise・fall・r20）を足した。3: rise・fall を高値・安値で測る。
+VERSION = 6                         # 2: 先20営業日の値動き（rise・fall・r20）を足した。3: rise・fall を高値・安値で測る。
                                     # 4: ε をやめて k近傍の網に（要約は k ごとの byK）。
-                                    # 5: 要約から今日に近い過去の更新日（nearestFresh）を外した（似た日は近い k 日だけ）
+                                    # 5: 要約から今日に近い過去の更新日（nearestFresh）を外した（似た日は近い k 日だけ）。
+                                    # 6: 既定の k を 10 → 5 に（目次の method.k だけが変わる。画面の最初の k）
 #: 状態の9列。実験105 の学習の寄与（gain。360列の lgbm）の上位で、1.5σ の上位8列（360列中 28・31・32・38・40・42・44・50位）と、
 #: 1.2σ でだけ上位に入った出来高の60日 ÷ 250日（37位）。docs/MODEL_ADOPTION_RULES.md §68
 FEATURES: Tuple[str, ...] = ("tx_vol_60", "tx_mdi_14", "tx_vortex_pos_14", "tx_atr_ratio_14_50", "tx_ichi_kijun_gap",
@@ -106,8 +108,8 @@ SHORT = {"tx_vol_60": "60日ボラ", "tx_mdi_14": "−DI(14)", "tx_vortex_pos_14
          "tx_vol_ratio_60_250": "出来高60日÷250日"}
 THEILER = int(B.RISE_HORIZON)       # 20営業日。これ以下しか離れていない日どうしは結ばない
 #: k近傍の k（運用者の選択 2026-10-19「k近傍だけにする」「5・10・20・30・50（既定10）」→ 続けて指定「正直なところ、kは1〜10までで
-#: 良いです」で 1〜10。既定は 10 のまま）
-K_DEFAULT = 10
+#: 良いです」で 1〜10。既定は同じ日の指定「初期状態のkは5でお願いします」で 5）
+K_DEFAULT = 5
 K_CHOICES: Tuple[int, ...] = tuple(range(1, 11))
 Q = 20                              # 状態を 1/Q σ 刻みの整数で持つ
 Z_CAP = 6.0                         # |z| をここで切る（Q 倍して ±120。int8 に収まる）

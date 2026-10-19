@@ -484,7 +484,8 @@ class TestBuild(unittest.TestCase):
         self.assertEqual([d["nBreak"] for d in index["days"]], [2, 2])               # 満たさなかった銘柄も数える
         self.assertEqual(index["days"][0]["skipped"], [])                           # 満たさない銘柄は作れない扱いにもしない
         self.assertEqual(index["method"]["rule"], {"models": list(LT.RULE_MODELS), "agreePct": LT.AGREE_PCT})
-        self.assertEqual((index["method"]["k"], index["method"]["kChoices"]), (10, list(range(1, 11))))   # k は 1〜10
+        # k は 1〜10、最初の k は 5（運用者の指定 2026-10-19「初期状態のkは5でお願いします」）
+        self.assertEqual((index["method"]["k"], index["method"]["kChoices"]), (5, list(range(1, 11))))
         for c in index["days"][1]["candidates"]:
             self.assertEqual(list(c["byK"]), [str(k) for k in range(1, 11)])
             self.assertEqual(c["byK"]["10"], files[c["file"]]["byK"]["10"])

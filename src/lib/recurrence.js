@@ -6,7 +6,7 @@
  * 整数にした値）・結果（+10% の指値か20営業日目の終値・目的変数 1.2σ / 1.5σ）・78週高値の更新日が入っている。
  *
  * 網は k近傍（運用者の選択 2026-10-19「k近傍だけにする」。k は続けて指定「正直なところ、kは1〜10までで良いです」で 1〜10、
- * 既定10。版 3 までは ε で結んでいた）。
+ * 既定は指定「初期状態のkは5でお願いします」で 5。版 3 までは ε で結んでいた）。
  * 各日に、タイラー窓（20営業日）より離れた日のうち状態の近い k 日（同じ距離は古い日が先）を選び、どちらかが選べば線で結ぶ。
  * 近傍・線・要約は、ここで Python と同じ式で数え直す（画面で k を変えられるように）。距離は整数の2乗で比べるので、浮動小数点の
  * 差は出ない。tests/recurrence.test.js が Python の数えた値（tests/fixtures/recurrence-expected.json）と一致することを確かめる。
@@ -17,7 +17,7 @@
 export const DEFAULT_LABELS = [{ key: 'l12', k: 1.2 }, { key: 'l15', k: 1.5 }];
 
 /** 既定値（index.json の method が無いときだけ使う。正本は research/recurrence_net.py） */
-export const DEFAULTS = { theiler: 20, k: 10, kChoices: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], q: 20, zCap: 6, target: 10, hold: 20 };
+export const DEFAULTS = { theiler: 20, k: 5, kChoices: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], q: 20, zCap: 6, target: 10, hold: 20 };
 
 const posInt = (v) => Number.isInteger(v) && v > 0;
 

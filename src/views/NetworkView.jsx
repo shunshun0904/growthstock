@@ -19,9 +19,11 @@ import {
  * 銘柄のうち購入条件（1.5σ の3本がすべて95以上。今日の戦略の strategySignal の passed）を満たした銘柄だけ。
  *
  * 点 = その銘柄の1営業日、線 = テクニカル指標9列の状態が似た日どうし（各日に、20営業日より離れた日のうち状態の近い k 日。
- * どちらかが選べば結ぶ）。同日の夜の運用者の選択「k近傍だけにする」と指定「kは1〜10までで良いです」（既定10。それまでは辺の密度で ε を
- * 決めていた）。同じ夜の依頼「指で拡大縮小」「対象日と似ている（紐づく）サンプルもハイライト」「無理に球状にしなくても3次元
- * ネットワーク構造でかっこよく」は src/components/RecurrenceGraph.jsx。
+ * どちらかが選べば結ぶ）。同日の夜の運用者の選択「k近傍だけにする」と指定「kは1〜10までで良いです」（それまでは辺の密度で ε を
+ * 決めていた）。最初の k は指定「初期状態のkは5でお願いします」で 5（目次の method.k。research/recurrence_net.py の K_DEFAULT）。
+ * 並べ方は力学だけ（指定「3種のプロット方法がありますが、今のデフォルトのみのもので良いです」。状態の地図・時間のらせんは外した）。
+ * 同じ夜の依頼「指で拡大縮小」「対象日と似ている（紐づく）サンプルもハイライト」「無理に球状にしなくても3次元ネットワーク構造で
+ * かっこよく」は src/components/RecurrenceGraph.jsx。
  * 点の色はその日に候補になっていたら、の結果（+10% の指値か20営業日目の終値・目的変数 1.5σ / 1.2σ。予測日までに分かったものだけ）。
  * 今日（候補の日）の似た日は、その銘柄の過去で今日と状態の近い k 日で、どれも結果が出そろっている（図で光らせる）。右の一覧も
  * 同じ k 日（運用者の指定 2026-10-19「今日に近い過去の更新日の日付とプロット上のkで選ばれる近い日付の概念は別物ですか？
@@ -43,13 +45,6 @@ const FORCE_SLIDERS = [
   { key: 'linkDistance', label: 'リンクの長さ', min: 5, max: 100, step: 5, show: (v) => fmtInt(v) },
 ];
 const DEFAULT_FORCES = Object.fromEntries(FORCE_SLIDERS.map((s) => [s.key, FORCE_DEFAULTS[s.key]]));
-
-/** 並べ方（運用者の依頼 2026-10-19「無理に球状にしなくても3次元ネットワーク構造でかっこよく」） */
-const LAYOUTS = [
-  { id: 'force', label: '力学', title: '似た日どうしを線のばねで引き寄せ、ほかを押し離して並べる（Obsidian のグラフ表示と同じ考え方）' },
-  { id: 'state', label: '状態の地図', title: '9列の状態の主成分に置く。似た日は図でも近くに来る（動かさない）' },
-  { id: 'helix', label: '時間のらせん', title: '古い日から1年で1周するらせんに並べる（今日がいちばん上）。線は似た状態が何年のいつ現れたかを結ぶ' },
-];
 
 function labelText(v) {
   if (!Number.isFinite(v)) return '未確定';
@@ -110,7 +105,6 @@ export default function NetworkView({ data }) {
   const [spin, setSpin] = useState(() => !reducedMotion());
   const [trail, setTrail] = useState(true);
   const [lightToday, setLightToday] = useState(true);   // 今日に似た日を光らせる（運用者の依頼 2026-10-19）
-  const [layout, setLayout] = useState('force');
   const [selected, setSelected] = useState(null);
   const [zoomCmd, setZoomCmd] = useState(null);
   const [forces, setForces] = useState(DEFAULT_FORCES);
@@ -390,12 +384,6 @@ export default function NetworkView({ data }) {
                 {ok && <span className="sub">{`${fmtDate(dec.dates[0])} 〜 ${fmtDate(dec.date)}・${fmtInt(dec.n)} 営業日`}</span>}
               </div>
               <div className="net-controls">
-                <div className="net-seg" role="group" aria-label="並べ方">
-                  {LAYOUTS.map((l) => (
-                    <button key={l.id} className={`btn btn-ghost${l.id === layout ? ' on' : ''}`} aria-pressed={l.id === layout}
-                            onClick={() => setLayout(l.id)} title={l.title}>{l.label}</button>
-                  ))}
-                </div>
                 <div className="net-seg" role="group" aria-label="次元">
                   {[3, 2].map((d) => (
                     <button key={d} className={`btn btn-ghost${d === dim ? ' on' : ''}`} aria-pressed={d === dim}
@@ -409,17 +397,13 @@ export default function NetworkView({ data }) {
                   <button className="btn btn-ghost" onClick={() => setZoomCmd({ kind: 'in', t: Date.now() })} aria-label="拡大">＋</button>
                   <button className="btn btn-ghost" onClick={() => setZoomCmd({ kind: 'out', t: Date.now() })} aria-label="縮小">−</button>
                   <button className="btn btn-ghost" onClick={() => setZoomCmd({ kind: 'reset', t: Date.now() })}>元に戻す</button>
-                  {layout === 'force' && (
-                    <>
-                      <button className="btn btn-ghost" onClick={() => setZoomCmd({ kind: 'reheat', t: Date.now() })}>並べ直す</button>
-                      <button className={`btn btn-ghost${showForces ? ' on' : ''}`} aria-pressed={showForces}
-                              onClick={() => setShowForces((v) => !v)}>力の調整</button>
-                    </>
-                  )}
+                  <button className="btn btn-ghost" onClick={() => setZoomCmd({ kind: 'reheat', t: Date.now() })}>並べ直す</button>
+                  <button className={`btn btn-ghost${showForces ? ' on' : ''}`} aria-pressed={showForces}
+                          onClick={() => setShowForces((v) => !v)}>力の調整</button>
                 </div>
               </div>
             </div>
-            {showForces && layout === 'force' && (
+            {showForces && (
               <div className="net-forces" role="group" aria-label="力の調整">
                 {FORCE_SLIDERS.map((s) => {
                   const v = forces[s.key];
@@ -443,7 +427,7 @@ export default function NetworkView({ data }) {
                 <RecurrenceGraph
                   dec={dec} net={net} nbrs={nbrs} colors={colors} dim={dim} spin={spin} trail={trail ? TRAIL_DAYS : 0}
                   seedKey={`${dec.jqCode}-${dec.date}-k${k}`} selected={selected} onSelect={setSelected} tipOf={tipOf}
-                  zoomCmd={zoomCmd} forces={forces} highlightToday={lightToday} layout={layout}
+                  zoomCmd={zoomCmd} forces={forces} highlightToday={lightToday}
                   ariaLabel={`${dec.code} ${dec.name} の ${dec.n} 営業日のリカレンス・ネットワーク。今日に似た過去の日は ${summary.deg} 日。`
                     + '右の「今日に似た日」の表に同じ日があります'}
                 />

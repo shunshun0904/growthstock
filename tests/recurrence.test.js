@@ -58,7 +58,7 @@ test('フィクスチャの要約が Python と一致する（k ごと）', () =
   const files = index.days.flatMap((d) => d.candidates.map((c) => c.file));
   assert.deepEqual(files.sort(), Object.keys(expected).sort());
   assert.deepEqual(method.kChoices, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-  assert.equal(method.k, 10);
+  assert.equal(method.k, 5);                 // 最初の k（運用者の指定「初期状態のkは5でお願いします」）
   for (const f of files) {
     const p = read(path.join(FIX, f));
     const dec = decode(p, method.labels);
@@ -278,11 +278,11 @@ test('先20営業日の値動きの色（最高値まで・20営業日目）', (
   const v2 = tiny([0, 1, 2], { v: 2, rise: [5, 6, 7], fall: [-1, -2, -3], r20: [1, 2, 3] });
   assert.ok([...v2.rise, ...v2.fall].every(Number.isNaN));
   assert.deepEqual(Array.from(v2.r20), [1, 2, 3]);
-  // フィクスチャ（版 5。値は版 3 と同じ高値・安値の物差し）には値がある。最後の20営業日は未確定、分かる日は
+  // フィクスチャ（版 6。値は版 3 と同じ高値・安値の物差し）には値がある。最後の20営業日は未確定、分かる日は
   // 最安値 ≤ 20営業日目の終値 ≤ 最高値（0.1% の丸めの幅）
   const p = read(path.join(FIX, index.days[0].candidates[0].file));
   const fx = decode(p, method.labels);
-  assert.equal(p.v, 5);
+  assert.equal(p.v, 6);
   assert.ok(Array.from(fx.rise.slice(-20)).every(Number.isNaN));
   // （実データでは20営業日目に売買が無い日は 20営業日目だけが分からない。最大・最小はその日を飛ばして数える）
   let known = 0;

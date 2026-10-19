@@ -398,23 +398,27 @@ check(netStrip.includes('購入条件を満たした銘柄') && netStrip.include
 check((await crows.first().getAttribute('aria-selected')) === 'true', '最初はネットワークのある先頭の銘柄（9324）を出す');
 const netSide = async () => (await page.locator('.net-side').innerText()) || '';
 let side = await netSide();
-// k近傍（運用者の選択 2026-10-19「k近傍だけにする」。k は指定「kは1〜10までで良いです」で 1〜10、既定10）
+// k近傍（運用者の選択 2026-10-19「k近傍だけにする」。k は指定「kは1〜10までで良いです」で 1〜10、最初の k は指定「初期状態のkは5で
+// お願いします」で 5）。K0 = 最初の k、K2 = 切り替えて数え直させる k
+const K0 = 5;
+const K2 = 10;
 const kBtn = (v) => page.locator(`.net-seg[aria-label^="似た日の数"] button[aria-label="${v} 日"]`);
 const kBtns = await page.locator('.net-seg[aria-label^="似た日の数"] button').allTextContents();
 check(kBtns.join(',') === '1,2,3,4,5,6,7,8,9,10', `k は 1〜10 日から選ぶ (実際: ${kBtns.join(',')})`);
-check((await page.locator('.net-seg[aria-label^="似た日の数"] button[aria-pressed="true"]').getAttribute('aria-label')) === '10 日', '既定の k は 10');
+check((await page.locator('.net-seg[aria-label^="似た日の数"] button[aria-pressed="true"]').getAttribute('aria-label')) === `${K0} 日`,
+      `最初の k は ${K0}`);
 check((await page.locator('[aria-label="辺の密度（リカレンス率）"]').count()) === 0
         && !(await page.locator('.net .pred-strip').innerText()).includes('辺の密度'), '辺の密度のボタンは無い（ε はやめた）');
-check(side.includes(`${exp('93240', 10).deg} 日`) && side.includes(`${exp('93240', 10).periods} つの時期`) && side.includes('珍しい状態'),
-      `9324 の今日に似た日は ${exp('93240', 10).deg} 日・${exp('93240', 10).periods} つの時期（Python の要約と同じ）で、珍しさの説明が出る`);
+check(side.includes(`${exp('93240', K0).deg} 日`) && side.includes(`${exp('93240', K0).periods} つの時期`) && side.includes('珍しい状態'),
+      `9324 の今日に似た日は ${exp('93240', K0).deg} 日・${exp('93240', K0).periods} つの時期（Python の要約と同じ）で、珍しさの説明が出る`);
 const crowCells = await crows.first().locator(':scope > span.num').allTextContents();   // 最小・似た日・全期間
 const pctTxt = (v) => (Number.isFinite(v) ? `${Math.round(v * 100)}%` : '—');
-check(crowCells[1] === pctTxt(exp('93240', 10).nbr.hit) && crowCells[2] === pctTxt(exp('93240', 10).base.hit),
-      `一覧の「似た日」「全期間」は目次の k = 10 の要約（+10% 到達）と同じ (実際: ${crowCells.join(' / ')})`);
+check(crowCells[1] === pctTxt(exp('93240', K0).nbr.hit) && crowCells[2] === pctTxt(exp('93240', K0).base.hit),
+      `一覧の「似た日」「全期間」は目次の k = ${K0} の要約（+10% 到達）と同じ (実際: ${crowCells.join(' / ')})`);
 // 今日に似た日を光らせる（運用者の依頼「対象日と似ている（紐づく）サンプルもハイライト」）。強調している日:似た日の数
 await page.waitForFunction(() => document.querySelector('.net-canvas')?.dataset.focus);
-check(await netFocus() === `${netN('93240') - 1}:${exp('93240', 10).deg}`,
-      `開いたときから今日（最後の点）と似た ${exp('93240', 10).deg} 日を光らせている (実際: ${await netFocus()})`);
+check(await netFocus() === `${netN('93240') - 1}:${exp('93240', K0).deg}`,
+      `開いたときから今日（最後の点）と似た ${exp('93240', K0).deg} 日を光らせている (実際: ${await netFocus()})`);
 await page.locator('label', { hasText: '今日に似た日を光らせる' }).click();
 await page.waitForFunction(() => document.querySelector('.net-canvas')?.dataset.focus === '');
 check(await netFocus() === '', '「今日に似た日を光らせる」を外すと強調しない');
@@ -429,28 +433,28 @@ const inked = await page.evaluate(() => {
 check(inked > 200, `図に点と線が描かれている（明るい画素 ${inked}）`);
 await page.locator('.net-crow', { hasText: '9434' }).click();
 await page.waitForFunction(() => document.querySelector('.net-head strong')?.textContent.includes('9434'));
-await kBtn(5).click();
+await kBtn(K2).click();
 side = await netSide();
-check(side.includes(`${exp('94340', 5).deg} 日`) && side.includes(`${exp('94340', 5).periods} つの時期`),
-      `9434 を k = 5 で数え直すと今日に似た日 ${exp('94340', 5).deg} 日・${exp('94340', 5).periods} つの時期（Python と同じ）`);
+check(side.includes(`${exp('94340', K2).deg} 日`) && side.includes(`${exp('94340', K2).periods} つの時期`),
+      `9434 を k = ${K2} で数え直すと今日に似た日 ${exp('94340', K2).deg} 日・${exp('94340', K2).periods} つの時期（Python と同じ）`);
 const foot = (await page.locator('.net-foot').textContent()) || '';
-check(foot.includes(`線 ${exp('94340', 5).edges.toLocaleString('ja-JP')} 本`), `線の本数も Python と同じ（${exp('94340', 5).edges}）`);
+check(foot.includes(`線 ${exp('94340', K2).edges.toLocaleString('ja-JP')} 本`), `線の本数も Python と同じ（${exp('94340', K2).edges}）`);
 await page.waitForFunction((want) => document.querySelector('.net-canvas')?.dataset.focus === want,
-  `${netN('94340') - 1}:${exp('94340', 5).deg}`, { timeout: 5000 }).catch(() => {});
-check(await netFocus() === `${netN('94340') - 1}:${exp('94340', 5).deg}`, `k = 5 なら光らせる似た日も 5 日 (実際: ${await netFocus()})`);
+  `${netN('94340') - 1}:${exp('94340', K2).deg}`, { timeout: 5000 }).catch(() => {});
+check(await netFocus() === `${netN('94340') - 1}:${exp('94340', K2).deg}`, `k = ${K2} なら光らせる似た日も ${K2} 日 (実際: ${await netFocus()})`);
 // 右の一覧は図で光らせる日と同じ近い k 日（運用者の指定 2026-10-19「プロット上の近傍の日付で統一してほしい」）。日付を
-// フィクスチャから同じ式で数えた今日の近い5日（近い順）と比べる。更新日だけから選んだ「今日に近い過去の更新日」の欄は無い
+// フィクスチャから同じ式で数えた今日の近い k 日（近い順）と比べる。更新日だけから選んだ「今日に近い過去の更新日」の欄は無い
 const nearWant = (() => {
   const idx = JSON.parse(fs.readFileSync(path.join(RECURRENCE_FIXTURES, 'index.json'), 'utf8'));
   const m = methodOf(idx);
   const dec = decode(JSON.parse(fs.readFileSync(path.join(RECURRENCE_FIXTURES, '2026-09-11_94340.json'), 'utf8')), m.labels);
-  const net = network(dec, m.theiler, 5, knnLists(dec, m.theiler, 5));
+  const net = network(dec, m.theiler, K2, knnLists(dec, m.theiler, K2));
   return todayNeighbors(dec, net).map((r) => dec.dates[r.i].replace(/-/g, '/') + (dec.isFresh[r.i] ? ' ○' : ''));   // ○ = 更新日
 })();
 const nearDates = await page.locator('.net-near tbody tr td:first-child').allTextContents();
-check(nearDates.join(',') === nearWant.join(',') && nearDates.length === exp('94340', 5).deg,
-      `「今日に似た日」の表は図で光らせる近い5日と同じ日・同じ順 (実際: ${nearDates.join(',')} / 期待: ${nearWant.join(',')})`);
-check((await page.locator('.net-near h3').textContent()).includes(`図で今日と結んだ ${exp('94340', 5).deg} 日`)
+check(nearDates.join(',') === nearWant.join(',') && nearDates.length === exp('94340', K2).deg,
+      `「今日に似た日」の表は図で光らせる近い ${K2} 日と同じ日・同じ順 (実際: ${nearDates.join(',')} / 期待: ${nearWant.join(',')})`);
+check((await page.locator('.net-near h3').textContent()).includes(`図で今日と結んだ ${exp('94340', K2).deg} 日`)
         && !(await netSide()).includes('今日に近い過去の更新日') && (await page.locator('.net-details').count()) === 0,
       '「今日に近い過去の更新日」の欄と、同じ中身だった「表で見る」は無い（一覧は1つ）');
 await page.locator('label', { hasText: '回転' }).click();
@@ -492,10 +496,10 @@ const riseSw = await page.locator('.net-legend .sw').evaluateAll((els) => els.ma
 check(riseSw.join(',') === [...BWR].reverse().concat(NA_VALUE).map(rgbOf).join(','),
       `最高値までの段は高い順に 赤・薄い赤・白（5〜10%）・薄い青・青 と未確定の灰 (実際: ${riseSw.join(' ')})`);
 const nbrMix = (await page.locator('.net-nbrmix').textContent()) || '';
-check(nbrMix.includes(`今日に似た日 ${exp('94340', 5).deg} 日の内訳`), `凡例の下に今日に似た日の内訳 (実際: ${nbrMix.slice(0, 60)})`);
+check(nbrMix.includes(`今日に似た日 ${exp('94340', K2).deg} 日の内訳`), `凡例の下に今日に似た日の内訳 (実際: ${nbrMix.slice(0, 60)})`);
 const riseHead = await page.locator('.net-near thead th').allTextContents();
 const riseCells = await page.locator('.net-near tbody tr td:nth-child(4)').allTextContents();
-check(riseHead.includes('最高値まで') && riseCells.length === exp('94340', 5).deg && riseCells.every((t) => /^[+-]?\d+\.\d%$/.test(t)),
+check(riseHead.includes('最高値まで') && riseCells.length === exp('94340', K2).deg && riseCells.every((t) => /^[+-]?\d+\.\d%$/.test(t)),
       `今日に似た日の表に最高値までの列（どれも結果が出そろっているので値がある） (実際: ${riseCells.slice(0, 3).join(' ')})`);
 // 最安値までの色は外した（運用者の指定「安値の色付けは、なしで良いです」）。軌跡は直近20営業日（「軌跡は直近20営業日で良いです」）
 const colorBtns = await page.locator('.net-seg[aria-label="点の色"] button').allTextContents();
@@ -507,26 +511,13 @@ const r20Got = await legendOf();
 check(Object.keys(r20Got).join(',') === '+10% 以上,0〜+10%,−10〜0%,−10% 未満,未確定'
         && r20Got['未確定'] === fx94.r20.filter((v) => v === null).length,
       `20営業日目の騰落率は結果と同じ区切りの4段と未確定 (実際: ${JSON.stringify(r20Got)})`);
-// 並べ方（運用者の依頼「無理に球状にしなくても3次元ネットワーク構造でかっこよく」。最初は力学: 同日の選択「力学（Obsidian 風）」）
-const layoutBtns = await page.locator('.net-seg[aria-label="並べ方"] button').allTextContents();
-check(layoutBtns.join(',') === '力学,状態の地図,時間のらせん'
-        && (await page.locator('.net-seg[aria-label="並べ方"] button[aria-pressed="true"]').textContent()) === '力学',
-      `並べ方は 力学（最初）・状態の地図・時間のらせん (実際: ${layoutBtns.join(',')})`);
-const inkedNow = () => page.evaluate(() => {
-  const c = document.querySelector('.net-canvas canvas');
-  const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
-  let m = 0;
-  for (let i = 0; i < d.length; i += 4 * 7) if (d[i] > 60 || d[i + 1] > 60 || d[i + 2] > 90) m += 1;
-  return m;
-});
-for (const name of ['状態の地図', '時間のらせん']) {
-  await page.locator('.net-seg[aria-label="並べ方"] button', { hasText: name }).click();
-  await page.waitForSelector('.net-canvas[data-settled="1"]', { timeout: 5000 });
-  await page.waitForTimeout(150);
-  check((await inkedNow()) > 200 && (await page.locator('.net-seg button', { hasText: '力の調整' }).count()) === 0,
-        `${name}でも描ける（動かさない並べ方なので力の調整は出さない）`);
-}
-await page.locator('.net-seg[aria-label="並べ方"] button', { hasText: '力学' }).click();
+// 並べ方は力学だけ（運用者の指定 2026-10-19「3種のプロット方法がありますが、今のデフォルトのみのもので良いです」。状態の地図・
+// 時間のらせんのボタンは無い）。並べ直す・力の調整はいつも出す
+check((await page.locator('.net-seg[aria-label="並べ方"]').count()) === 0
+        && (await page.locator('.net-seg button', { hasText: '状態の地図' }).count()) === 0
+        && (await page.locator('.net-seg button', { hasText: '時間のらせん' }).count()) === 0
+        && (await page.locator('.net-seg button', { hasText: '並べ直す' }).count()) === 1,
+      '並べ方の切り替えは無い（力学だけ。並べ直すは出す）');
 await page.locator('.net-seg button', { hasText: '2D' }).click();
 await page.locator('.net-seg button', { hasText: '力の調整' }).click();
 check((await page.locator('.net-forces input[type=range]').count()) === 4, '力の調整は Obsidian と同じ4つのつまみ');

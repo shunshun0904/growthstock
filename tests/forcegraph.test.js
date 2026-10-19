@@ -5,8 +5,7 @@
  * - 同じ種なら同じ形（同じ候補はいつも同じ並び）。2次元にすると z は 0 のまま
  * - ばねの強さは linkStrength ÷ 両端の次数の小さいほう で、上限 1（力のつまみで変えると数え直す）
  * - 中心の力で孤立した点も遠くへ飛ばない。投影と、画面の点からいちばん近いノードを選ぶ
- * - ほかの並べ方（2026-10-19 夜）: 対称行列の固有分解（ヤコビ法）が A v = λ v を満たす。状態の地図は主成分に置き、状態が3次元の
- *   部分空間にあれば距離をそのまま保つ・同じ状態は同じ位置。時間のらせんは1年（TURN_DAYS 営業日）で1周・今日がいちばん上
+ * - 並べ方は力学だけ（運用者の指定 2026-10-19「今のデフォルトのみのもので良いです」で、状態の地図・時間のらせんは外した）
  *
  *   node --test tests/forcegraph.test.js
  */
@@ -14,7 +13,6 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   createSim, tick, setDim, setForces, extent, project, pick, rng, seedOf, FORCE_DEFAULTS,
-  symEigen, statePositions, helixPositions, TURN_DAYS,
 } from '../src/lib/forcegraph.js';
 
 const N = 200;
@@ -123,68 +121,4 @@ test('投影と、いちばん近いノードを選ぶ', () => {
   project(pos, 3, ext, { yaw: 0, pitch: 0, zoom: 1, panX: 10, panY: 0 }, 400, 400, 2, out);
   assert.equal(out[2], 1);
   assert.equal(out[0], 210);
-});
-
-test('対称行列の固有分解（ヤコビ法）', () => {
-  const two = symEigen([2, 1, 1, 2], 2);
-  assert.ok(Math.abs(two.values[0] - 3) < 1e-12 && Math.abs(two.values[1] - 1) < 1e-12);
-  assert.ok(Math.abs(two.vectors[0][0] - Math.SQRT1_2) < 1e-12 && Math.abs(two.vectors[0][1] - Math.SQRT1_2) < 1e-12);
-  // 乱数の 9 × 9: A v = λ v・長さ 1・互いに直交・大きい順
-  const r = rng(7);
-  const d = 9;
-  const b = Array.from({ length: d * d }, () => r() * 2 - 1);
-  const a = new Float64Array(d * d);
-  for (let i = 0; i < d; i += 1) for (let j = 0; j < d; j += 1) a[i * d + j] = (b[i * d + j] + b[j * d + i]) / 2;
-  const { values, vectors } = symEigen(a, d);
-  for (let x = 1; x < d; x += 1) assert.ok(values[x - 1] >= values[x] - 1e-12);
-  vectors.forEach((v, x) => {
-    for (let i = 0; i < d; i += 1) {
-      let av = 0;
-      for (let j = 0; j < d; j += 1) av += a[i * d + j] * v[j];
-      assert.ok(Math.abs(av - values[x] * v[i]) < 1e-9, `A v = λ v (${x}, ${i})`);
-    }
-    vectors.forEach((w, y) => {
-      const dot = v.reduce((sum, vi, i) => sum + vi * w[i], 0);
-      assert.ok(Math.abs(dot - (x === y ? 1 : 0)) < 1e-9);
-    });
-  });
-});
-
-test('状態の地図: 主成分に置く（3次元の部分空間なら距離を保つ・同じ状態は同じ位置）', () => {
-  // 9次元の中の3つの直交する向きの組み合わせだけで作った状態（整数）
-  const dims = 9;
-  const u = [[1, 0, 0, 0, 0, 0, 0, 0, 0], [0, 1, 1, 0, 0, 0, 0, 0, 0], [0, 0, 0, 1, -1, 1, -1, 0, 0]];
-  const r = rng(11);
-  const n = 60;
-  const z = new Int16Array(n * dims);
-  for (let i = 0; i < n; i += 1) {
-    const c = [Math.round((r() - 0.5) * 80), Math.round((r() - 0.5) * 30), Math.round((r() - 0.5) * 10)];
-    for (let d = 0; d < dims; d += 1) z[i * dims + d] = c[0] * u[0][d] + c[1] * u[1][d] + c[2] * u[2][d];
-  }
-  for (let d = 0; d < dims; d += 1) z[58 * dims + d] = z[59 * dims + d];       // 同じ状態を2つ（58 を 59 にそろえる）
-  const { pos, share } = statePositions(z, n, dims, 3);
-  assert.ok(Math.abs(share[0] + share[1] + share[2] - 1) < 1e-9);    // 分散はすべて上位3つに入る
-  assert.ok(share[0] >= share[1] && share[1] >= share[2]);
-  const dz = (i, j) => Math.hypot(...Array.from({ length: dims }, (_, d) => z[i * dims + d] - z[j * dims + d]));
-  const dp = (i, j) => Math.hypot(pos[3 * i] - pos[3 * j], pos[3 * i + 1] - pos[3 * j + 1], pos[3 * i + 2] - pos[3 * j + 2]);
-  for (let i = 0; i < n; i += 7) for (let j = 0; j < n; j += 5) assert.ok(Math.abs(dz(i, j) - dp(i, j)) < 1e-6, `${i}-${j}`);
-  assert.deepEqual([pos[3 * 58], pos[3 * 58 + 1], pos[3 * 58 + 2]], [pos[3 * 59], pos[3 * 59 + 1], pos[3 * 59 + 2]]);
-  // 2次元は上位2つだけ（z は 0）
-  const flat = statePositions(z, n, dims, 2).pos;
-  for (let i = 0; i < n; i += 1) assert.equal(flat[3 * i + 2], 0);
-});
-
-test('時間のらせん: 1年で1周・今日がいちばん上（2次元は外へ広がるうずまき）', () => {
-  const n = 2 * TURN_DAYS + 1;
-  const p = helixPositions(n, 3);
-  for (let i = 0; i + TURN_DAYS < n; i += 37) {
-    assert.ok(Math.abs(p[3 * i] - p[3 * (i + TURN_DAYS)]) < 1e-9 && Math.abs(p[3 * i + 2] - p[3 * (i + TURN_DAYS) + 2]) < 1e-9);
-    assert.ok(Math.abs(Math.hypot(p[3 * i], p[3 * i + 2]) - 100) < 1e-9);      // 半径は一定
-  }
-  for (let i = 1; i < n; i += 1) assert.ok(p[3 * i + 1] < p[3 * (i - 1) + 1]);   // 新しい日ほど上（画面の上はマイナス）
-  const q = helixPositions(n, 2);
-  for (let i = 1; i < n; i += 1) {
-    assert.equal(q[3 * i + 2], 0);
-    assert.ok(Math.hypot(q[3 * i], q[3 * i + 1]) > Math.hypot(q[3 * (i - 1)], q[3 * (i - 1) + 1]));
-  }
 });
