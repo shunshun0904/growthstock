@@ -1,0 +1,590 @@
+{
+ "2026-09-11_93240.json": {
+  "50": {
+   "rrBp": 50,
+   "theiler": 20,
+   "pairs": 31375,
+   "m": 157,
+   "eps2": 873,
+   "eps": 1.4773,
+   "edges": 157,
+   "isolated": 159,
+   "deg": 0,
+   "degPct": 29.3358,
+   "degMed": 0.0,
+   "nbr": {
+    "n": 0,
+    "known": 0,
+    "hit": null,
+    "retMed": null,
+    "l12": null,
+    "l12N": 0,
+    "l15": null,
+    "l15N": 0
+   },
+   "base": {
+    "n": 271,
+    "known": 256,
+    "hit": 0.3242,
+    "retMed": 3.2,
+    "l12": 0.2112,
+    "l12N": 251,
+    "l15": 0.1036,
+    "l15N": 251
+   },
+   "nbrFresh": {
+    "n": 0,
+    "known": 0,
+    "hit": null,
+    "retMed": null,
+    "l12": null,
+    "l12N": 0,
+    "l15": null,
+    "l15N": 0
+   },
+   "baseFresh": {
+    "n": 2,
+    "known": 2,
+    "hit": 0.0,
+    "retMed": 4.5,
+    "l12": 0.0,
+    "l12N": 2,
+    "l15": 0.0,
+    "l15N": 2
+   },
+   "nearestFresh": [
+    {
+     "i": 206,
+     "date": "2026-06-15",
+     "d": 3.3045,
+     "inEps": false,
+     "ret": 8.1,
+     "l12": 0,
+     "l15": 0
+    },
+    {
+     "i": 132,
+     "date": "2026-03-03",
+     "d": 3.8344,
+     "inEps": false,
+     "ret": 0.9,
+     "l12": 0,
+     "l15": 0
+    }
+   ]
+  },
+  "100": {
+   "rrBp": 100,
+   "theiler": 20,
+   "pairs": 31375,
+   "m": 314,
+   "eps2": 1081,
+   "eps": 1.6439,
+   "edges": 314,
+   "isolated": 128,
+   "deg": 0,
+   "degPct": 23.6162,
+   "degMed": 1.0,
+   "nbr": {
+    "n": 0,
+    "known": 0,
+    "hit": null,
+    "retMed": null,
+    "l12": null,
+    "l12N": 0,
+    "l15": null,
+    "l15N": 0
+   },
+   "base": {
+    "n": 271,
+    "known": 256,
+    "hit": 0.3242,
+    "retMed": 3.2,
+    "l12": 0.2112,
+    "l12N": 251,
+    "l15": 0.1036,
+    "l15N": 251
+   },
+   "nbrFresh": {
+    "n": 0,
+    "known": 0,
+    "hit": null,
+    "retMed": null,
+    "l12": null,
+    "l12N": 0,
+    "l15": null,
+    "l15N": 0
+   },
+   "baseFresh": {
+    "n": 2,
+    "known": 2,
+    "hit": 0.0,
+    "retMed": 4.5,
+    "l12": 0.0,
+    "l12N": 2,
+    "l15": 0.0,
+    "l15N": 2
+   },
+   "nearestFresh": [
+    {
+     "i": 206,
+     "date": "2026-06-15",
+     "d": 3.3045,
+     "inEps": false,
+     "ret": 8.1,
+     "l12": 0,
+     "l15": 0
+    },
+    {
+     "i": 132,
+     "date": "2026-03-03",
+     "d": 3.8344,
+     "inEps": false,
+     "ret": 0.9,
+     "l12": 0,
+     "l15": 0
+    }
+   ]
+  },
+  "200": {
+   "rrBp": 200,
+   "theiler": 20,
+   "pairs": 31375,
+   "m": 628,
+   "eps2": 1373,
+   "eps": 1.8527,
+   "edges": 630,
+   "isolated": 87,
+   "deg": 0,
+   "degPct": 16.0517,
+   "degMed": 3.0,
+   "nbr": {
+    "n": 0,
+    "known": 0,
+    "hit": null,
+    "retMed": null,
+    "l12": null,
+    "l12N": 0,
+    "l15": null,
+    "l15N": 0
+   },
+   "base": {
+    "n": 271,
+    "known": 256,
+    "hit": 0.3242,
+    "retMed": 3.2,
+    "l12": 0.2112,
+    "l12N": 251,
+    "l15": 0.1036,
+    "l15N": 251
+   },
+   "nbrFresh": {
+    "n": 0,
+    "known": 0,
+    "hit": null,
+    "retMed": null,
+    "l12": null,
+    "l12N": 0,
+    "l15": null,
+    "l15N": 0
+   },
+   "baseFresh": {
+    "n": 2,
+    "known": 2,
+    "hit": 0.0,
+    "retMed": 4.5,
+    "l12": 0.0,
+    "l12N": 2,
+    "l15": 0.0,
+    "l15N": 2
+   },
+   "nearestFresh": [
+    {
+     "i": 206,
+     "date": "2026-06-15",
+     "d": 3.3045,
+     "inEps": false,
+     "ret": 8.1,
+     "l12": 0,
+     "l15": 0
+    },
+    {
+     "i": 132,
+     "date": "2026-03-03",
+     "d": 3.8344,
+     "inEps": false,
+     "ret": 0.9,
+     "l12": 0,
+     "l15": 0
+    }
+   ]
+  },
+  "300": {
+   "rrBp": 300,
+   "theiler": 20,
+   "pairs": 31375,
+   "m": 941,
+   "eps2": 1627,
+   "eps": 2.0168,
+   "edges": 942,
+   "isolated": 63,
+   "deg": 1,
+   "degPct": 27.6753,
+   "degMed": 5.0,
+   "nbr": {
+    "n": 1,
+    "known": 1,
+    "hit": 1.0,
+    "retMed": 10.0,
+    "l12": 1.0,
+    "l12N": 1,
+    "l15": 0.0,
+    "l15N": 1
+   },
+   "base": {
+    "n": 271,
+    "known": 256,
+    "hit": 0.3242,
+    "retMed": 3.2,
+    "l12": 0.2112,
+    "l12N": 251,
+    "l15": 0.1036,
+    "l15N": 251
+   },
+   "nbrFresh": {
+    "n": 0,
+    "known": 0,
+    "hit": null,
+    "retMed": null,
+    "l12": null,
+    "l12N": 0,
+    "l15": null,
+    "l15N": 0
+   },
+   "baseFresh": {
+    "n": 2,
+    "known": 2,
+    "hit": 0.0,
+    "retMed": 4.5,
+    "l12": 0.0,
+    "l12N": 2,
+    "l15": 0.0,
+    "l15N": 2
+   },
+   "nearestFresh": [
+    {
+     "i": 206,
+     "date": "2026-06-15",
+     "d": 3.3045,
+     "inEps": false,
+     "ret": 8.1,
+     "l12": 0,
+     "l15": 0
+    },
+    {
+     "i": 132,
+     "date": "2026-03-03",
+     "d": 3.8344,
+     "inEps": false,
+     "ret": 0.9,
+     "l12": 0,
+     "l15": 0
+    }
+   ]
+  }
+ },
+ "2026-09-11_94340.json": {
+  "50": {
+   "rrBp": 50,
+   "theiler": 20,
+   "pairs": 92665,
+   "m": 463,
+   "eps2": 812,
+   "eps": 1.4248,
+   "edges": 464,
+   "isolated": 272,
+   "deg": 0,
+   "degPct": 30.1552,
+   "degMed": 0.0,
+   "nbr": {
+    "n": 0,
+    "known": 0,
+    "hit": null,
+    "retMed": null,
+    "l12": null,
+    "l12N": 0,
+    "l15": null,
+    "l15N": 0
+   },
+   "base": {
+    "n": 451,
+    "known": 442,
+    "hit": 0.3688,
+    "retMed": 3.45,
+    "l12": 0.2529,
+    "l12N": 431,
+    "l15": 0.1763,
+    "l15N": 431
+   },
+   "nbrFresh": {
+    "n": 0,
+    "known": 0,
+    "hit": null,
+    "retMed": null,
+    "l12": null,
+    "l12N": 0,
+    "l15": null,
+    "l15N": 0
+   },
+   "baseFresh": {
+    "n": 2,
+    "known": 2,
+    "hit": 0.5,
+    "retMed": 4.9,
+    "l12": 0.5,
+    "l12N": 2,
+    "l15": 0.5,
+    "l15N": 2
+   },
+   "nearestFresh": [
+    {
+     "i": 254,
+     "date": "2025-12-11",
+     "d": 2.4316,
+     "inEps": false,
+     "ret": 10.0,
+     "l12": 1,
+     "l15": 1
+    },
+    {
+     "i": 395,
+     "date": "2026-06-26",
+     "d": 4.2781,
+     "inEps": false,
+     "ret": -0.2,
+     "l12": 0,
+     "l15": 0
+    }
+   ]
+  },
+  "100": {
+   "rrBp": 100,
+   "theiler": 20,
+   "pairs": 92665,
+   "m": 927,
+   "eps2": 1032,
+   "eps": 1.6062,
+   "edges": 933,
+   "isolated": 186,
+   "deg": 0,
+   "degPct": 20.6208,
+   "degMed": 1.0,
+   "nbr": {
+    "n": 0,
+    "known": 0,
+    "hit": null,
+    "retMed": null,
+    "l12": null,
+    "l12N": 0,
+    "l15": null,
+    "l15N": 0
+   },
+   "base": {
+    "n": 451,
+    "known": 442,
+    "hit": 0.3688,
+    "retMed": 3.45,
+    "l12": 0.2529,
+    "l12N": 431,
+    "l15": 0.1763,
+    "l15N": 431
+   },
+   "nbrFresh": {
+    "n": 0,
+    "known": 0,
+    "hit": null,
+    "retMed": null,
+    "l12": null,
+    "l12N": 0,
+    "l15": null,
+    "l15N": 0
+   },
+   "baseFresh": {
+    "n": 2,
+    "known": 2,
+    "hit": 0.5,
+    "retMed": 4.9,
+    "l12": 0.5,
+    "l12N": 2,
+    "l15": 0.5,
+    "l15N": 2
+   },
+   "nearestFresh": [
+    {
+     "i": 254,
+     "date": "2025-12-11",
+     "d": 2.4316,
+     "inEps": false,
+     "ret": 10.0,
+     "l12": 1,
+     "l15": 1
+    },
+    {
+     "i": 395,
+     "date": "2026-06-26",
+     "d": 4.2781,
+     "inEps": false,
+     "ret": -0.2,
+     "l12": 0,
+     "l15": 0
+    }
+   ]
+  },
+  "200": {
+   "rrBp": 200,
+   "theiler": 20,
+   "pairs": 92665,
+   "m": 1853,
+   "eps2": 1303,
+   "eps": 1.8049,
+   "edges": 1854,
+   "isolated": 90,
+   "deg": 5,
+   "degPct": 50.7761,
+   "degMed": 5.0,
+   "nbr": {
+    "n": 5,
+    "known": 5,
+    "hit": 0.0,
+    "retMed": 2.0,
+    "l12": 0.0,
+    "l12N": 5,
+    "l15": 0.0,
+    "l15N": 5
+   },
+   "base": {
+    "n": 451,
+    "known": 442,
+    "hit": 0.3688,
+    "retMed": 3.45,
+    "l12": 0.2529,
+    "l12N": 431,
+    "l15": 0.1763,
+    "l15N": 431
+   },
+   "nbrFresh": {
+    "n": 0,
+    "known": 0,
+    "hit": null,
+    "retMed": null,
+    "l12": null,
+    "l12N": 0,
+    "l15": null,
+    "l15N": 0
+   },
+   "baseFresh": {
+    "n": 2,
+    "known": 2,
+    "hit": 0.5,
+    "retMed": 4.9,
+    "l12": 0.5,
+    "l12N": 2,
+    "l15": 0.5,
+    "l15N": 2
+   },
+   "nearestFresh": [
+    {
+     "i": 254,
+     "date": "2025-12-11",
+     "d": 2.4316,
+     "inEps": false,
+     "ret": 10.0,
+     "l12": 1,
+     "l15": 1
+    },
+    {
+     "i": 395,
+     "date": "2026-06-26",
+     "d": 4.2781,
+     "inEps": false,
+     "ret": -0.2,
+     "l12": 0,
+     "l15": 0
+    }
+   ]
+  },
+  "300": {
+   "rrBp": 300,
+   "theiler": 20,
+   "pairs": 92665,
+   "m": 2780,
+   "eps2": 1507,
+   "eps": 1.941,
+   "edges": 2780,
+   "isolated": 55,
+   "deg": 7,
+   "degPct": 42.9047,
+   "degMed": 9.0,
+   "nbr": {
+    "n": 7,
+    "known": 7,
+    "hit": 0.0,
+    "retMed": 2.0,
+    "l12": 0.0,
+    "l12N": 7,
+    "l15": 0.0,
+    "l15N": 7
+   },
+   "base": {
+    "n": 451,
+    "known": 442,
+    "hit": 0.3688,
+    "retMed": 3.45,
+    "l12": 0.2529,
+    "l12N": 431,
+    "l15": 0.1763,
+    "l15N": 431
+   },
+   "nbrFresh": {
+    "n": 0,
+    "known": 0,
+    "hit": null,
+    "retMed": null,
+    "l12": null,
+    "l12N": 0,
+    "l15": null,
+    "l15N": 0
+   },
+   "baseFresh": {
+    "n": 2,
+    "known": 2,
+    "hit": 0.5,
+    "retMed": 4.9,
+    "l12": 0.5,
+    "l12N": 2,
+    "l15": 0.5,
+    "l15N": 2
+   },
+   "nearestFresh": [
+    {
+     "i": 254,
+     "date": "2025-12-11",
+     "d": 2.4316,
+     "inEps": false,
+     "ret": 10.0,
+     "l12": 1,
+     "l15": 1
+    },
+    {
+     "i": 395,
+     "date": "2026-06-26",
+     "d": 4.2781,
+     "inEps": false,
+     "ret": -0.2,
+     "l12": 0,
+     "l15": 0
+    }
+   ]
+  }
+ }
+}
