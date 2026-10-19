@@ -45,8 +45,11 @@ export function decode(p, labels = DEFAULT_LABELS) {
   if (z.length !== n * dims) throw new Error(`状態の数が合いません（${z.length} / ${n} × ${dims}）`);
   if (p.gaps.length !== n - 1) throw new Error('日付の数が合いません');
   const ret = Float64Array.from(p.ret, nanOf);
-  // 先20営業日の値動き（色付け用。無いファイル（版 1）はすべて未確定）
-  const fwd = (k) => (Array.isArray(p[k]) && p[k].length === n ? Float64Array.from(p[k], nanOf) : new Float64Array(n).fill(NaN));
+  // 先20営業日の値動き（色付け用）。版 2 の rise / fall は終値で測った別の物差しなので読まない（版 3 から高値・安値）。
+  // 無いファイル（版 1）はすべて未確定
+  const ver = Number(p.v) || 1;
+  const fwd = (k, since) => (ver >= since && Array.isArray(p[k]) && p[k].length === n
+    ? Float64Array.from(p[k], nanOf) : new Float64Array(n).fill(NaN));
   const lab = {};
   for (const { key } of labels) lab[key] = Float64Array.from(p[key] || [], nanOf);
   const dates = new Array(n);
@@ -60,7 +63,7 @@ export function decode(p, labels = DEFAULT_LABELS) {
   const isFresh = new Uint8Array(n);
   for (const i of fresh) isFresh[i] = 1;
   return {
-    n, dims, q: p.q, z, ret, rise: fwd('rise'), fall: fwd('fall'), r20: fwd('r20'), labels: lab, dates, fresh, isFresh,
+    n, dims, q: p.q, z, ret, rise: fwd('rise', 3), fall: fwd('fall', 3), r20: fwd('r20', 2), labels: lab, dates, fresh, isFresh,
     close: Float64Array.from(p.close || [], nanOf),
     scale: p.scale || [], features: p.features, raw: p.raw || [],
     code: p.code, jqCode: p.jqCode, name: p.name, date: p.date,
@@ -297,9 +300,10 @@ export function labelClassOf(v) {
 export const NA_VALUE = '#3a3a3a';
 
 /**
- * 先20営業日の最大上昇率（%）の5段（運用者の選択 2026-10-19「5段＋未確定」）。t+1〜t+20 の終値の最大 ÷ 翌営業日の寄り − 1
- * （目的変数の到達と同じ物差し）。青の段で、低いほど暗く高いほど明るい（順序の段の検査を暗い面 #0a0e17 で通る。いちばん暗い段は
- * 面との差 2.38:1 なので、凡例の件数と表を添える）。並びは高い順（凡例も同じ）
+ * 最高値までの上昇率（%）の5段（運用者の選択 2026-10-19「5段＋未確定」）。最高到達価格（t+1〜t+20 の高値の最大）÷ 翌営業日の寄り
+ * − 1（運用者の指定「その日から最高到達価格（20日以内最高高値）までの上昇率」・選択「基準は翌営業日の始値」。10% 以上なら +10% の
+ * 指値に届いた）。青の段で、低いほど暗く高いほど明るい（順序の段の検査を暗い面 #0a0e17 で通る。いちばん暗い段は面との差 2.38:1
+ * なので、凡例の件数と表を添える）。並びは高い順（凡例も同じ）
  */
 export const RISE_CLASSES = [
   { id: 'r20p', label: '20% 以上', color: '#cde2fb' },
@@ -310,7 +314,7 @@ export const RISE_CLASSES = [
   { id: 'na', label: '未確定', color: NA_VALUE },
 ];
 
-/** 最大上昇率（%）の段。下の端を含む（5.0 は「5〜10%」） */
+/** 最高値までの上昇率（%）の段。下の端を含む（5.0 は「5〜10%」。値は 0.1% 刻みに切り下げてあるので 10 以上 = 指値に届いた） */
 export function riseOf(v) {
   if (!Number.isFinite(v)) return 'na';
   if (v >= 20) return 'r20p';
@@ -321,8 +325,8 @@ export function riseOf(v) {
 }
 
 /**
- * 先20営業日の最大下落率（%）の5段。t+1〜t+20 の終値の最小 ÷ 翌営業日の寄り − 1。赤の段で、浅いほど暗く深いほど明るい
- * （深い下げが目に付く。順序の段の検査を暗い面で通る）。並びは浅い順
+ * 最安値までの下落率（%）の5段。最安値（t+1〜t+20 の安値の最小）÷ 翌営業日の寄り − 1（最高値までと同じ基準・同じ形。運用者の
+ * 選択「そろえる」）。赤の段で、浅いほど暗く深いほど明るい（深い下げが目に付く。順序の段の検査を暗い面で通る）。並びは浅い順
  */
 export const FALL_CLASSES = [
   { id: 'f0', label: '下げなし（0% 以上）', color: '#b91c1c' },
@@ -333,7 +337,7 @@ export const FALL_CLASSES = [
   { id: 'na', label: '未確定', color: NA_VALUE },
 ];
 
-/** 最大下落率（%）の段。最大上昇率と左右対称（−5.0 は「−5〜−10%」） */
+/** 最安値までの下落率（%）の段。最高値までと左右対称（−5.0 は「−5〜−10%」。値は 0.1% 刻みに切り上げてある） */
 export function fallOf(v) {
   if (!Number.isFinite(v)) return 'na';
   if (v >= 0) return 'f0';
@@ -372,17 +376,18 @@ export function timeColor(f) {
 }
 
 /**
- * 色の付け方。outcome = 結果、rise / fall / r20 = 先20営業日の値動き（運用者の依頼 2026-10-19「ノードの色付け機能がほしい。
- * 先20日間の最大上昇率は最低限」→ 選択「終値・翌日寄り基準」「5段＋未確定」「最大下落率」「20営業日目の騰落率」）、
+ * 色の付け方。outcome = 結果、rise / fall / r20 = 翌営業日の寄り（買値）から見た先20営業日の値動き（運用者の依頼 2026-10-19
+ * 「ノードの色付け機能がほしい。先20日間の最大上昇率は最低限」→「最大上昇率というより、その日から最高到達価格（20日以内最高
+ * 高値）までの上昇率」。選択「5段＋未確定」「基準は翌営業日の始値」「最安値までの下落率・20営業日目も同じ基準にそろえる」）、
  * l15 / l12 = 目的変数、time = 時期。value があるものは、ノードの値を表やツールチップに出す（short は表の見出し）
  */
 export const COLOR_MODES = [
   { id: 'outcome', label: '結果（+10% / 20営業日目）',
     title: '翌営業日の寄りで買い、+10% の指値か20営業日目の終値で売ったときの収益' },
-  { id: 'rise', label: '最大上昇率（先20日）', short: '最大上昇', value: 'rise',
-    title: '先20営業日の終値の最大 ÷ 翌営業日の寄り − 1（目的変数の到達と同じ物差し）' },
-  { id: 'fall', label: '最大下落率（先20日）', short: '最大下落', value: 'fall',
-    title: '先20営業日の終値の最小 ÷ 翌営業日の寄り − 1' },
+  { id: 'rise', label: '最高値までの上昇率（20日以内）', short: '最高値まで', value: 'rise',
+    title: '20営業日以内の最高値（高値の最大）÷ 翌営業日の寄り − 1（10% 以上なら +10% の指値に届いた）' },
+  { id: 'fall', label: '最安値までの下落率（20日以内）', short: '最安値まで', value: 'fall',
+    title: '20営業日以内の最安値（安値の最小）÷ 翌営業日の寄り − 1' },
   { id: 'r20', label: '20営業日目の騰落率', short: '20日目', value: 'r20',
     title: '20営業日目の終値 ÷ 翌営業日の寄り − 1（指値なしで持ち切ったとき。20営業日目に売買が無かった日は未確定）' },
   { id: 'l15', label: '目的変数 1.5σ' },

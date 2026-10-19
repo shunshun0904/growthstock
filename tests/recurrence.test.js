@@ -6,8 +6,8 @@
  * - ε² は結べる組（タイラー窓より離れた組）の距離の2乗の m 番目（0.5 は切り上げ）。同じ値は全部結ぶ。タイラー窓の中は結ばない
  * - 日付は start に gaps の暦日を足していく（最後の日が予測日）
  * - 色の区分（+10% 到達 / 0〜+10 / −10〜0 / −10 未満 / 未確定、正例 / 負例 / 未確定）と、丸めた z から生の値の目安への戻し方
- * - 先20営業日の値動きの色（最大上昇率・最大下落率の5段、20営業日目の騰落率の4段。区切りは下の端を含む）。値の無いファイル
- *   （版 1）は未確定。今日に似た日だけの件数
+ * - 先20営業日の値動きの色（最高値までの上昇率・最安値までの下落率の5段、20営業日目の騰落率の4段。区切りは下の端を含む）。
+ *   値の無いファイル（版 1）は未確定、終値で測っていた版 2 の上昇率・下落率は読まない。今日に似た日だけの件数
  *
  *   node --test tests/recurrence.test.js
  */
@@ -168,15 +168,15 @@ test('丸めた z から生の値の目安へ戻す', () => {
   });
 });
 
-test('先20営業日の値動きの色（最大上昇率・最大下落率・20営業日目）', () => {
-  // 最大上昇率: 0% 未満 / 0〜5 / 5〜10 / 10〜20 / 20% 以上（下の端を含む）
+test('先20営業日の値動きの色（最高値まで・最安値まで・20営業日目）', () => {
+  // 最高値までの上昇率: 0% 未満 / 0〜5 / 5〜10 / 10〜20 / 20% 以上（下の端を含む）
   assert.deepEqual([-0.1, 0, 4.9, 5, 9.9, 10, 19.9, 20, 85, NaN].map(riseOf),
     ['r0', 'r5', 'r5', 'r10', 'r10', 'r20', 'r20', 'r20p', 'r20p', 'na']);
-  // 最大下落率: 左右対称（−5.0 は「−5〜−10%」）
+  // 最安値までの下落率: 左右対称（−5.0 は「−5〜−10%」）
   assert.deepEqual([0.3, 0, -0.1, -4.9, -5, -9.9, -10, -19.9, -20, -60, NaN].map(fallOf),
     ['f0', 'f0', 'f5', 'f5', 'f10', 'f10', 'f20', 'f20', 'f20p', 'f20p', 'na']);
   const dec = tiny([0, 1, 2, 3, 4], {
-    rise: [25, 12, 3, -1, null], fall: [0.5, -3, -7, -25, null], r20: [15, 4, -2, -12, null],
+    v: 3, rise: [25, 12, 3, -1, null], fall: [0.5, -3, -7, -25, null], r20: [15, 4, -2, -12, null],
   });
   assert.deepEqual(classCounts(dec, 'rise'), { r20p: 1, r20: 1, r5: 1, r0: 1, na: 1 });
   assert.deepEqual(classCounts(dec, 'fall'), { f0: 1, f5: 1, f10: 1, f20p: 1, na: 1 });
@@ -193,20 +193,24 @@ test('先20営業日の値動きの色（最大上昇率・最大下落率・20�
   assert.equal(classesOf('rise'), RISE_CLASSES);
   assert.equal(classesOf('time'), null);
   assert.deepEqual(COLOR_MODES.filter((m) => m.value).map((m) => m.value), ['rise', 'fall', 'r20']);
-  // 値の無いファイル（版 1）はすべて未確定
+  // 値の無いファイル（版 1）はすべて未確定。版 2 の上昇率・下落率（終値で測った別の物差し）は読まず、20営業日目は同じなので読む
   const old = tiny([0, 1, 2]);
   assert.ok([...old.rise, ...old.fall, ...old.r20].every(Number.isNaN));
-  // フィクスチャ（版 2）には値がある。最後の20営業日は未確定、分かる日は 最小 ≤ 20営業日目 ≤ 最大
+  const v2 = tiny([0, 1, 2], { v: 2, rise: [5, 6, 7], fall: [-1, -2, -3], r20: [1, 2, 3] });
+  assert.ok([...v2.rise, ...v2.fall].every(Number.isNaN));
+  assert.deepEqual(Array.from(v2.r20), [1, 2, 3]);
+  // フィクスチャ（版 3）には値がある。最後の20営業日は未確定、分かる日は 最安値 ≤ 20営業日目の終値 ≤ 最高値（0.1% の丸めの幅）
   const p = read(path.join(FIX, index.days[0].candidates[0].file));
   const fx = decode(p, method.labels);
-  assert.equal(p.v, 2);
+  assert.equal(p.v, 3);
   assert.ok(Array.from(fx.rise.slice(-20)).every(Number.isNaN));
   // （実データでは20営業日目に売買が無い日は 20営業日目だけが分からない。最大・最小はその日を飛ばして数える）
   let known = 0;
   for (let i = 0; i < fx.n; i += 1) {
     if (Number.isFinite(fx.rise[i])) known += 1;
     if (![fx.rise[i], fx.fall[i], fx.r20[i]].every(Number.isFinite)) continue;
-    assert.ok(fx.fall[i] <= fx.r20[i] + 1e-9 && fx.r20[i] <= fx.rise[i] + 1e-9, `${i}: ${fx.fall[i]} ${fx.r20[i]} ${fx.rise[i]}`);
+    assert.ok(fx.fall[i] <= fx.r20[i] + 0.1 + 1e-9 && fx.r20[i] <= fx.rise[i] + 0.1 + 1e-9, `${i}: ${fx.fall[i]} ${fx.r20[i]} ${fx.rise[i]}`);
+    if (fx.rise[i] >= 10) assert.equal(fx.ret[i], 10, `${i}: 最高値まで ${fx.rise[i]} なら +10% の指値に届いている`);
   }
   assert.equal(known, fx.n - 20);
 });
