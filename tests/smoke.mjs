@@ -380,7 +380,9 @@ await page.route('**/data/predictions.json*',
 await page.reload({ waitUntil: 'networkidle' });
 await page.getByRole('tab', { name: 'リカレンス・ネットワーク' }).click();
 await page.waitForSelector('.net-canvas canvas', { timeout: 10000 });
-const exp = (code, bp) => RECURRENCE_EXPECTED[`2026-09-11_${code}.json`][String(bp)];
+const exp = (code, k) => RECURRENCE_EXPECTED[`2026-09-11_${code}.json`][String(k)];
+const netFocus = async () => (await page.locator('.net-canvas').getAttribute('data-focus')) || '';
+const netN = (code) => JSON.parse(fs.readFileSync(path.join(ROOT, 'tests', 'fixtures', 'recurrence', `2026-09-11_${code}.json`), 'utf8')).n;
 const crows = page.locator('.net-crow:not(.head)');
 check((await crows.count()) === 3, `一覧は購入条件を満たした3件だけ（高値更新の5件ではない） (実際: ${await crows.count()})`);
 const crowCodes = await crows.locator('.id b').allTextContents();
@@ -395,8 +397,27 @@ check(netStrip.includes('購入条件を満たした銘柄') && netStrip.include
 check((await crows.first().getAttribute('aria-selected')) === 'true', '最初はネットワークのある先頭の銘柄（9324）を出す');
 const netSide = async () => (await page.locator('.net-side').innerText()) || '';
 let side = await netSide();
-check(side.includes(`${exp('93240', 100).deg} 日`) && side.includes('珍しい状態'),
-      `9324 の今日に似た日は ${exp('93240', 100).deg} 日（Python の要約と同じ）で、珍しい状態の説明が出る`);
+// k近傍（運用者の選択 2026-10-19「k近傍だけにする」。k は指定「kは1〜10までで良いです」で 1〜10、既定10）
+const kBtn = (v) => page.locator(`.net-seg[aria-label^="似た日の数"] button[aria-label="${v} 日"]`);
+const kBtns = await page.locator('.net-seg[aria-label^="似た日の数"] button').allTextContents();
+check(kBtns.join(',') === '1,2,3,4,5,6,7,8,9,10', `k は 1〜10 日から選ぶ (実際: ${kBtns.join(',')})`);
+check((await page.locator('.net-seg[aria-label^="似た日の数"] button[aria-pressed="true"]').getAttribute('aria-label')) === '10 日', '既定の k は 10');
+check((await page.locator('[aria-label="辺の密度（リカレンス率）"]').count()) === 0
+        && !(await page.locator('.net .pred-strip').innerText()).includes('辺の密度'), '辺の密度のボタンは無い（ε はやめた）');
+check(side.includes(`${exp('93240', 10).deg} 日`) && side.includes(`${exp('93240', 10).periods} つの時期`) && side.includes('珍しい状態'),
+      `9324 の今日に似た日は ${exp('93240', 10).deg} 日・${exp('93240', 10).periods} つの時期（Python の要約と同じ）で、珍しさの説明が出る`);
+const crowCells = await crows.first().locator(':scope > span.num').allTextContents();   // 最小・似た日・全期間
+const pctTxt = (v) => (Number.isFinite(v) ? `${Math.round(v * 100)}%` : '—');
+check(crowCells[1] === pctTxt(exp('93240', 10).nbr.hit) && crowCells[2] === pctTxt(exp('93240', 10).base.hit),
+      `一覧の「似た日」「全期間」は目次の k = 10 の要約（+10% 到達）と同じ (実際: ${crowCells.join(' / ')})`);
+// 今日に似た日を光らせる（運用者の依頼「対象日と似ている（紐づく）サンプルもハイライト」）。強調している日:似た日の数
+await page.waitForFunction(() => document.querySelector('.net-canvas')?.dataset.focus);
+check(await netFocus() === `${netN('93240') - 1}:${exp('93240', 10).deg}`,
+      `開いたときから今日（最後の点）と似た ${exp('93240', 10).deg} 日を光らせている (実際: ${await netFocus()})`);
+await page.locator('label', { hasText: '今日に似た日を光らせる' }).click();
+await page.waitForFunction(() => document.querySelector('.net-canvas')?.dataset.focus === '');
+check(await netFocus() === '', '「今日に似た日を光らせる」を外すと強調しない');
+await page.locator('label', { hasText: '今日に似た日を光らせる' }).click();
 const inked = await page.evaluate(() => {
   const c = document.querySelector('.net-canvas canvas');
   const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
@@ -407,11 +428,15 @@ const inked = await page.evaluate(() => {
 check(inked > 200, `図に点と線が描かれている（明るい画素 ${inked}）`);
 await page.locator('.net-crow', { hasText: '9434' }).click();
 await page.waitForFunction(() => document.querySelector('.net-head strong')?.textContent.includes('9434'));
-await page.locator('.net-seg button', { hasText: '2%' }).click();
+await kBtn(5).click();
 side = await netSide();
-check(side.includes(`${exp('94340', 200).deg} 日`), `9434 を辺の密度 2% で数え直すと今日に似た日 ${exp('94340', 200).deg} 日（Python と同じ）`);
+check(side.includes(`${exp('94340', 5).deg} 日`) && side.includes(`${exp('94340', 5).periods} つの時期`),
+      `9434 を k = 5 で数え直すと今日に似た日 ${exp('94340', 5).deg} 日・${exp('94340', 5).periods} つの時期（Python と同じ）`);
 const foot = (await page.locator('.net-foot').textContent()) || '';
-check(foot.includes(`線 ${exp('94340', 200).edges.toLocaleString('ja-JP')} 本`), `線の本数も Python と同じ（${exp('94340', 200).edges}）`);
+check(foot.includes(`線 ${exp('94340', 5).edges.toLocaleString('ja-JP')} 本`), `線の本数も Python と同じ（${exp('94340', 5).edges}）`);
+await page.waitForFunction((want) => document.querySelector('.net-canvas')?.dataset.focus === want,
+  `${netN('94340') - 1}:${exp('94340', 5).deg}`, { timeout: 5000 }).catch(() => {});
+check(await netFocus() === `${netN('94340') - 1}:${exp('94340', 5).deg}`, `k = 5 なら光らせる似た日も 5 日 (実際: ${await netFocus()})`);
 await page.locator('label', { hasText: '回転' }).click();
 await page.waitForSelector('.net-canvas[data-settled="1"]', { timeout: 20000 });
 const [todayX, todayY] = ((await page.locator('.net-canvas').getAttribute('data-today')) || '0,0').split(',').map(Number);
@@ -442,11 +467,11 @@ const riseGot = await legendOf();
 check(JSON.stringify(riseGot) === JSON.stringify(riseWant),
       `最高値までの上昇率の凡例（高い順の5段と未確定）の件数がファイルの値と同じ (実際: ${JSON.stringify(riseGot)})`);
 const nbrMix = (await page.locator('.net-nbrmix').textContent()) || '';
-check(nbrMix.includes(`今日に似た日 ${exp('94340', 200).deg} 日の内訳`), `凡例の下に今日に似た日の内訳 (実際: ${nbrMix.slice(0, 60)})`);
+check(nbrMix.includes(`今日に似た日 ${exp('94340', 5).deg} 日の内訳`), `凡例の下に今日に似た日の内訳 (実際: ${nbrMix.slice(0, 60)})`);
 await page.locator('.net-details summary').click();
 const riseHead = await page.locator('.net-details thead th').allTextContents();
 const riseCells = await page.locator('.net-details tbody tr td:nth-child(4)').allTextContents();
-check(riseHead.includes('最高値まで') && riseCells.length === exp('94340', 200).deg && riseCells.every((t) => /^[+-]?\d+\.\d%$/.test(t)),
+check(riseHead.includes('最高値まで') && riseCells.length === exp('94340', 5).deg && riseCells.every((t) => /^[+-]?\d+\.\d%$/.test(t)),
       `表に最高値までの列（今日に似た日はどれも結果が出そろっているので値がある） (実際: ${riseCells.slice(0, 3).join(' ')})`);
 await page.locator('.net-details summary').click();
 // 最安値までの色は外した（運用者の指定「安値の色付けは、なしで良いです」）。軌跡は直近20営業日（「軌跡は直近20営業日で良いです」）
@@ -459,6 +484,26 @@ const r20Got = await legendOf();
 check(Object.keys(r20Got).join(',') === '+10% 以上,0〜+10%,−10〜0%,−10% 未満,未確定'
         && r20Got['未確定'] === fx94.r20.filter((v) => v === null).length,
       `20営業日目の騰落率は結果と同じ区切りの4段と未確定 (実際: ${JSON.stringify(r20Got)})`);
+// 並べ方（運用者の依頼「無理に球状にしなくても3次元ネットワーク構造でかっこよく」。最初は力学: 同日の選択「力学（Obsidian 風）」）
+const layoutBtns = await page.locator('.net-seg[aria-label="並べ方"] button').allTextContents();
+check(layoutBtns.join(',') === '力学,状態の地図,時間のらせん'
+        && (await page.locator('.net-seg[aria-label="並べ方"] button[aria-pressed="true"]').textContent()) === '力学',
+      `並べ方は 力学（最初）・状態の地図・時間のらせん (実際: ${layoutBtns.join(',')})`);
+const inkedNow = () => page.evaluate(() => {
+  const c = document.querySelector('.net-canvas canvas');
+  const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+  let m = 0;
+  for (let i = 0; i < d.length; i += 4 * 7) if (d[i] > 60 || d[i + 1] > 60 || d[i + 2] > 90) m += 1;
+  return m;
+});
+for (const name of ['状態の地図', '時間のらせん']) {
+  await page.locator('.net-seg[aria-label="並べ方"] button', { hasText: name }).click();
+  await page.waitForSelector('.net-canvas[data-settled="1"]', { timeout: 5000 });
+  await page.waitForTimeout(150);
+  check((await inkedNow()) > 200 && (await page.locator('.net-seg button', { hasText: '力の調整' }).count()) === 0,
+        `${name}でも描ける（動かさない並べ方なので力の調整は出さない）`);
+}
+await page.locator('.net-seg[aria-label="並べ方"] button', { hasText: '力学' }).click();
 await page.locator('.net-seg button', { hasText: '2D' }).click();
 await page.locator('.net-seg button', { hasText: '力の調整' }).click();
 check((await page.locator('.net-forces input[type=range]').count()) === 4, '力の調整は Obsidian と同じ4つのつまみ');
@@ -471,6 +516,37 @@ const netFit = await page.evaluate(() => document.documentElement.scrollWidth <=
 check(netFit, 'スマホの幅（390px）で横にはみ出さない');
 await page.setViewportSize({ width: 1440, height: 1000 });
 await page.unroute('**/data/predictions.json*');
+// 指で拡大縮小（運用者の依頼 2026-10-19「指で拡大縮小できるようにしたい」）: 触れる画面で、2本指を 60px → 220px に広げると
+// 3.67 倍になる（指の間を中心に）。CDP の触る操作を Chromium が pointer イベントにする
+{
+  const tctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  const tpage = await tctx.newPage();
+  tpage.on('pageerror', (e) => consoleErrors.push(`pageerror: ${e.message}`));
+  await tpage.route('**/data/predictions.json*',
+    (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(predPass) }));
+  await tpage.goto(base, { waitUntil: 'networkidle' });
+  await tpage.getByRole('tab', { name: 'リカレンス・ネットワーク' }).click();
+  await tpage.waitForSelector('.net-canvas canvas', { timeout: 10000 });
+  await tpage.locator('.net-canvas canvas').scrollIntoViewIfNeeded();
+  const tb = await tpage.locator('.net-canvas canvas').boundingBox();
+  const cx = tb.x + tb.width / 2;
+  const cy = tb.y + tb.height / 2;
+  const cdp = await tctx.newCDPSession(tpage);
+  const pts = (dd) => [{ x: cx - dd, y: cy, id: 1 }, { x: cx + dd, y: cy, id: 2 }];
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: pts(30) });
+  for (let dd = 40; dd <= 110; dd += 10) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: pts(dd) });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await tpage.waitForTimeout(200);
+  const zoomed = Number(await tpage.locator('.net-canvas').getAttribute('data-zoom'));
+  check(Math.abs(zoomed - 220 / 60) < 0.01, `2本指でつまんで広げると拡大する（60px → 220px で ${(220 / 60).toFixed(2)} 倍。実際: ${zoomed}）`);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: pts(110) });
+  for (let dd = 100; dd >= 50; dd -= 10) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: pts(dd) });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await tpage.waitForTimeout(200);
+  const back = Number(await tpage.locator('.net-canvas').getAttribute('data-zoom'));
+  check(Math.abs(back - zoomed * (100 / 220)) < 0.01, `つまんで縮めると縮小する（実際: ${back}）`);
+  await tctx.close();
+}
 
 console.log('\n== コンソールエラー ==');
 check(consoleErrors.length === 0, `JS エラーなし (${consoleErrors.length}件)`);

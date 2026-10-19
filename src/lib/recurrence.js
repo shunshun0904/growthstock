@@ -5,9 +5,11 @@
  * 展開する。候補ごとのファイルには、その銘柄の各営業日（ノード）の状態（テクニカル指標9列を銘柄の中で標準化し、1/q σ 刻みの
  * 整数にした値）・結果（+10% の指値か20営業日目の終値・目的変数 1.2σ / 1.5σ）・78週高値の更新日が入っている。
  *
- * 辺（タイラー窓より離れた日どうしで、距離の2乗が ε² 以下）と要約は、ここで Python と同じ式で数え直す（画面で辺の密度を
- * 変えられるように）。整数の距離の2乗の m 番目（m = 密度 × 結べる組の数 を四捨五入）を ε² にするので、浮動小数点の差は出ない。
- * tests/recurrence.test.js が Python の数えた値（tests/fixtures/recurrence-expected.json）と一致することを確かめる。
+ * 網は k近傍（運用者の選択 2026-10-19「k近傍だけにする」。k は続けて指定「正直なところ、kは1〜10までで良いです」で 1〜10、
+ * 既定10。版 3 までは ε で結んでいた）。
+ * 各日に、タイラー窓（20営業日）より離れた日のうち状態の近い k 日（同じ距離は古い日が先）を選び、どちらかが選べば線で結ぶ。
+ * 近傍・線・要約は、ここで Python と同じ式で数え直す（画面で k を変えられるように）。距離は整数の2乗で比べるので、浮動小数点の
+ * 差は出ない。tests/recurrence.test.js が Python の数えた値（tests/fixtures/recurrence-expected.json）と一致することを確かめる。
  * **参考の表示で、選定には使わない。**
  */
 
@@ -15,15 +17,18 @@
 export const DEFAULT_LABELS = [{ key: 'l12', k: 1.2 }, { key: 'l15', k: 1.5 }];
 
 /** 既定値（index.json の method が無いときだけ使う。正本は research/recurrence_net.py） */
-export const DEFAULTS = { theiler: 20, rrBp: 100, rrChoicesBp: [50, 100, 200, 300], q: 20, zCap: 6, target: 10, hold: 20 };
+export const DEFAULTS = { theiler: 20, k: 10, kChoices: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], q: 20, zCap: 6, target: 10, hold: 20 };
 
-/** index.json の method から、計算に使う値をそろえる（欠けた値は既定値）。 */
+const posInt = (v) => Number.isInteger(v) && v > 0;
+
+/** index.json の method から、計算に使う値をそろえる（欠けた値は既定値。版 3 の目次には k が無いので既定値になる）。 */
 export function methodOf(index) {
   const m = index?.method || {};
+  const kChoices = Array.isArray(m.kChoices) && m.kChoices.length && m.kChoices.every(posInt) ? m.kChoices : DEFAULTS.kChoices;
   return {
     theiler: Number.isInteger(m.theiler) ? m.theiler : DEFAULTS.theiler,
-    rrBp: Number.isInteger(m.rrBp) ? m.rrBp : DEFAULTS.rrBp,
-    rrChoicesBp: Array.isArray(m.rrChoicesBp) && m.rrChoicesBp.length ? m.rrChoicesBp : DEFAULTS.rrChoicesBp,
+    k: posInt(m.k) && kChoices.includes(m.k) ? m.k : (kChoices.includes(DEFAULTS.k) ? DEFAULTS.k : kChoices[0]),
+    kChoices,
     q: Number.isInteger(m.q) ? m.q : DEFAULTS.q,
     zCap: Number.isFinite(m.zCap) ? m.zCap : DEFAULTS.zCap,
     target: Number.isFinite(m.target) ? m.target : DEFAULTS.target,
@@ -83,76 +88,122 @@ export function sqDist(dec, i, j) {
   return acc;
 }
 
+/** ノードの番号の上限（距離の2乗 × KEY + 番号 を浮動小数点で正確に持つ。距離の2乗は高々 9 × 240² で、積は 2^53 よりずっと小さい） */
+const KEY = 8192;
+
 /**
- * 辺。結べる組（j − i > theiler）の距離の2乗を小さい順に並べた m 番目を ε²（t）にし、t 以下の組を全部結ぶ（同じ値も全部）。
- * m = rrBp × 組の数 ÷ 10000 を四捨五入（0.5 は切り上げ）、最小 1。結べる組が無ければ t = −1（辺なし）。
- * 戻り値: { t, pairs, m, nEdges, edges（[i0, j0, i1, j1, …]）, deg }
+ * ノードごとの近い順の近傍（theiler より離れた日だけ）を kMax 日まで（Python の knn_order と同じ）。並びは（距離の2乗, 番号）の
+ * 小さい順で、同じ距離なら古い日（番号の小さい日）が先。各ノードで、いちばん遠い近傍を先頭に置くヒープで kMax 日を残す。
+ * 戻り値: { kMax, nbr（n × kMax。足りないところは −1）, d2（同じ形の距離の2乗）, cnt（ノードごとの近傍の数）}
  */
-export function network(dec, theiler, rrBp) {
+export function knnLists(dec, theiler, kMax) {
   const { n, dims, z } = dec;
-  const deg = new Int32Array(n);
-  if (n <= theiler + 1) return { t: -1, pairs: 0, m: 0, nEdges: 0, edges: new Uint32Array(0), deg };
-  const pairs = ((n - theiler - 1) * (n - theiler)) / 2;
-  const s = new Int32Array(pairs);
-  let maxS = 0;
-  let k = 0;
+  if (n > KEY) throw new Error(`ノードが多すぎます（${n} > ${KEY}）`);
+  const nbr = new Int32Array(n * kMax).fill(-1);
+  const d2 = new Int32Array(n * kMax).fill(-1);
+  const cnt = new Int32Array(n);
+  const heap = new Float64Array(Math.max(1, kMax));
   for (let i = 0; i < n; i += 1) {
+    let size = 0;
+    // いま残している中でいちばん遠い近傍の距離の2乗（kMax 日たまるまでは打ち切らない）。足していく途中でこれを超えたら、
+    // その日は入らない（同じ距離なら番号で比べるので、超えたときだけ打ち切る）
+    let worst = kMax > 0 ? Infinity : -1;
     const a = i * dims;
-    for (let j = i + theiler + 1; j < n; j += 1) {
+    for (let j = 0; j < n; j += 1) {
+      if (j >= i - theiler && j <= i + theiler) { j = i + theiler; continue; }   // タイラー窓の中は選ばない
       const b = j * dims;
       let acc = 0;
-      for (let d = 0; d < dims; d += 1) {
+      let d = 0;
+      for (; d < dims; d += 1) {
         const v = z[a + d] - z[b + d];
         acc += v * v;
+        if (acc > worst) break;
       }
-      s[k] = acc;
-      k += 1;
-      if (acc > maxS) maxS = acc;
+      if (d < dims) continue;
+      const key = acc * KEY + j;
+      if (size < kMax) {
+        let c = size;
+        heap[c] = key;
+        size += 1;
+        while (c > 0) {
+          const p = (c - 1) >> 1;
+          if (heap[p] >= heap[c]) break;
+          const t = heap[p]; heap[p] = heap[c]; heap[c] = t;
+          c = p;
+        }
+        if (size === kMax) worst = Math.floor(heap[0] / KEY);
+      } else if (key < heap[0]) {
+        heap[0] = key;
+        let c = 0;
+        for (;;) {
+          const l = 2 * c + 1;
+          const r = l + 1;
+          let m = c;
+          if (l < size && heap[l] > heap[m]) m = l;
+          if (r < size && heap[r] > heap[m]) m = r;
+          if (m === c) break;
+          const t = heap[m]; heap[m] = heap[c]; heap[c] = t;
+          c = m;
+        }
+        worst = Math.floor(heap[0] / KEY);
+      }
+    }
+    const got = heap.slice(0, size).sort();
+    cnt[i] = size;
+    for (let r = 0; r < size; r += 1) {
+      const j = got[r] % KEY;
+      nbr[i * kMax + r] = j;
+      d2[i * kMax + r] = (got[r] - j) / KEY;
     }
   }
-  const m = Math.min(pairs, Math.max(1, Math.floor((rrBp * pairs + 5000) / 10000)));
-  const hist = new Uint32Array(maxS + 1);
-  for (let x = 0; x < pairs; x += 1) hist[s[x]] += 1;
-  let cum = 0;
-  let t = 0;
-  for (; t <= maxS; t += 1) {
-    cum += hist[t];
-    if (cum >= m) break;
-  }
-  const edges = new Uint32Array(2 * cum);
-  let e = 0;
-  k = 0;
-  for (let i = 0; i < n; i += 1) {
-    for (let j = i + theiler + 1; j < n; j += 1) {
-      if (s[k] <= t) {
-        edges[e] = i;
-        edges[e + 1] = j;
-        e += 2;
-        deg[i] += 1;
-        deg[j] += 1;
-      }
-      k += 1;
-    }
-  }
-  return { t, pairs, m, nEdges: cum, edges, deg };
+  return { kMax, nbr, d2, cnt };
 }
 
-/** 隣接の一覧（ノードごとの近傍。ホバーで近傍を光らせるのに使う）。 */
-export function neighborsOf(net, n) {
-  const start = new Int32Array(n + 1);
-  for (let i = 0; i < n; i += 1) start[i + 1] = start[i] + net.deg[i];
-  const fill = start.slice(0, n);
-  const list = new Int32Array(start[n]);
-  const { edges } = net;
-  for (let e = 0; e < edges.length; e += 2) {
-    const a = edges[e];
-    const b = edges[e + 1];
-    list[fill[a]] = b;
-    fill[a] += 1;
-    list[fill[b]] = a;
-    fill[b] += 1;
+/**
+ * k近傍の網（Python の knn_adjacency と同じ）。どちらか一方が相手を近い k 日に選んでいれば結ぶ（i < j の組で1本）。lists は
+ * knnLists の戻り値（k 以上の kMax で数えたもの。無ければここで数える）。次数は k 以上になりうる（多くの日に選ばれる日ほど大きい）。
+ * 戻り値: { k, theiler, lists, nEdges, edges（[i0, j0, i1, j1, …]。i < j で小さい順）, deg }
+ */
+export function network(dec, theiler, k, lists = null) {
+  const { n } = dec;
+  const L = lists && lists.kMax >= k ? lists : knnLists(dec, theiler, k);
+  const take = (i) => Math.min(k, L.cnt[i]);
+  let total = 0;
+  for (let i = 0; i < n; i += 1) total += take(i);
+  const pairs = new Float64Array(total);
+  let t = 0;
+  for (let i = 0; i < n; i += 1) {
+    for (let r = 0, c = take(i); r < c; r += 1) {
+      const j = L.nbr[i * L.kMax + r];
+      pairs[t] = i < j ? i * n + j : j * n + i;
+      t += 1;
+    }
   }
-  return { start, list, of: (i) => list.subarray(start[i], start[i + 1]) };
+  pairs.sort();
+  let m = 0;
+  for (let x = 0; x < total; x += 1) {
+    if (x === 0 || pairs[x] !== pairs[x - 1]) { pairs[m] = pairs[x]; m += 1; }
+  }
+  const edges = new Uint32Array(2 * m);
+  const deg = new Int32Array(n);
+  for (let e = 0; e < m; e += 1) {
+    const a = Math.floor(pairs[e] / n);
+    const b = pairs[e] - a * n;
+    edges[2 * e] = a;
+    edges[2 * e + 1] = b;
+    deg[a] += 1;
+    deg[b] += 1;
+  }
+  return { k, theiler, lists: L, nEdges: m, edges, deg };
+}
+
+/**
+ * ノードごとの似た日（その日に近い k 日。近い順）。触れた日・選んだ日・今日の似た日を光らせるのに使う。線（どちらかが選べば
+ * 結ぶ）とは違い、その日が選んだ k 日だけ。
+ */
+export function neighborsOf(net) {
+  const L = net.lists;
+  return { of: (i) => L.nbr.subarray(i * L.kMax, i * L.kMax + Math.min(net.k, L.cnt[i])) };
 }
 
 const median = (v) => {
@@ -200,30 +251,48 @@ export function todayDist(dec) {
   return out;
 }
 
+/** ノードの集まりが、theiler より離れたところで区切るといくつの時期（塊）になるか（Python の periods_of と同じ。空なら 0） */
+export function periodsOf(idx, theiler) {
+  const v = [...idx].sort((a, b) => a - b);
+  if (!v.length) return 0;
+  let p = 1;
+  for (let x = 1; x < v.length; x += 1) if (v[x] - v[x - 1] > theiler) p += 1;
+  return p;
+}
+
 /**
- * 要約（Python の summarize と同じ項目・同じ式）。今日 = 最後のノード。nearestFresh は今日に近い過去の更新日（タイラー窓より前。
- * ε の外も近い順。同じ距離は日付の古い順）。
+ * 要約（Python の summarize と同じ項目・同じ式）。今日 = 最後のノード。似た日は今日の近い k 日（近い順）。
+ *   kth / kthPct … k 番目に近い日までの距離（σ）と、どのノードも自分の k 番目までの距離で比べたときの今日の位置（中位の順位の
+ *                  百分位。高いほど似た日の少ない珍しい状態）
+ *   periods      … 似た日がいくつの時期に固まっているか（20営業日より離れたところで区切る）
+ *   nearestFresh … 今日に近い過去の更新日（タイラー窓より前。近い k 日の外も近い順。同じ距離は古い日が先）
  */
-export function summarize(dec, net, theiler, rrBp, { target = DEFAULTS.target, labels = DEFAULT_LABELS, nNearest = 5 } = {}) {
+export function summarize(dec, net, theiler, k, { target = DEFAULTS.target, labels = DEFAULT_LABELS, nNearest = 5 } = {}) {
   const { n, q } = dec;
   const today = n - 1;
-  const { deg } = net;
-  const k = deg[today];
-  const d2 = todayDist(dec);
-  const nb = [];
-  for (let i = 0; i < n; i += 1) if (today - i > theiler && net.t >= 0 && d2[i] <= net.t) nb.push(i);
-  const nbFresh = nb.filter((i) => dec.isFresh[i]);
+  const L = net.lists;
+  const take = (i) => Math.min(k, L.cnt[i]);
+  const nb = n ? Array.from(L.nbr.subarray(today * L.kMax, today * L.kMax + take(today))) : [];
+  const kth2 = nb.length ? L.d2[today * L.kMax + nb.length - 1] : -1;
   let below = 0;
   let same = 0;
+  let valid = 0;
   for (let i = 0; i < n; i += 1) {
-    if (deg[i] < k) below += 1;
-    else if (deg[i] === k) same += 1;
+    const c = take(i);
+    if (!c) continue;
+    valid += 1;
+    const v = L.d2[i * L.kMax + c - 1];
+    if (v < kth2) below += 1;
+    else if (v === kth2) same += 1;
   }
+  const nbSet = new Set(nb);
+  const nbFresh = nb.filter((i) => dec.isFresh[i]);
+  const d2 = todayDist(dec);
   const pastFresh = [...dec.fresh].filter((i) => i < today - theiler)
     .sort((a, b) => (d2[a] - d2[b]) || (a - b)).slice(0, nNearest);
   const nearest = pastFresh.map((i) => {
     const rec = {
-      i, date: dec.dates[i], d: Math.sqrt(d2[i]) / q, inEps: net.t >= 0 && d2[i] <= net.t,
+      i, date: dec.dates[i], d: Math.sqrt(d2[i]) / q, inKnn: nbSet.has(i),
       ret: Number.isFinite(dec.ret[i]) ? dec.ret[i] : null,
     };
     for (const { key } of labels) {
@@ -234,11 +303,12 @@ export function summarize(dec, net, theiler, rrBp, { target = DEFAULTS.target, l
   });
   const all = Array.from({ length: n }, (_, i) => i);
   let isolated = 0;
-  for (let i = 0; i < n; i += 1) if (deg[i] === 0) isolated += 1;
+  for (let i = 0; i < n; i += 1) if (net.deg[i] === 0) isolated += 1;
   return {
-    rrBp, theiler, pairs: net.pairs, m: net.m, eps2: net.t, eps: net.t >= 0 ? Math.sqrt(net.t) / q : null,
-    edges: net.nEdges, isolated,
-    deg: k, degPct: (100 * (below + 0.5 * same)) / n, degMed: median(Array.from(deg)),
+    k, theiler, edges: net.nEdges, isolated, degMed: median(Array.from(net.deg)),
+    deg: nb.length, kth2, kth: kth2 >= 0 ? Math.sqrt(kth2) / q : null,
+    kthPct: nb.length && valid ? (100 * (below + 0.5 * same)) / valid : null,
+    periods: periodsOf(nb, theiler),
     nbr: outcomeStats(dec, nb, target, labels),
     base: outcomeStats(dec, all, target, labels),
     nbrFresh: outcomeStats(dec, nbFresh, target, labels),
@@ -247,17 +317,15 @@ export function summarize(dec, net, theiler, rrBp, { target = DEFAULTS.target, l
   };
 }
 
-/**
- * 今日の近傍の一覧（表で見る用）。近い順（同じ距離は日付の古い順）。
- */
-export function todayNeighbors(dec, net, theiler) {
+/** 今日の似た日（近い k 日）の一覧（表で見る用）。近い順（同じ距離は古い日が先）。 */
+export function todayNeighbors(dec, net) {
   const today = dec.n - 1;
-  const d2 = todayDist(dec);
+  const L = net.lists;
   const out = [];
-  for (let i = 0; i < dec.n; i += 1) {
-    if (today - i > theiler && net.t >= 0 && d2[i] <= net.t) out.push(i);
+  for (let r = 0, c = Math.min(net.k, L.cnt[today]); r < c; r += 1) {
+    out.push({ i: L.nbr[today * L.kMax + r], d: Math.sqrt(L.d2[today * L.kMax + r]) / dec.q });
   }
-  return out.sort((a, b) => (d2[a] - d2[b]) || (a - b)).map((i) => ({ i, d: Math.sqrt(d2[i]) / dec.q }));
+  return out;
 }
 
 // --------------------------------------------------------------------------- //

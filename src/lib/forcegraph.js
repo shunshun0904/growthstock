@@ -41,9 +41,11 @@ export function seedOf(str) {
  *   反発 −100・中心 0.2・ばね 1                      球らしさ 0.63〜0.72・辺 0.23〜0.25（丸いが構造が薄い）
  *   反発 −80・中心 0.18・ばね 4（既定。上限 1）       球らしさ 0.39〜0.60・辺 0.18〜0.20・間隔 0.04〜0.06
  * ばねは 1 を超えると行き過ぎて潰れる（倍率 6 で上限なしだと全点が1か所に集まった）ので上限 1。画面のつまみで変えられる
+ * 2026-10-19 夜: 網を k近傍（k = 10）にし、運用者の依頼「無理に球状にしなくても」で、中心の力と反発を弱めた（中心 0.18 → 0.05・
+ * 反発 −80 → −30）。k近傍は線の無い日が無く、同じ力だと一様な球の毛玉になった（実データ 2026-10-19 の候補で見比べた）
  */
 export const FORCE_DEFAULTS = {
-  linkDistance: 30, linkStrength: 4, charge: -80, gravity: 0.18, theta: 0.9, distMin: 1, velocityDecay: 0.4,
+  linkDistance: 30, linkStrength: 4, charge: -30, gravity: 0.05, theta: 0.9, distMin: 1, velocityDecay: 0.4,
   alphaMin: 0.002, ticks: 300,
 };
 
@@ -351,4 +353,122 @@ export function pick(screen, n, x, y, maxPx = 14) {
     }
   }
   return best;
+}
+
+// --------------------------------------------------------------------------- //
+// 力学のほかの並べ方（運用者の依頼 2026-10-19「無理に球状にしなくても3次元ネットワーク構造でかっこよく」）。どちらも決まった
+// 位置に置くだけで、動かさない（同じ候補はいつも同じ形）
+// --------------------------------------------------------------------------- //
+
+/**
+ * 対称行列（d × d。行の順に並べた Float64Array）の固有値と固有ベクトル（ヤコビ法）。固有値の大きい順。ベクトルの向きは、
+ * 絶対値のいちばん大きい成分が正になるようにそろえる（同じデータはいつも同じ向き）。
+ */
+export function symEigen(a, d) {
+  const m = Float64Array.from(a);
+  const v = new Float64Array(d * d);
+  for (let i = 0; i < d; i += 1) v[i * d + i] = 1;
+  for (let sweep = 0; sweep < 100; sweep += 1) {
+    let off = 0;
+    for (let p = 0; p < d; p += 1) for (let q = p + 1; q < d; q += 1) off += m[p * d + q] * m[p * d + q];
+    if (off < 1e-22) break;
+    for (let p = 0; p < d; p += 1) {
+      for (let q = p + 1; q < d; q += 1) {
+        const apq = m[p * d + q];
+        if (Math.abs(apq) < 1e-300) continue;
+        const theta = (m[q * d + q] - m[p * d + p]) / (2 * apq);
+        const t = Math.sign(theta || 1) / (Math.abs(theta) + Math.sqrt(theta * theta + 1));
+        const c = 1 / Math.sqrt(t * t + 1);
+        const s = t * c;
+        for (let k = 0; k < d; k += 1) {
+          const mkp = m[k * d + p];
+          const mkq = m[k * d + q];
+          m[k * d + p] = c * mkp - s * mkq;
+          m[k * d + q] = s * mkp + c * mkq;
+        }
+        for (let k = 0; k < d; k += 1) {
+          const mpk = m[p * d + k];
+          const mqk = m[q * d + k];
+          m[p * d + k] = c * mpk - s * mqk;
+          m[q * d + k] = s * mpk + c * mqk;
+        }
+        for (let k = 0; k < d; k += 1) {
+          const vkp = v[k * d + p];
+          const vkq = v[k * d + q];
+          v[k * d + p] = c * vkp - s * vkq;
+          v[k * d + q] = s * vkp + c * vkq;
+        }
+      }
+    }
+  }
+  const idx = Array.from({ length: d }, (_, i) => i).sort((x, y) => m[y * d + y] - m[x * d + x]);
+  const values = idx.map((i) => m[i * d + i]);
+  const vectors = idx.map((i) => {
+    const col = Array.from({ length: d }, (_, k) => v[k * d + i]);
+    let big = 0;
+    for (let k = 1; k < d; k += 1) if (Math.abs(col[k]) > Math.abs(col[big])) big = k;
+    return col[big] < 0 ? col.map((x) => -x) : col;
+  });
+  return { values, vectors };
+}
+
+/**
+ * 状態の地図: 9列の状態（z）の主成分の上位3つ（2次元なら2つ）に置く。距離の近い日（似た日）は図でも近くに来る。
+ * 戻り値: 長さ 3n の位置（力学の位置と同じ形。大きさは extent が画面に合わせる）と、各軸の分散の割合（説明用）。
+ */
+export function statePositions(z, n, dims, dim = 3) {
+  const mean = new Float64Array(dims);
+  for (let i = 0; i < n; i += 1) for (let d = 0; d < dims; d += 1) mean[d] += z[i * dims + d];
+  for (let d = 0; d < dims; d += 1) mean[d] /= n || 1;
+  const cov = new Float64Array(dims * dims);
+  for (let i = 0; i < n; i += 1) {
+    for (let a = 0; a < dims; a += 1) {
+      const xa = z[i * dims + a] - mean[a];
+      for (let b = a; b < dims; b += 1) cov[a * dims + b] += xa * (z[i * dims + b] - mean[b]);
+    }
+  }
+  for (let a = 0; a < dims; a += 1) {
+    for (let b = a; b < dims; b += 1) {
+      cov[a * dims + b] /= n || 1;
+      cov[b * dims + a] = cov[a * dims + b];
+    }
+  }
+  const { values, vectors } = symEigen(cov, dims);
+  const total = values.reduce((s, x) => s + Math.max(0, x), 0) || 1;
+  const pos = new Float64Array(3 * n);
+  for (let i = 0; i < n; i += 1) {
+    for (let c = 0; c < Math.min(dim, 3, dims); c += 1) {
+      let acc = 0;
+      for (let d = 0; d < dims; d += 1) acc += (z[i * dims + d] - mean[d]) * vectors[c][d];
+      pos[3 * i + c] = acc;
+    }
+  }
+  return { pos, share: values.slice(0, 3).map((x) => Math.max(0, x) / total) };
+}
+
+/** 1年の営業日（らせんの1周） */
+export const TURN_DAYS = 245;
+
+/**
+ * 時間のらせん: 古い日から順に、1年（TURN_DAYS 営業日）で1周するらせんに置く。3次元は上へ伸びる（今日がいちばん上）、
+ * 2次元は外へ広がるうずまき（今日がいちばん外）。似た日どうしの線は、似た状態が何年のいつ現れたかを結ぶ。
+ */
+export function helixPositions(n, dim = 3) {
+  const pos = new Float64Array(3 * n);
+  const turns = Math.max(1, (n - 1) / TURN_DAYS);
+  for (let i = 0; i < n; i += 1) {
+    const th = (2 * Math.PI * i) / TURN_DAYS;
+    const f = n > 1 ? i / (n - 1) : 1;
+    if (dim === 3) {
+      pos[3 * i] = 100 * Math.cos(th);
+      pos[3 * i + 1] = -(f - 0.5) * 100 * Math.max(1.6, turns * 0.42);   // 画面の上がマイナス（今日が上）
+      pos[3 * i + 2] = 100 * Math.sin(th);
+    } else {
+      const r = 20 + 80 * f;
+      pos[3 * i] = r * Math.cos(th);
+      pos[3 * i + 1] = r * Math.sin(th);
+      pos[3 * i + 2] = 0;
+    }
+  }
+  return pos;
 }

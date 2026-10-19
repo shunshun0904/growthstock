@@ -729,6 +729,7 @@ input[type='range']::-moz-range-thumb {
 .net { display: flex; flex-direction: column; gap: var(--s4); }
 .net-seg { display: inline-flex; gap: 2px; flex-wrap: wrap; }
 .net-seg .btn.on { color: var(--text); background: var(--bg-raised); box-shadow: inset 0 -2px 0 var(--accent); }
+.net-seg .btn.net-k { min-width: 28px; padding-left: 6px; padding-right: 6px; justify-content: center; font-variant-numeric: tabular-nums; }
 .net-note b { color: var(--text); }
 .net-how { margin-top: 4px; }
 .net-how summary { cursor: pointer; color: var(--text-dim); }
@@ -773,7 +774,7 @@ input[type='range']::-moz-range-thumb {
 .net-legend .mk.today { width: 12px; height: 12px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 2px var(--bg-card), 0 0 0 3px #fff; }
 .net-legend .mk.fresh { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--violet); }
 .net-legend .mk.trail { width: 16px; height: 0; border-top: 2px solid rgba(251, 191, 36, 0.85); }
-.net-legend .mk.focus { width: 16px; height: 0; border-top: 2px solid rgba(167, 139, 250, 0.9); }
+.net-legend .mk.focus { width: 16px; height: 0; border-top: 2px solid rgba(224, 242, 254, 0.92); box-shadow: 0 0 6px 1px rgba(125, 211, 252, 0.55); }
 .net-ramp { gap: 6px; }
 .net-ramp i { display: inline-block; width: 120px; height: 8px; border-radius: 4px; }
 .net-canvas { position: relative; height: min(78vh, 760px); min-height: 360px; border-radius: var(--radius-sm); overflow: hidden;

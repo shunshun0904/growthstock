@@ -4,10 +4,11 @@
 （作りものの日足）。
 
 - 状態: 列の型（linear_preprocess）どおりに変換して、その銘柄のノード全体で平均0・標準偏差1。|z| は Z_CAP で切る。丸めは 1/Q σ
-- 距離の2乗は整数で、素朴に数えた値と一致する。ε² は結べる組（タイラー窓より離れた組）の距離の2乗の m 番目
-  （m = 密度 × 組の数 を四捨五入。0.5 は切り上げ）。結べる組が無ければ辺なし
-- 辺はタイラー窓の中を結ばない・対称・ε² 以下は同じ値も全部入る
-- 要約: 今日の次数・中位の百分位・近傍の結果（分かった日だけで数える）・近い更新日の並び（ε の外も近い順）が、小さな例で手で数えた値と一致
+- 距離の2乗は整数で、素朴に数えた値と一致する。近傍は各ノードの、タイラー窓より離れた日のうち距離の近い k 日（同じ距離は古い日が先。
+  同じ距離がたくさんある例で素朴な並べ方と一致）。結べる日が k より少なければその数。結べる日が無ければ近傍なし
+- 辺はどちらかが相手を近い k 日に選んでいれば結ぶ（対称・タイラー窓の中は結ばない）
+- 要約（k ごと）: 今日の近い k 日の結果（分かった日だけで数える）・k 番目の距離とその位置（中位の百分位）・時期の数・線の数・
+  近い更新日の並び（近い k 日の外も近い順）が、小さな例で手で数えた値と一致（k = 3 は版 3 の ε の例と同じ近傍になる）
 - 先読みしない: 予測日より後の日足があってもなくても、同じファイルになる。目的変数は最後の20営業日が未確定、+10% の到達は予測日までの
   高値だけで決まる
 - 結果は live_track.forward・build_dataset の目的変数（1.2σ・1.5σ）・78週高値の更新日と同じ
@@ -133,14 +134,15 @@ def decode(p: dict):
 
 
 def make_fixtures(out_dir: str = FIX_DIR, expected_path: str = FIX_EXPECTED) -> None:
-    """フィクスチャ（index.json・銘柄ごとのファイル・密度ごとの要約）を作り直す。"""
+    """フィクスチャ（index.json・銘柄ごとのファイル・k ごとの要約）を作り直す。要約は k ごとに summarize を1つずつ通して数える
+    （ファイルの byK は summaries でまとめて数えたもの。両方が同じことは test_fixture_summaries が確かめる）。"""
     index, files = fixture_build()
     RN.write(index, files, out_dir, None)
     expected = {}
     for f, p in files.items():
         zq, ret, labels, fresh, dates = decode({k: v for k, v in p.items() if not k.startswith("_")})
-        expected[f] = {str(bp): RN.round_summary(RN.summarize(zq, ret, labels, fresh, dates, rr_bp=bp))
-                       for bp in RN.RR_CHOICES_BP}
+        expected[f] = {str(k): RN.round_summary(RN.summarize(zq, ret, labels, fresh, dates, k=k))
+                       for k in RN.K_CHOICES}
     with open(expected_path, "w", encoding="utf-8") as fh:
         json.dump(expected, fh, ensure_ascii=False, indent=1)
 
@@ -203,39 +205,69 @@ class TestEdges(unittest.TestCase):
             for j in range(40):
                 self.assertEqual(int(s[i, j]), int(((a[i] - a[j]) ** 2).sum()))
 
-    def test_threshold_and_adjacency(self):
-        rng = np.random.default_rng(3)
-        a = rng.integers(-40, 41, size=(30, 9))
-        s = RN.sq_dist(a)
-        th = RN.threshold(s, theiler=3, rr_bp=1000)
-        vals = sorted(int(s[i, j]) for i in range(30) for j in range(i + 4, 30))
-        self.assertEqual(th["pairs"], len(vals))
-        self.assertEqual(th["m"], (1000 * len(vals) + 5000) // 10000)
-        self.assertEqual(th["t"], vals[th["m"] - 1])
-        A = RN.adjacency(s, th["t"], theiler=3)
-        self.assertTrue(np.array_equal(A, A.T))
-        self.assertFalse(A.diagonal().any())
-        for i in range(30):
-            for j in range(30):
-                self.assertEqual(bool(A[i, j]), abs(i - j) > 3 and s[i, j] <= th["t"])
-        self.assertEqual(int(A.sum() // 2), sum(v <= th["t"] for v in vals))   # 同じ値は全部入る
+    @staticmethod
+    def brute_knn(s, theiler, k):
+        """素朴な並べ方: 結べる日（|i − j| > theiler）を（距離の2乗, 番号）で並べて先頭 k 日。"""
+        n = len(s)
+        out = []
+        for i in range(n):
+            cand = sorted((j for j in range(n) if abs(i - j) > theiler), key=lambda j: (int(s[i, j]), j))
+            out.append(cand[:k])
+        return out
 
-    def test_threshold_rounds_half_up(self):
-        # 組の数 300（n = 27、タイラー窓 2: (27−3)(27−2)/2 = 300）、密度 50bp → 1.5 → 2
-        s = RN.sq_dist(np.random.default_rng(4).integers(-5, 6, size=(27, 9)))
-        th = RN.threshold(s, theiler=2, rr_bp=50)
-        self.assertEqual((th["pairs"], th["m"]), (300, 2))
+    def test_knn_order_matches_bruteforce_with_ties(self):
+        # 値の幅を狭くして同じ距離をたくさん作る（同じ距離は古い日が先）
+        rng = np.random.default_rng(3)
+        for lo, hi, n, theiler in [(-2, 3, 50, 3), (-40, 41, 70, 5), (0, 2, 30, 0)]:
+            a = rng.integers(lo, hi, size=(n, 9))
+            s = RN.sq_dist(a)
+            order, cnt = RN.knn_order(s, theiler, 12)
+            want = self.brute_knn(s, theiler, 12)
+            for i in range(n):
+                self.assertEqual(int(cnt[i]), len(want[i]))
+                self.assertEqual(order[i, :cnt[i]].tolist(), want[i], f"{lo},{hi} i={i}")
+                self.assertTrue((order[i, cnt[i]:] == -1).all())
+            ties = sum(len(set(int(s[i, j]) for j in w)) < len(w) for i, w in enumerate(want))
+            if hi - lo <= 5:
+                self.assertGreater(ties, 0)                                  # 同じ距離の並びを本当に確かめている
+
+    def test_knn_adjacency_union(self):
+        rng = np.random.default_rng(5)
+        a = rng.integers(-40, 41, size=(40, 9))
+        s = RN.sq_dist(a)
+        order, cnt = RN.knn_order(s, 3, 50)
+        for k in (1, 4, 10):
+            A = RN.knn_adjacency(order, cnt, k)
+            want = self.brute_knn(s, 3, k)
+            self.assertTrue(np.array_equal(A, A.T))
+            self.assertFalse(A.diagonal().any())
+            for i in range(40):
+                for j in range(40):
+                    self.assertEqual(bool(A[i, j]), j in want[i] or i in want[j], (k, i, j))
+                    if abs(i - j) <= 3:
+                        self.assertFalse(A[i, j])
+            self.assertTrue((A.sum(axis=1) >= k).all())                     # 次数は k 以上（選ばれた分だけ増える）
+
+    def test_fewer_candidates_than_k(self):
+        # 6ノード・タイラー窓 2: 端の日は結べる日が3日、真ん中は1日だけ（k = 5 より少ない）
+        s = RN.sq_dist(np.random.default_rng(6).integers(-5, 6, size=(6, 9)))
+        order, cnt = RN.knn_order(s, 2, 5)
+        self.assertEqual(cnt.tolist(), [3, 2, 1, 1, 2, 3])
+        self.assertEqual(sorted(order[0, :3].tolist()), [3, 4, 5])
+        self.assertEqual(order[2, :1].tolist(), [5])
+        self.assertTrue((order[2, 1:] == -1).all())
 
     def test_too_few_nodes(self):
         s = RN.sq_dist(np.zeros((5, 9), dtype=int))
-        th = RN.threshold(s, theiler=20)
-        self.assertEqual(th, {"t": -1, "pairs": 0, "m": 0})
-        self.assertFalse(RN.adjacency(s, th["t"], theiler=20).any())
+        order, cnt = RN.knn_order(s, 20, 10)
+        self.assertEqual(cnt.tolist(), [0] * 5)
+        self.assertTrue((order == -1).all())
+        self.assertFalse(RN.knn_adjacency(order, cnt, 10).any())
 
 
 class TestSummary(unittest.TestCase):
-    def test_hand_example(self):
-        # 1列目だけが動く8ノード（ほかの列は 0）。タイラー窓 1・密度 3333bp（結べる組 21 → m = (3333×21 + 5000) // 10000 = 7）
+    def hand(self, k):
+        # 1列目だけが動く8ノード（ほかの列は 0）。タイラー窓 1・q = 1（距離の2乗 = 1列目の差の2乗）
         x = np.array([0, 10, 1, 30, 2, 31, 9, 0])
         zq = np.zeros((8, 9), dtype=int)
         zq[:, 0] = x
@@ -244,44 +276,75 @@ class TestSummary(unittest.TestCase):
                   "l15": np.array([1, 0, np.nan, 0, 0, 0, 0, np.nan], dtype=float)}
         fresh = [0, 4, 5, 6]
         dates = [f"2026-01-{d:02d}" for d in range(5, 13)]
-        s = RN.summarize(zq, ret, labels, fresh, dates, theiler=1, rr_bp=3333, q=1)
-        # 結べる組（|i−j| > 1）の距離の2乗を小さい順: 0（0-7）, 1（0-2・1-6・2-4・2-7・3-5）, 4（0-4・4-7）, 49, ... → 7 番目 = 4
-        self.assertEqual((s["pairs"], s["m"], s["eps2"]), (21, 7, 4))
-        self.assertAlmostEqual(s["eps"], 2.0)
-        # 辺（4 以下）: 0-7・0-2・1-6・2-4・2-7・3-5・0-4・4-7
-        self.assertEqual(s["edges"], 8)
-        # 今日 = 7（x = 0）: 0（0）・2（1）・4（4）。5 は 31² = 961 で遠い。6 はタイラー窓の中
-        self.assertEqual(s["deg"], 3)
-        deg = np.array([3, 1, 3, 1, 3, 1, 1, 3])
-        self.assertAlmostEqual(s["degPct"], 100.0 * (np.sum(deg < 3) + 0.5 * np.sum(deg == 3)) / 8)
-        self.assertEqual(s["nbr"]["n"], 3)
-        self.assertEqual(s["nbr"]["known"], 2)                  # 2 は結果が分からない
-        self.assertAlmostEqual(s["nbr"]["hit"], 1.0)            # 0 と 4 はどちらも +10
-        self.assertAlmostEqual(s["nbr"]["retMed"], 10.0)
-        self.assertAlmostEqual(s["nbr"]["l15"], 0.5)
-        self.assertEqual(s["nbr"]["l15N"], 2)
+        return RN.summarize(zq, ret, labels, fresh, dates, theiler=1, k=k, q=1)
+
+    def test_hand_example_k2(self):
+        s = self.hand(2)
+        # 今日 = 7（x = 0）。結べる日は 0〜5: 距離の2乗 0（0）・1（2）・4（4）・100（1）・900（3）・961（5） → 近い2日は 0・2
+        self.assertEqual((s["k"], s["theiler"], s["deg"], s["kth2"]), (2, 1, 2, 1))
+        self.assertAlmostEqual(s["kth"], 1.0)
+        # 各ノードの2番目に近い日までの距離の2乗（手で数えた値）: 1・64・1・400・4・441・49・1。今日の 1 は下 0・同じ 3
+        self.assertAlmostEqual(s["kthPct"], 100.0 * (0 + 0.5 * 3) / 8)
+        self.assertEqual(s["periods"], 2)                       # 0 と 2 は 1 日より離れている
+        # 近い2日: 0→7,2 / 1→6,4 / 2→0,4 / 3→5,1 / 4→2,0 / 5→3,1 / 6→1,4 / 7→0,2。どちらかが選べば1本 → 11本
+        self.assertEqual(s["edges"], 11)
+        self.assertEqual(s["isolated"], 0)
+        self.assertAlmostEqual(s["degMed"], 2.5)                # 次数 3・4・3・2・4・2・2・2
+        self.assertEqual(s["nbr"], {"n": 2, "known": 1, "hit": 1.0, "retMed": 10.0,
+                                    "l12": 1.0, "l12N": 1, "l15": 1.0, "l15N": 1})
+        self.assertEqual(s["nbrFresh"]["n"], 1)                 # 0 だけ
         self.assertEqual(s["base"]["known"], 6)
         self.assertAlmostEqual(s["base"]["hit"], 2 / 6)
         self.assertAlmostEqual(s["base"]["retMed"], (0.0 + 2.5) / 2)
-        self.assertEqual(s["nbrFresh"]["n"], 2)                 # 0 と 4
         self.assertEqual(s["baseFresh"]["n"], 4)
-        # 近い更新日: 今日（7）より 1 日より前の更新日 0, 4, 5 を近い順（6 はタイラー窓の中）
+        # 近い更新日: 今日（7）より 1 日より前の更新日 0, 4, 5 を近い順（6 はタイラー窓の中）。近い2日に入るのは 0 だけ
         self.assertEqual([r["i"] for r in s["nearestFresh"]], [0, 4, 5])
-        self.assertEqual([r["inEps"] for r in s["nearestFresh"]], [True, True, False])
+        self.assertEqual([r["inKnn"] for r in s["nearestFresh"]], [True, False, False])
         self.assertEqual(s["nearestFresh"][0]["date"], "2026-01-05")
         self.assertEqual(s["nearestFresh"][2]["ret"], -12.0)
         self.assertEqual(s["nearestFresh"][1]["l12"], 1)
 
-    def test_isolated_today(self):
+    def test_hand_example_k3_same_as_eps_example(self):
+        # k = 3 の近傍は、版 3 の ε の例（ε² = 4）と同じ 0・2・4
+        s = self.hand(3)
+        self.assertEqual((s["deg"], s["kth2"], s["periods"]), (3, 4, 3))
+        self.assertEqual(s["nbr"], {"n": 3, "known": 2, "hit": 1.0, "retMed": 10.0,
+                                    "l12": 1.0, "l12N": 2, "l15": 0.5, "l15N": 2})
+        self.assertEqual(s["nbrFresh"]["n"], 2)                 # 0 と 4
+        self.assertEqual([r["inKnn"] for r in s["nearestFresh"]], [True, True, False])
+
+    def test_summaries_same_as_one_by_one(self):
+        rng = np.random.default_rng(8)
+        zq = rng.integers(-30, 31, size=(120, 9))
+        ret = np.where(rng.random(120) < 0.2, np.nan, np.round(rng.normal(0, 8, 120), 1))
+        labels = {"l12": rng.integers(0, 2, 120).astype(float), "l15": rng.integers(0, 2, 120).astype(float)}
+        fresh = sorted(rng.choice(100, 15, replace=False).tolist())
+        dates = [f"d{i}" for i in range(120)]
+        allk = RN.summaries(zq, ret, labels, fresh, dates)
+        self.assertEqual(list(allk), [str(k) for k in RN.K_CHOICES])
+        for k in RN.K_CHOICES:
+            self.assertEqual(json.dumps(allk[str(k)], sort_keys=True),
+                             json.dumps(RN.summarize(zq, ret, labels, fresh, dates, k=k), sort_keys=True))
+            self.assertEqual(allk[str(k)]["deg"], k)
+
+    def test_rare_today(self):
         zq = np.zeros((60, 9), dtype=int)
         zq[:, 0] = np.arange(60) % 7
-        zq[-1, 0] = 100                                          # 今日だけ遠い
-        s = RN.summarize(zq, np.full(60, np.nan), {"l12": np.full(60, np.nan), "l15": np.full(60, np.nan)},
-                         [], [f"d{i}" for i in range(60)], theiler=5, rr_bp=200)
-        self.assertEqual(s["deg"], 0)
-        self.assertEqual(s["nbr"], {"n": 0, "known": 0, "hit": None, "retMed": None,
+        zq[-1, 0] = 100                                          # 今日だけ遠い（似た日はあるが、どれも遠い）
+        nan = np.full(60, np.nan)
+        s = RN.summarize(zq, nan, {"l12": nan, "l15": nan}, [], [f"d{i}" for i in range(60)], theiler=5, k=5)
+        self.assertEqual(s["deg"], 5)
+        self.assertAlmostEqual(s["kthPct"], 100.0 * (59 + 0.5) / 60)   # k 番目の距離がいちばん遠い
+        self.assertEqual(s["nbr"], {"n": 5, "known": 0, "hit": None, "retMed": None,
                                     "l12": None, "l12N": 0, "l15": None, "l15N": 0})
         self.assertEqual(s["nearestFresh"], [])
+
+    def test_too_few_nodes(self):
+        nan = np.full(5, np.nan)
+        s = RN.summarize(np.zeros((5, 9), dtype=int), nan, {"l12": nan, "l15": nan}, [], [f"d{i}" for i in range(5)])
+        self.assertEqual((s["deg"], s["kth2"], s["kth"], s["kthPct"], s["periods"], s["edges"], s["isolated"]),
+                         (0, -1, None, None, 0, 0, 5))
+        self.assertEqual(s["nbr"]["n"], 0)
 
 
 class TestRule(unittest.TestCase):
@@ -338,7 +401,7 @@ class TestBuild(unittest.TestCase):
         self.assertEqual(sorted(f1), sorted(f2))
         for f in f1:
             self.assertEqual(json.dumps(f1[f], sort_keys=True), json.dumps(f2[f], sort_keys=True), f)
-        self.assertEqual([c["summary"] for c in blk1["candidates"]], [c["summary"] for c in blk2["candidates"]])
+        self.assertEqual([c["byK"] for c in blk1["candidates"]], [c["byK"] for c in blk2["candidates"]])
 
     def test_outcomes_match_sources(self):
         bars = fixture_bars(extra_after=30)
@@ -426,6 +489,10 @@ class TestBuild(unittest.TestCase):
         self.assertEqual([d["nBreak"] for d in index["days"]], [2, 2])               # 満たさなかった銘柄も数える
         self.assertEqual(index["days"][0]["skipped"], [])                           # 満たさない銘柄は作れない扱いにもしない
         self.assertEqual(index["method"]["rule"], {"models": list(LT.RULE_MODELS), "agreePct": LT.AGREE_PCT})
+        self.assertEqual((index["method"]["k"], index["method"]["kChoices"]), (10, list(range(1, 11))))   # k は 1〜10
+        for c in index["days"][1]["candidates"]:
+            self.assertEqual(list(c["byK"]), [str(k) for k in range(1, 11)])
+            self.assertEqual(c["byK"]["10"], files[c["file"]]["byK"]["10"])
         RN.write(index, files, out, arch)
         self.assertTrue(os.path.exists(os.path.join(out, "keep.txt")))              # 自分のファイル以外は残す
         self.assertFalse(os.path.exists(os.path.join(out, "2020-01-01_11110.json")))  # 前の自分のファイルは消す
@@ -510,10 +577,11 @@ class TestFixtures(unittest.TestCase):
                 p = json.load(fh)
             zq, ret, labels, fresh, dates = decode(p)
             self.assertEqual(dates[-1], p["date"])
-            for bp, want in expected[f].items():
-                got = RN.round_summary(RN.summarize(zq, ret, labels, fresh, dates, rr_bp=int(bp)))
-                self.assertEqual(got, want, f"{f} {bp}bp")
-            self.assertEqual(p["summary"], expected[f][str(RN.RR_BP)])
+            self.assertEqual(list(expected[f]), [str(k) for k in RN.K_CHOICES])
+            for k, want in expected[f].items():
+                got = RN.round_summary(RN.summarize(zq, ret, labels, fresh, dates, k=int(k)))
+                self.assertEqual(got, want, f"{f} k={k}")
+            self.assertEqual(p["byK"], expected[f])
 
     def test_fixture_format(self):
         # フィクスチャの項目は今の作り（build_day）が書く項目と同じ。値そのものは比べない（作りものの日足の exp・log は
@@ -534,7 +602,8 @@ class TestFixtures(unittest.TestCase):
             with open(os.path.join(FIX_DIR, f), encoding="utf-8") as fh:
                 q = json.load(fh)
             self.assertEqual(sorted(q), sorted(k for k in p if not k.startswith("_")), f)
-            self.assertEqual(sorted(q["summary"]), sorted(p["summary"]), f)
+            self.assertEqual(sorted(q["byK"]), sorted(p["byK"]), f)
+            self.assertEqual(sorted(q["byK"]["10"]), sorted(p["byK"]["10"]), f)
 
 
 if __name__ == "__main__":

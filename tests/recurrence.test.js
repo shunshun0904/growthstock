@@ -1,9 +1,10 @@
 /**
  * リカレンス・ネットワーク（src/lib/recurrence.js）の単体テスト。
  *
- * - 辺と要約は Python（research/recurrence_net.py）と同じ: tests/fixtures/recurrence/ の候補のファイルから、辺の密度ごとに数えた
+ * - 近傍・線・要約は Python（research/recurrence_net.py）と同じ: tests/fixtures/recurrence/ の候補のファイルから、k ごとに数えた
  *   要約が tests/fixtures/recurrence-expected.json（Python が数えた値。tests/test_recurrence_net.py が同じ値を確かめる）と一致する
- * - ε² は結べる組（タイラー窓より離れた組）の距離の2乗の m 番目（0.5 は切り上げ）。同じ値は全部結ぶ。タイラー窓の中は結ばない
+ * - 近傍は各ノードの、タイラー窓より離れた日のうち距離の近い k 日（同じ距離は古い日が先。同じ距離がたくさんある例で素朴な並べ方と
+ *   一致）。線はどちらかが選べば結ぶ。手で数えた小さな例（Python の test_hand_example_k2・k3 と同じ）
  * - 日付は start に gaps の暦日を足していく（最後の日が予測日）
  * - 色の区分（+10% 到達 / 0〜+10 / −10〜0 / −10 未満 / 未確定、正例 / 負例 / 未確定）と、丸めた z から生の値の目安への戻し方
  * - 先20営業日の値動きの色（最高値までの上昇率の5段、20営業日目の騰落率の4段。区切りは下の端を含む。最安値までの色は運用者の
@@ -18,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  decode, network, summarize, neighborsOf, todayNeighbors, outcomeOf, labelClassOf, nodeColors, classCounts,
+  decode, knnLists, network, summarize, neighborsOf, todayNeighbors, periodsOf, outcomeOf, labelClassOf, nodeColors, classCounts,
   rawOf, methodOf, timeColor, riseOf, classesOf, OUTCOME_CLASSES, RISE_CLASSES, R20_CLASSES,
   NA_VALUE, COLOR_MODES,
 } from '../src/lib/recurrence.js';
@@ -51,19 +52,28 @@ function near(got, want, where) {
   for (const k of Object.keys(want)) near(got[k], want[k], `${where}.${k}`);
 }
 
-test('フィクスチャの要約が Python と一致する（辺の密度ごと）', () => {
+test('フィクスチャの要約が Python と一致する（k ごと）', () => {
   const files = index.days.flatMap((d) => d.candidates.map((c) => c.file));
   assert.deepEqual(files.sort(), Object.keys(expected).sort());
+  assert.deepEqual(method.kChoices, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  assert.equal(method.k, 10);
   for (const f of files) {
     const p = read(path.join(FIX, f));
     const dec = decode(p, method.labels);
     assert.equal(dec.dates[dec.n - 1], p.date, `${f}: 最後のノードが予測日`);
-    for (const [bp, want] of Object.entries(expected[f])) {
-      const net = network(dec, method.theiler, Number(bp));
-      near(summarize(dec, net, method.theiler, Number(bp), { target: method.target, labels: method.labels }), want, `${f} ${bp}bp`);
+    const lists = knnLists(dec, method.theiler, Math.max(...method.kChoices));
+    assert.deepEqual(Object.keys(expected[f]), method.kChoices.map(String));
+    for (const [k, want] of Object.entries(expected[f])) {
+      const net = network(dec, method.theiler, Number(k), lists);
+      near(summarize(dec, net, method.theiler, Number(k), { target: method.target, labels: method.labels }), want, `${f} k=${k}`);
+      // 一度にまとめて数えた近傍（kMax = 50）から切っても、その k だけで数えても同じ
+      const alone = network(dec, method.theiler, Number(k));
+      assert.deepEqual(Array.from(alone.edges), Array.from(net.edges), `${f} k=${k}: 線`);
     }
-    near(p.summary, expected[f][String(method.rrBp)], `${f} ファイルの要約`);
+    near(p.byK, expected[f], `${f} ファイルの要約`);
   }
+  // 目次の一覧の要約もファイルと同じ
+  for (const c of index.days.flatMap((d) => d.candidates)) near(c.byK, expected[c.file], `${c.file} 目次の要約`);
 });
 
 const tiny = (xs, extra = {}) => {
@@ -78,46 +88,100 @@ const tiny = (xs, extra = {}) => {
   });
 };
 
-test('辺: ε² は m 番目・同じ値は全部・タイラー窓の中は結ばない', () => {
-  // test_recurrence_net.TestSummary.test_hand_example と同じ例
-  const dec = tiny([0, 10, 1, 30, 2, 31, 9, 0], {
-    ret: [10, -3, null, 2.5, 10, -12, 0, null],
-    l12: [1, 0, null, 0, 1, 0, 0, null], l15: [1, 0, null, 0, 0, 0, 0, null], fresh: [0, 4, 5, 6],
-  });
-  const net = network(dec, 1, 3333);
-  assert.equal(net.pairs, 21);
-  assert.equal(net.m, 7);
-  assert.equal(net.t, 4);
-  assert.equal(net.nEdges, 8);
-  const pairs = [];
-  for (let e = 0; e < net.edges.length; e += 2) pairs.push(`${net.edges[e]}-${net.edges[e + 1]}`);
-  assert.deepEqual(pairs.sort(), ['0-2', '0-4', '0-7', '1-6', '2-4', '2-7', '3-5', '4-7']);
-  assert.deepEqual(Array.from(net.deg), [3, 1, 3, 1, 3, 1, 1, 3]);
-  const s = summarize(dec, net, 1, 3333);
-  assert.equal(s.deg, 3);
-  assert.equal(s.degPct, 75);
-  assert.deepEqual(s.nbr, { n: 3, known: 2, hit: 1, retMed: 10, l12: 1, l12N: 2, l15: 0.5, l15N: 2 });
-  assert.equal(s.base.known, 6);
-  assert.equal(s.base.retMed, 1.25);
-  assert.deepEqual(s.nearestFresh.map((r) => [r.i, r.inEps, r.date]),
-    [[0, true, '2026-01-05'], [4, true, '2026-01-09'], [5, false, '2026-01-10']]);
-  // 隣接の一覧・今日の近傍（近い順）
-  const nb = neighborsOf(net, dec.n);
-  assert.deepEqual(Array.from(nb.of(7)).sort(), [0, 2, 4]);
-  assert.deepEqual(todayNeighbors(dec, net, 1).map((r) => r.i), [0, 2, 4]);
+const hand = () => tiny([0, 10, 1, 30, 2, 31, 9, 0], {
+  ret: [10, -3, null, 2.5, 10, -12, 0, null],
+  l12: [1, 0, null, 0, 1, 0, 0, null], l15: [1, 0, null, 0, 0, 0, 0, null], fresh: [0, 4, 5, 6],
 });
 
-test('四捨五入は 0.5 を切り上げる・結べる組が無ければ辺なし', () => {
-  const xs = Array.from({ length: 27 }, (_, i) => (i * 7) % 11);
-  const net = network(tiny(xs), 2, 50);    // 組 300 × 50bp = 1.5 → 2
-  assert.equal(net.pairs, 300);
-  assert.equal(net.m, 2);
-  const none = network(tiny([0, 1, 2]), 20, 100);
-  assert.deepEqual([none.t, none.pairs, none.nEdges], [-1, 0, 0]);
-  const s = summarize(tiny([0, 1, 2]), none, 20, 100);
-  assert.equal(s.deg, 0);
-  assert.equal(s.eps, null);
+test('k近傍: 手で数えた例（Python の test_hand_example_k2 と同じ）', () => {
+  const dec = hand();
+  const net = network(dec, 1, 2);
+  // 近い2日: 0→7,2 / 1→6,4 / 2→0,4 / 3→5,1 / 4→2,0 / 5→3,1 / 6→1,4 / 7→0,2。どちらかが選べば1本
+  const pairs = [];
+  for (let e = 0; e < net.edges.length; e += 2) pairs.push(`${net.edges[e]}-${net.edges[e + 1]}`);
+  assert.deepEqual(pairs, ['0-2', '0-4', '0-7', '1-3', '1-4', '1-5', '1-6', '2-4', '2-7', '3-5', '4-6']);
+  assert.deepEqual(Array.from(net.deg), [3, 4, 3, 2, 4, 2, 2, 2]);
+  const s = summarize(dec, net, 1, 2);
+  assert.deepEqual([s.k, s.deg, s.kth2, s.kth, s.periods, s.edges, s.isolated, s.degMed], [2, 2, 1, 1, 2, 11, 0, 2.5]);
+  assert.equal(s.kthPct, (100 * 1.5) / 8);                  // 各ノードの2番目の距離 1・64・1・400・4・441・49・1
+  assert.deepEqual(s.nbr, { n: 2, known: 1, hit: 1, retMed: 10, l12: 1, l12N: 1, l15: 1, l15N: 1 });
+  assert.equal(s.nbrFresh.n, 1);
+  assert.equal(s.base.known, 6);
+  assert.equal(s.base.retMed, 1.25);
+  assert.deepEqual(s.nearestFresh.map((r) => [r.i, r.inKnn, r.date]),
+    [[0, true, '2026-01-05'], [4, false, '2026-01-09'], [5, false, '2026-01-10']]);
+  assert.deepEqual(Array.from(neighborsOf(net).of(7)), [0, 2]);           // 今日の似た日（近い順）
+  assert.deepEqual(Array.from(neighborsOf(net).of(1)), [6, 4]);           // 線は 1-3・1-5 もあるが、1 が選んだのは 6・4
+  assert.deepEqual(todayNeighbors(dec, net).map((r) => [r.i, r.d]), [[0, 0], [2, 1]]);
+  // k = 3 は版 3 の ε の例（ε² = 4）と同じ近傍 0・2・4
+  const s3 = summarize(dec, network(dec, 1, 3), 1, 3);
+  assert.deepEqual([s3.deg, s3.kth2, s3.periods], [3, 4, 3]);
+  assert.deepEqual(s3.nbr, { n: 3, known: 2, hit: 1, retMed: 10, l12: 1, l12N: 2, l15: 0.5, l15N: 2 });
+  assert.deepEqual(s3.nearestFresh.map((r) => r.inKnn), [true, true, false]);
+});
+
+/** 決まった種の乱数（-r〜r の整数）。 */
+function ints(seed, count, r) {
+  let a = seed >>> 0;
+  const out = [];
+  for (let x = 0; x < count; x += 1) {
+    a = (Math.imul(a, 1664525) + 1013904223) >>> 0;
+    out.push((a % (2 * r + 1)) - r);
+  }
+  return out;
+}
+
+test('k近傍: 素朴な並べ方と一致する（同じ距離がたくさんある例・結べる日が k より少ない例）', () => {
+  for (const [seed, n, r, theiler, k] of [[1, 50, 2, 3, 12], [2, 70, 40, 5, 12], [3, 30, 1, 0, 7], [4, 6, 5, 2, 5]]) {
+    const z = ints(seed, n * 9, r);
+    const dec = decode({
+      n, features: Array(9).fill('f'), z, q: 1, start: '2026-01-05', gaps: Array(n - 1).fill(1),
+      ret: Array(n).fill(null), l12: Array(n).fill(null), l15: Array(n).fill(null), fresh: [], close: Array(n).fill(1),
+    });
+    const lists = knnLists(dec, theiler, k);
+    const dist = (i, j) => { let acc = 0; for (let d = 0; d < 9; d += 1) acc += (z[i * 9 + d] - z[j * 9 + d]) ** 2; return acc; };
+    const want = [];
+    for (let i = 0; i < n; i += 1) {
+      const cand = [];
+      for (let j = 0; j < n; j += 1) if (Math.abs(i - j) > theiler) cand.push(j);
+      cand.sort((a, b) => (dist(i, a) - dist(i, b)) || (a - b));
+      want.push(cand.slice(0, k));
+      assert.equal(lists.cnt[i], Math.min(k, cand.length), `cnt ${seed} ${i}`);
+      assert.deepEqual(Array.from(lists.nbr.subarray(i * k, i * k + lists.cnt[i])), want[i], `並び ${seed} ${i}`);
+      assert.deepEqual(Array.from(lists.d2.subarray(i * k, i * k + lists.cnt[i])), want[i].map((j) => dist(i, j)));
+    }
+    for (const kk of [1, Math.min(4, k), k]) {
+      const net = network(dec, theiler, kk, lists);
+      const has = new Set();
+      for (let e = 0; e < net.edges.length; e += 2) {
+        assert.ok(net.edges[e] < net.edges[e + 1]);
+        has.add(`${net.edges[e]}-${net.edges[e + 1]}`);
+      }
+      for (let i = 0; i < n; i += 1) {
+        for (let j = i + 1; j < n; j += 1) {
+          const want1 = want[i].slice(0, kk).includes(j) || want[j].slice(0, kk).includes(i);
+          assert.equal(has.has(`${i}-${j}`), want1, `線 ${seed} k=${kk} ${i}-${j}`);
+        }
+      }
+    }
+  }
+  // 6ノード・タイラー窓 2: 結べる日は 3・2・1・1・2・3 日
+  const six = decode({
+    n: 6, features: ['f'], z: [0, 1, 2, 3, 4, 5], q: 1, start: '2026-01-05', gaps: [1, 1, 1, 1, 1],
+    ret: Array(6).fill(null), l12: Array(6).fill(null), l15: Array(6).fill(null), fresh: [], close: Array(6).fill(1),
+  });
+  assert.deepEqual(Array.from(knnLists(six, 2, 5).cnt), [3, 2, 1, 1, 2, 3]);
+  // 結べる日が無いほど短い: 似た日なし・要約は空
+  const few = tiny([0, 1, 2]);
+  const none = network(few, 20, 10);
+  assert.deepEqual([none.nEdges, none.lists.cnt[2]], [0, 0]);
+  const s = summarize(few, none, 20, 10);
+  assert.deepEqual([s.deg, s.kth2, s.kth, s.kthPct, s.periods, s.isolated], [0, -1, null, null, 0, 3]);
   assert.equal(s.nbr.hit, null);
+  assert.deepEqual(todayNeighbors(few, none), []);
+  assert.equal(periodsOf([40, 1, 20, 22, 70], 20), 2);      // 1・20・22・40 は隣との差が20以下でつながり、70 は30離れる
+  assert.equal(periodsOf([0, 21, 42], 20), 3);              // 差が 21 ずつ（20 より離れる）なら3つ
+  assert.equal(periodsOf([], 20), 0);
 });
 
 test('日付は start に gaps の暦日を足す', () => {
@@ -198,10 +262,11 @@ test('先20営業日の値動きの色（最高値まで・20営業日目）', (
   const v2 = tiny([0, 1, 2], { v: 2, rise: [5, 6, 7], fall: [-1, -2, -3], r20: [1, 2, 3] });
   assert.ok([...v2.rise, ...v2.fall].every(Number.isNaN));
   assert.deepEqual(Array.from(v2.r20), [1, 2, 3]);
-  // フィクスチャ（版 3）には値がある。最後の20営業日は未確定、分かる日は 最安値 ≤ 20営業日目の終値 ≤ 最高値（0.1% の丸めの幅）
+  // フィクスチャ（版 4。値は版 3 と同じ高値・安値の物差し）には値がある。最後の20営業日は未確定、分かる日は
+  // 最安値 ≤ 20営業日目の終値 ≤ 最高値（0.1% の丸めの幅）
   const p = read(path.join(FIX, index.days[0].candidates[0].file));
   const fx = decode(p, method.labels);
-  assert.equal(p.v, 3);
+  assert.equal(p.v, 4);
   assert.ok(Array.from(fx.rise.slice(-20)).every(Number.isNaN));
   // （実データでは20営業日目に売買が無い日は 20営業日目だけが分からない。最大・最小はその日を飛ばして数える）
   let known = 0;

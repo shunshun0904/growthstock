@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-購入条件を満たした銘柄ごとのリカレンス・ネットワーク（ε-recurrence network）。画面の「リカレンス・ネットワーク」タブ
+購入条件を満たした銘柄ごとのリカレンス・ネットワーク（k近傍の網。版 3 までは ε-recurrence network）。画面の「リカレンス・ネットワーク」タブ
 （src/views/NetworkView.jsx）に渡す（Release data-raw の recurrence.tar.gz。デプロイのときに dist/data/recurrence/ へ展開する）。
 
 運用者の依頼（2026-10-19）「Obsidian の球状のプロットのようなことを、ノードを1営業日として、本予測モデルに使えそうな可視化を
@@ -9,23 +9,28 @@
 画面の新しいタブ / データは Release に置く（全期間だと1日あたり約0.7〜1.6MB になり、毎日コミットすると履歴が年に数百MB 膨らむ。
 モデル本体を Release に置くのと同じ考え方。この見込みは高値更新の全銘柄で作る前提で、下の対象に絞り色付けの値を足した後は
 2026-10-09〜16 の5日で5銘柄・0.7MB）。
+同日の夜、運用者の選択（AskUserQuestion）「k近傍だけにする」「5・10・20・30・50（既定10）」で、ε（辺の密度で結ぶ）をやめて
+k近傍の網にした（版 4。docs/MODEL_ADOPTION_RULES.md §69）。k は続けて運用者の指定「正直なところ、kは1〜10までで良いです」で
+1〜10 にした（既定10 のまま）。
 対象（同日の運用者の指定「候補といったのは、予測サンプルではなく、その中でも購入条件を満たした銘柄です」）: その日の高値更新の
 銘柄（予測ファイルの候補）のうち、購入条件（今日の戦略の規則。1.5σ の3本 RULE_MODELS の百分位がすべて AGREE_PCT 以上）を
 満たした銘柄だけ。画面の strategy.js の strategySignal の passed・候補銘柄のニュース（news_links.rule_codes）と同じ。
 
 **参考の表示であって、選定には使わない。** 買う銘柄は今日の戦略（1.5σ の3本の最小の順）のまま。
 
-手法（Marwan ほか 2009 Phys. Lett. A 373:4246・Donner ほか 2010 New J. Phys. 12:033025 の recurrence network）
+手法（Marwan ほか 2009 Phys. Lett. A 373:4246・Donner ほか 2010 New J. Phys. 12:033025 の recurrence network のうち、
+      半径（ε）ではなく近傍の数（k）を決めて結ぶ網）
   ノード: 対象の銘柄の、予測日までの各営業日（売買が成立し、下の9列がそろった日。いちばん長い窓の指標（出来高の250日平均）が
         そろうまでの約250取引日は入らない）。予測日（候補の日）が最後のノード
   状態: テクニカル指標9列（FEATURES。research/technicals.py の値そのもの）を、列の型（linear_preprocess の型と同じ。正で裾が
         重い列は上の0.5%で切って log1p、符号つきで裾が重い列は上下0.5%で切って asinh、ほかは上下0.1%で切る）で変換し、その銘柄の
         ノード全体で平均0・標準偏差1にそろえた9次元のベクトル。|z| は Z_CAP で切り、1/Q σ 刻みの整数で持つ。距離も画面もこの
-        丸めた整数から数える（画面で辺の密度を変えて引き直しても、既定の密度ならこのファイルの要約と同じ辺になる）
-  辺: 2日の状態のユークリッド距離が ε 以下で、かつ THEILER（目的変数の期間 20営業日）より離れている組。隣り合う日は指標の窓が
-      重なってほぼ同じ状態になるので結ばない（リカレンスの解析でいうタイラー窓）。ε は結べる組のうち辺になる割合（辺の密度
-      = リカレンス率）が RR_BP（1万分率）になる値。結べる組の距離の2乗（整数）を小さい順に並べた m 番目（m = RR × 組の数を
-      四捨五入）を ε² とし、それ以下を全部結ぶ（同じ値は全部入る）。Donner ほか 2010 の「リカレンス率を固定して ε を決める」
+        丸めた整数から数える（画面で k を変えて引き直しても、このファイルの要約と同じ網になる）
+  近傍: 各ノードについて、THEILER（目的変数の期間 20営業日）より離れた日のうち、状態のユークリッド距離の近い k 日。並びは
+      （距離の2乗, ノードの番号）の小さい順で、同じ距離なら古い日が先（knn_order）。隣り合う日は指標の窓が重なってほぼ同じ状態に
+      なるので選ばない（リカレンスの解析でいうタイラー窓）。今日（最後のノード）の近傍は、このぶん必ず結果が出そろった過去の日
+  辺: どちらか一方が相手を近い k 日に選んでいれば結ぶ（向きのある近傍を対称にした網。knn_adjacency）。次数は k 以上になりうる
+      （多くの日に選ばれる日ほど大きい）。k は K_CHOICES から画面で選ぶ（既定 K_DEFAULT）
   結果（ノードの色）: その日に候補になっていたら、の結果。予測日までに分かったものだけ（予測日より後の日足は読まない）
      ret  … 今日の戦略の売り方（翌営業日の寄りで買い、+10% の指値に届けば +10、届かなければ20営業日目の終値。
              live_track.forward。予測日までに指値に届いた日は、20営業日たっていなくても +10 で分かっている）
@@ -40,10 +45,11 @@
              r20  … 20営業日目の騰落率（t+20 の終値 ÷ 買値 − 1。live_track.forward の ret_close。指値なしで持ち切った値）
              20営業日たつまでは未確定。窓の中の売買の無い日は飛ばす（指値の判定と同じ）。r20 は20営業日目に売買が無ければ
              分からない（2020-10-01 の終日の売買停止・売買の少ない銘柄。ret と同じ）。画面はこの3つでもノードを色分けする
-  要約（summary）: 今日のノードの次数（ε の中にある過去の日の数。タイラー窓のぶん、近傍はすべて結果が出そろった日）と、その銘柄の
-        ノードの中での位置（中位の順位の百分位）、今日の近傍の結果（+10% 到達・目的変数の正例の割合・収益の中央値）と銘柄の全期間の
-        割合、今日に近い過去の更新日（母集団の日）。画面は辺の密度を変えるたびに同じ式で数え直す（src/lib/recurrence.js。
-        tests/recurrence.test.js と tests/test_recurrence_net.py が同じフィクスチャで一致を確かめる）
+  要約（byK。k ごと）: 今日の近い k 日（似た日）の結果（+10% 到達・目的変数の正例の割合・収益の中央値）と銘柄の全期間の割合、
+        k 番目に近い日までの距離とその銘柄の日の中での位置（中位の順位の百分位。高いほど似た日の少ない珍しい状態）、似た日が
+        いくつの時期に固まっているか（20営業日より離れたところで区切った塊の数）、今日に近い過去の更新日（母集団の日）。
+        画面は k を変えるたびに同じ式で数え直す（src/lib/recurrence.js。tests/recurrence.test.js と tests/test_recurrence_net.py が
+        同じフィクスチャで一致を確かめる）
   過去の日: その日に作った値のまま（前の archive にある日は引き継ぐ。knn_compare と同じ考え方）。前の archive に無い過去の日は
         その日までの日足で作る（builtAt でいつ作ったか分かる）
   確かめ: 予測用のデータセット（dataset_predict.parquet）があれば、候補の日の9列がデータセットの値と一致するかを数える
@@ -82,7 +88,8 @@ import linear_preprocess as LP  # noqa: E402
 import live_track as LT  # noqa: E402
 import technicals as TX  # noqa: E402
 
-VERSION = 3                         # 2: 先20営業日の値動き（rise・fall・r20）を足した。3: rise・fall を高値・安値で測る
+VERSION = 4                         # 2: 先20営業日の値動き（rise・fall・r20）を足した。3: rise・fall を高値・安値で測る。
+                                    # 4: ε をやめて k近傍の網に（要約は k ごとの byK）
 #: 状態の9列。実験105 の学習の寄与（gain。360列の lgbm）の上位で、1.5σ の上位8列（360列中 28・31・32・38・40・42・44・50位）と、
 #: 1.2σ でだけ上位に入った出来高の60日 ÷ 250日（37位）。docs/MODEL_ADOPTION_RULES.md §68
 FEATURES: Tuple[str, ...] = ("tx_vol_60", "tx_mdi_14", "tx_vortex_pos_14", "tx_atr_ratio_14_50", "tx_ichi_kijun_gap",
@@ -96,8 +103,10 @@ SHORT = {"tx_vol_60": "60日ボラ", "tx_mdi_14": "−DI(14)", "tx_vortex_pos_14
          "tx_ichi_kijun_gap": "基準線乖離", "tx_bb_width": "BB幅", "tx_tsi": "TSI", "tx_stoch_k": "ストキャス%K",
          "tx_vol_ratio_60_250": "出来高60日÷250日"}
 THEILER = int(B.RISE_HORIZON)       # 20営業日。これ以下しか離れていない日どうしは結ばない
-RR_BP = 100                         # 既定の辺の密度（1万分率。100 = 1%）
-RR_CHOICES_BP = (50, 100, 200, 300)  # 画面で選べる密度
+#: k近傍の k（運用者の選択 2026-10-19「k近傍だけにする」「5・10・20・30・50（既定10）」→ 続けて指定「正直なところ、kは1〜10までで
+#: 良いです」で 1〜10。既定は 10 のまま）
+K_DEFAULT = 10
+K_CHOICES: Tuple[int, ...] = tuple(range(1, 11))
 Q = 20                              # 状態を 1/Q σ 刻みの整数で持つ
 Z_CAP = 6.0                         # |z| をここで切る（Q 倍して ±120。int8 に収まる）
 MIN_NODES = 100                     # ノードがこれより少ない銘柄は作らない
@@ -158,7 +167,7 @@ def quantize(Z: np.ndarray, q: int = Q) -> np.ndarray:
 
 
 # --------------------------------------------------------------------------- #
-# 辺（整数の距離の2乗・リカレンス率で決める ε）
+# 近傍と辺（整数の距離の2乗・k近傍）
 # --------------------------------------------------------------------------- #
 
 def sq_dist(zq: np.ndarray) -> np.ndarray:
@@ -172,33 +181,43 @@ def sq_dist(zq: np.ndarray) -> np.ndarray:
     return nrm[:, None] + nrm[None, :] - 2 * g
 
 
-def threshold(s: np.ndarray, theiler: int = THEILER, rr_bp: int = RR_BP) -> Dict[str, int]:
+def knn_order(s: np.ndarray, theiler: int = THEILER, k_max: int = max(K_CHOICES)) -> Tuple[np.ndarray, np.ndarray]:
     """
-    結べる組（j − i > theiler）の距離の2乗を小さい順に並べた m 番目を ε² にする。m = rr_bp × 組の数 ÷ 10000 を四捨五入
-    （整数で数える。画面の recurrence.js と同じ）、最小 1。結べる組が無ければ t = -1（辺なし）。
+    各ノードの近い順の近傍（theiler より離れた日だけ）を k_max 日まで。並びは（距離の2乗, ノードの番号）の小さい順で、同じ距離なら
+    古い日（番号の小さい日）が先（画面の recurrence.js の knnLists と同じ）。
+    戻り値: (order, cnt)。order は n × k_max（近傍の番号。足りないところは -1）、cnt はノードごとの近傍の数（k_max と結べる日の数の
+    小さいほう）。
     """
     n = len(s)
-    if n <= theiler + 1:
-        return {"t": -1, "pairs": 0, "m": 0}
-    iu, ju = np.triu_indices(n, k=theiler + 1)
-    v = s[iu, ju]
-    pairs = int(len(v))
-    m = max(1, (int(rr_bp) * pairs + 5000) // 10000)
-    m = min(m, pairs)
-    t = int(np.partition(v, m - 1)[m - 1])
-    return {"t": t, "pairs": pairs, "m": int(m)}
-
-
-def adjacency(s: np.ndarray, t: int, theiler: int = THEILER) -> np.ndarray:
-    """距離の2乗が t 以下で、theiler より離れた組を結ぶ（対称・対角は False）。"""
-    n = len(s)
+    order = np.full((n, k_max), -1, dtype=np.int64)
+    if n == 0:
+        return order, np.zeros(0, dtype=np.int64)
     idx = np.arange(n)
     far = np.abs(idx[:, None] - idx[None, :]) > theiler
-    return (s <= t) & far
+    cnt = np.minimum(far.sum(axis=1), k_max).astype(np.int64)
+    masked = np.where(far, s, np.iinfo(np.int64).max)
+    kk = min(k_max, n)
+    got = np.argsort(masked, axis=1, kind="stable")[:, :kk]      # 安定な並べ替え: 同じ距離は番号の小さい順
+    order[:, :kk] = got
+    order[np.arange(k_max)[None, :] >= cnt[:, None]] = -1
+    return order, cnt
+
+
+def knn_adjacency(order: np.ndarray, cnt: np.ndarray, k: int) -> np.ndarray:
+    """k近傍の辺（どちらか一方が相手を近い k 日に選んでいれば結ぶ。対称・対角は False）。"""
+    n = len(order)
+    A = np.zeros((n, n), dtype=bool)
+    if n == 0:
+        return A
+    kk = np.minimum(cnt, k)
+    take = np.arange(order.shape[1])[None, :] < kk[:, None]
+    rows = np.nonzero(take)[0]
+    A[rows, order[take]] = True
+    return A | A.T
 
 
 # --------------------------------------------------------------------------- #
-# 要約（今日のノードの次数・近傍の結果）
+# 要約（今日の近い k 日の結果）
 # --------------------------------------------------------------------------- #
 
 def _median(v: np.ndarray) -> Optional[float]:
@@ -228,43 +247,77 @@ def outcome_stats(idx: np.ndarray, ret: np.ndarray, labels: Dict[str, np.ndarray
     return out
 
 
+def periods_of(idx: Sequence[int], theiler: int = THEILER) -> int:
+    """ノードの集まりが、theiler より離れたところで区切るといくつの時期（塊）になるか（空なら 0）。"""
+    v = np.sort(np.asarray(list(idx), dtype=np.int64))
+    if not len(v):
+        return 0
+    return int(1 + np.sum(np.diff(v) > theiler))
+
+
 def summarize(zq: np.ndarray, ret: np.ndarray, labels: Dict[str, np.ndarray], fresh: Sequence[int],
-              dates: Sequence[str], theiler: int = THEILER, rr_bp: int = RR_BP, q: int = Q) -> dict:
+              dates: Sequence[str], theiler: int = THEILER, k: int = K_DEFAULT, q: int = Q,
+              s: Optional[np.ndarray] = None, knn: Optional[Tuple[np.ndarray, np.ndarray]] = None) -> dict:
     """
-    ネットワークの要約。今日 = 最後のノード。ret・labels は丸めた後の値（ファイルに書く値。画面と同じ数になるように）。
+    k近傍の網の要約。今日 = 最後のノード。ret・labels は丸めた後の値（ファイルに書く値。画面と同じ数になるように）。
+    s（距離の2乗）と knn（knn_order の戻り値。k 以上の k_max で数えたもの）は、k を変えて何度も数えるときに渡す。
     戻り値の数値は丸めない（書き出しで丸める）。
+      deg       今日の似た日の数（近い k 日。結べる日が k より少なければその数）
+      kth2/kth  k 番目に近い日までの距離の2乗（整数）と距離（σ）。似た日が無ければ -1 / None
+      kthPct    kth2 の、その銘柄のノードの中での位置（中位の順位の百分位。どのノードも自分の k 番目までの距離で比べる。高いほど
+                似た日の少ない珍しい状態）
+      periods   似た日がいくつの時期に固まっているか（theiler より離れたところで区切る）
+      edges / isolated / degMed  網の線の数（どちらかが選べば1本）・線の無い日の数・次数の中央値
     """
     n = len(zq)
-    s = sq_dist(zq)
-    th = threshold(s, theiler, rr_bp)
-    A = adjacency(s, th["t"], theiler)
-    deg = A.sum(axis=1)
+    if s is None:
+        s = sq_dist(zq)
+    if knn is None or knn[0].shape[1] < k:
+        knn = knn_order(s, theiler, k)
+    order, cnt = knn
     today = n - 1
-    k = int(deg[today])
-    nb = np.flatnonzero(A[today])
+    kk = np.minimum(cnt, k)
+    nb = order[today, :kk[today]] if n else np.zeros(0, dtype=np.int64)
+    A = knn_adjacency(order, cnt, k)
+    deg = A.sum(axis=1)
+    # 各ノードの k 番目に近い日までの距離の2乗（近傍の無いノードは比べない）
+    has = kk > 0
+    rows = np.flatnonzero(has)
+    kth_all = s[rows, order[rows, kk[rows] - 1]] if len(rows) else np.zeros(0, dtype=np.int64)
+    kth2 = int(s[today, nb[-1]]) if len(nb) else -1
+    kth_pct = (float(100.0 * (np.sum(kth_all < kth2) + 0.5 * np.sum(kth_all == kth2)) / len(kth_all))
+               if len(nb) and len(kth_all) else None)
     fresh = np.asarray(sorted(set(int(i) for i in fresh)), dtype=int)
     fr_set = set(fresh.tolist())
-    nb_fresh = np.array([i for i in nb if i in fr_set], dtype=int)
-    # 今日に近い過去の更新日（タイラー窓より前。ε の外でも近い順に出す）
+    nb_set = set(int(i) for i in nb)
+    nb_fresh = np.array([i for i in nb if int(i) in fr_set], dtype=int)
+    # 今日に近い過去の更新日（タイラー窓より前。近い k 日の外でも近い順に出す。同じ距離は古い日が先）
     past_fresh = fresh[fresh < today - theiler]
-    order = past_fresh[np.argsort(s[today, past_fresh], kind="stable")][:N_NEAREST]
+    near = past_fresh[np.argsort(s[today, past_fresh], kind="stable")][:N_NEAREST] if n else past_fresh
     nearest = []
-    for i in order:
-        rec = {"i": int(i), "date": dates[i], "d": float(np.sqrt(s[today, i]) / q), "inEps": bool(A[today, i]),
+    for i in near:
+        rec = {"i": int(i), "date": dates[i], "d": float(np.sqrt(s[today, i]) / q), "inKnn": int(i) in nb_set,
                "ret": None if not np.isfinite(ret[i]) else float(ret[i])}
         for key, lab in labels.items():
             rec[key] = None if not np.isfinite(lab[i]) else int(lab[i])
         nearest.append(rec)
     return {
-        "rrBp": int(rr_bp), "theiler": int(theiler), "pairs": th["pairs"], "m": th["m"],
-        "eps2": th["t"], "eps": (float(np.sqrt(th["t"]) / q) if th["t"] >= 0 else None),
-        "edges": int(A.sum() // 2), "isolated": int((deg == 0).sum()),
-        "deg": k, "degPct": float(100.0 * (np.sum(deg < k) + 0.5 * np.sum(deg == k)) / n),
-        "degMed": float(np.median(deg)),
+        "k": int(k), "theiler": int(theiler),
+        "edges": int(A.sum() // 2), "isolated": int((deg == 0).sum()), "degMed": float(np.median(deg)) if n else None,
+        "deg": int(len(nb)), "kth2": kth2, "kth": (float(np.sqrt(kth2) / q) if kth2 >= 0 else None), "kthPct": kth_pct,
+        "periods": periods_of(nb, theiler),
         "nbr": outcome_stats(nb, ret, labels), "base": outcome_stats(np.arange(n), ret, labels),
         "nbrFresh": outcome_stats(nb_fresh, ret, labels), "baseFresh": outcome_stats(fresh, ret, labels),
         "nearestFresh": nearest,
     }
+
+
+def summaries(zq: np.ndarray, ret: np.ndarray, labels: Dict[str, np.ndarray], fresh: Sequence[int],
+              dates: Sequence[str], ks: Sequence[int] = K_CHOICES, theiler: int = THEILER, q: int = Q) -> Dict[str, dict]:
+    """k ごとの要約（{"5": …, "10": …}）。距離と近傍の並びは一度だけ数える。"""
+    s = sq_dist(zq)
+    knn = knn_order(s, theiler, max(ks))
+    return {str(k): summarize(zq, ret, labels, fresh, dates, theiler, k, q, s=s, knn=knn) for k in ks}
 
 
 def round_summary(x, nd: int = 4):
@@ -394,7 +447,7 @@ def candidate_payload(g: pd.DataFrame, bars_code: pd.DataFrame, cand: dict, as_o
     fwd = forward_moves(bars_code, g["Date"])
     labels = {key: pd.to_numeric(g[key], errors="coerce").to_numpy(dtype=float) for key, _ in LABEL_KS}
     fresh = np.flatnonzero(g["is_fresh_break"].fillna(False).to_numpy(dtype=bool)).tolist()
-    summ = summarize(zq, ret, labels, fresh, dates)
+    by_k = summaries(zq, ret, labels, fresh, dates)
     d = pd.to_datetime(g["Date"]).to_numpy(dtype="datetime64[D]")
     gaps = np.diff(d).astype(int).tolist()
     payload = {
@@ -410,7 +463,7 @@ def candidate_payload(g: pd.DataFrame, bars_code: pd.DataFrame, cand: dict, as_o
         **{key: _pct_list(v) for key, v in fwd.items()},
         "fresh": [int(i) for i in fresh],
         "raw": [_sig(float(x), 6) for x in X[-1]],             # 今日の9列の生の値（有効数字6桁。画面の説明）
-        "summary": round_summary(summ),
+        "byK": round_summary(by_k),                             # k ごとの要約（K_CHOICES。画面の一覧と照合用）
         "_raw": [float(x) for x in X[-1]],                     # 丸めない値（データセットとの突き合わせだけ。書き出さない）
     }
     return payload, ""
@@ -458,9 +511,8 @@ def file_name(day: str, jq_code: str) -> str:
 
 
 def index_entry(payload: dict, file: str) -> dict:
-    s = payload["summary"]
     return {"jqCode": payload["jqCode"], "code": payload["code"], "name": payload["name"], "file": file,
-            "n": payload["n"], "start": payload["start"], "summary": s}
+            "n": payload["n"], "start": payload["start"], "byK": payload["byK"]}
 
 
 def build_day(day: str, cands: List[dict], bars: pd.DataFrame, segments: Optional[pd.DataFrame]) -> Tuple[dict, Dict[str, dict]]:
@@ -511,12 +563,13 @@ def method_block() -> dict:
         "features": [{"col": c, "ja": ja[c], "short": SHORT.get(c, ja[c]),
                       "group": TX.GROUP_JA.get(TX.GROUP_OF.get(c, ""), ""), "kind": LP.kind_of(c),
                       "gainRank": GAIN_RANK.get(c, {})} for c in FEATURES],
-        "theiler": THEILER, "rrBp": RR_BP, "rrChoicesBp": list(RR_CHOICES_BP), "q": Q, "zCap": Z_CAP,
+        "theiler": THEILER, "k": K_DEFAULT, "kChoices": list(K_CHOICES), "q": Q, "zCap": Z_CAP,
         "target": TARGET, "hold": HOLD, "labels": [{"key": k, "k": v} for k, v in LABEL_KS], "minNodes": MIN_NODES,
         "rule": {"models": list(RULE_MODELS), "agreePct": AGREE_PCT},
         "note": ("参考の表示。購入条件（1.5σ の3本の百分位がすべて95以上）を満たした銘柄ごとに、各営業日のテクニカル指標9列の"
-                 "状態が似た日どうし（タイラー窓 20営業日より離れた組のうち、距離の近い順に辺の密度ぶん）を結んだリカレンス・"
-                 "ネットワーク。選定には使わない（今日の戦略の並べ方のまま）。過去の日は、その日に作った値のまま"),
+                 "状態が似た日どうし（各日に、タイラー窓 20営業日より離れた日のうち距離の近い k 日。どちらかが選べば結ぶ）を"
+                 "結んだリカレンス・ネットワーク（k近傍の網）。選定には使わない（今日の戦略の並べ方のまま）。過去の日は、その日に"
+                 "作った値のまま"),
     }
 
 
