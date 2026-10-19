@@ -53,8 +53,8 @@ jobs:
       - run: npm run build
 
       # リカレンス・ネットワーク（日次予測が Release に上げた recurrence.tar.gz。research/recurrence_net.py）を
-      # dist/data/recurrence/ に置く。全期間で1日あたり約1MB になるのでリポジトリには入れていない（運用者の選択
-      # 「Release に置く」、2026-10-19）。中の名前は recurrence/index.json と recurrence/<日付>_<コード>.json だけのはずなので、
+      # dist/data/recurrence/ に置く。購入条件を満たした銘柄ごとに全期間で作る（1銘柄 約100KB）のでリポジトリには入れていない
+      # （運用者の選択「Release に置く」、2026-10-19）。中の名前は recurrence/index.json と recurrence/<日付>_<コード>.json だけのはずなので、
       # それ以外が混ざっていたら展開しない。無い・取れなくてもデプロイは止めない（画面のタブが「まだデータがありません」と出す）
       - name: Recurrence networks (release)
         continue-on-error: true

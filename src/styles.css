@@ -748,6 +748,7 @@ input[type='range']::-moz-range-thumb {
 .net-crow .mark { font-weight: 700; color: var(--text-dim); text-align: left; }
 .net-crow .id { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .net-crow .name { color: var(--text-dim); }
+.net-crow .net-pick { margin-left: 6px; padding: 0 6px; font-size: 10px; letter-spacing: 0; vertical-align: 1px; }
 .net-crow .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .net-forces { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2) var(--s4); padding: var(--s2) var(--s3);
   border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--bg-raised); font-size: 12px; }

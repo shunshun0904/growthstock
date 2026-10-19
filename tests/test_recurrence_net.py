@@ -12,6 +12,8 @@
   高値だけで決まる
 - 結果は live_track.forward・build_dataset の目的変数（1.2σ・1.5σ）・78週高値の更新日と同じ
 - 作れない候補は理由を残して飛ばす（日足が無い・ノードが少ない）
+- 作るのは購入条件（1.5σ の3本の百分位がすべて95以上）を満たした銘柄だけ。百分位が1本でも欠けた銘柄は通さない
+  （news_links.rule_codes・画面の strategy.js と同じ）。並びは最小の降順・同点はスコアの降順。日の項目に高値更新の件数（nBreak）
 - 前の archive にある日は引き継ぐ（候補の組が変わった日は作り直す）。archive を書いて読み戻せる（突き合わせ用の丸めない値は書かない）。
   出力フォルダの自分のファイル以外は消さない
 - フィクスチャ（tests/fixtures/recurrence/ と recurrence-expected.json）は今の式で数え直した値と一致する（画面の
@@ -40,7 +42,11 @@ import recurrence_net as RN  # noqa: E402
 
 FIX_DIR = os.path.join(ROOT, "tests", "fixtures", "recurrence")
 FIX_EXPECTED = os.path.join(ROOT, "tests", "fixtures", "recurrence-expected.json")
+PRED_FIXTURE = os.path.join(ROOT, "tests", "fixtures", "synthetic-predictions.json")
 FIX_DAY = "2026-09-11"     # tests/fixtures/synthetic-predictions.json と同じ日・同じ銘柄コード（日足は作りもの）
+#: 合成の予測ファイルの5件には購入条件を満たす銘柄が無いので、3件の 1.5σ の3本（RULE_MODELS の順）の百分位を上書きする
+#: （tests/smoke.mjs の PASS と同じ値）。9082 は日足を作らない（購入条件は満たすが「日足が無い」で作れない例）
+FIX_PASS = {"9324": [98.1, 97.1, 97.4], "9434": [97.1, 96.5, 95.2], "9082": [96.0, 100.0, 95.0]}
 FIX_CANDS = [{"code": "9324", "jqCode": "93240", "name": "安田倉庫", "date": FIX_DAY, "n": 520, "seed": 11},
              {"code": "9434", "jqCode": "94340", "name": "ソフトバンク", "date": FIX_DAY, "n": 700, "seed": 12}]
 
@@ -75,6 +81,42 @@ def fixture_bars(extra_after: int = 0) -> pd.DataFrame:
     return pd.concat(parts, ignore_index=True).sort_values(["Code", "Date"], kind="mergesort").reset_index(drop=True)
 
 
+def with_pcts(c: dict, pcts) -> dict:
+    """候補に規則の3本の百分位（RULE_MODELS の順）を付けた写し。pcts の None はその1本が欠けた候補。"""
+    return dict(c, byModel={a: ({} if v is None else {"pctHistorical": v}) for a, v in zip(RN.RULE_MODELS, pcts)})
+
+
+def fixture_pred() -> dict:
+    """合成の予測ファイル（2026-09-11 の5件）に FIX_PASS を上書きしたもの（tests/smoke.mjs の predPass と同じ）。"""
+    with open(PRED_FIXTURE, encoding="utf-8") as fh:
+        pred = json.load(fh)
+    for c in pred["candidates"]:
+        for a, v in zip(RN.RULE_MODELS, FIX_PASS.get(c["code"], [])):
+            c["byModel"][a]["pctHistorical"] = v
+    return pred
+
+
+def write_bars(bars: pd.DataFrame, data_dir: str) -> None:
+    """日足を年ごとの bars_<年>.parquet に書く（load_bars が読む形）。"""
+    os.makedirs(data_dir, exist_ok=True)
+    for y, g in bars.groupby(bars["Date"].dt.year):
+        g.to_parquet(os.path.join(data_dir, f"bars_{y}.parquet"), index=False)
+
+
+def fixture_build():
+    """フィクスチャと同じ作り: 合成の予測ファイル（fixture_pred）と作りものの日足（9324・9434 だけ）で build を通す。"""
+    tmp = tempfile.mkdtemp()
+    try:
+        write_bars(fixture_bars(), tmp)
+        index, files = RN.build(fixture_pred(), tmp)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    index["generatedAt"] = "2026-09-11T10:00:00+00:00"
+    for d in index["days"]:
+        d["builtAt"] = "2026-09-11T10:00:00+00:00"
+    return index, files
+
+
 def decode(p: dict):
     """候補のファイル → (zq, ret, labels, fresh, dates)。画面の recurrence.js の decode と同じ読み方。"""
     n = p["n"]
@@ -89,11 +131,8 @@ def decode(p: dict):
 
 
 def make_fixtures(out_dir: str = FIX_DIR, expected_path: str = FIX_EXPECTED) -> None:
-    """フィクスチャ（index.json・候補ごとのファイル・密度ごとの要約）を作り直す。"""
-    blk, files = RN.build_day(FIX_DAY, [dict(c) for c in FIX_CANDS], fixture_bars(), None)
-    blk["builtAt"] = "2026-09-11T10:00:00+00:00"
-    index = {"v": RN.VERSION, "generatedAt": "2026-09-11T10:00:00+00:00", "asOf": FIX_DAY, "method": RN.method_block(),
-             "days": [blk]}
+    """フィクスチャ（index.json・銘柄ごとのファイル・密度ごとの要約）を作り直す。"""
+    index, files = fixture_build()
     RN.write(index, files, out_dir, None)
     expected = {}
     for f, p in files.items():
@@ -243,6 +282,44 @@ class TestSummary(unittest.TestCase):
         self.assertEqual(s["nearestFresh"], [])
 
 
+class TestRule(unittest.TestCase):
+    """対象は購入条件（1.5σ の3本の百分位がすべて95以上）を満たした銘柄だけ（運用者の指定 2026-10-19）。"""
+
+    def test_rule_min(self):
+        c = FIX_CANDS[0]
+        self.assertEqual(RN.rule_min(with_pcts(c, [98.1, 97.1, 97.4])), 97.1)
+        self.assertEqual(RN.rule_min(with_pcts(c, [95, 95, 95])), 95.0)
+        self.assertIsNone(RN.rule_min(with_pcts(c, [99, None, 99])))          # 1本でも欠ければ出さない
+        self.assertIsNone(RN.rule_min(with_pcts(c, [99, float("nan"), 99])))
+        self.assertIsNone(RN.rule_min(with_pcts(c, [99, True, 99])))          # 真偽値は数として扱わない
+        self.assertIsNone(RN.rule_min(with_pcts(c, [99, "99", 99])))
+        self.assertIsNone(RN.rule_min(dict(c)))                                # byModel が無い
+        self.assertIsNone(RN.rule_min(dict(c, byModel={"lgbm_k15": 99})))      # 形が違う
+
+    def test_rule_candidates_order_and_line(self):
+        rows = [with_pcts(dict(FIX_CANDS[0], code=k, score=sc), p) for k, sc, p in [
+            ("A", 0.4, [96, 97, 98]), ("B", 0.9, [99, 94.99, 99]), ("C", 0.5, [96, 99, 99]),
+            ("D", 0.7, [96, 99, 99]), ("E", 0.1, [95, 95, 95]), ("F", 0.8, [None, 99, 99])]]
+        got = RN.rule_candidates(rows)
+        # 最小の降順（C・D・A が 96、E が 95）。同点はスコアの降順（D 0.7 > C 0.5 > A 0.4）
+        self.assertEqual([r["code"] for r in got], ["D", "C", "A", "E"])
+        self.assertEqual([r["code"] for r in RN.rule_candidates(rows, line=96.5)], [])
+        self.assertEqual(RN.rule_candidates([]), [])
+
+    def test_same_as_news_links(self):
+        # 候補銘柄のニュース（news_links.rule_codes）と同じ銘柄・同じ日を選ぶ（合成の予測ファイルに上書きしたもの）
+        import news_links as NL
+        pred = fixture_pred()
+        want = NL.rule_codes(pred)
+        got: dict = {}
+        for d in pred["dates"]:
+            for c in RN.rule_candidates([c for c in pred["candidates"] if c["date"] == d]):
+                got.setdefault(c["code"], []).append(d)
+        self.assertEqual(got, want)
+        self.assertEqual(sorted(got), sorted(FIX_PASS))
+        self.assertEqual([c["code"] for c in RN.rule_candidates(pred["candidates"])], ["9324", "9434", "9082"])
+
+
 class TestBuild(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.mkdtemp()
@@ -303,14 +380,13 @@ class TestBuild(unittest.TestCase):
         self.assertIn("日足が無い", why["77770"])
 
     def test_build_carry_and_archive(self):
-        bars = fixture_bars()
         data_dir = os.path.join(self.tmp, "data")
-        os.makedirs(data_dir)
-        for y, g in bars.groupby(bars["Date"].dt.year):
-            g.to_parquet(os.path.join(data_dir, f"bars_{y}.parquet"), index=False)
+        write_bars(fixture_bars(), data_dir)
         prev_day = "2026-09-04"
+        ok1, ok2 = with_pcts(FIX_CANDS[0], [98, 97, 96]), with_pcts(FIX_CANDS[1], [95, 99, 99])
+        below = with_pcts(FIX_CANDS[1], [99, 99, 94.9])                 # 1本が95未満 → 作らない（日足はある）
         pred = {"asOf": FIX_DAY, "dates": [prev_day, FIX_DAY],
-                "candidates": [dict(c) for c in FIX_CANDS] + [dict(FIX_CANDS[0], date=prev_day)]}
+                "candidates": [ok1, ok2, dict(below, date=prev_day), dict(ok1, date=prev_day)]}
         arch = os.path.join(self.tmp, "recurrence.tar.gz")
         out = os.path.join(self.tmp, "out")
         os.makedirs(out)
@@ -321,6 +397,9 @@ class TestBuild(unittest.TestCase):
         index, files = RN.build(pred, data_dir, prev_archive=arch)
         self.assertEqual([d["date"] for d in index["days"]], [prev_day, FIX_DAY])
         self.assertEqual([len(d["candidates"]) for d in index["days"]], [1, 2])
+        self.assertEqual([d["nBreak"] for d in index["days"]], [2, 2])               # 満たさなかった銘柄も数える
+        self.assertEqual(index["days"][0]["skipped"], [])                           # 満たさない銘柄は作れない扱いにもしない
+        self.assertEqual(index["method"]["rule"], {"models": list(LT.RULE_MODELS), "agreePct": LT.AGREE_PCT})
         RN.write(index, files, out, arch)
         self.assertTrue(os.path.exists(os.path.join(out, "keep.txt")))              # 自分のファイル以外は残す
         self.assertFalse(os.path.exists(os.path.join(out, "2020-01-01_11110.json")))  # 前の自分のファイルは消す
@@ -336,11 +415,17 @@ class TestBuild(unittest.TestCase):
         index3, files3 = RN.build(pred, data_dir, prev_archive=arch)
         self.assertEqual([d.get("carried") for d in index3["days"]], [True, True])
         self.assertEqual(files3, files2)
-        # 最新の日の候補の組が変わったら、その日だけ作り直す
-        pred2 = dict(pred, candidates=[dict(FIX_CANDS[0])] + [dict(FIX_CANDS[0], date=prev_day)])
+        # 最新の日に購入条件を満たす銘柄の組が変わったら、その日だけ作り直す（満たさない銘柄が増えても作り直さない）
+        pred2 = dict(pred, candidates=[ok1, dict(ok2, byModel={}), dict(below, date=prev_day), dict(ok1, date=prev_day),
+                                       dict(below, date=prev_day, code="9999", jqCode="99990")])
         index4, files4 = RN.build(pred2, data_dir, prev_archive=arch)
         self.assertEqual([d.get("carried") for d in index4["days"]], [True, None])
+        self.assertEqual([d["nBreak"] for d in index4["days"]], [3, 2])
         self.assertEqual(len(index4["days"][1]["candidates"]), 1)
+        # 購入条件を満たす銘柄が無い日は「no_candidates」（高値更新の件数は残す）
+        pred3 = dict(pred, dates=[prev_day], candidates=[dict(below, date=prev_day)])
+        index5, files5 = RN.build(pred3, data_dir)
+        self.assertEqual((index5["days"][0]["status"], index5["days"][0]["nBreak"], files5), ("no_candidates", 1, {}))
         # 版が違う archive は使わない
         bad = os.path.join(self.tmp, "bad.tar.gz")
         RN.write(dict(index, v=RN.VERSION + 1), files, None, bad)
@@ -389,12 +474,18 @@ class TestFixtures(unittest.TestCase):
     def test_fixture_format(self):
         # フィクスチャの項目は今の作り（build_day）が書く項目と同じ。値そのものは比べない（作りものの日足の exp・log は
         # CPU の命令で最後の桁が変わりうるので、丸めた状態の整数が境目で1つずれることがある）
-        blk, files = RN.build_day(FIX_DAY, [dict(c) for c in FIX_CANDS], fixture_bars(), None)
+        built, files = fixture_build()
         with open(os.path.join(FIX_DIR, "index.json"), encoding="utf-8") as fh:
             index = json.load(fh)
         self.assertEqual(index["v"], RN.VERSION)
         self.assertEqual(index["method"], json.loads(json.dumps(RN.method_block())))
+        blk = built["days"][0]
         self.assertEqual(sorted(index["days"][0]), sorted(blk))
+        # 購入条件を満たした3件のうち、日足のある2件を作り、9082 は「日足が無い」（予測ファイルの5件は nBreak）
+        for got in (index["days"][0], blk):
+            self.assertEqual([c["jqCode"] for c in got["candidates"]], ["93240", "94340"])
+            self.assertEqual([(x["jqCode"], x["reason"]) for x in got["skipped"]], [("90820", "日足が無い")])
+            self.assertEqual((got["status"], got["nBreak"]), ("partial", 5))
         for f, p in files.items():
             with open(os.path.join(FIX_DIR, f), encoding="utf-8") as fh:
                 q = json.load(fh)
