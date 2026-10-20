@@ -42,6 +42,21 @@ const pct = (v) => (Number.isFinite(v) ? `${fmt(v * 100, 0)}%` : '—');
 // 「ビュンビュンしすぎなので、もう少し落ち着かせて」「破線もなしでよいです。モーションさえあればよい」。src/components/RecurrenceGraph.jsx）
 const TRAIL_DAYS = 20;
 const reducedMotion = () => typeof window !== 'undefined' && Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
+// 点の大きさ（運用者の依頼 2026-10-20「プロットのサイズをもう少し大きくできないですか？画面上で調整できるようにしても良いです」
+// →「図自体ではなく、点のサイズですかね」）。倍率は前の大きさ（標準）に掛ける。既定は「大」。選んだ大きさはこのブラウザに覚える
+const POINT_SIZES = [
+  { key: 's', label: '小', scale: 0.75 }, { key: 'm', label: '標準', scale: 1 },
+  { key: 'l', label: '大', scale: 1.5 }, { key: 'xl', label: '特大', scale: 2 },
+];
+const POINT_SIZE_KEY = 'net.pointSize';
+const readPointSize = () => {
+  try {
+    const v = window.localStorage.getItem(POINT_SIZE_KEY);
+    return POINT_SIZES.some((s) => s.key === v) ? v : 'l';
+  } catch {
+    return 'l';
+  }
+};
 
 /** 力のつまみ（Obsidian のグラフ表示の Forces と同じ4つ）。反発は画面では正の数で見せる */
 const FORCE_SLIDERS = [
@@ -108,8 +123,13 @@ export default function NetworkView({ data }) {
   const [kSel, setK] = useState(null);
   const [mode, setMode] = useState('outcome');
   const [flow] = useState(() => !reducedMotion());       // 軌跡の明るみを流す（動きを減らす設定では向きの矢印）
-  const [trail, setTrail] = useState(true);
+  const [trail, setTrail] = useState(false);            // 直近の軌跡は最初は出さない（運用者の指定 2026-10-20）
   const [lightToday, setLightToday] = useState(true);   // 今日に似た日を光らせる（運用者の依頼 2026-10-19）
+  const [pointSize, setPointSize] = useState(readPointSize);
+  useEffect(() => {
+    try { window.localStorage.setItem(POINT_SIZE_KEY, pointSize); } catch { /* 覚えられなくても表示は変わらない */ }
+  }, [pointSize]);
+  const pointScale = (POINT_SIZES.find((s) => s.key === pointSize) || POINT_SIZES[2]).scale;
   const [selected, setSelected] = useState(null);
   const [zoomCmd, setZoomCmd] = useState(null);
   const [forces, setForces] = useState(DEFAULT_FORCES);
@@ -299,6 +319,17 @@ export default function NetworkView({ data }) {
               ))}
             </div>
           </div>
+          <div>
+            <span className="lab">点の大きさ</span>
+            <div className="net-seg" role="group" aria-label="点の大きさ">
+              {POINT_SIZES.map((s) => (
+                <button key={s.key} className={`btn btn-ghost${s.key === pointSize ? ' on' : ''}`} aria-pressed={s.key === pointSize}
+                        onClick={() => setPointSize(s.key)} title={`前の大きさの ${s.scale} 倍`}>
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
 
         {past && block?.builtAt && (
@@ -426,7 +457,7 @@ export default function NetworkView({ data }) {
               <>
                 <Legend mode={mode} counts={counts} nbrCounts={nbrCounts} nbrN={summary.deg} dec={dec} />
                 <RecurrenceGraph
-                  dec={dec} net={net} nbrs={nbrs} colors={colors} trail={trail ? TRAIL_DAYS : 0} flow={flow}
+                  dec={dec} net={net} nbrs={nbrs} colors={colors} trail={trail ? TRAIL_DAYS : 0} flow={flow} pointScale={pointScale}
                   seedKey={`${dec.jqCode}-${dec.date}-k${k}`} selected={selected} onSelect={setSelected} tipOf={tipOf}
                   zoomCmd={zoomCmd} forces={forces} highlightToday={lightToday}
                   ariaLabel={`${dec.code} ${dec.name} の ${dec.n} 営業日のリカレンス・ネットワーク。今日に似た過去の日は ${summary.deg} 日。`

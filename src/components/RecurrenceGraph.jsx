@@ -14,9 +14,9 @@ import { createSim, tick, setForces, reheat, extent, project, pick, seedOf } fro
  *   にじみは通常の重ね方で描く（足し算の重ね方 lighter は、GPU の無い描画で線 1.6万本が約8倍遅かった。足し算は強調する
  *   少しの線と光だけに使う）
  * - 強調（同日の依頼「対象日と似ている（紐づく）サンプルもハイライト」）: 触れた日 → 選んだ日 → 今日 の順に、その日の似た日
- *   （その日に近い k 日）へ光る線を引き、似た日に光の輪を付ける。ほかの点と線は暗くしない（2026-10-20 の依頼「他の日付が暗く
- *   なるのですが、相対的な差がわからなくなるので、他はくらくしないでそのままに」。前は強調中にほかを暗くしていた）。今日の強調は
- *   highlightToday で消せる
+ *   （その日に近い k 日）へ細い線を引き、似た日はその日の色のまま少し大きくして、地の色の縁と細い控えめな輪で囲む（2026-10-20 の
+ *   依頼「白く光らせてますが、それ自身が何色かわからなくなるので、もう少し抑えた表現に」。前は足し算の光と白い輪・光る線）。ほかの
+ *   点と線は暗くしない（同日の依頼「他はくらくしないでそのままに」）。今日の強調は highlightToday で消せる
  * - 直近の軌跡（同日の依頼「単純に線で結ぶよりも、日付の順方向に流れているような（流れがわかるような）可視化」「動的にするので
  *   あれば、色自体はもう少し暗くてもよい」、2026-10-20「ビュンビュンしすぎなので、もう少し落ち着かせてほしい」「モーションさえ
  *   つければ若干他よりも線を太くする程度で、色自体は暗いままで良い」、続けて「破線もなしでよいです。モーションさえあればよい」）:
@@ -26,17 +26,19 @@ import { createSim, tick, setForces, reheat, extent, project, pick, seedOf } fro
  * - 操作: ドラッグで回す（Shift・右ボタンはずらす）。ホイール・2本指でつまんで拡大縮小（同日の依頼「指で拡大縮小」。指の
  *   間・カーソルの位置を中心に）。2本指を動かすとずらす。点に触れる（タップ）とその日の値と似た日を出し、クリックで選ぶ
  *   （もう一度・何も無いところで外す）。ダブルクリックで元の大きさ。矢印キーで回し、＋ − で拡大、0 で元に戻す
+ * - 点の大きさ（運用者の依頼 2026-10-20「プロットのサイズをもう少し大きく」→「図自体ではなく、点のサイズですかね」）: 画面の
+ *   「点の大きさ」の倍率 pointScale を点に掛ける（今日と触れた日は大きくするときだけ合わせる）。触れる範囲も合わせて広げる
  * - 計算は毎フレーム 10ms までに区切り、動き終わったら描き直しが要るときだけ描く
  */
 
 const BG_IN = '#101a33';
 const BG_OUT = '#04060c';
-/** 線の色。奥・手前・強調中で濃さを変える */
+/** 線の色。奥と手前で濃さを変える */
 const EDGE_RGB_BACK = '96, 165, 250';
 const EDGE_RGB_FRONT = '147, 197, 253';
 const EDGE_ALPHA = { back: 0.06, front: 0.12 };
-const LINK_GLOW = 'rgba(125, 211, 252, 0.16)';
-const LINK_CORE = 'rgba(224, 242, 254, 0.92)';
+/** 強調する日から似た日への線と、似た日の外の輪（控えめな薄い灰。光らせない） */
+const LINK = 'rgba(203, 213, 225, 0.6)';
 /** 直近の軌跡: 暗めの橙の実線（前は明るい黄 251, 191, 36）と、その上をゆっくり今日の向きへ流れる同じ色の明るみ */
 const TRAIL_RGB = '217, 119, 6';
 const FLOW_PX_PER_S = 12;    // 明るみが今日の向きへ流れる速さ（px/秒。画面の上で一定なので、日の間が長いところでも速くならない）
@@ -53,7 +55,7 @@ const clampZoom = (z) => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
 
 export default function RecurrenceGraph({
   dec, net, nbrs, colors, trail, seedKey, selected, onSelect, tipOf, ariaLabel, zoomCmd, forces,
-  highlightToday = true, flow = true,
+  highlightToday = true, flow = true, pointScale = 1,
 }) {
   const wrapRef = useRef(null);
   const canvasRef = useRef(null);
@@ -63,7 +65,7 @@ export default function RecurrenceGraph({
     nbSet: null, nbFor: -2, nbNet: null, bg: null,
   });
   const props = useRef({});
-  props.current = { dec, net, nbrs, colors, trail, selected, highlightToday, flow };
+  props.current = { dec, net, nbrs, colors, trail, selected, highlightToday, flow, pointScale };
   const [tip, setTip] = useState(null);
 
   // ネットワークが変わったら並べ直す（同じ候補・同じ k ならいつも同じ形。力学の種は銘柄・日付・k）
@@ -80,7 +82,7 @@ export default function RecurrenceGraph({
     setTip(null);
   }, [dec, net]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { st.current.dirty = true; }, [colors, trail, selected, highlightToday, nbrs, flow]);
+  useEffect(() => { st.current.dirty = true; }, [colors, trail, selected, highlightToday, nbrs, flow, pointScale]);
 
   // 力のつまみ（中心の力・反発の力・リンクの力・リンクの長さ）。変えた分だけ動かし直す
   useEffect(() => {
@@ -235,8 +237,7 @@ export default function RecurrenceGraph({
       ctx.strokeStyle = `rgba(${front ? EDGE_RGB_FRONT : EDGE_RGB_BACK}, ${al.toFixed(4)})`;
       ctx.stroke();
     }
-    // 強調する日から似た日への線（光の筋 + 芯。本数が少ないので足し算で光らせる）
-    ctx.globalCompositeOperation = 'lighter';
+    // 強調する日から似た日への線（細い控えめな線。光らせない）
     if (focus >= 0 && nbSet && nbSet.size) {
       const fx = sc[4 * focus];
       const fy = sc[4 * focus + 1];
@@ -245,14 +246,10 @@ export default function RecurrenceGraph({
         ctx.moveTo(fx, fy);
         ctx.lineTo(sc[4 * j], sc[4 * j + 1]);
       }
-      ctx.strokeStyle = LINK_GLOW;
-      ctx.lineWidth = 4;
-      ctx.stroke();
-      ctx.strokeStyle = LINK_CORE;
-      ctx.lineWidth = 1.1;
+      ctx.strokeStyle = LINK;
+      ctx.lineWidth = 1;
       ctx.stroke();
     }
-    ctx.globalCompositeOperation = 'source-over';
     // 直近の軌跡（日付の順。今日へどう入ってきたか）: 暗めの橙の実線と、今日の向きへゆっくり流れる明るみ（動きを減らす設定では
     // 矢印）。点の下に描く
     const span = p.trail > 0 && n > 1 ? { from: Math.max(0, n - 1 - p.trail), L: n - 1 - Math.max(0, n - 1 - p.trail) } : null;
@@ -266,9 +263,10 @@ export default function RecurrenceGraph({
     // 点（奥から手前へ。奥ほど小さく暗い。手前はうっすら光る）
     const order = s.order;
     order.sort((a, b) => sc[4 * a + 3] - sc[4 * b + 3]);
-    // 点の大きさ（次数と遠近）。狭い画面（スマホ）では点を小さくする（約2,200点が重なって塗りつぶさないように）
+    // 点の大きさ（次数と遠近）。狭い画面（スマホ）では点を小さくする（約2,200点が重なって塗りつぶさないように）。画面の
+    // 「点の大きさ」の倍率（pointScale）を掛ける
     const sizeK = Math.max(0.55, Math.min(1, Math.min(w, h) / 640));
-    const radius = (i) => Math.min(6, (0.9 + 0.3 * Math.sqrt(deg[i])) * sc[4 * i + 2]) * sizeK;
+    const radius = (i) => Math.min(6, (0.9 + 0.3 * Math.sqrt(deg[i])) * sc[4 * i + 2]) * sizeK * p.pointScale;
     for (let k = 0; k < n; k += 1) {
       const i = order[k];
       if (i === today || lit(i)) continue;              // 強調する日と今日は上に重ねて描く
@@ -296,53 +294,49 @@ export default function RecurrenceGraph({
         ctx.stroke();
       }
     }
-    // 強調する日の似た日（光の輪 + 白い縁）
+    // 強調する日の似た日（その日の色のまま少し大きく描き、地の色の縁と細い控えめな輪で囲む。光らせない）
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.globalAlpha = 1;
     if (nbSet) {
       for (const j of nbSet) {
         if (j === today) continue;
         const x = sc[4 * j];
         const y = sc[4 * j + 1];
-        const r = Math.max(2.6, radius(j) * 1.25);
+        const r = Math.max(3.2 * p.pointScale, radius(j) * 1.5);
         ctx.fillStyle = p.colors[j];
-        ctx.globalCompositeOperation = 'lighter';
-        ctx.globalAlpha = 0.38;
-        ctx.beginPath();
-        ctx.arc(x, y, r * 3.4, 0, 2 * Math.PI);
-        ctx.fill();
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.globalAlpha = 1;
         ctx.beginPath();
         ctx.arc(x, y, r, 0, 2 * Math.PI);
         ctx.fill();
-        ring(ctx, x, y, r + 1.6, 'rgba(255, 255, 255, 0.9)', 1);
-        if (isFresh[j]) ring(ctx, x, y, r + 3.6, RING, 1.2);
+        ring(ctx, x, y, r + 0.9, BG_OUT, 1.8);
+        ring(ctx, x, y, r + 2.4, LINK, 1);
+        if (isFresh[j]) ring(ctx, x, y, r + 4.2, RING, 1.2);
       }
     }
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.globalAlpha = 1;
+    // 今日と触れている・選んだ日も、点を大きくしたら合わせて大きくする（小さくはしない）
+    const big = Math.max(1, p.pointScale);
     // 触れている・選んだ日
     if (focus >= 0 && focus !== today) {
       const x = sc[4 * focus];
       const y = sc[4 * focus + 1];
-      glow(ctx, x, y, 18, 'rgba(255, 255, 255, 0.22)');
+      glow(ctx, x, y, 18 * big, 'rgba(255, 255, 255, 0.22)');
       ctx.fillStyle = p.colors[focus];
       ctx.beginPath();
-      ctx.arc(x, y, 5, 0, 2 * Math.PI);
+      ctx.arc(x, y, 5 * big, 0, 2 * Math.PI);
       ctx.fill();
-      ring(ctx, x, y, 7, '#ffffff', 1.6);
-      label(ctx, x + 11, y - 9, p.dec.dates[focus]);
+      ring(ctx, x, y, 7 * big, '#ffffff', 1.6);
+      label(ctx, x + 6 + 5 * big, y - 4 - 5 * big, p.dec.dates[focus]);
     }
     // 今日
     const tx = sc[4 * today];
     const ty = sc[4 * today + 1];
-    glow(ctx, tx, ty, 26, 'rgba(255, 255, 255, 0.28)');
+    glow(ctx, tx, ty, 26 * big, 'rgba(255, 255, 255, 0.28)');
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
-    ctx.arc(tx, ty, 6.5, 0, 2 * Math.PI);
+    ctx.arc(tx, ty, 6.5 * big, 0, 2 * Math.PI);
     ctx.fill();
-    ring(ctx, tx, ty, 6.5, BG_OUT, 2);
-    ring(ctx, tx, ty, 10.5, '#ffffff', 1.2);
-    label(ctx, tx + 14, ty + 4, `今日 ${p.dec.date.slice(5).replace('-', '/')}`);
+    ring(ctx, tx, ty, 6.5 * big, BG_OUT, 2);
+    ring(ctx, tx, ty, 10.5 * big, '#ffffff', 1.2);
+    label(ctx, tx + 3.5 + 10.5 * big, ty + 4, `今日 ${p.dec.date.slice(5).replace('-', '/')}`);
     // 今日の点の画面上の位置（ブラウザのテストが触れて確かめる。1px 以上動いたときだけ書く）。強調している日と似た日の数も
     const pos = `${Math.round(tx)},${Math.round(ty)}`;
     const wrap = wrapRef.current;
@@ -353,6 +347,10 @@ export default function RecurrenceGraph({
       const zm = s.view.zoom.toFixed(3);
       if (wrap.dataset.zoom !== zm) wrap.dataset.zoom = zm;
       if (wrap.dataset.flow !== flowTag) wrap.dataset.flow = flowTag;     // 明るみの進んだ位置（px）か arrows。軌跡なしは空
+      // 似た日の画面上の位置と色（ブラウザのテストが、似た日の点がその日の色のままで白く光っていないかを確かめる）
+      const nbp = nbSet ? [...nbSet].filter((j) => j !== today)
+        .map((j) => `${Math.round(sc[4 * j])},${Math.round(sc[4 * j + 1])},${p.colors[j]}`).join(';') : '';
+      if (wrap.dataset.nbpos !== nbp) wrap.dataset.nbpos = nbp;
       if (s.sim.alpha < s.sim.opts.alphaMin) wrap.dataset.settled = '1';
       else delete wrap.dataset.settled;
     }
@@ -499,7 +497,7 @@ export default function RecurrenceGraph({
     const s = st.current;
     const p = props.current;
     if (!s.sim || !s.screen || !p.dec) return;
-    const i = pick(s.screen, p.dec.n, x, y, 12);
+    const i = pick(s.screen, p.dec.n, x, y, 12 * Math.max(1, p.pointScale));   // 点を大きくしたら触れる範囲も広げる
     if (i !== s.hover) {
       s.hover = i;
       s.dirty = true;
@@ -592,7 +590,7 @@ export default function RecurrenceGraph({
     s.drag = null;
     if (d && !d.moved && onSelect && e.type === 'pointerup') {
       const { x, y } = local(e);
-      const i = s.screen ? pick(s.screen, props.current.dec.n, x, y, d.touch ? 18 : 12) : -1;
+      const i = s.screen ? pick(s.screen, props.current.dec.n, x, y, (d.touch ? 18 : 12) * Math.max(1, props.current.pointScale)) : -1;
       onSelect(i >= 0 && i !== props.current.selected ? i : null);
       // 指で触れたときは、その日の値も出す（マウスのように触れ続けられないので）
       if (d.touch) {
