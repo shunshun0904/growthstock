@@ -463,8 +463,17 @@ check(nearDates.join(',') === nearWant.join(',') && nearDates.length === exp('94
 check((await page.locator('.net-near h3').textContent()).includes(`図で今日と結んだ ${exp('94340', K2).deg} 日`)
         && !(await netSide()).includes('今日に近い過去の更新日') && (await page.locator('.net-details').count()) === 0,
       '「今日に近い過去の更新日」の欄と、同じ中身だった「表で見る」は無い（一覧は1つ）');
-await page.locator('label', { hasText: '回転' }).click();
+// 自動の回転と 2D / 3D の切り替えは無い（運用者の指定 2026-10-20「回転機能と２D機能はいらないです」）。図はいつも3次元で、
+// 並べ終わったら触らなければ止まっている（今日の点の位置が変わらない）
+check((await page.locator('.net-controls label', { hasText: '回転' }).count()) === 0
+        && (await page.locator('.net-seg[aria-label="次元"]').count()) === 0
+        && (await page.locator('.net-controls button', { hasText: /^[23]D$/ }).count()) === 0,
+      '「回転」のチェックと 2D / 3D の切り替えは無い');
 await page.waitForSelector('.net-canvas[data-settled="1"]', { timeout: 20000 });
+const still0 = await page.locator('.net-canvas').getAttribute('data-today');
+await page.waitForTimeout(800);
+const still1 = await page.locator('.net-canvas').getAttribute('data-today');
+check(Boolean(still0) && still0 === still1, `触らなければ図は止まっている（今日の点 ${still0} → 0.8 秒後 ${still1}）`);
 const [todayX, todayY] = ((await page.locator('.net-canvas').getAttribute('data-today')) || '0,0').split(',').map(Number);
 await page.locator('.net-canvas canvas').scrollIntoViewIfNeeded();    // 図の下が画面の外だと、そこにある点に触れられない
 const cbox = await page.locator('.net-canvas canvas').boundingBox();
@@ -549,7 +558,20 @@ check((await page.locator('.net-seg[aria-label="並べ方"]').count()) === 0
         && (await page.locator('.net-seg button', { hasText: '時間のらせん' }).count()) === 0
         && (await page.locator('.net-seg button', { hasText: '並べ直す' }).count()) === 1,
       '並べ方の切り替えは無い（力学だけ。並べ直すは出す）');
-await page.locator('.net-seg button', { hasText: '2D' }).click();
+// ドラッグで回すのは残した（何も無いところから横へ 120px ドラッグすると今日の点が動く。選ぶことはしない）
+{
+  await page.locator('.net-canvas canvas').scrollIntoViewIfNeeded();
+  const box = await page.locator('.net-canvas canvas').boundingBox();
+  const before = await page.locator('.net-canvas').getAttribute('data-today');
+  const y0 = box.y + Math.min(box.height / 2, 200);
+  await page.mouse.move(box.x + 6, y0);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 126, y0, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForFunction((b) => document.querySelector('.net-canvas')?.dataset.today !== b, before, { timeout: 3000 }).catch(() => {});
+  const after = await page.locator('.net-canvas').getAttribute('data-today');
+  check(after !== before, `ドラッグで回すと今日の点が動く（${before} → ${after}）`);
+}
 await page.locator('.net-seg button', { hasText: '力の調整' }).click();
 check((await page.locator('.net-forces input[type=range]').count()) === 4, '力の調整は Obsidian と同じ4つのつまみ');
 side = await netSide();
@@ -561,14 +583,13 @@ await page.waitForTimeout(200);
 const netFit = await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 check(netFit, 'スマホの幅（390px）で横にはみ出さない');
 await page.setViewportSize({ width: 1440, height: 1000 });
-// 動きを減らす設定（prefers-reduced-motion）では粒を流さず、向きの矢印にする（回転も止めて開く）
+// 動きを減らす設定（prefers-reduced-motion）では明るみを流さず、向きの矢印にする
 await page.emulateMedia({ reducedMotion: 'reduce' });
 await page.reload({ waitUntil: 'networkidle' });
 await page.getByRole('tab', { name: 'リカレンス・ネットワーク' }).click();
 await page.waitForSelector('.net-canvas canvas', { timeout: 10000 });
 await page.waitForFunction(() => document.querySelector('.net-canvas')?.dataset.flow === 'arrows', null, { timeout: 5000 }).catch(() => {});
-check(await flowAt() === 'arrows' && !(await page.locator('label', { hasText: '回転' }).locator('input').isChecked()),
-      `動きを減らす設定では、軌跡は向きの矢印（流さない）で、回転も止めて開く (実際: ${await flowAt()})`);
+check(await flowAt() === 'arrows', `動きを減らす設定では、軌跡は向きの矢印（流さない） (実際: ${await flowAt()})`);
 await page.emulateMedia({ reducedMotion: 'no-preference' });
 await page.unroute('**/data/predictions.json*');
 // 指で拡大縮小（運用者の依頼 2026-10-19「指で拡大縮小できるようにしたい」）: 触れる画面で、2本指を 60px → 220px に広げると

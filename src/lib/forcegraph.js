@@ -9,7 +9,7 @@
  *   反発: すべての組。Barnes–Hut の八分木で近似する（θ = 0.9。遠い塊は重心にまとめる）。強さ charge（負）、距離の2乗の下限 distMin²
  *   中心: 原点へ gravity × 位置（孤立した日が遠くへ飛ばない。Obsidian の「中心の力」。孤立した日は塊の外側に殻のように並ぶ）
  *   速度は毎回 (1 − velocityDecay) 倍。alpha は 1 から alphaMin まで ticks 回で下がる
- * 2次元にすると z を 0 に固定する（同じ八分木がそのまま四分木として働く）。
+ * いつも3次元（運用者の指定 2026-10-20「回転機能と２D機能はいらないです」で、z を 0 に固定する 2次元は外した）。
  */
 
 /** 決まった種の乱数（mulberry32）。同じ候補はいつも同じ形に並ぶ。 */
@@ -142,7 +142,7 @@ function buildTree(T, pos, n) {
 /**
  * レイアウトの状態。edges は [i0, j0, i1, j1, …]、deg は次数。初めの位置は種で決まる球の中の点（同じ候補はいつも同じ形）。
  */
-export function createSim(n, edges, deg, { dim = 3, seed = 1, ...opts } = {}) {
+export function createSim(n, edges, deg, { seed = 1, ...opts } = {}) {
   const o = { ...FORCE_DEFAULTS, ...opts };
   const rand = rng(seed);
   const pos = new Float64Array(3 * n);
@@ -156,7 +156,7 @@ export function createSim(n, edges, deg, { dim = 3, seed = 1, ...opts } = {}) {
     const s = Math.sqrt(1 - u * u);
     pos[3 * i] = r * s * Math.cos(th);
     pos[3 * i + 1] = r * s * Math.sin(th);
-    pos[3 * i + 2] = dim === 3 ? r * u : 0;
+    pos[3 * i + 2] = r * u;
   }
   const nE = edges.length / 2;
   const strength = new Float64Array(nE);
@@ -170,12 +170,12 @@ export function createSim(n, edges, deg, { dim = 3, seed = 1, ...opts } = {}) {
     bias[e] = a / (a + b);
   }
   return {
-    n, dim, pos, vel, edges, strength, bias, minDeg, opts: o, alpha: 1,
+    n, pos, vel, edges, strength, bias, minDeg, opts: o, alpha: 1,
     alphaDecay: 1 - Math.pow(o.alphaMin, 1 / o.ticks), tree: makeTree(n), jiggle: rng(seed ^ 0x9e3779b9),
   };
 }
 
-/** もう一度動かす（密度を変えた・2D / 3D を切り替えた・並べ直す）。 */
+/** もう一度動かす（力のつまみを変えた・並べ直す）。 */
 export function reheat(sim, alpha = 0.8) {
   sim.alpha = Math.max(sim.alpha, alpha);
 }
@@ -196,23 +196,11 @@ export function setForces(sim, forces = {}) {
   return true;
 }
 
-/** 2次元 / 3次元の切り替え。2次元は z を 0 に固定する。3次元へ戻すときは z を少し散らしてから動かす。 */
-export function setDim(sim, dim) {
-  if (sim.dim === dim) return;
-  sim.dim = dim;
-  for (let i = 0; i < sim.n; i += 1) {
-    sim.pos[3 * i + 2] = dim === 2 ? 0 : (sim.jiggle() - 0.5) * sim.opts.linkDistance * 4;
-    sim.vel[3 * i + 2] = 0;
-  }
-  reheat(sim, 1);
-}
-
 /** 1回ぶん動かす。動き終わっていれば false。 */
 export function tick(sim) {
   if (sim.alpha < sim.opts.alphaMin) return false;
   const { n, pos, vel, edges, strength, bias, opts, tree: T } = sim;
   const alpha = sim.alpha;
-  const flat = sim.dim === 2;
   // ばね
   const nE = edges.length / 2;
   for (let e = 0; e < nE; e += 1) {
@@ -220,7 +208,7 @@ export function tick(sim) {
     const t = edges[2 * e + 1];
     let dx = pos[3 * t] + vel[3 * t] - pos[3 * s] - vel[3 * s];
     let dy = pos[3 * t + 1] + vel[3 * t + 1] - pos[3 * s + 1] - vel[3 * s + 1];
-    let dz = flat ? 0 : pos[3 * t + 2] + vel[3 * t + 2] - pos[3 * s + 2] - vel[3 * s + 2];
+    let dz = pos[3 * t + 2] + vel[3 * t + 2] - pos[3 * s + 2] - vel[3 * s + 2];
     let l = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1e-6;
     l = ((l - opts.linkDistance) / l) * alpha * strength[e];
     dx *= l; dy *= l; dz *= l;
@@ -249,7 +237,7 @@ export function tick(sim) {
           let dx = pos[3 * q] - xi; let dy = pos[3 * q + 1] - yi; let dz = pos[3 * q + 2] - zi;
           let l = dx * dx + dy * dy + dz * dz;
           if (l === 0) {
-            dx = (sim.jiggle() - 0.5) * 1e-6; dy = (sim.jiggle() - 0.5) * 1e-6; dz = flat ? 0 : (sim.jiggle() - 0.5) * 1e-6;
+            dx = (sim.jiggle() - 0.5) * 1e-6; dy = (sim.jiggle() - 0.5) * 1e-6; dz = (sim.jiggle() - 0.5) * 1e-6;
             l = dx * dx + dy * dy + dz * dz;
           }
           if (l < dmin2) l = Math.sqrt(dmin2 * l);
@@ -271,7 +259,7 @@ export function tick(sim) {
         if (ch >= 0 && sp < stack.length) { stack[sp] = ch; sp += 1; }
       }
     }
-    vel[3 * i] += fx; vel[3 * i + 1] += fy; vel[3 * i + 2] += flat ? 0 : fz;
+    vel[3 * i] += fx; vel[3 * i + 1] += fy; vel[3 * i + 2] += fz;
   }
   // 中心へ・速度の減衰・位置
   const g = opts.gravity * alpha;
@@ -279,7 +267,6 @@ export function tick(sim) {
   for (let i = 0; i < n; i += 1) {
     for (let d = 0; d < 3; d += 1) {
       const k = 3 * i + d;
-      if (flat && d === 2) { vel[k] = 0; pos[k] = 0; continue; }
       vel[k] = (vel[k] - pos[k] * g) * keep;
       pos[k] += vel[k];
     }
@@ -304,9 +291,9 @@ export function extent(pos, n, q = 0.98) {
 
 /**
  * 投影。view = { yaw, pitch, zoom, panX, panY }（角度はラジアン）、ext = extent の戻り値。
- * out（長さ 4n）に [画面 x, 画面 y, 大きさの倍率, 奥行き（手前ほど大きい）] を書く。透視は 3次元のときだけ。
+ * out（長さ 4n）に [画面 x, 画面 y, 大きさの倍率（透視）, 奥行き（手前ほど大きい）] を書く。
  */
-export function project(pos, n, ext, view, width, height, dim, out) {
+export function project(pos, n, ext, view, width, height, out) {
   const cy = Math.cos(view.yaw); const sy = Math.sin(view.yaw);
   const cp = Math.cos(view.pitch); const sp = Math.sin(view.pitch);
   const R = ext.radius;
@@ -318,18 +305,11 @@ export function project(pos, n, ext, view, width, height, dim, out) {
     const x = pos[3 * i] - ext.cx;
     const y = pos[3 * i + 1] - ext.cy;
     const z = pos[3 * i + 2] - ext.cz;
-    let x1; let y2; let z2;
-    if (dim === 3) {
-      x1 = cy * x + sy * z;
-      const z1 = -sy * x + cy * z;
-      y2 = cp * y - sp * z1;
-      z2 = sp * y + cp * z1;
-    } else {
-      x1 = cy * x - sy * y;            // 2次元は画面の中で回すだけ
-      y2 = sy * x + cy * y;
-      z2 = 0;
-    }
-    const persp = dim === 3 ? cam / (cam - z2) : 1;
+    const x1 = cy * x + sy * z;
+    const z1 = -sy * x + cy * z;
+    const y2 = cp * y - sp * z1;
+    const z2 = sp * y + cp * z1;
+    const persp = cam / (cam - z2);
     out[4 * i] = ox + x1 * base * persp;
     out[4 * i + 1] = oy + y2 * base * persp;
     out[4 * i + 2] = persp;

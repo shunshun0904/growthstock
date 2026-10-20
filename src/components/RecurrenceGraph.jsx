@@ -1,13 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { createSim, tick, setDim, setForces, reheat, extent, project, pick, seedOf } from '../lib/forcegraph.js';
+import { createSim, tick, setForces, reheat, extent, project, pick, seedOf } from '../lib/forcegraph.js';
 
 /**
- * リカレンス・ネットワークの描画（canvas 2D。力学レイアウトで3次元に並べて回す）。
+ * リカレンス・ネットワークの描画（canvas 2D。力学レイアウトで3次元に並べ、ドラッグで回して見る）。
  *
  * - 点 = 1営業日（大きさは次数 = 似た日として選ばれた数を含む線の数）、線 = 状態の似た日どうし（k近傍）。今日（候補の日）は
  *   白い大きな点、78週高値の更新日は紫の輪
  * - 並べ方は力学だけ（運用者の指定 2026-10-19「3種のプロット方法がありますが、今のデフォルトのみのもので良いです」。状態の
- *   地図・時間のらせんは外した）
+ *   地図・時間のらせんは外した）。図はいつも3次元で、触らなければ止まっている（2026-10-20 の指定「回転機能と２D機能はいらない
+ *   です」で、自動の回転と 2D の表示は外した）
  * - 見た目（運用者の依頼 2026-10-19「無理に球状にしなくても3次元ネットワーク構造でかっこよく」）: 暗い面に、薄い明るい線を
  *   重ねる（密な塊ほど明るく見える）、点は奥ほど小さく暗く（霧）、手前の点はうっすら光る。似た日は光の輪で強調。線と点の
  *   にじみは通常の重ね方で描く（足し算の重ね方 lighter は、GPU の無い描画で線 1.6万本が約8倍遅かった。足し算は強調する
@@ -22,7 +23,7 @@ import { createSim, tick, setDim, setForces, reheat, extent, project, pick, seed
  *   暗めの橙の実線（ほかの線より少し太い。古い日ほど薄い）の上を、同じ暗い橙のやわらかい明るみが古い日から今日の向きへゆっくり
  *   流れる（画面の上で一定の速さ FLOW_PX_PER_S。前は光の粒が1日を同じ時間で進み、日の間の長いところで速く飛んでいた。その次は
  *   破線）。点の下に描く。動きを減らす設定（prefers-reduced-motion。flow = false）では、流さずに向きの矢印を置く
- * - 操作: ドラッグで回す（2D・Shift・右ボタンはずらす）。ホイール・2本指でつまんで拡大縮小（同日の依頼「指で拡大縮小」。指の
+ * - 操作: ドラッグで回す（Shift・右ボタンはずらす）。ホイール・2本指でつまんで拡大縮小（同日の依頼「指で拡大縮小」。指の
  *   間・カーソルの位置を中心に）。2本指を動かすとずらす。点に触れる（タップ）とその日の値と似た日を出し、クリックで選ぶ
  *   （もう一度・何も無いところで外す）。ダブルクリックで元の大きさ。矢印キーで回し、＋ − で拡大、0 で元に戻す
  * - 計算は毎フレーム 10ms までに区切り、動き終わったら描き直しが要るときだけ描く
@@ -41,7 +42,7 @@ const TRAIL_RGB = '217, 119, 6';
 const FLOW_PX_PER_S = 12;    // 明るみが今日の向きへ流れる速さ（px/秒。画面の上で一定なので、日の間が長いところでも速くならない）
 const FLOW_GAP_PX = 60;      // 明るみの間隔（px）
 const FLOW_TAIL_PX = 30;     // 明るみの長さ（px。後ろほど薄い）
-const FLOW_FRAME_MS = 50;    // 明るみだけが動くとき（回していない）の描き直しの間隔（約20コマ/秒）
+const FLOW_FRAME_MS = 50;    // 明るみだけが動くとき（並べ終わって、触っていない）の描き直しの間隔（約20コマ/秒）
 const ARROW_EVERY = 4;       // 動きを減らす設定のときの矢印の間隔（日）
 const RING = '#a78bfa';
 const TEXT = '#e8edf6';
@@ -51,7 +52,7 @@ const ZOOM_MAX = 12;
 const clampZoom = (z) => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z));
 
 export default function RecurrenceGraph({
-  dec, net, nbrs, colors, dim, spin, trail, seedKey, selected, onSelect, tipOf, ariaLabel, zoomCmd, forces,
+  dec, net, nbrs, colors, trail, seedKey, selected, onSelect, tipOf, ariaLabel, zoomCmd, forces,
   highlightToday = true, flow = true,
 }) {
   const wrapRef = useRef(null);
@@ -62,14 +63,14 @@ export default function RecurrenceGraph({
     nbSet: null, nbFor: -2, nbNet: null, bg: null,
   });
   const props = useRef({});
-  props.current = { dec, net, nbrs, colors, dim, spin, trail, selected, highlightToday, flow };
+  props.current = { dec, net, nbrs, colors, trail, selected, highlightToday, flow };
   const [tip, setTip] = useState(null);
 
   // ネットワークが変わったら並べ直す（同じ候補・同じ k ならいつも同じ形。力学の種は銘柄・日付・k）
   useEffect(() => {
     const s = st.current;
     if (!dec || !net) { s.sim = null; return; }
-    s.sim = createSim(dec.n, net.edges, net.deg, { dim, seed: seedOf(seedKey || ''), ...(forces || {}) });
+    s.sim = createSim(dec.n, net.edges, net.deg, { seed: seedOf(seedKey || ''), ...(forces || {}) });
     s.screen = new Float64Array(4 * dec.n);
     s.order = new Int32Array(dec.n).map((_, i) => i);
     s.hover = -1;
@@ -78,11 +79,6 @@ export default function RecurrenceGraph({
     s.dirty = true;
     setTip(null);
   }, [dec, net]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    const s = st.current;
-    if (s.sim) { setDim(s.sim, dim); s.ext = null; s.dirty = true; }
-  }, [dim]);
 
   useEffect(() => { st.current.dirty = true; }, [colors, trail, selected, highlightToday, nbrs, flow]);
 
@@ -127,7 +123,7 @@ export default function RecurrenceGraph({
     return () => { if (ro) ro.disconnect(); window.removeEventListener('resize', resize); };
   }, []);
 
-  // 描き続ける（計算・回転・描画）
+  // 描き続ける（計算・描画）
   useEffect(() => {
     let alive = true;
     const loop = () => {
@@ -143,10 +139,8 @@ export default function RecurrenceGraph({
             ran += 1;
           }
         }
-        const idle = !s.drag && !s.pinch && s.hover < 0;
-        if (p.spin && idle) { s.view.yaw += p.dim === 3 ? 0.0022 : 0.0010; s.dirty = true; }
         if (ran) { s.dirty = true; s.fit = true; }
-        // 軌跡の明るみだけが動くとき（回していない）は約20コマ/秒で描き直す
+        // 軌跡の明るみが流れている間は、ほかに動きが無くても約20コマ/秒で描き直す
         if (p.trail > 0 && p.flow && performance.now() - s.flowAt >= FLOW_FRAME_MS) s.dirty = true;
         if (s.dirty) { draw(); s.dirty = false; s.flowAt = performance.now(); }
       }
@@ -217,27 +211,26 @@ export default function RecurrenceGraph({
     const { n, isFresh } = p.dec;
     const { deg, edges } = p.net;
     const ext = currentExtent();
-    const sc = project(s.sim.pos, n, ext, s.view, w, h, s.sim.dim, s.screen);
-    const three = s.sim.dim === 3;
+    const sc = project(s.sim.pos, n, ext, s.view, w, h, s.screen);
     const today = n - 1;
     const focus = focusOf();
     const nbSet = neighborSet(focus);
     const lit = (i) => i === focus || (nbSet && nbSet.has(i));
-    const depth = (i) => (three ? Math.min(1, Math.max(0, (sc[4 * i + 3] + 1) / 2)) : 0.75);
+    const depth = (i) => Math.min(1, Math.max(0, (sc[4 * i + 3] + 1) / 2));
 
     // 線（薄い明るい線を重ねる。密な塊ほど明るい。奥と手前で濃さを変える。強調中も同じ濃さ）
     ctx.globalCompositeOperation = 'source-over';
     ctx.lineWidth = 0.7;
-    for (let pass = 0; pass < (three ? 2 : 1); pass += 1) {
+    for (let pass = 0; pass < 2; pass += 1) {
       ctx.beginPath();
       for (let e = 0; e < edges.length; e += 2) {
         const a = edges[e];
         const b = edges[e + 1];
-        if (three && (sc[4 * a + 3] + sc[4 * b + 3] >= 0) !== (pass === 1)) continue;
+        if ((sc[4 * a + 3] + sc[4 * b + 3] >= 0) !== (pass === 1)) continue;
         ctx.moveTo(sc[4 * a], sc[4 * a + 1]);
         ctx.lineTo(sc[4 * b], sc[4 * b + 1]);
       }
-      const front = !three || pass === 1;
+      const front = pass === 1;
       const al = EDGE_ALPHA[front ? 'front' : 'back'];
       ctx.strokeStyle = `rgba(${front ? EDGE_RGB_FRONT : EDGE_RGB_BACK}, ${al.toFixed(4)})`;
       ctx.stroke();
@@ -272,7 +265,7 @@ export default function RecurrenceGraph({
 
     // 点（奥から手前へ。奥ほど小さく暗い。手前はうっすら光る）
     const order = s.order;
-    if (three) order.sort((a, b) => sc[4 * a + 3] - sc[4 * b + 3]);
+    order.sort((a, b) => sc[4 * a + 3] - sc[4 * b + 3]);
     // 点の大きさ（次数と遠近）。狭い画面（スマホ）では点を小さくする（約2,200点が重なって塗りつぶさないように）
     const sizeK = Math.max(0.55, Math.min(1, Math.min(w, h) / 640));
     const radius = (i) => Math.min(6, (0.9 + 0.3 * Math.sqrt(deg[i])) * sc[4 * i + 2]) * sizeK;
@@ -281,7 +274,7 @@ export default function RecurrenceGraph({
       if (i === today || lit(i)) continue;              // 強調する日と今日は上に重ねて描く
       const dz = depth(i);
       const r = radius(i);
-      const a = three ? 0.22 + 0.78 * dz : 0.92;          // 強調中も暗くしない（相対的な差が分かるように）
+      const a = 0.22 + 0.78 * dz;                         // 強調中も暗くしない（相対的な差が分かるように）
       const x = sc[4 * i];
       const y = sc[4 * i + 1];
       ctx.fillStyle = p.colors[i];
@@ -547,7 +540,7 @@ export default function RecurrenceGraph({
       s.dirty = true;
       return;
     }
-    startDrag(pt.x, pt.y, e.shiftKey || props.current.dim === 2 || e.button === 2);
+    startDrag(pt.x, pt.y, e.shiftKey || e.button === 2);
     s.drag.touch = e.pointerType === 'touch';
   };
 
@@ -590,7 +583,7 @@ export default function RecurrenceGraph({
         s.pinch = null;
         if (s.ptrs.size === 1) {
           const [rest] = [...s.ptrs.values()];
-          startDrag(rest.x, rest.y, props.current.dim === 2, true);
+          startDrag(rest.x, rest.y, false, true);
         } else s.drag = null;
       }
       return;

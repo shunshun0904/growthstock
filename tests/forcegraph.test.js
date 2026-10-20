@@ -2,7 +2,8 @@
  * 力学レイアウト（src/lib/forcegraph.js。リカレンス・ネットワークのタブの図）の単体テスト。
  *
  * - 反発の八分木（Barnes–Hut）は、θ をほぼ 0 にすると総当たりと一致する（θ = 0.9 は近似）
- * - 同じ種なら同じ形（同じ候補はいつも同じ並び）。2次元にすると z は 0 のまま
+ * - 同じ種なら同じ形（同じ候補はいつも同じ並び）。いつも3次元（運用者の指定 2026-10-20「回転機能と２D機能はいらないです」で
+ *   2次元は外した）
  * - ばねの強さは linkStrength ÷ 両端の次数の小さいほう で、上限 1（力のつまみで変えると数え直す）
  * - 中心の力で孤立した点も遠くへ飛ばない。投影と、画面の点からいちばん近いノードを選ぶ
  * - 並べ方は力学だけ（運用者の指定 2026-10-19「今のデフォルトのみのもので良いです」で、状態の地図・時間のらせんは外した）
@@ -12,8 +13,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  createSim, tick, setDim, setForces, extent, project, pick, rng, seedOf, FORCE_DEFAULTS,
+  createSim, tick, setForces, extent, project, pick, rng, seedOf, FORCE_DEFAULTS,
 } from '../src/lib/forcegraph.js';
+import * as forcegraph from '../src/lib/forcegraph.js';
 
 const N = 200;
 const none = new Uint32Array(0);
@@ -61,30 +63,27 @@ test('反発の八分木は θ ≈ 0 で総当たりと一致する', () => {
   assert.ok(e2 < 0.25 * mag, `θ = 0.9 の誤差 ${e2} / ${mag}`);
 });
 
-test('同じ種なら同じ形・2次元は z が 0 のまま', () => {
+test('同じ種なら同じ形・いつも3次元', () => {
   const r = rng(11);
   const edges = [];
   for (let k = 0; k < 600; k += 1) edges.push(Math.floor(r() * N), Math.floor(r() * N));
   const E = Uint32Array.from(edges);
   const deg = new Int32Array(N);
   for (const v of E) deg[v] += 1;
-  const run = (seed, dim) => {
-    const s = createSim(N, E, deg, { seed, dim });
+  const run = (seed) => {
+    const s = createSim(N, E, deg, { seed });
     while (tick(s));
     return s;
   };
-  const a = run(seedOf('46840-2026-10-16-100'), 3);
-  const b = run(seedOf('46840-2026-10-16-100'), 3);
+  const a = run(seedOf('46840-2026-10-16-100'));
+  const b = run(seedOf('46840-2026-10-16-100'));
   assert.deepEqual(Array.from(a.pos), Array.from(b.pos));
-  const c = run(seedOf('46840-2026-10-16-200'), 3);
+  const c = run(seedOf('46840-2026-10-16-200'));
   assert.notDeepEqual(Array.from(a.pos), Array.from(c.pos));
-  const flat = run(5, 2);
-  for (let i = 0; i < N; i += 1) assert.equal(flat.pos[3 * i + 2], 0);
-  // 3次元 → 2次元に切り替えても z は 0 になり、動かし直す
-  setDim(a, 2);
-  assert.ok(a.alpha >= 0.99);
-  while (tick(a));
-  for (let i = 0; i < N; i += 1) assert.equal(a.pos[3 * i + 2], 0);
+  // 2次元の切り替えは無い（z も x・y と同じくらい広がる）
+  assert.equal(forcegraph.setDim, undefined);
+  const spread = (d) => Math.max(...Array.from({ length: N }, (_, i) => Math.abs(a.pos[3 * i + d])));
+  assert.ok(spread(2) > 0.3 * Math.max(spread(0), spread(1)), `z の広がり ${spread(2)}`);
   // 孤立した点も中心の力で遠くへは飛ばない（重心からの距離の 98% 点の 3倍の中）
   const ext = extent(a.pos, N, 0.98);
   for (let i = 0; i < N; i += 1) {
@@ -111,14 +110,16 @@ test('投影と、いちばん近いノードを選ぶ', () => {
   const pos = Float64Array.from([0, 0, 0, 100, 0, 0, -100, 0, 0]);
   const ext = { cx: 0, cy: 0, cz: 0, radius: 100 };
   const out = new Float64Array(12);
-  project(pos, 3, ext, { yaw: 0, pitch: 0, zoom: 1, panX: 0, panY: 0 }, 400, 400, 3, out);
+  project(pos, 3, ext, { yaw: 0, pitch: 0, zoom: 1, panX: 0, panY: 0 }, 400, 400, out);
   assert.equal(out[0], 200);                                    // 原点は真ん中
   assert.equal(out[1], 200);
   assert.ok(out[4] > 200 && out[8] < 200);                      // 右と左
   assert.equal(pick(out, 3, out[4] + 3, out[5] - 2), 1);
   assert.equal(pick(out, 3, 5, 5), -1);                         // 遠ければ選ばない
-  // 2次元は透視しない（倍率 1）
-  project(pos, 3, ext, { yaw: 0, pitch: 0, zoom: 1, panX: 10, panY: 0 }, 400, 400, 2, out);
+  // ずらすと画面の位置だけが動く（奥行き 0 の原点は倍率 1）。奥の点は小さく、手前の点は大きく見える
+  project(pos, 3, ext, { yaw: 0, pitch: 0, zoom: 1, panX: 10, panY: 0 }, 400, 400, out);
   assert.equal(out[2], 1);
   assert.equal(out[0], 210);
+  project(pos, 3, ext, { yaw: Math.PI / 2, pitch: 0, zoom: 1, panX: 0, panY: 0 }, 400, 400, out);
+  assert.ok(out[6] < 1 && out[10] > 1, `奥 ${out[6]}・手前 ${out[10]}`);
 });

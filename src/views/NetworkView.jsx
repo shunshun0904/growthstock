@@ -22,6 +22,8 @@ import {
  * どちらかが選べば結ぶ）。同日の夜の運用者の選択「k近傍だけにする」と指定「kは1〜10までで良いです」（それまでは辺の密度で ε を
  * 決めていた）。最初の k は指定「初期状態のkは5でお願いします」で 5（目次の method.k。research/recurrence_net.py の K_DEFAULT）。
  * 並べ方は力学だけ（指定「3種のプロット方法がありますが、今のデフォルトのみのもので良いです」。状態の地図・時間のらせんは外した）。
+ * 自動の回転と 2D / 3D の切り替えも外した（2026-10-20 の指定「回転機能と２D機能はいらないです」。図はいつも3次元で、触らなければ
+ * 止まっている。ドラッグで回して見るのは残した）。
  * 同じ夜の依頼「指で拡大縮小」「対象日と似ている（紐づく）サンプルもハイライト」「無理に球状にしなくても3次元ネットワーク構造で
  * かっこよく」は src/components/RecurrenceGraph.jsx。
  * 点の色はその日に候補になっていたら、の結果（+10% の指値か20営業日目の終値・目的変数 1.5σ / 1.2σ。予測日までに分かったものだけ）。
@@ -105,8 +107,6 @@ export default function NetworkView({ data }) {
   const [payload, setPayload] = useState(null);         // { file, data } / { file, error } / { file, loading }
   const [kSel, setK] = useState(null);
   const [mode, setMode] = useState('outcome');
-  const [dim, setDim] = useState(3);
-  const [spin, setSpin] = useState(() => !reducedMotion());
   const [flow] = useState(() => !reducedMotion());       // 軌跡の明るみを流す（動きを減らす設定では向きの矢印）
   const [trail, setTrail] = useState(true);
   const [lightToday, setLightToday] = useState(true);   // 今日に似た日を光らせる（運用者の依頼 2026-10-19）
@@ -392,13 +392,6 @@ export default function NetworkView({ data }) {
                 {ok && <span className="sub">{`${fmtDate(dec.dates[0])} 〜 ${fmtDate(dec.date)}・${fmtInt(dec.n)} 営業日`}</span>}
               </div>
               <div className="net-controls">
-                <div className="net-seg" role="group" aria-label="次元">
-                  {[3, 2].map((d) => (
-                    <button key={d} className={`btn btn-ghost${d === dim ? ' on' : ''}`} aria-pressed={d === dim}
-                            onClick={() => setDim(d)}>{`${d}D`}</button>
-                  ))}
-                </div>
-                <label><input type="checkbox" checked={spin} onChange={(e) => setSpin(e.target.checked)} /> 回転</label>
                 <label><input type="checkbox" checked={trail} onChange={(e) => setTrail(e.target.checked)} /> {`直近${TRAIL_DAYS}営業日の軌跡`}</label>
                 <label><input type="checkbox" checked={lightToday} onChange={(e) => setLightToday(e.target.checked)} /> 今日に似た日を光らせる</label>
                 <div className="net-seg" role="group" aria-label="表示の操作">
@@ -433,7 +426,7 @@ export default function NetworkView({ data }) {
               <>
                 <Legend mode={mode} counts={counts} nbrCounts={nbrCounts} nbrN={summary.deg} dec={dec} />
                 <RecurrenceGraph
-                  dec={dec} net={net} nbrs={nbrs} colors={colors} dim={dim} spin={spin} trail={trail ? TRAIL_DAYS : 0} flow={flow}
+                  dec={dec} net={net} nbrs={nbrs} colors={colors} trail={trail ? TRAIL_DAYS : 0} flow={flow}
                   seedKey={`${dec.jqCode}-${dec.date}-k${k}`} selected={selected} onSelect={setSelected} tipOf={tipOf}
                   zoomCmd={zoomCmd} forces={forces} highlightToday={lightToday}
                   ariaLabel={`${dec.code} ${dec.name} の ${dec.n} 営業日のリカレンス・ネットワーク。今日に似た過去の日は ${summary.deg} 日。`
@@ -442,7 +435,7 @@ export default function NetworkView({ data }) {
                 <div className="net-foot">
                   {`点 ${fmtInt(dec.n)}・線 ${fmtInt(summary.edges)} 本（各日に近い ${k} 日を選び、どちらかが選べば結ぶ）・`
                     + `今日の ${k} 番目に近い日まで ${fmt(summary.kth, 2)}σ（9列の距離）。`
-                    + 'ドラッグで回す（Shift + ドラッグ・2D はずらす）・ホイールか2本指でつまんで拡大縮小・2本指で動かすとずらす・'
+                    + 'ドラッグで回す（Shift + ドラッグでずらす）・ホイールか2本指でつまんで拡大縮小・2本指で動かすとずらす・'
                     + '点に触れる（タップ）とその日に似た日を光らせる・クリックで選ぶ'}
                 </div>
               </>
