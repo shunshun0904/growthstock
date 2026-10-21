@@ -10,7 +10,7 @@
 - 文脈: t の行で終わり、長さは CONTEXT 以下、銘柄をまたがない。日足に無い行は止める
 - 入力: 株価だけなら終値の対数の配列、共変量ありなら同じ日足の行の値を名前つきで渡す
 - 判定の言い方と、日付で束ねたブートストラップ（同じ点数の腕どうしの差の区間は 0）
-- 途中から続ける: 保存済みの分位点を読み、まだの行があれば None
+- 途中から続ける: 保存済みの分位点を読み、まだの行があれば None。束の名前は行と入力の値で決まる（行が増えた束だけ計算し直す）
 - 基準モデルの学習: E41.oof_folds の LightGBM と同じ点数（小さな合成データ）
 
   python3 tests/test_e109_chronos2.py
@@ -180,14 +180,35 @@ class Resume(unittest.TestCase):
 
         E.forecast = fake
         pipe = SimpleNamespace(quantiles=LV)
-        q1 = E.run_arm("Z0", pipe, "rev", rows, p, st, en, {}, None, [], None, "rows")
+        q1 = E.run_arm("Z0", pipe, "rev", rows, p, st, en, {}, None, [], None)
         self.assertEqual(q1.shape, (3, 3, E.HORIZON))
         self.assertEqual(list(q1[:, 0, 0]), [2.0, 3.0, 3.0])     # 文脈の長さ（行の並びのまま戻る）
         self.assertEqual(sum(calls), 3)
-        q2 = E.run_arm("Z0", None, "rev", rows, p, st, en, {}, None, [], None, "rows")
+        q2 = E.run_arm("Z0", None, "rev", rows, p, st, en, {}, None, [], None)
         np.testing.assert_array_equal(q1, q2)
         self.assertEqual(sum(calls), 3)                          # 2回目は保存済みを読むだけ
-        self.assertIsNone(E.run_arm("Z0", None, "other", rows, p, st, en, {}, None, [], None, "rows"))
+        self.assertIsNone(E.run_arm("Z0", None, "other", rows, p, st, en, {}, None, [], None))
+        # 日々の取り込みで後ろに行が増えても、前の束はそのまま読める（束の名前は行と入力の値で決まる）
+        more = pd.concat([rows, pd.DataFrame({"Code": ["2222"], "Date": [pd.Timestamp("2024-01-04")], "fold": [1]})],
+                         ignore_index=True)
+        st2, en2 = E.context_bounds(p, more, 3)
+        self.assertIsNone(E.run_arm("Z0", None, "rev", more, p, st2, en2, {}, None, [], None))
+        q3 = E.run_arm("Z0", pipe, "rev", more, p, st2, en2, {}, None, [], None)
+        self.assertEqual(sum(calls), 5)                          # 窓0 の束は読み、行が増えた窓1 の束（2行）だけ計算し直した
+        np.testing.assert_array_equal(q3[:3], q1)
+
+    def test_chunk_key(self):
+        keys = pd.DataFrame({"Code": ["1111"], "Date": [pd.Timestamp("2024-01-02")]})
+        a = [{"target": np.array([1.0, 2.0], dtype=np.float32),
+              "past_covariates": {"x": np.array([0.5, np.nan], dtype=np.float32)}}]
+        b = [{"target": np.array([1.0, 2.0], dtype=np.float32),
+              "past_covariates": {"x": np.array([0.5, 0.7], dtype=np.float32)}}]
+        meta = {"arm": "Z30"}
+        self.assertEqual(E.chunk_key(meta, keys, a), E.chunk_key(meta, keys, [dict(a[0])]))
+        self.assertNotEqual(E.chunk_key(meta, keys, a), E.chunk_key(meta, keys, b))
+        self.assertNotEqual(E.chunk_key(meta, keys, a), E.chunk_key({"arm": "Z0"}, keys, a))
+        self.assertNotEqual(E.chunk_key(meta, keys, a),
+                            E.chunk_key(meta, keys.assign(Code="2222"), a))
 
 
 class BaseModel(unittest.TestCase):

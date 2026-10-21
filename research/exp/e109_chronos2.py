@@ -342,7 +342,7 @@ def covariates(keys: pd.DataFrame, cols: Sequence[str], panel: pd.DataFrame, src
         part = fn(s, src["data_dir"])
         for c in part.columns:
             s[c] = part[c].to_numpy()
-    out = pd.DataFrame(index=range(n))
+    out = {}
     tx_cols = [c for c in cols if c in TX.COLUMNS]
     for c in cols:
         if c in tx_cols:
@@ -363,10 +363,9 @@ def covariates(keys: pd.DataFrame, cols: Sequence[str], panel: pd.DataFrame, src
             tx = TX.compute_at(sub, k.loc[sel, ["Code", "Date"]])
             for c in tx_cols:
                 vals[c][sel] = tx[c].to_numpy(dtype=dtype)
-        for c in tx_cols:
-            out[c] = vals[c]
-    out = out.replace([np.inf, -np.inf], np.nan)
-    return out[cols]
+        out.update(vals)
+    frame = pd.DataFrame({c: out[c] for c in cols})
+    return frame.replace([np.inf, -np.inf], np.nan)
 
 
 # --------------------------------------------------------------------------- #
@@ -493,22 +492,45 @@ def make_items(panel_close: np.ndarray, start: np.ndarray, end: np.ndarray, cov:
     return items
 
 
+def chunk_key(meta: dict, keys: pd.DataFrame, items: list) -> str:
+    """
+    保存の名前。束の行（Code・Date）と、モデルに渡す入力の値そのもの（目的の系列・共変量の名前と値）と meta から作る。
+    日々の取り込みで行が増えても、分割で過去の調整後の値が直っても、入力が同じ束はそのまま使え、違う束だけ計算し直す。
+    """
+    h = hashlib.sha1(json.dumps(meta, sort_keys=True, default=str).encode())
+    h.update(pd.util.hash_pandas_object(keys.reset_index(drop=True), index=False).to_numpy().tobytes())
+    for it in items:
+        if isinstance(it, dict):
+            h.update(np.ascontiguousarray(it["target"]).tobytes())
+            for c, v in it["past_covariates"].items():
+                h.update(c.encode())
+                h.update(np.ascontiguousarray(v).tobytes())
+        else:
+            h.update(np.ascontiguousarray(it).tobytes())
+    return h.hexdigest()[:16]
+
+
 def run_arm(arm: str, pipe, rev: str, rows: pd.DataFrame, panel: pd.DataFrame, start: np.ndarray, end: np.ndarray,
-            tops: Dict[int, List[str]], cov_tab: Optional[np.ndarray], cov_cols: List[str], cov_row: Optional[np.ndarray],
-            tag_rows: str) -> Optional[pd.DataFrame]:
+            tops: Dict[int, List[str]], cov_tab: Optional[np.ndarray], cov_cols: List[str],
+            cov_row: Optional[np.ndarray]) -> Optional[np.ndarray]:
     """
     腕（Z0 / Z30）の分位点を、窓ごと・CHUNK_ROWS 行ごとに計算して保存する（保存済みは読む）。全部そろえば (行, 分位点) を返す。
     """
     close = panel["close"].to_numpy(dtype=float)
+    meta = {"arm": arm, "ctx": CONTEXT, "h": HORIZON, "model": MODEL_ID, "rev": rev}
     parts, missing = [], 0
     for fold, idx in rows.groupby("fold").indices.items():
         idx = np.sort(idx)
         cols = tops[int(fold)] if arm == "Z30" else []
-        fp = digest({"arm": arm, "rows": tag_rows, "fold": int(fold), "ctx": CONTEXT, "h": HORIZON, "cols": cols,
-                     "model": MODEL_ID, "rev": rev})
-        for ci, st in enumerate(range(0, len(idx), CHUNK_ROWS)):
+        for st in range(0, len(idx), CHUNK_ROWS):
             sl = idx[st:st + CHUNK_ROWS]
-            p = path(f"{arm}_{fp}_f{int(fold)}_c{ci:03d}.npz")
+            if arm == "Z30":
+                items = make_items(close, start[sl], end[sl], cov_tab, [cov_cols.index(c) for c in cols], cols, cov_row)
+                bs = (len(cols) + 1) * BATCH_ITEMS_Z30
+            else:
+                items = make_items(close, start[sl], end[sl])
+                bs = BATCH_ITEMS_Z0
+            p = path(f"{arm}_{chunk_key(meta, rows.iloc[sl][['Code', 'Date']], items)}.npz")
             if os.path.exists(p):
                 z = np.load(p)
                 parts.append((sl, z["q"]))
@@ -517,12 +539,6 @@ def run_arm(arm: str, pipe, rev: str, rows: pd.DataFrame, panel: pd.DataFrame, s
                 missing += len(sl)
                 continue
             t0 = time.time()
-            if arm == "Z30":
-                items = make_items(close, start[sl], end[sl], cov_tab, [cov_cols.index(c) for c in cols], cols, cov_row)
-                bs = (len(cols) + 1) * BATCH_ITEMS_Z30
-            else:
-                items = make_items(close, start[sl], end[sl])
-                bs = BATCH_ITEMS_Z0
             q = forecast(pipe, items, bs)
             np.savez_compressed(p, q=q)
             parts.append((sl, q))
@@ -828,7 +844,6 @@ def main(argv=None) -> int:
     pipe, rev = load_pipeline()
     log(f"[chronos] {MODEL_ID}（commit {rev}）を読んだ / {time.time()-t0:.0f}秒・分位点 {len(pipe.quantiles)}個"
         f"（{pipe.quantiles[0]}〜{pipe.quantiles[-1]}）")
-    tag_rows = AB.fingerprint(rows, ["need"])
     close = panel["close"].to_numpy(dtype=float)
     last_log = np.log(close[end])
     fwd = end + HORIZON
@@ -836,7 +851,7 @@ def main(argv=None) -> int:
     real_end = np.where(same, np.log(close[np.minimum(fwd, len(panel) - 1)]), np.nan)
     diag, done = {}, ["A"]
     for a in z_arms:
-        q = run_arm(a, pipe, rev, rows, panel, start, end, tops, cov_tab, union, cov_row, tag_rows)
+        q = run_arm(a, pipe, rev, rows, panel, start, end, tops, cov_tab, union, cov_row)
         if q is None:
             continue
         sc = scores(q, pipe.quantiles, last_log, rows["need"].to_numpy(dtype=float))
