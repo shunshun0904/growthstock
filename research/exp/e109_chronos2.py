@@ -23,6 +23,10 @@
 上位30列（窓ごと。回す前に決めた）
   その窓の学習データで学習した A の3つの種の gain の平均で並べ、毎日（または毎週）値が変わる列（ELIGIBLE）の上から30本。評価の
   期間を列選びに使わない（実験61 の「評価期間を学習済みのモデルで列を選んだことによる見かけ」を避ける）。
+  回をまたぐとき（2026-10-21 に足した）: データセットは作り直すたびに値がわずかに違い（同じ生データでも指紋が変わる。試運転と
+  本番の1回目で確かめた）、A を学習し直すと gain の30位前後が入れ替わる窓がある。その窓は束の名前が変わって前の回の分位点が
+  使えない。そこで今回と、保存してある回ごとの A の gain の上位列を候補にし、窓ごとに保存済みの束の行が多いものを使う（同じなら
+  今回の列）。どれも「その窓の学習データで学習した A の gain の上位」で、評価の行の結果は選び方に入らない。どの回の列かは ■ 0b。
   ELIGIBLE（159列）: テクニカル指標111・市場環境11・業種指数4・直近の増減5・高値への近さ3・ボラの分解6・出来高の傾き1・信用倍率1・
   需給（空売り比率・投資部門別）12、ブレイクの性質のうち毎日の値がある4（break_margin・close_position・ret_20d・vol_20d）、
   売買代金1（log_trading_value）。
@@ -56,7 +60,7 @@
 
 出すもの（公開ログには件数・割合・日付・精度・列名だけ。銘柄・値は出さない）
 
-    exp=e109_chronos2.py                       本番の回。--budget-min を過ぎたら新しい計算を始めずに終わる（続きは次の回が使う）
+    exp=e109_chronos2.py                       本番の回。--budget-min までに終わらない束は計算せずに終わる（続きは次の回が使う）
     exp=e109_chronos2.py args="--smoke"        試運転（窓ごとに先頭 SMOKE_ROWS 行。速さを測る。保存は e109smoke_*）
 手元（Chronos-2 の手前まで。共変量の確かめ・上位30列・文脈の大きさ）: python3 research/exp/e109_chronos2.py --dry
 
@@ -66,6 +70,7 @@ research/_data/oof/<tag>_* に置き、actions/cache で次の回に引き継ぐ
 from __future__ import annotations
 
 import argparse
+import glob
 import hashlib
 import json
 import os
@@ -154,7 +159,7 @@ def time_left(need_sec: float = 0.0) -> bool:
         return True
     if not TIMED_OUT:
         TIMED_OUT = True
-        log("[time] --budget-min に届くので、新しい計算は始めない（保存済みの分で報告。続きは次の回）")
+        log("[time] --budget-min までに終わらない束は計算しない（収まる小さな束は計算する。保存済みの分で報告。続きは次の回）")
     return False
 
 
@@ -176,6 +181,44 @@ def top_eligible(gain: pd.Series, eligible: Sequence[str], n: int = TOP_N) -> Li
     g = gain.reindex(list(eligible)).fillna(0.0)
     order = sorted(g.index, key=lambda c: (-float(g[c]), c))
     return order[:n]
+
+
+def tops_candidates(eligible: Sequence[str], n: int = TOP_N) -> Dict[str, Dict[int, List[str]]]:
+    """
+    保存してある A の gain（回ごと。apath の A_<指紋>_gain.parquet）それぞれの、窓ごとの上位 n 列。毎日動く列がすべて
+    gain に載っているものだけ（列の組が違う回の gain は使わない）。名前は <指紋>。
+    """
+    out = {}
+    head, tail = apath("A_"), "_gain.parquet"
+    for p in sorted(glob.glob(apath("A_*_gain.parquet"))):
+        g = pd.read_parquet(p)
+        if not {"col", "gain", "fold"} <= set(g.columns) or not set(eligible) <= set(g["col"]):
+            continue
+        out[p[len(head):-len(tail)]] = {int(f): top_eligible(x.set_index("col")["gain"], eligible, n)
+                                        for f, x in g.groupby("fold")}
+    return out
+
+
+def choose_tops(current: Dict[int, List[str]], cands: Dict[str, Dict[int, List[str]]], saved) -> tuple:
+    """
+    窓ごとに使う上位列。今回の A の列と、保存してある回ごとの候補のうち、保存済みの束の行（saved(窓, 列) -> 行の数）が
+    いちばん多いもの。同じなら今回の列、その次は候補の名前の順。戻り値は (窓 -> 列, 窓 -> (どの回の列か, 保存済みの行))。
+
+    データセットを作り直すたびに値がわずかに違い（同じ生データでも指紋が変わる）、A を学習し直すと gain の30位前後が
+    入れ替わる窓がある。その窓は束の名前（入力の値から作る）が変わり、前の回の分位点が使えなくなるので、列はどれも
+    「その窓の学習データで学習した A の gain の上位」のまま、保存済みの多いほうを使う（評価の行は列選びに使わない）。
+    """
+    chosen, why = {}, {}
+    for f, cur in current.items():
+        opts, seen = [], []
+        for name, cols in [("今回", cur)] + [(k, v[f]) for k, v in sorted(cands.items()) if f in v]:
+            if cols not in seen:
+                seen.append(cols)
+                opts.append((name, cols, saved(f, cols)))
+        name, cols, n_saved = max(opts, key=lambda t: t[2])     # 同じ行の数なら先に並べたもの（今回の列）
+        chosen[f] = cols
+        why[f] = (name, int(n_saved))
+    return chosen, why
 
 
 # --------------------------------------------------------------------------- #
@@ -510,6 +553,39 @@ def chunk_key(meta: dict, keys: pd.DataFrame, items: list) -> str:
     return h.hexdigest()[:16]
 
 
+def arm_chunks(arm: str, rev: str, rows: pd.DataFrame, close: np.ndarray, start: np.ndarray, end: np.ndarray,
+               tops: Dict[int, List[str]], cov_tab: Optional[np.ndarray], cov_cols: List[str],
+               cov_row: Optional[np.ndarray], folds=None):
+    """
+    腕の束（窓ごと・CHUNK_ROWS 行ごと）を順に: (窓, 束の頭, 窓の行数, 行の位置, 入力, 保存の名前)。folds で窓を絞れる。
+    """
+    meta = {"arm": arm, "ctx": CONTEXT, "h": HORIZON, "model": MODEL_ID, "rev": rev}
+    for fold, idx in rows.groupby("fold").indices.items():
+        if folds is not None and int(fold) not in folds:
+            continue
+        idx = np.sort(idx)
+        cols = tops[int(fold)] if arm == "Z30" else []
+        for st in range(0, len(idx), CHUNK_ROWS):
+            sl = idx[st:st + CHUNK_ROWS]
+            if arm == "Z30":
+                items = make_items(close, start[sl], end[sl], cov_tab, [cov_cols.index(c) for c in cols], cols, cov_row)
+            else:
+                items = make_items(close, start[sl], end[sl])
+            p = path(f"{arm}_{chunk_key(meta, rows.iloc[sl][['Code', 'Date']], items)}.npz")
+            yield int(fold), st, len(idx), sl, items, p
+
+
+def saved_rows(rev: str, rows: pd.DataFrame, close: np.ndarray, start: np.ndarray, end: np.ndarray, fold: int,
+               cols: List[str], cov_tab: np.ndarray, cov_cols: List[str], cov_row: np.ndarray) -> int:
+    """窓 fold を列 cols で Z30 にしたときの束のうち、分位点が保存済みの行の数（計算はしない）。"""
+    n = 0
+    for _f, _st, _n, sl, _items, p in arm_chunks("Z30", rev, rows, close, start, end, {fold: cols}, cov_tab, cov_cols,
+                                                 cov_row, folds={fold}):
+        if os.path.exists(p):
+            n += len(sl)
+    return n
+
+
 def run_arm(arm: str, pipe, rev: str, rows: pd.DataFrame, panel: pd.DataFrame, start: np.ndarray, end: np.ndarray,
             tops: Dict[int, List[str]], cov_tab: Optional[np.ndarray], cov_cols: List[str],
             cov_row: Optional[np.ndarray]) -> Optional[np.ndarray]:
@@ -517,34 +593,24 @@ def run_arm(arm: str, pipe, rev: str, rows: pd.DataFrame, panel: pd.DataFrame, s
     腕（Z0 / Z30）の分位点を、窓ごと・CHUNK_ROWS 行ごとに計算して保存する（保存済みは読む）。全部そろえば (行, 分位点) を返す。
     """
     close = panel["close"].to_numpy(dtype=float)
-    meta = {"arm": arm, "ctx": CONTEXT, "h": HORIZON, "model": MODEL_ID, "rev": rev}
     parts, missing = [], 0
-    for fold, idx in rows.groupby("fold").indices.items():
-        idx = np.sort(idx)
-        cols = tops[int(fold)] if arm == "Z30" else []
-        for st in range(0, len(idx), CHUNK_ROWS):
-            sl = idx[st:st + CHUNK_ROWS]
-            if arm == "Z30":
-                items = make_items(close, start[sl], end[sl], cov_tab, [cov_cols.index(c) for c in cols], cols, cov_row)
-                bs = (len(cols) + 1) * BATCH_ITEMS_Z30
-            else:
-                items = make_items(close, start[sl], end[sl])
-                bs = BATCH_ITEMS_Z0
-            p = path(f"{arm}_{chunk_key(meta, rows.iloc[sl][['Code', 'Date']], items)}.npz")
-            if os.path.exists(p):
-                z = np.load(p)
-                parts.append((sl, z["q"]))
-                continue
-            if pipe is None or not time_left(EST_SEC.get(arm, 0.0) * len(sl) * 1.3):
-                missing += len(sl)
-                continue
-            t0 = time.time()
-            q = forecast(pipe, items, bs)
-            np.savez_compressed(p, q=q)
-            parts.append((sl, q))
-            dt = time.time() - t0
-            EST_SEC[arm] = dt / len(sl)
-            log(f"  {arm} 窓{int(fold)} の {st + len(sl):,} / {len(idx):,}行 {dt:.0f}秒（1行 {dt / len(sl):.3f}秒）")
+    for fold, st, n_fold, sl, items, p in arm_chunks(arm, rev, rows, close, start, end, tops, cov_tab, cov_cols,
+                                                     cov_row):
+        if os.path.exists(p):
+            z = np.load(p)
+            parts.append((sl, z["q"]))
+            continue
+        if pipe is None or not time_left(EST_SEC.get(arm, 0.0) * len(sl) * 1.3):
+            missing += len(sl)
+            continue
+        bs = (len(tops[fold]) + 1) * BATCH_ITEMS_Z30 if arm == "Z30" else BATCH_ITEMS_Z0
+        t0 = time.time()
+        q = forecast(pipe, items, bs)
+        np.savez_compressed(p, q=q)
+        parts.append((sl, q))
+        dt = time.time() - t0
+        EST_SEC[arm] = dt / len(sl)
+        log(f"  {arm} 窓{fold} の {st + len(sl):,} / {n_fold:,}行 {dt:.0f}秒（1行 {dt / len(sl):.3f}秒）")
     if missing:
         log(f"[{arm}] まだの行 {missing:,}（次の回で続ける）")
         return None
@@ -768,6 +834,13 @@ def main(argv=None) -> int:
         print(f"  {c:<26}{F.group_of(c):<16}{int(cnt[c]):>3}窓")
     share = gain.groupby("col")["gain"].sum()
     print(f"  A の gain のうち毎日動く列の割合 {share.reindex(elig).sum() / share.sum() * 100:.1f}%")
+    # 前の回の A の上位列も候補にする（窓ごとに、保存済みの束が多いほうを Chronos-2 の前で選ぶ。choose_tops）
+    cands = tops_candidates(elig) if "Z30" in arms else {}
+    union = sorted({c for v in [tops, *cands.values()] for lst in v.values() for c in lst}, key=lambda c: cols.index(c))
+    if cands:
+        diff = {k: sum(v.get(f) != t for f, t in tops.items()) for k, v in cands.items()}
+        print(f"  保存してある回ごとの A の上位列: {len(cands)}回（今回と違う窓の数 "
+              + "・".join(f"{k} {n}" for k, n in diff.items()) + f"）→ 共変量はその和 {len(union)}列で作る")
 
     rows = oA.copy()
     rows["Date"] = pd.to_datetime(rows["Date"]).astype("datetime64[ns]")
@@ -849,6 +922,22 @@ def main(argv=None) -> int:
     fwd = end + HORIZON
     same = (fwd < len(panel)) & (panel["Code"].to_numpy()[np.minimum(fwd, len(panel) - 1)] == rows["Code"].to_numpy())
     real_end = np.where(same, np.log(close[np.minimum(fwd, len(panel) - 1)]), np.nan)
+    src_tops = {}
+    if "Z30" in z_arms:
+        memo = {}
+
+        def saved(f, lst):
+            k = (f, tuple(lst))
+            if k not in memo:
+                memo[k] = saved_rows(rev, rows, close, start, end, f, lst, cov_tab, union, cov_row)
+            return memo[k]
+
+        tops, src_tops = choose_tops(tops, cands, saved)
+        n_fold = rows.groupby("fold").size()
+        print(f"\n■ 0b. Z30 が窓ごとに使う上位{TOP_N}列（今回か前の回の A の gain の上位のうち、保存済みの束が多いほう）")
+        for f in sorted(tops):
+            name, n_saved = src_tops[f]
+            print(f"  窓{f:<3} {name:<18} 保存済みの束 {n_saved:>6,} / {int(n_fold[f]):,}行")
     diag, done = {}, ["A"]
     for a in z_arms:
         q = run_arm(a, pipe, rev, rows, panel, start, end, tops, cov_tab, union, cov_row)
@@ -871,7 +960,8 @@ def main(argv=None) -> int:
         log("[report] Chronos-2 の腕がまだそろっていない（次の回で続ける）")
         return 0
     res = report(rows, done, tops, diag)
-    res.update({"checks": checks, "tops": tops, "model": MODEL_ID, "revision": rev, "context": CONTEXT,
+    res.update({"checks": checks, "tops": tops, "tops_source": src_tops, "model": MODEL_ID, "revision": rev,
+                "context": CONTEXT,
                 "smoke": bool(args.smoke), "built_utc": time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime())})
     with open(path("summary.json"), "w", encoding="utf-8") as fh:
         json.dump(res, fh, ensure_ascii=False, indent=1, default=str)

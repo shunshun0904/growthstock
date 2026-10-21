@@ -11,6 +11,8 @@
 - 入力: 株価だけなら終値の対数の配列、共変量ありなら同じ日足の行の値を名前つきで渡す
 - 判定の言い方と、日付で束ねたブートストラップ（同じ点数の腕どうしの差の区間は 0）
 - 途中から続ける: 保存済みの分位点を読み、まだの行があれば None。束の名前は行と入力の値で決まる（行が増えた束だけ計算し直す）
+- 回をまたぐ上位列: 保存してある回ごとの A の gain から窓ごとの候補（列の組が違う回は使わない）、保存済みの束が多いものを選ぶ
+  （同じなら今回の列。同じ列の組は1回だけ数える）。前の回の列の束が残っていれば計算し直さない
 - 基準モデルの学習: E41.oof_folds の LightGBM と同じ点数（小さな合成データ）
 
   python3 tests/test_e109_chronos2.py
@@ -196,6 +198,63 @@ class Resume(unittest.TestCase):
         q3 = E.run_arm("Z0", pipe, "rev", more, p, st2, en2, {}, None, [], None)
         self.assertEqual(sum(calls), 5)                          # 窓0 の束は読み、行が増えた窓1 の束（2行）だけ計算し直した
         np.testing.assert_array_equal(q3[:3], q1)
+
+    def test_tops_across_runs(self):
+        """前の回の A の上位列で計算した束が残っていれば、その窓はその列を選び、計算し直さない。"""
+        p = toy_panel()
+        rows = pd.DataFrame({"Code": ["1111", "1111", "2222"],
+                             "Date": pd.to_datetime(["2024-01-02", "2024-01-06", "2024-01-03"]), "fold": [0, 0, 1]})
+        st, en = E.context_bounds(p, rows, 3)
+        close = p["close"].to_numpy(dtype=float)
+        cov = np.arange(30, dtype=np.float32).reshape(10, 3)
+        cov_cols, cov_row = ["a", "b", "c"], np.arange(10)
+        calls = []
+
+        def fake(pipe, items, bs):
+            calls.append(len(items))
+            return np.ones((len(items), 3, E.HORIZON), dtype=np.float32)
+
+        E.forecast = fake
+        pipe = SimpleNamespace(quantiles=LV)
+        old = {0: ["a", "b"], 1: ["a", "b"]}
+        q1 = E.run_arm("Z30", pipe, "rev", rows, p, st, en, old, cov, cov_cols, cov_row)
+        self.assertEqual(sum(calls), 3)
+
+        def saved(f, lst):
+            return E.saved_rows("rev", rows, close, st, en, f, lst, cov, cov_cols, cov_row)
+
+        self.assertEqual((saved(0, ["a", "b"]), saved(1, ["a", "b"]), saved(0, ["a", "c"])), (2, 1, 0))
+        now = {0: ["a", "c"], 1: ["a", "c"]}                     # 学び直した A で30位前後が入れ替わった
+        tops, why = E.choose_tops(now, {"old": old}, saved)
+        self.assertEqual(tops, old)
+        self.assertEqual(why, {0: ("old", 2), 1: ("old", 1)})
+        q2 = E.run_arm("Z30", None, "rev", rows, p, st, en, tops, cov, cov_cols, cov_row)
+        np.testing.assert_array_equal(q1, q2)
+        self.assertEqual(sum(calls), 3)                          # 読むだけ
+        self.assertIsNone(E.run_arm("Z30", None, "rev", rows, p, st, en, now, cov, cov_cols, cov_row))
+
+    def test_choose_tops_rules(self):
+        seen = []
+
+        def saved(f, lst):
+            seen.append((f, tuple(lst)))
+            return {(1, ("a", "c")): 10, (1, ("a", "b")): 4, (2, ("b", "c")): 3}.get((f, tuple(lst)), 0)
+
+        cur = {1: ["a", "b"], 2: ["a", "b"], 3: ["a", "b"]}
+        cands = {"y": {1: ["a", "c"], 2: ["a", "b"]}, "x": {1: ["a", "b"], 2: ["b", "c"], 3: ["b", "c"]}}
+        tops, why = E.choose_tops(cur, cands, saved)
+        self.assertEqual(tops, {1: ["a", "c"], 2: ["b", "c"], 3: ["a", "b"]})
+        self.assertEqual(why, {1: ("y", 10), 2: ("x", 3), 3: ("今回", 0)})   # 同じ行の数なら今回の列
+        self.assertEqual(len(seen), len(set(seen)))                          # 同じ列の組は1回だけ数える
+
+    def test_tops_candidates(self):
+        elig = ["a", "b", "c"]
+        g = pd.DataFrame({"col": ["a", "b", "c", "x"] * 2, "gain": [1.0, 3.0, 2.0, 9.0, 5.0, 1.0, 1.0, 0.0],
+                          "fold": [1] * 4 + [2] * 4})
+        g.to_parquet(E.apath("A_aaaa_bbbb_gain.parquet"), index=False)
+        g[g["col"] != "c"].to_parquet(E.apath("A_cccc_dddd_gain.parquet"), index=False)   # 列の組が違う回は使わない
+        got = E.tops_candidates(elig, n=2)
+        self.assertEqual(got, {"aaaa_bbbb": {1: ["b", "c"], 2: ["a", "b"]}})
 
     def test_chunk_key(self):
         keys = pd.DataFrame({"Code": ["1111"], "Date": [pd.Timestamp("2024-01-02")]})
