@@ -120,6 +120,9 @@ class Compare(unittest.TestCase):
         # 本番の表に progress_pct が入っていること（main が使う）
         import features as F
         self.assertEqual(F.REDEFINED.get("progress_pct"), "2026-10-02")
+        # 10/16 夜の調整後終値の付け直しで、分割をならす倍率が変わった BPS・株数の前年同期比も直した日足の予測（10/19）から
+        for c in ("bps_yoy", "bps_yoy_p1", "shares_yoy", "shares_yoy_p1"):
+            self.assertEqual(F.REDEFINED.get(c), "2026-10-19")
 
     def test_early_run_day_is_not_compared(self):
         """
