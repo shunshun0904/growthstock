@@ -124,6 +124,7 @@
 | ラベル違い 1.8σ | 土曜 14:10 | Retrain Weekly | `tune=yes` `only=lgbm_k18,xgb_k18,cat_k18,logit_k18`（同上。09:10 の回が長引けば待ってから走る） | `trig_01JHXTaxZLmDgfUBF3CYbTqe` |
 | 保存データの検査 | 土曜 10:40 | Check Data Store | 既定（5日） | `trig_01G4KY6RJMAsFgY7t57khocW` |
 | 朝の確認 | 月〜土 07:40 | （確かめるだけ） | 前日の run の結論を見る。取り込みの run が無ければ Update Data Store を起動し直す。取り込みは済んで予測だけ無ければ Predict Breakouts を起動する。月曜は日曜の学習と土曜の検査を見る | `trig_01Pscq9oSei7otJrCjgfxgEc` |
+| 米国株の朝のまとめ | 平日 07:31 | （起動しない。チャットに書くだけ） | 前夜の米国の引け（下の「米国株の朝のまとめ」） | `trig_01QgG7DBXSiFwitT7pPpAWaA` |
 
 Routine はすべて、この運用を続けている Claude のセッション（`session_01HavkjgQwRz5mTV8cGj4KJp`、
 claude.ai の「jquants APIブラウザアプリ」）に届き、そのセッションが `curl` で workflow_dispatch を送る
@@ -142,6 +143,24 @@ raw.githubusercontent.com は読める。そのため Routine は既存のセッ
 Predict Breakouts は Routine からは起動しない。取り込みの完了で `workflow_run` が繋ぐ（上の図）。
 Routine が起動した run は、Actions の一覧では `workflow_dispatch` として見える（以前の予約の起動は
 `schedule`）。Routine が走った記録（起動した run の ID と結論、件数）は claude.ai のそのセッションに残る。
+
+#### 米国株の朝のまとめ（2026-10-23 から）
+
+運用者の依頼（2026-10-23）「全体が悪い日の購入は避けたいので、朝8時に、深夜〜明け方の米国株市場の動向をまとめて、
+こちらに投稿してほしい」。ワークフローは起動せず、この運用のセッションのチャットに書くだけ。運用者は 8:00 に読む。
+07:40 の朝の確認が長引いても遅れないように、その前の 07:31 に始める。
+
+- 中身: 直近に引けた米国の取引日の S&P 500・NASDAQ 総合・ダウ平均・ラッセル2000・VIX（FMP の index-quote）、
+  半導体株 ETF の SOXX（Alpha Vantage の GLOBAL_QUOTE。無料の枠は1日25回なので1回だけ）、米10年債利回り（FMP の
+  treasury-rates）、ドル円（FMP の forex-quote。取った時刻の値）、下げ・上げの理由（WebSearch で引けのまとめを探し、
+  記事の指数の数字が FMP の値と合うものだけ。リンクを付ける）。米国が休場なら1行目にそう書く
+- 目安（運用者の決定 2026-10-23）: NASDAQ 総合が −2.0% 以下か、S&P 500 が −1.5% 以下（前日比を小数2桁に丸めて比べる）
+  なら、1行目に「買い控えの目安に当たる」。2016-01-05〜2026-10-22 の 2,716取引日では 214日（7.9%・年に約20日）。
+  買うかどうかは運用者が決める。過去の買いでの確かめは実験110（`docs/MODEL_ADOPTION_RULES.md` §73）
+- 今の契約で取れないもの: FMP の無料の枠では PHLX 半導体指数（^SOX）・NASDAQ-100（^NDX）・先物（日経平均先物の
+  夜間取引も）・個別銘柄の quote・ニュースは取れない（Alpha Vantage の指数も有料）。そのため週末のニュースは月曜の
+  まとめに入らない（金曜の引けまで）。FRED・Stooq はこの環境のネットワークの設定で 403
+- 米国の日足（FMP のデータ）はリポジトリ・Actions・Release に置かない。実験110 も手元で回した
 
 なぜ cron をやめたか: GitHub の予約の起動は実測で +4時間01分〜+7時間19分遅れ（下の
 「起動時刻を 21:30 から 16:05 に前倒しした」の表）、10/5（月）は 07:05 UTC の予約が 14:33 UTC
