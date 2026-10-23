@@ -222,7 +222,7 @@ export const MODEL_FAMILY = {
   logit: 'other', mlp: 'other',
   // ラベル違い（到達しきい値 1.5σ / 1.8σ のラベルで学習した4学習器。research/models.py の VARIANTS）。
   // 1.2σ の4本の「上位10%と見たモデル」の数え上げ（agree90）には入れない（1.5σ・1.8σ は agreeK90 で別に数える）。
-  // 2026-10-12 から、今日の戦略の規則は 1.5σ の木3本（strategy.js の RULE_MODELS）がすべて95以上。
+  // 今日の戦略の規則は、2026-10-12〜10-23 は 1.5σ の木3本、2026-10-23 から 1.2σ の木3本（strategy.js の RULE_MODELS）がすべて95以上。
   // k ごとに塊を分ける（1.5σ の4本、1.8σ の4本。同じ k の中の並びは 1.2σ と同じ LGB / XGB / CAT / LR）
   lgbm_k15: 'k15', xgb_k15: 'k15', cat_k15: 'k15', logit_k15: 'k15',
   lgbm_k18: 'k18', xgb_k18: 'k18', cat_k18: 'k18', logit_k18: 'k18',

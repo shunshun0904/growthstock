@@ -84,8 +84,9 @@ def make_case(seed=0):
     for y, g in bars.groupby(bars["Date"].dt.year):
         g.to_parquet(os.path.join(data_dir, f"bars_{y}.parquet"), index=False)
     for a in KC.RULE_MODELS:
-        d = os.path.join(model_dir, "models", a)
-        os.makedirs(d)
+        # 日次予測が並べ直した形（live_track.find_oof）: 基準モデルの lgbm は model_dir/oof.parquet、ほかは models/<algo>/
+        d = model_dir if a == "lgbm" else os.path.join(model_dir, "models", a)
+        os.makedirs(d, exist_ok=True)
         o = oof[["Code", "Date"]].assign(score=oof[f"score_{a}"])
         # 画面の物差しは NaN を含む全行で付ける（models.hist_scores と同じ）。1行だけ NaN を混ぜる（先頭の行。末尾は先読みの確かめ用）
         if a == KC.RULE_MODELS[0]:
@@ -122,7 +123,9 @@ class TestHelpersMatchExperiment(unittest.TestCase):
         self.assertEqual(KC.done_before(np.sort(a["done"]), days[200]), E91.done_before(np.sort(b["done"]), days[200]))
         self.assertEqual((KC.K, KC.POOL_LINE, KC.CONTEXT_LINE, KC.TARGET, KC.HOLD, KC.WIN, KC.LEVELS),
                          (E91.K_MAIN, E91.POOL_LINE, E91.LINE, E91.TARGET, E91.HOLD, E91.WIN, E91.LEVELS))
-        self.assertEqual(KC.RULE_MODELS, tuple(E91.RULE_MODELS))
+        # 母集団の3本は今の規則の3本（2026-10-23 から 1.2σ。実験91 は当時の規則の 1.5σ の3本で測った）
+        self.assertEqual(KC.RULE_MODELS, tuple(LT.RULE_MODELS))
+        self.assertEqual(tuple(E91.RULE_MODELS), ("lgbm_k15", "xgb_k15", "cat_k15"))
 
 
 class TestBuild(unittest.TestCase):
@@ -147,7 +150,7 @@ class TestBuild(unittest.TestCase):
         """台本と別に、母集団（最小85以上・結果が出そろった行）と分布を作る。"""
         base = None
         for a in KC.RULE_MODELS:
-            o = pd.read_parquet(os.path.join(self.model_dir, "models", a, "oof.parquet"))
+            o = pd.read_parquet(LT.find_oof(a, self.model_dir, self.model_dir))
             hist = o["score"].to_numpy(dtype=float)
             o = o[np.isfinite(hist)].copy()
             o[f"p_{a}"] = [M.pct_historical(float(s), hist) for s in o["score"]]
@@ -218,7 +221,7 @@ class TestBuild(unittest.TestCase):
             self.assertGreater(rec["dNn"]["R"] + rec["dNn"]["V"], 0.0)
         self.assertEqual(self.knn["bands"], ["-10 未満", "-10〜0", "0〜+5", "+5〜+10 未満", "+10 到達"])
         self.assertEqual(self.knn["dBins"], [0.0, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0])
-        self.assertEqual(self.knn["models"], ["lgbm_k15", "xgb_k15", "cat_k15"])
+        self.assertEqual(self.knn["models"], ["lgbm", "xgb", "cat"])
         self.assertEqual(self.knn["byDay"]["2025-06-30"]["status"], "no_candidates")
 
     def test_context_and_no_identifiers(self):

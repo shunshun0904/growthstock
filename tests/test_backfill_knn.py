@@ -34,8 +34,9 @@ class TestBackfill(unittest.TestCase):
     def setUpClass(cls):
         cls.data_dir, cls.model_dir, cls.bars, cls.oof, cls.codes = TK.make_case()
         for a in KC.RULE_MODELS:                       # Release の形（<名前>_oof.parquet）
-            src = os.path.join(cls.model_dir, "models", a, "oof.parquet")
-            pd.read_parquet(src).to_parquet(os.path.join(cls.data_dir, f"{a}_oof.parquet"), index=False)
+            src = KC.LT.find_oof(a, cls.model_dir, cls.model_dir)   # 基準モデル（lgbm）は oof.parquet、ほかは <名前>_oof.parquet
+            dst = "oof.parquet" if a == "lgbm" else f"{a}_oof.parquet"
+            pd.read_parquet(src).to_parquet(os.path.join(cls.data_dir, dst), index=False)
         cls.payload = {
             "generatedAt": "2025-07-01T09:00:00+00:00", "asOf": TK.DAY, "dates": ["2025-06-30", TK.DAY],
             "dayInfo": {"2025-06-30": {"trainedAt": "x"}, TK.DAY: {"trainedAt": "x"}},

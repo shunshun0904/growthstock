@@ -11,8 +11,8 @@
           最初に出た版を使い、「遅れ」の印を付ける。
           そこに運用の規則を当てて、紙の上の売買を作る。値動きは保存済みの
           日足（分割調整後）。
-  見込み  規則のモデルの OOF（Release の lgbm_k15_oof.parquet / xgb_k15_oof.parquet /
-          cat_k15_oof.parquet。並べ替えの同点とラベルは本番の oof.parquet）に同じ規則を当てる。
+  見込み  規則のモデルの OOF（Release の oof.parquet / xgb_oof.parquet / cat_oof.parquet。並べ替えの同点と
+          ラベルは本番の oof.parquet）に同じ規則を当てる。
           百分位は画面と同じく「OOF 全体のうち、そのスコアより低い割合」。
           **1本の数字にしない。** 実運用と同じ長さの期間を1か月（21営業日）
           ずつずらして切り出し、期間ごとの成績の散らばりを見込みの幅にする。
@@ -22,8 +22,9 @@
 tests/test_live_track.py が両者を突き合わせる）
   その日の発火（候補数）の数では見送らない（2026-10-12 の運用者の決定「Aでお願いします」から。それまでは 8件未満の日は
   買わなかった。実験88 で今の規則ではこの線を支える数字が無かった）
-  1.5σ のラベルで学んだ木の3モデル（RULE_MODELS: lgbm_k15 / xgb_k15 / cat_k15）すべてが 95 以上
-  （2026-10-12 の運用者の決定から。それまでは 1.2σ の3モデル（BOOST）すべてが 90 以上。参考として並べて出す）
+  1.2σ のラベルで学んだ木の3モデル（RULE_MODELS: lgbm / xgb / cat）すべてが 95 以上（2026-10-23 の運用者の依頼
+  「選定の基準ですが1.2σにしてほしいです」から。2026-10-12〜10-23 は 1.5σ の3本（lgbm_k15 / xgb_k15 / cat_k15）すべてが
+  95 以上、それより前は 1.2σ の3本すべてが 90 以上・発火8件以上の日。どちらも参考として並べて出す）
   3モデルの最小の百分位が高い順に上位2件（同点は本番の LightGBM のスコア順）
   翌営業日の寄りで買い、+10% の指値、届かなければ 20営業日目の終値で売る
   同時に持つのは 3銘柄まで。埋まっていたら見送る（先着順・乗り換えなし）
@@ -45,8 +46,9 @@ tests/test_live_track.py が両者を突き合わせる）
   数え、それより後の取引は「途中」として含み損益だけ出す。
 
 参考に並べるもの（集計だけ）
-  以前の画面の規則（1.2σ の3本がすべて90以上・3枠）を運用開始から、月2件の先着（今の規則を満たした候補を月ごとに
-  先着2件。運用者の買い方）を今の規則の記録の始まりから。公開ログには買値（日足の生の値）を出さない
+  以前の画面の規則（PREV_RULES: 1.5σ の3本がすべて95以上 / 1.2σ の3本がすべて90以上・発火8件以上の日。どちらも3枠）を
+  その規則の百分位が予測に入った日から、月2件の先着（今の規則を満たした候補を月ごとに先着2件。運用者の買い方）を今の規則の
+  記録の始まりから。公開ログには買値（日足の生の値）を出さない
 
 使い方
   python3 research/live_track.py                  # 集計して表示
@@ -81,26 +83,38 @@ MODEL_DIR = os.path.join(HERE, "model")
 OUT_DIR = os.path.join(DATA_DIR, "oof")
 PRED_PATH = "public/data/predictions.json"
 
-#: 本番のラベル（1.2σ）の木の3モデル（線形・MLP は入れない）。画面の BOOST と同じ。2026-10-12 までの規則と、過去の実験の規則
+#: 本番のラベル（1.2σ）の木の3モデル（線形・MLP は入れない）。画面の BOOST と同じ。今の規則（2026-10-23 から）と、
+#: 2026-10-12 までの規則、過去の実験の規則
 BOOST = ("lgbm", "xgb", "cat")
-#: 画面の「今日の戦略」の規則に使う3モデル。2026-10-12 から 1.5σ のラベルで学んだ木の3本（運用者の決定「1.5σの3モデルで
-#: 95以上を選定のベースラインにしようかな」「今日の戦略パネルも変えてください」）。画面の RULE_MODELS と同じ
-RULE_MODELS = ("lgbm_k15", "xgb_k15", "cat_k15")
-#: 2026-10-12 まで画面の規則だった形（1.2σ の3本がすべて90以上）。実運用の追跡に参考として並べる
+#: 1.5σ のラベルで学んだ木の3本。2026-10-12〜10-23 の規則（運用者の決定「1.5σの3モデルで95以上を選定のベースラインにしようかな」）。
+#: 実運用の追跡に参考として並べる。この3本を規則にした過去の実験（e99・e100・probe_earn_direction など）は記録どおりこれを明示する
+K15 = ("lgbm_k15", "xgb_k15", "cat_k15")
+#: 画面の「今日の戦略」の規則に使う3モデル。2026-10-23 から 1.2σ のラベルで学んだ木の3本（運用者の依頼「選定の基準ですが
+#: 1.2σにしてほしいです」→ AskUserQuestion「1.2σ の3本 95以上」。docs/MODEL_ADOPTION_RULES.md §75）。画面の RULE_MODELS と同じ
+RULE_MODELS = BOOST
+#: 規則の3モデルの呼び名（画面の RULE_JA と同じ）
+RULE_JA = "1.2σ の3本"
+#: 2026-10-12 まで画面の規則だった形（1.2σ の3本がすべて90以上）。過去の実験の再現と、参考の記録（PREV_RULES）に使う
 PREV_MODELS = BOOST
 PREV_AGREE = 90.0
 #: 予測ファイルから百分位を読むモデル（今の規則と以前の規則）
-PCT_MODELS = BOOST + RULE_MODELS
+PCT_MODELS = BOOST + K15
 #: 以前画面に並んでいた5モデル（実験59・62 の「全5モデル」の選び方の記録用。規則の既定は RULE_MODELS）。
 #: 2026-10-09 に logit / mlp を画面から外したので、新しい予測ファイルには3モデルしか無い
 ALL5 = ("lgbm", "xgb", "cat", "logit", "mlp")
 
 # --- 運用の規則。src/lib/strategy.js の STRATEGY と同じ値 --- #
-AGREE_PCT = 95.0      # agreePct: 規則の3モデル（RULE_MODELS）すべてがこの百分位以上。2026-10-12 に 1.2σ の3本 90 → 1.5σ の3本 95
+AGREE_PCT = 95.0      # agreePct: 規則の3モデル（RULE_MODELS）すべてがこの百分位以上。2026-10-12 に 1.2σ の3本 90 → 1.5σ の3本 95、
+#                       2026-10-23 に 1.2σ の3本 95（線は 95 のまま）
 STRONG_BREAKS = 20    # strongBreaks: この件数以上の発火なら本命の日
 SKIP_BREAKS = 1       # skipBreaks: これ未満の発火なら見送る。2026-10-12 に 8 → 1（発火の数では見送らない。実験88）
 #: 2026-10-12 までの見送りの線（発火がこれ未満の日は買わない）。以前の規則（■5）と、それまでの実験の再現に使う
 PREV_SKIP_BREAKS = 8
+#: 以前の画面の規則（実運用の追跡の ■5 に参考として並べる。集計だけ）: (呼び名, モデル, 線, 見送りの線, 期間)
+PREV_RULES = (
+    ("1.5σ の3本がすべて95以上", K15, 95.0, 1, "2026-10-12〜10-23"),
+    (f"1.2σ の3本がすべて{PREV_AGREE:g}以上", PREV_MODELS, PREV_AGREE, PREV_SKIP_BREAKS, "2026-10-12 まで"),
+)
 TOP_K = 2             # topK: 買うのは上位何件まで
 TAKE_PROFIT = 10.0    # takeProfit: 利確の指値（%）。2026-10-12 に 20 → 10（運用者の実際の売りに合わせた）
 FALLBACK = "close"    # 指値に届かなければ: "close" = 20営業日目の終値（2026-10-12 から）/ "ma5" = 5日平均（それまで）
@@ -244,8 +258,8 @@ def decide(rows: pd.DataFrame, *, agree: float = AGREE_PCT,
 
     rows: 1行 = その日の候補1件（Date, Code, score, p_<モデル>）。
           発火数はその日の行数（画面と同じ数え方）。
-    models: 合議に使うモデル（既定は画面と同じ RULE_MODELS。2026-10-12 までは BOOST の3つで線 90。過去の実験は
-          BOOST・90 を明示して呼ぶ。実験59 は ALL5 の5つでも呼ぶ）。
+    models: 合議に使うモデル（既定は画面と同じ RULE_MODELS = 1.2σ の3本。2026-10-12〜10-23 は K15 の3本で線 95、
+          それより前は BOOST の3つで線 90。過去の実験は使ったモデル・線を明示して呼ぶ。実験59 は ALL5 の5つでも呼ぶ）。
           p_min はこのモデルの百分位の最小。並べ替えの同点は LightGBM（本番）のスコア順のまま（画面と同じ）。
     戻り値: (rows に p_min / n_break / passed / rank を足したもの,
              1日1行の判断, 買う銘柄)
@@ -487,7 +501,7 @@ def find_oof(algo: str, oof_dir: str, model_dir: str) -> Optional[str]:
 def oof_rows(oof_dir: str, model_dir: str, algos: Sequence[str] = RULE_MODELS) -> pd.DataFrame:
     """
     モデルの OOF を (Code, Date) で揃え、画面と同じ百分位を付ける。
-    algos の既定は今の規則の3モデル（RULE_MODELS）。過去の実験は BOOST を明示し、実験59 は ALL5（5モデル）で呼ぶ。
+    algos の既定は今の規則の3モデル（RULE_MODELS = BOOST）。過去の実験は使ったモデルを明示し、実験59 は ALL5（5モデル）で呼ぶ。
     LightGBM（本番）の OOF はいつも読む: 並べ替えの同点に使うスコア（画面と同じ）と、label / ret_o1_20（本番のラベル。
     ラベル違いのモデルの OOF の label は自分のラベルなので使わない）はここから持つ。
     """
@@ -709,19 +723,23 @@ def ref_summary(picks_fwd: pd.DataFrame, bar_days: Sequence, complete_to, slots:
 def print_reference(prev_live: pd.DataFrame, lrows: pd.DataFrame, bars: pd.DataFrame, bar_days: Sequence,
                     complete_to) -> dict:
     """
-    参考の記録（集計だけ）。■5 以前の画面の規則（1.2σ の3本がすべて90以上・3枠）を運用開始から、■6 月2件の先着
-    （今の規則の候補を月ごとに先着2件。発火は問わない。枠なし）を今の規則の記録の始まりから。
+    参考の記録（集計だけ）。■5 以前の画面の規則（PREV_RULES: 1.5σ の3本がすべて95以上（2026-10-12〜10-23）・1.2σ の3本が
+    すべて90以上・発火8件以上の日（2026-10-12 まで）。どれも上位2件・3枠）を、その規則の百分位が予測に入った日から、■6 月2件の
+    先着（今の規則の候補を月ごとに先着2件。発火は問わない。枠なし）を今の規則の記録の始まりから。
     """
-    out = {}
-    print(f"\n■ 5. 参考: 以前の画面の規則（{' / '.join(PREV_MODELS)} がすべて{PREV_AGREE:g}以上・"
-          f"{breaks_txt(PREV_SKIP_BREAKS)}上位{TOP_K}件・{SLOTS}枠。2026-10-12 まで）")
-    if prev_live.empty:
-        print("  （記録が無い）")
-    else:
-        pr, pdays, ppicks = decide(prev_live, agree=PREV_AGREE, min_break=PREV_SKIP_BREAKS, models=PREV_MODELS)
+    out = {"prev": {}}
+    print(f"\n■ 5. 参考: 以前の画面の規則（どれも上位{TOP_K}件・{SLOTS}枠。その規則の百分位が予測に入った日から）")
+    for name, models, agree, min_break, when in PREV_RULES:
+        start = rule_start(prev_live, models)
+        print(f"  {name}・{breaks_txt(min_break)}（{when}。{' / '.join(models)}）")
+        if start is None:
+            print("    （記録が無い）")
+            continue
+        rows = prev_live[prev_live["Date"] >= start]
+        pr, pdays, ppicks = decide(rows, agree=agree, min_break=min_break, models=models)
         st = ref_summary(forward(bars, ppicks), bar_days, complete_to, slots=SLOTS)
-        out["prev"] = st
-        print(f"  {prev_live['Date'].min().date()}〜{prev_live['Date'].max().date()}: 買う日 {int(pdays['buy'].sum())}日・"
+        out["prev"][name] = st
+        print(f"    {rows['Date'].min().date()}〜{rows['Date'].max().date()}: 買う日 {int(pdays['buy'].sum())}日・"
               f"選んだ {st['picks']}件 → 枠で買えた {st['taken']}件。20営業日たった {st['done']}件: 1取引 {_f(st['mean'])}%"
               f"（中央 {_f(st['median'])}）・勝率 {_f(st['win'], '{:.0f}')}%・+{TAKE_PROFIT:g}%到達 {_f(st['hit'], '{:.0f}')}%")
     print("\n■ 6. 参考: 月2件の先着（今の規則を満たした候補を、月ごとに選定日の早い順に2件。発火は問わない・枠なし）")
@@ -781,7 +799,8 @@ def main(argv=None) -> int:
         labels["Code"] = labels["Code"].astype(str)
         live = live.merge(labels, on=["Code", "Date"], how="left")
 
-    # 以前の規則（1.2σ の3本 90以上）は運用開始から、今の規則（1.5σ の3本 95以上）は百分位が予測に入った日から数える
+    # 今の規則（1.2σ の3本 95以上）も以前の規則（■5）も、その規則の3本の百分位が予測に入った日から数える（1.2σ の3本は運用開始
+    # から予測ファイルにある。1.5σ の3本は 2026-10-13 の予測から）
     prev_live = live
     rstart = rule_start(live)
     if rstart is None:
@@ -828,9 +847,9 @@ def main(argv=None) -> int:
 
     print("=" * 78)
     print(f"実運用の追跡（ミニブレイク予測・運用の規則）  集計 {today} / 日足 〜{last_bar.date()}")
-    print(f"規則: {' / '.join(RULE_MODELS)}（1.5σ の3本）がすべて{AGREE_PCT:g}以上・{breaks_txt(SKIP_BREAKS)}上位{TOP_K}件・"
-          f"{SLOTS}枠・+{TAKE_PROFIT:g}% の指値か{HOLD}営業日目の終値（2026-10-12 から。それまでは "
-          f"{' / '.join(PREV_MODELS)} がすべて{PREV_AGREE:g}以上・発火{PREV_SKIP_BREAKS}件以上の日。■5 に参考）")
+    print(f"規則: {' / '.join(RULE_MODELS)}（{RULE_JA}）がすべて{AGREE_PCT:g}以上・{breaks_txt(SKIP_BREAKS)}上位{TOP_K}件・"
+          f"{SLOTS}枠・+{TAKE_PROFIT:g}% の指値か{HOLD}営業日目の終値（2026-10-23 から。それまでの規則は ■5 に参考: "
+          + "・".join(f"{name}（{when}）" for name, _, _, _, when in PREV_RULES) + "）")
     print("=" * 78)
     print("\n■ 結論")
     print(f"  ・記録: {live_lo.date()}〜{live_hi.date()} の {int(ldays['Date'].nunique())}営業日"
@@ -873,8 +892,8 @@ def main(argv=None) -> int:
     if len(early):
         print(f"  {early['Date'].min().date()}〜{early['Date'].max().date()} は運用開始前に"
               f"まとめて出た版しか無いので数えない（{early['Date'].nunique()}日）")
-    print(f"  今の規則の記録は {rstart.date()} から（1.5σ の3本の百分位が予測に入った日）。"
-          f"以前の規則の参考（■5）は {prev_live['Date'].min().date()} から")
+    print(f"  今の規則の記録は {rstart.date()} から（{RULE_JA}の百分位が予測に入った日）。"
+          f"以前の規則の参考（■5）は、それぞれの3本の百分位が予測に入った日から")
     meta = lrows.drop_duplicates("Date").set_index("Date")
     print(f"  寄りまでに版が出なかった日（遅れ）: {int(meta['late'].sum())}日")
     print(f"  日足の最終日 {last_bar.date()} / 成績に数えるのは選定日が "

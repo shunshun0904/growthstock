@@ -2,14 +2,14 @@
  * 候補の比較（似た過去の事例）の画面（src/views/KnnCompareView.jsx）の、純粋な計算。
  *
  * データは predictions.json の knn（research/knn_compare.py が日次予測で書く）。候補ごとに、60日のリターンの形と
- * 出来高の比率が似た過去の事例（1.5σ の3本の最小が85以上で結果が出そろった行から、ワッサーステイン距離の近い50件）の
+ * 出来高の比率が似た過去の事例（規則の3本（2026-10-23 から 1.2σ の3本）の最小が85以上で結果が出そろった行から、ワッサーステイン距離の近い50件）の
  * 収益の分布（10〜90% 点・+10% 到達・−10% 割れ）、近傍までの距離、「距離 × 収益の帯」の度数（雲）が付いている。
  *
- * 候補の並び（A・B・C…）と M（今の並べ方の先頭）は今日の戦略と同じ物差し（strategy.js の orderRows: 1.5σ の3本の最小が
+ * 候補の並び（A・B・C…）と M（今の並べ方の先頭）は今日の戦略と同じ物差し（strategy.js の orderRows: 規則の3本の最小が
  * 高い順・同点は基準モデルのスコア）。Q は近傍の収益の下側25%点が最も高い候補（実験93 の選び方。同点は今の並べ方）。
  * **参考の表示で、選定には使わない**（docs/MODEL_ADOPTION_RULES.md §53〜§58）。
  */
-import { orderRows, STRATEGY } from './strategy.js';
+import { orderRows, STRATEGY, RULE_JA } from './strategy.js';
 
 /** 表示する候補の範囲。pass = 規則を満たす候補（今日の戦略の候補）、near = 惜しい候補（85〜95）まで、all = 全候補 */
 export const KNN_MODES = [
@@ -18,7 +18,7 @@ export const KNN_MODES = [
   { id: 'all', label: '全候補' },
 ];
 
-/** 範囲の下限（1.5σ の3本の最小）。all は下限なし。 */
+/** 範囲の下限（規則の3本の最小）。all は下限なし。 */
 export function modeMin(mode) {
   if (mode === 'pass') return STRATEGY.agreePct;
   if (mode === 'near') return STRATEGY.nearLo;
@@ -86,7 +86,7 @@ export function knnStatus(data, block, rows, mode = 'pass') {
                : `${modeLabel(mode)}はありません。「${modeLabel(mode === 'pass' ? 'near' : 'all')}」に広げると、この日の候補が過去のどの辺りにいるかは見られます。` };
   }
   if (!rows.some((r) => r.knn)) {
-    return { kind: 'empty', text: '候補に近傍の集計が付いていません（1.5σ の3本のどれかが欠けているか、60日の日足が足りない）。' };
+    return { kind: 'empty', text: `候補に近傍の集計が付いていません（${RULE_JA}のどれかが欠けているか、60日の日足が足りない）。` };
   }
   return { kind: 'ok', text: '' };
 }

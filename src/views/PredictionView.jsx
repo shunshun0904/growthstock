@@ -3,7 +3,7 @@ import { fmt, fmtInt, fmtSigned, fmtOku, fmtDate, fmtDateTime, DASH } from '../l
 import { bandColor, bandLabel, pctColor, pctInk, PCT_LEGEND, scoreRange, scoreColor, scoreInk, modelRows, modelGrid, MODEL_SHORT, MODEL_FAMILY,
   FAMILY_JA, marketTone, candidateToStock, dayOrigin, featureLabel, earningsNote, earningsSummary,
 } from '../lib/predictions.js';
-import { STRATEGY, RULE_MODELS, RULE_JA, BORDER, strategySignal, exitPlan, nearMisses,
+import { STRATEGY, RULE_MODELS, RULE_JA, RULE_SHORT, BORDER, strategySignal, exitPlan, nearMisses,
          MODEL_JA, fundContrib, frozenNote, borderNote, orderRows, ruleMinTier,
 } from '../lib/strategy.js';
 
@@ -20,8 +20,8 @@ import { STRATEGY, RULE_MODELS, RULE_JA, BORDER, strategySignal, exitPlan, nearM
  * 12本（1.2σ・1.5σ・1.8σ のラベルで各4本。どれも毎日の予測に使う）は、ラベル × 学習器の表に数字と色で出す
  * （運用者の指示 2026-10-12「12本の平均ではなく、12個全てを載せてほしい。棒グラフ形式でなくてよい。
  * 大小が分かればよい」。同じ日に出した「12本の合意の百分位」の欄はこの指示で外した）。
- * 一覧の並び順は、今日の戦略の規則と同じ 1.5σ の3本の百分位の最小が高い順（運用者の決定 2026-10-13
- * 「1.5σ の3本のうち一番低い百分位でいきましょう」。strategy.js の orderRows）。帯・較正・追跡と
+ * 一覧の並び順は、今日の戦略の規則の3本（2026-10-23 から 1.2σ の3本）の百分位の最小が高い順（運用者の決定 2026-10-13
+ * 「1.5σ の3本のうち一番低い百分位でいきましょう」を、規則の3本に合わせて続けている。strategy.js の orderRows）。帯・較正・追跡と
  * rankInDay（予測ログの「順位」）は基準モデル（1.2σ の LightGBM）のまま。
  * byModel が無い予測ファイル（5モデルを学習する前のもの）でも壊れないよう、
  * 基準モデル1本の表示に落ちる作りにしてある。
@@ -34,12 +34,12 @@ export default function PredictionView({ data, history, featureNames, onSendToOc
   // スコアの色の物差しは予測ファイルの全候補・12本で1つ（scoreRange）
   const [metric, setMetric] = useState('pct');
 
-  // 1.5σ の3本の最小が高い順（orderRows）。各行に order（並び順）と ruleMin（最小）が付く
+  // 規則の3本の最小が高い順（orderRows）。各行に order（並び順）と ruleMin（最小）が付く
   const rows = useMemo(
     () => orderRows((data?.candidates || []).filter((c) => c.date === day)),
     [data, day]
   );
-  // 1.5σ の3本のどれかが欠けて最小が出せない行（1.5σ を予測に入れる前の固定した日）。後ろに基準モデルの順で並ぶ
+  // 規則の3本のどれかが欠けて最小が出せない行（そのモデルの値が無い日）。後ろに基準モデルの順で並ぶ
   const nNoRule = rows.filter((c) => c.ruleMin === null).length;
   const tone = useMemo(() => marketTone(rows), [rows]);
   const signal = useMemo(() => strategySignal(rows), [rows]);
@@ -128,7 +128,7 @@ export default function PredictionView({ data, history, featureNames, onSendToOc
             <span>ℹ</span>
             <div>
               {nNoRule === rows.length
-                ? `この日は${RULE_JA}の百分位が無い（1.5σ のモデルを予測に入れる前の日）ので、`
+                ? `この日は${RULE_JA}の百分位が無いので、`
                   + '基準モデル（1.2σ の LightGBM）のスコア順に並べています。'
                 : `${RULE_JA}の百分位が欠けた ${nNoRule} 件は、最後に基準モデル（1.2σ の LightGBM）のスコア順で並べています。`}
             </div>
@@ -173,7 +173,7 @@ export default function PredictionView({ data, history, featureNames, onSendToOc
 /**
  * docs/PLAYBOOK.md の手順を、その日のデータでそのまま実行して見せる。
  *
- * 判断の材料（発火数・規則の3モデル（2026-10-12 から 1.5σ の3本）の百分位）は下の一覧にも出ているが、
+ * 判断の材料（発火数・規則の3モデル（2026-10-23 から 1.2σ の3本）の百分位）は下の一覧にも出ているが、
  * 「今日は買うのか、買うなら何を、いくらで手仕舞うのか」を1か所で
  * 言い切る場所が要る。迷いどころを毎日つくらないための画面。
  */
@@ -184,7 +184,7 @@ function StrategyPanel({ signal, near, day, models, onSend, sentIds }) {
       <div className="card-head">
         <h2>今日の戦略</h2>
         <span className="sub">
-          {RULE_JA}（L15・X15・C15）がすべて{STRATEGY.agreePct}以上の銘柄を{STRATEGY.topK}件まで。
+          {RULE_JA}（{RULE_SHORT}）がすべて{STRATEGY.agreePct}以上の銘柄を{STRATEGY.topK}件まで。
           翌営業日の寄りで買い、+{STRATEGY.takeProfit}% の指値か
           {STRATEGY.holdDays}営業日目の終値で降りる（同時保有は{STRATEGY.maxSlots}銘柄まで。
           発火の数では見送らない）
@@ -258,24 +258,25 @@ function StrategyPanel({ signal, near, day, models, onSend, sentIds }) {
       {near.length > 0 && <NearMiss near={near} />}
 
       <p className="strat-src sub">
-        実測（画面と同じ百分位、2021-05〜2026-09 の out-of-fold、{RULE_JA}がすべて95以上の354件。
-        +10% の指値・届かなければ20営業日目の終値）: 発火20件以上は192件で +4.9%・勝率78%、
-        8〜19件は140件で +1.5%・勝率59%、7件以下は22件と少なく +5.4%。その時点の百分位で測り直しても
-        7件以下の日（36件 +3.7%）は8件以上の日（523件 +3.1%）より悪くなかったので、2026-10-12 から発火の数では
-        見送らない。この手順のとおり3枠で回すと、その時点の百分位で128取引・1取引 +2.2%（以前の「発火8件以上の日
-        だけ」は118取引・+1.8%）。これまでの目安（1.2σ の3本が95以上）と比べて、どちらが良いかは過去のデータでは
-        見分けられない（docs/MODEL_ADOPTION_RULES.md §46・§47）。
+        実測（画面と同じ百分位、2021-05〜2026-09 の out-of-fold、{RULE_JA}がすべて95以上の339件。
+        +10% の指値・届かなければ20営業日目の終値）: 発火20件以上は204件で +3.5%・勝率70%、
+        8〜19件は112件で +1.5%・勝率63%、7件以下は23件と少なく +2.3%。その時点の百分位で測ると、
+        7件以下の日（31件 +1.5%・−10%割れ 16%）は8件以上の日（436件 +2.7%）より低い（発火の数では見送らない線は
+        2026-10-12 の決定のまま）。この手順のとおり3枠で回すと、その時点の百分位で100取引・1取引 +0.15%
+        （発火8件以上の日だけなら89取引・+0.5%）。2026-10-12〜10-23 の規則（1.5σ の3本が95以上）は同じ物差しで
+        121取引・+1.6% で、今のモデルではこちらのほうが上だった。それを見た上で、運用者の判断で 1.2σ の3本に
+        戻した（docs/MODEL_ADOPTION_RULES.md §75）。
       </p>
     </section>
   );
 }
 
 /**
- * 惜しい候補（規則の3モデル（1.5σ の3本）の最小が 85〜95）。**買わない**ことの根拠を添えて出す。
+ * 惜しい候補（規則の3モデル（2026-10-23 から 1.2σ の3本）の最小が 85〜95）。**買わない**ことの根拠を添えて出す。
  *
- * 毎日「あと少しなのに」と迷い直さないための欄。数字は今の規則で測ったもの（research/exp/probe_k15_baseline.py。
- * 画面と同じ百分位、発火8件以上の日）。以前の規則（1.2σ の3本、最小 85〜90）で「1つだけ5pt以上低い形は空き枠と
- * 変わらない」とした実験36 は、1.5σ の3本では成り立たない（幅5以上のほうが少し上）。
+ * 毎日「あと少しなのに」と迷い直さないための欄。数字は今の規則で測ったもの（research/exp/probe_t3_panel.py。
+ * 画面と同じ百分位、発火8件以上の日、360列の OOF）。以前の規則（1.2σ の3本、最小 85〜90、153列のころ）で「1つだけ5pt
+ * 以上低い形は空き枠と変わらない」とした実験36 は、今のモデルでは成り立たない（幅5以上のほうが少し上）。
  */
 function NearMiss({ near }) {
   return (
@@ -294,10 +295,10 @@ function NearMiss({ near }) {
             <span className="sub">
               {c.weak
                 ? `${MODEL_JA[c.laggard] || c.laggard} だけ `
-                  + `${fmt(c.spread, 1)}pt 低い形。最小 85〜95・幅5以上の形は過去 584件で +2.1%・勝率63%`
-                  + `（3本とも95以上は354件で +3.6%）`
-                : `3本がほぼ揃っている（幅 ${fmt(c.spread, 1)}pt）。最小 85〜95・幅5未満の形は過去 369件で `
-                  + '+1.1%・勝率58%（3本とも95以上は354件で +3.6%）'}
+                  + `${fmt(c.spread, 1)}pt 低い形。最小 85〜95・幅5以上の形は過去 576件で +2.3%・勝率63%`
+                  + `（3本とも95以上は339件で +2.8%）`
+                : `3本がほぼ揃っている（幅 ${fmt(c.spread, 1)}pt）。最小 85〜95・幅5未満の形は過去 335件で `
+                  + '+1.5%・勝率61%（3本とも95以上は339件で +2.8%）'}
               <FundNote c={c} />
             </span>
           </div>
@@ -389,7 +390,7 @@ function PickCard({ c, n, models, onSend, sent }) {
 }
 
 /**
- * 際どい候補の印（1.5σ の3本で見た今の規則の線「3本とも95以上」の下。strategy.js の borderNote）。
+ * 際どい候補の印（規則の3本（2026-10-23 から 1.2σ の3本）で見た今の規則の線「3本とも95以上」の下。strategy.js の borderNote）。
  * その形でそのモデルが一番低い組の過去の平均が 0% 以下（20件以上）なら赤、それ以外は黄（先に決めた線。BORDER_WARN）。
  * 詳しい文言は title と、行を開いたときの本文に出す。選定の規則は変えない。
  */
@@ -531,7 +532,7 @@ function ScoreLegend({ range }) {
  * **そのモデル自身の**過去スコア分布での位置（百分位）、地の色は区分（明るいほど上。pctColor）。
  * モデルをまたいで生スコアを比べられないので、位置に揃えてある。並び順は行をまたいで固定
  * （payload の models 順）。予測ファイルに無いモデルのマスは「—」。
- * large は行を開いた詳しい欄（小数1桁・1.5σ の行の見出しに「規則」）。
+ * large は行を開いた詳しい欄（小数1桁・規則の行（2026-10-23 から 1.2σ）の見出しに「規則」）。
  * 12本とも本番で使うモデルなので、1.2σ を「本番」とは呼ばない（運用者の指示 2026-10-17）。
  */
 function ModelGrid({ c, models, large = false, metric = 'pct' }) {
@@ -549,9 +550,9 @@ function ModelGrid({ c, models, large = false, metric = 'pct' }) {
         <React.Fragment key={r.label}>
           <span className="r"
                 title={`到達しきい値 ${r.labelJa} のラベルで学習したモデル`
-                  + (r.label === 'base' ? '。スコア帯・較正・追跡の基準はこの行の LightGBM'
-                    : r.label === 'k15' ? '。今日の戦略の規則はこの行の木の3本（L15・X15・C15）がすべて95以上' : '')}>
-            {r.labelJa}{large && r.label === 'k15' ? '（規則）' : ''}
+                  + (r.label === 'base' ? `。スコア帯・較正・追跡の基準はこの行の LightGBM。今日の戦略の規則はこの行の木の3本`
+                    + `（${RULE_SHORT}）がすべて${STRATEGY.agreePct}以上` : '')}>
+            {r.labelJa}{large && r.label === 'base' ? '（規則）' : ''}
           </span>
           {r.cells.map((x, i) => (x && Number.isFinite(score ? x.score : x.pct) ? (
             <span key={g.cols[i].learner} className="c num"
@@ -646,9 +647,9 @@ function Detail({ c, models, featureNames, onSend, sent }) {
             </div>
             <p className="sub" style={{ margin: '8px 0 0' }}>
               行は学習に使ったラベル（到達しきい値）で、12本とも毎日の予測に使っています。スコア帯の基準は 1.2σ の
-              LightGBM です。1.5σ・1.8σ は、より大きく上がった銘柄だけを正例にして学習したもの。今日の戦略の規則は、2026-10-12 から 1.5σ の木の3本
-              （L15・X15・C15）がすべて95以上です（運用者の決定）。
-              一覧はこの3本の最小が高い順です（2026-10-13 から。それまでは 1.2σ の LightGBM のスコア順）。
+              LightGBM です。1.5σ・1.8σ は、より大きく上がった銘柄だけを正例にして学習したもの。今日の戦略の規則は、2026-10-23 から 1.2σ の木の3本
+              （{RULE_SHORT}）がすべて{STRATEGY.agreePct}以上です（運用者の依頼。2026-10-12〜10-23 は 1.5σ の木の3本）。
+              一覧はこの3本の最小が高い順です（2026-10-13 から規則の3本の最小の順。それまでは 1.2σ の LightGBM のスコア順）。
               同じ行・同じ列のモデルは似た見方をするので、そろって高くても独立した票ではありません。
               1.2σ の3本が95以上の候補に「1.5σ・1.8σ の3本も95以上」を足しても、過去の前向きの
               検証では成績は安定して上がりませんでした（実験82）。

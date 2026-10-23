@@ -42,7 +42,7 @@ import probe_label_earn as P  # noqa: E402
 import trading_calendar as TC  # noqa: E402
 
 DATA_DIR = lab.DATA_DIR
-RULE = tuple(LT.RULE_MODELS)
+RULE = tuple(LT.K15)                    # 集計したときの規則（1.5σ の3本。2026-10-23 からは 1.2σ の3本なので記録どおり固定）
 LINE = float(LT.AGREE_PCT)
 AHEAD_BINS: Sequence[Tuple[str, float, float]] = (
     ("0〜7日", 0, 7), ("8〜14日", 7, 14), ("15〜28日（窓の中）", 14, 28), ("29〜60日", 28, 60), ("61日〜", 60, 1e9))

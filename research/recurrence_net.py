@@ -14,10 +14,12 @@ k近傍の網にした（版 4。docs/MODEL_ADOPTION_RULES.md §69）。k は続
 1〜10 にした。既定は続けて運用者の指定「初期状態のkは5でお願いします」で 5（版 6）。並べ方は画面の力学だけ（同じ指定
 「3種のプロット方法がありますが、今のデフォルトのみのもので良いです」）。
 対象（同日の運用者の指定「候補といったのは、予測サンプルではなく、その中でも購入条件を満たした銘柄です」）: その日の高値更新の
-銘柄（予測ファイルの候補）のうち、購入条件（今日の戦略の規則。1.5σ の3本 RULE_MODELS の百分位がすべて AGREE_PCT 以上）を
-満たした銘柄だけ。画面の strategy.js の strategySignal の passed・候補銘柄のニュース（news_links.rule_codes）と同じ。
+銘柄（予測ファイルの候補）のうち、購入条件（今日の戦略の規則。2026-10-23 から 1.2σ の3本 RULE_MODELS の百分位がすべて
+AGREE_PCT 以上。それまでは 1.5σ の3本）を満たした銘柄だけ。画面の strategy.js の strategySignal の passed・候補銘柄の
+ニュース（news_links.rule_codes）と同じ。規則が変わると archive_ok が False を返し、次の日次予測で作り直す（その日の銘柄が
+同じ日は前の archive から引き継ぐ）。
 
-**参考の表示であって、選定には使わない。** 買う銘柄は今日の戦略（1.5σ の3本の最小の順）のまま。
+**参考の表示であって、選定には使わない。** 買う銘柄は今日の戦略（規則の3本の最小の順）のまま。
 
 手法（Marwan ほか 2009 Phys. Lett. A 373:4246・Donner ほか 2010 New J. Phys. 12:033025 の recurrence network のうち、
       半径（ε）ではなく近傍の数（k）を決めて結ぶ網）
@@ -583,8 +585,8 @@ def method_block() -> dict:
         "metric": "mahalanobis", "shrinkage": "ledoit-wolf",
         "theiler": THEILER, "k": K_DEFAULT, "kChoices": list(K_CHOICES), "q": Q, "zCap": Z_CAP,
         "target": TARGET, "hold": HOLD, "labels": [{"key": k, "k": v} for k, v in LABEL_KS], "minNodes": MIN_NODES,
-        "rule": {"models": list(RULE_MODELS), "agreePct": AGREE_PCT},
-        "note": ("参考の表示。購入条件（1.5σ の3本の百分位がすべて95以上）を満たした銘柄ごとに、各営業日のテクニカル指標9列の"
+        "rule": rule_block(),
+        "note": (f"参考の表示。購入条件（{LT.RULE_JA}の百分位がすべて{AGREE_PCT:g}以上）を満たした銘柄ごとに、各営業日のテクニカル指標9列の"
                  "状態が似た日どうし（各日に、タイラー窓 20営業日より離れた日のうち、9列の重なりを差し引いた距離（マハラノビス"
                  "距離）の近い k 日。どちらかが選べば結ぶ）を"
                  "結んだリカレンス・ネットワーク（k近傍の網）。選定には使わない（今日の戦略の並べ方のまま）。過去の日は、その日に"
@@ -618,13 +620,22 @@ def read_archive(path: Optional[str]) -> Tuple[Optional[dict], Dict[str, dict]]:
         return None, {}
 
 
+def rule_block() -> dict:
+    """目次の method.rule（購入条件の3本と線）。archive_ok が前の archive と比べる。"""
+    return {"models": list(RULE_MODELS), "agreePct": AGREE_PCT}
+
+
 def archive_ok(path: Optional[str]) -> bool:
     """
-    archive が今の版で読めるか（無い・読めない・版が違うなら False）。日次予測の段は、予測済みの日でも False なら作り直す
-    （作り方を変えて版を上げたとき、次の起動で入れ替わるように）。read_archive のログは標準エラーに出す。
+    archive が今の版・今の購入条件で読めるか（無い・読めない・版が違う・購入条件（method.rule）が違うなら False）。日次予測の
+    段は、予測済みの日でも False なら作り直す（作り方を変えて版を上げたときや、規則を変えたとき（2026-10-23 に 1.5σ の3本 →
+    1.2σ の3本）、次の起動で入れ替わるように）。read_archive のログは標準エラーに出す。
     """
     with contextlib.redirect_stdout(sys.stderr):
         index, _ = read_archive(path)
+        if index is not None and (index.get("method") or {}).get("rule") != rule_block():
+            log(f"前の archive は購入条件が今と違う（{(index.get('method') or {}).get('rule')}）ので作り直す")
+            return False
     return index is not None
 
 

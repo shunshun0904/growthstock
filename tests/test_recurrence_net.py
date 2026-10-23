@@ -574,10 +574,14 @@ class TestBuild(unittest.TestCase):
         self.assertEqual(RN.read_archive(os.path.join(self.tmp, "none.tar.gz")), (None, {}))
 
     def test_archive_ok_cli(self):
-        # 日次予測の段の判定: 予測済みの日でも、archive が無いか版が古ければ作り直す（$GITHUB_OUTPUT に ok= の1行だけを出す）
+        # 日次予測の段の判定: 予測済みの日でも、archive が無いか版が古いか購入条件が違えば作り直す（$GITHUB_OUTPUT に ok= の1行だけを出す）
         cur, old = os.path.join(self.tmp, "cur.tar.gz"), os.path.join(self.tmp, "old.tar.gz")
-        RN.write({"v": RN.VERSION, "days": []}, {}, None, cur)
-        RN.write({"v": RN.VERSION - 1, "days": []}, {}, None, old)
+        rule_old = os.path.join(self.tmp, "rule_old.tar.gz")
+        RN.write({"v": RN.VERSION, "days": [], "method": {"rule": RN.rule_block()}}, {}, None, cur)
+        RN.write({"v": RN.VERSION - 1, "days": [], "method": {"rule": RN.rule_block()}}, {}, None, old)
+        # 2026-10-12〜10-23 の購入条件（1.5σ の3本 95以上）で作った archive。2026-10-23 に規則が 1.2σ の3本になったので作り直す
+        RN.write({"v": RN.VERSION, "days": [], "method": {"rule": {"models": ["lgbm_k15", "xgb_k15", "cat_k15"], "agreePct": 95.0}}},
+                 {}, None, rule_old)
 
         def run(path):
             out, err = io.StringIO(), io.StringIO()
@@ -589,7 +593,11 @@ class TestBuild(unittest.TestCase):
         out, err = run(old)
         self.assertEqual(out, "ok=false\n")
         self.assertIn("版が違う", err)                                  # ログは標準エラーへ（出力の行を壊さない）
+        out, err = run(rule_old)
+        self.assertEqual(out, "ok=false\n")
+        self.assertIn("購入条件が今と違う", err)
         self.assertEqual(run(os.path.join(self.tmp, "none.tar.gz"))[0], "ok=false\n")
+        self.assertEqual(RN.rule_block(), {"models": ["lgbm", "xgb", "cat"], "agreePct": 95.0})
 
     def test_dataset_check(self):
         _, files = self.build(fixture_bars())

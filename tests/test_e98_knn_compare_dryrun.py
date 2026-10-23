@@ -35,8 +35,9 @@ class TestDryRun(unittest.TestCase):
         cls.data_dir, cls.model_dir, cls.bars, cls.oof, cls.codes = TK.make_case()
         # Release の形（<名前>_oof.parquet）に置き直す
         for a in KC.RULE_MODELS:
-            src = os.path.join(cls.model_dir, "models", a, "oof.parquet")
-            pd.read_parquet(src).to_parquet(os.path.join(cls.data_dir, f"{a}_oof.parquet"), index=False)
+            src = KC.LT.find_oof(a, cls.model_dir, cls.model_dir)   # 基準モデル（lgbm）は oof.parquet、ほかは <名前>_oof.parquet
+            dst = "oof.parquet" if a == "lgbm" else f"{a}_oof.parquet"
+            pd.read_parquet(src).to_parquet(os.path.join(cls.data_dir, dst), index=False)
         cands = [TK.cand(cls.codes[1], TK.DAY, [97.0, 98.5, 96.2], 0.9), TK.cand(cls.codes[2], TK.DAY, [99.0, 95.0, 95.5], 0.8),
                  TK.cand(cls.codes[3], "2025-06-30", [96.0, 96.0, 96.0], 0.7)]
         cls.pred = os.path.join(cls.data_dir, "predictions.json")

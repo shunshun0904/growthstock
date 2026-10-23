@@ -28,7 +28,7 @@ sys.path.insert(0, os.path.join(ROOT, "research"))
 
 import news_links as N  # noqa: E402
 
-RULE = ("lgbm_k15", "xgb_k15", "cat_k15")
+RULE = ("lgbm", "xgb", "cat")                # 今日の戦略の規則の3本（2026-10-23 から 1.2σ。それまでは 1.5σ の3本）
 
 
 def cand(code, date, pcts, name="テスト"):

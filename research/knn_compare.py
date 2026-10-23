@@ -8,14 +8,15 @@
 
 **参考の表示であって、選定には使わない。** 近傍の25%点で選ぶ後工程（実験93、§53）は同じ期間のデータでは先に決めた判定を
 通ったが裏付けは弱く（§53・§55）、前向きの確かめ直し（実験94、§54。判定は 2027-10-15 以降）が通るまでは、今日の戦略の
-並べ方（1.5σ の3本の最小）のまま。
+並べ方（規則の3本の最小。2026-10-23 から 1.2σ の3本）のまま。
 
 作り（実験91・93・97 と同じ。research/exp/e91_wasserstein_knn_pick.py。下の関数は同じ式を本番に写したもので、
 tests/test_knn_compare.py が実験の関数と同じ値になることを確かめる）
   分布: ブレイクの日を含む直近60営業日の、日次リターン（調整後終値の前日比）を平均0・標準偏差1にそろえた分布（R）と、
         log(その日の出来高 ÷ その前の60営業日の平均出来高)（V）。それぞれ60点の分位関数で持ち、W1 = 分位関数の差の絶対値の平均
   距離: W1(R)/sR + W1(V)/sV。s は母集団から無作為に取った2,000組の W1 の中央値（尺度をそろえるだけ。収益は使わない）
-  母集団（惜しい帯から上）: 1.5σ の3本（lgbm_k15・xgb_k15・cat_k15）の out-of-fold の行のうち、画面と同じ百分位（それぞれの
+  母集団（惜しい帯から上）: 今の規則の3本（RULE_MODELS。2026-10-23 から 1.2σ の lgbm・xgb・cat。実験91・93・97 とそれまでの
+        画面は 1.5σ の lgbm_k15・xgb_k15・cat_k15）の out-of-fold の行のうち、画面と同じ百分位（それぞれの
         out-of-fold 全体の分布での位置。live_track.pct_of）の最小が85以上で、結果が出そろった行（買った日を1日目として
         20営業日目の日足が、予測日より前）。結果 = 翌営業日の寄りで買い、+10% の指値に届けば +10、届かなければ
         20営業日目の終値（live_track.forward。今日の戦略の売りの規則と同じ）
@@ -42,8 +43,8 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import live_track as LT  # noqa: E402
 
-RULE_MODELS = tuple(LT.RULE_MODELS)   # lgbm_k15・xgb_k15・cat_k15（今の規則の3本。画面の strategy.js の RULE_MODELS と同じ）
-POOL_LINE = 85.0                      # 近傍の母集団: 1.5σ の3本の最小が85以上（惜しい帯から上）
+RULE_MODELS = tuple(LT.RULE_MODELS)   # 今の規則の3本（2026-10-23 から lgbm・xgb・cat。画面の strategy.js の RULE_MODELS と同じ）
+POOL_LINE = 85.0                      # 近傍の母集団: 規則の3本の最小が85以上（惜しい帯から上）
 CONTEXT_LINE = LT.AGREE_PCT           # 文脈（過去の候補）: 今の規則の線 95
 K = 50                                # 近傍の数
 MIN_POOL = 2 * K                      # 母集団がこれに満たない日は見積もりを出さない
@@ -294,7 +295,7 @@ def context_of(p25: np.ndarray, bad: np.ndarray, min_cell: int = MIN_CELL) -> Op
 
 
 def candidate_min15(row: dict, models: Sequence[str] = RULE_MODELS) -> Optional[float]:
-    """候補の 1.5σ の3本の最小（画面の strategy.js の minPct と同じ。1本でも欠けていれば None）。"""
+    """候補の規則の3本の最小（画面の strategy.js の minPct と同じ。1本でも欠けていれば None）。名前の min15 は 1.5σ の3本だったころのまま。"""
     per = row.get("byModel") or {}
     vals = []
     for a in models:
@@ -309,8 +310,9 @@ def header(days: Sequence[str]) -> dict:
     return {"version": VERSION, "k": K, "poolLine": POOL_LINE, "contextLine": CONTEXT_LINE, "minPool": MIN_POOL,
             "target": TARGET, "hold": HOLD, "win": WIN, "models": list(RULE_MODELS),
             "dBins": D_BINS, "bands": BANDS, "minCell": MIN_CELL, "context": None, "byDay": {},
-            "note": ("参考の表示。候補ごとに、60日のリターンの形と出来高の比率が似た過去の事例（1.5σ の3本の最小が85以上で結果が"
-                     "出そろった行から近い50件）の収益の分布。選定には使わない（今日の戦略の並べ方のまま。実験93・94）。"
+            "note": (f"参考の表示。候補ごとに、60日のリターンの形と出来高の比率が似た過去の事例（{LT.RULE_JA}の最小が"
+                     f"{POOL_LINE:g}以上で結果が出そろった行から近い50件）の収益の分布。選定には使わない（今日の戦略の並べ方のまま。"
+                     "実験93・94）。"
                      "過去の日は、その日に出した値のまま")}
 
 
