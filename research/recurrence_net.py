@@ -25,9 +25,15 @@ k近傍の網にした（版 4。docs/MODEL_ADOPTION_RULES.md §69）。k は続
         そろうまでの約250取引日は入らない）。予測日（候補の日）が最後のノード
   状態: テクニカル指標9列（FEATURES。research/technicals.py の値そのもの）を、列の型（linear_preprocess の型と同じ。正で裾が
         重い列は上の0.5%で切って log1p、符号つきで裾が重い列は上下0.5%で切って asinh、ほかは上下0.1%で切る）で変換し、その銘柄の
-        ノード全体で平均0・標準偏差1にそろえた9次元のベクトル。|z| は Z_CAP で切り、1/Q σ 刻みの整数で持つ。距離も画面もこの
-        丸めた整数から数える（画面で k を変えて引き直しても、このファイルの要約と同じ網になる）
-  近傍: 各ノードについて、THEILER（目的変数の期間 20営業日）より離れた日のうち、状態のユークリッド距離の近い k 日。並びは
+        ノード全体で平均0・標準偏差1にそろえた9次元のベクトル。|z| は Z_CAP で切り、1/Q σ 刻みの整数で持つ（z。画面の値の説明）
+  距離（版 7 から）: 9列の重なりを差し引くマハラノビス距離。状態のノード全体の共分散を Ledoit–Wolf の縮小推定で求め、その
+      逆平方根で白色化した座標（|値| は Z_CAP で切り、同じ 1/Q 刻みの整数。zw）のユークリッド距離（whiten）。トレンド系の5列
+      （−DI・VI+・基準線乖離・TSI・ストキャス%K）は銘柄の中で互いに相関 0.61〜0.80 で、版 6 までのユークリッド距離ではこの向きが
+      約5倍の重みになっていた。運用者の依頼（2026-10-23）「近傍点の距離の算出方法を見直してほしいです。今はユークリッド距離に
+      なってませんか？」→ 実験111（全銘柄の過去の更新日で、同じ銘柄の中の当てる力はユークリッド 0.5023・マハラノビス 0.5030 と
+      同じ）→ 運用者の選択「マハラノビスに替える」（docs/MODEL_ADOPTION_RULES.md §74）。距離も画面もこの丸めた整数から数える
+      （画面で k を変えて引き直しても、このファイルの要約と同じ網になる）
+  近傍: 各ノードについて、THEILER（目的変数の期間 20営業日）より離れた日のうち、距離の近い k 日。並びは
       （距離の2乗, ノードの番号）の小さい順で、同じ距離なら古い日が先（knn_order）。隣り合う日は指標の窓が重なってほぼ同じ状態に
       なるので選ばない（リカレンスの解析でいうタイラー窓）。今日（最後のノード）の近傍は、このぶん必ず結果が出そろった過去の日
   辺: どちらか一方が相手を近い k 日に選んでいれば結ぶ（向きのある近傍を対称にした網。knn_adjacency）。次数は k 以上になりうる
@@ -59,7 +65,7 @@ k近傍の網にした（版 4。docs/MODEL_ADOPTION_RULES.md §69）。k は続
 
 出すもの（--out-dir。archive は --archive）
   index.json            日ごとの購入条件を満たした銘柄と要約・その日の高値更新の件数（nBreak）。画面は最初にこれだけ読む
-  <日付>_<jqCode>.json  銘柄ごとのノード（状態・結果・色付けの値・終値）。約2,200ノードの銘柄で約130KB（日足の短い銘柄は小さい）
+  <日付>_<jqCode>.json  銘柄ごとのノード（状態・結果・色付けの値・終値）。約2,200ノードの銘柄で約250KB（版 7 で距離の座標 zw を足した。版 6 は約130KB。日足の短い銘柄は小さい）
 
 作れなくても日次予測は止めない（predict.yml の段は continue-on-error。銘柄ごとの失敗は理由を残して先へ進む）。
 
@@ -83,6 +89,7 @@ from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
+from sklearn.covariance import ledoit_wolf
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import build_dataset as B  # noqa: E402
@@ -90,10 +97,11 @@ import linear_preprocess as LP  # noqa: E402
 import live_track as LT  # noqa: E402
 import technicals as TX  # noqa: E402
 
-VERSION = 6                         # 2: 先20営業日の値動き（rise・fall・r20）を足した。3: rise・fall を高値・安値で測る。
+VERSION = 7                         # 2: 先20営業日の値動き（rise・fall・r20）を足した。3: rise・fall を高値・安値で測る。
                                     # 4: ε をやめて k近傍の網に（要約は k ごとの byK）。
                                     # 5: 要約から今日に近い過去の更新日（nearestFresh）を外した（似た日は近い k 日だけ）。
-                                    # 6: 既定の k を 10 → 5 に（目次の method.k だけが変わる。画面の最初の k）
+                                    # 6: 既定の k を 10 → 5 に（目次の method.k だけが変わる。画面の最初の k）。
+                                    # 7: 距離をマハラノビス距離に（白色化した座標 zw。網・要約・画面の距離は zw から。§74）
 #: 状態の9列。実験105 の学習の寄与（gain。360列の lgbm）の上位で、1.5σ の上位8列（360列中 28・31・32・38・40・42・44・50位）と、
 #: 1.2σ でだけ上位に入った出来高の60日 ÷ 250日（37位）。docs/MODEL_ADOPTION_RULES.md §68
 FEATURES: Tuple[str, ...] = ("tx_vol_60", "tx_mdi_14", "tx_vortex_pos_14", "tx_atr_ratio_14_50", "tx_ichi_kijun_gap",
@@ -167,6 +175,19 @@ def transform_states(X: np.ndarray, cols: Sequence[str] = FEATURES) -> Tuple[np.
 def quantize(Z: np.ndarray, q: int = Q) -> np.ndarray:
     """1/q σ 刻みの整数（四捨五入。0.5 ちょうどは偶数へ寄せる numpy の rint）。"""
     return np.rint(np.asarray(Z, dtype=float) * q).astype(np.int16)
+
+
+def whiten(Z: np.ndarray) -> Tuple[np.ndarray, float]:
+    """
+    状態 Z（ノード × 9。transform_states の戻り値）を、そのノード全体の共分散を Ledoit–Wolf で縮小した Σ̂ の逆平方根（対称）で
+    白色化した座標（|値| は Z_CAP で切る）と、縮小の強さ（0〜1）。白色化した座標のユークリッド距離は Σ̂ でのマハラノビス距離で、
+    互いに相関する列（トレンド系の5列）の重なりを差し引く（実験111 の M と同じ。docs/MODEL_ADOPTION_RULES.md §74）。
+    """
+    Z = np.asarray(Z, dtype=float)
+    S, shrink = ledoit_wolf(Z)
+    vals, vecs = np.linalg.eigh(S)
+    W = (vecs * (1.0 / np.sqrt(np.maximum(vals, 1e-12)))) @ vecs.T
+    return np.clip(Z @ W, -Z_CAP, Z_CAP), float(shrink)
 
 
 # --------------------------------------------------------------------------- #
@@ -428,7 +449,9 @@ def candidate_payload(g: pd.DataFrame, bars_code: pd.DataFrame, cand: dict, as_o
         return None, f"ノードが {len(g)} 日しかない（{MIN_NODES} 日未満）"
     X = g[list(FEATURES)].to_numpy(dtype=float)
     Z, params = transform_states(X)
-    zq = quantize(Z)
+    zq = quantize(Z)                                           # 9列の状態（画面の値の説明）
+    Zw, shrink = whiten(Z)
+    zw = quantize(Zw)                                          # 距離に使う座標（マハラノビス。網・要約・画面の距離）
     n = len(g)
     dates = [d.date().isoformat() for d in pd.to_datetime(g["Date"])]
     # 結果: live_track.forward（予測日までの日足だけ）。0.1% 刻みに丸めた値を書き、要約もその値で数える
@@ -439,7 +462,7 @@ def candidate_payload(g: pd.DataFrame, bars_code: pd.DataFrame, cand: dict, as_o
     fwd = forward_moves(bars_code, g["Date"])
     labels = {key: pd.to_numeric(g[key], errors="coerce").to_numpy(dtype=float) for key, _ in LABEL_KS}
     fresh = np.flatnonzero(g["is_fresh_break"].fillna(False).to_numpy(dtype=bool)).tolist()
-    by_k = summaries(zq, ret, labels, fresh)
+    by_k = summaries(zw, ret, labels, fresh)
     d = pd.to_datetime(g["Date"]).to_numpy(dtype="datetime64[D]")
     gaps = np.diff(d).astype(int).tolist()
     payload = {
@@ -450,6 +473,8 @@ def candidate_payload(g: pd.DataFrame, bars_code: pd.DataFrame, cand: dict, as_o
         "q": Q, "features": list(FEATURES),
         "scale": [round_summary(p, 6) for p in params],
         "z": zq.reshape(-1).astype(int).tolist(),
+        "zw": zw.reshape(-1).astype(int).tolist(),             # 版 7: 距離はこの座標から（画面の recurrence.js も同じ）
+        "shrink": round(shrink, 6),                             # 縮小推定の強さ（0〜1。説明用）
         "ret": _pct_list(ret),
         **{key: [None if not np.isfinite(x) else int(x) for x in labels[key]] for key, _ in LABEL_KS},
         **{key: _pct_list(v) for key, v in fwd.items()},
@@ -555,11 +580,13 @@ def method_block() -> dict:
         "features": [{"col": c, "ja": ja[c], "short": SHORT.get(c, ja[c]),
                       "group": TX.GROUP_JA.get(TX.GROUP_OF.get(c, ""), ""), "kind": LP.kind_of(c),
                       "gainRank": GAIN_RANK.get(c, {})} for c in FEATURES],
+        "metric": "mahalanobis", "shrinkage": "ledoit-wolf",
         "theiler": THEILER, "k": K_DEFAULT, "kChoices": list(K_CHOICES), "q": Q, "zCap": Z_CAP,
         "target": TARGET, "hold": HOLD, "labels": [{"key": k, "k": v} for k, v in LABEL_KS], "minNodes": MIN_NODES,
         "rule": {"models": list(RULE_MODELS), "agreePct": AGREE_PCT},
         "note": ("参考の表示。購入条件（1.5σ の3本の百分位がすべて95以上）を満たした銘柄ごとに、各営業日のテクニカル指標9列の"
-                 "状態が似た日どうし（各日に、タイラー窓 20営業日より離れた日のうち距離の近い k 日。どちらかが選べば結ぶ）を"
+                 "状態が似た日どうし（各日に、タイラー窓 20営業日より離れた日のうち、9列の重なりを差し引いた距離（マハラノビス"
+                 "距離）の近い k 日。どちらかが選べば結ぶ）を"
                  "結んだリカレンス・ネットワーク（k近傍の網）。選定には使わない（今日の戦略の並べ方のまま）。過去の日は、その日に"
                  "作った値のまま"),
     }

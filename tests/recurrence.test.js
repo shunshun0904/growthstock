@@ -5,6 +5,8 @@
  *   要約が tests/fixtures/recurrence-expected.json（Python が数えた値。tests/test_recurrence_net.py が同じ値を確かめる）と一致する
  * - 近傍は各ノードの、タイラー窓より離れた日のうち距離の近い k 日（同じ距離は古い日が先。同じ距離がたくさんある例で素朴な並べ方と
  *   一致）。線はどちらかが選べば結ぶ。手で数えた小さな例（Python の test_hand_example_k2・k3 と同じ）
+ * - 距離は版 7 から、ファイルの zw（白色化した座標 = マハラノビス距離）から数える。zw の無いファイル（版 6 まで）は z から数える。
+ *   値の説明（zOf・rawOf）はどちらでも z。目次の method.metric が無ければ euclid
  * - 日付は start に gaps の暦日を足していく（最後の日が予測日）
  * - 色の区分（+10% 到達 / 0〜+10 / −10〜0 / −10 未満 / 未確定、正例 / 負例 / 未確定）と、丸めた z から生の値の目安への戻し方
  * - 先20営業日の値動きの色（最高値までの上昇率の5段、20営業日目の騰落率の4段。区切りは下の端を含む。最安値までの色は運用者の
@@ -23,7 +25,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   decode, knnLists, network, summarize, neighborsOf, todayNeighbors, periodsOf, outcomeOf, labelClassOf, nodeColors, classCounts,
-  rawOf, methodOf, timeColor, riseOf, classesOf, OUTCOME_CLASSES, RISE_CLASSES, R20_CLASSES, LABEL_CLASSES,
+  rawOf, methodOf, timeColor, riseOf, classesOf, sqDist, zOf, OUTCOME_CLASSES, RISE_CLASSES, R20_CLASSES, LABEL_CLASSES,
   NA_VALUE, COLOR_MODES, BWR, TIME_STOPS,
 } from '../src/lib/recurrence.js';
 
@@ -194,6 +196,26 @@ test('k近傍: 素朴な並べ方と一致する（同じ距離がたくさん�
   assert.equal(periodsOf([], 20), 0);
 });
 
+test('距離の座標: 版 7 は zw（マハラノビス）、zw の無いファイルは z（ユークリッド）', () => {
+  // z は1列目だけ動く（0, 10, 3, 4）。zw は2列目だけ動く（0, 1, 9, 2）。距離・近傍は zw から、値の説明（zOf）は z のまま
+  const zw = [];
+  [0, 1, 9, 2].forEach((x) => { zw.push(0, x); for (let d = 2; d < 9; d += 1) zw.push(0); });
+  const v7 = tiny([0, 10, 3, 4], { v: 7, zw });
+  assert.equal(v7.metric, 'mahalanobis');
+  assert.deepEqual([sqDist(v7, 0, 1), sqDist(v7, 0, 2), sqDist(v7, 0, 3)], [1, 81, 4]);
+  assert.deepEqual(zOf(v7, 1).slice(0, 2), [10, 0]);
+  assert.deepEqual(Array.from(knnLists(v7, 0, 3).nbr.slice(0, 3)), [1, 3, 2]);          // ノード0 の近い順（zw で 1・4・81）
+  const v6 = tiny([0, 10, 3, 4]);
+  assert.equal(v6.metric, 'euclid');
+  assert.equal(v6.zd, v6.z);
+  assert.deepEqual([sqDist(v6, 0, 1), sqDist(v6, 0, 2), sqDist(v6, 0, 3)], [100, 9, 16]);
+  assert.deepEqual(Array.from(knnLists(v6, 0, 3).nbr.slice(0, 3)), [2, 3, 1]);          // z で 9・16・100
+  assert.throws(() => tiny([0, 1], { zw: [1, 2, 3] }), /距離の座標の数が合いません/);
+  assert.equal(methodOf({ method: {} }).metric, 'euclid');
+  assert.equal(methodOf({ method: { metric: 'mahalanobis' } }).metric, 'mahalanobis');
+  assert.equal(methodOf(index).metric, 'mahalanobis');                                     // フィクスチャ（版 7）の目次
+});
+
 test('日付は start に gaps の暦日を足す', () => {
   const dec = decode({
     n: 4, features: ['a'], z: [0, 1, 2, 3], q: 20, start: '2026-10-08', gaps: [1, 4, 1],
@@ -284,11 +306,11 @@ test('先20営業日の値動きの色（最高値まで・20営業日目）', (
   const v2 = tiny([0, 1, 2], { v: 2, rise: [5, 6, 7], fall: [-1, -2, -3], r20: [1, 2, 3] });
   assert.ok([...v2.rise, ...v2.fall].every(Number.isNaN));
   assert.deepEqual(Array.from(v2.r20), [1, 2, 3]);
-  // フィクスチャ（版 6。値は版 3 と同じ高値・安値の物差し）には値がある。最後の20営業日は未確定、分かる日は
+  // フィクスチャ（版 7。値は版 3 と同じ高値・安値の物差し）には値がある。最後の20営業日は未確定、分かる日は
   // 最安値 ≤ 20営業日目の終値 ≤ 最高値（0.1% の丸めの幅）
   const p = read(path.join(FIX, index.days[0].candidates[0].file));
   const fx = decode(p, method.labels);
-  assert.equal(p.v, 6);
+  assert.equal(p.v, 7);
   assert.ok(Array.from(fx.rise.slice(-20)).every(Number.isNaN));
   // （実データでは20営業日目に売買が無い日は 20営業日目だけが分からない。最大・最小はその日を飛ばして数える）
   let known = 0;

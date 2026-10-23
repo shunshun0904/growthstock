@@ -172,7 +172,7 @@ jobs:
 
       # 購入条件（1.5σ の3本がすべて95以上）を満たした銘柄ごとのリカレンス・ネットワーク（画面の「リカレンス・ネットワーク」
       # タブ。research/recurrence_net.py。運用者の依頼 2026-10-19）。取れる全期間（1銘柄 約2,200営業日 × テクニカル指標9列と
-      # 色付けの値で約130KB）で作るので、リポジトリにはコミットせず Release に1つの archive（recurrence.tar.gz）で上げ、デプロイ（deploy-pages.yml）が
+      # 色付けの値・距離の座標で約250KB。版 6 までは約130KB）で作るので、リポジトリにはコミットせず Release に1つの archive（recurrence.tar.gz）で上げ、デプロイ（deploy-pages.yml）が
       # dist/data/recurrence/ に展開する（運用者の選択「Release に置く」）。過去の日は前の archive（最初の
       # Download raw data で research/_data に来ている）から引き継ぐ。参考の表示で選定には使わないので、作れなくても
       # 日次予測は止めない（continue-on-error。失敗は赤で残り、Summary にも出る）。

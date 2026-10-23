@@ -4,6 +4,8 @@
 （作りものの日足）。
 
 - 状態: 列の型（linear_preprocess）どおりに変換して、その銘柄のノード全体で平均0・標準偏差1。|z| は Z_CAP で切る。丸めは 1/Q σ
+- 距離（版 7）: 状態を Ledoit–Wolf で縮小した共分散で白色化した座標（zw）のユークリッド距離 = マハラノビス距離。実験111 の M と
+  同じ座標。ファイルの zw・z・要約は日足から数え直した値と一致する（要約は zw から）
 - 距離の2乗は整数で、素朴に数えた値と一致する。近傍は各ノードの、タイラー窓より離れた日のうち距離の近い k 日（同じ距離は古い日が先。
   同じ距離がたくさんある例で素朴な並べ方と一致）。結べる日が k より少なければその数。結べる日が無ければ近傍なし
 - 辺はどちらかが相手を近い k 日に選んでいれば結ぶ（対称・タイラー窓の中は結ばない）
@@ -35,14 +37,17 @@ import unittest
 
 import numpy as np
 import pandas as pd
+from sklearn.covariance import ledoit_wolf
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "research"))
+sys.path.insert(0, os.path.join(ROOT, "research", "exp"))
 
 import build_dataset as B  # noqa: E402
 import linear_preprocess as LP  # noqa: E402
 import live_track as LT  # noqa: E402
 import recurrence_net as RN  # noqa: E402
+import e111_recurrence_metric as E111  # noqa: E402
 
 FIX_DIR = os.path.join(ROOT, "tests", "fixtures", "recurrence")
 FIX_EXPECTED = os.path.join(ROOT, "tests", "fixtures", "recurrence-expected.json")
@@ -122,9 +127,12 @@ def fixture_build():
 
 
 def decode(p: dict):
-    """候補のファイル → (zq, ret, labels, fresh, dates)。画面の recurrence.js の decode と同じ読み方。"""
+    """
+    候補のファイル → (zq, ret, labels, fresh, dates)。画面の recurrence.js の decode と同じ読み方。zq は距離に使う座標
+    （版 7 からは白色化した zw。版 6 までのファイルは状態 z）。
+    """
     n = p["n"]
-    zq = np.asarray(p["z"], dtype=np.int64).reshape(n, len(p["features"]))
+    zq = np.asarray(p["zw"] if "zw" in p else p["z"], dtype=np.int64).reshape(n, len(p["features"]))
     ret = np.array([np.nan if v is None else float(v) for v in p["ret"]], dtype=float)
     labels = {key: np.array([np.nan if v is None else float(v) for v in p[key]], dtype=float) for key, _ in RN.LABEL_KS}
     d = [pd.Timestamp(p["start"])]
@@ -196,6 +204,28 @@ class TestStates(unittest.TestCase):
     def test_quantize(self):
         z = np.array([[0.0, 0.024, 0.026, -0.026, 6.0, -6.0, 1.0, -1.0, 0.075]])
         self.assertEqual(RN.quantize(z).tolist(), [[0, 0, 1, -1, 120, -120, 20, -20, 2]])
+
+    def test_whiten_is_mahalanobis(self):
+        # 版 7: 白色化した座標のユークリッド距離 = Ledoit–Wolf で縮小した共分散でのマハラノビス距離
+        rng = np.random.default_rng(3)
+        f = rng.normal(size=(600, 1))
+        Z = np.hstack([f + 0.3 * rng.normal(size=(600, 5)), rng.normal(size=(600, 4))])
+        Z = (Z - Z.mean(0)) / Z.std(0)
+        Zw, shrink = RN.whiten(Z)
+        S, s2 = ledoit_wolf(Z)
+        self.assertAlmostEqual(shrink, s2)
+        self.assertLessEqual(np.abs(Zw).max(), RN.Z_CAP)
+        Sinv = np.linalg.inv(S)
+        ok = np.flatnonzero((np.abs(Zw) < RN.Z_CAP).all(axis=1))           # 切っていない行どうしで比べる
+        for i, j in zip(ok[:40], ok[40:80]):
+            d = Z[i] - Z[j]
+            self.assertAlmostEqual(((Zw[i] - Zw[j]) ** 2).sum(), d @ Sinv @ d, places=8)
+
+    def test_whiten_same_as_experiment_111(self):
+        # 実験111 の M（運用者の選択「マハラノビスに替える」の元の検証）と同じ丸めた座標
+        Z, _ = RN.transform_states(np.random.default_rng(4).normal(size=(400, len(RN.FEATURES))))
+        np.testing.assert_array_equal(RN.quantize(RN.whiten(Z)[0]), E111.arm_states(Z)[0]["M"])
+        np.testing.assert_array_equal(RN.quantize(Z), E111.arm_states(Z)[0]["E"])
 
 
 class TestEdges(unittest.TestCase):
@@ -450,6 +480,28 @@ class TestBuild(unittest.TestCase):
                 # 最高値までの上昇率が 10 以上 ⟺ +10% の指値に届いた（結果が +10）
                 self.assertEqual(got[0] >= 10, p["ret"][i] == 10, f"{c['jqCode']} {d} {got[0]} {p['ret'][i]}")
             self.assertEqual(sum(v is None for v in p["rise"][-RN.HOLD:]), RN.HOLD)
+
+    def test_distance_coordinates(self):
+        # 版 7: ファイルの zw は、その銘柄のノードの状態を白色化して丸めた座標。z（値の説明）はそのまま。要約は zw から数える
+        bars = fixture_bars()
+        _, files = self.build(bars)
+        panel = RN.build_panel(bars, None)
+        for c in FIX_CANDS:
+            p = files[RN.file_name(FIX_DAY, c["jqCode"])]
+            g = panel[panel["Code"] == c["jqCode"]]
+            X = g[list(RN.FEATURES)].to_numpy(dtype=float)
+            X = X[np.isfinite(X).all(axis=1)]
+            Z, _ = RN.transform_states(X)
+            Zw, shrink = RN.whiten(Z)
+            n, dims = p["n"], len(p["features"])
+            self.assertEqual(len(p["zw"]), n * dims)
+            self.assertEqual(p["z"], RN.quantize(Z).reshape(-1).astype(int).tolist())
+            self.assertEqual(p["zw"], RN.quantize(Zw).reshape(-1).astype(int).tolist())
+            self.assertAlmostEqual(p["shrink"], round(shrink, 6))
+            zw = np.asarray(p["zw"], dtype=np.int64).reshape(n, dims)
+            _, ret, labels, fresh, _ = decode(p)
+            self.assertEqual(p["byK"], RN.round_summary(RN.summaries(zw, ret, labels, fresh)))
+            self.assertNotEqual(p["zw"], p["z"])                    # 9列のままのユークリッドとは別の座標
 
     def test_skips_with_reason(self):
         bars = fixture_bars()

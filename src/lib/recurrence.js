@@ -8,6 +8,8 @@
  * 網は k近傍（運用者の選択 2026-10-19「k近傍だけにする」。k は続けて指定「正直なところ、kは1〜10までで良いです」で 1〜10、
  * 既定は指定「初期状態のkは5でお願いします」で 5。版 3 までは ε で結んでいた）。
  * 各日に、タイラー窓（20営業日）より離れた日のうち状態の近い k 日（同じ距離は古い日が先）を選び、どちらかが選べば線で結ぶ。
+ * 距離は版 7 から、9列の重なりを差し引くマハラノビス距離（Python が白色化して 1/q 刻みに丸めた座標 zw のユークリッド距離。
+ * docs/MODEL_ADOPTION_RULES.md §74）。版 6 までのファイル（zw が無い）は、これまでどおり状態 z のユークリッド距離で数える。
  * 近傍・線・要約は、ここで Python と同じ式で数え直す（画面で k を変えられるように）。距離は整数の2乗で比べるので、浮動小数点の
  * 差は出ない。tests/recurrence.test.js が Python の数えた値（tests/fixtures/recurrence-expected.json）と一致することを確かめる。
  * **参考の表示で、選定には使わない。**
@@ -35,6 +37,8 @@ export function methodOf(index) {
     hold: Number.isInteger(m.hold) ? m.hold : DEFAULTS.hold,
     labels: Array.isArray(m.labels) && m.labels.length ? m.labels : DEFAULT_LABELS,
     features: Array.isArray(m.features) ? m.features : [],
+    // 距離の種類（版 7 から mahalanobis。版 6 までの目次には無いので euclid）。画面の説明の文言を選ぶのに使う
+    metric: m.metric === 'mahalanobis' ? 'mahalanobis' : 'euclid',
   };
 }
 
@@ -48,6 +52,9 @@ export function decode(p, labels = DEFAULT_LABELS) {
   const dims = p.features.length;
   const z = Int16Array.from(p.z);
   if (z.length !== n * dims) throw new Error(`状態の数が合いません（${z.length} / ${n} × ${dims}）`);
+  // 距離に使う座標（版 7: 白色化した zw = マハラノビス距離。版 6 まで: 状態 z そのまま = ユークリッド距離）
+  const zw = Array.isArray(p.zw) ? Int16Array.from(p.zw) : null;
+  if (zw && zw.length !== n * dims) throw new Error(`距離の座標の数が合いません（${zw.length} / ${n} × ${dims}）`);
   if (p.gaps.length !== n - 1) throw new Error('日付の数が合いません');
   const ret = Float64Array.from(p.ret, nanOf);
   // 先20営業日の値動き（色付け用）。版 2 の rise / fall は終値で測った別の物差しなので読まない（版 3 から高値・安値）。
@@ -68,16 +75,17 @@ export function decode(p, labels = DEFAULT_LABELS) {
   const isFresh = new Uint8Array(n);
   for (const i of fresh) isFresh[i] = 1;
   return {
-    n, dims, q: p.q, z, ret, rise: fwd('rise', 3), fall: fwd('fall', 3), r20: fwd('r20', 2), labels: lab, dates, fresh, isFresh,
+    n, dims, q: p.q, z, zd: zw || z, metric: zw ? 'mahalanobis' : 'euclid',
+    ret, rise: fwd('rise', 3), fall: fwd('fall', 3), r20: fwd('r20', 2), labels: lab, dates, fresh, isFresh,
     close: Float64Array.from(p.close || [], nanOf),
     scale: p.scale || [], features: p.features, raw: p.raw || [],
     code: p.code, jqCode: p.jqCode, name: p.name, date: p.date,
   };
 }
 
-/** 2ノードの距離の2乗（整数）。 */
+/** 2ノードの距離の2乗（整数。距離に使う座標 zd から）。 */
 export function sqDist(dec, i, j) {
-  const { z, dims } = dec;
+  const { zd: z, dims } = dec;
   const a = i * dims;
   const b = j * dims;
   let acc = 0;
@@ -97,7 +105,7 @@ const KEY = 8192;
  * 戻り値: { kMax, nbr（n × kMax。足りないところは −1）, d2（同じ形の距離の2乗）, cnt（ノードごとの近傍の数）}
  */
 export function knnLists(dec, theiler, kMax) {
-  const { n, dims, z } = dec;
+  const { n, dims, zd: z } = dec;
   if (n > KEY) throw new Error(`ノードが多すぎます（${n} > ${KEY}）`);
   const nbr = new Int32Array(n * kMax).fill(-1);
   const d2 = new Int32Array(n * kMax).fill(-1);
