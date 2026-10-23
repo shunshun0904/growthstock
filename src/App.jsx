@@ -31,8 +31,10 @@ const TABS = [
   { id: 'news', label: '候補銘柄のニュース' },
   // 候補ごとのリカレンス・ネットワーク（点 = その銘柄の1営業日、線 = テクニカル指標9列の状態が似た日どうし。参考で、選定には
   // 使わない）。運用者の依頼 2026-10-19「Obsidian の球状のプロットのようなことを、ノードを1営業日として…その日の各候補銘柄単体で」。
-  // データは Release の recurrence.tar.gz（research/recurrence_net.py）をデプロイで dist/data/recurrence/ に置く
-  { id: 'network', label: 'リカレンス・ネットワーク' },
+  // データは Release の recurrence.tar.gz（research/recurrence_net.py）をデプロイで dist/data/recurrence/ に置く。
+  // 2026-10-24「現状、参考にできるレベルでもないので非表示にしてください。なくて良いです」で hidden に。画面のコード
+  // （NetworkView）と日次予測の網の作成は残してあり、hidden を外せば戻る
+  { id: 'network', label: 'リカレンス・ネットワーク', hidden: true },
   // 候補の比較（似た過去の事例の収益の分布。参考で、選定には使わない）。運用者の指示 2026-10-15
   // 「別タブとして、左から2番目の位置に追加して下さい。3枚で良いです」。2026-10-16「候補の比較タブはいったん、
   // なくしてください」で hidden に。画面のコード（KnnCompareView）と日次予測の knn の計算は残してあり、hidden を外せば戻る
@@ -335,7 +337,7 @@ export default function App() {
         )}
 
         {/* 予測ファイルは候補の並び（今日の戦略の順）にだけ使う。読めなくてもネットワークの目次の順で出す */}
-        {tab === 'network' && <NetworkView data={pred} />}
+        {tab === 'network' && isVisible('network') && <NetworkView data={pred} />}
 
         {tab === 'samples' && <SamplesView data={newSamples} />}
 

@@ -10,7 +10,6 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { decode, knnLists, network, todayNeighbors, methodOf, BWR, NA_VALUE } from '../src/lib/recurrence.js';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const DIST = path.join(ROOT, 'dist');
@@ -22,10 +21,6 @@ const FILINGS_FIXTURE = path.join(ROOT, 'tests', 'fixtures', 'synthetic-filings.
 const SAMPLES_FIXTURE = path.join(ROOT, 'tests', 'fixtures', 'synthetic-new-samples.json');
 // 候補銘柄のニュースのリンクを確かめた結果。research/news_links.py の書き出しで作った（偽の取得。9324 の掲示板は開けない）
 const NEWS_FIXTURE = path.join(ROOT, 'tests', 'fixtures', 'synthetic-news-links.json');
-// リカレンス・ネットワーク（目次と候補ごとのファイル）。tests/test_recurrence_net.py --write-fixtures が作りものの日足から作る
-// （日付・銘柄コードは synthetic-predictions.json と同じ 2026-09-11 の 9324・9434）
-const RECURRENCE_FIXTURES = path.join(ROOT, 'tests', 'fixtures', 'recurrence');
-const RECURRENCE_EXPECTED = JSON.parse(fs.readFileSync(path.join(ROOT, 'tests', 'fixtures', 'recurrence-expected.json'), 'utf8'));
 const SHOTS = path.join(ROOT, 'docs');
 fs.mkdirSync(SHOTS, { recursive: true });
 
@@ -45,8 +40,7 @@ const server = http.createServer((req, res) => {
     '/data/new_samples.json': SAMPLES_FIXTURE,
     '/data/news_links.json': NEWS_FIXTURE,
   };
-  const rec = rel.startsWith('/data/recurrence/') ? path.join(RECURRENCE_FIXTURES, path.basename(rel)) : null;
-  const file = fixtures[rel] || rec || path.join(DIST, rel);
+  const file = fixtures[rel] || path.join(DIST, rel);
   if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
     res.writeHead(404).end('not found');
     return;
@@ -79,6 +73,9 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 const consoleErrors = [];
 page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
 page.on('pageerror', (e) => consoleErrors.push(`pageerror: ${e.message}`));
+// リカレンス・ネットワークのデータ（隠している間はどのタブも読まない。下の「隠したタブ」）
+const recurrenceRequests = [];
+page.on('request', (r) => { if (r.url().includes('/data/recurrence/')) recurrenceRequests.push(r.url()); });
 
 console.log('\n== ブレイク予測 View ==');
 await page.goto(base, { waitUntil: 'networkidle' });
@@ -264,14 +261,18 @@ const tabNames = (await page.getByRole('tab').allTextContents()).map((t) => t.tr
 // 再学習で加わったサンプルは一番右（運用者の指示 2026-10-14「一番右側に持ってきてください」）
 // 候補銘柄のニュースは左から2番目（運用者の依頼 2026-10-17「候補銘柄のニュース として新たにタブを追加してほしいです。
 // 左から2番目で」）
-// リカレンス・ネットワークは候補銘柄のニュースの右（運用者の依頼 2026-10-19。場所の指定は無かったので、候補ごとに見る
-// タブどうしを並べた。再学習で加わったサンプルは一番右のまま）
-check(tabNames.join(',') === 'ブレイク予測,候補銘柄のニュース,リカレンス・ネットワーク,タイムマシーン,再学習で加わったサンプル',
-      `タブは ブレイク予測 / 候補銘柄のニュース / リカレンス・ネットワーク / タイムマシーン / 再学習で加わったサンプル の5つ (実際: ${tabNames.join(',')})`);
+// リカレンス・ネットワーク（2026-10-19 に候補銘柄のニュースの右に足した）は、運用者の依頼 2026-10-24「現状、参考にできる
+// レベルでもないので非表示にしてください。なくて良いです」で隠している（src/App.jsx の hidden。画面のコードと日次予測の網の
+// 作成は残す）
+check(tabNames.join(',') === 'ブレイク予測,候補銘柄のニュース,タイムマシーン,再学習で加わったサンプル',
+      `タブは ブレイク予測 / 候補銘柄のニュース / タイムマシーン / 再学習で加わったサンプル の4つ (実際: ${tabNames.join(',')})`);
 check(!tabNames.includes('決算サンキー') && !tabNames.includes('What-If シミュレーター')
-        && !tabNames.includes('8軸オクタゴン比較') && !tabNames.includes('候補の比較'),
-      '決算サンキー・What-If シミュレーター・8軸オクタゴン比較・候補の比較のタブは出ない');
+        && !tabNames.includes('8軸オクタゴン比較') && !tabNames.includes('候補の比較')
+        && !tabNames.includes('リカレンス・ネットワーク'),
+      '決算サンキー・What-If シミュレーター・8軸オクタゴン比較・候補の比較・リカレンス・ネットワークのタブは出ない');
 check((await page.locator('.knn').count()) === 0, '候補の比較の画面はどのタブにも出ない（隠している間）');
+check((await page.locator('.net').count()) === 0 && (await page.locator('.net-canvas').count()) === 0,
+      'リカレンス・ネットワークの画面はどのタブにも出ない（隠している間）');
 check((await page.locator('.sankey').count()) === 0 && (await page.locator('.stock-card').count()) === 0,
       '8軸オクタゴン比較の画面（銘柄カード・サンキー図）はどのタブにも出ない');
 check(!((await page.textContent('.footer')) || '').includes('EDINET'),
@@ -364,418 +365,13 @@ check(newsFit.right <= newsFit.vw + 0.5 && !newsFit.scroll,
 await page.setViewportSize({ width: 1440, height: 1000 });
 await page.unroute('**/data/predictions.json*');
 
-console.log('\n== リカレンス・ネットワーク ==');
-// 運用者の依頼（2026-10-19）「Obsidian の球状のプロットのようなことを、ノードを1営業日として…その日の各候補銘柄単体で」。
-// 対象は購入条件（規則の3本がすべて95以上。2026-10-23 から 1.2σ の3本）を満たした銘柄だけ（同日の指定「候補といったのは、予測サンプルではなく、その中でも
-// 購入条件を満たした銘柄です」）。元の合成データ（2026-09-11 の5件。どれも満たさない）では図を出さずに理由を書く
-await page.reload({ waitUntil: 'networkidle' });
-await page.getByRole('tab', { name: 'リカレンス・ネットワーク' }).click();
-// 読み込み中の文言も同じ枠（.card.empty）に出るので、理由の文言が出るまで待つ（枠だけを待つと読み込み中を読んでしまう）
-await page.locator('.net .card.empty', { hasText: '購入条件' }).waitFor({ timeout: 10000 }).catch(() => {});
-const netEmpty = (await page.locator('.net .card.empty').textContent()) || '';
-check(netEmpty.includes('購入条件') && netEmpty.includes('高値更新 5 銘柄のうち'),
-      `購入条件を満たした銘柄が無い日は、図を出さずに理由を書く (実際: ${netEmpty.slice(0, 70)})`);
-check((await page.locator('.net-canvas canvas').count()) === 0 && (await page.locator('.net-crow').count()) === 0,
-      '満たさない銘柄（高値更新の5件）は一覧にも図にも出さない');
-// 上の候補銘柄のニュースと同じ predPass（9324・9434・9082 が満たす）で読み込み直す。ネットワークのフィクスチャは購入条件を
-// 満たした3件のうち 9324・9434 の2件（9082 は日足が無いので作れない。tests/test_recurrence_net.py の fixture_build）
-await page.route('**/data/predictions.json*',
-  (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(predPass) }));
-await page.reload({ waitUntil: 'networkidle' });
-await page.getByRole('tab', { name: 'リカレンス・ネットワーク' }).click();
-await page.waitForSelector('.net-canvas canvas', { timeout: 10000 });
-const exp = (code, k) => RECURRENCE_EXPECTED[`2026-09-11_${code}.json`][String(k)];
-const netFocus = async () => (await page.locator('.net-canvas').getAttribute('data-focus')) || '';
-const netN = (code) => JSON.parse(fs.readFileSync(path.join(ROOT, 'tests', 'fixtures', 'recurrence', `2026-09-11_${code}.json`), 'utf8')).n;
-const crows = page.locator('.net-crow:not(.head)');
-check((await crows.count()) === 3, `一覧は購入条件を満たした3件だけ（高値更新の5件ではない） (実際: ${await crows.count()})`);
-const crowCodes = await crows.locator('.id b').allTextContents();
-check(crowCodes.join(',') === '9324,9434,9082', `今日の戦略の順（3本の最小 97.1・95.2・95.0） (実際: ${crowCodes.join(',')})`);
-const pickMarks = await crows.evaluateAll((els) => els.map((e) => Boolean(e.querySelector('.net-pick'))));
-check(pickMarks.join(',') === 'true,true,false', `上位2件（9324・9434）に「買う候補」の印 (実際: ${pickMarks.join(',')})`);
-check((await page.locator('.net-crow:not(.head):not([disabled])').count()) === 2, 'ネットワークのある2件だけ選べる');
-check(((await crows.nth(2).getAttribute('title')) || '').includes('日足が無い'), '作れなかった 9082 は理由（日足が無い）を出す');
-const netStrip = (await page.locator('.net .pred-strip').innerText()) || '';
-check(netStrip.includes('購入条件を満たした銘柄') && netStrip.includes('高値更新 5 銘柄のうち'),
-      `件数の欄に「購入条件を満たした銘柄 3（高値更新 5 銘柄のうち）」 (実際: ${netStrip.replace(/\s+/g, ' ').slice(0, 90)})`);
-check((await crows.first().getAttribute('aria-selected')) === 'true', '最初はネットワークのある先頭の銘柄（9324）を出す');
-const netSide = async () => (await page.locator('.net-side').innerText()) || '';
-let side = await netSide();
-// k近傍（運用者の選択 2026-10-19「k近傍だけにする」。k は指定「kは1〜10までで良いです」で 1〜10、最初の k は指定「初期状態のkは5で
-// お願いします」で 5）。K0 = 最初の k、K2 = 切り替えて数え直させる k
-const K0 = 5;
-const K2 = 10;
-const kBtn = (v) => page.locator(`.net-seg[aria-label^="似た日の数"] button[aria-label="${v} 日"]`);
-const kBtns = await page.locator('.net-seg[aria-label^="似た日の数"] button').allTextContents();
-check(kBtns.join(',') === '1,2,3,4,5,6,7,8,9,10', `k は 1〜10 日から選ぶ (実際: ${kBtns.join(',')})`);
-check((await page.locator('.net-seg[aria-label^="似た日の数"] button[aria-pressed="true"]').getAttribute('aria-label')) === `${K0} 日`,
-      `最初の k は ${K0}`);
-check((await page.locator('[aria-label="辺の密度（リカレンス率）"]').count()) === 0
-        && !(await page.locator('.net .pred-strip').innerText()).includes('辺の密度'), '辺の密度のボタンは無い（ε はやめた）');
-check(side.includes(`${exp('93240', K0).deg} 日`) && side.includes(`${exp('93240', K0).periods} つの時期`) && side.includes('珍しい状態'),
-      `9324 の今日に似た日は ${exp('93240', K0).deg} 日・${exp('93240', K0).periods} つの時期（Python の要約と同じ）で、珍しさの説明が出る`);
-const crowCells = await crows.first().locator(':scope > span.num').allTextContents();   // 最小・似た日・全期間
-const pctTxt = (v) => (Number.isFinite(v) ? `${Math.round(v * 100)}%` : '—');
-check(crowCells[1] === pctTxt(exp('93240', K0).nbr.hit) && crowCells[2] === pctTxt(exp('93240', K0).base.hit),
-      `一覧の「似た日」「全期間」は目次の k = ${K0} の要約（+10% 到達）と同じ (実際: ${crowCells.join(' / ')})`);
-// 今日に似た日を光らせる（運用者の依頼「対象日と似ている（紐づく）サンプルもハイライト」）。強調している日:似た日の数
-await page.waitForFunction(() => document.querySelector('.net-canvas')?.dataset.focus);
-check(await netFocus() === `${netN('93240') - 1}:${exp('93240', K0).deg}`,
-      `開いたときから今日（最後の点）と似た ${exp('93240', K0).deg} 日を光らせている (実際: ${await netFocus()})`);
-const inkOf = () => page.evaluate(() => {
-  const c = document.querySelector('.net-canvas canvas');
-  const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
-  let n = 0;
-  for (let i = 0; i < d.length; i += 4 * 7) if (d[i] > 40 || d[i + 1] > 40 || d[i + 2] > 60) n += 1;
-  return n;
-});
-await page.locator('label', { hasText: '今日に似た日を光らせる' }).click();
-await page.waitForFunction(() => document.querySelector('.net-canvas')?.dataset.focus === '');
-check(await netFocus() === '', '「今日に似た日を光らせる」を外すと強調しない');
-const inkOff = await inkOf();
-await page.locator('label', { hasText: '今日に似た日を光らせる' }).click();
-await page.waitForFunction(() => document.querySelector('.net-canvas')?.dataset.focus);
-const inked = await inkOf();
-check(inked > 200, `図に点と線が描かれている（明るい画素 ${inked}）`);
-// 強調しても、ほかの点と線は暗くしない（運用者の依頼 2026-10-20「他の日付が暗くなるのですが、相対的な差がわからなくなるので、
-// 他はくらくしないでそのままに」）。前は強調中にほかを暗くしていたので、明るい画素が半分ほどに減っていた
-check(inked >= inkOff * 0.85, `今日に似た日を光らせても、ほかの点と線は暗くならない（明るい画素 外す ${inkOff} → 光らせる ${inked}）`);
-// 似た日はその日の色のまま（運用者の依頼 2026-10-20「白く光らせてますが、それ自身が何色かわからなくなるので、もう少し抑えた表現に」）。
-// 今日の光と日付の字から離れた似た日について、点の中心がその日の色で、まわり 29px 四方に白に近い画素がほとんど無い（前は足し算の
-// 光と白い輪で、まわりが白くなっていた）。離れた似た日が無ければ拡大してから測る
-const nbLook = () => page.evaluate(() => {
-  const wrap = document.querySelector('.net-canvas');
-  const c = wrap.querySelector('canvas');
-  const k = c.width / c.clientWidth;
-  const ctx = c.getContext('2d');
-  const [tx, ty] = (wrap.dataset.today || '0,0').split(',').map(Number);
-  const out = [];
-  for (const part of (wrap.dataset.nbpos || '').split(';').filter(Boolean)) {
-    const [x, y, col] = part.split(',');
-    const X = Number(x);
-    const Y = Number(y);
-    const nearToday = Math.hypot(X - tx, Y - ty) < 60 || (Math.abs(Y - ty) < 26 && X - tx > -14 && X - tx < 130);
-    if (nearToday || X < 16 || Y < 16 || X > c.clientWidth - 16 || Y > c.clientHeight - 16) continue;
-    const d = ctx.getImageData(Math.round((X - 14) * k), Math.round((Y - 14) * k), Math.round(29 * k), Math.round(29 * k)).data;
-    let white = 0;
-    for (let i = 0; i < d.length; i += 4) if (Math.min(d[i], d[i + 1], d[i + 2]) > 215) white += 1;
-    const m = ctx.getImageData(Math.round(X * k), Math.round(Y * k), 1, 1).data;
-    out.push({ white, center: [m[0], m[1], m[2]], col });
-  }
-  return out;
-});
-let looks = await nbLook();
-for (let z = 0; z < 3 && !looks.length; z += 1) {
-  await page.locator('button[aria-label="拡大"]').click();
-  await page.waitForTimeout(150);
-  looks = await nbLook();
-}
-const hexRgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
-check(looks.length > 0 && looks.every((l) => l.white <= 3)
-        && looks.every((l) => hexRgb(l.col).every((v, i) => Math.abs(v - l.center[i]) <= 12)),
-      `似た日の点はその日の色のままで、まわりが白く光らない (${looks.length} 点・白に近い画素 ${looks.map((l) => l.white).join('/')})`);
-await page.locator('.net-seg button', { hasText: '元に戻す' }).click();
-await page.locator('.net-crow', { hasText: '9434' }).click();
-await page.waitForFunction(() => document.querySelector('.net-head strong')?.textContent.includes('9434'));
-await kBtn(K2).click();
-side = await netSide();
-check(side.includes(`${exp('94340', K2).deg} 日`) && side.includes(`${exp('94340', K2).periods} つの時期`),
-      `9434 を k = ${K2} で数え直すと今日に似た日 ${exp('94340', K2).deg} 日・${exp('94340', K2).periods} つの時期（Python と同じ）`);
-const foot = (await page.locator('.net-foot').textContent()) || '';
-check(foot.includes(`線 ${exp('94340', K2).edges.toLocaleString('ja-JP')} 本`), `線の本数も Python と同じ（${exp('94340', K2).edges}）`);
-await page.waitForFunction((want) => document.querySelector('.net-canvas')?.dataset.focus === want,
-  `${netN('94340') - 1}:${exp('94340', K2).deg}`, { timeout: 5000 }).catch(() => {});
-check(await netFocus() === `${netN('94340') - 1}:${exp('94340', K2).deg}`, `k = ${K2} なら光らせる似た日も ${K2} 日 (実際: ${await netFocus()})`);
-// 右の一覧は図で光らせる日と同じ近い k 日（運用者の指定 2026-10-19「プロット上の近傍の日付で統一してほしい」）。日付を
-// フィクスチャから同じ式で数えた今日の近い k 日（近い順）と比べる。更新日だけから選んだ「今日に近い過去の更新日」の欄は無い
-const nearWant = (() => {
-  const idx = JSON.parse(fs.readFileSync(path.join(RECURRENCE_FIXTURES, 'index.json'), 'utf8'));
-  const m = methodOf(idx);
-  const dec = decode(JSON.parse(fs.readFileSync(path.join(RECURRENCE_FIXTURES, '2026-09-11_94340.json'), 'utf8')), m.labels);
-  const net = network(dec, m.theiler, K2, knnLists(dec, m.theiler, K2));
-  return todayNeighbors(dec, net).map((r) => dec.dates[r.i].replace(/-/g, '/') + (dec.isFresh[r.i] ? ' ○' : ''));   // ○ = 更新日
-})();
-const nearDates = await page.locator('.net-near tbody tr td:first-child').allTextContents();
-check(nearDates.join(',') === nearWant.join(',') && nearDates.length === exp('94340', K2).deg,
-      `「今日に似た日」の表は図で光らせる近い ${K2} 日と同じ日・同じ順 (実際: ${nearDates.join(',')} / 期待: ${nearWant.join(',')})`);
-check((await page.locator('.net-near h3').textContent()).includes(`図で今日と結んだ ${exp('94340', K2).deg} 日`)
-        && !(await netSide()).includes('今日に近い過去の更新日') && (await page.locator('.net-details').count()) === 0,
-      '「今日に近い過去の更新日」の欄と、同じ中身だった「表で見る」は無い（一覧は1つ）');
-// 自動の回転と 2D / 3D の切り替えは無い（運用者の指定 2026-10-20「回転機能と２D機能はいらないです」）。図はいつも3次元で、
-// 並べ終わったら触らなければ止まっている（今日の点の位置が変わらない）
-check((await page.locator('.net-controls label', { hasText: '回転' }).count()) === 0
-        && (await page.locator('.net-seg[aria-label="次元"]').count()) === 0
-        && (await page.locator('.net-controls button', { hasText: /^[23]D$/ }).count()) === 0,
-      '「回転」のチェックと 2D / 3D の切り替えは無い');
-await page.waitForSelector('.net-canvas[data-settled="1"]', { timeout: 20000 });
-const still0 = await page.locator('.net-canvas').getAttribute('data-today');
-await page.waitForTimeout(800);
-const still1 = await page.locator('.net-canvas').getAttribute('data-today');
-check(Boolean(still0) && still0 === still1, `触らなければ図は止まっている（今日の点 ${still0} → 0.8 秒後 ${still1}）`);
-const [todayX, todayY] = ((await page.locator('.net-canvas').getAttribute('data-today')) || '0,0').split(',').map(Number);
-await page.locator('.net-canvas canvas').scrollIntoViewIfNeeded();    // 図の下が画面の外だと、そこにある点に触れられない
-const cbox = await page.locator('.net-canvas canvas').boundingBox();
-await page.mouse.move(cbox.x + todayX, cbox.y + todayY);
-await page.waitForSelector('.net-tip', { timeout: 3000 }).catch(() => {});
-const netTip = (await page.locator('.net-tip').textContent().catch(() => '')) || '';
-check(netTip.includes('（今日）') && netTip.includes('2026/09/11'), `今日の点に触れると日付と（今日）が出る (実際: ${netTip.slice(0, 40)})`);
-check(netTip.includes('20日以内の最高値まで未確定') && netTip.includes('20営業日目の騰落率未確定'),
-      '今日の点の先20営業日の値動きは未確定（予測日より後の日足は読まない）');
-await page.mouse.move(cbox.x + 2, cbox.y + 2);
-await page.locator('.net-seg button', { hasText: '時期' }).click();
-check((await page.locator('.net-legend .net-ramp').count()) === 1, '時期の色にすると凡例が古い → 新しいの帯になる');
-// 時期・最高値までの色は青白赤（運用者の指定「青白ではなく、青白赤で」→ 選択「高い・新しい方を赤」）
-const rgbOf = (h) => `rgb(${parseInt(h.slice(1, 3), 16)}, ${parseInt(h.slice(3, 5), 16)}, ${parseInt(h.slice(5, 7), 16)})`;
-const rampBg = await page.locator('.net-legend .net-ramp i').evaluate((e) => getComputedStyle(e).backgroundImage);
-const rampStops = rampBg.match(/rgb\([^)]*\)/g) || [];
-check(rampStops.join(',') === BWR.map(rgbOf).join(','),
-      `時期の帯は古い = 青 → 白 → 新しい = 赤 (実際: ${rampStops.join(' ')})`);
-// ノードの色付け（運用者の依頼 2026-10-19「先20日間の最大上昇率は最低限」→「その日から最高到達価格（20日以内最高高値）
-// までの上昇率」）: 凡例の5段と未確定の件数が、フィクスチャの値をここで数え直した件数と同じ。今日に似た日の内訳・表の列も出る
-await page.locator('.net-seg button', { hasText: '最高値までの上昇率（20日以内）' }).click();
-const fx94 = JSON.parse(fs.readFileSync(path.join(ROOT, 'tests', 'fixtures', 'recurrence', '2026-09-11_94340.json'), 'utf8'));
-const riseWant = { '20% 以上': 0, '10〜20%': 0, '5〜10%': 0, '0〜5%': 0, '0% 未満': 0, '未確定': 0 };
-for (const v of fx94.rise) {
-  riseWant[v === null ? '未確定' : v >= 20 ? '20% 以上' : v >= 10 ? '10〜20%' : v >= 5 ? '5〜10%' : v >= 0 ? '0〜5%' : '0% 未満'] += 1;
-}
-const legendOf = async () => Object.fromEntries((await page.locator('.net-legend > span:has(.sw)').allInnerTexts()).map((t) => {
-  const m = t.replace(/\s+/g, ' ').trim().match(/^(.*) ([\d,]+)$/);
-  return m ? [m[1], Number(m[2].replace(/,/g, ''))] : [t, NaN];
-}));
-const riseGot = await legendOf();
-check(JSON.stringify(riseGot) === JSON.stringify(riseWant),
-      `最高値までの上昇率の凡例（高い順の5段と未確定）の件数がファイルの値と同じ (実際: ${JSON.stringify(riseGot)})`);
-const riseSw = await page.locator('.net-legend .sw').evaluateAll((els) => els.map((e) => getComputedStyle(e).backgroundColor));
-check(riseSw.join(',') === [...BWR].reverse().concat(NA_VALUE).map(rgbOf).join(','),
-      `最高値までの段は高い順に 赤・薄い赤・白（5〜10%）・薄い青・青 と未確定の灰 (実際: ${riseSw.join(' ')})`);
-const nbrMix = (await page.locator('.net-nbrmix').textContent()) || '';
-check(nbrMix.includes(`今日に似た日 ${exp('94340', K2).deg} 日の内訳`), `凡例の下に今日に似た日の内訳 (実際: ${nbrMix.slice(0, 60)})`);
-const riseHead = await page.locator('.net-near thead th').allTextContents();
-const riseCells = await page.locator('.net-near tbody tr td:nth-child(4)').allTextContents();
-check(riseHead.includes('最高値まで') && riseCells.length === exp('94340', K2).deg && riseCells.every((t) => /^[+-]?\d+\.\d%$/.test(t)),
-      `今日に似た日の表に最高値までの列（どれも結果が出そろっているので値がある） (実際: ${riseCells.slice(0, 3).join(' ')})`);
-// 最安値までの色は外した（運用者の指定「安値の色付けは、なしで良いです」）。軌跡は直近20営業日（「軌跡は直近20営業日で良いです」）
-const colorBtns = await page.locator('.net-seg[aria-label="点の色"] button').allTextContents();
-check(colorBtns.length === 6 && !colorBtns.some((t) => t.includes('最安値')),
-      `色の付け方に最安値までは無い（6通り） (実際: ${colorBtns.join(' / ')})`);
-check((await page.locator('label', { hasText: '直近20営業日の軌跡' }).count()) === 1, '軌跡は直近20営業日');
-// 直近の軌跡は最初は出さない（運用者の指定 2026-10-20「デフォルトで直近20日の軌跡はチェックを入れなくて良いです」）。入れると出る
-const flowAt = async () => (await page.locator('.net-canvas').getAttribute('data-flow')) ?? '';
-check(!(await page.locator('label', { hasText: '直近20営業日の軌跡' }).locator('input').isChecked()) && await flowAt() === '',
-      '直近の軌跡は最初は出さない（チェックなし）');
-await page.locator('label', { hasText: '直近20営業日の軌跡' }).click();
-await page.waitForFunction(() => (document.querySelector('.net-canvas')?.dataset.flow || '') !== '', null, { timeout: 3000 }).catch(() => {});
-// 直近の軌跡は古い日から今日へ流れる（運用者の依頼 2026-10-19「日付の順方向に流れているような（流れがわかるような）可視化」）。
-// 2026-10-20「ビュンビュンしすぎなので、もう少し落ち着かせて」「破線もなしでよいです。モーションさえあればよい」で、暗い橙の実線の
-// 上を同じ色の明るみが毎秒 12px でゆっくり流れる見せ方にした。明るみの進んだ位置（px。60px で一回り）が、0.6 秒で約 7px 今日の
-// 向きへ進む
-const flow1 = Number(await flowAt());
-await page.waitForTimeout(600);
-const flow2 = Number(await flowAt());
-const flowAdv = (flow2 - flow1 + 60) % 60;
-check(Number.isFinite(flow1) && Number.isFinite(flow2) && flowAdv > 4 && flowAdv < 13,
-      `軌跡の明るみが古い日から今日の向きへゆっくり流れる（0.6 秒で ${flowAdv.toFixed(1)}px）`);
-check((await page.locator('.net-legend').innerText()).includes('直近の軌跡（古い日 → 今日へ流れる）'), '凡例に流れる向きを書く');
-await page.locator('label', { hasText: '直近20営業日の軌跡' }).click();
-await page.waitForFunction(() => document.querySelector('.net-canvas')?.dataset.flow === '', null, { timeout: 3000 }).catch(() => {});
-check(await flowAt() === '', '軌跡を外すと流れも消える');
-await page.locator('label', { hasText: '直近20営業日の軌跡' }).click();
-await page.locator('.net-seg button', { hasText: '20営業日目の騰落率' }).click();
-const r20Got = await legendOf();
-check(Object.keys(r20Got).join(',') === '+10% 以上,0〜+10%,−10〜0%,−10% 未満,未確定'
-        && r20Got['未確定'] === fx94.r20.filter((v) => v === null).length,
-      `20営業日目の騰落率は結果と同じ区切りの4段と未確定 (実際: ${JSON.stringify(r20Got)})`);
-// 色の向きはどの付け方も同じ（低い・届かない = 青、高い・届いた = 赤。運用者の指定 2026-10-20「揃えたいです」→ 目的変数も正例 = 赤）
-const swatches = () => page.locator('.net-legend .sw').evaluateAll((els) => els.map((e) => getComputedStyle(e).backgroundColor));
-const outcomeWant = [BWR[4], BWR[3], BWR[1], BWR[0], NA_VALUE].map(rgbOf).join(',');
-check((await swatches()).join(',') === outcomeWant, `20営業日目の段は +10% 以上 = 赤 → 薄い赤 → 薄い青 → −10% 未満 = 青 (実際: ${(await swatches()).join(' ')})`);
-await page.locator('.net-seg button', { hasText: '結果（+10% / 20営業日目）' }).click();
-check((await swatches()).join(',') === outcomeWant, `結果の段も同じ向き（+10% 到達 = 赤・−10% 未満 = 青） (実際: ${(await swatches()).join(' ')})`);
-await page.locator('.net-seg button', { hasText: '目的変数 1.5σ' }).click();
-check((await swatches()).join(',') === [BWR[4], '#64748b', '#334155'].map(rgbOf).join(','),
-      `目的変数は正例 = 赤・負例 = 灰 (実際: ${(await swatches()).join(' ')})`);
-// 並べ方は力学だけ（運用者の指定 2026-10-19「3種のプロット方法がありますが、今のデフォルトのみのもので良いです」。状態の地図・
-// 時間のらせんのボタンは無い）。並べ直す・力の調整はいつも出す
-check((await page.locator('.net-seg[aria-label="並べ方"]').count()) === 0
-        && (await page.locator('.net-seg button', { hasText: '状態の地図' }).count()) === 0
-        && (await page.locator('.net-seg button', { hasText: '時間のらせん' }).count()) === 0
-        && (await page.locator('.net-seg button', { hasText: '並べ直す' }).count()) === 1,
-      '並べ方の切り替えは無い（力学だけ。並べ直すは出す）');
-// ドラッグで回すのは残した（何も無いところから横へ 120px ドラッグすると今日の点が動く。選ぶことはしない）
-{
-  await page.locator('.net-canvas canvas').scrollIntoViewIfNeeded();
-  const box = await page.locator('.net-canvas canvas').boundingBox();
-  const before = await page.locator('.net-canvas').getAttribute('data-today');
-  const y0 = box.y + Math.min(box.height / 2, 200);
-  await page.mouse.move(box.x + 6, y0);
-  await page.mouse.down();
-  await page.mouse.move(box.x + 126, y0, { steps: 8 });
-  await page.mouse.up();
-  await page.waitForFunction((b) => document.querySelector('.net-canvas')?.dataset.today !== b, before, { timeout: 3000 }).catch(() => {});
-  const after = await page.locator('.net-canvas').getAttribute('data-today');
-  check(after !== before, `ドラッグで回すと今日の点が動く（${before} → ${after}）`);
-}
-await page.locator('.net-seg button', { hasText: '力の調整' }).click();
-check((await page.locator('.net-forces input[type=range]').count()) === 4, '力の調整は Obsidian と同じ4つのつまみ');
-side = await netSide();
-check(!side.includes('NaN') && !side.includes('undefined'), 'ネットワークの欄に NaN / undefined が出ていない');
-// README の画像（docs/screenshot-network.png）は実データで撮るので、ここでは別の名前に書く（.gitignore。CI の画像には入る）
-// 点の大きさ（運用者の依頼 2026-10-20「プロットのサイズをもう少し大きく」→「図自体ではなく、点のサイズですかね」）: 2026-10-23 の
-// 依頼「サイズはバーで滑らかに変更できるほうが嬉しいです」でバー（0.5〜3 倍・0.05 刻み。最初は前の「大」と同じ 1.5 倍）。大きく
-// すると描かれる画素が増え、今日・選んだ日・その似た日の点の大きさは変わらない（同日の指定「選択された点のサイズはそのままで
-// 良いです」「選択された類似の点もそのままで良いです。全く関係ない他のノードを調整したいので」）。3 倍のまま下の読み込み直しで
-// 残るかを見る
-const sizeBar = page.locator('.net-size input[type=range]');
-const setSize = (v) => sizeBar.evaluate((el, val) => {
-  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, String(val));
-  el.dispatchEvent(new Event('input', { bubbles: true }));
-}, v);
-// 今日と選んだ日の点の大きさを画素で測る（CSS px。左右の短いほう）。どちらもバーによらない 1 倍（同日の依頼「もう少し小さく」
-// 「白く光るのでこちらもサイズはおおきくしなくて良いです」）で、今日は中心から白い円が続く長さ（半径 6.5 の円の端を地の色の縁が
-// 削るので約 4〜5）、選んだ日は中心から白い輪（半径 7・太さ 1.6）に届く手前までの長さ（約 5〜6）。倍率に合わせて大きくすると、
-// 3 倍では伸びる
-const markR = (attr) => page.evaluate((a) => {
-  const wrap = document.querySelector('.net-canvas');
-  const c = wrap.querySelector('canvas');
-  const k = c.width / c.clientWidth;
-  const ctx = c.getContext('2d');
-  const [x, y] = (wrap.dataset[a] || '').split(',').map(Number);
-  if (!Number.isFinite(x) || !Number.isFinite(y)) return NaN;
-  const lo = a === 'today' ? 245 : 200;
-  const white = (dx) => {
-    const d = ctx.getImageData(Math.round(x * k) + dx, Math.round(y * k), 1, 1).data;
-    return Math.min(d[0], d[1], d[2]) >= lo;
-  };
-  const len = (dir) => {
-    let i = 0;
-    while (i < 40 * k && white(dir * (i + 1)) === (a === 'today')) i += 1;
-    return i / k;
-  };
-  return Math.min(len(1), len(-1));
-}, attr);
-check((await page.locator('.net-seg[aria-label="点の大きさ"]').count()) === 0 && (await sizeBar.count()) === 1
-        && (await sizeBar.inputValue()) === '1.5' && (await sizeBar.getAttribute('min')) === '0.5'
-        && (await sizeBar.getAttribute('max')) === '3',
-      `点の大きさはバー（0.5〜3 倍）で、最初は 1.5 倍（前の「大」） (実際: ${await sizeBar.count()} 本・${await sizeBar.inputValue().catch(() => '')})`);
-// 選んだ日の似た日の点の大きさ（中心から、その日の色が続く長さ。CSS px）。今日・選んだ日（光と日付の字）・ほかの似た日・図の
-// 端から離れた点だけ測る
-const nbR = () => page.evaluate(() => {
-  const wrap = document.querySelector('.net-canvas');
-  const c = wrap.querySelector('canvas');
-  const k = c.width / c.clientWidth;
-  const ctx = c.getContext('2d');
-  const marks = [wrap.dataset.today, wrap.dataset.focuspos].map((v) => (v || '').split(',').map(Number))
-    .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
-  const nbs = (wrap.dataset.nbpos || '').split(';').filter(Boolean)
-    .map((part) => { const [x, y, col] = part.split(','); return { x: Number(x), y: Number(y), col }; });
-  const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
-  const out = {};
-  for (const nb of nbs) {
-    if (marks.some(([x, y]) => Math.hypot(nb.x - x, nb.y - y) < 50 || (Math.abs(nb.y - y) < 30 && nb.x - x > -14 && nb.x - x < 140))) continue;
-    if (nbs.some((o) => o !== nb && Math.hypot(nb.x - o.x, nb.y - o.y) < 40)) continue;
-    if (nb.x < 30 || nb.y < 30 || nb.x > c.clientWidth - 30 || nb.y > c.clientHeight - 30) continue;
-    const C = hex(nb.col);
-    const same = (dx) => {
-      const d = ctx.getImageData(Math.round(nb.x * k) + dx, Math.round(nb.y * k), 1, 1).data;
-      return Math.max(Math.abs(d[0] - C[0]), Math.abs(d[1] - C[1]), Math.abs(d[2] - C[2])) <= 12;
-    };
-    const len = (dir) => {
-      let i = 0;
-      while (i < 40 * k && same(dir * (i + 1))) i += 1;
-      return i / k;
-    };
-    out[`${nb.x},${nb.y}`] = Math.min(len(1), len(-1));
-  }
-  return out;
-});
-// 一覧の似た日を選ぶ（行をクリック）。今日の点（光と日付の字）・図の端から離れていて、測れる似た日がある日を使う
-const pickRows = page.locator('tr.pick');
-let picked = -1;
-for (let r = 0; r < await pickRows.count() && picked < 0; r += 1) {
-  await pickRows.nth(r).click();
-  await page.waitForTimeout(200);
-  const far = await page.evaluate(() => {
-    const wrap = document.querySelector('.net-canvas');
-    const c = wrap.querySelector('canvas');
-    const [x, y] = (wrap.dataset.focuspos || '').split(',').map(Number);
-    const [tx, ty] = (wrap.dataset.today || '').split(',').map(Number);
-    return Number.isFinite(x) && Math.hypot(x - tx, y - ty) > 50 && !(Math.abs(y - ty) < 30 && x - tx > -14 && x - tx < 140)
-      && x > 20 && y > 20 && x < c.clientWidth - 20 && y < c.clientHeight - 20;
-  });
-  if (far && Object.keys(await nbR()).length) picked = r;
-}
-await setSize(0.5);
-await page.waitForTimeout(200);
-const inkSmall = await inkOf();
-const todaySmall = await markR('today');
-const selSmall = await markR('focuspos');
-const nbSmall = await nbR();
-await setSize(3);
-await page.waitForTimeout(200);
-const inkLarge = await inkOf();
-const todayLarge = await markR('today');
-const selLarge = await markR('focuspos');
-const nbLarge = await nbR();
-const nbKeys = Object.keys(nbSmall).filter((key) => key in nbLarge);
-check(inkLarge > inkSmall * 1.2, `ほかの点を大きくすると描かれる画素が増える（0.5 倍 ${inkSmall} → 3 倍 ${inkLarge}）`);
-check(todaySmall >= 3 && todaySmall <= 7 && Math.abs(todayLarge - todaySmall) <= 1,
-      `今日の点の大きさはバーで変わらない（中心から白い円の端まで 0.5 倍 ${todaySmall}px → 3 倍 ${todayLarge}px）`);
-check(picked >= 0 && selSmall >= 4 && selSmall <= 7 && Math.abs(selLarge - selSmall) <= 1,
-      `選んだ日の点の大きさもバーで変わらない（中心から白い輪まで 0.5 倍 ${selSmall}px → 3 倍 ${selLarge}px。一覧の ${picked + 1} 行目）`);
-check(nbKeys.length > 0 && nbKeys.every((key) => nbSmall[key] >= 2 && Math.abs(nbLarge[key] - nbSmall[key]) <= 1),
-      `選んだ日の似た日の点の大きさもバーで変わらない（${nbKeys.length} 点。半径 0.5 倍 ${nbKeys.map((key) => nbSmall[key]).join('/')}px → 3 倍 ${nbKeys.map((key) => nbLarge[key]).join('/')}px）`);
-if (picked >= 0) await pickRows.nth(picked).click();     // 選ぶのをやめる（もう一度クリック）
-check((await page.locator('.net-size b').textContent()) === '×3.00', '倍率の数字がバーに合わせて変わる');
-await page.screenshot({ path: path.join(SHOTS, 'screenshot-network-smoke.png') });
-await page.setViewportSize({ width: 390, height: 844 });
-await page.waitForTimeout(200);
-const netFit = await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
-check(netFit, 'スマホの幅（390px）で横にはみ出さない');
-await page.setViewportSize({ width: 1440, height: 1000 });
-// 動きを減らす設定（prefers-reduced-motion）では明るみを流さず、向きの矢印にする
-await page.emulateMedia({ reducedMotion: 'reduce' });
-await page.reload({ waitUntil: 'networkidle' });
-await page.getByRole('tab', { name: 'リカレンス・ネットワーク' }).click();
-await page.waitForSelector('.net-canvas canvas', { timeout: 10000 });
-// 選んだ点の大きさは読み込み直しても残る（このブラウザに覚える）。確かめたら既定の 1.5 倍に戻す
-check((await sizeBar.inputValue()) === '3', `選んだ点の大きさは読み込み直しても残る (実際: ${await sizeBar.inputValue()})`);
-await setSize(1.5);
-await page.locator('label', { hasText: '直近20営業日の軌跡' }).click();
-await page.waitForFunction(() => document.querySelector('.net-canvas')?.dataset.flow === 'arrows', null, { timeout: 5000 }).catch(() => {});
-check(await flowAt() === 'arrows', `動きを減らす設定では、軌跡は向きの矢印（流さない） (実際: ${await flowAt()})`);
-await page.emulateMedia({ reducedMotion: 'no-preference' });
-await page.unroute('**/data/predictions.json*');
-// 指で拡大縮小（運用者の依頼 2026-10-19「指で拡大縮小できるようにしたい」）: 触れる画面で、2本指を 60px → 220px に広げると
-// 3.67 倍になる（指の間を中心に）。CDP の触る操作を Chromium が pointer イベントにする
-{
-  const tctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
-  const tpage = await tctx.newPage();
-  tpage.on('pageerror', (e) => consoleErrors.push(`pageerror: ${e.message}`));
-  await tpage.route('**/data/predictions.json*',
-    (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(predPass) }));
-  await tpage.goto(base, { waitUntil: 'networkidle' });
-  await tpage.getByRole('tab', { name: 'リカレンス・ネットワーク' }).click();
-  await tpage.waitForSelector('.net-canvas canvas', { timeout: 10000 });
-  await tpage.locator('.net-canvas canvas').scrollIntoViewIfNeeded();
-  const tb = await tpage.locator('.net-canvas canvas').boundingBox();
-  const cx = tb.x + tb.width / 2;
-  const cy = tb.y + tb.height / 2;
-  const cdp = await tctx.newCDPSession(tpage);
-  const pts = (dd) => [{ x: cx - dd, y: cy, id: 1 }, { x: cx + dd, y: cy, id: 2 }];
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: pts(30) });
-  for (let dd = 40; dd <= 110; dd += 10) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: pts(dd) });
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-  await tpage.waitForTimeout(200);
-  const zoomed = Number(await tpage.locator('.net-canvas').getAttribute('data-zoom'));
-  check(Math.abs(zoomed - 220 / 60) < 0.01, `2本指でつまんで広げると拡大する（60px → 220px で ${(220 / 60).toFixed(2)} 倍。実際: ${zoomed}）`);
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: pts(110) });
-  for (let dd = 100; dd >= 50; dd -= 10) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: pts(dd) });
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-  await tpage.waitForTimeout(200);
-  const back = Number(await tpage.locator('.net-canvas').getAttribute('data-zoom'));
-  check(Math.abs(back - zoomed * (100 / 220)) < 0.01, `つまんで縮めると縮小する（実際: ${back}）`);
-  await tctx.close();
-}
+console.log('\n== リカレンス・ネットワーク（隠している） ==');
+// リカレンス・ネットワークの画面の確かめ（購入条件を満たした銘柄の一覧・k の切り替え・似た日・色・軌跡・点の大きさ・回す・
+// 拡大縮小）は、タブを隠している間は外してある（運用者の依頼 2026-10-24）。純粋な計算のテストは tests/recurrence.test.js・
+// tests/forcegraph.test.js・tests/test_recurrence_net.py に残っている。タブを戻すときは git の履歴（2026-10-24 より前の
+// smoke.mjs）から戻す
+check(recurrenceRequests.length === 0,
+      `リカレンス・ネットワークのデータ（/data/recurrence/）はどのタブを開いても読まない (実際: ${recurrenceRequests.length}件)`);
 
 console.log('\n== コンソールエラー ==');
 check(consoleErrors.length === 0, `JS エラーなし (${consoleErrors.length}件)`);
