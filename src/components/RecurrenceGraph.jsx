@@ -27,7 +27,10 @@ import { createSim, tick, setForces, reheat, extent, project, pick, seedOf } fro
  *   間・カーソルの位置を中心に）。2本指を動かすとずらす。点に触れる（タップ）とその日の値と似た日を出し、クリックで選ぶ
  *   （もう一度・何も無いところで外す）。ダブルクリックで元の大きさ。矢印キーで回し、＋ − で拡大、0 で元に戻す
  * - 点の大きさ（運用者の依頼 2026-10-20「プロットのサイズをもう少し大きく」→「図自体ではなく、点のサイズですかね」）: 画面の
- *   「点の大きさ」の倍率 pointScale を点に掛ける（今日と触れた日は大きくするときだけ合わせる）。触れる範囲も合わせて広げる
+ *   「点の大きさ」のバーの倍率 pointScale は、今日・触れた（選んだ）日・その似た日のどれでもない点にだけ掛ける。この3つの点は
+ *   いつもバーの最初（1.5 倍）のときの大きさ（運用者の指定 2026-10-23「選択された点のサイズはそのままで良いです。選択された
+ *   日付のノードも比例しておおきくしてしまうと、その他のノードのサイズを変える意味がなくなってしまうので」「選択された類似の点も
+ *   そのままで良いです。全く関係ない他のノードを調整したいので」）。触れる範囲は点に合わせて広げる
  * - 計算は毎フレーム 10ms までに区切り、動き終わったら描き直しが要るときだけ描く
  */
 
@@ -39,6 +42,9 @@ const EDGE_RGB_FRONT = '147, 197, 253';
 const EDGE_ALPHA = { back: 0.06, front: 0.12 };
 /** 強調する日から似た日への線と、似た日の外の輪（控えめな薄い灰。光らせない） */
 const LINK = 'rgba(203, 213, 225, 0.6)';
+/** 今日・触れた（選んだ）日・その似た日の点の倍率（「点の大きさ」のバーによらず、バーの最初の 1.5 倍のときと同じ大きさ。
+ *  src/views/NetworkView.jsx の POINT_SCALE.def） */
+const MARK_SCALE = 1.5;
 /** 直近の軌跡: 暗めの橙の実線（前は明るい黄 251, 191, 36）と、その上をゆっくり今日の向きへ流れる同じ色の明るみ */
 const TRAIL_RGB = '217, 119, 6';
 const FLOW_PX_PER_S = 12;    // 明るみが今日の向きへ流れる速さ（px/秒。画面の上で一定なので、日の間が長いところでも速くならない）
@@ -263,10 +269,11 @@ export default function RecurrenceGraph({
     // 点（奥から手前へ。奥ほど小さく暗い。手前はうっすら光る）
     const order = s.order;
     order.sort((a, b) => sc[4 * a + 3] - sc[4 * b + 3]);
-    // 点の大きさ（次数と遠近）。狭い画面（スマホ）では点を小さくする（約2,200点が重なって塗りつぶさないように）。画面の
-    // 「点の大きさ」の倍率（pointScale）を掛ける
+    // 点の大きさ（次数と遠近）。狭い画面（スマホ）では点を小さくする（約2,200点が重なって塗りつぶさないように）。ほかの点には
+    // 画面の「点の大きさ」の倍率（pointScale）を掛ける
     const sizeK = Math.max(0.55, Math.min(1, Math.min(w, h) / 640));
-    const radius = (i) => Math.min(6, (0.9 + 0.3 * Math.sqrt(deg[i])) * sc[4 * i + 2]) * sizeK * p.pointScale;
+    const radius0 = (i) => Math.min(6, (0.9 + 0.3 * Math.sqrt(deg[i])) * sc[4 * i + 2]) * sizeK;
+    const radius = (i) => radius0(i) * p.pointScale;
     for (let k = 0; k < n; k += 1) {
       const i = order[k];
       if (i === today || lit(i)) continue;              // 強調する日と今日は上に重ねて描く
@@ -294,7 +301,7 @@ export default function RecurrenceGraph({
         ctx.stroke();
       }
     }
-    // 強調する日の似た日（その日の色のまま少し大きく描き、地の色の縁と細い控えめな輪で囲む。光らせない）
+    // 強調する日の似た日（その日の色のまま少し大きく描き、地の色の縁と細い控えめな輪で囲む。光らせない。大きさはバーによらない）
     ctx.globalCompositeOperation = 'source-over';
     ctx.globalAlpha = 1;
     if (nbSet) {
@@ -302,7 +309,7 @@ export default function RecurrenceGraph({
         if (j === today) continue;
         const x = sc[4 * j];
         const y = sc[4 * j + 1];
-        const r = Math.max(3.2 * p.pointScale, radius(j) * 1.5);
+        const r = Math.max(3.2, radius0(j) * 1.5) * MARK_SCALE;
         ctx.fillStyle = p.colors[j];
         ctx.beginPath();
         ctx.arc(x, y, r, 0, 2 * Math.PI);
@@ -312,12 +319,12 @@ export default function RecurrenceGraph({
         if (isFresh[j]) ring(ctx, x, y, r + 4.2, RING, 1.2);
       }
     }
-    // 今日と触れている・選んだ日も、点を大きくしたら合わせて大きくする（小さくはしない）
-    const big = Math.max(1, p.pointScale);
+    // 今日と触れている・選んだ日の点も「点の大きさ」によらずいつも同じ大きさ（MARK_SCALE。運用者の指定 2026-10-23）
+    const big = MARK_SCALE;
     // 触れている・選んだ日
-    if (focus >= 0 && focus !== today) {
-      const x = sc[4 * focus];
-      const y = sc[4 * focus + 1];
+    const fp = focus >= 0 && focus !== today ? [sc[4 * focus], sc[4 * focus + 1]] : null;
+    if (fp) {
+      const [x, y] = fp;
       glow(ctx, x, y, 18 * big, 'rgba(255, 255, 255, 0.22)');
       ctx.fillStyle = p.colors[focus];
       ctx.beginPath();
@@ -342,6 +349,9 @@ export default function RecurrenceGraph({
     const wrap = wrapRef.current;
     if (wrap) {
       if (wrap.dataset.today !== pos) wrap.dataset.today = pos;
+      // 触れている・選んだ日（今日以外）の点の位置（ブラウザのテストが、その点の大きさがバーで変わらないかを画素で確かめる）
+      const fpos = fp ? `${Math.round(fp[0])},${Math.round(fp[1])}` : '';
+      if (wrap.dataset.focuspos !== fpos) wrap.dataset.focuspos = fpos;
       const lf = focus >= 0 ? `${focus}:${nbSet ? nbSet.size : 0}` : '';
       if (wrap.dataset.focus !== lf) wrap.dataset.focus = lf;
       const zm = s.view.zoom.toFixed(3);

@@ -617,19 +617,111 @@ check((await page.locator('.net-forces input[type=range]').count()) === 4, '力�
 side = await netSide();
 check(!side.includes('NaN') && !side.includes('undefined'), 'ネットワークの欄に NaN / undefined が出ていない');
 // README の画像（docs/screenshot-network.png）は実データで撮るので、ここでは別の名前に書く（.gitignore。CI の画像には入る）
-// 点の大きさ（運用者の依頼 2026-10-20「プロットのサイズをもう少し大きく」→「図自体ではなく、点のサイズですかね」）: 小・標準・大・
-// 特大（前の大きさの 0.75・1・1.5・2 倍。最初は大）。大きくすると描かれる画素が増える。特大のまま下の読み込み直しで残るかを見る
-const sizeBtn = (t) => page.locator('.net-seg[aria-label="点の大きさ"] button', { hasText: new RegExp(`^${t}$`) });
-check((await page.locator('.net-seg[aria-label="点の大きさ"] button').allTextContents()).join(',') === '小,標準,大,特大'
-        && (await sizeBtn('大').getAttribute('aria-pressed')) === 'true',
-      '点の大きさは 小・標準・大・特大 で、最初は「大」');
-await sizeBtn('小').click();
+// 点の大きさ（運用者の依頼 2026-10-20「プロットのサイズをもう少し大きく」→「図自体ではなく、点のサイズですかね」）: 2026-10-23 の
+// 依頼「サイズはバーで滑らかに変更できるほうが嬉しいです」でバー（0.5〜3 倍・0.05 刻み。最初は前の「大」と同じ 1.5 倍）。大きく
+// すると描かれる画素が増え、今日・選んだ日・その似た日の点の大きさは変わらない（同日の指定「選択された点のサイズはそのままで
+// 良いです」「選択された類似の点もそのままで良いです。全く関係ない他のノードを調整したいので」）。3 倍のまま下の読み込み直しで
+// 残るかを見る
+const sizeBar = page.locator('.net-size input[type=range]');
+const setSize = (v) => sizeBar.evaluate((el, val) => {
+  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, String(val));
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}, v);
+// 今日と選んだ日の点の大きさを画素で測る（CSS px。左右の短いほう）。どちらもバーの最初（1.5 倍）のときの大きさのままで、今日は
+// 中心から白い円が続く長さ（半径 9.75 の円の端を地の色の縁が削るので約 8）、選んだ日は中心から白い輪（半径 10.5・太さ 1.6）に
+// 届く手前までの長さ（約 9）。倍率に合わせて大きくすると、3 倍ではどちらも倍ほどに伸びる
+const markR = (attr) => page.evaluate((a) => {
+  const wrap = document.querySelector('.net-canvas');
+  const c = wrap.querySelector('canvas');
+  const k = c.width / c.clientWidth;
+  const ctx = c.getContext('2d');
+  const [x, y] = (wrap.dataset[a] || '').split(',').map(Number);
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return NaN;
+  const lo = a === 'today' ? 245 : 200;
+  const white = (dx) => {
+    const d = ctx.getImageData(Math.round(x * k) + dx, Math.round(y * k), 1, 1).data;
+    return Math.min(d[0], d[1], d[2]) >= lo;
+  };
+  const len = (dir) => {
+    let i = 0;
+    while (i < 40 * k && white(dir * (i + 1)) === (a === 'today')) i += 1;
+    return i / k;
+  };
+  return Math.min(len(1), len(-1));
+}, attr);
+check((await page.locator('.net-seg[aria-label="点の大きさ"]').count()) === 0 && (await sizeBar.count()) === 1
+        && (await sizeBar.inputValue()) === '1.5' && (await sizeBar.getAttribute('min')) === '0.5'
+        && (await sizeBar.getAttribute('max')) === '3',
+      `点の大きさはバー（0.5〜3 倍）で、最初は 1.5 倍（前の「大」） (実際: ${await sizeBar.count()} 本・${await sizeBar.inputValue().catch(() => '')})`);
+// 選んだ日の似た日の点の大きさ（中心から、その日の色が続く長さ。CSS px）。今日・選んだ日（光と日付の字）・ほかの似た日・図の
+// 端から離れた点だけ測る
+const nbR = () => page.evaluate(() => {
+  const wrap = document.querySelector('.net-canvas');
+  const c = wrap.querySelector('canvas');
+  const k = c.width / c.clientWidth;
+  const ctx = c.getContext('2d');
+  const marks = [wrap.dataset.today, wrap.dataset.focuspos].map((v) => (v || '').split(',').map(Number))
+    .filter(([x, y]) => Number.isFinite(x) && Number.isFinite(y));
+  const nbs = (wrap.dataset.nbpos || '').split(';').filter(Boolean)
+    .map((part) => { const [x, y, col] = part.split(','); return { x: Number(x), y: Number(y), col }; });
+  const hex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const out = {};
+  for (const nb of nbs) {
+    if (marks.some(([x, y]) => Math.hypot(nb.x - x, nb.y - y) < 50 || (Math.abs(nb.y - y) < 30 && nb.x - x > -14 && nb.x - x < 140))) continue;
+    if (nbs.some((o) => o !== nb && Math.hypot(nb.x - o.x, nb.y - o.y) < 40)) continue;
+    if (nb.x < 30 || nb.y < 30 || nb.x > c.clientWidth - 30 || nb.y > c.clientHeight - 30) continue;
+    const C = hex(nb.col);
+    const same = (dx) => {
+      const d = ctx.getImageData(Math.round(nb.x * k) + dx, Math.round(nb.y * k), 1, 1).data;
+      return Math.max(Math.abs(d[0] - C[0]), Math.abs(d[1] - C[1]), Math.abs(d[2] - C[2])) <= 12;
+    };
+    const len = (dir) => {
+      let i = 0;
+      while (i < 40 * k && same(dir * (i + 1))) i += 1;
+      return i / k;
+    };
+    out[`${nb.x},${nb.y}`] = Math.min(len(1), len(-1));
+  }
+  return out;
+});
+// 一覧の似た日を選ぶ（行をクリック）。今日の点（光と日付の字）・図の端から離れていて、測れる似た日がある日を使う
+const pickRows = page.locator('tr.pick');
+let picked = -1;
+for (let r = 0; r < await pickRows.count() && picked < 0; r += 1) {
+  await pickRows.nth(r).click();
+  await page.waitForTimeout(200);
+  const far = await page.evaluate(() => {
+    const wrap = document.querySelector('.net-canvas');
+    const c = wrap.querySelector('canvas');
+    const [x, y] = (wrap.dataset.focuspos || '').split(',').map(Number);
+    const [tx, ty] = (wrap.dataset.today || '').split(',').map(Number);
+    return Number.isFinite(x) && Math.hypot(x - tx, y - ty) > 50 && !(Math.abs(y - ty) < 30 && x - tx > -14 && x - tx < 140)
+      && x > 20 && y > 20 && x < c.clientWidth - 20 && y < c.clientHeight - 20;
+  });
+  if (far && Object.keys(await nbR()).length) picked = r;
+}
+await setSize(0.5);
 await page.waitForTimeout(200);
 const inkSmall = await inkOf();
-await sizeBtn('特大').click();
+const todaySmall = await markR('today');
+const selSmall = await markR('focuspos');
+const nbSmall = await nbR();
+await setSize(3);
 await page.waitForTimeout(200);
 const inkLarge = await inkOf();
-check(inkLarge > inkSmall * 1.2, `点を大きくすると描かれる画素が増える（小 ${inkSmall} → 特大 ${inkLarge}）`);
+const todayLarge = await markR('today');
+const selLarge = await markR('focuspos');
+const nbLarge = await nbR();
+const nbKeys = Object.keys(nbSmall).filter((key) => key in nbLarge);
+check(inkLarge > inkSmall * 1.2, `ほかの点を大きくすると描かれる画素が増える（0.5 倍 ${inkSmall} → 3 倍 ${inkLarge}）`);
+check(todaySmall >= 6 && todaySmall <= 11 && Math.abs(todayLarge - todaySmall) <= 1,
+      `今日の点の大きさはバーで変わらない（中心から白い円の端まで 0.5 倍 ${todaySmall}px → 3 倍 ${todayLarge}px）`);
+check(picked >= 0 && selSmall >= 7 && selSmall <= 12 && Math.abs(selLarge - selSmall) <= 1,
+      `選んだ日の点の大きさもバーで変わらない（中心から白い輪まで 0.5 倍 ${selSmall}px → 3 倍 ${selLarge}px。一覧の ${picked + 1} 行目）`);
+check(nbKeys.length > 0 && nbKeys.every((key) => nbSmall[key] >= 2 && Math.abs(nbLarge[key] - nbSmall[key]) <= 1),
+      `選んだ日の似た日の点の大きさもバーで変わらない（${nbKeys.length} 点。半径 0.5 倍 ${nbKeys.map((key) => nbSmall[key]).join('/')}px → 3 倍 ${nbKeys.map((key) => nbLarge[key]).join('/')}px）`);
+if (picked >= 0) await pickRows.nth(picked).click();     // 選ぶのをやめる（もう一度クリック）
+check((await page.locator('.net-size b').textContent()) === '×3.00', '倍率の数字がバーに合わせて変わる');
 await page.screenshot({ path: path.join(SHOTS, 'screenshot-network-smoke.png') });
 await page.setViewportSize({ width: 390, height: 844 });
 await page.waitForTimeout(200);
@@ -641,10 +733,9 @@ await page.emulateMedia({ reducedMotion: 'reduce' });
 await page.reload({ waitUntil: 'networkidle' });
 await page.getByRole('tab', { name: 'リカレンス・ネットワーク' }).click();
 await page.waitForSelector('.net-canvas canvas', { timeout: 10000 });
-// 選んだ点の大きさは読み込み直しても残る（このブラウザに覚える）。確かめたら既定の「大」に戻す
-check((await page.locator('.net-seg[aria-label="点の大きさ"] button', { hasText: /^特大$/ }).getAttribute('aria-pressed')) === 'true',
-      '選んだ点の大きさは読み込み直しても残る');
-await page.locator('.net-seg[aria-label="点の大きさ"] button', { hasText: /^大$/ }).click();
+// 選んだ点の大きさは読み込み直しても残る（このブラウザに覚える）。確かめたら既定の 1.5 倍に戻す
+check((await sizeBar.inputValue()) === '3', `選んだ点の大きさは読み込み直しても残る (実際: ${await sizeBar.inputValue()})`);
+await setSize(1.5);
 await page.locator('label', { hasText: '直近20営業日の軌跡' }).click();
 await page.waitForFunction(() => document.querySelector('.net-canvas')?.dataset.flow === 'arrows', null, { timeout: 5000 }).catch(() => {});
 check(await flowAt() === 'arrows', `動きを減らす設定では、軌跡は向きの矢印（流さない） (実際: ${await flowAt()})`);
