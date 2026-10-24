@@ -81,7 +81,9 @@ OWNED_COLS = [
 MODEL_COLS = [f"{M.SHORT.get(a, a[:3].upper())}%" for a in M.LINEUP]
 SCORE_COLS = [f"{M.SHORT.get(a, a[:3].upper())}スコア" for a in M.LINEUP]
 AGREE_COL = "一致(上位10%)"
-#: ラベル違いのモデル（L15 / L18。models.VARIANTS）のうち上位10%と見た数。本番の一致（AGREE_COL）には数えない
+#: ラベル違いのモデル（L15 など1.5σ の4本。models.ACTIVE_VARIANTS）のうち上位10%と見た数。1.2σ の一致（AGREE_COL）には
+#: 数えない。1.8σ の4本（L18 など）は 2026-10-24 に外したので、それからの行は1.5σ の4本だけで数え、L18% などの列は
+#: 書かない（見出しは残り、それより前の行の値もそのまま）
 AGREE_K_COL = "ラベル違い一致(上位10%)"
 AGREE_COLS = [AGREE_COL, AGREE_K_COL]
 
@@ -130,8 +132,10 @@ def rows_from_predictions(pred: Dict) -> List[Dict]:
     モデル別の列は、その予測ファイルが持っているモデルだけ埋める。
     5モデルを学習する前の予測ファイル（byModel が無い）でも落ちない。
     """
-    # 予測ファイルが持っているモデルの順。無ければ models.ALGOS の順
-    algos = [m["algo"] for m in (pred.get("models") or [])] or list(M.LINEUP)
+    # 予測ファイルが持っているモデルの順。無ければ models.LINEUP の順。外した 1.8σ の4本（models.RETIRED_VARIANTS。
+    # 2026-10-24）は、それより前に出した予測ファイルにあっても書かない
+    algos = [a for a in ([m["algo"] for m in (pred.get("models") or [])] or list(M.LINEUP))
+             if a not in M.RETIRED_VARIANTS]
     short = {m["algo"]: m.get("short") for m in (pred.get("models") or [])}
     out = []
     for c in pred["candidates"]:

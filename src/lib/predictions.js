@@ -220,8 +220,8 @@ export const MODEL_SHORT = {
 export const MODEL_FAMILY = {
   lgbm: 'tree', xgb: 'tree', cat: 'tree', rf: 'tree',
   logit: 'other', mlp: 'other',
-  // ラベル違い（到達しきい値 1.5σ / 1.8σ のラベルで学習した4学習器。research/models.py の VARIANTS）。
-  // 1.2σ の4本の「上位10%と見たモデル」の数え上げ（agree90）には入れない（1.5σ・1.8σ は agreeK90 で別に数える）。
+  // ラベル違い（到達しきい値 1.5σ / 1.8σ のラベルで学習した4学習器。research/models.py の VARIANTS。1.8σ は 2026-10-24 に
+  // 外した: RETIRED_VARIANTS）。1.2σ の4本の「上位10%と見たモデル」の数え上げ（agree90）には入れない（1.5σ は別に数える）。
   // 今日の戦略の規則は、2026-10-12〜10-23 は 1.5σ の木3本、2026-10-23 から 1.2σ の木3本（strategy.js の RULE_MODELS）がすべて95以上。
   // k ごとに塊を分ける（1.5σ の4本、1.8σ の4本。同じ k の中の並びは 1.2σ と同じ LGB / XGB / CAT / LR）
   lgbm_k15: 'k15', xgb_k15: 'k15', cat_k15: 'k15', logit_k15: 'k15',
@@ -229,6 +229,18 @@ export const MODEL_FAMILY = {
 };
 
 export const FAMILY_JA = { tree: '決定木系', other: '木以外', k15: 'ラベル1.5σ', k18: 'ラベル1.8σ' };
+
+/**
+ * 外したラベル違いのモデル（research/models.py の RETIRED_VARIANTS）。運用者の依頼（2026-10-24）「1.8σの週次学習は
+ * なくしたはずです」→ AskUserQuestion「採点・表示からも外す」。それより前の日の予測ファイルには値が残っているが、
+ * 画面（モデル別の表・スコアの色の物差し・並べているモデル・上位10%と見たモデルの数）には出さない。
+ */
+export const RETIRED_VARIANTS = new Set(['lgbm_k18', 'xgb_k18', 'cat_k18', 'logit_k18']);
+
+/** 画面に出すモデル（外したモデルを除く。並びは予測ファイルの models の順のまま）。 */
+export function activeModels(models) {
+  return (models || []).filter((m) => !RETIRED_VARIANTS.has(m.algo));
+}
 
 /**
  * 候補1件を「モデル別に並べられる形」にする。
@@ -245,7 +257,7 @@ export function modelRows(candidate, models) {
   const per = candidate?.byModel;
   if (!per) return [];
   const order = (models?.length ? models.map((m) => m.algo) : Object.keys(per))
-    .filter((a) => per[a]);
+    .filter((a) => per[a] && !RETIRED_VARIANTS.has(a));
   const meta = new Map((models || []).map((m) => [m.algo, m]));
   return order.map((algo) => ({
     algo,
@@ -346,21 +358,23 @@ export function pctInk(pct) {
  * スコアそのものの色（運用者の依頼 2026-10-16「目的変数横断での比較ができないので、モデルのスコア自体も表示してほしい。
  * 同じ形式で、青白の濃淡でモデル×目的変数横断で色付け」）。
  *
- * 百分位は各モデル自身の分布での位置なので、ラベル（1.2σ / 1.5σ / 1.8σ）をまたいで水準を比べられない。スコアの表は
- * **その表の12本（学習器 × ラベル）の中の最小〜最大の線形**で色を付け、同じ表の中では同じ色が同じスコアを表す
+ * 百分位は各モデル自身の分布での位置なので、ラベル（1.2σ / 1.5σ）をまたいで水準を比べられない。スコアの表は
+ * **その表の8本（学習器 × ラベル。2026-10-24 までは 1.8σ を含む12本）の中の最小〜最大の線形**で色を付け、同じ表の中では
+ * 同じ色が同じスコアを表す。外したモデル（RETIRED_VARIANTS）は物差しに入れない
  * （同日の指示「OOF の下限ではなく、この表の中での最大最小で」。最初は予測ファイルの全候補で1つにしていた）。
  * 色相は百分位の表と同じ青の濃淡（暗い画面なので明るいほど高い）。SCORE_COLORS は --pct-0 / --pct-95 と同じ値。
  * scoreRange は候補の配列を受けるので、1件だけ渡せばその表の範囲になる。
  */
 export const SCORE_COLORS = { lo: [30, 58, 138], hi: [219, 234, 254] };   // #1e3a8a → #dbeafe
 
-/** 渡した候補の全モデルのスコアの範囲（候補1件なら、その表の中の最小〜最大）。スコアが1つも無ければ null。 */
+/** 渡した候補の全モデル（外したモデルを除く）のスコアの範囲（候補1件なら、その表の中の最小〜最大）。無ければ null。 */
 export function scoreRange(candidates) {
   let lo = Infinity;
   let hi = -Infinity;
   let n = 0;
   for (const c of candidates || []) {
-    for (const v of Object.values(c?.byModel || {})) {
+    for (const [algo, v] of Object.entries(c?.byModel || {})) {
+      if (RETIRED_VARIANTS.has(algo)) continue;
       const x = v?.score;
       if (!Number.isFinite(x)) continue;
       n += 1;
@@ -398,7 +412,8 @@ export const LABEL_JA = { base: '1.2σ', k15: '1.5σ', k18: '1.8σ' };
 
 /**
  * モデル別の百分位を表の形にする（運用者の指示 2026-10-12「12個全てを載せてほしい。棒グラフ形式でなくてよい。
- * 大小が分かればよい」）。行 = 学習に使ったラベル（1.2σ / 1.5σ / 1.8σ）、列 = 学習器（LGB / XGB / CAT / LR）。
+ * 大小が分かればよい」）。行 = 学習に使ったラベル（1.2σ / 1.5σ）、列 = 学習器（LGB / XGB / CAT / LR）。
+ * 1.8σ の行は 2026-10-24 に外した（RETIRED_VARIANTS。それより前の日の値があっても出さない）。
  *
  * 列の並びは payload の models の順で、学習器が最初に出た順。予測ファイルに無いモデルのマスは null。
  * 古い予測ファイル（ラベル違いが無い4本・5本）は 1.2σ の1行だけになり、MLP がある日は NN の列が付く。
@@ -420,7 +435,7 @@ export function modelGrid(candidate, models) {
       learner: l,
       short: lines.get('base')?.get(l)?.short || MODEL_SHORT[l] || l.slice(0, 3).toUpperCase(),
     })),
-    rows: ['base', 'k15', 'k18'].filter((k) => lines.has(k)).map((k) => ({
+    rows: ['base', 'k15'].filter((k) => lines.has(k)).map((k) => ({
       label: k,
       labelJa: LABEL_JA[k],
       cells: cols.map((l) => lines.get(k).get(l) || null),

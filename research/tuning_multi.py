@@ -133,7 +133,9 @@ TREE_ALGOS = ("lgbm", "xgb", "cat", "rf")
 #: ロジスティック回帰の版は分離力の根拠が無く、仮説「厳しいラベルで上位なら緩いラベルでも上位」の確認とクラスタリングの
 #: 特徴量のための追加。並びは k ごと（1.5σ の4本 → 1.8σ の4本。画面・シートの順）。
 #: 探索・学習は土曜の Retrain Weekly 2回（only=<1.5σ の4本> / only=<1.8σ の4本>。各 1.5〜2時間）で行い、日曜の週次
-#: （本番の4モデル）には含めない（e15_tune_all.py / train_multi.py の既定に入れない。.github/workflows/retrain-weekly.yml）
+#: （1.2σ の4本）には含めない（e15_tune_all.py / train_multi.py の既定に入れない。.github/workflows/retrain-weekly.yml）
+#: 2026-10-24 に運用者の依頼で 1.8σ の4本を週次の学習・毎日の採点・画面・スプレッドシートから外した（models.RETIRED_VARIANTS）。
+#: ここには過去の実験の記録を読むために残す。土曜の学習は 1.5σ の4本の1回だけ
 VARIANTS: Dict[str, Dict] = {
     "lgbm_k15": {"base": "lgbm", "k": 1.5},
     "xgb_k15": {"base": "xgb", "k": 1.5},

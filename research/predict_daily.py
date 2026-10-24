@@ -227,7 +227,8 @@ def agreement(per: Dict[str, Dict], algos, pct: float = 90.0) -> Tuple[int, int]
 # 90 以上 = 上位10%）。実験79〜81（docs/MODEL_ADOPTION_RULES.md §35〜37）で、12本の値の中で判断に効いたのは
 # 「12本がそろって高いか」（合意の高さ）だけだった。順位・帯・較正・追跡ファイルは基準モデルのまま。
 # 同じ日の運用者の指示（「12本の平均ではなく、12個全てを載せてほしい」）で、画面は12本の百分位をそのまま表で出す
-# 形に変え、合意は画面に出さなくなった。値は確認・研究用に predictions.json に残す（§38）。
+# 形に変え、合意は画面に出さなくなった。値は確認・研究用に predictions.json に残す（§38）。2026-10-24 に 1.8σ の
+# 4本を外したので、それからの合意は LINEUP の8本（1.2σ と 1.5σ の各4本）の平均。
 
 def oof_scores_of(algo: str, model_dir: str) -> Optional[pd.DataFrame]:
     """そのモデルの out-of-fold（Code, Date, score）。基準モデルは model_dir/oof.parquet、ほかは models/<名前>/。"""
@@ -295,8 +296,8 @@ def score_others(cand: pd.DataFrame, cols: List[str],
     転んだ日に、日次予測まで落とさないため。
 
     各モデルは**自分が学習した列**（meta の features。並びもそのとき）で採点する。列の組を切り替える週は
-    土曜に 1.5σ・1.8σ、日曜に 1.2σ を学習し直すので、どちらかが失敗するとモデルごとに列が違う週ができる
-    （2026-10-17、241列への切り替えで足した）。学習した列がデータに無いモデルだけ飛ばす。
+    土曜に 1.5σ、日曜に 1.2σ を学習し直すので、どちらかが失敗するとモデルごとに列が違う週ができる
+    （2026-10-17、241列への切り替えで足した。1.8σ は 2026-10-24 に外した）。学習した列がデータに無いモデルだけ飛ばす。
     """
     import models as M
 
@@ -330,7 +331,7 @@ def score_others(cand: pd.DataFrame, cols: List[str],
                 "nOof": meta.get("nOof"),
                 "scoreBands": meta.get("scoreBands", {}),
                 "cv": meta.get("tuning", {}),
-                # ラベル違いのモデル（models.VARIANTS）の目印。画面は本番の合議（agree90）に数えず、並べて見せる
+                # ラベル違いのモデル（models.ACTIVE_VARIANTS。1.5σ の4本）の目印。画面は 1.2σ の一致（agree90）に数えず、並べて見せる
                 "variant": M.label_k(algo) is not None,
                 "labelK": meta.get("volNormK"),
                 "label": meta.get("label"),
@@ -521,7 +522,7 @@ def main(argv=None) -> int:
             "label": meta.get("label"),
             "positiveRate": meta.get("positiveRate"),
         })
-        # 12本の合意の物差し（過去の out-of-fold の合意の分布）。並びは画面と同じ LINEUP の順。
+        # 合意の物差し（過去の out-of-fold の合意の分布）。並びは画面と同じ LINEUP の順（2026-10-24 から8本。それまでは12本）。
         # 作れなくても日次予測は止めない（合意を出さないだけ。1モデルの失敗で止めない score_others と同じ考え方）
         try:
             cons_ref, cons_used = consensus_reference(
@@ -552,10 +553,12 @@ def main(argv=None) -> int:
                 }
             x["byModel"] = per
             # 何個のモデルが「上位10%」と見ているか。独立した判定の数え上げ。
-            # ラベル違いのモデル（1.5σ・1.8σ）は本番の数（agree90 / nModels）に入れず、別に数える（agreeK90 / nK）
+            # ラベル違いのモデル（1.5σ の4本。1.8σ は 2026-10-24 に外した）は 1.2σ の数（agree90 / nModels）に入れず、
+            # 別に数える（agreeK90 / nK）
             x["agree90"], x["nModels"] = agreement(per, M.ALGOS)
-            x["agreeK90"], x["nK"] = agreement(per, M.VARIANTS)
-            # 12本の合意（cons12）と、その過去の分布での百分位（consPct）。丸める前の百分位で計算する。
+            x["agreeK90"], x["nK"] = agreement(per, M.ACTIVE_VARIANTS)
+            # 合意（cons12。名前は12本だったころのまま。2026-10-24 から8本の平均）と、その過去の分布での百分位（consPct）。
+            # 丸める前の百分位で計算する。
             # 2026-10-12 に一度画面に出したが、同じ日の運用者の指示（「12本の平均ではなく、12個全てを載せてほしい」）で
             # 画面は12本の百分位をそのまま表で出す形に変え、合意は出さなくなった。確認・研究用に predictions.json には残す
             raw = {M.BASELINE: raw_pct(M.BASELINE, float(base_scores[i]))}
@@ -625,7 +628,7 @@ def main(argv=None) -> int:
         "calibration": meta["calibration"],
         # 画面に並べるモデルの素性。基準モデル(lgbm)も含む
         "models": model_info,
-        # 12本の合意の物差し（consensus_reference）。線は過去の合意の分布の 90% / 97.5% 点（12本の平均の値）。
+        # 合意の物差し（consensus_reference）。線は過去の合意の分布の 90% / 97.5% 点（その日の LINEUP の平均の値）。
         # 画面には出さない（上の cons12 / consPct と同じ。確認・研究用）
         "consensus": consensus_meta,
         # 候補の比較（似た過去の事例）。画面の「候補の比較」タブが読む（research/knn_compare.py）
@@ -645,10 +648,11 @@ def main(argv=None) -> int:
             "スコアで付けてあり、他のモデルは並べて見るためのもの。",
             "過去の日は、その日に出した値のまま（後の再学習や、後から入ったデータで採点し直さない）。"
             "どのモデルで出した値かは dayInfo の学習日。",
-            "L15 / X15 / C15 / LR15 は到達しきい値 1.5σ、L18 / X18 / C18 / LR18 は 1.8σ のラベルで学習した"
-            "モデル（学習器は記号の元と同じ LightGBM / XGBoost / CatBoost / ロジスティック回帰）。"
-            "1.2σ の4本の一致度（agree90）には数えず、agreeK90 / nK で別に数える。今日の戦略の規則は 1.5σ の木の3本"
-            "（L15 / X15 / C15）がすべて95以上。12本とも毎日の予測に使う。",
+            "L15 / X15 / C15 / LR15 は到達しきい値 1.5σ のラベルで学習したモデル（学習器は記号の元と同じ"
+            " LightGBM / XGBoost / CatBoost / ロジスティック回帰）。1.2σ の4本の一致度（agree90）には数えず、"
+            "agreeK90 / nK で別に数える。今日の戦略の規則は 1.2σ の木の3本（LGB / XGB / CAT）がすべて95以上"
+            "（2026-10-23 から）。8本とも毎日の予測に使う。1.8σ の4本（L18 / X18 / C18 / LR18）は 2026-10-24 に"
+            "外した（それより前の日の予測には値が残る）。",
         ],
     }
     os.makedirs(args.out_dir, exist_ok=True)

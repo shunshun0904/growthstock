@@ -76,8 +76,11 @@ class TestBasics(unittest.TestCase):
         self.assertTrue(np.isnan(E.pct_within(np.array([]), np.array([1.0]))[0]))
 
     def test_models_are_the_twelve_in_lineup_order(self):
-        self.assertEqual(E.MODELS, M.LINEUP)
+        # 実験79〜88 の12本（1.2σ・1.5σ・1.8σ × 4学習器）。2026-10-24 に 1.8σ の4本を毎日の採点・画面（M.LINEUP）から
+        # 外したが、実験は記録どおり12本のまま（M.VARIANTS に残してある）
+        self.assertEqual(E.MODELS, tuple(M.ALGOS) + tuple(M.VARIANTS))
         self.assertEqual(len(E.MODELS), 12)
+        self.assertEqual(E.MODELS[:len(M.LINEUP)], M.LINEUP)
         self.assertEqual(set(E.TREES) | set(E.LOGITS), set(E.MODELS))
         self.assertEqual(E.LOGITS, ("logit", "logit_k15", "logit_k18"))
         self.assertEqual(E.oof_path("lgbm", "/x"), "/x/oof.parquet")              # 基準モデルの Release 名

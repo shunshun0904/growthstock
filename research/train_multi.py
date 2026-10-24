@@ -17,8 +17,9 @@ research/model/{model.txt, meta.json, oof.parquet} を作っている。そこ�
 基準モデルはここで作り直さない
 ---------------------------
 既定の対象は models.EXTRA（xgb / cat / logit。2026-10-09 に mlp を外した）で、lgbm は入らない。
-ラベル違いのモデル（models.VARIANTS。1.5σ / 1.8σ の8本）は --models で名指ししたときだけ作る
-（土曜の Retrain Weekly が only= で2回に分けて回す。日曜の週次には入れない。2026-10-11 夜）。
+ラベル違いのモデル（models.ACTIVE_VARIANTS。1.5σ の4本）は --models で名指ししたときだけ作る
+（土曜の Retrain Weekly が only= で回す。日曜の週次には入れない。2026-10-11 夜）。1.8σ の4本は 2026-10-24 に外したので
+（models.RETIRED_VARIANTS）、名指ししても「知らないモデル」で止まる。
 同じ LightGBM を別のパラメータで当てはめると、内側検証の PR-AUC はほぼ
 同じ（0.4016 対 0.4029）のに上位10%の重複が 52.8% しかなく、画面に
 「LightGBM」が2本並んで最大62pt ずれる。順位・帯・較正・SHAP の基準は
@@ -192,7 +193,7 @@ def main(argv=None) -> int:
     ap.add_argument("--out-dir", default=MODEL_DIR)
     ap.add_argument("--models", default=",".join(M.EXTRA),
                     help=f"学習するモデル（カンマ区切り）。既定: {','.join(M.EXTRA)}"
-                         f"。ラベル違い（{','.join(M.VARIANTS)}）は名指ししたときだけ"
+                         f"。ラベル違い（{','.join(M.ACTIVE_VARIANTS)}）は名指ししたときだけ"
                          f"。基準モデル({M.BASELINE})は train_production.py が作る")
     ap.add_argument("--features", default=F.DEFAULT_PRESET)
     args = ap.parse_args(argv)

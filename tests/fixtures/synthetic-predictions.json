@@ -953,10 +953,6 @@
      "score": 0.3524,
      "pctHistorical": 76.8
     },
-    "logit_k15": {
-     "score": 0.44,
-     "pctHistorical": 94.9
-    },
     "lgbm_k18": {
      "score": 0.318,
      "pctHistorical": 87.4

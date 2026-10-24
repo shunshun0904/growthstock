@@ -67,10 +67,11 @@ class TestReference(unittest.TestCase):
         np.testing.assert_allclose(ref, np.sort(cons))
 
     def test_missing_model_is_left_out(self):
-        write_oofs(self.d, skip=("cat_k18",))
+        write_oofs(self.d, skip=("cat_k15",))
         ref, used = PD.consensus_reference(self.d, M.LINEUP)
-        self.assertNotIn("cat_k18", used)
-        self.assertEqual(len(used), 11)
+        self.assertNotIn("cat_k15", used)
+        self.assertEqual(len(used), len(M.LINEUP) - 1)                      # 8本（2026-10-24 に 1.8σ を外した）から1本欠け
+        self.assertFalse(set(used) & set(M.RETIRED_VARIANTS))
         ref2, used2 = PD.consensus_reference(tempfile.mkdtemp(), M.LINEUP)
         self.assertIsNone(ref2)
         self.assertEqual(used2, [])
@@ -81,11 +82,11 @@ class TestFields(unittest.TestCase):
         ref = np.sort(np.arange(1000) / 10.0)                               # 0.0 〜 99.9
         used = list(M.LINEUP)
         pcts = {a: 90.0 for a in used}
-        pcts["logit"] = 78.0                                                # 平均 89.0
+        pcts["logit"] = 82.0                                                # 8本の平均 89.0
         f = PD.consensus_fields(pcts, ref, used)
-        self.assertEqual(f["cons12"], 89.0)
+        self.assertEqual(f["cons12"], 89.0)                                 # 名前は12本のころのまま
         self.assertEqual(f["consPct"], 89.0)                                # 0.0〜88.9 の 890件 / 1000
-        self.assertEqual(f["nCons"], 12)
+        self.assertEqual(f["nCons"], 8)
         # 1本でも欠けたら出さない（欠けたまま平均すると別の物差しになる）
         p2 = dict(pcts)
         p2["xgb_k15"] = None

@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { fmt, fmtInt, fmtSigned, fmtOku, fmtDate, fmtDateTime, DASH } from '../lib/format.js';
 import { bandColor, bandLabel, pctColor, pctInk, PCT_LEGEND, scoreRange, scoreColor, scoreInk, modelRows, modelGrid, MODEL_SHORT, MODEL_FAMILY,
-  FAMILY_JA, marketTone, candidateToStock, dayOrigin, featureLabel, earningsNote, earningsSummary,
+  FAMILY_JA, activeModels, marketTone, candidateToStock, dayOrigin, featureLabel, earningsNote, earningsSummary,
 } from '../lib/predictions.js';
 import { STRATEGY, RULE_MODELS, RULE_JA, RULE_SHORT, BORDER, strategySignal, exitPlan, nearMisses,
          MODEL_JA, fundContrib, frozenNote, borderNote, orderRows, ruleMinTier,
@@ -17,9 +17,10 @@ import { STRATEGY, RULE_MODELS, RULE_JA, RULE_SHORT, BORDER, strategySignal, exi
  * スコアはモデルごとに並べる。混ぜて1つにはしない（アンサンブルにしない）。
  * 学習器が違えばスコアのスケールも意味も違うので、各モデル自身の過去スコア
  * 分布での位置に揃えて並べ、買うかどうかは人間が統合して決める。
- * 12本（1.2σ・1.5σ・1.8σ のラベルで各4本。どれも毎日の予測に使う）は、ラベル × 学習器の表に数字と色で出す
+ * 8本（1.2σ・1.5σ のラベルで各4本。どれも毎日の予測に使う）は、ラベル × 学習器の表に数字と色で出す
  * （運用者の指示 2026-10-12「12本の平均ではなく、12個全てを載せてほしい。棒グラフ形式でなくてよい。
- * 大小が分かればよい」。同じ日に出した「12本の合意の百分位」の欄はこの指示で外した）。
+ * 大小が分かればよい」。同じ日に出した「12本の合意の百分位」の欄はこの指示で外した）。1.8σ の4本は 2026-10-24 に外した
+ * （運用者の依頼「1.8σの週次学習はなくしたはずです」→「採点・表示からも外す」。それより前の日の値も出さない。activeModels）。
  * 一覧の並び順は、今日の戦略の規則の3本（2026-10-23 から 1.2σ の3本）の百分位の最小が高い順（運用者の決定 2026-10-13
  * 「1.5σ の3本のうち一番低い百分位でいきましょう」を、規則の3本に合わせて続けている。strategy.js の orderRows）。帯・較正・追跡と
  * rankInDay（予測ログの「順位」）は基準モデル（1.2σ の LightGBM）のまま。
@@ -31,8 +32,10 @@ export default function PredictionView({ data, history, featureNames, onSendToOc
   const [day, setDay] = useState(() => data?.asOf || dates[dates.length - 1]);
   const [openId, setOpenId] = useState(null);
   // モデル別の表に出す値: 百分位（各モデル自身の分布での位置）か、スコアそのもの（運用者の依頼 2026-10-16）。
-  // スコアの色の物差しは予測ファイルの全候補・12本で1つ（scoreRange）
+  // スコアの色の物差しはその表の8本の中の最小〜最大（scoreRange）
   const [metric, setMetric] = useState('pct');
+  // 画面に出すモデル（外した 1.8σ の4本を除く。それより前の日の予測ファイルに値が残っていても出さない）
+  const models = useMemo(() => activeModels(data?.models), [data]);
 
   // 規則の3本の最小が高い順（orderRows）。各行に order（並び順）と ruleMin（最小）が付く
   const rows = useMemo(
@@ -52,7 +55,7 @@ export default function PredictionView({ data, history, featureNames, onSendToOc
 
   return (
     <div className="pred">
-      <StrategyPanel signal={signal} near={near} day={day} models={data?.models}
+      <StrategyPanel signal={signal} near={near} day={day} models={models}
                      onSend={(c) => onSendToOctagon(candidateToStock(c))}
                      sentIds={sentIds} />
 
@@ -80,7 +83,7 @@ export default function PredictionView({ data, history, featureNames, onSendToOc
             <span className="lab">候補</span>
             <strong className="num">{rows.length}</strong> 銘柄
           </div>
-          <div title="一覧の行の表に出す値。百分位 = 各モデル自身の過去スコア分布での位置（ラベルをまたいで水準は比べられない）。スコア = モデルが出した確率そのもの（色はその表の12本の中の最小〜最大）。今日の戦略の札と行を開いた詳しい欄は両方を出す">
+          <div title="一覧の行の表に出す値。百分位 = 各モデル自身の過去スコア分布での位置（ラベルをまたいで水準は比べられない）。スコア = モデルが出した確率そのもの（色はその表の8本の中の最小〜最大）。今日の戦略の札と行を開いた詳しい欄は両方を出す">
             <span className="lab">モデル別の表</span>
             <div className="pred-days pred-metric">
               <button className={`btn btn-ghost${metric === 'pct' ? ' on' : ''}`} onClick={() => setMetric('pct')}>百分位</button>
@@ -152,7 +155,7 @@ export default function PredictionView({ data, history, featureNames, onSendToOc
 
         <div className="pred-list">
           {rows.map((c) => (
-            <Row key={c.jqCode} c={c} models={data?.models} metric={metric} featureNames={featureNames} open={openId === c.jqCode}
+            <Row key={c.jqCode} c={c} models={models} metric={metric} featureNames={featureNames} open={openId === c.jqCode}
                  onToggle={() => setOpenId(openId === c.jqCode ? null : c.jqCode)}
                  onSend={() => onSendToOctagon(candidateToStock(c))}
                  sent={sentIds?.has(`pred:${c.jqCode}`)} />
@@ -161,7 +164,7 @@ export default function PredictionView({ data, history, featureNames, onSendToOc
       </section>
 
       <BandTable bands={data?.scoreBands} />
-      <ModelLineup models={data?.models} />
+      <ModelLineup models={models} />
       <HistoryPanel history={history} horizon={m.riseHorizon} />
       <ModelCard model={m} notes={data?.notes} generatedAt={data?.generatedAt} />
     </div>
@@ -362,7 +365,7 @@ function PickCard({ c, n, models, onSend, sent }) {
               <ModelGrid c={c} models={models} />
             </div>
             <div className="strat-metric strat-mg"
-                 title="各モデルが出した確率そのもの（混ぜていない）。色はこの表の12本の中の最小〜最大の線形。ラベルをまたいで水準を比べられる（運用者の依頼 2026-10-16）">
+                 title="各モデルが出した確率そのもの（混ぜていない）。色はこの表の8本の中の最小〜最大の線形。ラベルをまたいで水準を比べられる（運用者の依頼 2026-10-16）">
               <span className="lab">モデル別のスコア<ScoreLegend range={scoreRange([c])} /></span>
               <ModelGrid c={c} models={models} metric="score" />
             </div>
@@ -506,7 +509,7 @@ function PctLegend() {
 }
 
 /**
- * スコアの色の物差し（その表の12本の中の最小〜最大の線形）。表の見出しに添える。
+ * スコアの色の物差し（その表の8本の中の最小〜最大の線形）。表の見出しに添える。
  * 運用者の依頼（2026-10-16）: 百分位では目的変数をまたいで比べられないので、スコアそのものも同じ形式で出す。
  * 物差しは最初は予測ファイルの全候補で1つにしたが、同日の指示「この表の中での最大最小で色付けしてほしい」で表ごとに変えた。
  */
@@ -514,7 +517,7 @@ function ScoreLegend({ range }) {
   if (!range) return null;
   return (
     <span className="pred-ms-legend pred-ms-grad"
-          title={`スコアの色はこの表の12本（学習器 × ラベル）の中の最小 ${fmt(range.lo, 3)} 〜 最大 ${fmt(range.hi, 3)} の線形（明るいほど高い）。表をまたいでは比べない`}>
+          title={`スコアの色はこの表の8本（学習器 × ラベル）の中の最小 ${fmt(range.lo, 3)} 〜 最大 ${fmt(range.hi, 3)} の線形（明るいほど高い）。表をまたいでは比べない`}>
       <em className="num">{fmt(range.lo, 2)}</em>
       <i style={{ background: `linear-gradient(90deg, ${scoreColor(range.lo, range)}, ${scoreColor(range.hi, range)})` }}
          aria-hidden="true" />
@@ -525,24 +528,24 @@ function ScoreLegend({ range }) {
 
 /**
  * モデル別の百分位の表（運用者の指示 2026-10-12「12個全てを載せてほしい。棒グラフ形式でなくてよい。
- * 大小が分かればよい」）。metric='score' ならマスにスコアそのものを出し、色はこの表の12本の中の最小〜最大の線形
+ * 大小が分かればよい」）。metric='score' ならマスにスコアそのものを出し、色はこの表の8本の中の最小〜最大の線形
  * （scoreColor。運用者の依頼 2026-10-16。ラベルをまたいだ水準の比較ができるように）。
  *
- * 行 = 学習に使ったラベル（1.2σ / 1.5σ / 1.8σ）、列 = 学習器（LGB / XGB / CAT / LR）。マスの数字は
+ * 行 = 学習に使ったラベル（1.2σ / 1.5σ。1.8σ は 2026-10-24 に外した）、列 = 学習器（LGB / XGB / CAT / LR）。マスの数字は
  * **そのモデル自身の**過去スコア分布での位置（百分位）、地の色は区分（明るいほど上。pctColor）。
  * モデルをまたいで生スコアを比べられないので、位置に揃えてある。並び順は行をまたいで固定
  * （payload の models 順）。予測ファイルに無いモデルのマスは「—」。
  * large は行を開いた詳しい欄（小数1桁・規則の行（2026-10-23 から 1.2σ）の見出しに「規則」）。
- * 12本とも本番で使うモデルなので、1.2σ を「本番」とは呼ばない（運用者の指示 2026-10-17）。
+ * どれも本番で使うモデルなので、1.2σ を「本番」とは呼ばない（運用者の指示 2026-10-17）。
  */
 function ModelGrid({ c, models, large = false, metric = 'pct' }) {
   const g = modelGrid(c, models);
   if (!g.rows.length) return null;
   const score = metric === 'score';
-  const range = score ? scoreRange([c]) : null;   // 色の物差しはこの表の12本の中の最小〜最大
+  const range = score ? scoreRange([c]) : null;   // 色の物差しはこの表の8本の中の最小〜最大
   return (
     <span className={`pred-mg${large ? ' lg' : ''}`} style={{ '--mg-cols': g.cols.length }}
-          aria-label={score ? 'モデル別のスコア（行はラベル、列は学習器。色は12本・全候補で1つの物差し）'
+          aria-label={score ? 'モデル別のスコア（行はラベル、列は学習器。色はこの表の8本の中の最小〜最大）'
             : 'モデル別の百分位（行はラベル、列は学習器）'}>
       <span className="h" aria-hidden="true" />
       {g.cols.map((k) => <span key={k.learner} className="h">{k.short}</span>)}
@@ -597,6 +600,9 @@ function Detail({ c, models, featureNames, onSend, sent }) {
   const maxTop = Math.max(...top.map((t) => Math.abs(t.contrib)), 0.001);
 
   const mr = modelRows(c, models);
+  // 1.5σ の4本のうち上位10%と見た数。予測ファイルの agreeK90 / nK は 2026-10-24 より前の日は 1.8σ を含む8本で数えて
+  // いるので、画面では 1.5σ の4本の百分位から数え直す（predict_daily.agreement と同じ 90 以上）
+  const k15 = mr.filter((r) => r.family === 'k15' && Number.isFinite(r.pct));
   const bn = borderNote(c);
 
   return (
@@ -622,16 +628,16 @@ function Detail({ c, models, featureNames, onSend, sent }) {
             <ModelGrid c={c} models={models} large />
             <p className="sub" style={{ margin: '10px 0 4px' }}>
               同じ表で<b>スコアそのもの</b>（各モデルが出した確率。混ぜていない）。色は
-              この表の12本の中の最小〜最大の線形で、ラベルをまたいで水準を比べられます。
-              1.5σ・1.8σ は正例が少ないラベルなので、同じ銘柄でもスコアは低く出るのが普通です<ScoreLegend range={scoreRange([c])} />
+              この表の8本の中の最小〜最大の線形で、ラベルをまたいで水準を比べられます。
+              1.5σ は正例が少ないラベルなので、同じ銘柄でもスコアは低く出るのが普通です<ScoreLegend range={scoreRange([c])} />
             </p>
             <ModelGrid c={c} models={models} large metric="score" />
             <div className="pred-split" style={{ marginTop: 10 }}>
               <span>
                 <span className="lab">上位10%と見たモデル</span>
                 <span className="sub">1.2σ </span><b className="num">{c.agree90}/{c.nModels}</b>
-                {Number.isFinite(c.agreeK90) && c.nK > 0 && (
-                  <span className="sub">（1.5σ・1.8σ {c.agreeK90}/{c.nK}）</span>
+                {k15.length > 0 && (
+                  <span className="sub">（1.5σ {k15.filter((r) => r.pct >= 90).length}/{k15.length}）</span>
                 )}
               </span>
               <span>
@@ -646,8 +652,8 @@ function Detail({ c, models, featureNames, onSend, sent }) {
               </span>
             </div>
             <p className="sub" style={{ margin: '8px 0 0' }}>
-              行は学習に使ったラベル（到達しきい値）で、12本とも毎日の予測に使っています。スコア帯の基準は 1.2σ の
-              LightGBM です。1.5σ・1.8σ は、より大きく上がった銘柄だけを正例にして学習したもの。今日の戦略の規則は、2026-10-23 から 1.2σ の木の3本
+              行は学習に使ったラベル（到達しきい値）で、8本とも毎日の予測に使っています（1.8σ の4本は 2026-10-24 に
+              外しました）。スコア帯の基準は 1.2σ の LightGBM です。1.5σ は、より大きく上がった銘柄だけを正例にして学習したもの。今日の戦略の規則は、2026-10-23 から 1.2σ の木の3本
               （{RULE_SHORT}）がすべて{STRATEGY.agreePct}以上です（運用者の依頼。2026-10-12〜10-23 は 1.5σ の木の3本）。
               一覧はこの3本の最小が高い順です（2026-10-13 から規則の3本の最小の順。それまでは 1.2σ の LightGBM のスコア順）。
               同じ行・同じ列のモデルは似た見方をするので、そろって高くても独立した票ではありません。
@@ -843,7 +849,7 @@ function ModelLineup({ models }) {
       </div>
       <p className="sub">
         探索PR-AUC は探索時の内側検証（5分割・50試行・木200本固定）の値です。
-        1.5σ / 1.8σ のモデル（記号の末尾が 15 / 18）はラベルが違うので、この値を 1.2σ のモデルと比べられません。
+        1.5σ のモデル（記号の末尾が 15）はラベルが違うので、この値を 1.2σ のモデルと比べられません。
         運用は上位だけを買うので、この順位がそのまま運用の優劣にはなりません。
         どのモデルを重く見るかは、上の「スコア帯の実績」と
         「過去に出した銘柄のその後」で確かめてください。

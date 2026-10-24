@@ -52,9 +52,15 @@ class TestNames(unittest.TestCase):
         self.assertFalse(TM.is_tree("logit"))
         self.assertEqual(TM.preprocess_version("lgbm_k15"), "")                  # 木なので前処理なし
         self.assertEqual(TM.preprocess_version("logit_k15"), TM.preprocess_version("logit"))  # 線形は元の前処理の版
-        self.assertEqual(M.VARIANTS, TM.VARIANTS)
-        self.assertEqual(M.LINEUP, M.ALGOS + k15 + k18)
-        self.assertEqual(M.MULTI, M.EXTRA + k15 + k18)
+        self.assertEqual(M.VARIANTS, TM.VARIANTS)                                  # 過去の実験の記録を読むために 1.8σ も残す
+        # 1.8σ の4本は 2026-10-24 に外した（運用者の依頼）: 学習・毎日の採点・画面・シートは 1.5σ の4本だけ
+        self.assertEqual(M.RETIRED_VARIANTS, k18)
+        self.assertEqual(M.ACTIVE_VARIANTS, k15)
+        self.assertEqual(M.LINEUP, M.ALGOS + k15)
+        self.assertEqual(M.MULTI, M.EXTRA + k15)
+        for a in k18:
+            self.assertNotIn(a, M.LINEUP)
+            self.assertNotIn(a, M.MULTI)
         for a in M.VARIANTS:
             self.assertNotIn(a, M.ALGOS)                                           # 本番の合議には入れない
             self.assertIn(a, M.JA)
@@ -107,11 +113,15 @@ class TestNames(unittest.TestCase):
                 os.makedirs(M.sub_dir(a, d))
                 open(os.path.join(M.sub_dir(a, d), "model.joblib"), "w").close()
             self.assertEqual(M.available(d), ["xgb", "lgbm_k15"])
+            os.makedirs(M.sub_dir("logit_k15", d))
+            open(os.path.join(M.sub_dir("logit_k15", d), "model.joblib"), "w").close()
+            self.assertEqual(M.available(d), ["xgb", "lgbm_k15", "logit_k15"])    # LINEUP の順
+            # 外した 1.8σ は Release から落ちてきて置き場にあっても採点しない（2026-10-24）
             os.makedirs(M.sub_dir("logit_k18", d))
             open(os.path.join(M.sub_dir("logit_k18", d), "model.joblib"), "w").close()
-            self.assertEqual(M.available(d), ["xgb", "lgbm_k15", "logit_k18"])    # LINEUP の順
-            r = ML.row("lgbm_k18", d)
-            self.assertEqual((r["state"], r["name"]), ("未学習", M.JA["lgbm_k18"]))
+            self.assertEqual(M.available(d), ["xgb", "lgbm_k15", "logit_k15"])
+            r = ML.row("cat_k15", d)
+            self.assertEqual((r["state"], r["name"]), ("未学習", M.JA["cat_k15"]))
         finally:
             shutil.rmtree(d, ignore_errors=True)
 
@@ -180,11 +190,15 @@ class TestPredict(unittest.TestCase):
 class TestSheets(unittest.TestCase):
     def test_columns_and_rows(self):
         self.assertIn("L15%", ES.MODEL_COLS)
-        self.assertIn("L18スコア", ES.SCORE_COLS)
-        for c in ("X15%", "C15%", "LR15%", "X18%", "C18%", "LR18%"):
+        self.assertIn("L15スコア", ES.SCORE_COLS)
+        for c in ("X15%", "C15%", "LR15%"):
             self.assertIn(c, ES.MODEL_COLS)
-        self.assertIn("LR18スコア", ES.SCORE_COLS)
+        # 1.8σ の4本は 2026-10-24 に外した: 列を書かない（シートの見出しは残り、前の行の値もそのまま）
+        for c in ("L18%", "X18%", "C18%", "LR18%"):
+            self.assertNotIn(c, ES.MODEL_COLS)
+        self.assertNotIn("LR18スコア", ES.SCORE_COLS)
         self.assertEqual(len(ES.MODEL_COLS), len(M.LINEUP))
+        self.assertEqual(len(M.LINEUP), 8)
         self.assertEqual(ES.AGREE_COLS, [ES.AGREE_COL, ES.AGREE_K_COL])
         pred = {"models": [{"algo": "lgbm", "short": "LGB"}, {"algo": "lgbm_k15", "short": "L15"}],
                 "candidates": [{"date": "2026-10-13", "code": "1234", "jqCode": "12340", "name": "x", "rankInDay": 1,
@@ -203,6 +217,15 @@ class TestSheets(unittest.TestCase):
         row = ES.rows_from_predictions(old)[0]
         self.assertNotIn("L15%", row)                                              # 無いモデルの列は作らない
         self.assertIsNone(row[ES.AGREE_K_COL])
+        # 外す前に出した予測ファイル（models に 1.8σ がある）でも、1.8σ の列は書かない
+        k18 = {"models": pred["models"] + [{"algo": "lgbm_k18", "short": "L18"}],
+               "candidates": [{**pred["candidates"][0],
+                               "byModel": {**pred["candidates"][0]["byModel"],
+                                           "lgbm_k18": {"score": 0.3, "pctHistorical": 90.0}}}]}
+        row = ES.rows_from_predictions(k18)[0]
+        self.assertEqual(row["L15%"], 93.0)
+        self.assertNotIn("L18%", row)
+        self.assertNotIn("L18スコア", row)
 
 
 if __name__ == "__main__":

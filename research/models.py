@@ -89,11 +89,18 @@ base_algo = TM.base_algo
 label_k = TM.label_k
 variants_of = TM.variants_of
 
-#: 画面・スプレッドシートに並べる順（本番の4モデル → 1.5σ の4本 → 1.8σ の4本）
-LINEUP = ALGOS + tuple(VARIANTS)
+#: 外したラベル違いのモデル。運用者の依頼（2026-10-24）「1.8σの週次学習はなくしたはずです」→ AskUserQuestion
+#: 「採点・表示からも外す」で、1.8σ の4本は週次の学習・毎日の採点・画面・スプレッドシートから外した。
+#: RETIRED（mlp）と同じく VARIANTS には残す（過去の予測ファイルと実験78〜88 などの記録を読むため。学習も採点もしない）
+RETIRED_VARIANTS = ("lgbm_k18", "xgb_k18", "cat_k18", "logit_k18")
+#: 今使っているラベル違いのモデル（1.5σ の4本）
+ACTIVE_VARIANTS = tuple(a for a in VARIANTS if a not in RETIRED_VARIANTS)
+
+#: 画面・スプレッドシートに並べる順（1.2σ の4本 → 1.5σ の4本）
+LINEUP = ALGOS + ACTIVE_VARIANTS
 #: train_multi.py が作れるもの全部（基準モデル以外 + ラベル違い）。既定の対象は EXTRA（日曜の週次）で、
 #: ラベル違いは土曜の Retrain Weekly が --models で名指しして作る（2026-10-11 夜。8本を日曜に足すと長すぎる）
-MULTI = EXTRA + tuple(VARIANTS)
+MULTI = EXTRA + ACTIVE_VARIANTS
 
 #: 画面に出す日本語名。棒グラフのラベルに使う
 JA = {
@@ -122,7 +129,7 @@ SHORT = {
 }
 
 #: それぞれ何を見ているか。画面の説明に使う（学習のときに meta.json の note に写り、日次予測が predictions.json に出す）。
-#: 12本とも本番で使うモデルなので、1.2σ のモデルを「本番」と呼ばない（運用者の指示 2026-10-17）
+#: どのモデルも毎日の予測で使うので、1.2σ のモデルを「本番」と呼ばない（運用者の指示 2026-10-17。当時は12本、2026-10-24 から8本）
 NOTE = {
     "lgbm": "勾配ブースティング（葉単位で成長）。スコア帯・較正・追跡の基準モデル",
     "xgb": "勾配ブースティング（深さ単位で成長）。木の形が違う",
@@ -203,7 +210,8 @@ def load(algo: str, root: str = MODEL_DIR):
 
 
 def available(root: str = MODEL_DIR) -> List[str]:
-    """保存済みのモデル名を LINEUP の順（本番の4モデル → ラベル違い）で返す。"""
+    """保存済みのモデル名を LINEUP の順（1.2σ の4本 → 1.5σ の4本）で返す。外したモデル（RETIRED・RETIRED_VARIANTS）は
+    Release から落ちてきて置き場にあっても返さない（採点しない）。"""
     return [a for a in LINEUP
             if os.path.exists(os.path.join(sub_dir(a, root), "model.joblib"))]
 

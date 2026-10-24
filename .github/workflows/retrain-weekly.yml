@@ -33,7 +33,7 @@ on:
         options: ['yes', 'no']
         default: 'yes'
       only:
-        description: '画面に並べる追加モデルのうち、これだけ探索・学習する（例: lgbm_k15,xgb_k15,cat_k15,logit_k15。空なら 1.2σ の4本。1.5σ・1.8σ の8本は指定したときだけ。指定すると基準モデル（1.2σ の LightGBM）は触らない）'
+        description: '画面に並べる追加モデルのうち、これだけ探索・学習する（例: lgbm_k15,xgb_k15,cat_k15,logit_k15。空なら 1.2σ の4本。1.5σ の4本は指定したときだけ。1.8σ の4本は 2026-10-24 に外した。指定すると基準モデル（1.2σ の LightGBM）は触らない）'
         required: false
         default: ''
 
@@ -205,10 +205,10 @@ jobs:
           ONLY: ${{ steps.scope.outputs.only }}
         run: |
           # only があればそのモデルだけ（名前はカンマ区切り → 引数）。空なら 1.2σ の追加モデル（xgb / cat / logit）。
-          # ラベル違いのモデル（models.VARIANTS。1.5σ / 1.8σ × 4学習器の8本）は既定に入れない。土曜に Routine が
-          # only=lgbm_k15,xgb_k15,cat_k15,logit_k15（09:10 JST）と only=lgbm_k18,xgb_k18,cat_k18,logit_k18（14:10 JST）の
-          # 2回に分けて回す（実験78 の実測: 探索 1本 lgbm 13分・cat 12〜17分・logit 21〜26分・xgb 25〜35分。
-          # 1回あたり 1.5〜2時間。8本を日曜に足すと 1.2σ の4本の探索と合わせて 6時間に収まらない。2026-10-11 夜）
+          # ラベル違いのモデル（models.ACTIVE_VARIANTS。1.5σ × 4学習器）は既定に入れない。土曜に Routine が
+          # only=lgbm_k15,xgb_k15,cat_k15,logit_k15（09:10 JST）で回す（実験78 の実測: 探索 1本 lgbm 13分・cat 12〜17分・
+          # logit 21〜26分・xgb 25〜35分。1回あたり 1.5〜2時間。2026-10-11 夜）。1.8σ の4本（14:10 JST の回）は
+          # 2026-10-24 に運用者の依頼で外した（models.RETIRED_VARIANTS。名指ししても探索・学習しない）
           read -r -a ONLY_ARGS <<< "${ONLY//,/ }"
           python3 research/exp/e15_tune_all.py "${ONLY_ARGS[@]}" 2>&1 | tail -25
 
