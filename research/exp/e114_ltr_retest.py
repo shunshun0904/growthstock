@@ -496,6 +496,21 @@ def load_frame(cols: Sequence[str]) -> Tuple[pd.DataFrame, pd.Timestamp, Dict]:
     return full, pd.Timestamp(cutoff), chk
 
 
+def show_params(path: str = PARAMS_PATH) -> int:
+    """探索の結果（C と L の木の形・探索の目印）を JSON で出す（小数は丸めない。試行ごとの記録は出さない）。"""
+    if not os.path.exists(path):
+        raise SystemExit(f"実験114 の探索の結果が無い（{path}）")
+    with open(path, encoding="utf-8") as fh:
+        store = json.load(fh)
+    out = {"_sig": store.get("_sig"), "_cutoff": store.get("_cutoff")}
+    for arm in ARMS:
+        rec = store.get(arm) or {}
+        cv = {k: v for k, v in (rec.get("_cv") or {}).items() if k != "trials"}
+        out[arm] = {"params": rec.get("params"), "_cv": cv}
+    print("[探索の結果] " + json.dumps(out, ensure_ascii=False, sort_keys=True))
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="実験114: ランキング学習を今の条件で確かめ直す（検証だけ）")
     ap.add_argument("--trials", type=int, default=50)
@@ -506,7 +521,12 @@ def main(argv=None) -> int:
                     help="実験114b（今の規則の形で確かめる）を回す。実験114 の探索の結果と L の out-of-fold を同じ置き場から読む")
     ap.add_argument("--quick", action="store_true",
                     help="実験114b の速報（基準モデル1本＋ランキング学習で両方使う形）を回す。C と L の out-of-fold を同じ置き場から読む")
+    ap.add_argument("--show-params", action="store_true",
+                    help="置き場にある探索の結果（C と L の木の形。小数を丸めない）を出して終わる。ランキング学習を本番の脇に"
+                         "写すため（research/ltr_params.json。運用者の選択「まず並べて見る」2026-10-24）")
     args = ap.parse_args(argv)
+    if args.show_params:
+        return show_params()
     if args.rule or args.quick:
         import e114b_ltr_rule as RB
         return RB.main(["--quick"] if args.quick else [])

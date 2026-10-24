@@ -242,5 +242,40 @@ class TestVerdict(unittest.TestCase):
         self.assertFalse(E.verdict({})["pass"])
 
 
+class TestShowParams(unittest.TestCase):
+    def test_full_precision_without_trials(self):
+        import contextlib
+        import io
+        import json
+        store = {"_sig": {"n_features": 360}, "_cutoff": "2025-08-26",
+                 "C": {"params": {"learning_rate": 0.018581234567891234}, "_cv": {"mean_pr_auc": 0.3476}},
+                 "L": {"params": {"learning_rate": 0.012153456789012345, "num_leaves": 69, "n_estimators": 200},
+                       "_cv": {"ndcg": 0.6587, "trials": [{"n": 0, "ndcg": 0.6}]}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "p.json")
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(store, fh)
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                self.assertEqual(E.show_params(path), 0)
+            with self.assertRaises(SystemExit):
+                E.show_params(os.path.join(tmp, "none.json"))
+        line = buf.getvalue().strip()
+        self.assertTrue(line.startswith("[探索の結果] "))
+        got = json.loads(line.split(" ", 1)[1])
+        self.assertEqual(got["L"]["params"], store["L"]["params"])
+        self.assertEqual(got["C"]["params"]["learning_rate"], 0.018581234567891234)
+        self.assertNotIn("trials", got["L"]["_cv"])
+        self.assertEqual(got["_cutoff"], "2025-08-26")
+
+    def test_entry(self):
+        orig = E.show_params
+        try:
+            E.show_params = lambda path=None: 9
+            self.assertEqual(E.main(["--show-params"]), 9)
+        finally:
+            E.show_params = orig
+
+
 if __name__ == "__main__":
     unittest.main()
