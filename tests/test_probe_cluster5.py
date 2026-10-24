@@ -4,8 +4,8 @@
 
 - Wilson の区間・百分位（同点は中央の順位）の値
 - 組の件数と正例の数が全体と合い、信用倍率なし・欠測で外した行の数が合う。番号は正例率の高い順
-- 前向き: 窓が本番の out-of-fold と同じ作りで、本番のスコアが行に正しく付く（ラベルから作ったスコアの AUC が高い）
-- 本番の上位が組のどこにいるか: 割合の合計が 1・上位はおよそ 5%
+- 前向き: 窓が基準モデルの out-of-fold と同じ作りで、基準モデルのスコアが行に正しく付く（ラベルから作ったスコアの AUC が高い）
+- 基準モデルの上位が組のどこにいるか: 割合の合計が 1・上位はおよそ 5%
 - 報告に銘柄コードが出ない
 
   python3 tests/test_probe_cluster5.py
@@ -51,7 +51,7 @@ def synth(n: int = 6000, seed: int = 0) -> pd.DataFrame:
 
 
 def synth_oof(df: pd.DataFrame, seed: int = 1) -> pd.DataFrame:
-    """本番の out-of-fold の形の作りもの（窓の中の行だけ。スコアはラベルにノイズを足したもの）。"""
+    """基準モデルの out-of-fold の形の作りもの（窓の中の行だけ。スコアはラベルにノイズを足したもの）。"""
     rng = np.random.default_rng(seed)
     folds = P.make_windows(df["Date"])
     start, end = pd.Timestamp(folds[0].test_start), pd.Timestamp(folds[-1].test_end)
@@ -104,7 +104,7 @@ class TestProbeCluster5(unittest.TestCase):
         fw = P.forward(self.df, self.oof, 4, with_gbm=True)
         s = fw["summary"]
         self.assertGreater(s["n_windows"], 3)
-        # 本番のスコアはラベル + ノイズなので、行が正しく付いていれば AUC は高い（ずれていれば 0.5 前後）
+        # 基準モデルのスコアはラベル + ノイズなので、行が正しく付いていれば AUC は高い（ずれていれば 0.5 前後）
         self.assertGreater(s["auc"]["base"]["mean"], 0.7)
         for name in ("cluster", "gbm5"):
             self.assertIn(name, s["auc"])

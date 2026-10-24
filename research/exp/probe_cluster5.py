@@ -18,13 +18,13 @@
      +10% 以上の割合（目的変数の到達ラインは20日ボラで決まるので、それによらない見方）・規則どおりの収益（+10% の指値・
      届かなければ20営業日目の終値。%）の平均・5変数の中央値（元の単位）と百分位の低・中・高
   5. 安定: 前半（〜2022-06）と後半（2022-07〜）の正例率と、年ごとにその年の全体の正例率を上回った年の数
-  6. 前向き（当てる力）: 本番の out-of-fold と同じ窓（学習36か月から、テスト6か月ずつ前へ。学習はテスト窓の始まりの
+  6. 前向き（当てる力）: 基準モデルの out-of-fold と同じ窓（学習36か月から、テスト6か月ずつ前へ。学習はテスト窓の始まりの
      20営業日ぶん手前まで）で、窓ごとに学習期間だけで百分位・k-means・組ごとの正例率を作り、テスト窓の行をその組の学習期間の
-     正例率で採点する。同じ行で、5変数だけの LightGBM（既定のパラメータ）と本番の 1.2σ の LightGBM（360列）の out-of-fold を
+     正例率で採点する。同じ行で、5変数だけの LightGBM（既定のパラメータ）と基準モデル（1.2σ の LightGBM。360列）の out-of-fold を
      並べて ROC-AUC・PR-AUC を窓ごとに出す。あわせて「学習期間で一番正例率が高かった組（学習100行以上）」がテスト窓でも
-     高いか、同じ件数を本番モデル・5変数 LightGBM のスコアの上位から取ったときの正例率と比べる（一番低かった組も同じ）
-  7. （1回目を回した後に足した見方）本番の 1.2σ の LightGBM の out-of-fold の上位5%（窓ごとの順位）が、全期間の組（k = 8）の
-     どこにいるか。本番モデルがこの5変数の傾向をすでに取り込んでいるかを見る
+     高いか、同じ件数を基準モデル・5変数 LightGBM のスコアの上位から取ったときの正例率と比べる（一番低かった組も同じ）
+  7. （1回目を回した後に足した見方）基準モデル（1.2σ の LightGBM）の out-of-fold の上位5%（窓ごとの順位）が、全期間の組（k = 8）の
+     どこにいるか。基準モデルがこの5変数の傾向をすでに取り込んでいるかを見る
 
 公開ログには集計だけ（件数・割合・中央値・AUC）。銘柄・日付ごとの値は出さない。
 
@@ -43,11 +43,11 @@
     C6 1,907行 13.6% [12.1–15.2] → 0.80・28.4%・−0.04%・2/9  1.4倍・1.4倍・+16%・2.5%・+8.3%
     C7 1,775行 12.7% [11.3–14.4] → 0.75・23.2%・+0.49%・2/9  2.8倍・1.3倍・+15%・2.3%・+0.8%
     C8 2,058行 11.8% [10.5–13.3] → 0.69・34.0%・+1.19%・1/9  13倍・6.0倍・+20%・3.5%・+0.5%
-  前向き（本番の OOF と同じ 11 窓・16,340行・正例率 17.9%）: ROC-AUC 組 0.565 ± 0.028・5変数 LightGBM 0.581 ± 0.041・
-    本番 0.639 ± 0.041、PR-AUC 0.193・0.206・0.246。学習期間で一番高い組はテスト窓で 23.8%（全体 17.8%・11/11 窓で上回る）、
-    同じ件数を本番の上位から取ると 28.4%・5変数 LightGBM は 22.9%。一番低い組は 13.7%（全体 18.1%・10/11 窓で下回る）、
-    本番の下位同数 5.2%・5変数 LightGBM 9.4%
-  本番の上位5%（窓ごと・812行・正例率 32.5%）: C1・C2 が 44.4%（OOF 全体では 26.5%）、C4〜C8 は 17.6%（全体では 42.6%）
+  前向き（基準モデルの OOF と同じ 11 窓・16,340行・正例率 17.9%）: ROC-AUC 組 0.565 ± 0.028・5変数 LightGBM 0.581 ± 0.041・
+    基準モデル 0.639 ± 0.041、PR-AUC 0.193・0.206・0.246。学習期間で一番高い組はテスト窓で 23.8%（全体 17.8%・11/11 窓で上回る）、
+    同じ件数を基準モデルの上位から取ると 28.4%・5変数 LightGBM は 22.9%。一番低い組は 13.7%（全体 18.1%・10/11 窓で下回る）、
+    基準モデルの下位同数 5.2%・5変数 LightGBM 9.4%
+  基準モデルの上位5%（窓ごと・812行・正例率 32.5%）: C1・C2 が 44.4%（OOF 全体では 26.5%）、C4〜C8 は 17.6%（全体では 42.6%）
   k = 5・12 でも同じ形: 一番高い組 23.8% / 26.0%（信用倍率 高・静か）、一番低い組 12.1% / 10.9%（出来高急増・急騰・ボラ高）、
     前向きの ROC-AUC 0.560 / 0.565
 """
@@ -93,7 +93,7 @@ NO_CREDIT = 0                           # 「信用倍率なし」の組（ク�
 DROPPED = -1                            # ほかの変数が欠けて外した行
 MIN_YEAR_ROWS = 20                      # 年ごとの比べに数える組の最小の件数
 MIN_TRAIN_GROUP = 100                   # 前向きで「一番高い・低い組」に選べる学習の最小の件数
-TOP_SHARE = 0.05                        # 本番モデルの上位（窓ごとの順位）がどの組にいるかを見る割合
+TOP_SHARE = 0.05                        # 基準モデルの上位（窓ごとの順位）がどの組にいるかを見る割合
 OUT_DIR = os.path.join(lab.DATA_DIR, "oof")
 
 
@@ -254,7 +254,7 @@ def describe(df: pd.DataFrame, g: np.ndarray, X: np.ndarray, rule_ret: np.ndarra
 # --------------------------------------------------------------------------- #
 
 def make_windows(dates: pd.Series) -> list:
-    """本番の out-of-fold と同じ窓（train_production.oof_scores と同じ引数）。"""
+    """基準モデルの out-of-fold と同じ窓（train_production.oof_scores と同じ引数）。"""
     return WF.make_folds(pd.to_datetime(dates), min_train_months=OOF_MIN_TRAIN_MONTHS,
                          test_months=OOF_TEST_MONTHS, step_months=OOF_STEP_MONTHS,
                          embargo_days=B.RISE_HORIZON)
@@ -276,7 +276,7 @@ def bottom_rate(y: np.ndarray, s: np.ndarray, n: int) -> float:
 
 
 def forward(df: pd.DataFrame, oof: pd.DataFrame | None, k: int, with_gbm: bool = True) -> dict:
-    """窓ごとに学習期間だけで作った組の正例率で採点し、5変数 LightGBM・本番の OOF と同じ行で比べる。"""
+    """窓ごとに学習期間だけで作った組の正例率で採点し、5変数 LightGBM・基準モデルの OOF と同じ行で比べる。"""
     from sklearn.metrics import average_precision_score, roc_auc_score
 
     d = df["Date"]
@@ -368,7 +368,7 @@ def summarize_forward(wins: list) -> dict:
 
 def model_top(df: pd.DataFrame, g: np.ndarray, oof: pd.DataFrame, top: float = TOP_SHARE) -> dict:
     """
-    本番の 1.2σ の LightGBM の out-of-fold の上位 top（窓ごとの順位）が、全期間の組のどこにいるか。
+    基準モデル（1.2σ の LightGBM）の out-of-fold の上位 top（窓ごとの順位）が、全期間の組のどこにいるか。
     組ごとに、out-of-fold の行に占める割合・上位に占める割合・上位の中の正例率。
     """
     o = oof[["Code", "Date", "score"]].copy()
@@ -443,12 +443,12 @@ def print_describe(desc: dict, k: int) -> None:
 
 def print_forward(fw: dict) -> None:
     s = fw["summary"]
-    log(f"\n■ 前向き（k = {fw['k']}・本番の out-of-fold と同じ窓 {s['n_windows']} 本・{s['rows']:,}行・正例率 {fmt_pct(s['pos_rate'])}）")
-    ja = {"cluster": "組の正例率", "gbm5": "5変数 LightGBM", "base": "本番 1.2σ LightGBM（360列）"}
+    log(f"\n■ 前向き（k = {fw['k']}・基準モデルの out-of-fold と同じ窓 {s['n_windows']} 本・{s['rows']:,}行・正例率 {fmt_pct(s['pos_rate'])}）")
+    ja = {"cluster": "組の正例率", "gbm5": "5変数 LightGBM", "base": "基準モデル（1.2σ の LightGBM。360列）"}
     for name in s["auc"]:
         a, p = s["auc"][name], s["pr"][name]
         log(f"  {ja.get(name, name):<28} ROC-AUC {a['mean']:.3f} ± {a['sd']:.3f}  PR-AUC {p['mean']:.3f} ± {p['sd']:.3f}（{a['n']}窓）")
-    log("  窓ごと（ROC-AUC 組 / 5変数 / 本番、正例率）:")
+    log("  窓ごと（ROC-AUC 組 / 5変数 / 基準モデル、正例率）:")
     for w in fw["windows"]:
         au = w["auc"]
         log(f"   窓{w['window']:>2} {w['test']}  {w['n']:>5,}行  "
@@ -464,7 +464,7 @@ def print_forward(fw: dict) -> None:
 
 
 def print_model_top(mt: dict) -> None:
-    log(f"\n■ 本番 1.2σ LightGBM の上位 {mt['top'] * 100:.0f}%（窓ごと・{mt['top_rows']:,}行・正例率 {fmt_pct(mt['top_rate'])}）"
+    log(f"\n■ 基準モデル（1.2σ の LightGBM）の上位 {mt['top'] * 100:.0f}%（窓ごと・{mt['top_rows']:,}行・正例率 {fmt_pct(mt['top_rate'])}）"
         f"がどの組にいるか（out-of-fold {mt['rows']:,}行に占める割合 → 上位に占める割合・上位の中の正例率）")
     for r in mt["groups"]:
         name = "信用なし" if r["id"] == NO_CREDIT else f"C{r['id']}"
@@ -486,7 +486,7 @@ def main(argv=None) -> int:
         log(f"[probe] 規則どおりの収益が出た行 {int(np.isfinite(rule_ret).sum()):,} / {len(df):,}")
     path = LT.find_oof("lgbm", args.data_dir, os.path.join(os.path.dirname(args.data_dir), "model"))
     oof = pd.read_parquet(path) if path else None
-    log(f"[probe] 本番 1.2σ の LightGBM の out-of-fold: {len(oof):,}行" if oof is not None else "[probe] out-of-fold なし")
+    log(f"[probe] 基準モデル（1.2σ の LightGBM）の out-of-fold: {len(oof):,}行" if oof is not None else "[probe] out-of-fold なし")
     result = {"vars": COLS, "k_main": K_MAIN, "describe": {}, "forward": {}}
     for k in (K_MAIN,) + K_ALT:
         g, X = cluster_all(df, k)
