@@ -96,6 +96,7 @@ TARGET = float(LT.TAKE_PROFIT)          # +10% の指値
 HOLD = int(LT.HOLD)                     # 20営業日
 RET = "ret_tp"                          # 今の売り方の収益（比。指値に届けば 0.10）。判定の物差し
 R20 = "ret_c20"                         # 翌営業日の寄りで買い20営業日目の終値で売った収益（比）。L が学ぶ並び
+HITDAY = "hitday_tp"                    # 指値に届いた営業日（1 = 買った日。届かなければ空）。3枠の形の売買（実験114b）に使う
 HIT = "hit_tp"                          # 指値に届いたか
 N_GRADES = E52.N_GRADES                 # 段階の数（5）
 NDCG_K = 5
@@ -131,7 +132,8 @@ def attach_exit(df: pd.DataFrame, bars: pd.DataFrame) -> Tuple[pd.DataFrame, Dic
     base = df[["Code", "Date", OUTCOME]].copy()
     out, chk = E83.attach_exits(base, bars, targets=(TARGET,), hold=HOLD)
     k = E83.tp_key(TARGET)
-    m = out[["Code", "Date", f"tp{k}c", f"hit{k}", "c20"]].rename(columns={f"tp{k}c": RET, f"hit{k}": HIT, "c20": R20})
+    m = out[["Code", "Date", f"tp{k}c", f"hit{k}", f"hitday{k}", "c20"]].rename(
+        columns={f"tp{k}c": RET, f"hit{k}": HIT, f"hitday{k}": HITDAY, "c20": R20})
     m[RET] = pd.to_numeric(m[RET], errors="coerce") / 100.0
     m[R20] = pd.to_numeric(m[R20], errors="coerce") / 100.0
     res = df.merge(m, on=["Code", "Date"], how="left", validate="one_to_one")
@@ -499,7 +501,12 @@ def main(argv=None) -> int:
     ap.add_argument("--shifts", default="0,2,4")
     ap.add_argument("--seeds", type=int, default=3)
     ap.add_argument("--skip-tune", action="store_true")
+    ap.add_argument("--rule", action="store_true",
+                    help="実験114b（今の規則の形で確かめる）を回す。実験114 の探索の結果と L の out-of-fold を同じ置き場から読む")
     args = ap.parse_args(argv)
+    if args.rule:
+        import e114b_ltr_rule as RB
+        return RB.main([])
     shifts = [int(x) for x in args.shifts.split(",") if x.strip()]
     seeds = SEEDS[:args.seeds]
     cols = F.columns(F.DEFAULT_PRESET)

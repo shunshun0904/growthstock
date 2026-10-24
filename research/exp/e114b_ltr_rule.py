@@ -1,0 +1,470 @@
+#!/usr/bin/env python3
+"""
+実験114b: 実験114 のランキング学習（L）を、今の規則の形で確かめる（検証だけ。本番は変えない）。
+
+運用者の選択（2026-10-24、実験114 の結果を見て）「今の規則の形で確かめる」: 今の規則（1.2σ の3本 95以上）の買いと、ランキング
+学習を使う規則（単独で95以上・今の規則かつランキングが上位）を、同じ期間・同じ件数で比べる。docs/MODEL_ADOPTION_RULES.md §78-5。
+
+モデル（どれも 360列 = features.DEFAULT_PRESET）
+  lgbm / xgb / cat  1.2σ の3本。木の形は本番の探索の結果（lgbm_params.json の DEFAULT_PRESET の鍵・multi_params.json）で、
+                    360列で探索したものでなければ止める（日曜 10/25 の週次の後に回す）。当てはめは本番の out-of-fold と同じ
+                    （train_production.oof_scores / train_multi.oof_scores と同じ作り・同じ種）
+  ltr               実験114 の L（LGBMRanker。段階は同じ日の中の20営業日目の終値の5分位）。木の形は実験114 の探索の結果
+                    （e114_params.json）、種は 42 の1つ（実験114 の out-of-fold をそのまま読む。本番の3本と同じく種1つ）
+窓: 基準モデルの out-of-fold と同じ窓を 0 / 2 / 4か月ずらした3通り（e41.folds_for）。4本とも同じ窓・同じ行を採点する
+百分位: 前向き（テスト窓より前の窓のスコアの分布での位置。e79.window_split と同じ作りで、最初の2窓は参照が足りないので外す）。
+        画面と同じ小数1桁に丸める（e82.rounded）
+確かめ: ずらし0の lgbm / xgb / cat のスコアが、週次の再学習が Release（data-raw）に上げた out-of-fold（oof.parquet /
+        xgb_oof.parquet / cat_oof.parquet）と同じか（突き合わせた行数・差の最大・一致した行の割合）
+
+買い方（収益は今の売り方: 翌営業日の寄りで買い、+10% の指値、届かなければ20営業日目の終値）
+  R0   今の規則: 1.2σ の3本の百分位がすべて95以上
+  L95  ランキング学習の百分位が95以上
+  R0L  今の規則を満たし、かつランキング学習の百分位が50以上（上半分）
+  LN   同じ件数: 窓ごとに R0 と同じ件数を、ランキング学習のスコアの上から取る
+  ・それぞれの件数・平均収益（全件 / 窓の平均）・−10% 未満・+10% 到達・1件も無い月と、R0 との窓ごとの差
+  ・R0 の中を、ランキング学習の上半分 / 下半分に分けた平均収益（ランキング学習が今の規則の中で良し悪しを分けるか）
+  ・3枠の形（同時に3銘柄まで・その日の上位2件・発火を問わない / 8件以上の日。実験87・88 の simulate）: R0 を今の並び
+    （3本の最小の百分位の順、同点は基準モデルのスコア）で / R0 をランキング学習のスコアの順で / L95 をランキング学習の順で、
+    の取引数・1取引の平均・資金全体の月の損益
+
+判定（回す前に決めたもの）
+  LN（同じ件数）が 0 / 2 / 4か月の3通りすべてで、R0 より平均収益（窓の平均）が高く、かつ −10% 未満の割合（窓の平均）が
+  低いとき「今の規則の形でも上回る」。満たしても規則を変えるかは運用者が決める
+
+公開ログには集計だけ（件数・平均・割合・木の形）。銘柄ごとの値は出さない。結果は research/_data/oof/e114b_*。
+
+    exp=e114_ltr_retest.py  args="--rule"
+    （実験114 の探索の結果と L の out-of-fold を Actions のキャッシュから読むため、実験114 の名前で回す。手元なら
+     python3 research/exp/e114b_ltr_rule.py）
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import sys
+import time
+from typing import Dict, List, Sequence
+
+import numpy as np
+import pandas as pd
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import features as F  # noqa: E402
+import lab  # noqa: E402
+import live_track as LT  # noqa: E402
+import models as M  # noqa: E402
+import tuning  # noqa: E402
+import tuning_multi as TM  # noqa: E402
+import e41_stop_loss as E41  # noqa: E402
+import e79_model_clusters as E79  # noqa: E402
+import e82_and_rule_variants as E82  # noqa: E402
+import e87_monthly_return_search as E87  # noqa: E402
+import e114_ltr_retest as E  # noqa: E402
+
+PREFIX = "e114b"
+OOF_DIR = E.OOF_DIR
+SUMMARY_PATH = os.path.join(OOF_DIR, f"{PREFIX}_summary.json")
+TREES = ("lgbm", "xgb", "cat")
+LTR = "ltr"
+MODELS4 = TREES + (LTR,)
+LINE = 95.0                    # 今の規則の線
+UPPER = 50.0                   # 「ランキング学習が上位」= 上半分
+L_SEED = 42                    # L は実験114 の種 42 の out-of-fold（種1つ）
+TOP_K = LT.TOP_K               # その日の上位何件まで（2）
+SLOTS = LT.SLOTS               # 同時に持つ銘柄（3）
+BUSY = LT.PREV_SKIP_BREAKS     # 発火8件以上の日
+BAD = E.BAD
+RET, HIT, HITDAY, R20 = E.RET, E.HIT, E.HITDAY, E.R20
+PROD_OOF = {"lgbm": "oof.parquet", "xgb": "xgb_oof.parquet", "cat": "cat_oof.parquet"}
+RULES = (("R0", "今の規則（1.2σ の3本 95以上）"), ("L95", "ランキング学習 95以上"),
+         ("R0L", "今の規則 かつ ランキング学習 50以上"), ("LN", "今の規則と同じ件数をランキング学習の上から"))
+RULE_JA = dict(RULES)
+
+log = E.log
+
+
+# --------------------------------------------------------------------------- #
+# 本番の3本
+# --------------------------------------------------------------------------- #
+
+def prod_params(cols: Sequence[str], lgbm_store: Dict | None = None, multi_store: Dict | None = None) -> Dict[str, Dict]:
+    """
+    本番の3本の木の形。学習する列（cols）で探索したものでなければ止める（train_production.py / e15_tune_all.py と同じ確かめ）。
+    """
+    cols = list(cols)
+    sig = F.signature(cols)
+    store = tuning.load_params() if lgbm_store is None else lgbm_store
+    rec = store.get(F.DEFAULT_PRESET) or {}
+    why = tuning.tuned_mismatch(rec.get("_features_sig"), rec.get("_n_features"), cols) if rec else "探索の結果が無い"
+    if why:
+        raise SystemExit(f"基準モデル（lgbm）の木の形が {len(cols)}列で探索したものではない（{why}）。"
+                         "日曜の週次の再学習（360列の最初の探索）の後に回す")
+    out = {"lgbm": tuning.params_for(F.DEFAULT_PRESET, store)}
+    ms = TM.load() if multi_store is None else multi_store
+    for a in ("xgb", "cat"):
+        cv = (ms.get(a) or {}).get("_cv", {})
+        if cv.get("features_sig") != sig:
+            raise SystemExit(f"{a} の木の形が {len(cols)}列で探索したものではない（{cv.get('n_features', '?')}列・"
+                             f"指紋 {cv.get('features_sig', 'なし')}）。日曜の週次の再学習の後に回す")
+        out[a] = TM.params_for(a, ms)
+    return out
+
+
+def fit_tree(algo: str, params: Dict, tr: pd.DataFrame, te: pd.DataFrame, cols: Sequence[str]) -> np.ndarray:
+    """本番の out-of-fold と同じ当てはめ（lgbm は train_production.oof_scores、xgb / cat は train_multi.oof_scores）。"""
+    cols = list(cols)
+    X = tr[cols].to_numpy(dtype=float)
+    y = tr["label"].to_numpy(dtype=int)
+    Xte = te[cols].to_numpy(dtype=float)
+    if algo == "lgbm":
+        import lightgbm as lgb
+        m = lgb.LGBMClassifier(**params, scale_pos_weight=tuning.scale_pos_weight(y))
+        m.fit(X, y)
+        return m.predict_proba(Xte)[:, 1]
+    m = M.fit(algo, X, y, cols, params=params)
+    return M.predict(m, Xte)
+
+
+def eval_mask(df: pd.DataFrame) -> pd.Series:
+    """採点する行（実験114 の oof_arm と同じ: ラベル・今の売り方の収益・20営業日目の終値がある行）。"""
+    return df["label"].notna() & df[RET].notna() & df[R20].notna()
+
+
+def tree_tag(algo: str, params: Dict, cols: Sequence[str], df: pd.DataFrame) -> str:
+    key = {"algo": algo, "params": {k: params[k] for k in sorted(params)}, "cols": F.signature(list(cols)),
+           "rows": int(len(df)), "last": str(pd.to_datetime(df["Date"]).max().date()),
+           "eval_rows": int(eval_mask(df).sum()), "v": 1}
+    return hashlib.sha1(json.dumps(key, sort_keys=True, default=str).encode()).hexdigest()[:10]
+
+
+def oof_tree(df: pd.DataFrame, cols: Sequence[str], algo: str, params: Dict, shift: int,
+             out_dir: str = OOF_DIR) -> pd.DataFrame:
+    """本番の3本の1つの out-of-fold（学習はラベルのある行 = 本番と同じ。採点は eval_mask の行）。保存済みなら読む。"""
+    path = os.path.join(out_dir, f"{PREFIX}_{algo}_{tree_tag(algo, params, cols, df)}_sh{shift}.parquet")
+    if os.path.exists(path):
+        return pd.read_parquet(path)
+    t0 = time.time()
+    folds = E41.folds_for(df["Date"], shift)
+    d = pd.to_datetime(df["Date"])
+    ev = eval_mask(df)
+    rows = []
+    for f in folds:
+        tr = df[(d <= pd.Timestamp(f.train_end)) & df["label"].notna()]
+        te = df[(d >= pd.Timestamp(f.test_start)) & (d <= pd.Timestamp(f.test_end)) & ev]
+        if len(te) < 200 or len(tr) < 1000:
+            continue
+        part = te[["Code", "Date"]].copy()
+        part["score"] = fit_tree(algo, params, tr, te, cols)
+        part["fold"] = int(f.index)
+        rows.append(part)
+    if not rows:
+        raise SystemExit(f"{algo} ずらし{shift}か月: 窓を作れない")
+    o = pd.concat(rows, ignore_index=True)
+    os.makedirs(out_dir, exist_ok=True)
+    o.to_parquet(path, index=False)
+    log(f"  {algo} ずらし{shift}か月: {o['fold'].nunique()}窓・{len(o):,}件 {time.time() - t0:.0f}秒")
+    return o
+
+
+def prod_check(o: pd.DataFrame, algo: str, data_dir: str = lab.DATA_DIR, tol: float = 1e-6) -> Dict:
+    """ずらし0の out-of-fold が、週次の再学習が上げた本番の out-of-fold と同じか。"""
+    p = os.path.join(data_dir, PROD_OOF[algo])
+    if not os.path.exists(p):
+        return {"algo": algo, "found": False}
+    prod = pd.read_parquet(p, columns=["Code", "Date", "score"])
+    prod["Code"] = prod["Code"].astype(str)
+    prod["Date"] = pd.to_datetime(prod["Date"])
+    ours = o[["Code", "Date", "score"]].copy()
+    ours["Code"] = ours["Code"].astype(str)
+    ours["Date"] = pd.to_datetime(ours["Date"])
+    m = ours.merge(prod, on=["Code", "Date"], suffixes=("", "_prod"))
+    diff = np.abs(m["score"].to_numpy(dtype=float) - m["score_prod"].to_numpy(dtype=float))
+    return {"algo": algo, "found": True, "ours": int(len(ours)), "prod": int(len(prod)), "matched": int(len(m)),
+            "max_diff": float(diff.max()) if len(m) else float("nan"),
+            "same_share": float(np.mean(diff <= tol)) if len(m) else float("nan")}
+
+
+# --------------------------------------------------------------------------- #
+# 前向きの百分位と規則
+# --------------------------------------------------------------------------- #
+
+def wide(parts: Dict[str, pd.DataFrame], df: pd.DataFrame) -> pd.DataFrame:
+    """4本の out-of-fold を (Code, Date) で横に並べ、収益の列を足す。4本で採点した行が違えば止める。"""
+    keys = None
+    base = None
+    for a in MODELS4:
+        o = parts[a][["Code", "Date", "score", "fold"]].copy()
+        o["Code"] = o["Code"].astype(str)
+        o["Date"] = pd.to_datetime(o["Date"])
+        o = o.sort_values(["Date", "Code"], kind="mergesort").reset_index(drop=True)
+        k = o[["Code", "Date", "fold"]].astype(str).to_numpy()
+        if keys is None:
+            keys = k
+            base = o.rename(columns={"score": f"score_{a}", "fold": "window"})
+        else:
+            if not np.array_equal(keys, k):
+                raise SystemExit(f"{a} の採点した行・窓がほかのモデルと違う")
+            base[f"score_{a}"] = o["score"].to_numpy(dtype=float)
+    src = df[["Code", "Date", "label", RET, HIT, HITDAY, R20, "vol_20d"]].copy()
+    src["Code"] = src["Code"].astype(str)
+    src["Date"] = pd.to_datetime(src["Date"])
+    out = base.merge(src, on=["Code", "Date"], how="left", validate="one_to_one")
+    out["window"] = out["window"].astype(int)
+    return out
+
+
+def forward_frame(w: pd.DataFrame, folds) -> pd.DataFrame:
+    """前向きの百分位（e79.window_split。画面と同じ丸め）と、3本の最小・その日の発火数を足す。"""
+    split = E79.window_split(w, folds, models=MODELS4)
+    outs = []
+    for ww in sorted(split):
+        _, te, _, Pte = split[ww]
+        R = E82.rounded(Pte)
+        g = w.iloc[te].copy()
+        for k, a in enumerate(MODELS4):
+            g[f"pct_{a}"] = R[:, k]
+        outs.append(g)
+    if not outs:
+        raise SystemExit("前向きの百分位を付けられる窓が無い")
+    ft = pd.concat(outs, ignore_index=True)
+    ft["min_t3"] = ft[[f"pct_{a}" for a in TREES]].min(axis=1, skipna=False)
+    ft["n_break"] = ft.groupby("Date")["Code"].transform("size").to_numpy()
+    return ft
+
+
+def rule_masks(ft: pd.DataFrame) -> Dict[str, np.ndarray]:
+    """R0 / L95 / R0L / LN の印（NaN の百分位は満たさない）。LN は窓ごとに R0 と同じ件数をランキング学習の上から。"""
+    t3 = np.nan_to_num(ft["min_t3"].to_numpy(dtype=float), nan=-1.0) >= LINE
+    lp = np.nan_to_num(ft["pct_ltr"].to_numpy(dtype=float), nan=-1.0)
+    out = {"R0": t3, "L95": lp >= LINE, "R0L": t3 & (lp >= UPPER)}
+    ln = np.zeros(len(ft), dtype=bool)
+    win = ft["window"].to_numpy()
+    for ww in np.unique(win):
+        idx = np.where(win == ww)[0]
+        n = int(t3[idx].sum())
+        if n <= 0:
+            continue
+        sc = ft["score_ltr"].to_numpy(dtype=float)[idx]
+        order = idx[np.argsort(-sc, kind="mergesort")]
+        ln[order[:n]] = True
+    out["LN"] = ln
+    return out
+
+
+def per_window(ft: pd.DataFrame, mask: np.ndarray) -> pd.DataFrame:
+    """窓ごとの件数・平均収益・−10% 未満の割合（選んだ行のある窓だけ）。"""
+    s = ft[mask]
+    if not len(s):
+        return pd.DataFrame(columns=["window", "n", "ret", "bad"])
+    g = s.groupby("window")[RET]
+    return pd.DataFrame({"n": g.size(), "ret": g.mean(),
+                         "bad": g.apply(lambda x: float(np.mean(x.to_numpy(dtype=float) < BAD)))}).reset_index()
+
+
+def rule_stats(ft: pd.DataFrame, mask: np.ndarray) -> Dict:
+    s = ft[mask]
+    r = s[RET].to_numpy(dtype=float)
+    pw = per_window(ft, mask)
+    months = pd.to_datetime(ft["Date"]).dt.to_period("M")
+    pm = months[mask].value_counts()
+    allm = pd.period_range(months.min(), months.max(), freq="M")
+    return {"n": int(len(s)), "ret": float(np.mean(r)) if len(r) else float("nan"),
+            "ret_w": float(pw["ret"].mean()) if len(pw) else float("nan"),
+            "bad": float(np.mean(r < BAD)) if len(r) else float("nan"),
+            "bad_w": float(pw["bad"].mean()) if len(pw) else float("nan"),
+            "hit": float(s[HIT].astype(float).mean()) if len(s) else float("nan"),
+            "zero_months": int(sum(1 for m in allm if pm.get(m, 0) == 0)), "months": int(len(allm))}
+
+
+def window_diff(ft: pd.DataFrame, base: np.ndarray, cur: np.ndarray, key: str = "ret") -> Dict:
+    """窓ごとの差（cur − base）の平均・標準誤差・上回った窓の数（両方に選んだ行がある窓だけ）。"""
+    a, b = per_window(ft, base), per_window(ft, cur)
+    m = a.merge(b, on="window", suffixes=("_b", "_c"))
+    dv = (m[f"{key}_c"] - m[f"{key}_b"]).to_numpy(dtype=float)
+    if not len(dv):
+        return {"mean": float("nan"), "se": float("nan"), "won": 0, "n": 0}
+    se = float(dv.std(ddof=1) / np.sqrt(len(dv))) if len(dv) > 1 else float("nan")
+    return {"mean": float(dv.mean()), "se": se, "won": int((dv > 0).sum()), "n": int(len(dv))}
+
+
+# --------------------------------------------------------------------------- #
+# 3枠の形
+# --------------------------------------------------------------------------- #
+
+def ordered_candidates(ft: pd.DataFrame, mask: np.ndarray, order: str, min_break: int = 1,
+                       top_k: int = TOP_K) -> pd.DataFrame:
+    """
+    その日の候補を並べて上位 top_k 件まで。order="min" は今の並び（3本の最小の百分位の高い順、同点は基準モデルのスコア。
+    e87.candidates と同じ）、order="ltr" はランキング学習のスコアの高い順。
+    """
+    c = ft[mask & (ft["n_break"].to_numpy() >= min_break)].copy()
+    if order == "min":
+        c = c.sort_values(["Date", "min_t3", "score_lgbm"], ascending=[True, False, False], kind="mergesort")
+    elif order == "ltr":
+        c = c.sort_values(["Date", "score_ltr"], ascending=[True, False], kind="mergesort")
+    else:
+        raise ValueError(order)
+    c["rank"] = c.groupby("Date").cumcount().to_numpy() + 1
+    return c[c["rank"] <= top_k]
+
+
+def slot_trades(c: pd.DataFrame, bar_days, slots: int = SLOTS) -> pd.DataFrame:
+    """3枠の形で買えた取引（e87.simulate: 翌営業日に買い、指値に届いた翌営業日か20営業日の翌営業日から枠が空く）。"""
+    idx = {pd.Timestamp(d): k for k, d in enumerate(bar_days)}
+    day = np.array([idx.get(pd.Timestamp(d), -1) for d in c["Date"]], dtype=float)
+    keep = day >= 0
+    c, day = c[keep], day[keep]
+    ret = c[RET].to_numpy(dtype=float) * 100.0
+    hit = c[HIT].fillna(False).to_numpy(dtype=bool)
+    hitday = pd.to_numeric(c[HITDAY], errors="coerce").to_numpy(dtype=float)
+    month = pd.to_datetime(c["Date"]).dt.to_period("M").map(lambda p: p.ordinal).to_numpy()
+    taken = E87.simulate(day, ret, hit, hitday, month, slots, 0)
+    return c.iloc[taken]
+
+
+def slot_stats(t: pd.DataFrame, months: int, slots: int = SLOTS) -> Dict:
+    r = t[RET].to_numpy(dtype=float) * 100.0
+    return {"n": int(len(t)), "mean": float(np.mean(r)) if len(r) else float("nan"),
+            "win": float(np.mean(r > 0) * 100) if len(r) else float("nan"),
+            "capital_pm": float(r.sum() / slots / months) if months else float("nan")}
+
+
+def verdict(rows: List[Dict]) -> Dict:
+    """判定（回す前に決めたもの）: すべてのずらし方で LN の平均収益（窓の平均）が R0 より高く、−10% 未満（窓の平均）が低い。"""
+    out = []
+    for r in rows:
+        ok_r = bool(r["LN"]["ret_w"] > r["R0"]["ret_w"])
+        ok_b = bool(r["LN"]["bad_w"] < r["R0"]["bad_w"])
+        out.append({"shift": int(r["shift"]), "ret_R0": r["R0"]["ret_w"], "ret_LN": r["LN"]["ret_w"],
+                    "bad_R0": r["R0"]["bad_w"], "bad_LN": r["LN"]["bad_w"], "ret_ok": ok_r, "bad_ok": ok_b,
+                    "ok": ok_r and ok_b})
+    return {"rows": out, "pass": bool(out) and all(x["ok"] for x in out)}
+
+
+def _p(x: float, nd: int = 2) -> str:
+    return f"{x * 100:+.{nd}f}%" if np.isfinite(x) else "—"
+
+
+def _s(x: float) -> str:
+    return f"{x * 100:.1f}%" if np.isfinite(x) else "—"
+
+
+# --------------------------------------------------------------------------- #
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description="実験114b: ランキング学習を今の規則の形で確かめる（検証だけ）")
+    ap.add_argument("--shifts", default="0,2,4")
+    args = ap.parse_args(argv)
+    shifts = [int(x) for x in args.shifts.split(",") if x.strip()]
+    import warnings
+    from scipy.stats import ConstantInputWarning
+    warnings.filterwarnings("ignore", category=ConstantInputWarning)
+
+    t_all = time.time()
+    cols = F.columns(F.DEFAULT_PRESET)
+    params = prod_params(cols)                       # 日曜の週次の前なら、ここで止まる
+    if not os.path.exists(E.PARAMS_PATH):
+        raise SystemExit(f"実験114 の探索の結果が無い（{E.PARAMS_PATH}）。先に実験114 を回す")
+    with open(E.PARAMS_PATH, encoding="utf-8") as fh:
+        store = json.load(fh)
+    params["ltr"] = store["L"]["params"]
+    full, cutoff, chk = E.load_frame(cols)
+    df = full[full["label"].notna()].reset_index(drop=True)
+    sig_now = E.data_sig(cols, full[full["Date"] <= cutoff], store["_sig"]["n_trials"])
+    same_data = store.get("_sig") == sig_now
+    bars = LT.load_bars(lab.DATA_DIR, start=df["Date"].min() - pd.Timedelta(days=10))
+    bar_days = list(pd.to_datetime(np.sort(bars["Date"].unique())))
+    del bars
+
+    print("=" * 96)
+    print(f"実験114b ランキング学習を今の規則の形で確かめる（検証だけ）: {len(df):,}件・{df['Date'].nunique():,}日・"
+          f"{df['Date'].min().date()} 〜 {df['Date'].max().date()} / {len(cols)}列 / ずらし {shifts}か月")
+    print(f"  収益: 今の売り方（翌営業日の寄りで買い、+{E.TARGET:g}% の指値、届かなければ{E.HOLD}営業日目の終値）")
+    for a in MODELS4:
+        print(f"  {a:<5} 木の形: {E._tree_line(params[a])}")
+    print(f"  ランキング学習の木の形は実験114 の探索（{store.get('_cutoff')} まで）。"
+          f"{'同じデータ' if same_data else '実験114 のときとデータが違う（木の形はそのまま使う）'}")
+    print("=" * 96)
+    log(f"[確かめ] 同じ計算の5日平均が ret_o1_20 と一致 {chk['hold5_match']:,} / {chk['hold5_both']:,} 行")
+
+    summary: Dict = {"shifts": {}, "same_data": same_data}
+    vrows = []
+    for sh in shifts:
+        parts = {a: oof_tree(df, cols, a, params[a], sh) for a in TREES}
+        lo = E.oof_arm(df, cols, "L", params["ltr"], sh, (L_SEED,))
+        parts[LTR] = lo
+        sh_out: Dict = {}
+        if sh == 0:
+            checks = [prod_check(parts[a], a) for a in TREES]
+            sh_out["prod_check"] = checks
+            for c in checks:
+                if not c["found"]:
+                    log(f"[確かめ] {c['algo']}: 本番の out-of-fold（{PROD_OOF[c['algo']]}）が置き場に無いので比べない")
+                else:
+                    log(f"[確かめ] {c['algo']} ずらし0 対 本番の out-of-fold: 突き合わせ {c['matched']:,} / {c['ours']:,} 行"
+                        f"（本番 {c['prod']:,}行）・差の最大 {c['max_diff']:.2e}・一致 {c['same_share'] * 100:.2f}%")
+        folds = E41.folds_for(df["Date"], sh)
+        w = wide(parts, df)
+        ft = forward_frame(w, folds)
+        masks = rule_masks(ft)
+        print(f"\n■ ずらし{sh}か月（前向きの百分位を付けた {ft['window'].nunique()}窓・{len(ft):,}件・"
+              f"{ft['Date'].min().date()} 〜 {ft['Date'].max().date()}・全体の平均 {_p(np.nanmean(ft[RET]))}・"
+              f"−10% 未満 {_s(np.nanmean(ft[RET] < BAD))}）")
+        print("  ◆ 買い方ごと: 件数 / 平均収益（全件・窓の平均）/ −10% 未満（全件・窓の平均）/ +10% 到達 / 1件も無い月 ｜ R0 との差（窓ごと）")
+        st = {}
+        for key, ja in RULES:
+            s = rule_stats(ft, masks[key])
+            st[key] = s
+            line = (f"    {key:<4}{ja:<28}{s['n']:>6}件 {_p(s['ret']):>8} {_p(s['ret_w']):>8} {_s(s['bad']):>6} "
+                    f"{_s(s['bad_w']):>6} {_s(s['hit']):>6} {s['zero_months']:>3} / {s['months']}月")
+            if key != "R0":
+                dd = window_diff(ft, masks["R0"], masks[key])
+                db = window_diff(ft, masks["R0"], masks[key], "bad")
+                line += (f" ｜ {dd['mean'] * 100:+.2f} ± {dd['se'] * 100:.2f}pt（上の窓 {dd['won']}/{dd['n']}）・"
+                         f"−10%未満 {db['mean'] * 100:+.1f}pt")
+                s["diff"] = dd
+                s["diff_bad"] = db
+            print(line)
+        lp = np.nan_to_num(ft["pct_ltr"].to_numpy(dtype=float), nan=-1.0)
+        up, lowr = masks["R0"] & (lp >= UPPER), masks["R0"] & (lp < UPPER)
+        su, sl = rule_stats(ft, up), rule_stats(ft, lowr)
+        print(f"  ◆ 今の規則の中をランキング学習で分ける: 上半分 {su['n']}件 {_p(su['ret'])}（−10%未満 {_s(su['bad'])}）/ "
+              f"下半分 {sl['n']}件 {_p(sl['ret'])}（{_s(sl['bad'])}）")
+        st["R0_upper"], st["R0_lower"] = su, sl
+        months = int(pd.to_datetime(ft["Date"]).dt.to_period("M").nunique())
+        print(f"  ◆ 3枠の形（同時に{SLOTS}銘柄・その日の上位{TOP_K}件）: 取引数 / 1取引の平均 / 勝率 / 資金全体の月の損益（{months}か月）")
+        slots_out = {}
+        for mb, mb_ja in ((1, "発火を問わない"), (BUSY, f"発火{BUSY}件以上の日")):
+            for name, key, order in (("R0・今の並び", "R0", "min"), ("R0・ランキングの並び", "R0", "ltr"),
+                                     ("L95・ランキングの並び", "L95", "ltr")):
+                t = slot_trades(ordered_candidates(ft, masks[key], order, min_break=mb), bar_days)
+                ss = slot_stats(t, months)
+                slots_out[f"{key}_{order}_{mb}"] = ss
+                print(f"    {mb_ja:<14}{name:<22}{ss['n']:>5}取引 {ss['mean']:>+7.2f}% {ss['win']:>5.1f}% "
+                      f"{ss['capital_pm']:>+7.2f}%")
+        sh_out.update({"stats": st, "slots": slots_out, "windows": int(ft["window"].nunique()), "rows": int(len(ft))})
+        summary["shifts"][str(sh)] = sh_out
+        vrows.append({"shift": sh, **{k: st[k] for k in ("R0", "LN")}})
+
+    v = verdict(vrows)
+    summary["verdict"] = v
+    print("\n■ 判定（先に決めた基準: すべてのずらし方で、LN（今の規則と同じ件数をランキング学習の上から）の平均収益（窓の平均）が"
+          "今の規則より高く、−10% 未満（窓の平均）が低い）")
+    for r in v["rows"]:
+        print(f"  ずらし{r['shift']}か月: 平均収益 R0 {_p(r['ret_R0'])} / LN {_p(r['ret_LN'])}（{'○' if r['ret_ok'] else '×'}）・"
+              f"−10%未満 R0 {_s(r['bad_R0'])} / LN {_s(r['bad_LN'])}（{'○' if r['bad_ok'] else '×'}）")
+    print(f"  → {'今の規則の形でも上回る（規則を変えるかは運用者が決める）' if v['pass'] else '今の規則の形では上回らない'}")
+    summary["minutes"] = round((time.time() - t_all) / 60, 1)
+    os.makedirs(OOF_DIR, exist_ok=True)
+    with open(SUMMARY_PATH, "w", encoding="utf-8") as fh:
+        json.dump(summary, fh, ensure_ascii=False, indent=2, default=str)
+    log(f"記録: {OOF_DIR}/{PREFIX}_* （{summary['minutes']}分）")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
