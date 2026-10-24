@@ -53,6 +53,7 @@
     exp=e114_ltr_retest.py  args="--trials 50 --shifts 0,2,4 --seeds 3"
     --skip-tune は e114_params.json が同じデータ・同じ列で作られていればそれを読む
     --rule / --quick は実験114b（今の規則の形 / 基準モデル1本の速報）を回す（research/exp/e114b_ltr_rule.py）
+    --show-params は置き場の探索の結果を丸めずに出す。--check-ltr は本番の脇に置いたランキング学習が L と同じかを確かめる
 
 結果（2026-10-24、run 40070769689、f5d652a、実験の部分 62分。docs/MODEL_ADOPTION_RULES.md §78）
 ------------------------------------------------------------------
@@ -524,9 +525,15 @@ def main(argv=None) -> int:
     ap.add_argument("--show-params", action="store_true",
                     help="置き場にある探索の結果（C と L の木の形。小数を丸めない）を出して終わる。ランキング学習を本番の脇に"
                          "写すため（research/ltr_params.json。運用者の選択「まず並べて見る」2026-10-24）")
+    ap.add_argument("--check-ltr", action="store_true",
+                    help="本番の脇に置いたランキング学習（Release の ltr_oof.parquet・research/ltr_params.json）が、"
+                         "実験114 の L（種42・ずらし0）と同じかを確かめる（research/exp/e114b_ltr_rule.py の check_ltr）")
     args = ap.parse_args(argv)
     if args.show_params:
         return show_params()
+    if args.check_ltr:
+        import e114b_ltr_rule as RB
+        return RB.main(["--check-ltr"])
     if args.rule or args.quick:
         import e114b_ltr_rule as RB
         return RB.main(["--quick"] if args.quick else [])

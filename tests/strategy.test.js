@@ -9,6 +9,7 @@ import {
   strategySignal, exitPlan,
   freeSlots, pctSpread, laggard, nearMisses, fundContrib, frozenNote,
   BORDER, BORDER_STATS, BORDER_WARN, borderShape, borderNote, borderWarn, orderRows, ruleMinTier,
+  ltrDayPct, ltrUpper, passesBoth, bothSummary,
 } from '../src/lib/strategy.js';
 
 const cand = (code, pcts, score = 0.5) => ({
@@ -443,3 +444,44 @@ test('BORDER_STATS: probe_t3_panel の数字（件数の合計が形の件数と
   assert.ok(!/NaN|undefined|null|測っていない/.test(n.text));
 });
 
+/* ------------------------------------------------ ランキング学習（参考。両方使う形） */
+
+const withLtr = (c, dayPct, upper) => ({ ...c, ltr: { score: 0.1, dayPct, dayRank: 1, nDay: 4, upper } });
+
+test('ltrDayPct / ltrUpper: 予測の ltr を読む。無い・壊れた値は null', () => {
+  const c = withLtr(rule('A', [96, 97, 98]), 66.7, true);
+  assert.equal(ltrDayPct(c), 66.7);
+  assert.equal(ltrUpper(c), true);
+  assert.equal(ltrDayPct(rule('B', [96, 97, 98])), null);
+  assert.equal(ltrUpper(rule('B', [96, 97, 98])), null);
+  assert.equal(ltrUpper({ ltr: { upper: 'yes' } }), null);
+  assert.equal(ltrDayPct({ ltr: { dayPct: null } }), null);
+});
+
+test('passesBoth: 今の規則を満たし、かつランキング学習が上半分のときだけ（予測の upper で決める）', () => {
+  assert.equal(passesBoth(withLtr(rule('A', [96, 97, 98]), 66.7, true)), true);
+  assert.equal(passesBoth(withLtr(rule('B', [96, 97, 98]), 33.3, false)), false);
+  assert.equal(passesBoth(withLtr(rule('C', [94, 97, 98]), 100, true)), false);
+  assert.equal(passesBoth(rule('D', [96, 97, 98])), false);
+});
+
+test('bothSummary: 規則を満たした候補のうち上半分を、passed の並びのまま。ランキング学習の無い日は数えない', () => {
+  const rows = [
+    withLtr(rule('A', [99, 99, 99], 0.9), 100, true),
+    withLtr(rule('B', [97, 98, 99], 0.8), 33.3, false),
+    withLtr(rule('C', [96, 96, 96], 0.7), 66.7, true),
+    withLtr(rule('D', [50, 60, 70], 0.6), 0, false),
+  ];
+  const sig = strategySignal(rows);
+  const b = bothSummary(rows, sig);
+  assert.equal(b.available, true);
+  assert.equal(b.nPassed, 3);
+  assert.deepEqual(b.both.map((c) => c.code), ['A', 'C']);
+  // 買う銘柄（今の規則の上位2件）は変えない
+  assert.deepEqual(sig.picks.map((c) => c.code), ['A', 'B']);
+  const old = rows.map(({ ltr, ...c }) => c);
+  const ob = bothSummary(old, strategySignal(old));
+  assert.equal(ob.available, false);
+  assert.deepEqual(ob.both, []);
+  assert.equal(bothSummary([], strategySignal([])).available, false);
+});

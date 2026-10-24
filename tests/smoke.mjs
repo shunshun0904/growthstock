@@ -148,6 +148,24 @@ check(strat.includes('発火数'), '発火数が表示される');
 check(!strat.includes('NaN') && !strat.includes('undefined'),
       '戦略パネルに NaN / undefined が出ていない');
 
+// ランキング学習（参考。買いの規則は変えない。運用者の選択「まず並べて見る」2026-10-24）。合成データの5件に
+// その日の中の順位を付けてある（ソフトバンク 1位・大和自動車交通 2位・安田倉庫 3位（50。上半分）・シンプレクス 4位・野村 5位）。
+// 規則を満たす銘柄が無いので「両方使う形」は 0件 / 0件、印はどれも灰（紫の「両方使う形」は出ない）
+check(strat.includes('両方使う形（参考）'), '今日の戦略に「両方使う形（参考）」が出る');
+check(strat.includes('0件 / 0件（ランキング学習がその日の中で上半分）'), '規則を満たす銘柄が無い日は 0件 / 0件');
+const ltrBadges = page.locator('.pred-list .pred-ltr');
+check((await ltrBadges.count()) === 5, `ランキング学習の印が5件すべてに出る (実際: ${await ltrBadges.count()})`);
+check(((await rowOf('ソフトバンク').locator('.pred-ltr').textContent()) || '') === 'ランキング上半分',
+      'ソフトバンク（1位）は「ランキング上半分」');
+check(((await rowOf('安田倉庫').locator('.pred-ltr').textContent()) || '') === 'ランキング上半分',
+      '安田倉庫（3位 / 5件。百分位 50）は上半分');
+check(((await rowOf('シンプレクス').locator('.pred-ltr').textContent()) || '') === 'ランキング下半分',
+      'シンプレクス（4位）は「ランキング下半分」');
+check(((await rowOf('ソフトバンク').locator('.pred-ltr').getAttribute('class')) || '').includes('slate'),
+      '規則を満たさない候補の印は灰（両方使う形ではない）');
+check(((await rowOf('ソフトバンク').locator('.pred-ltr').getAttribute('title')) || '').includes('買いの規則には使いません'),
+      '印の title に「買いの規則には使いません」と出る');
+
 check(!predBody.includes('NaN'), '予測タブに NaN が出ていない');
 check(!predBody.includes('undefined'), '予測タブに undefined が出ていない');
 

@@ -5,6 +5,7 @@ import { bandColor, bandLabel, pctColor, pctInk, PCT_LEGEND, scoreRange, scoreCo
 } from '../lib/predictions.js';
 import { STRATEGY, RULE_MODELS, RULE_JA, RULE_SHORT, BORDER, strategySignal, exitPlan, nearMisses,
          MODEL_JA, fundContrib, frozenNote, borderNote, orderRows, ruleMinTier,
+         ltrDayPct, ltrUpper, passesBoth, bothSummary,
 } from '../lib/strategy.js';
 
 /**
@@ -46,6 +47,8 @@ export default function PredictionView({ data, history, featureNames, onSendToOc
   const nNoRule = rows.filter((c) => c.ruleMin === null).length;
   const tone = useMemo(() => marketTone(rows), [rows]);
   const signal = useMemo(() => strategySignal(rows), [rows]);
+  // 両方使う形（参考。今の規則 かつ その日の中でランキング学習が上半分）。買う銘柄は signal.picks のまま（§78-9）
+  const both = useMemo(() => bothSummary(rows, signal), [rows, signal]);
   const near = useMemo(() => nearMisses(rows), [rows]);
   const m = data?.model || {};
   // 過去の日は、その日に出した値のまま（research/predict_daily.py の freeze_past_days。dayInfo にその日のモデルの学習日）
@@ -55,7 +58,7 @@ export default function PredictionView({ data, history, featureNames, onSendToOc
 
   return (
     <div className="pred">
-      <StrategyPanel signal={signal} near={near} day={day} models={models}
+      <StrategyPanel signal={signal} near={near} day={day} models={models} both={both}
                      onSend={(c) => onSendToOctagon(candidateToStock(c))}
                      sentIds={sentIds} />
 
@@ -180,7 +183,7 @@ export default function PredictionView({ data, history, featureNames, onSendToOc
  * 「今日は買うのか、買うなら何を、いくらで手仕舞うのか」を1か所で
  * 言い切る場所が要る。迷いどころを毎日つくらないための画面。
  */
-function StrategyPanel({ signal, near, day, models, onSend, sentIds }) {
+function StrategyPanel({ signal, near, day, models, both, onSend, sentIds }) {
   const { nBreak, verdict, picks, passed, buyable } = signal;
   return (
     <section className="card strat">
@@ -209,6 +212,18 @@ function StrategyPanel({ signal, near, day, models, onSend, sentIds }) {
             <span className="lab">{RULE_JA}がすべて{STRATEGY.agreePct}以上</span>
             <strong className="num">{passed.length}</strong>
             <span className="sub">件 / {nBreak}件</span>
+          </div>
+          <div title={'今の規則を満たし、かつその日の候補の中でランキング学習の順位が上半分のもの（実験114b で過去の成績を'
+                      + '確かめた形。docs/MODEL_ADOPTION_RULES.md §78）。参考に並べるだけで、買う銘柄は今の規則のまま'}>
+            <span className="lab">両方使う形（参考）</span>
+            {both?.available ? (
+              <>
+                <strong className="num">{both.both.length}</strong>
+                <span className="sub">件 / {passed.length}件（ランキング学習がその日の中で上半分）</span>
+              </>
+            ) : (
+              <span className="sub">この日の予測にはランキング学習の順位がありません</span>
+            )}
           </div>
         </div>
         <p className="sub strat-note">{verdict.note}</p>
@@ -344,6 +359,7 @@ function PickCard({ c, n, models, onSend, sent }) {
           {c.sector && <span className="sub">{c.sector}</span>}
           <BorderBadge c={c} />
           <EarnBadge c={c} />
+          <LtrBadge c={c} />
         </span>
         <button className="btn btn-primary" onClick={onSend} disabled={sent}>
           {sent ? '送信済み' : 'タイムマシーンで見る'}
@@ -376,6 +392,15 @@ function PickCard({ c, n, models, onSend, sent }) {
             <span className="num">{fmt(c.byModel?.[a]?.pctHistorical, 0)}</span>
           </div>
         ))}
+        {ltrDayPct(c) !== null && (
+          <div className="strat-metric"
+               title={'ランキング学習（同じ日の候補の中で、20営業日目の終値で売った収益の順番を学んだもの）の、その日の中の順位。'
+                      + '参考に並べるだけで、買いの規則には使いません'}>
+            <span className="lab">ランキング学習（その日の中）</span>
+            <span className="num">{c.ltr?.dayRank ?? DASH}位 / {c.ltr?.nDay ?? DASH}件</span>
+            <span className="sub">{ltrUpper(c) ? '上半分（両方使う形に入る）' : '下半分（両方使う形からは外れる）'}</span>
+          </div>
+        )}
         <div className="strat-metric">
           <span className="lab">終値</span>
           <span className="num">{fmtInt(c.close)}</span>
@@ -403,6 +428,25 @@ function BorderBadge({ c }) {
   return (
     <span className={`badge ${n.warn ? 'red' : 'amber'} pred-warn pred-border`} title={n.text}>
       {n.badge}
+    </span>
+  );
+}
+
+/**
+ * ランキング学習の、その日の候補の中の順位の印（予測の ltr。参考に並べるだけで、買いの規則には使わない。§78-9）。
+ * 今の規則を満たし、かつ上半分なら「両方使う形」（紫）。それ以外は上半分 / 下半分を灰で。値の無い日（2026-10-24 より前）は出さない。
+ */
+function LtrBadge({ c }) {
+  const p = ltrDayPct(c);
+  if (p === null) return null;
+  const both = passesBoth(c);
+  const title = `ランキング学習: その日の候補 ${c.ltr?.nDay ?? DASH}件の中で ${c.ltr?.dayRank ?? DASH}位（百分位 ${fmt(p, 1)}。`
+    + '50以上が上半分）。'
+    + (both ? '今の規則も満たすので「両方使う形」に入ります。' : '')
+    + '参考に並べるだけで、買いの規則には使いません';
+  return (
+    <span className={`badge ${both ? 'violet' : 'slate'} pred-warn pred-ltr`} title={title}>
+      {both ? '両方使う形' : `ランキング${ltrUpper(c) ? '上半分' : '下半分'}`}
     </span>
   );
 }
@@ -454,6 +498,7 @@ function Row({ c, models, metric = 'pct', featureNames, open, onToggle, onSend, 
           )}
           <BorderBadge c={c} />
           <EarnBadge c={c} />
+          <LtrBadge c={c} />
         </span>
         {mr.length > 0 ? (
           <span className="pred-ms">

@@ -343,6 +343,47 @@ def score_others(cand: pd.DataFrame, cols: List[str],
     return scores, info
 
 
+def attach_ltr(rows: List[Dict], cand: pd.DataFrame, model_dir: str) -> Optional[Dict]:
+    """
+    ランキング学習（research/ltr.py）で候補を採点し、各行に ltr（score・その日の中の百分位 dayPct・順位 dayRank・その日の
+    候補数 nDay・上半分の印 upper・過去の分布での位置 pctHistorical）を足す。画面と実運用の追跡が「両方使う形」（今の規則
+    かつ その日の中でランキング学習が上半分）を参考に並べるためのもの（運用者の選択「まず並べて見る」2026-10-24。
+    docs/MODEL_ADOPTION_RULES.md §78-9）。**買いの規則には使わない。**
+
+    rows は cand と同じ順（1行 = cand の1行）。その日の中の順位は、その日の候補すべての中で付ける（実験114b と同じ）。
+    モデルが無い・学習した列がデータに無い・失敗したときは何も足さない（予測は止めない。score_others と同じ考え方）。
+    """
+    import ltr as LTR
+    import models as M
+
+    try:
+        model, meta = LTR.load(model_dir)
+        if model is None:
+            print("[ltr] ランキング学習のモデルが無いので出さない")
+            return None
+        want = list(meta.get("features") or [])
+        miss = [c for c in want if c not in cand.columns]
+        if not want or miss:
+            print(f"[ltr] 学習した列のうち {len(miss)}列がデータに無いので出さない")
+            return None
+        sc = LTR.predict(model, cand[want].to_numpy(dtype=float))
+        fields = LTR.day_fields(cand["Date"], sc, M.hist_scores(LTR.NAME, model_dir))
+        if len(fields) != len(rows):
+            print(f"[ltr] 行の数が合わない（候補 {len(rows)} / 採点 {len(fields)}）ので出さない")
+            return None
+        for x, f in zip(rows, fields):
+            x["ltr"] = f
+        print(f"[ltr] 採点 {len(rows):,}件（学習日 {str(meta.get('trainedAt'))[:10]}）・その日の中で上半分 "
+              f"{sum(1 for f in fields if f['upper']):,}件")
+        return {"algo": LTR.NAME, "name": meta.get("name", LTR.JA), "short": meta.get("short", LTR.SHORT),
+                "note": meta.get("note", LTR.NOTE), "trainedAt": meta.get("trainedAt"), "nOof": meta.get("nOof"),
+                "dayUpper": round(float(meta.get("dayUpper", LTR.DAY_UPPER)) * 100, 1),
+                "oofMetrics": meta.get("oofMetrics", {})}
+    except Exception as exc:          # noqa: BLE001
+        print(f"[ltr] 失敗（出さない）: {type(exc).__name__}: {exc}")
+        return None
+
+
 def progress_fields(data_dir: str, keys) -> Dict[Tuple[str, str], dict]:
     """
     候補（銘柄コード5桁, 'YYYY-MM-DD'）ごとに、画面の「進捗期待」に使う値を出す。
@@ -572,6 +613,9 @@ def main(argv=None) -> int:
               + (f" / 上位10% の線 {np.quantile(cons_ref, 0.90):.1f}・上位2.5% の線 {np.quantile(cons_ref, 0.975):.1f}"
                  if cons_ref is not None else ""))
 
+    # ランキング学習（参考。買いの規則には使わない）。その日の中の順位と上半分の印を足す（attach_ltr。§78-9）
+    ltr_info = attach_ltr(rows, cand, args.model_dir)
+
     # ファイルの並び・rankInDay（予測ログの「順位」）はどちらも基準モデルのスコア（上の rank_in_day と同じ）。
     # 帯・較正・追跡ファイルも基準モデル基準なので、ここは基準モデルのまま。画面の一覧は 2026-10-13 から
     # 1.5σ の3本の百分位の最小の順に並べ直す（src/lib/strategy.js の orderRows。運用者の決定）
@@ -633,6 +677,9 @@ def main(argv=None) -> int:
         "consensus": consensus_meta,
         # 候補の比較（似た過去の事例）。画面の「候補の比較」タブが読む（research/knn_compare.py）
         "knn": knn,
+        # ランキング学習の素性（attach_ltr。無ければ None）。各候補の ltr と合わせて、画面と実運用の追跡が「両方使う形」を
+        # 参考に並べる（買いの規則には使わない。運用者の選択「まず並べて見る」2026-10-24）
+        "ltr": ltr_info,
         "notes": [
             "スコアは較正されていない生の出力。確率として読まず、"
             "同じ日の候補の中での順位と、スコア帯の過去実績で読むこと。",
@@ -653,6 +700,10 @@ def main(argv=None) -> int:
             "agreeK90 / nK で別に数える。今日の戦略の規則は 1.2σ の木の3本（LGB / XGB / CAT）がすべて95以上"
             "（2026-10-23 から）。8本とも毎日の予測に使う。1.8σ の4本（L18 / X18 / C18 / LR18）は 2026-10-24 に"
             "外した（それより前の日の予測ファイルには値が残るが、画面には出さない）。",
+            "ltr はランキング学習（LambdaRank。同じ日の候補の中で、翌営業日の寄りで買い20営業日目の終値で売った収益の"
+            "順番を学んだもの）。dayPct はその日の候補の中の百分位（候補が1件の日は 50）、upper は 50 以上か。"
+            "「両方使う形」（今の規則を満たし、かつ upper）を参考に並べるだけで、買いの規則には使わない"
+            "（2026-10-24 から。それより前の日には無い）。",
         ],
     }
     os.makedirs(args.out_dir, exist_ok=True)

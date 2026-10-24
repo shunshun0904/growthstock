@@ -347,6 +347,42 @@ export function passesAgree(candidate, pct = STRATEGY.agreePct) {
 }
 
 /**
+ * ランキング学習（予測の ltr。research/ltr.py）の、その日の候補の中の百分位（0〜100。候補が1件の日は 50）。無ければ null。
+ * 2026-10-24 から予測に入る（それより前の日には無い）。参考に並べるだけで、買いの規則には使わない
+ * （運用者の選択「まず並べて見る」。docs/MODEL_ADOPTION_RULES.md §78-9）。
+ */
+export function ltrDayPct(candidate) {
+  const v = candidate?.ltr?.dayPct;
+  return Number.isFinite(v) ? v : null;
+}
+
+/** その日の中でランキング学習が上半分か（予測の ltr.upper。丸める前の百分位で決めてある）。無ければ null。 */
+export function ltrUpper(candidate) {
+  const u = candidate?.ltr?.upper;
+  return typeof u === 'boolean' ? u : null;
+}
+
+/**
+ * 両方使う形（参考）: 今の規則（RULE_MODELS がすべて agreePct 以上）を満たし、かつその日の中でランキング学習が上半分。
+ * 実験114b の R0D（§78-8）。買う銘柄は strategySignal のまま変えない。research/live_track.py の ■7 と同じ判定。
+ */
+export function passesBoth(candidate, s = STRATEGY) {
+  return passesAgree(candidate, s.agreePct) && ltrUpper(candidate) === true;
+}
+
+/**
+ * その日の「両方使う形」の要約。rows はその日の候補、signal はその日の strategySignal。
+ *   available  その日の候補にランキング学習の値があるか（無い日は数えない）
+ *   both       今の規則を満たした候補（signal.passed）のうち、ランキング学習が上半分のもの（並びは passed のまま）
+ */
+export function bothSummary(rows, signal) {
+  const list = Array.isArray(rows) ? rows : [];
+  const passed = signal?.passed ?? [];
+  const available = list.length > 0 && list.every((c) => ltrUpper(c) !== null);
+  return { available, both: available ? passed.filter((c) => ltrUpper(c) === true) : [], nPassed: passed.length };
+}
+
+/**
  * その日の発火数の帯。発火数だけで決める（2026-10-12 からは発火の数では見送らない。skipBreaks = 1）。
  *   strong  20件以上（本命）/ ok  8〜19件 / quiet  1〜7件（発火が少ない日。買うが件数が少ないと添える）/ none  0件
  * 地合いの条件は足さない（発火15件以上の日は100%が TOPIX 200日線より上で、

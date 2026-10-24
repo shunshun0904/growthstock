@@ -366,6 +366,71 @@ class References(unittest.TestCase):
         self.assertEqual((st1["taken"], st1["done"]), (2, 1))
 
 
+class BothUse(unittest.TestCase):
+    """両方使う形（参考。今の規則 かつ その日の中でランキング学習が上半分。■7）。画面の passesBoth と同じ判定。"""
+
+    def test_live_rows_read_ltr(self):
+        def cand(code, upper=None, day=None):
+            c = {"date": "2026-10-26", "jqCode": f"{code}0", "code": code, "name": code, "score": 0.5,
+                 "byModel": {a: {"pctHistorical": 96} for a in L.BOOST}}
+            if upper is not None:
+                c["ltr"] = {"upper": upper, "dayPct": day, "dayRank": 1, "nDay": 3}
+            return c
+        vers = [{"sha": "a" * 40, "committed": pd.Timestamp("2026-10-26 10:00", tz="UTC"),
+                 "data": {"model": {}, "candidates": [cand("1111", True, 100.0), cand("2222", False, 0.0),
+                                                      cand("3333")]}}]
+        r = L.live_rows(vers, [dt.date(2026, 10, 26), dt.date(2026, 10, 27)]).set_index("code")
+        self.assertEqual(r.loc["1111", "ltr_upper"], 1.0)
+        self.assertEqual(r.loc["2222", "ltr_upper"], 0.0)
+        self.assertEqual(r.loc["1111", "ltr_day"], 100.0)
+        self.assertTrue(np.isnan(r.loc["3333", "ltr_upper"]))
+        self.assertEqual(L.col_start(r.reset_index(), "ltr_upper"), pd.Timestamp("2026-10-26"))
+        self.assertIsNone(L.col_start(r.reset_index().iloc[0:0], "ltr_upper"))
+
+    def test_decide_with_day_col(self):
+        d1 = cands("2026-10-26", [(99, 99, 99), (98, 98, 98), (97, 97, 97), (50, 50, 50)],
+                   scores=[0.9, 0.8, 0.7, 0.6]).assign(ltr_upper=[0.0, 1.0, 1.0, 1.0])
+        r, days, picks = L.decide(d1, day_col="ltr_upper")
+        self.assertEqual(sorted(r.loc[r["passed"], "Code"]), ["10010", "10020"])
+        self.assertEqual(picks["Code"].tolist(), ["10010", "10020"])       # 両方使う形の中で最小の百分位の順
+        self.assertEqual(picks["rank"].tolist(), [1, 2])
+        self.assertTrue(bool(days["buy"].iloc[0]))
+        self.assertNotIn("_missing", r.columns)
+        # 今の規則だけなら上位2件は 99 と 98（ランキング学習は見ない）
+        _, _, rp = L.decide(d1)
+        self.assertEqual(rp["Code"].tolist(), ["10000", "10010"])
+        # ランキング学習の順位が欠けた候補が1件でもあれば判定できない（買わない）
+        d2 = d1.assign(ltr_upper=[1.0, 1.0, np.nan, 0.0])
+        _, days2, picks2 = L.decide(d2, day_col="ltr_upper")
+        self.assertFalse(bool(days2["buy"].iloc[0]))
+        self.assertIn("ランキング学習の順位", days2["verdict"].iloc[0])
+        self.assertEqual(int(days2["n_missing"].iloc[0]), 1)
+        # 列ごと無ければ全部欠け
+        _, days3, _ = L.decide(d1.drop(columns="ltr_upper"), day_col="ltr_upper")
+        self.assertEqual(int(days3["n_missing"].iloc[0]), 4)
+
+    def test_print_both(self):
+        import contextlib
+        import io
+        start = pd.Timestamp("2026-01-05")
+        bars = pd.concat([make_bars(f"{1000 + i}0", start, [100.0] * 40, [101.0] * 40,
+                                    [100.0 + i] * 40) for i in range(3)], ignore_index=True)
+        bar_days = sorted(pd.Timestamp(d) for d in bars["Date"].unique())
+        rows = cands(bar_days[0], [(99, 99, 99), (98, 98, 98), (97, 97, 97)],
+                     scores=[0.9, 0.8, 0.7]).assign(ltr_upper=[0.0, 1.0, 1.0], ltr_day=[0.0, 50.0, 100.0])
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            out = L.print_both(rows, bars, bar_days, complete_to=bar_days[-1])
+            none = L.print_both(rows.drop(columns=["ltr_upper"]), bars, bar_days, complete_to=bar_days[-1])
+        self.assertIsNone(none)
+        self.assertEqual(out["start"], str(bar_days[0].date()))
+        self.assertEqual((out["both"]["picks"], out["rule"]["picks"]), (2, 2))
+        # 両方使う形は 98・97 を買い（+1%・+2%）、今の規則は 99・98（+0%・+1%）
+        self.assertAlmostEqual(out["both"]["mean"], 1.5)
+        self.assertAlmostEqual(out["rule"]["mean"], 0.5)
+        self.assertIn("両方使う形", buf.getvalue())
+
+
 class CompleteOnly(unittest.TestCase):
     def test_open_and_recent_trades_excluded(self):
         """+20% に早く届いた最近の取引を入れると勝ち側に偏るので数えない。"""

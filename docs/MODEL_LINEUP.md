@@ -264,3 +264,14 @@ Spearman 相関 / 上位10%の Jaccard 重複。16,431件。
   出さない（モデル別の表は 1.2σ / 1.5σ の2行、スコアの色の物差しも8本、並べているモデルの一覧も8本）。「上位10%と見たモデル」の
   1.5σ の数は画面で 1.5σ の4本の百分位から数え直す
 - Release の 1.8σ のモデル・out-of-fold（`*_k18_model.joblib` / `*_k18_oof.parquet`）は消していない（読まないだけ）
+
+## ランキング学習を脇に置く（2026-10-24。並べて見るだけ）
+
+運用者の選択「まず並べて見る」（docs/MODEL_ADOPTION_RULES.md §78-9）。実験114 の L（LGBMRanker。同じ日の候補の中で、翌営業日の
+寄りで買い20営業日目の終値で売った収益の順番を学ぶ）を `research/ltr.py` / `research/train_ltr.py` で週次に学習し、毎日の候補の
+その日の中の順位を出す。**モデル別の表（8本）・合意・一致度・選定の規則には入れない**（分類ではなく確率を出さないので、ほかの
+モデルと同じ百分位の表に並べると読み違える）。画面では今日の戦略の「両方使う形（参考）」と、候補の印（紫・灰）だけに出す。
+
+- 置き場は `research/model/models/ltr/`（Release の `ltr_model.joblib` / `ltr_oof.parquet`、git の `meta.json`）。
+  `models.LINEUP` / `available()` には含めない（`predict_daily.attach_ltr` が別に読む）
+- 木の形は `research/ltr_params.json`（実験114 の探索の結果）。毎週は探索しない

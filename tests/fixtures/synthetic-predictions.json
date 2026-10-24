@@ -199,7 +199,15 @@
    "nextEarnQuarter": "2Q",
    "nextEarnDays": 14,
    "nextEarnTradingDays": 7,
-   "daysSinceDisc": 74
+   "daysSinceDisc": 74,
+   "ltr": {
+    "score": 0.2,
+    "dayPct": 50.0,
+    "dayRank": 3,
+    "nDay": 5,
+    "upper": true,
+    "pctHistorical": null
+   }
   },
   {
    "code": "1699",
@@ -395,7 +403,15 @@
    "nextEarnQuarter": null,
    "nextEarnDays": null,
    "nextEarnTradingDays": null,
-   "daysSinceDisc": null
+   "daysSinceDisc": null,
+   "ltr": {
+    "score": 0.0,
+    "dayPct": 0.0,
+    "dayRank": 5,
+    "nDay": 5,
+    "upper": false,
+    "pctHistorical": null
+   }
   },
   {
    "code": "1671",
@@ -591,7 +607,15 @@
    "nextEarnQuarter": null,
    "nextEarnDays": null,
    "nextEarnTradingDays": null,
-   "daysSinceDisc": null
+   "daysSinceDisc": null,
+   "ltr": {
+    "score": 0.1,
+    "dayPct": 25.0,
+    "dayRank": 4,
+    "nDay": 5,
+    "upper": false,
+    "pctHistorical": null
+   }
   },
   {
    "code": "9434",
@@ -787,7 +811,15 @@
    "nextEarnQuarter": "2Q",
    "nextEarnDays": 55,
    "nextEarnTradingDays": 36,
-   "daysSinceDisc": 43
+   "daysSinceDisc": 43,
+   "ltr": {
+    "score": 0.4,
+    "dayPct": 100.0,
+    "dayRank": 1,
+    "nDay": 5,
+    "upper": true,
+    "pctHistorical": null
+   }
   },
   {
    "code": "9082",
@@ -975,7 +1007,15 @@
    "nextEarnQuarter": null,
    "nextEarnDays": null,
    "nextEarnTradingDays": null,
-   "daysSinceDisc": 120
+   "daysSinceDisc": 120,
+   "ltr": {
+    "score": 0.3,
+    "dayPct": 75.0,
+    "dayRank": 2,
+    "nDay": 5,
+    "upper": true,
+    "pctHistorical": null
+   }
   }
  ],
  "model": {
@@ -1991,5 +2031,15 @@
    "V": 0.3285
   }
  },
- "_fixture": "tests/fixtures/synthetic-predictions.json（合成データ）"
+ "_fixture": "tests/fixtures/synthetic-predictions.json（合成データ）",
+ "ltr": {
+  "algo": "ltr",
+  "name": "ランキング学習",
+  "short": "LTR",
+  "note": "テスト用",
+  "trainedAt": "2026-09-10T00:00:00",
+  "nOof": 0,
+  "dayUpper": 50.0,
+  "oofMetrics": {}
+ }
 }

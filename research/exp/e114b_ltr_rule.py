@@ -93,7 +93,9 @@ SLOTS = LT.SLOTS               # 同時に持つ銘柄（3）
 BUSY = LT.PREV_SKIP_BREAKS     # 発火8件以上の日
 BAD = E.BAD
 RET, HIT, HITDAY, R20 = E.RET, E.HIT, E.HITDAY, E.R20
-PROD_OOF = {"lgbm": "oof.parquet", "xgb": "xgb_oof.parquet", "cat": "cat_oof.parquet"}
+PROD_OOF = {"lgbm": "oof.parquet", "xgb": "xgb_oof.parquet", "cat": "cat_oof.parquet",
+            # 本番の脇に置いたランキング学習（research/train_ltr.py。運用者の選択「まず並べて見る」2026-10-24）
+            "ltr": "ltr_oof.parquet"}
 RULES = (("R0", "今の規則（1.2σ の3本 95以上）"), ("L95", "ランキング学習 95以上"),
          ("R0L", "今の規則 かつ ランキング学習 50以上"), ("R0D", "今の規則 かつ その日の中でランキング学習が上半分"),
          ("LN", "今の規則と同じ件数をランキング学習の上から"))
@@ -598,6 +600,37 @@ def quick_main(shifts: Sequence[int]) -> int:
     return 0
 
 
+def check_ltr(ltr_params_path: str | None = None) -> int:
+    """
+    本番の脇に置いたランキング学習（research/train_ltr.py が Release に上げた ltr_oof.parquet と research/ltr_params.json）が、
+    実験114 の L（種42・ずらし0。実験114b で確かめたもの）と同じかを確かめる（docs/MODEL_ADOPTION_RULES.md §78-9）。
+    木の形がそっくり同じで、同じデータなら、out-of-fold のスコアは全行で一致するはず。一致しなければ 1 を返す。
+    """
+    import ltr as LTR
+
+    cols = F.columns(F.DEFAULT_PRESET)
+    if not os.path.exists(E.PARAMS_PATH):
+        raise SystemExit(f"実験114 の探索の結果が無い（{E.PARAMS_PATH}）")
+    with open(E.PARAMS_PATH, encoding="utf-8") as fh:
+        store = json.load(fh)
+    rec = LTR.load_params(ltr_params_path or LTR.PARAMS_PATH)
+    same_params = rec.get("params") == store["L"]["params"]
+    log(f"[確かめ] research/ltr_params.json の木の形が実験114 の L と{'同じ' if same_params else '違う'}"
+        f"（鍵 {len(rec.get('params') or {})}個）・列の指紋 {'一致' if not LTR.params_mismatch(rec, cols) else '不一致'}")
+    full, cutoff, chk = E.load_frame(cols)
+    df = full[full["label"].notna()].reset_index(drop=True)
+    lo = E.oof_arm(df, cols, "L", store["L"]["params"], 0, (L_SEED,))
+    c = prod_check(lo, LTR.NAME)
+    if not c["found"]:
+        log(f"[確かめ] 本番のランキング学習の out-of-fold（{PROD_OOF[LTR.NAME]}）が置き場に無い。先に Retrain Weekly（only=ltr）を回す")
+        return 1
+    ok = same_params and c["matched"] == c["ours"] == c["prod"] and c["same_share"] == 1.0
+    log(f"[確かめ] ランキング学習 本番の out-of-fold 対 実験114 の L（種{L_SEED}・ずらし0）: 突き合わせ {c['matched']:,} / "
+        f"{c['ours']:,} 行（本番 {c['prod']:,}行）・差の最大 {c['max_diff']:.2e}・一致 {c['same_share'] * 100:.2f}% → "
+        f"{'同じもの' if ok else '違う（木の形・データ・作りのどれかがずれている）'}")
+    return 0 if ok else 1
+
+
 # --------------------------------------------------------------------------- #
 
 def main(argv=None) -> int:
@@ -605,7 +638,11 @@ def main(argv=None) -> int:
     ap.add_argument("--shifts", default="0,2,4")
     ap.add_argument("--quick", action="store_true",
                     help="速報: 1.2σ の3本の代わりに基準モデル1本（実験114 の C）で両方使う形を確かめる")
+    ap.add_argument("--check-ltr", action="store_true",
+                    help="本番の脇に置いたランキング学習が実験114 の L（種42・ずらし0）と同じかを確かめる（§78-9）")
     args = ap.parse_args(argv)
+    if args.check_ltr:
+        return check_ltr()
     shifts = [int(x) for x in args.shifts.split(",") if x.strip()]
     import warnings
     from scipy.stats import ConstantInputWarning

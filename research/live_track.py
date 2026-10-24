@@ -48,7 +48,9 @@ tests/test_live_track.py が両者を突き合わせる）
 参考に並べるもの（集計だけ）
   以前の画面の規則（PREV_RULES: 1.5σ の3本がすべて95以上 / 1.2σ の3本がすべて90以上・発火8件以上の日。どちらも3枠）を
   その規則の百分位が予測に入った日から、月2件の先着（今の規則を満たした候補を月ごとに先着2件。運用者の買い方）を今の規則の
-  記録の始まりから。公開ログには買値（日足の生の値）を出さない
+  記録の始まりから。両方使う形（今の規則を満たし、かつその日の候補の中でランキング学習が上半分。上位2件・3枠。運用者の選択
+  「まず並べて見る」2026-10-24。docs/MODEL_ADOPTION_RULES.md §78-9）を、ランキング学習の順位が予測に入った日から、同じ期間の
+  今の規則と並べて。公開ログには買値（日足の生の値）を出さない
 
 使い方
   python3 research/live_track.py                  # 集計して表示
@@ -207,7 +209,8 @@ def live_rows(versions: Sequence[dict], days: Sequence[dt.date]) -> pd.DataFrame
     日付ごとに「判断に使えた版」を選び、その版の候補を1行ずつにする。
 
     列: Date, Code, code, name, score, p_<モデル>（PCT_MODELS。1.2σ の3本と 1.5σ の3本。予測に無ければ NaN）,
-        sha, committed, trained, late
+        ltr_upper（ランキング学習がその日の中で上半分なら 1・下半分なら 0。予測に無ければ NaN。2026-10-24 から）,
+        ltr_day（その日の中の百分位 0〜100）, sha, committed, trained, late
     """
     by_date: Dict[str, List[int]] = {}
     for i, v in enumerate(versions):
@@ -237,6 +240,11 @@ def live_rows(versions: Sequence[dict], days: Sequence[dt.date]) -> pd.DataFrame
                 if a == "lgbm" and p is None:
                     p = c.get("pctHistorical")
                 rec[f"p_{a}"] = _pct(p)
+            # ランキング学習（参考。predict_daily.attach_ltr）。上半分の印は丸める前の百分位で決めたもの（画面と同じ）
+            lt = c.get("ltr") or {}
+            up = lt.get("upper")
+            rec["ltr_upper"] = float(up) if isinstance(up, bool) else np.nan
+            rec["ltr_day"] = _pct(lt.get("dayPct"))
             rows.append(rec)
     return pd.DataFrame(rows)
 
@@ -252,7 +260,7 @@ def breaks_txt(min_break: int) -> str:
 
 def decide(rows: pd.DataFrame, *, agree: float = AGREE_PCT,
            min_break: int = SKIP_BREAKS, top_k: int = TOP_K,
-           models: Sequence[str] = RULE_MODELS):
+           models: Sequence[str] = RULE_MODELS, day_col: Optional[str] = None):
     """
     画面の strategySignal と同じ判断を、日ごとにまとめて出す。
 
@@ -261,6 +269,8 @@ def decide(rows: pd.DataFrame, *, agree: float = AGREE_PCT,
     models: 合議に使うモデル（既定は画面と同じ RULE_MODELS = 1.2σ の3本。2026-10-12〜10-23 は K15 の3本で線 95、
           それより前は BOOST の3つで線 90。過去の実験は使ったモデル・線を明示して呼ぶ。実験59 は ALL5 の5つでも呼ぶ）。
           p_min はこのモデルの百分位の最小。並べ替えの同点は LightGBM（本番）のスコア順のまま（画面と同じ）。
+    day_col: 指定すると、その列が 1 の行だけ基準を満たしたことにする（両方使う形のランキング学習の上半分 ltr_upper。
+          画面の passesBoth と同じ）。その列が無い行は、百分位が欠けた行と同じく「判定できない」に数える。
     戻り値: (rows に p_min / n_break / passed / rank を足したもの,
              1日1行の判断, 買う銘柄)
     """
@@ -273,6 +283,12 @@ def decide(rows: pd.DataFrame, *, agree: float = AGREE_PCT,
     r["p_min"] = r[pc].min(axis=1, skipna=False)
     r["n_break"] = r.groupby("Date")["Code"].transform("size")
     r["passed"] = (r["p_min"] >= agree).fillna(False).astype(bool)
+    r["_missing"] = r["p_min"].isna()
+    if day_col is not None:
+        if day_col not in r:
+            r[day_col] = np.nan
+        r["passed"] = r["passed"] & (r[day_col] == 1).to_numpy()
+        r["_missing"] = r["_missing"] | r[day_col].isna()
     r = r.sort_values(["Date", "p_min", "score"], ascending=[True, False, False],
                       na_position="last").reset_index(drop=True)
     r["rank"] = np.nan
@@ -286,11 +302,12 @@ def decide(rows: pd.DataFrame, *, agree: float = AGREE_PCT,
     for d, g in r.groupby("Date", sort=True):
         n = len(g)
         n_pass = int(g["passed"].sum())
-        n_missing = int(g["p_min"].isna().sum())
+        n_missing = int(g["_missing"].sum())
         if n < min_break:
             verdict = f"見送り（発火{n}件）"
         elif n_missing:
-            verdict = f"判定できない（{len(models)}モデルの百分位が無い）"
+            verdict = (f"判定できない（{len(models)}モデルの百分位" + ("かランキング学習の順位" if day_col else "")
+                       + "が無い）")
         elif not n_pass:
             verdict = "買わない（基準を満たす銘柄なし）"
         else:
@@ -299,7 +316,7 @@ def decide(rows: pd.DataFrame, *, agree: float = AGREE_PCT,
                      "n_missing": n_missing, "verdict": verdict,
                      "buy": n >= min_break and n_pass > 0 and not n_missing,
                      "strong": n >= STRONG_BREAKS})
-    return r, pd.DataFrame(days), picks
+    return r.drop(columns="_missing"), pd.DataFrame(days), picks.drop(columns="_missing")
 
 
 # ---------------------------------------------------------------- #
@@ -687,6 +704,14 @@ def rule_start(rows: pd.DataFrame, models: Sequence[str] = RULE_MODELS):
     return pd.Timestamp(rows.loc[ok, "Date"].min()) if ok.any() else None
 
 
+def col_start(rows: pd.DataFrame, col: str):
+    """その列の値がある候補が初めて出た日（ランキング学習の順位 ltr_upper なら 2026-10-24 の予測から）。無ければ None。"""
+    if rows.empty or col not in rows.columns:
+        return None
+    ok = rows[col].notna()
+    return pd.Timestamp(rows.loc[ok, "Date"].min()) if ok.any() else None
+
+
 def monthly_first(rows: pd.DataFrame, n: int = 2) -> pd.DataFrame:
     """
     月2件の先着（運用者の買い方）: 規則を満たした候補（decide の passed）を、月ごとに選定日の早い順（同じ日は p_min の
@@ -753,6 +778,32 @@ def print_reference(prev_live: pd.DataFrame, lrows: pd.DataFrame, bars: pd.DataF
         print(f"  {lrows['Date'].min().date()}〜{lrows['Date'].max().date()}: 選んだ {st['picks']}件。20営業日たった "
               f"{st['done']}件: 1取引 {_f(st['mean'])}%（中央 {_f(st['median'])}）・勝率 {_f(st['win'], '{:.0f}')}%・"
               f"+{TAKE_PROFIT:g}%到達 {_f(st['hit'], '{:.0f}')}%")
+    out["both"] = print_both(prev_live, bars, bar_days, complete_to)
+    return out
+
+
+def print_both(live: pd.DataFrame, bars: pd.DataFrame, bar_days: Sequence, complete_to) -> Optional[dict]:
+    """
+    ■7 両方使う形（今の規則を満たし、かつその日の候補の中でランキング学習が上半分。上位2件・3枠）を、ランキング学習の
+    順位が予測に入った日から、同じ期間の今の規則と並べる（集計だけ）。運用者の選択「まず並べて見る」（2026-10-24。§78-9）。
+    買いの規則には使わない。記録が無ければ None。
+    """
+    print(f"\n■ 7. 参考: 両方使う形（{RULE_JA}がすべて{AGREE_PCT:g}以上、かつその日の候補の中でランキング学習が上半分。"
+          f"上位{TOP_K}件・{SLOTS}枠。ランキング学習の順位が予測に入った日から。買いの規則には使わない）")
+    start = col_start(live, "ltr_upper")
+    if start is None:
+        print("  （記録が無い）")
+        return None
+    rows = live[live["Date"] >= start]
+    out = {"start": str(start.date()), "end": str(rows["Date"].max().date())}
+    for key, name, kw in (("both", "両方使う形", {"day_col": "ltr_upper"}), ("rule", "同じ期間の今の規則", {})):
+        _, days, picks = decide(rows, **kw)
+        st = ref_summary(forward(bars, picks), bar_days, complete_to, slots=SLOTS)
+        st["buyDays"] = int(days["buy"].sum())
+        out[key] = st
+        print(f"  {name:<10}{out['start']}〜{out['end']}: 買う日 {st['buyDays']}日・選んだ {st['picks']}件 → 枠で買えた "
+              f"{st['taken']}件。20営業日たった {st['done']}件: 1取引 {_f(st['mean'])}%（中央 {_f(st['median'])}）・"
+              f"勝率 {_f(st['win'], '{:.0f}')}%・+{TAKE_PROFIT:g}%到達 {_f(st['hit'], '{:.0f}')}%")
     return out
 
 
@@ -982,7 +1033,7 @@ def main(argv=None) -> int:
     else:
         print(f"\n  (b) 取引の成績: 選定日から{HOLD}営業日たった期間がまだ無いので比べない")
 
-    print_reference(prev_live, lrows, bars, bar_days, complete_to)
+    ref = print_reference(prev_live, lrows, bars, bar_days, complete_to)
 
     print("\n■ 注意")
     print("  ・取引が少ないうちは、どの数字も幅が広い。1取引の標準偏差は約9pt あるので、"
@@ -1008,7 +1059,9 @@ def main(argv=None) -> int:
                             "buyDays": int(ldays["buy"].sum()),
                             "trades": int(len(t_live)), "tradesComplete": int(len(t_done)),
                             **{k: v for k, v in _flat(lst).items() if isinstance(v, num)}},
-                   "oof": {k: v for k, v in _flat(whole).items() if isinstance(v, num)}}
+                   "oof": {k: v for k, v in _flat(whole).items() if isinstance(v, num)},
+                   # 参考の記録（■5〜■7。件数と成績の集計だけ）
+                   "reference": ref}
         with open(args.json, "w", encoding="utf-8") as fh:
             json.dump(summary, fh, ensure_ascii=False, indent=1, default=float)
     return 0

@@ -33,7 +33,7 @@ on:
         options: ['yes', 'no']
         default: 'yes'
       only:
-        description: '画面に並べる追加モデルのうち、これだけ探索・学習する（例: lgbm_k15,xgb_k15,cat_k15,logit_k15。空なら 1.2σ の4本。1.5σ の4本は指定したときだけ。1.8σ の4本は 2026-10-24 に外した。指定すると基準モデル（1.2σ の LightGBM）は触らない）'
+        description: '画面に並べる追加モデルのうち、これだけ探索・学習する（例: lgbm_k15,xgb_k15,cat_k15,logit_k15。空なら 1.2σ の4本とランキング学習。1.5σ の4本は指定したときだけ。ltr はランキング学習だけ（探索はしない）。1.8σ の4本は 2026-10-24 に外した。指定すると基準モデル（1.2σ の LightGBM）は触らない）'
         required: false
         default: ''
 
@@ -159,6 +159,11 @@ jobs:
             echo "only の形が不正: $ONLY"; exit 1
           fi
           echo "only=$ONLY" >> "$GITHUB_OUTPUT"
+          # ランキング学習（ltr。research/train_ltr.py）は追加モデルの探索・学習とは別のステップ。only から ltr を除いたものを
+          # 追加モデルの対象（models）にし、ltr は only が空か ltr を含むときだけ学習する
+          MODELS=$(echo ",$ONLY," | sed 's/,ltr,/,/g; s/^,//; s/,$//')
+          echo "models=$MODELS" >> "$GITHUB_OUTPUT"
+          if [ -z "$ONLY" ] || [[ ",$ONLY," == *",ltr,"* ]]; then echo "ltr=yes" >> "$GITHUB_OUTPUT"; else echo "ltr=no" >> "$GITHUB_OUTPUT"; fi
           if [ -n "$ONLY" ]; then echo "対象を限定: $ONLY（基準モデルは触らない）"; else echo "全モデル"; fi
 
       - name: Tune
@@ -189,7 +194,8 @@ jobs:
       # 持ち回すのは、同じ週にやり直したときの保険（下のタイムアウトや
       # コンテナ再起動で落ちた場合、完了済みの試行から再開できる）。
       - name: Tune extra models (opt-in)
-        if: inputs.tune == 'yes'
+        # only が ltr だけの回（ランキング学習だけ）は追加モデルを探索しない
+        if: inputs.tune == 'yes' && (steps.scope.outputs.only == '' || steps.scope.outputs.models != '')
         # 実測: 2026-09-13 の週次実行で127分（試行記録から見積もった86分より
         # 4割長い。CI は手元より遅く、5モデルぶんの初回探索が丸ごと走った）。
         # 150分だと余裕が23分しかなく、データが増えれば足りなくなる。
@@ -202,7 +208,7 @@ jobs:
         timeout-minutes: 270
         continue-on-error: true
         env:
-          ONLY: ${{ steps.scope.outputs.only }}
+          ONLY: ${{ steps.scope.outputs.models }}
         run: |
           # only があればそのモデルだけ（名前はカンマ区切り → 引数）。空なら 1.2σ の追加モデル（xgb / cat / logit）。
           # ラベル違いのモデル（models.ACTIVE_VARIANTS。1.5σ × 4学習器）は既定に入れない。土曜に Routine が
@@ -218,16 +224,27 @@ jobs:
       # ここが丸ごと失敗しても日次予測は動き続ける。
       - name: Train extra models
         # 4モデル × 10窓の out-of-fold ＋ 全期間モデル。実測143秒
+        if: steps.scope.outputs.only == '' || steps.scope.outputs.models != ''
         timeout-minutes: 30
         continue-on-error: true
         env:
-          ONLY: ${{ steps.scope.outputs.only }}
+          ONLY: ${{ steps.scope.outputs.models }}
         run: |
           if [ -n "$ONLY" ]; then
             python3 research/train_multi.py --models "$ONLY" 2>&1 | tee -a retrain.log
           else
             python3 research/train_multi.py 2>&1 | tee -a retrain.log
           fi
+
+      # ランキング学習（research/train_ltr.py。research/model/models/ltr/ に置く）。買いの規則には使わず、画面と実運用の追跡に
+      # 「両方使う形」（今の規則 かつ その日の中でランキング学習が上半分）を参考に並べるためのもの（運用者の選択「まず並べて見る」
+      # 2026-10-24。docs/MODEL_ADOPTION_RULES.md §78-9）。木の形は research/ltr_params.json（実験114 の探索）で、毎週は探索しない。
+      # 列の指紋が違えば学習しない（前回のモデルのまま）。失敗しても日次予測は動く（ランキング学習を出さないだけ）
+      - name: Train ranking model
+        if: steps.scope.outputs.ltr == 'yes'
+        timeout-minutes: 30
+        continue-on-error: true
+        run: python3 research/train_ltr.py 2>&1 | tee -a retrain.log
 
       # 1モデルの失敗で他を止めない作りにしたぶん、静かに欠けたまま
       # 運用が続くおそれがある。どれがいつ学習されたのかを毎週要約に出す

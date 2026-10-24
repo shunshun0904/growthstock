@@ -323,6 +323,27 @@ class TestQuick(unittest.TestCase):
         self.assertEqual(calls, [("quick", [0, 2]), ("quick", [0, 2, 4]), ("main", [])])
 
 
+class TestCheckLtr(unittest.TestCase):
+    """本番の脇に置いたランキング学習（Release の ltr_oof.parquet）と実験114 の L の突き合わせ（§78-9）。"""
+
+    def test_prod_check_reads_ltr_oof(self):
+        self.assertEqual(RB.PROD_OOF["ltr"], "ltr_oof.parquet")
+        o = pd.DataFrame({"Code": ["1", "2"], "Date": pd.to_datetime(["2024-01-04"] * 2), "score": [0.3, -0.2]})
+        with tempfile.TemporaryDirectory() as tmp:
+            o.to_parquet(os.path.join(tmp, "ltr_oof.parquet"), index=False)
+            c = RB.prod_check(o, "ltr", data_dir=tmp)
+        self.assertEqual((c["matched"], c["same_share"]), (2, 1.0))
+
+    def test_entry(self):
+        orig = RB.check_ltr
+        try:
+            RB.check_ltr = lambda ltr_params_path=None: 3
+            self.assertEqual(RB.main(["--check-ltr"]), 3)
+            self.assertEqual(E.main(["--check-ltr"]), 3)
+        finally:
+            RB.check_ltr = orig
+
+
 class TestOofTree(unittest.TestCase):
     def test_rows_match_experiment_114(self):
         rng = np.random.default_rng(0)
