@@ -10,6 +10,8 @@
 - 3枠の形: 今の並び（3本の最小・同点は基準モデルのスコア）とランキング学習の並び、上位2件まで、枠が埋まれば見送る
 - 本番の out-of-fold との突き合わせ・判定（すべてのずらし方で R0D（既定）が上かつ大負けが少ない。LN でも同じ判定ができる）
 - 本番の3本の out-of-fold は、本番と同じ行（ラベルがある行）で学習し、実験114 と同じ行を採点する
+- 速報（--quick）: 基準モデル1本＋ランキング学習で、R0 が基準モデルの95以上になり、ほかの表は同じ作り。実験114 の集計との
+  突き合わせ・置き場にある種の数・実験114 の --quick / --rule からの呼び出し
 
   python3 tests/test_e114b_ltr_rule.py
 """
@@ -230,6 +232,95 @@ class TestChecks(unittest.TestCase):
         self.assertGreater(cd["lgbm"]["top_days"], cd["lgbm"]["bottom_days"])
         # 候補が少ない日は数えない
         self.assertEqual(RB.cross_date(ft[ft["Code"].isin(["3000", "3001"])]), {})
+
+
+class TestQuick(unittest.TestCase):
+    """速報: 基準モデル1本（lgbm の名前）＋ランキング学習で同じ買い方・同じ比べ方をする。"""
+
+    def setUp(self):
+        w, self.folds = synth_wide()
+        self.w = w.drop(columns=["score_xgb", "score_cat"])
+        self.ft = RB.forward_frame(self.w, self.folds, RB.QUICK_MODELS, RB.QUICK_TREES)
+
+    def test_forward_uses_one_classifier(self):
+        self.assertEqual(RB.QUICK_MODELS, ("lgbm", "ltr"))
+        self.assertNotIn("pct_xgb", self.ft.columns)
+        np.testing.assert_array_equal(self.ft["min_t3"].to_numpy(), self.ft["pct_lgbm"].to_numpy())
+        m = RB.rule_masks(self.ft)
+        r0 = self.ft["pct_lgbm"].to_numpy() >= 95
+        np.testing.assert_array_equal(m["R0"], r0)
+        np.testing.assert_array_equal(m["R0D"], r0 & (self.ft["day_pct_ltr"].to_numpy() >= 0.5))
+        # 4本のときと同じ行・同じランキング学習の百分位（百分位はモデルごとに付ける）
+        w4, _ = synth_wide()
+        ft4 = RB.forward_frame(w4, self.folds)
+        np.testing.assert_array_equal(ft4["pct_ltr"].to_numpy(), self.ft["pct_ltr"].to_numpy())
+        np.testing.assert_array_equal(ft4["pct_lgbm"].to_numpy(), self.ft["pct_lgbm"].to_numpy())
+
+    def test_wide_two_models(self):
+        base = self.w[["Code", "Date", "window"]].rename(columns={"window": "fold"})
+        parts = {a: base.assign(score=self.w[f"score_{a}"]) for a in RB.QUICK_MODELS}
+        df = self.w.drop(columns=[f"score_{a}" for a in RB.QUICK_MODELS] + ["window"])
+        out = RB.wide(parts, df, RB.QUICK_MODELS)
+        self.assertEqual(len(out), len(self.w))
+        self.assertNotIn("score_xgb", out.columns)
+        parts["ltr"] = parts["ltr"].iloc[1:]
+        with self.assertRaises(SystemExit):
+            RB.wide(parts, df, RB.QUICK_MODELS)
+
+    def test_report_shift(self):
+        import contextlib
+        import io
+        bar_days = list(pd.bdate_range("2021-01-01", "2023-12-29"))
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            st, slots = RB.report_shift(self.ft, bar_days, RB.QUICK_RULES, RB.QUICK_MODELS, "基準モデルの並び")
+            st4, _ = RB.report_shift(RB.forward_frame(synth_wide()[0], self.folds), bar_days)
+        text = buf.getvalue()
+        self.assertIn("基準モデル 95以上の中をランキング学習で分ける", text)
+        self.assertIn("R0・基準モデルの並び", text)
+        for key, _ in RB.QUICK_RULES:
+            self.assertIn(key, st)
+        self.assertEqual(set(st["cross_date"]), {"lgbm", "ltr"})
+        self.assertEqual(set(st4["cross_date"]), set(RB.MODELS4))
+        self.assertEqual(st["R0"]["n"], int((self.ft["pct_lgbm"] >= 95).sum()))
+        self.assertEqual(st["R0_day_upper"]["n"] + st["R0_day_lower"]["n"], st["R0"]["n"])
+        self.assertEqual(st["R0D"]["n"], st["R0_day_upper"]["n"])
+        self.assertEqual(len(slots), 8)
+
+    def test_check_114_and_cached(self):
+        o = self.w[["Code", "Date", "window", E.RET, E.HIT, E.R20, "label"]].rename(columns={"window": "fold"})
+        res = {"C": o.assign(score=self.w["score_lgbm"]), "L": o.assign(score=self.w["score_ltr"])}
+        top = {arm: E.top_within(x, 0.10) for arm, x in res.items()}
+        prev = {"shifts": {"0": {f"top10_{arm}": {"n": int(t["n"].sum()), "ret": float(t["ret"].mean())}
+                                 for arm, t in top.items()}}}
+        c = RB.check_114(res, prev, 0)
+        self.assertTrue(c["C"]["same"] and c["L"]["same"])
+        prev["shifts"]["0"]["top10_L"]["ret"] += 1e-6
+        self.assertFalse(RB.check_114(res, prev, 0)["L"]["same"])
+        self.assertFalse(RB.check_114(res, None, 0)["C"]["found"])
+        self.assertFalse(RB.check_114(res, prev, 2)["C"]["found"])
+        df = pd.DataFrame({"Code": ["1", "2"], "Date": pd.to_datetime(["2024-01-04"] * 2), E.RET: [0.1, 0.0],
+                           E.R20: [0.1, 0.0]})
+        params = {"learning_rate": 0.1}
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(RB.cached_seeds(df, FEATS, "C", params, 0, (42, 7), out_dir=tmp), 0)
+            tag = E.run_tag("C", params, FEATS, df)
+            pd.DataFrame({"x": [1]}).to_parquet(os.path.join(tmp, f"{E.PREFIX}_C_{tag}_sh0_s42.parquet"))
+            self.assertEqual(RB.cached_seeds(df, FEATS, "C", params, 0, (42, 7), out_dir=tmp), 1)
+            self.assertEqual(RB.cached_seeds(df, FEATS, "C", params, 2, (42, 7), out_dir=tmp), 0)
+
+    def test_entry_points(self):
+        calls = []
+        orig_q, orig_m = RB.quick_main, RB.main
+        try:
+            RB.quick_main = lambda shifts: calls.append(("quick", list(shifts))) or 7
+            self.assertEqual(RB.main(["--quick", "--shifts", "0,2"]), 7)
+            self.assertEqual(E.main(["--quick"]), 7)
+            RB.main = lambda argv=None: calls.append(("main", argv)) or 5
+            self.assertEqual(E.main(["--rule"]), 5)
+        finally:
+            RB.quick_main, RB.main = orig_q, orig_m
+        self.assertEqual(calls, [("quick", [0, 2]), ("quick", [0, 2, 4]), ("main", [])])
 
 
 class TestOofTree(unittest.TestCase):

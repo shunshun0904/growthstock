@@ -52,6 +52,7 @@
 
     exp=e114_ltr_retest.py  args="--trials 50 --shifts 0,2,4 --seeds 3"
     --skip-tune は e114_params.json が同じデータ・同じ列で作られていればそれを読む
+    --rule / --quick は実験114b（今の規則の形 / 基準モデル1本の速報）を回す（research/exp/e114b_ltr_rule.py）
 
 結果（2026-10-24、run 40070769689、f5d652a、実験の部分 62分。docs/MODEL_ADOPTION_RULES.md §78）
 ------------------------------------------------------------------
@@ -503,10 +504,12 @@ def main(argv=None) -> int:
     ap.add_argument("--skip-tune", action="store_true")
     ap.add_argument("--rule", action="store_true",
                     help="実験114b（今の規則の形で確かめる）を回す。実験114 の探索の結果と L の out-of-fold を同じ置き場から読む")
+    ap.add_argument("--quick", action="store_true",
+                    help="実験114b の速報（基準モデル1本＋ランキング学習で両方使う形）を回す。C と L の out-of-fold を同じ置き場から読む")
     args = ap.parse_args(argv)
-    if args.rule:
+    if args.rule or args.quick:
         import e114b_ltr_rule as RB
-        return RB.main([])
+        return RB.main(["--quick"] if args.quick else [])
     shifts = [int(x) for x in args.shifts.split(",") if x.strip()]
     seeds = SEEDS[:args.seeds]
     cols = F.columns(F.DEFAULT_PRESET)
