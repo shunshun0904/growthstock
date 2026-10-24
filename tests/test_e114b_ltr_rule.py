@@ -4,9 +4,11 @@
 
 - 本番の3本の木の形: 学習する列で探索したものでなければ止める（lgbm / xgb・cat それぞれ）
 - 4本の out-of-fold の行がそろわなければ止める。前向きの百分位は最初の2窓を外し、0〜100 に入る
-- 規則の印: R0 = 3本すべて95以上（百分位が無い行は満たさない）、L95、R0L、LN（窓ごとに R0 と同じ件数をランキング学習の上から）
+- 規則の印: R0 = 3本すべて95以上（百分位が無い行は満たさない）、L95、R0L、R0D（その日の中でランキング学習が上半分）、
+  LN（窓ごとに R0 と同じ件数をランキング学習の上から）
+- 日付をまたいだ力: 日ごとの平均百分位と日ごとの平均収益の順位相関が、日の水準を持つモデルで高く出る
 - 3枠の形: 今の並び（3本の最小・同点は基準モデルのスコア）とランキング学習の並び、上位2件まで、枠が埋まれば見送る
-- 本番の out-of-fold との突き合わせ・判定（すべてのずらし方で LN が上かつ大負けが少ない）
+- 本番の out-of-fold との突き合わせ・判定（すべてのずらし方で R0D（既定）が上かつ大負けが少ない。LN でも同じ判定ができる）
 - 本番の3本の out-of-fold は、本番と同じ行（ラベルがある行）で学習し、実験114 と同じ行を採点する
 
   python3 tests/test_e114b_ltr_rule.py
@@ -112,6 +114,16 @@ class TestForwardAndRules(unittest.TestCase):
                 top = g.sort_values("score_ltr", ascending=False).index[:n]
                 self.assertTrue(m["LN"][top].all())
 
+    def test_r0d_uses_rank_within_day(self):
+        m = RB.rule_masks(self.ft)
+        dp = self.ft["day_pct_ltr"].to_numpy()
+        np.testing.assert_array_equal(m["R0D"], m["R0"] & (dp >= 0.5))
+        for _, g in self.ft.groupby("Date"):
+            best = g["score_ltr"].idxmax()
+            worst = g["score_ltr"].idxmin()
+            self.assertAlmostEqual(self.ft.loc[best, "day_pct_ltr"], 1.0)
+            self.assertAlmostEqual(self.ft.loc[worst, "day_pct_ltr"], 0.0)
+
     def test_nan_percentile_does_not_pass(self):
         ft = self.ft.copy()
         ft.loc[0, "pct_xgb"] = np.nan
@@ -187,11 +199,37 @@ class TestChecks(unittest.TestCase):
             RB.wide(parts, df)
 
     def test_verdict(self):
-        good = {"R0": {"ret_w": 0.01, "bad_w": 0.10}, "LN": {"ret_w": 0.02, "bad_w": 0.08}}
-        bad = {"R0": {"ret_w": 0.02, "bad_w": 0.10}, "LN": {"ret_w": 0.01, "bad_w": 0.08}}
+        good = {"R0": {"ret_w": 0.01, "bad_w": 0.10}, "LN": {"ret_w": 0.02, "bad_w": 0.08},
+                "R0D": {"ret_w": 0.015, "bad_w": 0.09}}
+        bad = {"R0": {"ret_w": 0.02, "bad_w": 0.10}, "LN": {"ret_w": 0.01, "bad_w": 0.08},
+               "R0D": {"ret_w": 0.03, "bad_w": 0.10}}
+        self.assertEqual(RB.PRIMARY, "R0D")
         self.assertTrue(RB.verdict([{"shift": s, **good} for s in (0, 2, 4)])["pass"])
+        self.assertTrue(RB.verdict([{"shift": s, **good} for s in (0, 2, 4)], "LN")["pass"])
+        # R0D は大負けの割合が同じ（0.10）なので満たさない。LN は収益が下なので満たさない
         self.assertFalse(RB.verdict([{"shift": 0, **good}, {"shift": 2, **bad}])["pass"])
+        self.assertFalse(RB.verdict([{"shift": 0, **good}, {"shift": 2, **bad}], "LN")["pass"])
         self.assertFalse(RB.verdict([])["pass"])
+
+    def test_cross_date(self):
+        rng = np.random.default_rng(1)
+        days = pd.bdate_range("2023-01-02", periods=200)
+        rows = []
+        for d in days:
+            lvl = rng.normal()                       # その日の地合い（日の水準）
+            for j in range(6):
+                rows.append({"Date": d, "Code": f"{3000 + j}", "pct_lgbm": 50 + 15 * lvl + rng.normal(0, 5),
+                             "pct_xgb": rng.uniform(0, 100), "pct_cat": rng.uniform(0, 100),
+                             "pct_ltr": rng.uniform(0, 100), E.RET: 0.02 * lvl + rng.normal(0, 0.03),
+                             E.R20: 0.02 * lvl + rng.normal(0, 0.03)})
+        ft = pd.DataFrame(rows)
+        cd = RB.cross_date(ft)
+        self.assertEqual(cd["lgbm"]["days"], 200)
+        self.assertGreater(cd["lgbm"]["rho"], 0.5)
+        self.assertLess(abs(cd["ltr"]["rho"]), 0.3)
+        self.assertGreater(cd["lgbm"]["top_days"], cd["lgbm"]["bottom_days"])
+        # 候補が少ない日は数えない
+        self.assertEqual(RB.cross_date(ft[ft["Code"].isin(["3000", "3001"])]), {})
 
 
 class TestOofTree(unittest.TestCase):

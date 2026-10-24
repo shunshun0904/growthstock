@@ -20,17 +20,24 @@
 買い方（収益は今の売り方: 翌営業日の寄りで買い、+10% の指値、届かなければ20営業日目の終値）
   R0   今の規則: 1.2σ の3本の百分位がすべて95以上
   L95  ランキング学習の百分位が95以上
-  R0L  今の規則を満たし、かつランキング学習の百分位が50以上（上半分）
+  R0L  今の規則を満たし、かつランキング学習の百分位が50以上（上半分。日付をまたいだ百分位）
+  R0D  【判定】今の規則を満たし、かつその日の候補の中でランキング学習の順位が上半分（同じ日の中の百分位が 0.5 以上。候補が
+       1件の日は通る）。分類（3本）で日付をまたいで絞り、ランキング学習でその日の中の順番を付ける「両方使う形」
   LN   同じ件数: 窓ごとに R0 と同じ件数を、ランキング学習のスコアの上から取る
   ・それぞれの件数・平均収益（全件 / 窓の平均）・−10% 未満・+10% 到達・1件も無い月と、R0 との窓ごとの差
-  ・R0 の中を、ランキング学習の上半分 / 下半分に分けた平均収益（ランキング学習が今の規則の中で良し悪しを分けるか）
+  ・R0 の中を、ランキング学習の上半分 / 下半分に分けた平均収益（日付をまたいだ百分位で / その日の中の順位で）
+  ・日付をまたいだ力: 候補5件以上の日ごとに、4本それぞれの百分位の平均と、その日の候補の平均収益（今の売り方 / 20営業日目の
+    終値）の、日をまたいだ順位相関。日ごとの平均百分位の上位20% の日と下位20% の日の平均収益（運用者の見立て「その日の中の
+    ランキングは日付をまたいだ値上がりしやすさを踏まえていない」を数字で見る）
   ・3枠の形（同時に3銘柄まで・その日の上位2件・発火を問わない / 8件以上の日。実験87・88 の simulate）: R0 を今の並び
-    （3本の最小の百分位の順、同点は基準モデルのスコア）で / R0 をランキング学習のスコアの順で / L95 をランキング学習の順で、
-    の取引数・1取引の平均・資金全体の月の損益
+    （3本の最小の百分位の順、同点は基準モデルのスコア）で / R0 をランキング学習のスコアの順で / R0D を今の並びで / L95 を
+    ランキング学習の順で、の取引数・1取引の平均・資金全体の月の損益
 
-判定（回す前に決めたもの）
-  LN（同じ件数）が 0 / 2 / 4か月の3通りすべてで、R0 より平均収益（窓の平均）が高く、かつ −10% 未満の割合（窓の平均）が
-  低いとき「今の規則の形でも上回る」。満たしても規則を変えるかは運用者が決める
+判定（回す前に決めたもの。運用者の選択「両方使う形」2026-10-24）
+  R0D が 0 / 2 / 4か月の3通りすべてで、R0 より平均収益（窓の平均）が高く、かつ −10% 未満の割合（窓の平均）が低いとき
+  「両方使う形で今の規則を上回る」。LN で同じ判定をしたものも参考に並べる。満たしても規則を変えるかは運用者が決める
+  （最初は LN で判定する案だったが、回す前に運用者の指摘「その日の中での相対的なランキングだと、日付をまたいで見た場合に、
+  より値上げする確率が高い銘柄を踏まえたランキングではない」「両者は補完し合うものなので、両方使うのがベスト」を受けて変えた）
 
 公開ログには集計だけ（件数・平均・割合・木の形）。銘柄ごとの値は出さない。結果は research/_data/oof/e114b_*。
 
@@ -81,7 +88,13 @@ BAD = E.BAD
 RET, HIT, HITDAY, R20 = E.RET, E.HIT, E.HITDAY, E.R20
 PROD_OOF = {"lgbm": "oof.parquet", "xgb": "xgb_oof.parquet", "cat": "cat_oof.parquet"}
 RULES = (("R0", "今の規則（1.2σ の3本 95以上）"), ("L95", "ランキング学習 95以上"),
-         ("R0L", "今の規則 かつ ランキング学習 50以上"), ("LN", "今の規則と同じ件数をランキング学習の上から"))
+         ("R0L", "今の規則 かつ ランキング学習 50以上"), ("R0D", "今の規則 かつ その日の中でランキング学習が上半分"),
+         ("LN", "今の規則と同じ件数をランキング学習の上から"))
+#: 判定に使う買い方（運用者の選択「両方使う形」）と、参考に同じ判定をする買い方
+PRIMARY = "R0D"
+SECONDARY = "LN"
+DAY_UPPER = 0.5                # その日の中の百分位（0 = 最下位 / 1 = 最上位）がこれ以上なら上半分
+CROSS_TOP = 0.2                # 日付をまたいだ力: 平均百分位の上位 / 下位何割の日を比べるか
 RULE_JA = dict(RULES)
 
 log = E.log
@@ -233,14 +246,20 @@ def forward_frame(w: pd.DataFrame, folds) -> pd.DataFrame:
     ft = pd.concat(outs, ignore_index=True)
     ft["min_t3"] = ft[[f"pct_{a}" for a in TREES]].min(axis=1, skipna=False)
     ft["n_break"] = ft.groupby("Date")["Code"].transform("size").to_numpy()
+    # その日の候補の中でのランキング学習の百分位（0 = 最下位 / 1 = 最上位。候補が1件の日は 0.5。実験52・114 の段階と同じ作り）
+    ft["day_pct_ltr"] = E.E52.within_date_pct(ft["Date"], ft["score_ltr"].to_numpy(dtype=float))
     return ft
 
 
 def rule_masks(ft: pd.DataFrame) -> Dict[str, np.ndarray]:
-    """R0 / L95 / R0L / LN の印（NaN の百分位は満たさない）。LN は窓ごとに R0 と同じ件数をランキング学習の上から。"""
+    """
+    R0 / L95 / R0L / R0D / LN の印（NaN の百分位は満たさない）。R0D はその日の中のランキング学習の百分位が DAY_UPPER 以上。
+    LN は窓ごとに R0 と同じ件数をランキング学習の上から。
+    """
     t3 = np.nan_to_num(ft["min_t3"].to_numpy(dtype=float), nan=-1.0) >= LINE
     lp = np.nan_to_num(ft["pct_ltr"].to_numpy(dtype=float), nan=-1.0)
-    out = {"R0": t3, "L95": lp >= LINE, "R0L": t3 & (lp >= UPPER)}
+    dp = ft["day_pct_ltr"].to_numpy(dtype=float)
+    out = {"R0": t3, "L95": lp >= LINE, "R0L": t3 & (lp >= UPPER), "R0D": t3 & (dp >= DAY_UPPER)}
     ln = np.zeros(len(ft), dtype=bool)
     win = ft["window"].to_numpy()
     for ww in np.unique(win):
@@ -333,16 +352,45 @@ def slot_stats(t: pd.DataFrame, months: int, slots: int = SLOTS) -> Dict:
             "capital_pm": float(r.sum() / slots / months) if months else float("nan")}
 
 
-def verdict(rows: List[Dict]) -> Dict:
-    """判定（回す前に決めたもの）: すべてのずらし方で LN の平均収益（窓の平均）が R0 より高く、−10% 未満（窓の平均）が低い。"""
+def verdict(rows: List[Dict], key: str = PRIMARY) -> Dict:
+    """
+    判定（回す前に決めたもの）: すべてのずらし方で key（既定は R0D）の平均収益（窓の平均）が R0 より高く、−10% 未満
+    （窓の平均）が低い。
+    """
     out = []
     for r in rows:
-        ok_r = bool(r["LN"]["ret_w"] > r["R0"]["ret_w"])
-        ok_b = bool(r["LN"]["bad_w"] < r["R0"]["bad_w"])
-        out.append({"shift": int(r["shift"]), "ret_R0": r["R0"]["ret_w"], "ret_LN": r["LN"]["ret_w"],
-                    "bad_R0": r["R0"]["bad_w"], "bad_LN": r["LN"]["bad_w"], "ret_ok": ok_r, "bad_ok": ok_b,
+        ok_r = bool(r[key]["ret_w"] > r["R0"]["ret_w"])
+        ok_b = bool(r[key]["bad_w"] < r["R0"]["bad_w"])
+        out.append({"shift": int(r["shift"]), "key": key, "ret_R0": r["R0"]["ret_w"], "ret_X": r[key]["ret_w"],
+                    "bad_R0": r["R0"]["bad_w"], "bad_X": r[key]["bad_w"], "ret_ok": ok_r, "bad_ok": ok_b,
                     "ok": ok_r and ok_b})
-    return {"rows": out, "pass": bool(out) and all(x["ok"] for x in out)}
+    return {"key": key, "rows": out, "pass": bool(out) and all(x["ok"] for x in out)}
+
+
+def cross_date(ft: pd.DataFrame, models: Sequence[str] = MODELS4, min_n: int = E.MIN_DAY,
+               top: float = CROSS_TOP) -> Dict[str, Dict]:
+    """
+    日付をまたいだ力: 候補 min_n 件以上の日ごとに、各モデルの百分位の平均とその日の候補の平均収益の、日をまたいだ順位相関
+    （今の売り方 rho / 20営業日目の終値 rho20）と、平均百分位の上位 top の日・下位 top の日の平均収益（今の売り方）。
+    """
+    from scipy.stats import spearmanr
+
+    size = ft.groupby("Date")["Code"].transform("size").to_numpy()
+    sub = ft[size >= min_n]
+    if not len(sub):
+        return {}
+    agg = sub.groupby("Date").agg(ret=(RET, "mean"), r20=(R20, "mean"),
+                                  **{f"m_{a}": (f"pct_{a}", "mean") for a in models})
+    out = {}
+    for a in models:
+        x = agg[f"m_{a}"]
+        q = x.rank(pct=True)
+        out[a] = {"days": int(len(agg)),
+                  "rho": float(spearmanr(x, agg["ret"], nan_policy="omit").correlation),
+                  "rho20": float(spearmanr(x, agg["r20"], nan_policy="omit").correlation),
+                  "top_days": float(agg.loc[q > 1 - top, "ret"].mean()),
+                  "bottom_days": float(agg.loc[q <= top, "ret"].mean())}
+    return out
 
 
 def _p(x: float, nd: int = 2) -> str:
@@ -435,12 +483,26 @@ def main(argv=None) -> int:
         print(f"  ◆ 今の規則の中をランキング学習で分ける: 上半分 {su['n']}件 {_p(su['ret'])}（−10%未満 {_s(su['bad'])}）/ "
               f"下半分 {sl['n']}件 {_p(sl['ret'])}（{_s(sl['bad'])}）")
         st["R0_upper"], st["R0_lower"] = su, sl
+        dp = ft["day_pct_ltr"].to_numpy(dtype=float)
+        du, dl = rule_stats(ft, masks["R0"] & (dp >= DAY_UPPER)), rule_stats(ft, masks["R0"] & (dp < DAY_UPPER))
+        print(f"  ◆ 今の規則の中を、その日の中のランキング学習の順位で分ける: 上半分 {du['n']}件 {_p(du['ret'])}"
+              f"（−10%未満 {_s(du['bad'])}）/ 下半分 {dl['n']}件 {_p(dl['ret'])}（{_s(dl['bad'])}）")
+        st["R0_day_upper"], st["R0_day_lower"] = du, dl
+        cd = cross_date(ft)
+        if cd:
+            print(f"  ◆ 日付をまたいだ力（候補{E.MIN_DAY}件以上の {next(iter(cd.values()))['days']}日）: 日ごとの平均百分位と、"
+                  f"その日の候補の平均収益の順位相関（今の売り方 / 20営業日目の終値）・平均百分位の上位{CROSS_TOP * 100:.0f}% の日 / "
+                  f"下位{CROSS_TOP * 100:.0f}% の日の平均収益")
+            for a in MODELS4:
+                c = cd[a]
+                print(f"    {a:<5} {c['rho']:>+7.3f} / {c['rho20']:>+7.3f} ｜ {_p(c['top_days'])} / {_p(c['bottom_days'])}")
+        st["cross_date"] = cd
         months = int(pd.to_datetime(ft["Date"]).dt.to_period("M").nunique())
         print(f"  ◆ 3枠の形（同時に{SLOTS}銘柄・その日の上位{TOP_K}件）: 取引数 / 1取引の平均 / 勝率 / 資金全体の月の損益（{months}か月）")
         slots_out = {}
         for mb, mb_ja in ((1, "発火を問わない"), (BUSY, f"発火{BUSY}件以上の日")):
             for name, key, order in (("R0・今の並び", "R0", "min"), ("R0・ランキングの並び", "R0", "ltr"),
-                                     ("L95・ランキングの並び", "L95", "ltr")):
+                                     ("R0D・今の並び", "R0D", "min"), ("L95・ランキングの並び", "L95", "ltr")):
                 t = slot_trades(ordered_candidates(ft, masks[key], order, min_break=mb), bar_days)
                 ss = slot_stats(t, months)
                 slots_out[f"{key}_{order}_{mb}"] = ss
@@ -448,16 +510,19 @@ def main(argv=None) -> int:
                       f"{ss['capital_pm']:>+7.2f}%")
         sh_out.update({"stats": st, "slots": slots_out, "windows": int(ft["window"].nunique()), "rows": int(len(ft))})
         summary["shifts"][str(sh)] = sh_out
-        vrows.append({"shift": sh, **{k: st[k] for k in ("R0", "LN")}})
+        vrows.append({"shift": sh, **{k: st[k] for k in ("R0", PRIMARY, SECONDARY)}})
 
-    v = verdict(vrows)
-    summary["verdict"] = v
-    print("\n■ 判定（先に決めた基準: すべてのずらし方で、LN（今の規則と同じ件数をランキング学習の上から）の平均収益（窓の平均）が"
-          "今の規則より高く、−10% 未満（窓の平均）が低い）")
+    v = verdict(vrows, PRIMARY)
+    v2 = verdict(vrows, SECONDARY)
+    summary["verdict"], summary["verdict_ref"] = v, v2
+    print(f"\n■ 判定（先に決めた基準: すべてのずらし方で、{PRIMARY}（{RULE_JA[PRIMARY]}）の平均収益（窓の平均）が今の規則より高く、"
+          "−10% 未満（窓の平均）が低い）")
     for r in v["rows"]:
-        print(f"  ずらし{r['shift']}か月: 平均収益 R0 {_p(r['ret_R0'])} / LN {_p(r['ret_LN'])}（{'○' if r['ret_ok'] else '×'}）・"
-              f"−10%未満 R0 {_s(r['bad_R0'])} / LN {_s(r['bad_LN'])}（{'○' if r['bad_ok'] else '×'}）")
-    print(f"  → {'今の規則の形でも上回る（規則を変えるかは運用者が決める）' if v['pass'] else '今の規則の形では上回らない'}")
+        print(f"  ずらし{r['shift']}か月: 平均収益 R0 {_p(r['ret_R0'])} / {PRIMARY} {_p(r['ret_X'])}（{'○' if r['ret_ok'] else '×'}）・"
+              f"−10%未満 R0 {_s(r['bad_R0'])} / {PRIMARY} {_s(r['bad_X'])}（{'○' if r['bad_ok'] else '×'}）")
+    print(f"  → {'両方使う形で今の規則を上回る（規則を変えるかは運用者が決める）' if v['pass'] else '両方使う形では今の規則を上回らない'}")
+    print(f"  参考（{SECONDARY}: {RULE_JA[SECONDARY]} で同じ判定）: " + " / ".join(
+        f"ずらし{r['shift']} {'○' if r['ok'] else '×'}" for r in v2["rows"]) + f" → {'満たす' if v2['pass'] else '満たさない'}")
     summary["minutes"] = round((time.time() - t_all) / 60, 1)
     os.makedirs(OOF_DIR, exist_ok=True)
     with open(SUMMARY_PATH, "w", encoding="utf-8") as fh:
