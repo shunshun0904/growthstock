@@ -3170,7 +3170,11 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     print(f"[gm] 78週の窓を一般市場に移ってからの行で数える: {GENERAL_MARKET_START}")
 
     print("\n[panel] 株価系の指標を算出")
+    # 日足全体を使う市場環境を先に計算し、価格パネル作成後は生の日足を解放する。
+    # 後の財務結合まで2つの日足全体を同時に保持しない（計算式・結合時点は同じ）。
+    env = market_environment(bars, topix)
     df = price_panel(bars, start=start)
+    del bars
     if POPULATION == "breakout":
         print("[panel] 52週高値の更新日を判定")
         df = mark_new_highs(df)
@@ -3199,7 +3203,10 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
         print(f"[diag] dtype high={df['high'].dtype} "
               f"prior={df['high52w_prior'].dtype} date={df['Date'].dtype}")
         rows = []
-        for y, gy in df.groupby(_y):
+        # 診断に必要な列だけをまとめる。全パネルの groupby は巨大なコピーを作り、
+        # 2016〜2026 年の日足ではこのログ出力だけで 8GB の環境が停止する。
+        diag_cols = list(dict.fromkeys(["high", "high52w_prior", BREAKOUT_REF]))
+        for y, gy in df[diag_cols].groupby(_y):
             ratio = (gy[BREAKOUT_REF] / gy["high52w_prior"]).replace(
                 [np.inf, -np.inf], np.nan)
             mx = f"{ratio.max():.3f}" if ratio.notna().any() else "—"
@@ -3259,6 +3266,11 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
         samples = samples[samples["tv_ma20"] >= MIN_TRADING_VALUE]
         print(f"[filter] 低流動性(20日平均売買代金<{MIN_TRADING_VALUE}億円)を除外: "
               f"{before:,} -> {len(samples):,}")
+
+    # サンプル抽出後の全日足は調整倍率とテクニカル計算にだけ使う。
+    # ラベル・ブレイク文脈などの不要な列を保持すると、財務結合時のピークが
+    # 8GB を超える。必要な列の値は変えず、元の大きなブロックを解放する。
+    df = df[list(dict.fromkeys(TECH_PANEL_COLS + ["close_raw"]))].copy()
 
     # --- 財務をマージ（開示日ベースの point-in-time） --- #
     print("\n[merge] 財務情報を開示日ベースで結合")
@@ -3464,7 +3476,6 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
 
     # --- 市場環境（地合い） --- #
     print("[merge] 市場環境の特徴量を結合")
-    env = market_environment(bars, topix)
     samples = pd.merge_asof(
         samples.sort_values("Date"), env, on="Date", direction="backward",
     )
