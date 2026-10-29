@@ -3,9 +3,9 @@
  "asOf": "2026-09-11",
  "rule": {
   "models": [
-   "lgbm",
-   "xgb",
-   "cat"
+   "lgbm_k15",
+   "xgb_k15",
+   "cat_k15"
   ],
   "agreePct": 95.0
  },

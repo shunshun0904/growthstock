@@ -579,6 +579,23 @@ input[type='range']::-moz-range-thumb {
   .strat-head { grid-template-columns: 1fr; }
 }
 
+/* ランキング学習の順位表（予測タブ。今日の戦略の下）。上半分（両方使う形に入れる範囲）の下に紫の区切り */
+.ltr-rank-wrap { overflow-x: auto; }
+.ltr-rank-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ltr-rank-table th { text-align: left; font-weight: 500; font-size: 11px; color: var(--text-dim);
+  padding: 4px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.ltr-rank-table th.num { text-align: right; }
+.ltr-rank-table td { padding: 6px 8px; border-bottom: 1px solid var(--border-soft); vertical-align: middle; }
+.ltr-rank-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.ltr-rank-table tr.lower td { color: var(--text-dim); }
+.ltr-rank-table tr.cut td { border-bottom: 2px solid color-mix(in srgb, var(--violet) 65%, transparent); }
+.ltr-rank-table td.ltr-rank-n { text-align: left; font-weight: 600; white-space: nowrap; }
+.ltr-rank-name { display: inline-flex; align-items: baseline; gap: 8px; border: 0; background: transparent; color: inherit;
+  font: inherit; padding: 0; cursor: pointer; text-align: left; }
+.ltr-rank-name:hover .ltr-rank-nm { text-decoration: underline; }
+.ltr-rank-name:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; border-radius: 2px; }
+.ltr-rank-note { margin: 8px 0 0; font-size: 11px; }
+
 /* 惜しい候補（3モデルの最小が85〜90）。買わない根拠を添えて出す欄。 */
 .strat-near {
   margin-top: 12px;

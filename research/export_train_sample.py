@@ -157,9 +157,10 @@ def notes(sample: pd.DataFrame, cols: Sequence[str], rows: int, meta: Optional[d
         ["ラベル", "定義"],
     ]
     for c, k in LABELS:
-        # 今日の戦略の規則は 2026-10-23 から 1.2σ の木の3本（それまでは 1.5σ の3本）。1.8σ の4本は 2026-10-24 に外した
-        use = {"label": "1.2σ の4本（基準モデル = 1.2σ の LightGBM と、今日の戦略の規則に使う3本を含む）",
-               "label_k15": "1.5σ の4本",
+        # 今日の戦略の規則は 2026-10-29 から 1.5σ の木の3本（2026-10-23〜10-29 は 1.2σ の3本、それより前は 1.5σ の3本）。
+        # 1.8σ の4本は 2026-10-24 に外した
+        use = {"label": "1.2σ の4本（基準モデル = 1.2σ の LightGBM を含む）",
+               "label_k15": "1.5σ の4本（今日の戦略の規則に使う3本を含む）",
                "label_k18": "1.8σ の4本（2026-10-24 に外したので、今はどのモデルも学習しない。参考に残す列）"}[c]
         lines.append([c, f"{label_text(k)}。{use}の正解"])
     group_ja = {g: ja for ja, groups, _ in FD.MACRO for g in groups}

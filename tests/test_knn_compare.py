@@ -123,7 +123,7 @@ class TestHelpersMatchExperiment(unittest.TestCase):
         self.assertEqual(KC.done_before(np.sort(a["done"]), days[200]), E91.done_before(np.sort(b["done"]), days[200]))
         self.assertEqual((KC.K, KC.POOL_LINE, KC.CONTEXT_LINE, KC.TARGET, KC.HOLD, KC.WIN, KC.LEVELS),
                          (E91.K_MAIN, E91.POOL_LINE, E91.LINE, E91.TARGET, E91.HOLD, E91.WIN, E91.LEVELS))
-        # 母集団の3本は今の規則の3本（2026-10-23 から 1.2σ。実験91 は当時の規則の 1.5σ の3本で測った）
+        # 母集団の3本は今の規則の3本（2026-10-29 から 1.5σ。2026-10-23〜10-29 は 1.2σ。実験91 は当時の規則の 1.5σ の3本で測った）
         self.assertEqual(KC.RULE_MODELS, tuple(LT.RULE_MODELS))
         self.assertEqual(tuple(E91.RULE_MODELS), ("lgbm_k15", "xgb_k15", "cat_k15"))
 
@@ -221,7 +221,7 @@ class TestBuild(unittest.TestCase):
             self.assertGreater(rec["dNn"]["R"] + rec["dNn"]["V"], 0.0)
         self.assertEqual(self.knn["bands"], ["-10 未満", "-10〜0", "0〜+5", "+5〜+10 未満", "+10 到達"])
         self.assertEqual(self.knn["dBins"], [0.0, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0])
-        self.assertEqual(self.knn["models"], ["lgbm", "xgb", "cat"])
+        self.assertEqual(self.knn["models"], ["lgbm_k15", "xgb_k15", "cat_k15"])
         self.assertEqual(self.knn["byDay"]["2025-06-30"]["status"], "no_candidates")
 
     def test_context_and_no_identifiers(self):

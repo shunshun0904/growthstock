@@ -45,7 +45,7 @@ class TestPanel(unittest.TestCase):
         self.assertEqual([c for c, _ in E.CODES], ["T3", "K15"])
         self.assertEqual(E.LINE, LT.AGREE_PCT)
         groups = dict((c, g) for c, _, g in E.E87.SETS)
-        self.assertEqual(tuple(groups["T3"]), LT.RULE_MODELS)      # 1.2σ の3本 = 今の規則（2026-10-23 から）
+        self.assertEqual(tuple(groups["T3"]), LT.BOOST)            # 1.2σ の3本（2026-10-23〜10-29 の規則）
         self.assertEqual(tuple(groups["K15"]), LT.K15)
 
     def test_panel_bands_add_up(self):
@@ -73,10 +73,10 @@ class TestPanel(unittest.TestCase):
         ftx = E.PKX.add_shapes(self.ft, self.parts)
         t = E.PKX.family_table(ftx, "T3")
         for fam in ("two95", "min"):
-            self.assertEqual(sum(t[fam][a]["n"] for a in LT.RULE_MODELS), t[fam]["all"]["n"])
+            self.assertEqual(sum(t[fam][a]["n"] for a in LT.BOOST), t[fam]["all"]["n"])
         js = "\n".join(E.PKX.js_lines(t, "T3"))
-        for a in LT.RULE_MODELS:
-            self.assertIn(f" {a}: {{ n: ", js)                   # strategy.js の BORDER_STATS の鍵（lgbm / xgb / cat）
+        for a in LT.BOOST:
+            self.assertIn(f" {a}: {{ n: ", js)                   # 2026-10-23〜10-29 の BORDER_STATS の鍵（lgbm / xgb / cat）
         self.assertNotIn("_k15", js)
 
     def test_report_has_no_codes(self):

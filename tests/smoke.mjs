@@ -135,13 +135,13 @@ check(predBody.includes('LightGBM（1.5σ）') && predBody.includes('ロジス�
   '8本の日本語名が出る（1.8σ の4本は並べているモデルにも出さない）');
 // 今日の戦略パネル（docs/PLAYBOOK.md の手順）。
 // 合成データは候補5件。2026-10-12 から発火の数では見送らないので「発火が少ない日」。
-// 1.2σ の3本（2026-10-23 からの規則）がすべて95以上の候補は無いので、買う銘柄は出ない
+// 1.5σ の3本（2026-10-29 からの規則）がすべて95以上の候補は無いので、買う銘柄は出ない
 const strat = await page.textContent('.strat');
 check(strat.includes('今日の戦略'), '戦略パネルが表示される');
 check(strat.includes('発火が少ない日'), '発火5件の日は「発火が少ない日」と出る（見送りではない）');
 check(strat.includes('発火の数では見送らない'), 'パネルの見出しに「発火の数では見送らない」と出る');
-check(strat.includes('1.2σ の3本がすべて95以上の銘柄はありません'), '買わない理由（基準を満たす銘柄なし）が出る');
-check(strat.includes('1.2σ の3本（LGB・XGB・CAT）がすべて95以上の銘柄を2件まで'), 'パネルの見出しに規則（1.2σ の3本）が出る');
+check(strat.includes('1.5σ の3本がすべて95以上の銘柄はありません'), '買わない理由（基準を満たす銘柄なし）が出る');
+check(strat.includes('1.5σ の3本（L15・X15・C15）がすべて95以上の銘柄を2件まで'), 'パネルの見出しに規則（1.5σ の3本）が出る');
 check((await page.locator('.strat-pick').count()) === 0,
       '基準を満たす銘柄が無い日は買う銘柄を出さない');
 check(strat.includes('発火数'), '発火数が表示される');
@@ -166,40 +166,77 @@ check(((await rowOf('ソフトバンク').locator('.pred-ltr').getAttribute('cla
 check(((await rowOf('ソフトバンク').locator('.pred-ltr').getAttribute('title')) || '').includes('買いの規則には使いません'),
       '印の title に「買いの規則には使いません」と出る');
 
+// ランキング学習の順位表（運用者の依頼 2026-10-29「ランキング学習モデルによるランキングをわかりやくどこかに表示してください」
+// →「予測タブに順位表」）。今日の戦略の下に、対象日の候補をランキング学習の順位の順に並べる。上位3件（百分位 50 以上）が上半分で、
+// その下に区切り。規則を満たす候補は無いので「満たす」「両方使う形」は出ない。銘柄名を押すと下の一覧でその候補が開く
+const ltrCard = page.locator('.card.ltr-rank');
+check((await ltrCard.count()) === 1 && ((await ltrCard.locator('h2').textContent()) || '').includes('ランキング学習の順位'),
+      '予測タブにランキング学習の順位表が出る');
+const ltrOrderOk = await page.evaluate(() => {
+  const cards = [...document.querySelectorAll('.pred > section.card')];
+  const i = cards.findIndex((c) => c.classList.contains('ltr-rank'));
+  return i > 0 && cards[i - 1].classList.contains('strat') && (cards[i + 1]?.textContent || '').includes('ブレイク予測');
+});
+check(ltrOrderOk, '順位表は今日の戦略のすぐ下・一覧（ブレイク予測）の上');
+const ltrRows = ltrCard.locator('tbody tr');
+const ltrNames = await ltrCard.locator('tbody .ltr-rank-nm').allTextContents();
+const wantLtr = ['ソフトバンク', '大和自動車交通', '安田倉庫', 'シンプレクス', '野村アセットマネジメント'];
+check(ltrNames.length === 5 && wantLtr.every((w, i) => (ltrNames[i] || '').includes(w)),
+      `順位表はランキング学習の順位の順 (実際: ${ltrNames.map((t) => t.slice(0, 6)).join(' / ')})`);
+const ltrRanks = await ltrCard.locator('tbody td.ltr-rank-n').allTextContents();
+check(ltrRanks.join(',') === '1 / 5,2 / 5,3 / 5,4 / 5,5 / 5', `順位の列は「N / 件数」 (実際: ${ltrRanks.join(',')})`);
+const ltrPcts = await ltrRows.evaluateAll((trs) => trs.map((tr) => tr.children[2].textContent));
+check(ltrPcts.join(',') === '100.0,75.0,50.0,25.0,0.0', `その日の中の百分位 (実際: ${ltrPcts.join(',')})`);
+const ltrClasses = await ltrRows.evaluateAll((trs) => trs.map((tr) => tr.className));
+check(ltrClasses.join(',') === 'upper,upper,upper cut,lower,lower', `上半分（3件）の下に区切りの線 (実際: ${ltrClasses.join(',')})`);
+check((await ltrCard.locator('.badge').count()) === 0, '規則を満たす候補が無い日は「満たす」「両方使う形」の印が出ない');
+check(((await ltrCard.locator('.ltr-rank-note').textContent()) || '').includes('上の 3 件がその日の中で上半分'),
+      '順位表の注記に上半分の件数が出る');
+const ltrHead = (await ltrCard.locator('.card-head .sub').textContent()) || '';
+check(ltrHead.includes('参考に並べるだけで、買う銘柄は今日の戦略の規則のまま') && ltrHead.includes('2026/09/10 学習'),
+      '順位表の見出しに「参考」とモデルの学習日が出る');
+await ltrCard.locator('.ltr-rank-name', { hasText: 'シンプレクス' }).click();
+await page.waitForSelector('.pred-row.open .pred-detail', { timeout: 5000 });
+check(((await page.locator('.pred-row.open .pred-id').textContent()) || '').includes('シンプレクス'),
+      '順位表の銘柄名を押すと、下の一覧でその候補が開く');
+// 開いた行を閉じて、下の確かめを何も開いていない状態から始める
+await page.locator('.pred-row.open .pred-main').click();
+
 check(!predBody.includes('NaN'), '予測タブに NaN が出ていない');
 check(!predBody.includes('undefined'), '予測タブに undefined が出ていない');
 
-// 際どい候補の印（今の規則の線「1.2σ の3本とも95以上」の下。2026-10-23 から）。合成データの1件目は 1.2σ の3本で
-// lgbm 85・xgb 96・cat 98（2本95以上で LightGBM が最下位。今の数字では赤の組が無いので黄）。
-// 5件目の大和自動車交通も 1.2σ の3本では際どい形（96・100・78.1。2本95以上で CatBoost が最下位）→ 印が出る
-// （1.5σ の3本（92.9・100・76.8）が規則だったころは際どくなかった）
+// 際どい候補の印（今の規則の線「1.5σ の3本とも95以上」の下。2026-10-29 から）。合成データの1件目は 1.5σ の3本で
+// lgbm 83.6・xgb 97.1・cat 97.4（2本95以上で LightGBM が最下位。今の数字では赤の組が無いので黄）。
+// 5件目の大和自動車交通は 1.5σ の3本（92.9・100・76.8）では 95以上が1本だけなので際どくない → 印は出ない
+// （1.2σ の3本（96・100・78.1）が規則だった 2026-10-23〜10-29 は際どい形だった）
 const borders = page.locator('.pred-list .pred-border');
-check((await borders.count()) === 2, `際どい候補の印が2件に出る (実際: ${await borders.count()})`);
+check((await borders.count()) === 1, `際どい候補の印が1件に出る (実際: ${await borders.count()})`);
 const firstBorder = page.locator('.pred-row').first().locator('.pred-border');
-check(((await firstBorder.textContent()) || '').includes('1.2σで際どい・最下位 LightGBM'),
-      '1件目は「1.2σで際どい・最下位 LightGBM」と出る');
+check(((await firstBorder.textContent()) || '').includes('1.5σで際どい・最下位 LightGBM'),
+      '1件目は「1.5σで際どい・最下位 LightGBM」と出る');
 check(((await firstBorder.getAttribute('class')) || '').includes('amber'), '1件目の印は黄（赤の組は無い）');
-check(((await firstBorder.getAttribute('title')) || '').includes('LightGBM が一番低いときは、過去 +1.7%（212件）'),
+check(((await firstBorder.getAttribute('title')) || '').includes('LightGBM が一番低いときは、過去 +1.5%（154件）'),
       '印の title にその形の過去の数字が出る');
-check(((await rowOf('大和自動車交通').locator('.pred-border').textContent()) || '').includes('1.2σで際どい・最下位 CatBoost'),
-      '大和自動車交通（1.2σ の3本で 2本95以上・残り 85未満）にも印が出る');
+check((await rowOf('大和自動車交通').locator('.pred-border').count()) === 0,
+      '大和自動車交通（1.5σ の3本で 95以上は1本だけ）には印が出ない');
 
-// 一覧の並び順（運用者の決定 2026-10-13「1.5σ の3本のうち一番低い百分位でいきましょう」を、2026-10-23 から規則の 1.2σ の3本で）。
-// 合成データの 1.2σ の3本の最小: 安田倉庫 85.0・大和自動車交通 78.1・ソフトバンク 68.4・シンプレクス 58.1・
-// 野村 37.3（1.2σ の LightGBM のスコア順なら 安田倉庫・野村・シンプレクス・ソフトバンク・大和自動車交通）
+// 一覧の並び順（運用者の決定 2026-10-13「1.5σ の3本のうち一番低い百分位でいきましょう」。2026-10-23〜10-29 は規則の 1.2σ の3本で、
+// 2026-10-29 から規則と一緒に 1.5σ の3本に戻した）。
+// 合成データの 1.5σ の3本の最小: 安田倉庫 83.6・大和自動車交通 76.8・ソフトバンク 70.5・シンプレクス 59.9・
+// 野村 35.5（1.2σ の LightGBM のスコア順なら 安田倉庫・野村・シンプレクス・ソフトバンク・大和自動車交通）
 const names = await page.locator('.pred-list .pred-row .pred-id strong').allTextContents();
 const want = ['安田倉庫', '大和自動車交通', 'ソフトバンク', 'シンプレクス', '野村アセットマネジメント'];
 check(names.length === 5 && want.every((w, i) => (names[i] || '').includes(w)),
-      `一覧は 1.2σ の3本の最小が高い順 (実際: ${names.map((t) => t.slice(0, 6)).join(' / ')})`);
+      `一覧は 1.5σ の3本の最小が高い順 (実際: ${names.map((t) => t.slice(0, 6)).join(' / ')})`);
 const ranks = await page.locator('.pred-list .pred-rank').allTextContents();
-check(ranks.join(',') === '185.0,278.1,368.4,458.1,537.3', `順位の数字は並び順で、下に最小を添える (実際: ${ranks.join(',')})`);
+check(ranks.join(',') === '183.6,276.8,370.5,459.9,535.5', `順位の数字は並び順で、下に最小を添える (実際: ${ranks.join(',')})`);
 const rank2 = page.locator('.pred-list .pred-rank').nth(1);
 check(((await rank2.getAttribute('title')) || '').includes('基準モデル（1.2σ の LightGBM）の順位 5 / 5'),
       '順位の title に基準モデルの順位を添える');
 check((await rank2.evaluate((el) => getComputedStyle(el).color)) === 'rgb(151, 163, 184)',
       '最小が 85 未満の順位は控えめの字');
 check(((await page.textContent('.card-head:has(h2:text-is("ブレイク予測")) .sub')) || '')
-        .includes('1.2σ の3本のうち一番低い百分位が高い順'),
+        .includes('1.5σ の3本のうち一番低い百分位が高い順'),
       '見出しに並び順の物差しが出る');
 check((await page.locator('.pred-order-note').count()) === 0, '規則の3本の値がそろった日は並び順の注記を出さない');
 
@@ -225,13 +262,13 @@ check(bigLabels.length === 2 && !bigLabels.some((l) => l.includes('1.8σ')), `�
 // 百分位の表とスコアの表は上下に並べたとき列がそろう（列の最小幅を数字の幅に依らない値にした。2026-10-16）
 const gridWidths = await bigGrids.evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
 check(gridWidths.length === 2 && gridWidths[0] === gridWidths[1], `詳細の2つの表は同じ幅 (実際: ${gridWidths.join(' / ')})`);
-// どれも本番で使うので、1.2σ を「本番」と呼ばない（運用者の指示 2026-10-17）。規則の 1.2σ の行に「規則」と添える（2026-10-23 から）
-check(detail.includes('1.2σ（規則）') && !detail.includes('1.5σ（規則）') && !detail.includes('本番'),
-      '詳細の表は 1.2σ の行に「規則」と出て、どこにも「本番」と出ない');
-check(/並び順\s*1\.2σ の3本の最小\s*（85\.0）/.test(detail) && /帯の基準\s*LightGBM（1\.2σ）\s*（1 \/ 5 位）/.test(detail),
-      '詳細に並び順の物差し（1.2σ の3本の最小）と帯の基準（1.2σ の LightGBM の順位）が分けて出る');
+// どれも本番で使うので、1.2σ を「本番」と呼ばない（運用者の指示 2026-10-17）。規則の 1.5σ の行に「規則」と添える（2026-10-29 から）
+check(detail.includes('1.5σ（規則）') && !detail.includes('1.2σ（規則）') && !detail.includes('本番'),
+      '詳細の表は 1.5σ の行に「規則」と出て、どこにも「本番」と出ない');
+check(/並び順\s*1\.5σ の3本の最小\s*（83\.6）/.test(detail) && /帯の基準\s*LightGBM（1\.2σ）\s*（1 \/ 5 位）/.test(detail),
+      '詳細に並び順の物差し（1.5σ の3本の最小）と帯の基準（1.2σ の LightGBM の順位）が分けて出る');
 check(detail.includes('基準モデルの見立ての内訳') && detail.includes('基準モデル（1.2σ の LightGBM）の出力を')
-        && detail.includes('一覧の並び順（1.2σ の3本の最小）の内訳ではありません'),
+        && detail.includes('一覧の並び順（1.5σ の3本の最小）の内訳ではありません'),
       '寄与の欄は 1.2σ の LightGBM のものと明示される');
 // 1.5σ の数は画面で 1.5σ の4本の百分位から数え直す（予測ファイルの agreeK90 / nK は外す前の日は 1.8σ を含む8本の数）。
 // 1件目の 1.5σ の4本は 83.6・97.1・97.4・54.0 なので 2/4（ファイルの値は 4/8）
@@ -259,8 +296,8 @@ check(featNames.length > 0 && featNames[0] === '20日ボラティリティ' && !
 const featTitle = await page.locator('.pred-detail .pred-feats .pred-b').first().getAttribute('title');
 check((featTitle || '').includes('（vol_20d）'), 'ホバーの説明に元の列名が添えてある');
 const borderNote = await page.textContent('.pred-detail .pred-border-note');
-check((borderNote || '').includes('1.2σ の3本で見た際どい候補') && (borderNote || '').includes('+1.7%（212件）'),
-      '詳細の先頭に際どい候補の注意（1.2σ の3本）が出る');
+check((borderNote || '').includes('1.5σ の3本で見た際どい候補') && (borderNote || '').includes('+1.5%（154件）'),
+      '詳細の先頭に際どい候補の注意（1.5σ の3本）が出る');
 await page.screenshot({ path: path.join(SHOTS, 'screenshot-prediction.png') });
 await page.locator('.pred-row').first().locator('.pred-main').click();
 
@@ -334,14 +371,14 @@ check(xTicks.includes('24/4') && xTicks.includes('25/7') && xTicks.every((t) => 
 await page.screenshot({ path: path.join(SHOTS, 'screenshot-samples.png'), fullPage: true });
 
 console.log('\n== 候補銘柄のニュース ==');
-// 出すのは今日の戦略の候補（規則の3本すべて95以上。2026-10-23 から 1.2σ の3本）だけ（運用者の指示 2026-10-17「取得対象は、
+// 出すのは今日の戦略の候補（規則の3本すべて95以上。2026-10-29 から 1.5σ の3本）だけ（運用者の指示 2026-10-17「取得対象は、
 // 候補銘柄のみで良いです」）。合成の予測データには規則を通る候補が無いので、9324・9434・9082 の規則の3本の百分位を上書きして配り直す
 // （tests/fixtures/synthetic-news-links.json は同じ値から research/news_links.py の書き出しで作った。9082 はリンクの記録が無い）
 const PASS = { 9324: [98.1, 97.1, 97.4], 9434: [97.1, 96.5, 95.2], 9082: [96.0, 100.0, 95.0] };
 const predPass = JSON.parse(fs.readFileSync(PRED_FIXTURE, 'utf8'));
 for (const c of predPass.candidates) {
   const p = PASS[c.code];
-  if (p) ['lgbm', 'xgb', 'cat'].forEach((a, i) => { c.byModel[a].pctHistorical = p[i]; });
+  if (p) ['lgbm_k15', 'xgb_k15', 'cat_k15'].forEach((a, i) => { c.byModel[a].pctHistorical = p[i]; });
 }
 await page.route('**/data/predictions.json*',
   (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(predPass) }));
