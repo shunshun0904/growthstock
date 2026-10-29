@@ -9,9 +9,15 @@
 何か
   実験114 の L と同じもの。LightGBM の LGBMRanker で、同じ日の候補を1つの組にし、段階は同じ日の中の
   「翌営業日の寄りで買い、20営業日目の終値で売った収益」の5分位（0〜4。利得は段階そのもの）。列は基準モデルと同じ
-  （features.DEFAULT_PRESET。2026-10-24 から360列）。木の形は実験114 の探索の結果をそのまま使い（research/ltr_params.json）、
-  毎週は探索しない。種は 42（実験114b で確かめた L と同じ）。当てはめは実験114 の fit_score と同じ作り
+  （features.DEFAULT_PRESET。2026-10-24 から360列）。木の形は research/ltr_params.json（最初は実験114 の探索の結果）。
+  種は 42（実験114b で確かめた L と同じ）。当てはめは実験114 の fit_score と同じ作り
   （tests/test_ltr.py が同じスコアになることを確かめる）
+
+木の形の探索（tune）
+  実験114 の L の探索と同じ（ホールドアウトより前・年×時価総額帯で層別・日付単位の5分割・種0・50試行・木200本固定・
+  探索空間は tuning.tune と同じ。目的は検証分割の日付内 NDCG@5 の分割平均）。運用者の選択「毎週探索し直す」（2026-10-24。
+  docs/MODEL_ADOPTION_RULES.md §78-10）で、research/tune_ltr.py が週次に回す。Retrain Weekly に入れるのは、実験114c で
+  「本番の探索が実験114 と同じ木の形を出す」「探索し直しても両方使う形の判定が変わらない」を確かめてから
 
 画面と追跡での使い方
   毎日の候補を採点し、その日の候補の中の百分位（day_pct。0 = 最下位 / 1 = 最上位。候補が1件の日は 0.5。実験114b と同じ）を
@@ -28,6 +34,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import time
 from typing import Dict, List, Optional, Sequence
 
 import numpy as np
@@ -51,6 +58,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PARAMS_PATH = os.path.join(HERE, "ltr_params.json")
 #: 探索・当てはめで LightGBM に渡さない鍵（目的関数・不均衡の補正・種は、ここで決める）
 _DROP = ("objective", "scale_pos_weight", "random_state")
+#: 探索の設定（実験114 の L の探索と同じ。基準モデルの週次の探索 run_tuning.py と同じ枠組みで、目的だけが違う）
+TUNE_TRIALS = 50
+TUNE_SPLITS = 5
+TUNE_SEED = 0              # 分割・TPE・探索中の当てはめの種（基準モデルの探索と同じ 0。学習の種 SEED とは別）
+NDCG_K = 5
+MIN_DAY = 5                # NDCG に使う日の最小の候補数
+TUNE_OBJECTIVE = (f"検証分割の日付内 NDCG@{NDCG_K}（候補{MIN_DAY}件以上の日。利得は20営業日目の終値の段階 "
+                  f"0〜{N_GRADES - 1}）")
 
 
 # --------------------------------------------------------------------------- #
@@ -114,6 +129,25 @@ def attach_r20(ds: pd.DataFrame, bars: pd.DataFrame) -> pd.DataFrame:
     out = ds.copy()
     out[R20] = r
     return out
+
+
+def load_frame(dataset: str, data_dir: str, cols: Sequence[str]) -> pd.DataFrame:
+    """
+    学習・探索に使うデータセット（ラベルのある行だけ。(Date, Code) の順。R20 付き）。ラベル未確定の行があるデータセット
+    （予測用）や、学習する列が無いデータセットなら止める。train_ltr.py と tune_ltr.py が共通に使う。
+    """
+    ds = pd.read_parquet(dataset)
+    ds["Date"] = pd.to_datetime(ds["Date"])
+    ds["Code"] = ds["Code"].astype(str)
+    n_unlabeled = int(ds["label"].isna().sum())
+    if n_unlabeled:
+        raise SystemExit(f"ラベル未確定が {n_unlabeled:,}件あります。予測用データセットでは学習できません")
+    miss = [c for c in cols if c not in ds.columns]
+    if miss:
+        raise SystemExit(f"データセットに無い列: {miss[:6]}")
+    ds = ds.sort_values(["Date", "Code"], kind="mergesort").reset_index(drop=True)
+    bars = LT.load_bars(data_dir, start=ds["Date"].min() - pd.Timedelta(days=10))
+    return attach_r20(ds, bars)
 
 
 # --------------------------------------------------------------------------- #
@@ -192,6 +226,93 @@ def ndcg_at_k(dates, score, gain, k: int = 5, min_n: int = 5) -> float:
             continue
         vals.append(float((top * disc[:len(top)]).sum()) / idcg)
     return float(np.mean(vals)) if vals else float("nan")
+
+
+# --------------------------------------------------------------------------- #
+# 木の形の探索（実験114 の L の探索と同じ）
+# --------------------------------------------------------------------------- #
+
+def search_space(trial, n_trees: int = tuning.SEARCH_N_ESTIMATORS) -> Dict:
+    """
+    探索空間（tuning.tune と同じ。実験53 の search_params と同じ）。TPE の乱数の使い方が変わらないように、
+    鍵を引く順も同じにする。
+    """
+    lo, hi = tuning.lr_range(n_trees)
+    return {
+        "boosting_type": "gbdt",
+        "n_estimators": n_trees,
+        "learning_rate": trial.suggest_float("learning_rate", lo, hi, log=True),
+        "num_leaves": trial.suggest_int("num_leaves", 7, 127, log=True),
+        "min_child_samples": trial.suggest_int("min_child_samples", 10, 300, log=True),
+        "subsample": trial.suggest_float("subsample", 0.5, 1.0),
+        "subsample_freq": 1,
+        "colsample_bytree": trial.suggest_float("colsample_bytree", 0.3, 1.0),
+        "reg_alpha": trial.suggest_float("reg_alpha", 1e-8, 10.0, log=True),
+        "reg_lambda": trial.suggest_float("reg_lambda", 1e-8, 10.0, log=True),
+        "n_jobs": -1,
+    }
+
+
+def search_cutoff(dates) -> pd.Timestamp:
+    """探索に使う最後の日（run_tuning.py と同じ: 直近 HOLDOUT_MONTHS か月とエンバーゴを外す。train_model.holdout_bounds）。"""
+    from train_model import holdout_bounds
+
+    return pd.Timestamp(holdout_bounds(pd.to_datetime(pd.Series(dates)))[0])
+
+
+def search_rows(ds: pd.DataFrame, cutoff) -> pd.DataFrame:
+    """
+    探索に使う行: cutoff までの、ラベルと R20 がある行。ds は load_frame の形（(Date, Code) の順）。実験114 の探索と
+    同じ行・同じ並びになる（分割はこの並びで決まる）。
+    """
+    d = pd.to_datetime(ds["Date"])
+    return ds[(d <= pd.Timestamp(cutoff)) & trainable(ds)].reset_index(drop=True)
+
+
+def tune(sub: pd.DataFrame, cols: Sequence[str], n_trials: int = TUNE_TRIALS, n_splits: int = TUNE_SPLITS,
+         seed: int = TUNE_SEED) -> Dict:
+    """
+    木の形を探索する（実験114 の tune_l と同じ: 分割は tuning.cv_folds の本番の分割（年×時価総額帯で層別・日付単位。
+    同じ日の候補は必ず同じ分割）、各試行で分割ごとに学習→検証の日付内 NDCG@5、その平均を最大にする。TPE の種・分割の種・
+    探索中の当てはめの種はどれも seed）。sub は search_rows の行。
+
+    返すもの: params（ltr_params.json の params にそのまま入る形）・_cv（目的・分割・試行数・最良の試行・分割ごとの値・
+    探索に使った行と期間・分）・_trials（試行ごとの値。確かめ用）。
+    """
+    import optuna
+    from train_model import EMBARGO_DAYS
+
+    optuna.logging.set_verbosity(optuna.logging.WARNING)
+    cols = list(cols)
+    t0 = time.time()
+    folds = tuning.cv_folds(sub, tuning.PRODUCTION_CV, n_splits=n_splits, seed=seed, embargo_days=EMBARGO_DAYS)
+    if not folds:
+        raise SystemExit("探索の分割を作れない（期間が短すぎる）")
+
+    def objective(trial):
+        p = search_space(trial)
+        nd = []
+        for tr, va in folds:
+            m = fit(tr, cols, p, seed)
+            s = predict(m, va[cols].to_numpy(dtype=float))
+            nd.append(ndcg_at_k(va["Date"], s, grades(va["Date"], va[R20].to_numpy(dtype=float)), NDCG_K, MIN_DAY))
+        trial.set_user_attr("ndcg_folds", [round(x, 4) for x in nd])
+        return float(np.mean(nd))
+
+    study = optuna.create_study(direction="maximize", sampler=optuna.samplers.TPESampler(seed=seed))
+    study.optimize(objective, n_trials=n_trials, show_progress_bar=False)
+    best = {"boosting_type": "gbdt", "n_estimators": tuning.SEARCH_N_ESTIMATORS, "subsample_freq": 1,
+            "n_jobs": -1, "verbose": -1, **study.best_params}
+    d = pd.to_datetime(sub["Date"])
+    return {"params": best,
+            "_cv": {"objective": TUNE_OBJECTIVE, "scheme": tuning.PRODUCTION_CV, "n_splits": len(folds),
+                    "n_trials": int(n_trials), "seed": int(seed), "best_trial": int(study.best_trial.number),
+                    "ndcg": round(float(study.best_value), 4),
+                    "ndcg_folds": study.best_trial.user_attrs.get("ndcg_folds"),
+                    "n_rows": int(len(sub)), "n_days": int(d.nunique()),
+                    "train_from": str(d.min().date()), "train_to": str(d.max().date()),
+                    "minutes": round((time.time() - t0) / 60, 1)},
+            "_trials": [{"n": int(t.number), "ndcg": round(float(t.value), 4)} for t in study.trials]}
 
 
 # --------------------------------------------------------------------------- #

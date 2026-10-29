@@ -54,6 +54,7 @@
     --skip-tune は e114_params.json が同じデータ・同じ列で作られていればそれを読む
     --rule / --quick は実験114b（今の規則の形 / 基準モデル1本の速報）を回す（research/exp/e114b_ltr_rule.py）
     --show-params は置き場の探索の結果を丸めずに出す。--check-ltr は本番の脇に置いたランキング学習が L と同じかを確かめる
+    --retune は実験114c（毎週探索し直してよいかの確かめ。research/exp/e114c_ltr_retune.py。後ろの引数はそちらに渡す）
 
 結果（2026-10-24、run 40070769689、f5d652a、実験の部分 62分。docs/MODEL_ADOPTION_RULES.md §78）
 ------------------------------------------------------------------
@@ -528,7 +529,15 @@ def main(argv=None) -> int:
     ap.add_argument("--check-ltr", action="store_true",
                     help="本番の脇に置いたランキング学習（Release の ltr_oof.parquet・research/ltr_params.json）が、"
                          "実験114 の L（種42・ずらし0）と同じかを確かめる（research/exp/e114b_ltr_rule.py の check_ltr）")
-    args = ap.parse_args(argv)
+    ap.add_argument("--retune", action="store_true",
+                    help="実験114c（ランキング学習を毎週探索し直してよいかを確かめる。research/exp/e114c_ltr_retune.py）を回す。"
+                         "実験114 の探索の結果・L と3本の out-of-fold・実験114b の集計を同じ置き場から読む。後ろの引数は 114c に渡す")
+    args, rest = ap.parse_known_args(argv)
+    if args.retune:
+        import e114c_ltr_retune as RC
+        return RC.main(rest)
+    if rest:
+        ap.error(f"知らない引数: {' '.join(rest)}")
     if args.show_params:
         return show_params()
     if args.check_ltr:

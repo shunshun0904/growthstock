@@ -149,6 +149,51 @@ class TestDayFields(unittest.TestCase):
         self.assertIsNone(ltr.day_fields(d[:1], s[:1], None)[0]["pctHistorical"])
 
 
+class TestTune(unittest.TestCase):
+    """木の形の探索（ltr.tune）が実験114 の L の探索（tune_l）と同じ（運用者の選択「毎週探索し直す」§78-10）。"""
+
+    def test_settings_same_as_experiment(self):
+        import optuna
+        import e53_objective_tuning as E53
+
+        self.assertEqual((ltr.TUNE_SPLITS, ltr.TUNE_SEED, ltr.NDCG_K, ltr.MIN_DAY),
+                         (E.N_SPLITS, E.SEED, E.NDCG_K, E.MIN_DAY))
+        self.assertEqual(ltr.TUNE_TRIALS, 50)
+        fixed = {"learning_rate": 0.03, "num_leaves": 31, "min_child_samples": 40, "subsample": 0.7,
+                 "colsample_bytree": 0.5, "reg_alpha": 1e-3, "reg_lambda": 0.2}
+        self.assertEqual(ltr.search_space(optuna.trial.FixedTrial(fixed)),
+                         E53.search_params(optuna.trial.FixedTrial(fixed)))
+
+    def test_same_search_as_experiment(self):
+        import tuning
+        from train_model import EMBARGO_DAYS
+
+        # NDCG@5 は候補5件以上の日だけで測るので、1日6件にする
+        df = synth(end="2020-12-31", per_day=6).sort_values(["Date", "Code"], kind="mergesort").reset_index(drop=True)
+        sub = ltr.search_rows(df, df["Date"].max())
+        self.assertTrue(sub[ltr.R20].notna().all() and sub["label"].notna().all())
+        self.assertEqual(len(sub), int(ltr.trainable(df).sum()))
+        # 実験114 の main と同じ分割を作って tune_l に渡す。TPE が値を見て引き始める11試行目より先まで比べる
+        folds = tuning.cv_folds(sub, tuning.PRODUCTION_CV, n_splits=E.N_SPLITS, seed=E.SEED, embargo_days=EMBARGO_DAYS)
+        theirs = E.tune_l(sub, FEATS, 12, folds)
+        mine = ltr.tune(sub, FEATS, n_trials=12)
+        self.assertEqual(mine["params"], theirs["params"])
+        self.assertEqual(mine["_trials"], theirs["_cv"]["trials"])
+        for k in ("ndcg", "ndcg_folds", "best_trial", "n_splits", "n_trials", "objective"):
+            self.assertEqual(mine["_cv"][k], theirs["_cv"][k], k)
+        self.assertEqual(mine["_cv"]["n_rows"], len(sub))
+        self.assertEqual(mine["_cv"]["train_to"], str(sub["Date"].max().date()))
+        self.assertEqual(sorted(mine["params"]), sorted(ltr.load_params()["params"]))
+
+    def test_cutoff_same_as_run_tuning(self):
+        from train_model import EMBARGO_DAYS, HOLDOUT_MONTHS, holdout_bounds
+
+        d = pd.Series(pd.bdate_range("2020-01-01", "2026-09-24"))
+        self.assertEqual(ltr.search_cutoff(d), pd.Timestamp(holdout_bounds(d, HOLDOUT_MONTHS, EMBARGO_DAYS)[0]))
+        # 実験114 の探索の打ち切り（データの最終日 2026-09-24 → 2025-08-26）
+        self.assertEqual(ltr.search_cutoff(d), pd.Timestamp("2025-08-26"))
+
+
 class TestTrainScript(unittest.TestCase):
     def test_writes_and_loads(self):
         import train_ltr
@@ -173,10 +218,10 @@ class TestTrainScript(unittest.TestCase):
             with open(pp, "w", encoding="utf-8") as fh:
                 json.dump({"params": SMALL, "_features_sig": F.signature(cols), "_n_features": len(cols),
                            "_source": "テスト"}, fh)
-            orig_cols, orig_load = F.columns, train_ltr.LT.load_bars
+            orig_cols, orig_load = F.columns, ltr.LT.load_bars
             try:
                 F.columns = lambda preset=None: list(cols)
-                train_ltr.LT.load_bars = lambda data_dir, start=None, extra=(): bars
+                ltr.LT.load_bars = lambda data_dir, start=None, extra=(): bars
                 rc = train_ltr.main(["--data-dir", data_dir, "--dataset", ds_path, "--out-dir", tmp,
                                      "--params", pp])
                 self.assertEqual(rc, 0)
@@ -193,8 +238,64 @@ class TestTrainScript(unittest.TestCase):
                 self.assertEqual(train_ltr.main(["--data-dir", data_dir, "--dataset", ds_path, "--out-dir", tmp,
                                                  "--params", pp]), 1)
             finally:
-                F.columns, train_ltr.LT.load_bars = orig_cols, orig_load
+                F.columns, ltr.LT.load_bars = orig_cols, orig_load
         self.assertEqual(ltr.load(os.path.join(tmp, "none")), (None, None))
+
+    def test_tune_then_train(self):
+        """tune_ltr.py が ltr_params.json と同じ形で書き、train_ltr.py がその木の形で学習する。"""
+        import train_ltr
+        import tune_ltr
+
+        df = synth(per_day=6)
+        cols = FEATS
+        days = pd.bdate_range("2018-03-01", "2023-08-31")
+        rng = np.random.default_rng(6)
+        bars = []
+        for j in range(6):
+            c = 100 * np.exp(np.cumsum(rng.normal(0, 0.01, len(days))))
+            bars.append(pd.DataFrame({"Code": f"{1000 + j}", "Date": days, "AdjO": c, "AdjH": c * 1.01,
+                                      "AdjL": c * 0.99, "AdjC": c}))
+        bars = pd.concat(bars, ignore_index=True)
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = os.path.join(tmp, "data")
+            os.makedirs(data_dir)
+            ds_path = os.path.join(data_dir, "dataset.parquet")
+            df.drop(columns=[ltr.R20, E.R20, E.RET, E.HIT]).to_parquet(ds_path, index=False)
+            pp = os.path.join(tmp, "ltr_params.json")
+            orig_cols, orig_load = F.columns, ltr.LT.load_bars
+            try:
+                F.columns = lambda preset=None: list(cols)
+                ltr.LT.load_bars = lambda data_dir, start=None, extra=(): bars
+                self.assertEqual(tune_ltr.main(["--data-dir", data_dir, "--dataset", ds_path, "--out", pp,
+                                                "--trials", "2"]), 0)
+                with open(pp, encoding="utf-8") as fh:
+                    rec = json.load(fh)
+                self.assertEqual(sorted(rec), ["_cutoff", "_cv", "_features_sig", "_n_features", "_source", "params"])
+                self.assertEqual(sorted(rec["params"]), sorted(ltr.load_params()["params"]))
+                self.assertIsNone(ltr.params_mismatch(rec, cols))
+                ds = ltr.load_frame(ds_path, data_dir, cols)
+                self.assertEqual(rec["_cutoff"], str(ltr.search_cutoff(ds["Date"]).date()))
+                self.assertEqual(rec["_cv"]["n_rows"], len(ltr.search_rows(ds, ltr.search_cutoff(ds["Date"]))))
+                self.assertEqual(rec["_cv"]["n_trials"], 2)
+                self.assertTrue(rec["_source"].startswith("週次の探索（"))
+                self.assertFalse(os.path.exists(pp + ".tmp"))
+                self.assertEqual(train_ltr.main(["--data-dir", data_dir, "--dataset", ds_path, "--out-dir", tmp,
+                                                 "--params", pp]), 0)
+                _, meta = ltr.load(tmp)
+                self.assertEqual(meta["params"], rec["params"])
+                self.assertEqual(meta["tuning"], rec["_cv"])
+            finally:
+                F.columns, ltr.LT.load_bars = orig_cols, orig_load
+
+    def test_source_note(self):
+        import tune_ltr
+
+        cv = {"n_rows": 18038, "n_trials": 50, "n_splits": 5}
+        env = {"GITHUB_RUN_ID": "123", "GITHUB_WORKFLOW": "Retrain Weekly", "GITHUB_SHA": "abcdef0123"}
+        self.assertEqual(tune_ltr.source_note(cv, "2025-08-26", env),
+                         "週次の探索（Retrain Weekly run 123・abcdef0。2025-08-26 までの 18,038件・50試行・5分割・"
+                         "目的は検証分割の日付内 NDCG@5）")
+        self.assertIn("手元", tune_ltr.source_note(cv, "2025-08-26", {}))
 
 
 if __name__ == "__main__":

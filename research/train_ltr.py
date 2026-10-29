@@ -6,8 +6,8 @@
 
     python3 research/train_ltr.py
 
-木の形は research/ltr_params.json（実験114 の探索の結果）。学習する列で探索したものでなければ学習しない（前回のモデルの
-まま。ほかの追加モデルと同じ）。毎週は探索しない。
+木の形は research/ltr_params.json（最初は実験114 の探索の結果。探索し直すのは research/tune_ltr.py。§78-10）。学習する列で
+探索したものでなければ学習しない（前回のモデルのまま。ほかの追加モデルと同じ）。
 
 作るもの（ほかの追加モデルと同じ置き場・同じ名前）
   model.joblib   全期間（ラベルと20営業日目の終値がある行）で学習したモデル。毎日の候補の採点に使う
@@ -20,7 +20,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 import time
@@ -30,7 +29,6 @@ import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import features as F  # noqa: E402
-import live_track as LT  # noqa: E402
 import ltr  # noqa: E402
 import models as M  # noqa: E402
 from train_production import DATA_DIR, MODEL_DIR  # noqa: E402
@@ -60,19 +58,7 @@ def main(argv=None) -> int:
         return 1
     params = rec["params"]
 
-    ds = pd.read_parquet(args.dataset)
-    ds["Date"] = pd.to_datetime(ds["Date"])
-    ds["Code"] = ds["Code"].astype(str)
-    n_unlabeled = int(ds["label"].isna().sum())
-    if n_unlabeled:
-        raise SystemExit(f"ラベル未確定が {n_unlabeled:,}件あります。予測用データセットでは学習できません")
-    miss = [c for c in cols if c not in ds.columns]
-    if miss:
-        raise SystemExit(f"データセットに無い列: {miss[:6]}")
-    ds = ds.sort_values(["Date", "Code"], kind="mergesort").reset_index(drop=True)
-    bars = LT.load_bars(args.data_dir, start=ds["Date"].min() - pd.Timedelta(days=10))
-    ds = ltr.attach_r20(ds, bars)
-    del bars
+    ds = ltr.load_frame(args.dataset, args.data_dir, cols)
     ok = ltr.trainable(ds)
     sz = ds[ok].groupby("Date").size()
     print(f"[load] {len(ds):,}件（ラベルあり）のうち20営業日目の終値がある {int(ok.sum()):,}件・{len(sz):,}日・"
