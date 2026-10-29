@@ -110,10 +110,11 @@ summarize = E79.summarize
 # 行
 # --------------------------------------------------------------------------- #
 
-def build(df: pd.DataFrame, parts: list, models=MODELS) -> pd.DataFrame:
+def build(df: pd.DataFrame, parts: list, models=MODELS, sets=SETS) -> pd.DataFrame:
     """
     parts: [(行番号, 丸める前の百分位の行列)]。1行ごとに、組ごとの百分位の最小（画面と同じ丸め。欠けがあれば NaN = 満たさない）、
-    lgbm のスコア、売りごとの収益（%）・到達の印・到達日、発火（その日の行数）。
+    lgbm のスコア、売りごとの収益（%）・到達の印・到達日、発火（その日の行数）。models が12本より少ないときは、その中の
+    モデルだけでできた組（sets）を渡す（probe_k15_panel）。
     """
     i = {a: k for k, a in enumerate(models)}
     outs = []
@@ -123,7 +124,7 @@ def build(df: pd.DataFrame, parts: list, models=MODELS) -> pd.DataFrame:
         g = src[["Code", "Date", "window"]].copy().reset_index(drop=True)
         g["Date"] = pd.to_datetime(g["Date"])
         g["score"] = src[f"score_{M.BASELINE}"].to_numpy(dtype=float)
-        for code, _, grp in SETS:
+        for code, _, grp in sets:
             g[f"min_{code}"] = R[:, [i[a] for a in grp]].min(axis=1)
         for t in TARGETS:
             k = E83.tp_key(t)
