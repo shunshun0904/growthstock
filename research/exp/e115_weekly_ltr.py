@@ -60,6 +60,20 @@ AskUserQuestion（同じ日）: 候補の日から週末までの値動きを特
 
     exp=e115_weekly_ltr.py  args=""      （既定は --trials 50 --shifts 0,2,4 --top 2。探索の結果と out-of-fold は置き場に
                                             残し、同じデータ・同じ設定なら次の回は読む）
+
+結果（2026-10-29、run 40849364851、be54f9a、実験の部分 25.8分。docs/MODEL_ADOPTION_RULES.md §79-3）
+  - 確かめはすべて通った（週末に入った候補 4,493件の収益が日次と一致・値動き4列 300/300 行が一致）
+  - 週ごとの上位2件の平均収益（窓の平均）W / B / D:
+      0か月  +1.47% / +0.93% / +1.53%
+      2か月  +1.04% / +0.73% / +1.07%
+      4か月  +1.32% / +0.73% / +0.59%
+  - 読み方: 並べ方「はっきりとは良くない」（0・2か月は D に届かない）。曜日「はっきりとは寄らない」
+    （木・金の割合の差 +4.3 / +5.1 / +0.8 ポイント）
+
+補足（運用者の説明「今の運用に加え、毎週金曜に週次ランキングを足す」2026-10-29。1回目の結果のあとに足した集計で、記述だけ。§79-4）
+  daily_rule  今の毎日の買い R0（本番の out-of-fold の 1.2σ の木3本。実験82 と同じ前向きの百分位を小数1桁に丸め、すべて95以上）
+  supplement  ずらし0 の週の候補で、W の上位2件と R0 の重なり、足すと増える買い（W の上位で R0 でないもの）の成績、曜日・
+              金曜の候補、R0 を「その週の金曜の W でも上位か」で分けた成績
 """
 from __future__ import annotations
 
@@ -558,6 +572,156 @@ LEAN_JA = {"thu_fri": "見立てどおり木・金に寄る", "avoid": "見立�
 
 
 # --------------------------------------------------------------------------- #
+# 補足: 今の運用に金曜の週次ランキングを足す形（運用者の説明 2026-10-29。1回目の結果のあとに足した集計。§79-4）
+# --------------------------------------------------------------------------- #
+
+#: 今の毎日の買い（今日の戦略の規則: 1.2σ の木3本の前向きの百分位がすべて95以上。候補の翌営業日の寄りで買う）に使う3本。
+#: 週次の再学習が Release に上げた本番の out-of-fold（基準モデルと同じ窓 = ずらし0）を読む
+RULE_TREES = ("lgbm", "xgb", "cat")
+#: 「金曜の週次ランキングでも上位」の線（週の中の百分位。上位20%）。上位 n 件に入るかでも分ける
+UPPER_PCT = 0.8
+
+
+def daily_rule(daily: pd.DataFrame, data_dir: str | None = None) -> Tuple[pd.DataFrame, Dict]:
+    """
+    今の毎日の買い（R0）の印。実験82 と同じ作り: 本番の out-of-fold（1.2σ の木3本。e79.load_oofs で (Code, Date) にそろえ、
+    スコアの欠測は外す）を本番の out-of-fold と同じ窓に分け、前向きの百分位（e79.window_split。テスト窓より前の窓のスコアの
+    分布での位置。最初の2窓は参照が足りないので付かない）を画面と同じ小数1桁に丸めて（e82.rounded）、3本すべて95以上。
+    返すのは daily の (Code, Date) と r0（1.0 / 0.0。百分位が付かない行は欠測）。3本のファイルがそろわなければ found = False。
+    """
+    import e79_model_clusters as E79
+    import e82_and_rule_variants as E82
+
+    data_dir = data_dir or lab.DATA_DIR
+    keys = daily[["Code", "Date"]].copy()
+    keys["Code"] = keys["Code"].astype(str)
+    keys["Date"] = pd.to_datetime(keys["Date"])
+    if not all(os.path.exists(E79.oof_path(a, data_dir)) for a in RULE_TREES):
+        return keys.iloc[:0].assign(r0=pd.Series(dtype=float)), {"found": False}
+    w, info0 = E79.load_oofs(data_dir, models=RULE_TREES)
+    folds = E79.make_windows(keys["Date"])
+    w["window"] = E79.assign_windows(w["Date"], folds)
+    w = w[w["window"] > 0].reset_index(drop=True)
+    r0 = np.full(len(w), np.nan)
+    for _, (_, te, _, Pte) in E79.window_split(w, folds, models=RULE_TREES).items():
+        r0[te] = (np.nan_to_num(E82.rounded(Pte), nan=-1.0) >= LINE).all(axis=1).astype(float)
+    w["r0"] = r0
+    out = keys.merge(w[["Code", "Date", "r0"]], on=["Code", "Date"], how="left", validate="many_to_one")
+    info = {"found": True, "joined": int(info0["kept"]), "rows": int(len(w)), "with_pct": int(np.isfinite(r0).sum()),
+            "r0": int(np.nansum(r0)), "matched": int(out["r0"].notna().sum())}
+    return out, info
+
+
+def _grp(sel: pd.DataFrame, ret: str) -> Dict:
+    """件数・平均収益・−10% 未満の割合・平均の標準誤差（ret の列で）。"""
+    r = sel[ret].to_numpy(dtype=float)
+    return {"n": int(len(sel)), "ret": float(np.nanmean(r)) if len(r) else float("nan"),
+            "bad": float(np.nanmean(r < BAD)) if len(r) else float("nan"),
+            "se": float(np.nanstd(r, ddof=1) / np.sqrt(len(r))) if len(r) > 1 else float("nan")}
+
+
+def _split(hi: pd.DataFrame, lo: pd.DataFrame, ret: str) -> Dict:
+    """2つの組の成績と、平均収益の差（標準誤差つき。差の大きさが標準誤差の2倍以上なら clear）。"""
+    a, b = _grp(hi, ret), _grp(lo, ret)
+    diff = a["ret"] - b["ret"]
+    se = float(np.sqrt(a["se"] ** 2 + b["se"] ** 2)) if np.isfinite(a["se"]) and np.isfinite(b["se"]) else float("nan")
+    return {"upper": a, "rest": b, "diff": float(diff), "se": se,
+            "clear": bool(np.isfinite(diff) and np.isfinite(se) and abs(diff) >= 2 * se)}
+
+
+def supplement(o: pd.DataFrame, r0: pd.DataFrame, top_n: int = TOP_N, upper: float = UPPER_PCT) -> Dict:
+    """
+    今の運用（R0。候補の翌営業日の寄りで買う）に、金曜の週次ランキング（W。週ごとの上位 top_n 件を週明けの寄りで買う）を
+    足す形の集計（ずらし0）。o は週の候補の out-of-fold（score_W・RET（週明けの寄り）・D_RET（候補の翌営業日の寄り）・
+    cand_date・fold）、r0 は daily_rule の出力（候補の日の行の印）。R0 の印が全部の候補に付いた週だけで数える。
+      overlap   W の上位の件数・R0 の件数・両方に入る件数
+      added     足すと増える買い（W の上位で R0 に入らないもの。週明けの寄り）と、比べる W の上位すべて（週明け）・R0（翌営業日
+                の寄り）・候補全体（週明け）。窓の平均（ret_w）も
+      weekday   候補の日の曜日ごとに、W の上位（週明け）・R0（翌営業日）・候補全体（週明け）
+      friday    金曜の候補だけ（どれも月曜の寄りで買う）: R0・W の上位・両方・金曜の候補全体
+      confirm   R0 の買い（翌営業日の寄りの収益）を、その週の金曜の W で上位かどうかで分けた成績と差:
+                all = 週の中の百分位が upper 以上かどうか / mon = 同じ分け方を月曜の候補だけで / top = W の上位 top_n 件に入るか
+    """
+    m = o.merge(r0.rename(columns={"Date": "cand_date"}), on=["Code", "cand_date"], how="left", validate="many_to_one")
+    full = m["r0"].notna().groupby(m["Date"]).transform("all").to_numpy(dtype=bool)
+    m = m[full].reset_index(drop=True)
+    out: Dict = {"weeks": int(m["Date"].nunique()), "rows": int(len(m))}
+    if not len(m):
+        return out
+    rule = m["r0"].to_numpy(dtype=float) > 0
+    pct = LTR.within_date_pct(m["Date"], m["score_W"].to_numpy(dtype=float))
+    top = m.index.isin(top_per_week(m, "score_W", top_n).index)
+    wd = pd.to_datetime(m["cand_date"]).dt.weekday.to_numpy()
+    out["overlap"] = {"top": int(top.sum()), "rule": int(rule.sum()), "both": int((top & rule).sum())}
+    sets = {"W_only": (m[top & ~rule], RET), "W_all": (m[top], RET), "R0": (m[rule], D_RET), "all": (m, RET)}
+    out["added"] = {}
+    for k, (s, r) in sets.items():
+        g = _grp(s, r)
+        pw = per_window(s.assign(**{RET: s[r]}))
+        g["ret_w"] = float(pw["ret"].mean()) if len(pw) else float("nan")
+        out["added"][k] = g
+    out["weekday"] = {"W": [_grp(m[top & (wd == k)], RET) for k in range(5)],
+                      "R0": [_grp(m[rule & (wd == k)], D_RET) for k in range(5)],
+                      "all": [_grp(m[wd == k], RET) for k in range(5)]}
+    fri = wd == 4
+    out["friday"] = {"R0": _grp(m[fri & rule], RET), "W": _grp(m[fri & top], RET),
+                     "both": _grp(m[fri & top & rule], RET), "all": _grp(m[fri], RET)}
+    hi = pct >= upper
+    mon = wd == 0
+    out["confirm"] = {"all": _split(m[rule & hi], m[rule & ~hi], D_RET),
+                      "mon": _split(m[rule & mon & hi], m[rule & mon & ~hi], D_RET),
+                      "top": _split(m[rule & top], m[rule & ~top], D_RET)}
+    w_only, r0_w, all_w = (out["added"][k]["ret_w"] for k in ("W_only", "R0", "all"))
+    if not np.isfinite(w_only):
+        out["added_reading"] = "none"
+    elif w_only >= r0_w:
+        out["added_reading"] = "same_as_rule"
+    elif w_only > all_w:
+        out["added_reading"] = "between"
+    else:
+        out["added_reading"] = "no_better"
+    return out
+
+
+ADDED_JA = {"same_as_rule": "足すと、今の買いと同じくらいかそれ以上の買いが増える",
+            "between": "足すと、候補全体よりは良いが今の買いより劣る買いが増える",
+            "no_better": "足しても良い買いは増えない（候補全体と変わらないか、それより悪い）", "none": "数えられない"}
+
+
+def report_supplement(s: Dict, top_n: int) -> None:
+    """補足の表（公開ログ。集計だけ）。"""
+    print(f"\n■ 補足（ずらし0。運用者の説明「今の運用に加え、毎週金曜に週次ランキングを足す」2026-10-29。1回目の結果のあとに足した"
+          f"集計で、採用の判定ではない）: 今の毎日の買い R0 の印が全部の候補に付いた {s['weeks']}週・{s['rows']:,}件")
+    if not s.get("rows"):
+        print("  数えられる週が無い")
+        return
+    ov, ad = s["overlap"], s["added"]
+    print(f"  ◆ 重なり: W の上位{top_n}件 {ov['top']}件のうち今の買い（R0）にも入る {ov['both']}件（{_s(ov['both'] / max(1, ov['top']))}）"
+          f" ｜ R0 {ov['rule']}件のうち W の上位に入る {_s(ov['both'] / max(1, ov['rule']))}")
+    print("  ◆ 足すと増える買い（W の上位で R0 に入らないもの）: 件数 / 平均収益（全件・窓の平均）/ −10% 未満")
+    for k, ja in (("W_only", "W の上位で R0 でない（週明けの寄り）"), ("W_all", "W の上位すべて（週明けの寄り）"),
+                  ("R0", "今の買い R0（翌営業日の寄り）"), ("all", "候補全体（週明けの寄り）")):
+        g = ad[k]
+        print(f"    {ja:<26}{g['n']:>5}件 {_p(g['ret']):>8} {_p(g['ret_w']):>8} {_s(g['bad']):>6}")
+    print(f"    → {ADDED_JA[s['added_reading']]}")
+    print("  ◆ 候補の日の曜日ごと: W の上位（週明けの寄り）件数・平均 ｜ R0（翌営業日の寄り）件数・平均 ｜ 候補全体（週明け）の平均")
+    for k in range(5):
+        a, b, c = s["weekday"]["W"][k], s["weekday"]["R0"][k], s["weekday"]["all"][k]
+        print(f"    {WEEKDAYS[k]}  W {a['n']:>4}件 {_p(a['ret']):>8} ｜ R0 {b['n']:>4}件 {_p(b['ret']):>8} ｜ 候補全体 {_p(c['ret']):>8}")
+    fr = s["friday"]
+    print("  ◆ 金曜の候補だけ（どれも月曜の寄りで買う）: " + " / ".join(
+        f"{ja} {fr[k]['n']}件 {_p(fr[k]['ret'])}（−10%未満 {_s(fr[k]['bad'])}）"
+        for k, ja in (("R0", "今の買い R0"), ("W", f"W の上位{top_n}件"), ("both", "両方"), ("all", "金曜の候補全体"))))
+    hi_ja = f"上位{(1 - UPPER_PCT) * 100:.0f}%（週の中の百分位 {UPPER_PCT} 以上）"
+    for name, ja, cut in (("all", "R0 の買い全体", hi_ja), ("mon", "月曜の候補の R0", hi_ja), ("top", "R0 の買い全体", f"上位{top_n}件")):
+        c = s["confirm"][name]
+        print(f"  ◆ {ja}を、その週の金曜の W で{cut}に入るかで分ける（翌営業日の寄りで買った今の収益）: 入る {c['upper']['n']}件 "
+              f"{_p(c['upper']['ret'])}（−10%未満 {_s(c['upper']['bad'])}）/ 入らない {c['rest']['n']}件 {_p(c['rest']['ret'])}"
+              f"（{_s(c['rest']['bad'])}）｜ 差 {c['diff'] * 100:+.2f} ± {c['se'] * 100:.2f}pt → "
+              f"{'差がはっきりある（標準誤差の2倍以上）' if c['clear'] else 'はっきりしない'}")
+
+
+# --------------------------------------------------------------------------- #
 
 def load_all(cols: Sequence[str]) -> Tuple[pd.DataFrame, pd.DataFrame, pd.Timestamp, Dict]:
     """
@@ -717,12 +881,15 @@ def main(argv=None) -> int:
                      "search_cv": {k: v for k, v in store["W"]["_cv"].items() if k != "trials"},
                      "cv": cvm, "random_ndcg": rnd, "top": args.top, "shifts": {}}
     rows = []
+    o0 = None
     for sh in shifts:
         o, od = oof_shift(wk_eval, daily, cols, cols_w, params, sh)
         res = evaluate(o, od, args.top)
         report(sh, res, args.top)
         summary["shifts"][str(sh)] = res
         rows.append({"shift": sh, **res})
+        if sh == 0:
+            o0 = o
 
     rd = reading(rows)
     summary["reading"] = rd
@@ -734,6 +901,18 @@ def main(argv=None) -> int:
               f"（{'○' if x['better'] else '×'}）・木・金の割合の差 {x['tf_gap']:+.1f}pt")
     print(f"  → 並べ方: {'週ごとに学ぶ並べ方は、今のスコアで週の候補を並べるより良い' if rd['better'] else 'はっきりとは良くない'}"
           f" ／ 曜日: {LEAN_JA[rd['lean']]}")
+    # ---- 補足: 今の運用に金曜の週次ランキングを足す形（ずらし0。§79-4） ----
+    if o0 is not None:
+        r0, rinfo = daily_rule(daily)
+        if not rinfo.get("found"):
+            log("[補足] 本番の out-of-fold（1.2σ の木3本）が置き場に無いので、補足の集計はしない")
+        else:
+            log(f"[補足] 今の毎日の買い（本番の out-of-fold・実験82 と同じ作り）: 3本がそろう {rinfo['joined']:,}行・窓に入る "
+                f"{rinfo['rows']:,}行・前向きの百分位が付く {rinfo['with_pct']:,}行・R0 {rinfo['r0']:,}件（学習データの "
+                f"{len(daily):,}行のうち印が付く {rinfo['matched']:,}行）")
+            sup = supplement(o0, r0, args.top)
+            report_supplement(sup, args.top)
+            summary["supplement"] = {"info": rinfo, **sup}
     summary["minutes"] = round((time.time() - t_all) / 60, 1)
     with open(SUMMARY_PATH, "w", encoding="utf-8") as fh:
         json.dump(summary, fh, ensure_ascii=False, indent=2, default=str)

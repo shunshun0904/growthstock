@@ -13,6 +13,9 @@
   行（訓練に使った行より後）。W は値動きの列を使い、WX・D・B は使わない。保存した out-of-fold は次の回に読む
 - 木の形: 学習する列で探索したものでなければ止める
 - 通しで回す（探索は差し替え、当てはめは小さな木）: 集計と読み方を記録に書く
+- 補足（今の毎日の買い R0 に金曜の週次ランキングを足す形）: R0 の印は、本番の out-of-fold から numpy だけで直接計算し直した
+  前向きの百分位（前の窓の分布・同点は数えない・小数1桁に丸めて3本すべて95以上）と同じ。94.96 は 95.0 に丸まって入り、
+  94.91 は入らない。ファイルがそろわなければ数えない。集計は手で数えた小さな例と同じ
 
   python3 tests/test_e115_weekly_ltr.py
 """
@@ -32,8 +35,10 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "research"))
 sys.path.insert(0, os.path.join(ROOT, "research", "exp"))
 
+import build_dataset as BD  # noqa: E402
 import features as F  # noqa: E402
 import lab  # noqa: E402
+import walkforward as WF  # noqa: E402
 import e114_ltr_retest as E  # noqa: E402
 import e115_weekly_ltr as W  # noqa: E402
 
@@ -450,6 +455,229 @@ class TestParams(unittest.TestCase):
                 W.daily_ltr_params(["a", "b", "c"], p)
 
 
+#: 前向きの百分位の参照の切れ目（テスト窓の始まりの手前。20営業日 × 1.45 日）
+RULE_GAP = pd.Timedelta(days=int(round(BD.RISE_HORIZON * WF.TRADING_TO_CALENDAR)))
+
+
+def expected_r0(oof: pd.DataFrame, folds) -> np.ndarray:
+    """
+    R0 の印を numpy だけで直接計算し直す: テスト窓ごとに、前の窓（2つ以上）の行のうちテスト窓の始まりの RULE_GAP 前までを参照に、
+    参照のうちより低い割合 × 100（同点は数えない）を小数1桁に丸め、3本すべて95以上。参照が足りない窓・窓の外は欠測。
+    """
+    d = oof["Date"].to_numpy()
+    win = np.zeros(len(oof), dtype=int)
+    for f in folds:
+        win[(d >= np.datetime64(pd.Timestamp(f.test_start))) & (d <= np.datetime64(pd.Timestamp(f.test_end)))] = f.index
+    start = {f.index: pd.Timestamp(f.test_start) for f in folds}
+    present = sorted(set(int(x) for x in win[win > 0]))
+    r0 = np.full(len(oof), np.nan)
+    for ww in present:
+        prior = [x for x in present if x < ww]
+        if len(prior) < 2:
+            continue
+        ref = oof[np.isin(win, prior) & (d <= np.datetime64(start[ww] - RULE_GAP))]
+        te = np.flatnonzero(win == ww)
+        ok = np.ones(len(te), dtype=bool)
+        for a in W.RULE_TREES:
+            r = ref[f"score_{a}"].to_numpy(dtype=float)
+            x = oof[f"score_{a}"].to_numpy(dtype=float)[te]
+            ok &= np.array([round(float((r < v).sum()) / len(r) * 100.0, 1) for v in x]) >= 95.0
+        r0[te] = ok
+    return r0
+
+
+class TestDailyRule(unittest.TestCase):
+    """今の毎日の買い（R0）の印。合成の本番の out-of-fold（3本）を置き場に書いて読む。"""
+
+    @classmethod
+    def setUpClass(cls):
+        rng = np.random.default_rng(11)
+        days = pd.bdate_range("2016-01-04", "2021-12-31")
+        codes = [f"{6000 + j}" for j in range(10)]
+        daily = pd.DataFrame({"Code": np.tile(codes, len(days)), "Date": np.repeat(days, len(codes))})
+        z = rng.normal(size=len(daily))
+        sc = {a: z + rng.normal(0, 0.3, len(daily)) for a in W.RULE_TREES}     # 3本は似る（すべて95以上の行ができる）
+        folds = E.E41.folds_for(daily["Date"], 0)
+        cls.folds = folds
+        # 境目の行: 3つ目の窓の参照（前の2窓・始まりの29日前まで）の中で、ちょうど 94.96（丸めて 95.0）と 94.91 に置く
+        f3 = sorted(folds, key=lambda f: f.index)[2]
+        dd = daily["Date"].to_numpy()
+        win = np.zeros(len(daily), dtype=int)
+        for f in folds:
+            win[(dd >= np.datetime64(pd.Timestamp(f.test_start))) & (dd <= np.datetime64(pd.Timestamp(f.test_end)))] = f.index
+        first2 = sorted(folds, key=lambda f: f.index)[:2]
+        ref = np.isin(win, [f.index for f in first2]) & (dd <= np.datetime64(pd.Timestamp(f3.test_start) - RULE_GAP))
+        n = int(ref.sum())
+        k_in, k_out = int(np.ceil(0.9495 * n)), int(np.floor(0.9494 * n))
+        assert 100.0 * k_in / n < 95.0 and round(100.0 * k_in / n, 1) == 95.0, (n, k_in)
+        assert round(100.0 * k_out / n, 1) == 94.9, (n, k_out)
+        in3 = np.flatnonzero(win == f3.index)
+        cls.edge_in, cls.edge_out = int(in3[5]), int(in3[6])
+        for a in W.RULE_TREES:
+            r = np.sort(sc[a][ref])
+            sc[a][cls.edge_in] = (r[k_in - 1] + r[k_in]) / 2                     # 参照のうち k_in 件より上
+            sc[a][cls.edge_out] = (r[k_out - 1] + r[k_out]) / 2 if a == "cat" else r[-1] + 1.0   # cat だけ 94.91
+        cls.tmp = tempfile.TemporaryDirectory()
+        drop = (daily["Code"] == codes[3]) & (daily["Date"].dt.to_period("M") == pd.Period("2020-03"))
+        nan_row = int(np.flatnonzero((daily["Code"] == codes[4]).to_numpy() & (win == f3.index))[10])
+        for a in W.RULE_TREES:
+            o = daily.assign(score=sc[a], label=(z > 1.0).astype(float), **{lab.OUTCOME: 0.01 * z})
+            if a == "xgb":
+                o = o[~drop.to_numpy()]                                            # xgb に無い行 → 3本がそろわない
+            if a == "cat":
+                o.loc[nan_row, "score"] = np.nan                                   # スコアの欠測 → 外す
+            name = "oof.parquet" if a == "lgbm" else f"{a}_oof.parquet"
+            o.to_parquet(os.path.join(cls.tmp.name, name), index=False)
+        cls.daily, cls.drop, cls.nan_row = daily, drop.to_numpy(), nan_row
+        cls.sc = sc
+        cls.out, cls.info = W.daily_rule(daily, data_dir=cls.tmp.name)
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_same_as_direct(self):
+        keep = ~self.drop
+        keep[self.nan_row] = False
+        oof = self.daily[keep].reset_index(drop=True)
+        for a in W.RULE_TREES:
+            oof[f"score_{a}"] = self.sc[a][keep]
+        want = pd.Series(expected_r0(oof, self.folds), index=pd.MultiIndex.from_frame(oof[["Code", "Date"]]))
+        got = self.out.set_index(["Code", "Date"])["r0"]
+        self.assertEqual(list(self.out[["Code", "Date"]].itertuples(index=False)),
+                         list(self.daily[["Code", "Date"]].itertuples(index=False)))   # daily の行の順
+        both = got.reindex(want.index)
+        np.testing.assert_array_equal(np.isnan(both.to_numpy()), np.isnan(want.to_numpy()))
+        ok = ~np.isnan(want.to_numpy())
+        np.testing.assert_array_equal(both.to_numpy()[ok], want.to_numpy()[ok])
+        self.assertGreater(int(np.nansum(want.to_numpy())), 20)                    # 印の付く行がある
+        self.assertGreater(int((want.to_numpy() == 0).sum()), 1000)
+        self.assertEqual(self.info["r0"], int(np.nansum(want.to_numpy())))
+        self.assertEqual(self.info["with_pct"], int(ok.sum()))
+        self.assertEqual(self.info["joined"], len(oof))
+        self.assertEqual(self.info["matched"], int(ok.sum()))
+
+    def test_first_two_windows_and_missing(self):
+        r = self.out["r0"].to_numpy()
+        first = sorted(self.folds, key=lambda f: f.index)[1]
+        before3 = self.daily["Date"].to_numpy() <= np.datetime64(pd.Timestamp(first.test_end))
+        self.assertTrue(np.isnan(r[before3]).all())                                # 最初の2窓と窓の前は付かない
+        self.assertTrue(np.isnan(r[self.drop]).all())                              # 3本がそろわない行
+        self.assertTrue(np.isnan(r[self.nan_row]))                                 # スコアの欠測
+        self.assertTrue(np.isfinite(r[~before3 & ~self.drop]).mean() > 0.99)
+
+    def test_rounding_edge(self):
+        r = self.out["r0"].to_numpy()
+        self.assertEqual(r[self.edge_in], 1.0)                                     # 94.96 → 95.0（画面と同じ丸め）で入る
+        self.assertEqual(r[self.edge_out], 0.0)                                    # 2本は 100 でも cat が 94.9 なら入らない
+
+    def test_missing_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out, info = W.daily_rule(self.daily, data_dir=tmp)
+        self.assertFalse(info["found"])
+        self.assertEqual(len(out), 0)
+        self.assertIn("r0", out.columns)
+
+
+def small_week_oof():
+    """手で数える小さな例: 2週 × 5件（月〜金）と、R0 の印が欠ける週（数えない）。"""
+    rows = [  # Code, 週末, 候補の日, score_W, r0, RET（週明け）, D_RET（翌営業日）
+        ("1001", "2021-01-08", "2021-01-04", 0.9, 1.0, 0.10, 0.08),
+        ("1002", "2021-01-08", "2021-01-05", 0.1, 1.0, -0.15, -0.12),
+        ("1003", "2021-01-08", "2021-01-06", 0.5, 0.0, 0.02, 0.01),
+        ("1004", "2021-01-08", "2021-01-07", 0.7, 0.0, 0.05, 0.04),
+        ("1005", "2021-01-08", "2021-01-08", 0.3, 0.0, -0.02, 0.00),
+        ("1006", "2021-01-15", "2021-01-11", 0.2, 0.0, 0.01, 0.00),
+        ("1007", "2021-01-15", "2021-01-12", 0.8, 1.0, 0.10, 0.09),
+        ("1008", "2021-01-15", "2021-01-13", 0.6, 0.0, -0.12, -0.11),
+        ("1009", "2021-01-15", "2021-01-14", 0.4, 0.0, 0.03, 0.02),
+        ("1010", "2021-01-15", "2021-01-15", 0.9, 1.0, 0.06, 0.07),
+        ("1011", "2021-01-22", "2021-01-18", 0.9, 1.0, 0.50, 0.50),
+        ("1012", "2021-01-22", "2021-01-19", 0.1, np.nan, -0.50, -0.50),
+    ]
+    o = pd.DataFrame(rows, columns=["Code", "Date", "cand_date", "score_W", "r0", E.RET, W.D_RET])
+    o["Date"] = pd.to_datetime(o["Date"])
+    o["cand_date"] = pd.to_datetime(o["cand_date"])
+    o["fold"] = np.where(o["Date"] < "2021-01-20", 3, 4)
+    o[E.HIT] = o[E.RET] >= 0.10
+    o[E.R20] = o[E.RET]
+    r0 = o.loc[o["r0"].notna(), ["Code", "cand_date", "r0"]].rename(columns={"cand_date": "Date"})
+    r0 = pd.concat([r0, pd.DataFrame({"Code": ["9999"], "Date": [pd.Timestamp("2021-01-05")], "r0": [1.0]})])
+    return o.drop(columns=["r0"]), r0.reset_index(drop=True)
+
+
+class TestSupplement(unittest.TestCase):
+    def test_counts_by_hand(self):
+        o, r0 = small_week_oof()
+        s = W.supplement(o, r0, top_n=2, upper=0.8)
+        self.assertEqual((s["weeks"], s["rows"]), (2, 10))                         # 印が欠ける週は数えない
+        self.assertEqual(s["overlap"], {"top": 4, "rule": 4, "both": 3})
+        ad = s["added"]
+        self.assertEqual(ad["W_only"]["n"], 1)
+        self.assertAlmostEqual(ad["W_only"]["ret"], 0.05)
+        self.assertTrue(np.isnan(ad["W_only"]["se"]))
+        self.assertAlmostEqual(ad["W_all"]["ret"], (0.10 + 0.05 + 0.10 + 0.06) / 4)
+        self.assertAlmostEqual(ad["R0"]["ret"], (0.08 - 0.12 + 0.09 + 0.07) / 4)      # 今の買いは翌営業日の寄り
+        self.assertAlmostEqual(ad["R0"]["bad"], 0.25)
+        self.assertAlmostEqual(ad["all"]["ret"], 0.008)
+        self.assertAlmostEqual(ad["all"]["bad"], 0.2)
+        for k in ("W_only", "W_all", "R0", "all"):                                 # 窓は1つなので窓の平均 = 全件
+            self.assertAlmostEqual(ad[k]["ret_w"], ad[k]["ret"])
+        self.assertEqual(s["added_reading"], "same_as_rule")
+        wdw = s["weekday"]
+        self.assertEqual([g["n"] for g in wdw["W"]], [1, 1, 0, 1, 1])
+        self.assertAlmostEqual(wdw["W"][4]["ret"], 0.06)
+        self.assertTrue(np.isnan(wdw["W"][2]["ret"]))
+        self.assertEqual([g["n"] for g in wdw["R0"]], [1, 2, 0, 0, 1])
+        self.assertAlmostEqual(wdw["R0"][1]["ret"], (-0.12 + 0.09) / 2)
+        np.testing.assert_allclose([g["ret"] for g in wdw["all"]], [0.055, -0.025, -0.05, 0.04, 0.02])
+        fr = s["friday"]
+        self.assertEqual([fr[k]["n"] for k in ("R0", "W", "both", "all")], [1, 1, 1, 2])
+        self.assertAlmostEqual(fr["all"]["ret"], 0.02)
+        c = s["confirm"]["all"]                                                    # 週の中の百分位 0.8 以上: 1001・1010
+        self.assertEqual((c["upper"]["n"], c["rest"]["n"]), (2, 2))
+        self.assertAlmostEqual(c["upper"]["ret"], 0.075)
+        self.assertAlmostEqual(c["rest"]["ret"], -0.015)
+        self.assertAlmostEqual(c["diff"], 0.09)
+        self.assertAlmostEqual(c["se"], np.sqrt(0.005 ** 2 + 0.105 ** 2))
+        self.assertFalse(c["clear"])
+        m = s["confirm"]["mon"]
+        self.assertEqual((m["upper"]["n"], m["rest"]["n"]), (1, 0))
+        self.assertTrue(np.isnan(m["diff"]) and not m["clear"])
+        t = s["confirm"]["top"]                                                    # 上位2件に入る R0: 1001・1007・1010
+        self.assertEqual((t["upper"]["n"], t["rest"]["n"]), (3, 1))
+        self.assertAlmostEqual(t["upper"]["ret"], 0.08)
+        self.assertAlmostEqual(t["diff"], 0.20)
+        self.assertTrue(np.isnan(t["se"]))
+
+    def test_added_reading(self):
+        o, r0 = small_week_oof()
+        d = o["Code"] == "1004"                                                    # 足すと増える買いは 1004 だけ
+        self.assertEqual(W.supplement(o.assign(**{E.RET: np.where(d, 0.02, o[E.RET])}), r0)["added_reading"], "between")
+        self.assertEqual(W.supplement(o.assign(**{E.RET: np.where(d, -0.05, o[E.RET])}), r0)["added_reading"],
+                         "no_better")
+        r1 = r0.copy()
+        r1.loc[r1["Code"] == "1004", "r0"] = 1.0
+        self.assertEqual(W.supplement(o, r1)["added_reading"], "none")
+
+    def test_split_and_empty(self):
+        hi = pd.DataFrame({W.D_RET: [0.10, 0.11, 0.09, 0.10]})
+        lo = pd.DataFrame({W.D_RET: [0.00, 0.01, -0.01, 0.00]})
+        sp = W._split(hi, lo, W.D_RET)
+        self.assertAlmostEqual(sp["diff"], 0.10)
+        self.assertTrue(sp["clear"])
+        o, r0 = small_week_oof()
+        s = W.supplement(o, r0.iloc[:0])
+        self.assertEqual((s["weeks"], s["rows"]), (0, 0))
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            W.report_supplement(s, 2)
+            W.report_supplement(W.supplement(o, r0), 2)
+        self.assertIn("数えられる週が無い", buf.getvalue())
+        for code in o["Code"]:                                                     # 公開ログに銘柄コードを出さない
+            self.assertNotIn(code, buf.getvalue())
+
+
 class TestMain(unittest.TestCase):
     """通しで回す（データの読み込み・探索・木の形の読み込みは差し替え。当てはめは小さな木で本物）。"""
 
@@ -484,6 +712,13 @@ class TestMain(unittest.TestCase):
             return {"params": dict(SMALL_RANK), "_cv": {"objective": "x", "ndcg": 0.5, "best_trial": 0, "trials": []},
                     "_minutes": 0.0}
 
+        def fake_rule(daily):
+            # 本番の out-of-fold の代わり: f1 が高い行に R0 の印（置き場の実データは読まない）
+            self.assertTrue(daily["label"].notna().all())
+            r = daily[["Code", "Date"]].assign(r0=(daily["f1"] > 1.2).astype(float))
+            return r, {"found": True, "joined": len(r), "rows": len(r), "with_pct": len(r), "r0": int(r["r0"].sum()),
+                       "matched": len(r)}
+
         with tempfile.TemporaryDirectory() as tmp, \
                 mock.patch.object(W, "OOF_DIR", tmp), \
                 mock.patch.object(W, "PARAMS_PATH", os.path.join(tmp, "e115_params.json")), \
@@ -492,6 +727,7 @@ class TestMain(unittest.TestCase):
                 mock.patch.object(W, "load_all", return_value=(full, bars, cutoff, chk)), \
                 mock.patch.object(W, "base_params", return_value=dict(SMALL_CLF)), \
                 mock.patch.object(W, "daily_ltr_params", return_value={"params": dict(SMALL_RANK), "_cutoff": "x"}), \
+                mock.patch.object(W, "daily_rule", side_effect=fake_rule) as dr, \
                 mock.patch.object(W.E, "tune_l", side_effect=fake_tune) as tl:
             buf = io.StringIO()
             with contextlib.redirect_stdout(buf):
@@ -507,6 +743,13 @@ class TestMain(unittest.TestCase):
             self.assertEqual(sm["shifts"]["0"]["top"]["W"]["n"], 2 * sm["shifts"]["0"]["weeks"])
             self.assertIn("読み方", out)
             self.assertIn("週ごとの上位2件", out)
+            self.assertEqual(dr.call_count, 1)                                 # 補足（ずらし0）
+            sup = sm["supplement"]
+            self.assertTrue(sup["info"]["found"])
+            self.assertGreater(sup["weeks"], 0)
+            self.assertEqual(sup["overlap"]["top"], 2 * sup["weeks"])
+            self.assertLessEqual(sup["weeks"], sm["shifts"]["0"]["weeks"])
+            self.assertIn("■ 補足", out)
             for code in codes:                                         # 公開ログに銘柄コードを出さない
                 self.assertNotIn(code, out)
             with contextlib.redirect_stdout(io.StringIO()):            # 2回目は探索と out-of-fold を読む
