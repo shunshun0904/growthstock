@@ -6,8 +6,9 @@
 
     python3 research/train_ltr.py
 
-木の形は research/ltr_params.json（最初は実験114 の探索の結果。探索し直すのは research/tune_ltr.py。§78-10）。学習する列で
-探索したものでなければ学習しない（前回のモデルのまま。ほかの追加モデルと同じ）。
+木の形は research/ltr_params.json（最初は実験114 の探索の結果。2026-10-29 から日曜の再学習の「Tune ranking model」が
+research/tune_ltr.py で毎週探索し直す。§78-10）。学習する列で探索したものでなければ学習しない（前回のモデルのまま。ほかの
+追加モデルと同じ）。
 
 作るもの（ほかの追加モデルと同じ置き場・同じ名前）
   model.joblib   全期間（ラベルと20営業日目の終値がある行）で学習したモデル。毎日の候補の採点に使う

@@ -9,6 +9,7 @@
 - 木の形の確かめ（列の指紋が違えば学習しない）・LightGBM に渡す鍵
 - 毎日の候補の値（その日の中の百分位・順位・上半分の印・過去の分布での位置）
 - 学習の台本が置き場に model.joblib / meta.json / oof.parquet を作り、読み直せる
+- 日曜の再学習に木の形の探索（Tune ranking model）が学習の前に入り、ジョブの上限に近ければ飛ばし、木の形をコミットする
 
   python3 tests/test_ltr.py
 """
@@ -296,6 +297,55 @@ class TestTrainScript(unittest.TestCase):
                          "週次の探索（Retrain Weekly run 123・abcdef0。2025-08-26 までの 18,038件・50試行・5分割・"
                          "目的は検証分割の日付内 NDCG@5）")
         self.assertIn("手元", tune_ltr.source_note(cv, "2025-08-26", {}))
+
+
+class TestWeeklyWorkflow(unittest.TestCase):
+    """日曜の再学習（retrain-weekly.yml）にランキング学習の探索が入っている（運用者の指示 2026-10-29。§78-10）。"""
+
+    def setUp(self):
+        import yaml
+
+        with open(os.path.join(ROOT, ".github", "workflows", "retrain-weekly.yml"), encoding="utf-8") as fh:
+            self.wf = yaml.safe_load(fh)
+        self.steps = self.wf["jobs"]["retrain"]["steps"]
+        self.names = [s.get("name") for s in self.steps]
+
+    def step(self, name):
+        return self.steps[self.names.index(name)]
+
+    def test_tune_before_train(self):
+        self.assertLess(self.names.index("Tune extra models (opt-in)"), self.names.index("Tune ranking model"))
+        self.assertLess(self.names.index("Tune ranking model"), self.names.index("Train ranking model"))
+        st = self.step("Tune ranking model")
+        self.assertEqual(st["if"], "inputs.tune == 'yes' && steps.scope.outputs.ltr == 'yes'")
+        self.assertIs(st["continue-on-error"], True)
+        self.assertEqual(st["timeout-minutes"], 45)
+        self.assertIn("python3 research/tune_ltr.py", st["run"])
+        # ジョブの上限（330分）までの残りを、ジョブの最初のステップで控えた時刻から測る
+        self.assertEqual(self.wf["jobs"]["retrain"]["timeout-minutes"], 330)
+        self.assertIn("330 * 60", st["run"])
+        self.assertEqual(self.names[0], "Start time")
+        self.assertEqual(self.step("Start time")["id"], "start")
+        self.assertEqual(st["env"]["JOB_START"], "${{ steps.start.outputs.t }}")
+
+    def test_guard_skips_near_the_limit(self):
+        import subprocess
+        import time
+
+        run = self.step("Tune ranking model")["run"].replace("python3 research/tune_ltr.py", "echo RUN")
+        with tempfile.TemporaryDirectory() as tmp:
+            for ago_min, want, not_want in ((300, "探索しない", "RUN"), (60, "RUN", "探索しない")):
+                env = dict(os.environ, JOB_START=str(int(time.time()) - ago_min * 60))
+                out = subprocess.run(["bash", "-eo", "pipefail", "-c", run], cwd=tmp, env=env, capture_output=True,
+                                     text=True)
+                self.assertEqual(out.returncode, 0, out.stderr)
+                self.assertIn(want, out.stdout)
+                self.assertNotIn(not_want, out.stdout)
+
+    def test_commit_includes_params(self):
+        run = self.step("Commit model metadata")["run"]
+        self.assertIn("research/ltr_params.json", run)
+        self.assertIn("git diff -- research/ltr_params.json", run)
 
 
 if __name__ == "__main__":

@@ -33,7 +33,7 @@ on:
         options: ['yes', 'no']
         default: 'yes'
       only:
-        description: '画面に並べる追加モデルのうち、これだけ探索・学習する（例: lgbm_k15,xgb_k15,cat_k15,logit_k15。空なら 1.2σ の4本とランキング学習。1.5σ の4本は指定したときだけ。ltr はランキング学習だけ（探索はしない）。1.8σ の4本は 2026-10-24 に外した。指定すると基準モデル（1.2σ の LightGBM）は触らない）'
+        description: '画面に並べる追加モデルのうち、これだけ探索・学習する（例: lgbm_k15,xgb_k15,cat_k15,logit_k15。空なら 1.2σ の4本とランキング学習。1.5σ の4本は指定したときだけ。ltr はランキング学習だけ（tune=yes なら木の形も探索し直す）。1.8σ の4本は 2026-10-24 に外した。指定すると基準モデル（1.2σ の LightGBM）は触らない）'
         required: false
         default: ''
 
@@ -69,9 +69,17 @@ jobs:
     # 見込みで、後者はこのジョブに収まらない。全モデル200本のままにしている
     # （2026-09-25、運用者の判断。tuning.SEARCH_N_ESTIMATORS の注記）。
     #
+    # 2026-10-29 から、ランキング学習の木の形の探索（Tune ranking model。50試行 × 5分割）を足した。実験114c の実測で
+    # 1回 14〜20分（上限 45分）。10/24 の全モデルの回（2時間27分）に足して約2時間50分の見込み
+    #
     # 実際の打ち切りはステップ単位で掛けてあるので、ここは最後の砦
     timeout-minutes: 330
     steps:
+      # ジョブの始まりの時刻。ランキング学習の探索（Tune ranking model）は、ジョブの上限までの残りが足りなければ飛ばす
+      - name: Start time
+        id: start
+        run: echo "t=$(date +%s)" >> "$GITHUB_OUTPUT"
+
       # 公開ブランチ（＝既定ブランチ）に対して回す。
       # 成果物をここに積まないと GitHub Pages の画面が更新されない。
       # 調査は claude/breakout-model で進め、まとまったらこちらへマージする。
@@ -236,10 +244,31 @@ jobs:
             python3 research/train_multi.py 2>&1 | tee -a retrain.log
           fi
 
+      # ランキング学習の木の形の探索（research/tune_ltr.py。実験114 の L と同じ探索: run_tuning.py と同じ打ち切り・
+      # 年×時価総額帯で層別した日付単位の5分割・種0・50試行・木200本固定・目的は検証分割の日付内 NDCG@5）。
+      # 運用者の指示（2026-10-29）「日曜の再学習に毎週の探索を入れてください」。実験114c（docs/MODEL_ADOPTION_RULES.md §78-10）の
+      # 実測で1回 14〜20分。最後まで終わったときだけ research/ltr_params.json を書き換え、下の Train ranking model がその木の形で
+      # 学習する。落ちたり時間切れになったりしたら前の木の形のまま（continue-on-error）。ジョブの上限（330分）までの残りが、
+      # この探索の上限（45分）と学習・上げ・コミットの分（あわせて45分）に足りなければ探索しない
+      - name: Tune ranking model
+        if: inputs.tune == 'yes' && steps.scope.outputs.ltr == 'yes'
+        timeout-minutes: 45
+        continue-on-error: true
+        env:
+          JOB_START: ${{ steps.start.outputs.t }}
+        run: |
+          left=$(( 330 * 60 - ($(date +%s) - JOB_START) ))
+          if [ "$left" -lt $(( 90 * 60 )) ]; then
+            echo "ジョブの上限まで残り $((left / 60))分。探索（上限45分）と学習・上げ・コミットに足りないので探索しない（前の木の形のまま）" | tee -a retrain.log
+            exit 0
+          fi
+          python3 research/tune_ltr.py 2>&1 | tee -a retrain.log
+
       # ランキング学習（research/train_ltr.py。research/model/models/ltr/ に置く）。買いの規則には使わず、画面と実運用の追跡に
       # 「両方使う形」（今の規則 かつ その日の中でランキング学習が上半分）を参考に並べるためのもの（運用者の選択「まず並べて見る」
-      # 2026-10-24。docs/MODEL_ADOPTION_RULES.md §78-9）。木の形は research/ltr_params.json（実験114 の探索）で、毎週は探索しない。
-      # 列の指紋が違えば学習しない（前回のモデルのまま）。失敗しても日次予測は動く（ランキング学習を出さないだけ）
+      # 2026-10-24。docs/MODEL_ADOPTION_RULES.md §78-9）。木の形は research/ltr_params.json（tune=yes の回は上の Tune ranking model が
+      # その週のデータで探索し直したもの）。列の指紋が違えば学習しない（前回のモデルのまま）。失敗しても日次予測は動く（ランキング
+      # 学習を出さないだけ）
       - name: Train ranking model
         if: steps.scope.outputs.ltr == 'yes'
         timeout-minutes: 30
@@ -295,6 +324,10 @@ jobs:
           { echo '### パラメータの変化（先週 -> 今週）'
             echo '```diff'
             git diff -- research/lgbm_params.json | tail -n +5 | head -60 || true
+            echo '```'
+            echo '### ランキング学習の木の形の変化（先週 -> 今週）'
+            echo '```diff'
+            git diff -- research/ltr_params.json | tail -n +5 | grep -E '^[-+] ' | head -30 || true
             echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           # 以前コミットしていたバイナリを追跡から外す（1回だけ効く）
           git rm --cached -q --ignore-unmatch research/model/model.txt \
@@ -302,7 +335,7 @@ jobs:
             'research/model/models/*/model.joblib' \
             'research/model/models/*/oof.parquet' 
           git add -A research/model/meta.json research/lgbm_params.json \
-            research/multi_params.json research/model/models/*/meta.json
+            research/multi_params.json research/ltr_params.json research/model/models/*/meta.json
           if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
           git commit -m "chore(model): 週次の再学習 ($(date -u '+%Y-%m-%d'))"
           for i in 1 2 3 4; do

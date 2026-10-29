@@ -234,9 +234,10 @@ class TestWorkflows(unittest.TestCase):
         self.assertEqual(jsf.count("if: inputs.mode != 'history'"), 2)        # Daily / Upload (daily)
         self.assertIn("if: inputs.mode != 'daily'", jsf)                       # History
         self.assertIn("steps.prepare.outcome == 'success' && inputs.mode != 'daily'", jsf)  # Upload (history)
-        # 週次学習の探索は tune=yes のときだけ（Routine は tune=yes を渡す。既定も yes）
+        # 週次学習の探索は tune=yes のときだけ（Routine は tune=yes を渡す。既定も yes）。Tune / Tune extra models /
+        # Tune ranking model（2026-10-29 に足した。docs/MODEL_ADOPTION_RULES.md §78-10）の3つ
         rt = read_wf("retrain-weekly.yml")
-        self.assertEqual(rt.count("if: inputs.tune == 'yes'"), 2)
+        self.assertEqual(rt.count("if: inputs.tune == 'yes'"), 3)
         self.assertIn("default: 'yes'", rt)
 
     def test_refresh_fetches_like_the_daily_run(self):

@@ -2,10 +2,10 @@
 """
 ランキング学習（research/ltr.py）の木の形を探索し直して research/ltr_params.json に書く。**買いの規則には使わない。**
 
-運用者の選択「毎週探索し直す」（2026-10-24。docs/MODEL_ADOPTION_RULES.md §78-10）: 基準モデルと同じく、週次の再学習で
-毎回探索する。探索は実験114 の L と同じ（ltr.tune: ホールドアウトより前・年×時価総額帯で層別・日付単位の5分割・種0・
-50試行・木200本固定・探索空間は tuning.tune と同じ・目的は検証分割の日付内 NDCG@5）。Actions で約27分（実験114 の実測）。
-Retrain Weekly に入れるのは実験114c の確かめの後（いきなり切り替えない）。
+運用者の指示（2026-10-29）「日曜の再学習に毎週の探索を入れてください」（docs/MODEL_ADOPTION_RULES.md §78-10）: 基準モデルと
+同じく、週次の再学習（Retrain Weekly の「Tune ranking model」。tune=yes の回）で毎回探索する。探索は実験114 の L と同じ
+（ltr.tune: ホールドアウトより前・年×時価総額帯で層別・日付単位の5分割・種0・50試行・木200本固定・探索空間は tuning.tune と
+同じ・目的は検証分割の日付内 NDCG@5）。Actions で 14〜20分（実験114c の実測）。
 
     python3 research/tune_ltr.py
 
