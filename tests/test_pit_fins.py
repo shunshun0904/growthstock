@@ -6,10 +6,13 @@
   作った値」（probe_fins_versions.as_of_values と同じ。実データで確かめたもの）になる。当たらない行は1つも変わらない
 - 進捗の順位（全銘柄の中の順位）は、付いた版の開示日の順位（progress_pct_by_version）を引く。今の作りは期ごとの最後の版
 - progress_pct_point_in_time は、版ごとの順位の表から期ごとの最後の版を引いたものと同じ（作り直しの前と同じ値）
-- 窓が無ければ何も変えない。--pit-fins で PIT_FINS が立つ。quarterize_panel を分けて作っても今と同じ表
+- 窓が無ければ何も変えない。--pit-fins で PIT_FINS が立ち、--no-pit-fins で下りる（両方は付けられない）。
+  quarterize_panel を分けて作っても今と同じ表
 
   python3 tests/test_pit_fins.py
 """
+import contextlib
+import io
 import os
 import sys
 import tempfile
@@ -158,6 +161,17 @@ class TestSplitAndFlag(unittest.TestCase):
         with mock.patch.object(BD, "build"), mock.patch.object(BD, "PIT_FINS", False):
             BD.main(["--data-dir", "x", "--out", "y.parquet"])
             self.assertFalse(BD.PIT_FINS)
+        with mock.patch.object(BD, "build") as b, mock.patch.object(BD, "PIT_FINS", True):
+            BD.main(["--no-pit-fins", "--data-dir", "x", "--out", "y.parquet"])        # 比べ直すときに今の作りへ
+            self.assertFalse(BD.PIT_FINS)
+            b.assert_called_once_with("x", "y.parquet")
+        with mock.patch.object(BD, "build") as b, mock.patch.object(BD, "PIT_FINS", True):
+            BD.main(["--data-dir", "x", "--out", "y.parquet"])                        # 何も付けなければ既定のまま
+            self.assertTrue(BD.PIT_FINS)
+        with mock.patch.object(BD, "build") as b, contextlib.redirect_stderr(io.StringIO()), \
+                self.assertRaises(SystemExit):
+            BD.main(["--pit-fins", "--no-pit-fins", "--data-dir", "x", "--out", "y.parquet"])   # 両方は付けられない
+        b.assert_not_called()
 
     def test_panel_unchanged_by_split_helpers(self):
         # quarterize_panel の入り口を actual_disclosures / raw_versions に分けても、同じ行・同じ列

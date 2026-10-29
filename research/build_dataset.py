@@ -93,7 +93,9 @@ KEEP_UNLABELED = False
 #: 決算の列を「その日までに開示された決算だけで作った値」にする（repair_reissued）。既定（False）は今の作り: 同じ
 #: （銘柄, 事業年度, 四半期）の最後の版だけを残して結合するので、その間の行には後の版が先回りして効き、予測の時点の値
 #: （元の版）と食い違う（2026-10-28 の一致チェック。docs/DATA_TIMING.md）。運用者の選択「直す版を作って比べる」
-#: （2026-10-29）で、比べる版を作るためだけに使う（実験116）。build_dataset.py --pit-fins で立つ
+#: （2026-10-29）で比べる版を作り（実験116。docs/MODEL_ADOPTION_RULES.md §80）、運用者の選択「入れる」（同じ日）で、
+#: 2026-11-01（日）の再学習から既定を True にする（金曜 10/30 の予測の後に切り替える）。build_dataset.py --pit-fins で立ち、
+#: --no-pit-fins で今の作りに戻す（比べ直すとき）
 PIT_FINS = False
 
 # 78週 ≒ 368営業日。52週(245日)から広げた。
@@ -3761,6 +3763,12 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
         print(f"[result] ラベルは全行未確定（予測用）: {len(out):,}件")
     print(f"[result] 期間: {out['Date'].min().date()} 〜 {out['Date'].max().date()}")
     print(f"[result] 銘柄数: {out['Code'].nunique():,}")
+    # どちらの作りで決算を結合したか（ワークフローのログは末尾だけ残すので、ここにも出す）
+    if pit_info is not None:
+        print(f"[result] 決算の出し直し: その日の版で付け直した（PIT_FINS。出し直しの窓 {pit_info['windows']:,} / "
+              f"当たる行 {pit_info['rows']:,}件 / 値が変わった行 {pit_info['changed']:,}件）")
+    else:
+        print("[result] 決算の出し直し: 今の作り（同じ期は最後の版で結合。PIT_FINS はオフ）")
 
     miss = out[feature_cols].isna().mean().sort_values(ascending=False)
     print("\n[欠測率の高い特徴量]")
@@ -3847,8 +3855,11 @@ def main(argv: List[str] | None = None) -> int:
     ap.add_argument("--out", default=os.path.join(DATA_DIR, "dataset.parquet"))
     ap.add_argument("--keep-unlabeled", action="store_true",
                     help="ラベル未確定の行も残す（日次予測用。学習には使わない）")
-    ap.add_argument("--pit-fins", action="store_true",
-                    help="決算の出し直しの間の行を、その日に分かっていた版で付け直す（比べる版を作るときだけ。PIT_FINS）")
+    pit = ap.add_mutually_exclusive_group()
+    pit.add_argument("--pit-fins", action="store_true",
+                     help="決算の出し直しの間の行を、その日に分かっていた版で付け直す（PIT_FINS を立てる）")
+    pit.add_argument("--no-pit-fins", action="store_true",
+                     help="決算の出し直しの間の行も、同じ期の最後の版で結合する（PIT_FINS を下ろす。比べ直すとき）")
     args = ap.parse_args(argv)
     if args.keep_unlabeled:
         globals()["KEEP_UNLABELED"] = True
@@ -3856,6 +3867,9 @@ def main(argv: List[str] | None = None) -> int:
     if args.pit_fins:
         globals()["PIT_FINS"] = True
         print("[mode] 決算の出し直しの間の行を、その日に分かっていた版で付け直す（PIT_FINS）")
+    if args.no_pit_fins:
+        globals()["PIT_FINS"] = False
+        print("[mode] 決算の出し直しの間の行も、同じ期の最後の版で結合する（PIT_FINS をオフ）")
     build(args.data_dir, args.out)
     return 0
 
