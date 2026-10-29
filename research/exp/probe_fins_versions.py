@@ -28,9 +28,10 @@ import glob
 import io
 import os
 import sys
+import tempfile
 import time
 import warnings
-from typing import List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence
 
 import numpy as np
 import pandas as pd
@@ -89,6 +90,36 @@ def panel(fins: pd.DataFrame, adj: Optional[pd.DataFrame], data_dir: str = DATA_
         return BD.quarterize_panel(fins, data_dir, adj=adj)
 
 
+def split_valuation(codes, data_dir: str, root: str) -> Dict[str, str]:
+    """
+    quarterize_panel が読むバリュエーション（data_dir の valuation_*.parquet。API の ROE）を、銘柄ごとの置き場に分ける。
+    銘柄ごとに作り直すたびに全銘柄分（約90MB）を読み直すと1回数秒かかるので、その銘柄の行だけを置いた置き場を渡す
+    （api_valuation は銘柄で結合するので、ほかの銘柄の行が無くても値は同じ）。quarterize_panel が data_dir を使うのは
+    api_valuation だけ。置き場にバリュエーションが無ければ、どの銘柄も data_dir のまま。
+    """
+    codes = sorted(set(map(str, codes)))
+    paths = sorted(glob.glob(os.path.join(data_dir, "valuation_[0-9]*.parquet")))
+    if not paths:
+        return {c: data_dir for c in codes}
+    want = set(codes)
+    parts = []
+    for p in paths:
+        v = pd.read_parquet(p)
+        v = v[v["Code"].astype(str).isin(want)]
+        if len(v):
+            parts.append(v)
+    v = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
+    by = dict(tuple(v.groupby(v["Code"].astype(str), sort=False))) if len(v) else {}
+    out = {}
+    for c in codes:
+        d = os.path.join(root, c)
+        os.makedirs(d, exist_ok=True)
+        if c in by:
+            by[c].to_parquet(os.path.join(d, "valuation_0.parquet"), index=False)
+        out[c] = d
+    return out
+
+
 def attach(rows: pd.DataFrame, q: pd.DataFrame) -> pd.DataFrame:
     """build_dataset.build と同じ結合（attach_fins）と、1年以上古い決算の欠測。rows の順で返す。"""
     r = pd.DataFrame({"Code": rows["Code"].astype(str).to_numpy(), "Date": pd.to_datetime(rows["Date"]).to_numpy(),
@@ -104,10 +135,11 @@ def attach(rows: pd.DataFrame, q: pd.DataFrame) -> pd.DataFrame:
 
 
 def as_of_values(rows: pd.DataFrame, fins: pd.DataFrame, adj: Optional[pd.DataFrame],
-                 data_dir: str = DATA_DIR) -> pd.DataFrame:
+                 data_dir: str = DATA_DIR, dirs: Optional[Dict[str, str]] = None) -> pd.DataFrame:
     """
     その日の版: 行ごとに、その日までに開示された決算だけで quarterize_panel を作り、build と同じく結合した値。
     銘柄ごとに、決算の開示が増える日で区切って作る（同じ区間の行は同じ）。rows の順で返す（決算の無い行は欠測）。
+    dirs（銘柄 -> バリュエーションの置き場。split_valuation）があれば、銘柄ごとにその置き場を使う。
     """
     r = pd.DataFrame({"Code": rows["Code"].astype(str).to_numpy(), "Date": pd.to_datetime(rows["Date"]).to_numpy(),
                       "_i": np.arange(len(rows))})
@@ -131,7 +163,8 @@ def as_of_values(rows: pd.DataFrame, fins: pd.DataFrame, adj: Optional[pd.DataFr
             if p < 0:
                 parts.append(rr[["_i"]])
                 continue
-            q = panel(fc[fc["_dd"] <= dates[p]].drop(columns=["_dd"]), adj_by.get(code), data_dir)
+            q = panel(fc[fc["_dd"] <= dates[p]].drop(columns=["_dd"]), adj_by.get(code),
+                      (dirs or {}).get(code, data_dir))
             got = attach(rr, q)
             got["_i"] = rr["_i"].to_numpy()
             parts.append(got)
@@ -255,9 +288,14 @@ def main(argv=None) -> int:
     rng = np.random.default_rng(SEED)
     rest = np.flatnonzero(~hit)
     pick = np.sort(rng.choice(rest, size=min(N_CHECK, len(rest)), replace=False))
+    idx = np.flatnonzero(hit)
+    tmp = tempfile.TemporaryDirectory()
+    t1 = time.time()
+    dirs = split_valuation(ds["Code"].iloc[np.concatenate([pick, idx])], DATA_DIR, tmp.name)
+    print(f"[準備] バリュエーションを銘柄ごとの置き場に分けた: {len(dirs):,}銘柄（{time.time() - t1:.0f}秒）")
     t1 = time.time()
     chk_cur = cur_all.iloc[pick].reset_index(drop=True)
-    chk_pit = as_of_values(ds.iloc[pick], fins, adj).reindex(columns=chk_cur.columns)
+    chk_pit = as_of_values(ds.iloc[pick], fins, adj, dirs=dirs).reindex(columns=chk_cur.columns)
     kd_chk = kinds(chk_cur, chk_pit, cols)
     n_out = int((kd_chk != "none").sum())
     cmp_chk = compare(chk_cur, chk_pit, cols)
@@ -269,9 +307,9 @@ def main(argv=None) -> int:
 
     # ---- 当たる行の変わり方 ----
     t2 = time.time()
-    idx = np.flatnonzero(hit)
     cur = cur_all.iloc[idx].reset_index(drop=True)
-    pit = as_of_values(ds.iloc[idx], fins, adj).reindex(columns=cur.columns)
+    pit = as_of_values(ds.iloc[idx], fins, adj, dirs=dirs).reindex(columns=cur.columns)
+    tmp.cleanup()
     kd = kinds(cur, pit, cols)
     vc = kd.value_counts()
     n_changed = int((kd != "none").sum())

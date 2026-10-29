@@ -8,6 +8,7 @@ probe: 決算の出し直しと学習データ（research/exp/probe_fins_version
   作る）の違い: 窓の中の行は今の作りでより古い開示が付く（older）か、1年以上古くなって決算が付かない（lost）。窓の外の行は
   全部の列が同じ
 - 列ごとの数え方（変わった行・欠測になった行・値が戻った行）
+- 銘柄ごとに分けたバリュエーションの置き場で作り直しても、全部の置き場と同じ値
 
   python3 tests/test_probe_fins_versions.py
 """
@@ -132,6 +133,37 @@ class TestAsOf(unittest.TestCase):
         self.assertEqual(c.loc["x", "both"], 1)
         self.assertAlmostEqual(c.loc["x", "rel_med"], 0.3 / 3.3)
         self.assertEqual(c.loc["s", "changed"], 2)
+
+
+class TestSplitValuation(unittest.TestCase):
+    """銘柄ごとに分けたバリュエーション（API の ROE）の置き場で作り直しても、全部の置き場と同じ値になる。"""
+
+    def test_same_as_full_dir(self):
+        f = fins()
+        days = pd.bdate_range("2023-07-01", "2025-10-01")
+        val = pd.DataFrame([{"Code": c, "Date": d, "PER": 10.0 + i % 7, "PBR": 1.0 + (i % 5) / 10,
+                             "ROE": 0.05 + 0.0001 * i + 0.01 * k}
+                            for k, c in enumerate(("10010", "20020", "30030", "99990"))
+                            for i, d in enumerate(days)])
+        with tempfile.TemporaryDirectory() as data_dir, tempfile.TemporaryDirectory() as root:
+            val[val["Date"] < "2024-07-01"].to_parquet(os.path.join(data_dir, "valuation_2023.parquet"), index=False)
+            val[val["Date"] >= "2024-07-01"].to_parquet(os.path.join(data_dir, "valuation_2024.parquet"), index=False)
+            dirs = P.split_valuation(ROWS["Code"], data_dir, root)
+            self.assertEqual(sorted(dirs), ["10010", "20020", "30030", "40040"])
+            one = pd.read_parquet(os.path.join(dirs["10010"], "valuation_0.parquet"))
+            self.assertEqual(set(one["Code"]), {"10010"})
+            self.assertEqual(len(one), int((val["Code"] == "10010").sum()))
+            self.assertEqual(os.listdir(dirs["40040"]), [])       # バリュエーションの無い銘柄は空の置き場
+            full = P.as_of_values(ROWS, f, None, data_dir)
+            split = P.as_of_values(ROWS, f, None, data_dir, dirs=dirs).reindex(columns=full.columns)
+        self.assertTrue((full["roe_basis"] == "api").any())      # API の ROE を使っている
+        self.assertTrue(full["ROE_q0"].notna().any())
+        for col in full.columns:
+            self.assertTrue(P.same_values(full[col], split[col]).all(), col)
+
+    def test_no_valuation(self):
+        with tempfile.TemporaryDirectory() as data_dir, tempfile.TemporaryDirectory() as root:
+            self.assertEqual(P.split_valuation(["10010"], data_dir, root), {"10010": data_dir})
 
 
 if __name__ == "__main__":
