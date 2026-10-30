@@ -17,6 +17,10 @@
 - out-of-fold: W5・W5X は判断日が訓練の最終日以前の組の行、D・B は候補の日が訓練の最終日以前の日次の行で学び、採点はテスト窓の
   組の行。W5 だけ値動きの列を使う。保存した out-of-fold は次の回に読む
 - R15（1.5σ の木3本）の印と3本の最小: 本番の out-of-fold から直接計算し直したものと同じ
+- 参考（--ten）: 直近10営業日の組（祝日を飛ばして9営業日前まで・値動きの列の直接の計算し直し・5営業日の組を含む）、W10 の
+  順位（候補の日の行だけ・同点は銘柄コードの順）、3条件・4条件・R15 に「10日の組で1位 / 2位以内」を足した買い（手で数える例。
+  前からの組は変わらない）、組の大きさの3分位と1位の +10% 到達・組全体との差、読み方、W10 の out-of-fold の窓（5営業日の組の
+  判断日から作る）と保存
 - 通しで回す（探索は差し替え、当てはめは小さな木）: 集計と読み方を記録に書き、公開ログに銘柄コードを出さない。本番の
   out-of-fold が無ければ止まる
 
@@ -645,6 +649,183 @@ class TestTriple(unittest.TestCase):
         self.assertEqual(R.triple_stats(o2, days)["days"], 3)
 
 
+class TestTen(unittest.TestCase):
+    """参考（--ten）: 直近10営業日の組・W10 の順位・10日の組で1位 / 2位以内・組の大きさと1位の +10% 到達。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.days, cls.bars, cls.full = small()
+        cls.rl5, _ = R.rolling_frame(cls.full, cls.bars, cls.days, COLS)
+        cls.rl10, cls.info10 = R.rolling_frame(cls.full, cls.bars, cls.days, COLS, k=R.K10)
+
+    def test_rolling10(self):
+        rl = self.rl10
+        self.assertFalse(rl.duplicated(["Code", "Date"]).any())
+        self.assertTrue(((rl["r5_days"] >= 0) & (rl["r5_days"] <= 9)).all())
+        # 01-24 の10営業日の組（01-12 は祝日）: 01-10 の 10010 は9営業日前でまだ入る。01-25 からは入らない
+        got = rl[rl["Date"] == "2024-01-24"].set_index("Code")
+        self.assertEqual(sorted(got.index), ["10010", "20020", "30030", "40040"])
+        self.assertEqual(got.loc["10010", "cand_date"], pd.Timestamp("2024-01-10"))
+        self.assertEqual(got.loc["10010", "r5_days"], 9)
+        self.assertEqual(got.loc["40040", "r5_days"], 6)
+        self.assertEqual(sorted(rl.loc[rl["Date"] == "2024-01-25", "Code"]), ["20020", "30030", "40040"])
+        self.assertEqual(len(self.rl5[self.rl5["Date"] == "2024-01-24"]), 0)        # 5営業日の組には誰もいない日
+        self.assertEqual(len(self.info10["age_share"]), R.K10)
+        cm = R.check_move_cols(rl, self.bars, self.days, n=1000)                  # 9営業日までの値動きも直接計算と同じ
+        self.assertEqual(cm["same"], cm["rows"])
+        self.assertEqual(cm["rows"], len(rl))
+        cp = R.check_pools(rl, self.full, self.days, n=200, k=R.K10)
+        self.assertEqual(cp["same"], cp["days"])
+        self.assertLess(R.check_pools(rl, self.full, self.days, n=200)["same"], cp["days"])   # 5営業日として選び直すと合わない
+
+    def test_nested(self):
+        n = R.check_nested(self.rl5, self.rl10)
+        self.assertEqual(n["in10"], n["rows5"])
+        self.assertTrue(n["day_same"])
+        self.assertEqual((n["day5"], n["day10"]), (6, 6))                         # 候補の行（銘柄・候補の日）は6件
+        bad = self.rl10[~((self.rl10["Code"] == "20020") & (self.rl10["Date"] == "2024-01-15"))]
+        self.assertEqual(R.check_nested(self.rl5, bad)["in10"], n["rows5"] - 1)
+        bad0 = self.rl10[~((self.rl10["Code"] == "20020") & (self.rl10["Date"] == "2024-01-11"))]
+        self.assertFalse(R.check_nested(self.rl5, bad0)["day_same"])
+
+    def test_ranks_and_attach(self):
+        o10 = pd.DataFrame({"Date": pd.to_datetime(["2021-01-05"] * 4 + ["2021-01-06"] * 3),
+                            "Code": ["1001", "1002", "1003", "1004", "1001", "1005", "1006"],
+                            "r5_days": [0, 0, 7, 0, 1, 0, 0],
+                            "score_W10": [0.5, 0.9, 0.95, 0.5, 0.8, 0.8, 0.1]})
+        t = R.ten_ranks(o10)
+        got = {(d.strftime("%m-%d"), c): r for d, c, r in zip(t["Date"], t["Code"], t["t10_rank"])}
+        # 01-05: 候補の日でない 1003 が1位なので 1002 は2位、同点の 1001・1004 は銘柄コードの順。01-06: 同点の 1001 が先
+        self.assertEqual(got, {("01-05", "1002"): 2.0, ("01-05", "1001"): 3.0, ("01-05", "1004"): 4.0,
+                               ("01-06", "1005"): 2.0, ("01-06", "1006"): 3.0})
+        o = pd.DataFrame({"Date": pd.to_datetime(["2021-01-05", "2021-01-05", "2021-01-06", "2021-01-06"]),
+                          "Code": ["1002", "1003", "1001", "1005"], "r5_days": [0, 3, 1, 1], "x": [1, 2, 3, 4],
+                          "t10_rank": [9.0, 9.0, 9.0, 9.0]})
+        m = R.attach_ten(o, t)
+        self.assertEqual(list(m["x"]), [1, 2, 3, 4])                              # 行と順は変えない
+        # 候補の日の行にだけ付く（前の値は捨てる）。1005 は10日の組では候補の日でも、この組の行は候補の日でないので付けない
+        self.assertEqual(list(m["t10_rank"].fillna(-1.0)), [2.0, -1.0, -1.0, -1.0])
+
+    def test_triple_with_ten(self):
+        o, days = triple_pools()
+        t10 = {("01-04", "1001"): 2, ("01-04", "1002"): 1, ("01-05", "1004"): 1, ("01-05", "1005"): 3,
+               ("01-06", "1006"): 1, ("01-06", "1007"): 4, ("01-07", "1004"): 2, ("01-07", "1008"): 1}
+        o["t10_rank"] = [float(t10[(d.strftime("%m-%d"), c)]) if a == 0 else np.nan
+                         for d, c, a in zip(o["Date"], o["Code"], o["r5_days"])]
+        sets = R.triple_buys(o, days)
+        got = {k: list(zip(b["Date"].dt.strftime("%m-%d"), b["Code"])) for k, b in sets.items()}
+        self.assertEqual(sorted(got), sorted(R.TRIPLE_SETS + R.TEN_ONLY))
+        self.assertEqual(got["D1W1T1"], [("01-05", "1004")])
+        self.assertEqual(got["D1W1T2"], [("01-05", "1004")])        # 01-07 の 1004 は2位だが、01-05 に買って持っている
+        self.assertEqual(got["Q4T1"], [])                            # 4条件の 01-07 の 1004 は10日の組で2位
+        self.assertEqual(got["Q4T2"], [("01-07", "1004")])
+        self.assertEqual(got["R15T1"], [("01-04", "1002"), ("01-05", "1004"), ("01-07", "1008")])   # 01-06 の 1006 は R15 なし
+        self.assertEqual(got["R15T2"], [("01-04", "1001"), ("01-04", "1002"), ("01-05", "1004"), ("01-07", "1008")])
+        old = R.triple_buys(o.drop(columns=["t10_rank"]), days)
+        for k in R.TRIPLE_SETS:                                      # 前からの組は10日の順位を足しても変わらない
+            pd.testing.assert_frame_equal(sets[k].drop(columns=["t10_rank"]), old[k], obj=k)
+        t = R.triple_stats(o, days)
+        self.assertEqual([t["sets"][k]["n"] for k in R.TEN_SETS], [0, 1, 1, 1, 1, 1, 3, 4, 6])
+        self.assertTrue(np.isnan(t["sets"]["Q4T1"]["ret"]))          # 0件は平均を出さない
+        self.assertAlmostEqual(t["sets"]["R15T1"]["ret"], (-0.02 + 0.09 + 0.02) / 3)
+
+    def test_size_bins(self):
+        b, q = R.size_bins([2, 3, 4, 5, 6, 7])
+        self.assertEqual(list(b), [0, 0, 1, 1, 2, 2])
+        self.assertAlmostEqual(q[0], 2 + 5 / 3)
+        self.assertAlmostEqual(q[1], 2 + 10 / 3)
+        self.assertEqual(list(R.size_bins([5, 5, 5])[0]), [0, 0, 0])               # 同じ大きさばかりなら全部「小」
+        self.assertEqual(len(R.size_bins([])[0]), 0)
+
+    def test_pool_size(self):
+        days = pd.bdate_range("2021-01-04", periods=7)
+        rows, rows10 = [], []
+        for i, n in enumerate(range(2, 8)):                          # 判断日ごとに組の行が 2〜7件。c0 だけが +10% に届く
+            for j in range(n):
+                hit = j == 0
+                r = {"Date": days[i], "Code": f"c{j}", "cand_date": days[i], "r5_days": 0, "r15": 1.0,
+                     # D は組が大きい日（6件以上）だけ c0 を1位にする。W5 はどの日も c0 が1位
+                     "score_D": ((10.0 if n >= 6 else -10.0) if hit else float(j)),
+                     "score_W5": 10.0 if hit else float(j), E.HIT: hit, E.RET: 0.10 if hit else 0.0}
+                rows.append(r)
+                rows10.append({**r, "score_W10": float(j)})
+            # 10日の組には古い候補が1件多く、それが W10 の1位（届かない）
+            rows10.append({"Date": days[i], "Code": "old", "cand_date": days[0], "r5_days": 5, "score_W10": 99.0,
+                           E.HIT: False, E.RET: -0.05})
+        rows10.append({"Date": days[6], "Code": "c0", "cand_date": days[6], "r5_days": 0, "score_W10": 1.0,
+                       E.HIT: True, E.RET: 0.10})                    # 数える判断日でない日は入れない
+        ps = R.pool_size_stats(pd.DataFrame(rows), pd.DataFrame(rows10))
+        self.assertEqual(sorted(ps), sorted(R.POOL_ARMS))
+        d, w5, w10 = ps["D"], ps["W5"], ps["W10"]
+        self.assertEqual([b["days"] for b in d["bins"]], [2, 2, 2])
+        self.assertEqual([(b["n_min"], b["n_max"]) for b in d["bins"]], [(2, 3), (4, 5), (6, 7)])
+        self.assertEqual([b["hit"] for b in d["bins"]], [0.0, 0.0, 1.0])
+        self.assertEqual([b["ret"] for b in d["bins"]], [0.0, 0.0, 0.10])
+        ph = [(1 / 2 + 1 / 3) / 2, (1 / 4 + 1 / 5) / 2, (1 / 6 + 1 / 7) / 2]
+        for b, p in zip(d["bins"], ph):
+            self.assertAlmostEqual(b["pool_hit"], p)
+            self.assertAlmostEqual(b["lift"], b["hit"] - p)
+        self.assertAlmostEqual(d["hit"], 2 / 6)
+        self.assertEqual([b["hit"] for b in w5["bins"]], [1.0, 1.0, 1.0])
+        self.assertEqual(w10["days"], 6)
+        self.assertEqual([(b["n_min"], b["n_max"]) for b in w10["bins"]], [(3, 4), (5, 6), (7, 8)])
+        self.assertEqual([b["hit"] for b in w10["bins"]], [0.0, 0.0, 0.0])
+        self.assertEqual([b["ret"] for b in w10["bins"]], [-0.05, -0.05, -0.05])
+        self.assertAlmostEqual(w10["bins"][0]["pool_hit"], (1 / 3 + 1 / 4) / 2)
+        self.assertNotIn("W10", R.pool_size_stats(pd.DataFrame(rows)))
+        rd = R.pool_reading([(0, ps), (2, ps)])
+        self.assertEqual({a: r["read"] for a, r in rd.items()}, {"D": "lift", "W5": "none", "W10": "none"})
+        self.assertEqual(rd["D"]["hit_diff"], [100.0, 100.0])
+
+    def test_pool_reading(self):
+        def ps(h0, l0, h2, l2):
+            return {"D": {"bins": [{"hit": h0, "lift": l0}, {"hit": 0.5, "lift": 0.0}, {"hit": h2, "lift": l2}]}}
+
+        rd = R.pool_reading([(0, ps(0.30, 0.05, 0.40, 0.10)), (2, ps(0.30, 0.05, 0.35, 0.06))])
+        self.assertEqual(rd["D"], {"hit_diff": [10.0, 5.0], "lift_diff": [5.0, 1.0], "read": "lift"})
+        # 1位は大きい組で届きやすいが、組全体との差は大きい組で広がらない（0.0pt）→ pool
+        self.assertEqual(R.pool_reading([(0, ps(0.30, 0.05, 0.40, 0.05)), (2, ps(0.30, 0.05, 0.35, 0.06))])["D"]["read"],
+                         "pool")
+        # 1つのずらしで、丸めると 0.0pt → none
+        self.assertEqual(R.pool_reading([(0, ps(0.30, 0.05, 0.40, 0.10)), (2, ps(0.30, 0.05, 0.3004, 0.10))])["D"]["read"],
+                         "none")
+        self.assertEqual(R.pool_reading([(0, ps(np.nan, np.nan, 0.40, 0.10))])["D"]["read"], "none")
+        self.assertEqual(R.pool_reading([]), {})
+
+    def test_oof10(self):
+        rl, _, _ = long_frames()
+        cols_w = ["f1", "f2", "f3"] + list(R.MOVE_COLS)
+        calls = []
+
+        def fake_rank(p, tr, te, c):
+            calls.append((p["num_leaves"], list(c), pd.Timestamp(tr["Date"].max()), pd.Timestamp(te["Date"].min()),
+                          pd.Timestamp(te["Date"].max())))
+            return np.arange(len(te), dtype=float)
+
+        dates5 = rl.loc[rl["Date"] >= "2016-03-01", "Date"]        # 窓は5営業日の組の判断日から作る（10日の組の日付ではない）
+        p = dict(T115.SMALL_RANK, num_leaves=5)
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(R.W, "fit_rank", side_effect=fake_rank):
+            o = R.oof10_shift(rl, dates5, cols_w, p, 2, out_dir=tmp)
+            folds = {f.index: f for f in E.E41.folds_for(dates5, 2)}
+            self.assertGreater(o["fold"].nunique(), 1)
+            self.assertEqual(len(calls), o["fold"].nunique())
+            for (nl, c, trmax, lo, hi), f in zip(calls, sorted(o["fold"].unique())):
+                fd = folds[f]
+                self.assertEqual(nl, 5)                                  # 木の形は渡したもの（W5 と同じ）
+                self.assertEqual(c, cols_w)
+                self.assertLessEqual(trmax, pd.Timestamp(fd.train_end))
+                self.assertGreaterEqual(lo, pd.Timestamp(fd.test_start))
+                self.assertLessEqual(hi, pd.Timestamp(fd.test_end))
+            for c in ("score_W10", "fold", "cand_date", "r5_days", E.HIT, E.RET, E.HITDAY):
+                self.assertIn(c, o.columns)
+            n = len(calls)
+            o2 = R.oof10_shift(rl, dates5, cols_w, p, 2, out_dir=tmp)    # 保存したものを読む
+            self.assertEqual(len(calls), n)
+            pd.testing.assert_frame_equal(o.reset_index(drop=True), o2)
+            R.oof10_shift(rl, dates5, cols_w, dict(p, num_leaves=6), 2, out_dir=tmp)   # 木の形が変われば作り直す
+            self.assertGreater(len(calls), n)
+
+
 def keypair():
     """封の受け手の鍵（X25519。base64 の秘密鍵・公開鍵）。"""
     from cryptography.hazmat.primitives import serialization as ser
@@ -859,6 +1040,42 @@ class TestMain(unittest.TestCase):
                 self.assertNotIn(code, "\n".join(plain))
             with self.assertRaises(SystemExit):                                # --seal だけでは使えない
                 R.main(["--trials", "2", "--shifts", "0", "--seal", pub])
+            # 4回目: 直近10営業日の組（W10）と組の大きさの参考（--ten は --triple の表も出す）
+            buf4 = io.StringIO()
+            with contextlib.redirect_stdout(buf4):
+                self.assertEqual(R.main(["--trials", "2", "--shifts", "0,2", "--ten"]), 0)
+            out4 = buf4.getvalue()
+            with open(os.path.join(tmp, "e117_summary.json"), encoding="utf-8") as fh:
+                sm4 = json.load(fh)
+            self.assertEqual(tl.call_count, 1)                                 # 探索は読む
+            self.assertEqual(dr.call_count, 7)                                 # 3回目・4回目も R15 と R0
+            self.assertIn("■ 参考（運用者の確認 2026-10-30", out4)
+            self.assertIn(f"直近{R.K10}営業日の組で並べたランキング", out4)
+            self.assertIn("組の大きさで3つに分けた", out4)
+            ck = sm4["ten_check"]
+            self.assertEqual(ck["nested"]["in10"], ck["nested"]["rows5"])
+            self.assertTrue(ck["nested"]["day_same"])
+            self.assertEqual(ck["check_same_day"]["mismatch"], 0)
+            self.assertEqual(ck["check_pools"]["same"], ck["check_pools"]["days"])
+            self.assertEqual(ck["check_cols"]["same"], ck["check_cols"]["rows"])
+            self.assertGreater(ck["info"]["rows"], sm4["info"]["rows"])
+            self.assertEqual(sorted(sm4["pool_size"]), ["0", "2"])
+            self.assertEqual(sorted(sm4["pool_reading"]), sorted(R.POOL_ARMS))
+            for sh in ("0", "2"):
+                t = sm4["triple"][sh]["sets"]
+                for k in R.TRIPLE_SETS:                                        # 前からの表は変わらない
+                    self.assertEqual(t[k]["n"], sm2["triple"][sh]["sets"][k]["n"], (sh, k))
+                    self.assertEqual(t[k]["ret"], sm2["triple"][sh]["sets"][k]["ret"], (sh, k))
+                for k in R.TEN_ONLY:
+                    self.assertIn(k, t)
+                ps = sm4["pool_size"][sh]
+                for a in R.POOL_ARMS:
+                    self.assertEqual(sum(b["days"] for b in ps[a]["bins"]), ps[a]["days"])
+                self.assertEqual(ps["W5"]["days"], sm4["shifts"][sh]["days"])     # 数える判断日ごとに1位が1つ
+                self.assertEqual(ps["W10"]["days"], sm4["shifts"][sh]["days"])
+                self.assertLessEqual(ps["D"]["days"], sm4["shifts"][sh]["days"])
+            for code in codes:
+                self.assertNotIn(code, out4)
 
     def test_stops_without_production_oof(self):
         full, bars, _ = main_data()

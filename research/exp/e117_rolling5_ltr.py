@@ -85,11 +85,32 @@
     です。」: 1.2σ の木3本（R0。実験115 と同じ作り）も足した4つとも満たす候補と、R15＋R0（順位は問わない）も出す。手元で同じ
     out-of-fold を作り直せるように、W5 の木の形を全桁で出す（データの値ではない）
 
+参考（--ten。運用者の確認 2026-10-30「ランキング全体の銘柄数が多くなる方が（その中で1位）、到達しやすいのか検証したいので、
+直近10営業日でのランキング1位という条件も加えてどうなるかみたいです。単純に&条件だと購入数が少なくなると思うので、直近10営業日
+でのランキングに関しては2位以内も確認してください。」。見るだけ。§82-5。--triple の表も出す）
+  - W10: W5 と同じ作りのランキング学習を、組を「判断日までの直近10営業日の候補」にして学ぶ（360列＋値動き4列。値動きの列は候補の
+    日から判断日まで0〜9営業日。木の形・種は W5 と同じものを使い、探索はしない。窓は本体と同じく5営業日の組の判断日から作る）
+  - 候補の日 t に、その候補が t の10営業日の組の中で W10 の1位（T1）/ 2位以内（T2）かを付け、4条件＋T1・4条件＋T2・3条件＋T1・
+    3条件＋T2・R15＋T1・R15＋T2 を、ほかと同じ買い方（翌営業日の寄り・持っている銘柄は買い増さない）で数える。数える判断日は本体と
+    同じ。件数が少ない見込みなので読み方は決めず、数字を見るだけ
+  - 組の大きさと1位の +10% 到達（運用者の見立て「その日の銘柄数と、直近5営業日の銘柄数が、多い方が10%到達率は高いのかなと」）:
+    数える判断日ごとに、その日の候補の中の D の1位・5営業日の組の中の W5 の1位・10営業日の組の中の W10 の1位を翌営業日の寄りで
+    買ったときの +10% 到達・平均収益を、組の大きさ（その日の候補の数 / 組の行の数）の3分位で分けて出す（R15 は問わない。件数を
+    確保するため）。同じ組の全行の +10% 到達の割合（判断日ごとの割合の平均）と、その差（1位 − 全体）も出す
+  - 読み方（回す前に決めたもの。採用の判定ではない）: 腕（D・W5・W10）ごとに、3通りのずらしすべてで「大きい組の1位の +10% 到達 −
+    小さい組の1位の +10% 到達」が正（%の小数1桁に丸めて）で、「差（1位 − 全体）」の大きい組 − 小さい組もすべて正 →「大きい組
+    ほど1位が届きやすく、組全体の届きやすさの違いを除いても残る」。前者だけすべて正 →「大きい組の日は1位も届きやすいが、組全体も
+    届きやすい日で、並びの効き目とは言い切れない」。それ以外 →「はっきりとは言えない」
+  - 確かめ（合わなければ止まる）: 10営業日の組も本体と同じ確かめ（組の中身・値動きの列・判断日に入った候補の収益）をし、5営業日の
+    組の行がすべて10営業日の組にあること・判断日に入った候補の行が両方で同じこと・数える判断日の候補の日の行すべてに W10 の順位が
+    付くことを確かめる
+
 公開ログには集計だけ（件数・平均・割合・木の形）。銘柄ごとの値は出さない。結果は research/_data/oof/e117_*。
 
     exp=e117_rolling5_ltr.py  args=""      （既定は --trials 50 --shifts 0,2,4 --top 2。探索の結果と out-of-fold は置き場に
                                             残し、同じデータ・同じ設定なら次の回は読む）
     exp=e117_rolling5_ltr.py  args="--triple"   （参考の表も出す）
+    exp=e117_rolling5_ltr.py  args="--ten"      （直近10営業日の組の参考と、組の大きさの参考も出す。上）
     exp=e117_rolling5_ltr.py  args="--triple --seal <公開鍵>"   （3条件・4条件の候補の一覧を封をして出す。下）
 
 封をした一覧（--seal。運用者の依頼 2026-10-30「どのような銘柄なのか、調査用アーティファクト」）
@@ -620,6 +641,23 @@ TRIPLE_JA = {"Q4": "4つとも満たす（3つ＋1.2σ の3本 95以上）", "D1
              "R15": "R15 だけ（今の買い）", "REST": "今の買いのうち3つとも満たすもの以外"}
 #: 1.2σ の木3本（2026-10-23〜10-29 の規則。実験115 の R0 と同じ）
 R0_TREES = tuple(W.RULE_TREES)
+#: 参考（--ten）: 直近10営業日の組（運用者の確認 2026-10-30「直近10営業日でのランキング1位」「2位以内も確認」）
+K10 = 10
+TEN_TOP = 2
+TEN_ONLY = ("Q4T1", "Q4T2", "D1W1T1", "D1W1T2", "R15T1", "R15T2")
+TEN_SETS = ("Q4T1", "Q4T2", "Q4", "D1W1T1", "D1W1T2", "D1W1", "R15T1", "R15T2", "R15")
+TEN_JA = {"Q4T1": "4条件＋10日の組で1位", "Q4T2": f"4条件＋10日の組で{TEN_TOP}位以内", "Q4": "4条件（前回の表と同じ）",
+          "D1W1T1": "3条件＋10日の組で1位", "D1W1T2": f"3条件＋10日の組で{TEN_TOP}位以内", "D1W1": "3条件（前回の表と同じ）",
+          "R15T1": "R15＋10日の組で1位", "R15T2": f"R15＋10日の組で{TEN_TOP}位以内", "R15": "R15 だけ（今の買い）"}
+#: 組の大きさと1位の +10% 到達（運用者の見立て 2026-10-30）
+POOL_ARMS = ("D", "W5", "W10")
+POOL_JA = {"D": "当日（その日の候補の中の D の1位。大きさ = その日の候補の数）",
+           "W5": "直近5営業日（組の中の W5 の1位。大きさ = 組の行の数）",
+           "W10": f"直近{K10}営業日（{K10}営業日の組の中の W10 の1位。大きさ = 組の行の数）"}
+POOL_BINS = ("小", "中", "大")
+POOL_READ_JA = {"lift": "大きい組ほど1位が届きやすく、組全体の届きやすさの違いを除いても残る",
+                "pool": "大きい組の日は1位も届きやすいが、組全体も届きやすい日で、並びの効き目とは言い切れない",
+                "none": "はっきりとは言えない"}
 
 
 def triple_buys(o: pd.DataFrame, days, hold: int = E.HOLD) -> Dict[str, pd.DataFrame]:
@@ -631,6 +669,8 @@ def triple_buys(o: pd.DataFrame, days, hold: int = E.HOLD) -> Dict[str, pd.DataF
     分けて見るために、R15＋日次の1位・R15＋組の1位・R15 だけ（今の買い）と、今の買いのうち3つとも満たすもの以外も返す。
     組の行に r0（1.2σ の3本の印。attach_rule の names = ("r0", "pmin0")）があれば、3つに R0 も満たす4つとも満たす候補（Q4）と
     R15＋R0（順位は問わない）も返す（運用者の確認 2026-10-30「1.2σモデルでも95以上の条件だとどうなるか」）。
+    組の行に t10_rank（候補の日の10営業日の組の中の W10 の順位。attach_ten）があれば、3条件・4条件・R15 のそれぞれに「10日の組で
+    1位」（…T1）・「TEN_TOP 位以内」（…T2）を足したものも返す（運用者の確認 2026-10-30「直近10営業日でのランキング1位」）。
     """
     cal = W.calendar(days)
     pos = {pd.Timestamp(d): i for i, d in enumerate(cal)}
@@ -648,6 +688,13 @@ def triple_buys(o: pd.DataFrame, days, hold: int = E.HOLD) -> Dict[str, pd.DataF
     if "r0" in x.columns:
         r0 = (pd.to_numeric(x["r0"], errors="coerce") == 1.0).to_numpy()
         masks.update({"Q4": base & d1 & w1 & r0, "R15R0": base & r0})
+    if "t10_rank" in x.columns:
+        t10 = pd.to_numeric(x["t10_rank"], errors="coerce").to_numpy(dtype=float)
+        t1 = t10 == 1
+        t2 = (t10 >= 1) & (t10 <= TEN_TOP)
+        masks.update({"D1W1T1": masks["D1W1"] & t1, "D1W1T2": masks["D1W1"] & t2, "R15T1": base & t1, "R15T2": base & t2})
+        if "Q4" in masks:
+            masks.update({"Q4T1": masks["Q4"] & t1, "Q4T2": masks["Q4"] & t2})
     out: Dict[str, pd.DataFrame] = {}
     for k, m in masks.items():
         sel = x[m].sort_values(["Date", "Code"], kind="mergesort")
@@ -663,7 +710,7 @@ def triple_stats(o: pd.DataFrame, days, hold: int = E.HOLD) -> Dict:
     nm = n_months(of)
     sets = triple_buys(of, days, hold)
     out: Dict = {"days": int(of["Date"].nunique()) if len(of) else 0, "months": nm, "sets": {}}
-    for k in [k for k in TRIPLE_SETS if k in sets]:
+    for k in [k for k in TRIPLE_SETS + TEN_ONLY if k in sets]:
         b = sets[k]
         st = W.pick_stats(b)
         r = b[RET].to_numpy(dtype=float)
@@ -671,6 +718,178 @@ def triple_stats(o: pd.DataFrame, days, hold: int = E.HOLD) -> Dict:
         st["se"] = float(np.std(r, ddof=1) / np.sqrt(len(r))) if len(r) > 1 else np.nan
         st["win"] = float(np.mean(r > 0)) if len(r) else np.nan
         out["sets"][k] = st
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# 参考: 直近10営業日の組（W10）でも1位 / 2位以内・組の大きさと1位の +10% 到達（運用者の確認 2026-10-30。見るだけ）
+# --------------------------------------------------------------------------- #
+
+def check_nested(rl5: pd.DataFrame, rl10: pd.DataFrame) -> Dict:
+    """
+    5営業日の組の行（判断日・銘柄・候補の日）がすべて10営業日の組にあるか（10営業日の組は5営業日の組を含むはず）と、判断日に
+    入った候補の行（候補の日 = 判断日）が両方で同じかを数える。
+    """
+    def keys(r: pd.DataFrame) -> set:
+        return set(zip(pd.to_datetime(r["Date"]), r["Code"].astype(str), pd.to_datetime(r["cand_date"])))
+
+    k5, k10 = keys(rl5), keys(rl10)
+    z5 = {k for k in k5 if k[0] == k[2]}
+    z10 = {k for k in k10 if k[0] == k[2]}
+    return {"rows5": len(k5), "in10": len(k5 & k10), "day5": len(z5), "day10": len(z10), "day_same": bool(z5 == z10)}
+
+
+def run_tag10(params_w: Dict, cols_w: Sequence[str], rl10: pd.DataFrame, dates5) -> str:
+    """W10 の out-of-fold の保存名に入れる目印（木の形・列・データ・窓を作る判断日が変わったら別の名前にする）。"""
+    d5 = pd.to_datetime(pd.Series(dates5))
+    key = {"params": {k: params_w[k] for k in sorted(params_w)}, "cols_w": F.signature(list(cols_w)),
+           "rows": int(len(rl10)), "last": str(pd.to_datetime(rl10["Date"]).max().date()),
+           "r20": int(rl10[R20].notna().sum()), "d5_n": int(len(d5)), "d5_first": str(d5.min().date()),
+           "d5_last": str(d5.max().date()), "seed": SEED, "k": K10, "v": 1}
+    return hashlib.sha1(json.dumps(key, sort_keys=True, default=str).encode()).hexdigest()[:10]
+
+
+def oof10_shift(rl10: pd.DataFrame, dates5, cols_w: Sequence[str], params_w: Dict, shift: int,
+                out_dir: str = OOF_DIR) -> pd.DataFrame:
+    """
+    W10（直近10営業日の組のランキング学習。木の形・列・種は W5 と同じ）の1つのずらし方の out-of-fold。窓は本体と同じく5営業日の
+    組の判断日（dates5）から作り、判断日が窓の訓練の最終日以前の10営業日の組の行で学び、判断日がテスト窓に入る10営業日の組の行を
+    採点する（score_W10・fold）。rl10 は10営業日の組の行（今の売り方の収益と20営業日目の終値がある行）。保存済みなら読む。
+    """
+    tag = run_tag10(params_w, cols_w, rl10, dates5)
+    path = os.path.join(out_dir, f"{PREFIX}_pool10_{tag}_sh{shift}.parquet")
+    if os.path.exists(path):
+        return pd.read_parquet(path)
+    t0 = time.time()
+    folds = E41.folds_for(pd.Series(dates5), shift)
+    dr = pd.to_datetime(rl10["Date"])
+    rows = []
+    for f in folds:
+        lo, hi, end = pd.Timestamp(f.test_start), pd.Timestamp(f.test_end), pd.Timestamp(f.train_end)
+        te = rl10[(dr >= lo) & (dr <= hi)]
+        tr = rl10[dr <= end]
+        if len(te) < MIN_TEST or len(tr) < MIN_TRAIN:
+            continue
+        part = te[list(KEEP_R)].copy()
+        part["score_W10"] = W.fit_rank(params_w, tr, te, cols_w)
+        part["fold"] = int(f.index)
+        rows.append(part)
+    if not rows:
+        raise SystemExit(f"ずらし{shift}か月: W10 の窓を作れない（期間が短すぎる）")
+    o = pd.concat(rows, ignore_index=True)
+    os.makedirs(out_dir, exist_ok=True)
+    o.to_parquet(path, index=False)
+    log(f"  W10 ずらし{shift}か月: {o['fold'].nunique()}窓・{K10}営業日の組の行 {len(o):,}件・{o['Date'].nunique():,}日 "
+        f"{time.time() - t0:.0f}秒")
+    return o
+
+
+def ten_ranks(o10: pd.DataFrame) -> pd.DataFrame:
+    """
+    10営業日の組の中の W10 の順位（同じスコアは銘柄コードの順。1 = 1位）。返すのは候補の日の行（r5_days = 0。候補の日 = 判断日）の
+    銘柄・判断日・t10_rank。
+    """
+    s = o10.sort_values(["Date", "score_W10", "Code"], ascending=[True, False, True], kind="mergesort")
+    rank = pd.Series(s.groupby("Date", sort=False).cumcount().to_numpy() + 1, index=s.index)
+    x = o10[["Code", "Date", "r5_days"]].copy()
+    x["t10_rank"] = rank.reindex(x.index).to_numpy(dtype=float)
+    return x[x["r5_days"] == 0][["Code", "Date", "t10_rank"]].reset_index(drop=True)
+
+
+def attach_ten(o: pd.DataFrame, tr: pd.DataFrame) -> pd.DataFrame:
+    """組の行のうち候補の日の行（r5_days = 0）に、10営業日の組の中の W10 の順位 t10_rank を足す（ほかの行と、無い行は欠測）。"""
+    t = tr[["Code", "Date", "t10_rank"]].copy()
+    t["Code"] = t["Code"].astype(str)
+    t["Date"] = pd.to_datetime(t["Date"])
+    base = o.drop(columns=[c for c in ("t10_rank",) if c in o.columns])
+    m = base.merge(t, on=["Code", "Date"], how="left", validate="many_to_one")
+    m.loc[m["r5_days"].to_numpy() != 0, "t10_rank"] = np.nan
+    return m
+
+
+def top1_by_day(pool: pd.DataFrame, score: str) -> pd.DataFrame:
+    """
+    判断日ごとの1位の行（スコアの上から。同じスコアは銘柄コードの順）の +10% 到達（hit）・収益（ret）と、その日の組の行の数（n）・
+    組の全行の +10% 到達の割合（pool_hit）・平均収益（pool_ret）。
+    """
+    cols = ["Date", "n", "hit", "ret", "pool_hit", "pool_ret"]
+    if not len(pool):
+        return pd.DataFrame(columns=cols)
+    s = pool.sort_values(["Date", score, "Code"], ascending=[True, False, True], kind="mergesort")
+    top = s.groupby("Date", sort=True).head(1).set_index("Date")
+    g = pool.assign(_h=pool[HIT].astype(float).to_numpy()).groupby("Date", sort=True)
+    out = pd.DataFrame({"n": g.size(), "pool_hit": g["_h"].mean(), "pool_ret": g[RET].mean()})
+    out["hit"] = top[HIT].astype(float).reindex(out.index)
+    out["ret"] = top[RET].astype(float).reindex(out.index)
+    return out.reset_index()[cols]
+
+
+def size_bins(n) -> Tuple[np.ndarray, Tuple[float, float]]:
+    """
+    大きさの3つの組（判断日の大きさの 1/3・2/3 の分位点で分ける。分位点ちょうどの日は小さい側）。0 = 小・1 = 中・2 = 大。
+    返すのは組の番号と2つの分位点。
+    """
+    n = np.asarray(n, dtype=float)
+    if not len(n):
+        return np.array([], dtype=int), (np.nan, np.nan)
+    q1, q2 = float(np.quantile(n, 1 / 3)), float(np.quantile(n, 2 / 3))
+    return np.where(n <= q1, 0, np.where(n <= q2, 1, 2)).astype(int), (q1, q2)
+
+
+def pool_size_stats(o: pd.DataFrame, o10: pd.DataFrame | None = None) -> Dict:
+    """
+    組の大きさと1位の +10% 到達（運用者の見立て 2026-10-30「その日の銘柄数と、直近5営業日の銘柄数が、多い方が10%到達率は
+    高いのかなと」）。数える判断日（R15 の印が組のすべてに付いた日。本体と同じ）ごとに、
+      D    その日の候補（r5_days = 0）の中の D の1位。大きさ = その日の候補の数
+      W5   直近5営業日の組の中の W5 の1位（候補の日を問わない）。大きさ = 組の行の数
+      W10  直近10営業日の組の中の W10 の1位（o10 があるとき）。大きさ = 10営業日の組の行の数
+    を判断日の翌営業日の寄りで買ったときの +10% 到達・平均収益を、大きさの3つの組（size_bins）ごとに出す。比べるのは同じ組の
+    全行の +10% 到達の割合（判断日ごとの割合の平均）と、その差（lift = 1位 − 全体）。R15 は問わない（件数を確保するため）。
+    """
+    of = flagged(o)
+    ds = pd.to_datetime(of["Date"]).unique()
+    pools = {"D": (of[of["r5_days"] == 0], "score_D"), "W5": (of, "score_W5")}
+    if o10 is not None:
+        pools["W10"] = (o10[pd.to_datetime(o10["Date"]).isin(ds)], "score_W10")
+    out: Dict = {}
+    for a, (p, sc) in pools.items():
+        t = top1_by_day(p, sc)
+        b, q = size_bins(t["n"].to_numpy(dtype=float))
+        bins = []
+        for j in range(3):
+            x = t[b == j]
+            if not len(x):
+                bins.append({"days": 0, "n_min": np.nan, "n_max": np.nan, "hit": np.nan, "ret": np.nan,
+                             "pool_hit": np.nan, "lift": np.nan})
+                continue
+            hit, ph = float(x["hit"].mean()), float(x["pool_hit"].mean())
+            bins.append({"days": int(len(x)), "n_min": float(x["n"].min()), "n_max": float(x["n"].max()), "hit": hit,
+                         "ret": float(x["ret"].mean()), "pool_hit": ph, "lift": hit - ph})
+        out[a] = {"days": int(len(t)), "q": [q[0], q[1]], "bins": bins,
+                  "hit": float(t["hit"].mean()) if len(t) else np.nan,
+                  "pool_hit": float(t["pool_hit"].mean()) if len(t) else np.nan}
+    return out
+
+
+def pool_reading(rows: List[Tuple[int, Dict]]) -> Dict:
+    """
+    読み方（回す前に決めたもの。採用の判定ではない）。rows はずらし方ごとの pool_size_stats。腕（D・W5・W10）ごとに、
+      hit_diff  大きい組の1位の +10% 到達 − 小さい組の1位の +10% 到達（pt。表に出す桁 = 小数1桁に丸める）
+      lift_diff 差（1位 − 全体）の大きい組 − 小さい組（同じ）
+    が、すべてのずらし方で hit_diff > 0 かつ lift_diff > 0 なら "lift"、hit_diff だけすべて > 0 なら "pool"、それ以外は "none"。
+    """
+    def pt(x: float) -> float:
+        return round(float(x) * 100, 1) if np.isfinite(x) else float("nan")
+
+    out: Dict = {}
+    for a in [a for a in POOL_ARMS if rows and all(a in ps for _, ps in rows)]:
+        hd = [pt(ps[a]["bins"][2]["hit"] - ps[a]["bins"][0]["hit"]) for _, ps in rows]
+        ld = [pt(ps[a]["bins"][2]["lift"] - ps[a]["bins"][0]["lift"]) for _, ps in rows]
+        if all(np.isfinite(x) and x > 0 for x in hd):
+            read = "lift" if all(np.isfinite(x) and x > 0 for x in ld) else "pool"
+        else:
+            read = "none"
+        out[a] = {"hit_diff": hd, "lift_diff": ld, "read": read}
     return out
 
 
@@ -939,10 +1158,52 @@ def report_triple(rows: List[Tuple[int, Dict]]) -> None:
     for sh, t in rows:
         print(f"  ずらし{sh}か月（R15 の印が組のすべてに付いた判断日 {t['days']:,}日・{t['months']}か月）")
         for k in [k for k in TRIPLE_SETS if k in t["sets"]]:
-            s = t["sets"][k]
-            se = f"{s['se'] * 100:.2f}pt" if np.isfinite(s["se"]) else "—"
-            print(f"    {TRIPLE_JA[k]:<26}{s['n']:>5}件（{_pm(s['n'], t['months'])}）{_p(s['ret']):>8} ± {se:<7}"
-                  f"{_p(s['ret_w']):>8} {_s(s['win']):>6} {_s(s['bad']):>6} {_s(s['hit']):>6} {_p(s['r20']):>8}")
+            print(_set_line(TRIPLE_JA[k], t["sets"][k], t["months"]))
+
+
+def _set_line(name: str, s: Dict, months: int) -> str:
+    """参考の表の1行（件数（月あたり）/ 平均収益 ± 標準誤差 / 窓の平均 / 勝率 / −10% 未満 / +10%到達 / 20営業日目の終値）。"""
+    se = f"{s['se'] * 100:.2f}pt" if np.isfinite(s["se"]) else "—"
+    return (f"    {name:<26}{s['n']:>5}件（{_pm(s['n'], months)}）{_p(s['ret']):>8} ± {se:<7}"
+            f"{_p(s['ret_w']):>8} {_s(s['win']):>6} {_s(s['bad']):>6} {_s(s['hit']):>6} {_p(s['r20']):>8}")
+
+
+def _pt(x: float) -> str:
+    return f"{x * 100:+.1f}pt" if np.isfinite(x) else "—"
+
+
+def _n(x: float) -> str:
+    return f"{x:.0f}" if np.isfinite(x) else "—"
+
+
+def report_ten(rows: List[Tuple[int, Dict]]) -> None:
+    """参考（運用者の確認 2026-10-30「直近10営業日でのランキング1位」「2位以内も確認」）の表（公開ログ。集計だけ）。"""
+    print(f"\n■ 参考（運用者の確認 2026-10-30・見るだけ）: 候補の日に、直近{K10}営業日の組で並べたランキング（W10。W5 と同じ作り・"
+          f"同じ木の形で組を{K10}営業日に）でも1位 / {TEN_TOP}位以内の候補だけを、翌営業日の寄りで買う")
+    print("  件数（月あたり）/ 平均収益（全件 ± 標準誤差）/ 窓の平均 / 勝率 / −10% 未満 / +10%到達 / 20営業日目の終値")
+    for sh, t in rows:
+        print(f"  ずらし{sh}か月（R15 の印が組のすべてに付いた判断日 {t['days']:,}日・{t['months']}か月）")
+        for k in [k for k in TEN_SETS if k in t["sets"]]:
+            print(_set_line(TEN_JA[k], t["sets"][k], t["months"]))
+
+
+def report_pool(rows: List[Tuple[int, Dict]], rd: Dict) -> None:
+    """参考（運用者の見立て 2026-10-30）: 組の大きさと1位の +10% 到達の表（公開ログ。集計だけ）。"""
+    print("\n■ 参考（運用者の見立て 2026-10-30「その日の銘柄数と、直近5営業日の銘柄数が、多い方が10%到達率は高いのかなと」・"
+          "見るだけ）: 判断日を組の大きさで3つに分けた、1位の +10% 到達（R15 は問わない。判断日の翌営業日の寄りで買う）")
+    print("  日数 / 組の大きさ（件）/ 1位の +10%到達 / 1位の平均収益 / 全体の +10%到達（その日の候補・組の全行）/ 差（1位 − 全体）")
+    for sh, ps in rows:
+        print(f"  ずらし{sh}か月")
+        for a in [a for a in POOL_ARMS if a in ps]:
+            p = ps[a]
+            print(f"    {POOL_JA[a]}: 判断日 {p['days']:,}日・1位 {_s(p['hit'])}・全体 {_s(p['pool_hit'])}")
+            for nm, b in zip(POOL_BINS, p["bins"]):
+                print(f"      {nm} {b['days']:>5}日 {_n(b['n_min']):>3}〜{_n(b['n_max']):<3}件 {_s(b['hit']):>6} {_p(b['ret']):>8} "
+                      f"{_s(b['pool_hit']):>6} {_pt(b['lift']):>8}")
+    print("  → 読み方（大きい組 − 小さい組。1位の +10%到達 / 差（1位 − 全体）。ずらしの順）:")
+    for a, r in rd.items():
+        print(f"    {a}: " + ", ".join(f"{x:+.1f}pt" if np.isfinite(x) else "—" for x in r["hit_diff"]) + " / "
+              + ", ".join(f"{x:+.1f}pt" if np.isfinite(x) else "—" for x in r["lift_diff"]) + f" → {POOL_READ_JA[r['read']]}")
 
 
 def main(argv=None) -> int:
@@ -954,9 +1215,14 @@ def main(argv=None) -> int:
                     help="参考（運用者の確認 2026-10-30）: 日次の1位・組の1位・R15 の3つとも満たす候補だけを買った成績も出す")
     ap.add_argument("--seal", default="",
                     help="（--triple と一緒に）3条件・4条件の候補の一覧を、この公開鍵（X25519・base64）で封をしてログに出す")
+    ap.add_argument("--ten", action="store_true",
+                    help="参考（運用者の確認 2026-10-30）: 直近10営業日の組のランキング（W10）でも1位 / 2位以内の候補と、組の"
+                         "大きさごとの1位の +10% 到達も出す（--triple の表も出す）")
     args = ap.parse_args(argv)
     if args.seal and not args.triple:
         raise SystemExit("--seal は --triple と一緒に使う")
+    if args.ten:
+        args.triple = True
     shifts = [int(x) for x in args.shifts.split(",") if x.strip()]
     import warnings
     from scipy.stats import ConstantInputWarning
@@ -976,6 +1242,13 @@ def main(argv=None) -> int:
     cm = check_move_cols(rl, bars, days)
     cp = check_pools(rl, full, days)
     sd = check_same_day(rl)
+    rl10, ten_chk = None, None
+    if args.ten:
+        rl10, info10 = rolling_frame(full, bars, days, cols, k=K10)
+        rl10, xinfo10 = W.attach_week_exit(rl10, bars, days)
+        ten_chk = {"info": info10, "exit": xinfo10, "check_cols": check_move_cols(rl10, bars, days),
+                   "check_pools": check_pools(rl10, full, days, k=K10), "check_same_day": check_same_day(rl10),
+                   "nested": check_nested(rl, rl10)}
     del bars
     daily = full[full["label"].notna()].reset_index(drop=True)
     del full
@@ -1005,6 +1278,17 @@ def main(argv=None) -> int:
         raise SystemExit("判断日に入った候補で、組の収益が日次の収益と合わない（収益の付け方がずれている）")
     if cm["same"] != cm["rows"]:
         raise SystemExit("値動きの列が日足から直接計算した値と合わない")
+    if ten_chk is not None:
+        i10, x10, c10, p10, s10, n10 = (ten_chk[k] for k in ("info", "exit", "check_cols", "check_pools",
+                                                              "check_same_day", "nested"))
+        log(f"[確かめ] {K10}営業日の組（W10 用）: 組の行 {i10['rows']:,}件・1日の組 中央 {i10['per_day_median']:.0f}件・同じ銘柄で"
+            f"外した行 {i10['dropped_repeats']:,}件・20営業日目の終値がある {x10['with_r20']:,}件 ｜ 組の中身を直接選び直す "
+            f"{p10['same']} / {p10['days']} 日が同じ ｜ 値動き4列 {c10['same']} / {c10['rows']} 行が同じ ｜ 判断日に入った候補の"
+            f"収益の合わない行 {s10['mismatch']} ｜ 5営業日の組の行のうち{K10}営業日の組にある {n10['in10']:,} / {n10['rows5']:,}・"
+            f"判断日に入った候補の行 {n10['day5']:,} / {n10['day10']:,}（{'同じ' if n10['day_same'] else '違う'}）")
+        if (p10["same"] != p10["days"] or s10["mismatch"] or c10["same"] != c10["rows"]
+                or n10["in10"] != n10["rows5"] or not n10["day_same"]):
+            raise SystemExit(f"{K10}営業日の組の確かめが合わない")
     rule, rinfo = daily_rule(daily)
     if not rinfo.get("found"):
         raise SystemExit("本番の out-of-fold（1.5σ の木3本）が置き場に無いので、今の買いの印（R15）を作れない")
@@ -1061,6 +1345,10 @@ def main(argv=None) -> int:
 
     # ---- out-of-fold と集計 ----
     rl_eval = rl[rl[RET].notna() & rl[R20].notna()].reset_index(drop=True)
+    rl10_eval = None
+    if rl10 is not None:
+        rl10_eval = rl10[rl10[RET].notna() & rl10[R20].notna()].reset_index(drop=True)
+        del rl10
     summary: Dict = {"info": info, "exit": xinfo, "check_cols": cm, "check_pools": cp, "check_same_day": sd, "sig": sig,
                      "rule_info": rinfo, "cutoff": str(cutoff.date()),
                      "params": {a: {k: v for k, v in p.items()} for a, p in params.items()},
@@ -1068,6 +1356,7 @@ def main(argv=None) -> int:
                      "cv": cvm, "random_ndcg": rnd, "top": args.top, "shifts": {}}
     rows = []
     tri: List[Tuple[int, Dict]] = []
+    pool: List[Tuple[int, Dict]] = []
     sealed_sets: Dict[int, Dict[str, pd.DataFrame]] = {}
     of_seal = None
     for sh in shifts:
@@ -1078,6 +1367,14 @@ def main(argv=None) -> int:
         rows.append({"shift": sh, **res})
         if args.triple:
             o3 = attach_rule(o, rule0, ("r0", "pmin0"))
+            if rl10_eval is not None:
+                o10 = oof10_shift(rl10_eval, rl_eval["Date"], cols_w, params["W5"], sh)
+                o3 = attach_ten(o3, ten_ranks(o10))
+                f3 = flagged(o3)
+                miss = int(((f3["r5_days"] == 0) & f3["t10_rank"].isna()).sum())
+                if miss:
+                    raise SystemExit(f"ずらし{sh}か月: 数える判断日の候補の日の行に W10 の順位が付かない行がある（{miss}行）")
+                pool.append((sh, pool_size_stats(o3, o10)))
             tri.append((sh, triple_stats(o3, days)))
             if args.seal:
                 of3 = flagged(o3)
@@ -1100,6 +1397,13 @@ def main(argv=None) -> int:
         summary["triple"] = {str(sh): t for sh, t in tri}
         # 手元で同じ out-of-fold を作り直すため（木の形。データの値ではない）
         print("  W5 の木の形（全桁）: " + json.dumps(params["W5"], sort_keys=True, default=str))
+    if pool:
+        report_ten(tri)
+        prd = pool_reading(pool)
+        report_pool(pool, prd)
+        summary["pool_size"] = {str(sh): p for sh, p in pool}
+        summary["pool_reading"] = prd
+        summary["ten_check"] = ten_chk
     if sealed_sets:
         pcts = rule_pcts(daily, tuple(RULE_TREES) + tuple(R0_TREES))
         k15 = [f"pct_{a}" for a in RULE_TREES]
