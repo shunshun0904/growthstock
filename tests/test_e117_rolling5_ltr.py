@@ -570,19 +570,19 @@ class TestRuleBuys(unittest.TestCase):
 def triple_pools():
     """3つとも満たす候補（日次の1位・組の1位・R15）を手で数える組の行。"""
     days = pd.bdate_range("2020-12-28", "2021-03-31")
-    rows = [  # 判断日, 銘柄, 候補の日, r15, D, W5, RET
-        ("2021-01-04", "1001", "2021-01-04", 1.0, 0.90, 0.80, 0.05),    # 日次1位・組2位
-        ("2021-01-04", "1002", "2021-01-04", 1.0, 0.50, 0.95, -0.02),   # 日次2位・組1位
-        ("2021-01-04", "1003", "2020-12-29", 1.0, 0.99, 0.70, 0.01),    # 候補の日でない（D が高くても日次の順位は付かない）
-        ("2021-01-05", "1004", "2021-01-05", 1.0, 0.80, 0.90, 0.09),    # 3つとも満たす
-        ("2021-01-05", "1005", "2021-01-05", 1.0, 0.70, 0.85, 0.03),
-        ("2021-01-05", "1002", "2021-01-04", 1.0, 0.50, 0.88, -0.02),   # 1日前の候補
-        ("2021-01-06", "1006", "2021-01-06", 0.0, 0.90, 0.99, 0.08),    # 日次1位・組1位だが R15 を満たさない
-        ("2021-01-06", "1007", "2021-01-06", 1.0, 0.10, 0.20, -0.12),
-        ("2021-01-07", "1004", "2021-01-07", 1.0, 0.90, 0.95, 0.04),    # 3つとも満たすが、01-05 に買って持っている
-        ("2021-01-07", "1008", "2021-01-07", 1.0, 0.90, 0.30, 0.02),    # 日次で 1004 と同点 → 銘柄コードの順で2位
+    rows = [  # 判断日, 銘柄, 候補の日, r15, r0, D, W5, RET
+        ("2021-01-04", "1001", "2021-01-04", 1.0, 1.0, 0.90, 0.80, 0.05),    # 日次1位・組2位
+        ("2021-01-04", "1002", "2021-01-04", 1.0, 0.0, 0.50, 0.95, -0.02),   # 日次2位・組1位
+        ("2021-01-04", "1003", "2020-12-29", 1.0, 1.0, 0.99, 0.70, 0.01),    # 候補の日でない（D が高くても日次の順位は付かない）
+        ("2021-01-05", "1004", "2021-01-05", 1.0, 0.0, 0.80, 0.90, 0.09),    # 3つとも満たす（R0 は満たさない）
+        ("2021-01-05", "1005", "2021-01-05", 1.0, 1.0, 0.70, 0.85, 0.03),
+        ("2021-01-05", "1002", "2021-01-04", 1.0, 0.0, 0.50, 0.88, -0.02),   # 1日前の候補
+        ("2021-01-06", "1006", "2021-01-06", 0.0, 1.0, 0.90, 0.99, 0.08),    # 日次1位・組1位だが R15 を満たさない
+        ("2021-01-06", "1007", "2021-01-06", 1.0, 1.0, 0.10, 0.20, -0.12),
+        ("2021-01-07", "1004", "2021-01-07", 1.0, 1.0, 0.90, 0.95, 0.04),    # 4つとも満たす。3つの買いでは 01-05 に買って持っている
+        ("2021-01-07", "1008", "2021-01-07", 1.0, 0.0, 0.90, 0.30, 0.02),    # 日次で 1004 と同点 → 銘柄コードの順で2位
     ]
-    o = pd.DataFrame(rows, columns=["Date", "Code", "cand_date", "r15", "score_D", "score_W5", E.RET])
+    o = pd.DataFrame(rows, columns=["Date", "Code", "cand_date", "r15", "r0", "score_D", "score_W5", E.RET])
     o["Date"] = pd.to_datetime(o["Date"])
     o["cand_date"] = pd.to_datetime(o["cand_date"])
     o["r5_days"] = [(pd.bdate_range(c, d).size - 1) for c, d in zip(o["cand_date"], o["Date"])]
@@ -597,13 +597,19 @@ class TestTriple(unittest.TestCase):
     def test_by_hand(self):
         o, days = triple_pools()
         got = {k: list(zip(b["Date"].dt.strftime("%m-%d"), b["Code"])) for k, b in R.triple_buys(o, days).items()}
+        self.assertEqual(sorted(got), sorted(R.TRIPLE_SETS))
         self.assertEqual(got["D1W1"], [("01-05", "1004")])
+        # 4つ: 01-05 の 1004 は R0 を満たさない。01-07 の 1004 は4つとも満たし、この買い方では 01-05 に買っていないので買える
+        self.assertEqual(got["Q4"], [("01-07", "1004")])
+        self.assertEqual(got["R15R0"], [("01-04", "1001"), ("01-05", "1005"), ("01-06", "1007"), ("01-07", "1004")])
         self.assertEqual(got["D1"], [("01-04", "1001"), ("01-05", "1004")])
         self.assertEqual(got["W1"], [("01-04", "1002"), ("01-05", "1004")])
         self.assertEqual(got["R15"], [("01-04", "1001"), ("01-04", "1002"), ("01-05", "1004"), ("01-05", "1005"),
                                       ("01-06", "1007"), ("01-07", "1008")])
         self.assertEqual(got["REST"], [("01-04", "1001"), ("01-04", "1002"), ("01-05", "1005"), ("01-06", "1007"),
                                        ("01-07", "1008")])
+        no_r0 = R.triple_buys(o.drop(columns=["r0"]), days)               # R0 の印が無ければ4つの集計は出さない
+        self.assertEqual(sorted(no_r0), ["D1", "D1W1", "R15", "REST", "W1"])
 
     def test_stats(self):
         o, days = triple_pools()
@@ -611,8 +617,10 @@ class TestTriple(unittest.TestCase):
         self.assertEqual(t["days"], 4)
         self.assertEqual(t["months"], 1)
         s = t["sets"]
-        self.assertEqual([s[k]["n"] for k in R.TRIPLE_SETS], [1, 2, 2, 6, 5])
+        self.assertEqual([s[k]["n"] for k in R.TRIPLE_SETS], [1, 1, 4, 2, 2, 6, 5])
         self.assertAlmostEqual(s["D1W1"]["ret"], 0.09)
+        self.assertAlmostEqual(s["Q4"]["ret"], 0.04)
+        self.assertEqual(sorted(R.triple_stats(o.drop(columns=["r0"]), days)["sets"]), ["D1", "D1W1", "R15", "REST", "W1"])
         self.assertTrue(np.isnan(s["D1W1"]["se"]))                  # 1件では標準誤差を出さない
         r = np.array([0.05, -0.02, 0.09, 0.03, -0.12, 0.02])
         self.assertAlmostEqual(s["R15"]["ret"], r.mean())
@@ -696,9 +704,10 @@ class TestMain(unittest.TestCase):
             return {"params": dict(T115.SMALL_RANK), "_cv": {"objective": "x", "ndcg": 0.5, "best_trial": 0, "trials": []},
                     "_minutes": 0.0}
 
-        def fake_rule(daily):
+        def fake_rule(daily, models=None):
             self.assertTrue(daily["label"].notna().all())
-            r = daily[["Code", "Date"]].assign(r15=(daily["f1"] > 0.5).astype(float), pmin=np.round(daily["f1"] * 10, 1))
+            line = 0.5 if models is None else 0.9                               # R0（1.2σ の3本）は少なめにする
+            r = daily[["Code", "Date"]].assign(r15=(daily["f1"] > line).astype(float), pmin=np.round(daily["f1"] * 10, 1))
             r.loc[r["Date"] < no_pct_until, ["r15", "pmin"]] = np.nan
             return r, {"found": True, "joined": len(r), "rows": len(r), "with_pct": int(r["r15"].notna().sum()),
                        "r15": int(r["r15"].sum()), "matched": int(r["r15"].notna().sum())}
@@ -745,6 +754,9 @@ class TestMain(unittest.TestCase):
             with open(os.path.join(tmp, "e117_summary.json"), encoding="utf-8") as fh:
                 sm2 = json.load(fh)
             self.assertIn("■ 参考（運用者の確認 2026-10-30", out2)
+            self.assertIn("W5 の木の形（全桁）", out2)
+            self.assertEqual(dr.call_count, 3)                                 # 2回目は R15 と R0
+            self.assertEqual(tuple(dr.call_args.kwargs["models"]), tuple(R.R0_TREES))
             self.assertEqual(sorted(sm2["triple"]), ["0", "2"])
             for sh in ("0", "2"):
                 t = sm2["triple"][sh]["sets"]
@@ -753,13 +765,15 @@ class TestMain(unittest.TestCase):
                 self.assertLessEqual(t["D1W1"]["n"], min(t["D1"]["n"], t["W1"]["n"]))
                 self.assertLessEqual(max(t["D1"]["n"], t["W1"]["n"]), t["R15"]["n"])
                 self.assertLessEqual(t["REST"]["n"], t["R15"]["n"])
+                self.assertLessEqual(t["Q4"]["n"], t["R15R0"]["n"])
+                self.assertLessEqual(t["R15R0"]["n"], t["R15"]["n"])
             for code in codes:
                 self.assertNotIn(code, out2)
 
     def test_stops_without_production_oof(self):
         full, bars, _ = main_data()
 
-        def no_rule(daily):
+        def no_rule(daily, models=None):
             return daily[["Code", "Date"]].iloc[:0], {"found": False}
 
         def never(*a, **k):

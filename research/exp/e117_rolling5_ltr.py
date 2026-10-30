@@ -81,6 +81,9 @@
   - 候補の日 t の夜に、その日の候補の中の今のランキング学習（日次。D）で1位・t の組の W5 で1位・R15 の3つとも満たす候補を、t の
     翌営業日の寄りで買う（持っている銘柄は買い増さない）。分けて、R15＋日次の1位・R15＋組の1位・R15 だけ・今の買いのうち3つとも
     満たすもの以外も出す。数える判断日は本体と同じ。件数・平均収益（全件 ± 標準誤差・窓の平均）・勝率・−10% 未満など
+  - 続く確認（同じ日）「1.2σモデルでも95以上の条件だとどうなるか知りたいです。3条件、4条件全て満たすサンプルの集計をしてほしい
+    です。」: 1.2σ の木3本（R0。実験115 と同じ作り）も足した4つとも満たす候補と、R15＋R0（順位は問わない）も出す。手元で同じ
+    out-of-fold を作り直せるように、W5 の木の形を全桁で出す（データの値ではない）
 
 公開ログには集計だけ（件数・平均・割合・木の形）。銘柄ごとの値は出さない。結果は research/_data/oof/e117_*。
 
@@ -494,12 +497,15 @@ def slot_trades(buys: pd.DataFrame, days, n_months: int) -> Dict:
             "capital_pm": float(np.sum(r) / LT.SLOTS / n_months) if (len(r) and n_months) else np.nan}
 
 
-def attach_rule(o: pd.DataFrame, rule: pd.DataFrame) -> pd.DataFrame:
-    """組の行に、候補の日の R15 の印（r15）と3本の最小（pmin）を足す（銘柄・候補の日で突き合わせる。印の無い候補は欠測）。"""
-    r = rule[["Code", "Date", "r15", "pmin"]].rename(columns={"Date": "cand_date"}).copy()
+def attach_rule(o: pd.DataFrame, rule: pd.DataFrame, names: Tuple[str, str] = ("r15", "pmin")) -> pd.DataFrame:
+    """
+    組の行に、候補の日の印と3本の最小を足す（銘柄・候補の日で突き合わせる。印の無い候補は欠測）。rule は daily_rule の戻り値
+    （列 r15・pmin）で、names の名前で足す（既定は R15 の r15・pmin。1.2σ の3本なら r0・pmin0）。
+    """
+    r = rule[["Code", "Date", "r15", "pmin"]].rename(columns={"Date": "cand_date", "r15": names[0], "pmin": names[1]}).copy()
     r["Code"] = r["Code"].astype(str)
     r["cand_date"] = pd.to_datetime(r["cand_date"])
-    base = o.drop(columns=[c for c in ("r15", "pmin") if c in o.columns])
+    base = o.drop(columns=[c for c in names if c in o.columns])
     return base.merge(r, on=["Code", "cand_date"], how="left", validate="many_to_one")
 
 
@@ -599,9 +605,12 @@ LEAN_JA = {"fresh": "入ったばかりの候補を上に置きやすい", "aged
 # 参考: 日次の1位・組の1位・R15 の3つとも満たす候補（運用者の確認 2026-10-30。見るだけ）
 # --------------------------------------------------------------------------- #
 
-TRIPLE_SETS = ("D1W1", "D1", "W1", "R15", "REST")
-TRIPLE_JA = {"D1W1": "3つとも満たす（日次1位・組1位・R15）", "D1": "R15＋日次の1位", "W1": "R15＋組の1位（候補の日）",
+TRIPLE_SETS = ("Q4", "D1W1", "R15R0", "D1", "W1", "R15", "REST")
+TRIPLE_JA = {"Q4": "4つとも満たす（3つ＋1.2σ の3本 95以上）", "D1W1": "3つとも満たす（日次1位・組1位・R15）",
+             "R15R0": "R15＋R0（1.5σ・1.2σ の6本 95以上）", "D1": "R15＋日次の1位", "W1": "R15＋組の1位（候補の日）",
              "R15": "R15 だけ（今の買い）", "REST": "今の買いのうち3つとも満たすもの以外"}
+#: 1.2σ の木3本（2026-10-23〜10-29 の規則。実験115 の R0 と同じ）
+R0_TREES = tuple(W.RULE_TREES)
 
 
 def triple_buys(o: pd.DataFrame, days, hold: int = E.HOLD) -> Dict[str, pd.DataFrame]:
@@ -611,6 +620,8 @@ def triple_buys(o: pd.DataFrame, days, hold: int = E.HOLD) -> Dict[str, pd.DataF
     5営業日）の中の W5 の順位 w5_rank を付ける（どちらも同じスコアは銘柄コードの順。候補の日でない行の d_rank は 0）。候補の日の行で
     R15 を満たし、d_rank と w5_rank がどちらも1位のものを、候補の日の翌営業日の寄りで買う（持っている銘柄は買い増さない。_take）。
     分けて見るために、R15＋日次の1位・R15＋組の1位・R15 だけ（今の買い）と、今の買いのうち3つとも満たすもの以外も返す。
+    組の行に r0（1.2σ の3本の印。attach_rule の names = ("r0", "pmin0")）があれば、3つに R0 も満たす4つとも満たす候補（Q4）と
+    R15＋R0（順位は問わない）も返す（運用者の確認 2026-10-30「1.2σモデルでも95以上の条件だとどうなるか」）。
     """
     cal = W.calendar(days)
     pos = {pd.Timestamp(d): i for i, d in enumerate(cal)}
@@ -624,8 +635,12 @@ def triple_buys(o: pd.DataFrame, days, hold: int = E.HOLD) -> Dict[str, pd.DataF
     base = (x["r5_days"] == 0).to_numpy() & (pd.to_numeric(x["r15"], errors="coerce") == 1.0).to_numpy()
     d1 = (x["d_rank"] == 1).to_numpy()
     w1 = (x["w5_rank"] == 1).to_numpy()
+    masks = {"D1W1": base & d1 & w1, "D1": base & d1, "W1": base & w1, "R15": base}
+    if "r0" in x.columns:
+        r0 = (pd.to_numeric(x["r0"], errors="coerce") == 1.0).to_numpy()
+        masks.update({"Q4": base & d1 & w1 & r0, "R15R0": base & r0})
     out: Dict[str, pd.DataFrame] = {}
-    for k, m in {"D1W1": base & d1 & w1, "D1": base & d1, "W1": base & w1, "R15": base}.items():
+    for k, m in masks.items():
         sel = x[m].sort_values(["Date", "Code"], kind="mergesort")
         out[k] = _take(sel, np.ones(len(sel), dtype=bool), pos, hold)
     r = out["R15"]
@@ -639,7 +654,7 @@ def triple_stats(o: pd.DataFrame, days, hold: int = E.HOLD) -> Dict:
     nm = n_months(of)
     sets = triple_buys(of, days, hold)
     out: Dict = {"days": int(of["Date"].nunique()) if len(of) else 0, "months": nm, "sets": {}}
-    for k in TRIPLE_SETS:
+    for k in [k for k in TRIPLE_SETS if k in sets]:
         b = sets[k]
         st = W.pick_stats(b)
         r = b[RET].to_numpy(dtype=float)
@@ -749,7 +764,7 @@ def report_triple(rows: List[Tuple[int, Dict]]) -> None:
     print("  件数（月あたり）/ 平均収益（全件 ± 標準誤差）/ 窓の平均 / 勝率 / −10% 未満 / +10%到達 / 20営業日目の終値")
     for sh, t in rows:
         print(f"  ずらし{sh}か月（R15 の印が組のすべてに付いた判断日 {t['days']:,}日・{t['months']}か月）")
-        for k in TRIPLE_SETS:
+        for k in [k for k in TRIPLE_SETS if k in t["sets"]]:
             s = t["sets"][k]
             se = f"{s['se'] * 100:.2f}pt" if np.isfinite(s["se"]) else "—"
             print(f"    {TRIPLE_JA[k]:<26}{s['n']:>5}件（{_pm(s['n'], t['months'])}）{_p(s['ret']):>8} ± {se:<7}"
@@ -818,6 +833,16 @@ def main(argv=None) -> int:
     log(f"[確かめ] 今の買いの印 R15（本番の out-of-fold・実験82 と同じ作り）: 3本がそろう {rinfo['joined']:,}行・窓に入る "
         f"{rinfo['rows']:,}行・前向きの百分位が付く {rinfo['with_pct']:,}行・R15 {rinfo['r15']:,}件（学習データの {len(daily):,}行の"
         f"うち印が付く {rinfo['matched']:,}行）")
+    rule0 = None
+    if args.triple:
+        rule0, r0info = daily_rule(daily, models=R0_TREES)
+        if not r0info.get("found"):
+            raise SystemExit("本番の out-of-fold（1.2σ の木3本）が置き場に無いので、R0 の印を作れない")
+        both = rule[["Code", "Date", "r15"]].merge(rule0[["Code", "Date", "r15"]].rename(columns={"r15": "r0"}),
+                                                   on=["Code", "Date"], how="left", validate="one_to_one")
+        log(f"[確かめ] 参考の R0（1.2σ の木3本・同じ作り）: 前向きの百分位が付く {r0info['with_pct']:,}行・R0 {r0info['r15']:,}件・"
+            f"R15 と R0 の両方 {int(((both['r15'] == 1) & (both['r0'] == 1)).sum()):,}件・R15 の印があって R0 の印が無い行 "
+            f"{int((both['r15'].notna() & both['r0'].isna()).sum()):,}")
 
     # ---- 探索 ----
     sub, no_label = search_frame(rl, cutoff)
@@ -872,7 +897,7 @@ def main(argv=None) -> int:
         summary["shifts"][str(sh)] = res
         rows.append({"shift": sh, **res})
         if args.triple:
-            tri.append((sh, triple_stats(o, days)))
+            tri.append((sh, triple_stats(attach_rule(o, rule0, ("r0", "pmin0")), days)))
 
     rd = reading(rows)
     summary["reading"] = rd
@@ -888,6 +913,8 @@ def main(argv=None) -> int:
     if tri:
         report_triple(tri)
         summary["triple"] = {str(sh): t for sh, t in tri}
+        # 手元で同じ out-of-fold を作り直すため（木の形。データの値ではない）
+        print("  W5 の木の形（全桁）: " + json.dumps(params["W5"], sort_keys=True, default=str))
     summary["minutes"] = round((time.time() - t_all) / 60, 1)
     with open(SUMMARY_PATH, "w", encoding="utf-8") as fh:
         json.dump(summary, fh, ensure_ascii=False, indent=2, default=str)
