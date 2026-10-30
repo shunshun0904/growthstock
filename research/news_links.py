@@ -5,8 +5,8 @@
 時間をかけてください」）。
 
 毎晩の予測（Predict Breakouts）の後に Check News Links（.github/workflows/news-links.yml）が続けて走り、
-public/data/predictions.json に載っている日の**候補**（今日の戦略の規則 = 2026-10-29 から 1.5σ の3本すべて95以上。2026-10-23〜10-29 は
-1.2σ の3本、それまでは 1.5σ の3本。live_track.RULE_MODELS /
+public/data/predictions.json に載っている日の**候補**（今日の戦略の規則 = 2026-10-30 から 1.2σ の3本すべて95以上。2026-10-23〜10-29 も
+同じ。2026-10-12〜10-23 と 2026-10-29〜10-30 は 1.5σ の3本。live_track.RULE_MODELS /
 AGREE_PCT。画面の strategy.js と同じ）について、リンクを1本ずつ開き、次をすべて満たしたものだけを「確かめた」とする。
 
   1. HTTP 200（転送の後）

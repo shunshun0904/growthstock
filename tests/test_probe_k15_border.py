@@ -65,9 +65,9 @@ class TestSyncWithScreen(unittest.TestCase):
         self.assertIsNotNone(m)
         self.assertEqual((float(m.group(1)), float(m.group(2))), (E.LINE, E.NEAR_LO))
         r = re.search(r"export const RULE_MODELS = \[([^\]]*)\]", js)
-        # 2026-10-29 から画面の規則は 1.5σ の3本（このプローブの主の組 K15。画面の数字は probe_k15_panel が同じ形で測る）。
-        # 2026-10-12〜10-23 も K15、2026-10-23〜10-29 は T3（1.2σ の3本。probe_t3_panel）だった
-        self.assertEqual(tuple(re.findall(r"'([^']+)'", r.group(1))), tuple(E.GROUPS["K15"]))
+        # 2026-10-30 から画面の規則は 1.2σ の3本（このプローブの T3。画面の数字は probe_k15_panel の ■4c・■4d が同じ形で測る）。
+        # 2026-10-23〜10-29 も T3、2026-10-12〜10-23 と 2026-10-29〜10-30 は K15（このプローブの主の組）だった
+        self.assertEqual(tuple(re.findall(r"'([^']+)'", r.group(1))), tuple(E.GROUPS["T3"]))
 
 
 class TestReport(unittest.TestCase):

@@ -6,7 +6,7 @@
 - 母集団の百分位は画面の物差し（models.pct_historical / live_track.pct_of）と同じ
 - 母集団は、予測日より前に結果が出そろった行だけ（先読みしない）。候補の行は自分の母集団に入らない
 - 候補の見積もり（25%点・中央値・−10% 割れ）は、実験93 の neighbor_stats で別に計算した値と一致する。雲の度数の合計は近傍の数
-- 1.5σ の3本のどれかが欠けた候補には付けない。日足の足りない候補にも付けない
+- 規則の3本（今は 1.2σ の3本）のどれかが欠けた候補には付けない。日足の足りない候補にも付けない
 - 文脈の2次元の度数は MIN_CELL 未満のマス目を消す。出力に過去の事例の銘柄コード・日付が含まれない
 - 過去の日は前の knn のまま（引き継ぎ）。out-of-fold が無ければ例外を出さず「出せない」として返す
 - JSON に書ける
@@ -123,7 +123,8 @@ class TestHelpersMatchExperiment(unittest.TestCase):
         self.assertEqual(KC.done_before(np.sort(a["done"]), days[200]), E91.done_before(np.sort(b["done"]), days[200]))
         self.assertEqual((KC.K, KC.POOL_LINE, KC.CONTEXT_LINE, KC.TARGET, KC.HOLD, KC.WIN, KC.LEVELS),
                          (E91.K_MAIN, E91.POOL_LINE, E91.LINE, E91.TARGET, E91.HOLD, E91.WIN, E91.LEVELS))
-        # 母集団の3本は今の規則の3本（2026-10-29 から 1.5σ。2026-10-23〜10-29 は 1.2σ。実験91 は当時の規則の 1.5σ の3本で測った）
+        # 母集団の3本は今の規則の3本（2026-10-30 から 1.2σ。2026-10-23〜10-29 も同じ。2026-10-29〜10-30 は 1.5σ。実験91 は当時の規則の
+        # 1.5σ の3本で測った）
         self.assertEqual(KC.RULE_MODELS, tuple(LT.RULE_MODELS))
         self.assertEqual(tuple(E91.RULE_MODELS), ("lgbm_k15", "xgb_k15", "cat_k15"))
 
@@ -221,7 +222,7 @@ class TestBuild(unittest.TestCase):
             self.assertGreater(rec["dNn"]["R"] + rec["dNn"]["V"], 0.0)
         self.assertEqual(self.knn["bands"], ["-10 未満", "-10〜0", "0〜+5", "+5〜+10 未満", "+10 到達"])
         self.assertEqual(self.knn["dBins"], [0.0, 0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0])
-        self.assertEqual(self.knn["models"], ["lgbm_k15", "xgb_k15", "cat_k15"])
+        self.assertEqual(self.knn["models"], ["lgbm", "xgb", "cat"])
         self.assertEqual(self.knn["byDay"]["2025-06-30"]["status"], "no_candidates")
 
     def test_context_and_no_identifiers(self):

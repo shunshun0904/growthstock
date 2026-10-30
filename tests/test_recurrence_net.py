@@ -16,7 +16,7 @@
   高値だけで決まる
 - 結果は live_track.forward・build_dataset の目的変数（1.2σ・1.5σ）・78週高値の更新日と同じ
 - 作れない候補は理由を残して飛ばす（日足が無い・ノードが少ない）
-- 作るのは購入条件（1.5σ の3本の百分位がすべて95以上）を満たした銘柄だけ。百分位が1本でも欠けた銘柄は通さない
+- 作るのは購入条件（今日の戦略の規則の3本の百分位がすべて95以上。2026-10-30 から 1.2σ の3本）を満たした銘柄だけ。百分位が1本でも欠けた銘柄は通さない
   （news_links.rule_codes・画面の strategy.js と同じ）。並びは最小の降順・同点はスコアの降順。日の項目に高値更新の件数（nBreak）
 - 前の archive にある日は引き継ぐ（候補の組が変わった日は作り直す）。archive を書いて読み戻せる（突き合わせ用の丸めない値は書かない）。
   出力フォルダの自分のファイル以外は消さない
@@ -53,7 +53,7 @@ FIX_DIR = os.path.join(ROOT, "tests", "fixtures", "recurrence")
 FIX_EXPECTED = os.path.join(ROOT, "tests", "fixtures", "recurrence-expected.json")
 PRED_FIXTURE = os.path.join(ROOT, "tests", "fixtures", "synthetic-predictions.json")
 FIX_DAY = "2026-09-11"     # tests/fixtures/synthetic-predictions.json と同じ日・同じ銘柄コード（日足は作りもの）
-#: 合成の予測ファイルの5件には購入条件を満たす銘柄が無いので、3件の 1.5σ の3本（RULE_MODELS の順）の百分位を上書きする
+#: 合成の予測ファイルの5件には購入条件を満たす銘柄が無いので、3件の規則の3本（RULE_MODELS の順）の百分位を上書きする
 #: （tests/smoke.mjs の PASS と同じ値）。9082 は日足を作らない（購入条件は満たすが「日足が無い」で作れない例）
 FIX_PASS = {"9324": [98.1, 97.1, 97.4], "9434": [97.1, 96.5, 95.2], "9082": [96.0, 100.0, 95.0]}
 FIX_CANDS = [{"code": "9324", "jqCode": "93240", "name": "安田倉庫", "date": FIX_DAY, "n": 520, "seed": 11},
@@ -373,7 +373,7 @@ class TestSummary(unittest.TestCase):
 
 
 class TestRule(unittest.TestCase):
-    """対象は購入条件（1.5σ の3本の百分位がすべて95以上）を満たした銘柄だけ（運用者の指定 2026-10-19）。"""
+    """対象は購入条件（規則の3本の百分位がすべて95以上）を満たした銘柄だけ（運用者の指定 2026-10-19）。"""
 
     def test_rule_min(self):
         c = FIX_CANDS[0]
@@ -579,8 +579,8 @@ class TestBuild(unittest.TestCase):
         rule_old = os.path.join(self.tmp, "rule_old.tar.gz")
         RN.write({"v": RN.VERSION, "days": [], "method": {"rule": RN.rule_block()}}, {}, None, cur)
         RN.write({"v": RN.VERSION - 1, "days": [], "method": {"rule": RN.rule_block()}}, {}, None, old)
-        # 2026-10-23〜10-29 の購入条件（1.2σ の3本 95以上）で作った archive。2026-10-29 に規則が 1.5σ の3本に戻ったので作り直す
-        RN.write({"v": RN.VERSION, "days": [], "method": {"rule": {"models": ["lgbm", "xgb", "cat"], "agreePct": 95.0}}},
+        # 2026-10-29〜10-30 の購入条件（1.5σ の3本 95以上）で作った archive。2026-10-30 に規則が 1.2σ の3本に戻ったので作り直す
+        RN.write({"v": RN.VERSION, "days": [], "method": {"rule": {"models": ["lgbm_k15", "xgb_k15", "cat_k15"], "agreePct": 95.0}}},
                  {}, None, rule_old)
 
         def run(path):
@@ -597,7 +597,7 @@ class TestBuild(unittest.TestCase):
         self.assertEqual(out, "ok=false\n")
         self.assertIn("購入条件が今と違う", err)
         self.assertEqual(run(os.path.join(self.tmp, "none.tar.gz"))[0], "ok=false\n")
-        self.assertEqual(RN.rule_block(), {"models": ["lgbm_k15", "xgb_k15", "cat_k15"], "agreePct": 95.0})
+        self.assertEqual(RN.rule_block(), {"models": ["lgbm", "xgb", "cat"], "agreePct": 95.0})
 
     def test_dataset_check(self):
         _, files = self.build(fixture_bars())

@@ -4,8 +4,8 @@
 
 実運用と OOF の見込みは同じ関数で数えるので、ここで固定する約束が
 そのまま比べ方の約束になる。
-  - 規則の値は画面（src/lib/strategy.js の STRATEGY・RULE_MODELS）と同じ。2026-10-29 から 1.5σ の3本がすべて95以上
-    （2026-10-12〜10-23 も同じ。2026-10-23〜10-29 は 1.2σ の3本がすべて95以上。PREV_RULES に参考として並べる）
+  - 規則の値は画面（src/lib/strategy.js の STRATEGY・RULE_MODELS）と同じ。2026-10-30 から 1.2σ の3本がすべて95以上
+    （2026-10-23〜10-29 も同じ。2026-10-12〜10-23 と 2026-10-29〜10-30 は 1.5σ の3本がすべて95以上。PREV_RULES に参考として並べる）
   - 3モデルのどれかの百分位が欠けた候補は基準を満たさない（画面と同じ）
   - 買うのは発火8件以上の日の、3モデルの最小の百分位が高い順に上位2件
   - 以前の規則（1.2σ の3本がすべて90以上）と月2件の先着は参考として数える
@@ -74,15 +74,15 @@ class RulesMatchScreen(unittest.TestCase):
         self.assertEqual(tuple(re.findall(r"'(\w+)'", boost)), L.BOOST)
         rule = re.search(r"export const RULE_MODELS = \[([^\]]*)\]", js).group(1)
         self.assertEqual(tuple(re.findall(r"'(\w+)'", rule)), L.RULE_MODELS)
-        self.assertEqual(L.RULE_MODELS, ("lgbm_k15", "xgb_k15", "cat_k15"))
-        self.assertEqual(L.RULE_MODELS, L.K15)
+        self.assertEqual(L.RULE_MODELS, ("lgbm", "xgb", "cat"))
+        self.assertEqual(L.RULE_MODELS, L.BOOST)
         self.assertEqual(L.AGREE_PCT, 95.0)
         rule_ja = re.search(r"export const RULE_JA = '([^']*)'", js).group(1)
         self.assertEqual(rule_ja, L.RULE_JA)
-        # 以前の規則（参考）: 1.2σ の3本 95以上（2026-10-23〜10-29）と、1.2σ の3本 90以上・発火8件以上の日（2026-10-12 まで）。
-        # 1.5σ の3本 95以上の 2026-10-12〜10-23 は今の規則と同じなので、今の規則の記録に入る
+        # 以前の規則（参考）: 1.5σ の3本 95以上（2026-10-12〜10-23・2026-10-29〜10-30）と、1.2σ の3本 90以上・発火8件以上の日
+        # （2026-10-12 まで）。1.2σ の3本 95以上の 2026-10-23〜10-29 は今の規則と同じなので、今の規則の記録に入る
         self.assertEqual([(m, a, b) for _, m, a, b, _ in L.PREV_RULES],
-                         [(L.BOOST, 95.0, 1), (L.BOOST, 90.0, 8)])
+                         [(("lgbm_k15", "xgb_k15", "cat_k15"), 95.0, 1), (L.BOOST, 90.0, 8)])
         self.assertEqual(L.K15, ("lgbm_k15", "xgb_k15", "cat_k15"))
 
     def test_pct_matches_production_formula(self):
@@ -138,18 +138,18 @@ class Decide(unittest.TestCase):
         self.assertEqual(picks["code"].tolist(), ["1000"])
 
     def test_default_models_are_the_rule_models(self):
-        # 既定の合議は RULE_MODELS（2026-10-29 から 1.5σ の3本）。判定できない日の文言は「3モデル」（画面と同じ）
+        # 既定の合議は RULE_MODELS（2026-10-30 から 1.2σ の3本）。判定できない日の文言は「3モデル」（画面と同じ）
         rows = cands("2026-09-17", [(99, NAN, 99)] + [(50, 50, 50)] * 8)
         rows["p_logit"] = 10.0                                 # 余計な列があっても見ない
         _, days, picks = L.decide(rows)
         self.assertTrue(picks.empty)
         self.assertIn("3モデルの百分位が無い", days.iloc[0]["verdict"])
-        # 1.2σ の3本（2026-10-23〜10-29 の規則）の列だけでは、今の規則では誰も通らない（列が無ければ欠けと同じ。判定できない日）
-        old = cands("2026-09-17", [(99, 99, 99)] * 8, models=L.BOOST)
+        # 1.5σ の3本（2026-10-29〜10-30 の規則）の列だけでは、今の規則では誰も通らない（列が無ければ欠けと同じ。判定できない日）
+        old = cands("2026-09-17", [(99, 99, 99)] * 8, models=L.K15)
         _, od, op = L.decide(old)
         self.assertTrue(op.empty)
         self.assertIn("判定できない", od.iloc[0]["verdict"])
-        _, _, kp = L.decide(old, agree=95.0, models=L.BOOST)
+        _, _, kp = L.decide(old, agree=95.0, models=L.K15)
         self.assertEqual(len(kp), 2)
         # 2026-10-12 までの規則（1.2σ の3本が90以上）なら 92 でも通る。今の線 95 では通らない
         prev = cands("2026-09-17", [(92, 92, 92)] * 8, models=L.BOOST)
@@ -323,13 +323,13 @@ class DecisionVersion(unittest.TestCase):
         d16 = r[r["Date"] == pd.Timestamp("2026-09-16")].iloc[0]
         self.assertEqual(d16["sha"], "bbbbbbb")
         self.assertEqual(d16["p_lgbm"], 95)
-        self.assertEqual(d16["p_lgbm_k15"], 97)                # 今の規則の 1.5σ の3本も読む
+        self.assertEqual(d16["p_lgbm_k15"], 97)                # 以前の規則（参考）の 1.5σ の3本も読む
         self.assertFalse(bool(d16["late"]))
-        # 9/15 の版には 1.5σ の百分位が無い → 欠け（NaN）。今の規則（1.5σ の3本）の記録は 9/16 から、1.2σ の参考は 9/15 から
+        # 9/15 の版には 1.5σ の百分位が無い → 欠け（NaN）。今の規則（1.2σ の3本）の記録は 9/15 から、1.5σ の参考は 9/16 から
         self.assertTrue(np.isnan(r[r["Date"] == pd.Timestamp("2026-09-15")].iloc[0]["p_cat_k15"]))
-        self.assertEqual(L.rule_start(r), pd.Timestamp("2026-09-16"))
-        self.assertEqual(L.rule_start(r, L.BOOST), pd.Timestamp("2026-09-15"))
-        self.assertIsNone(L.rule_start(r[r["Date"] == pd.Timestamp("2026-09-15")]))
+        self.assertEqual(L.rule_start(r), pd.Timestamp("2026-09-15"))
+        self.assertEqual(L.rule_start(r, L.K15), pd.Timestamp("2026-09-16"))
+        self.assertIsNone(L.rule_start(r[r["Date"] == pd.Timestamp("2026-09-15")], L.K15))
         # 9/15 は寄り（9/16 0:00 UTC）の後に初めて出た → 遅れ。最初の版を使う
         d15 = r[r["Date"] == pd.Timestamp("2026-09-15")].iloc[0]
         self.assertTrue(bool(d15["late"]))
