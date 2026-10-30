@@ -279,7 +279,8 @@ Spearman 相関 / 上位10%の Jaccard 重複。16,431件。
 
 - 置き場は `research/model/models/ltr/`（Release の `ltr_model.joblib` / `ltr_oof.parquet`、git の `meta.json`）。
   `models.LINEUP` / `available()` には含めない（`predict_daily.attach_ltr` が別に読む）
-- 木の形は `research/ltr_params.json`（実験114 の探索の結果）。2026-10-29 から日曜の再学習で毎週探索し直す（§78-10）
+- 木の形は `research/ltr_params.json`（実験114 の探索の結果）。2026-10-29 から日曜の再学習で毎週探索し直す（§78-10。2026-11-01 から
+  日曜 14:10 の回。§85）
 
 ## 直近5営業日の組のランキング学習を脇に置く（2026-10-30。並べて見るだけ）
 
@@ -290,4 +291,4 @@ Spearman 相関 / 上位10%の Jaccard 重複。16,431件。
 
 - 置き場は `research/model/models/ltr5/`（Release の `ltr5_model.joblib` / `ltr5_oof.parquet`、git の `meta.json`）。
   `models.LINEUP` / `available()` には含めない（`predict_daily.attach_ltr5` が別に読む）
-- 木の形は `research/ltr5_params.json`（最初は実験117 の探索の結果。日曜の再学習で毎週探索し直す）
+- 木の形は `research/ltr5_params.json`（最初は実験117 の探索の結果。日曜 14:10 の回で毎週探索し直す。§85）

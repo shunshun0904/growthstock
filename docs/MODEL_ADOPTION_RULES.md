@@ -6359,3 +6359,28 @@ LightGBM。360列）より弱い（ROC-AUC 組 0.565・5変数の LightGBM 0.581
 - コード: `research/export_sheets.py` と `research/holdings_sheet.py` の `--book v1 / v2`（切り替え日 `export_sheets.V2_FROM` =
   2026-11-02）。Predict Breakouts と Update Holdings Sheet が両方回す。テストは `tests/test_sheets.py`（TestV2）と
   `tests/test_holdings_sheet.py`（Books・BooksEndToEnd）
+
+## 85. 運用者の選択（2026-10-30）「日曜 14:10 に分ける」: ランキング学習2本を日曜 09:10 の回から分ける（2026-11-01 から）
+
+**結論を先に**: 2026-11-01 から、日曜 09:10 の Retrain Weekly は 1.2σ の木3本（基準モデル・XGBoost・CatBoost）だけ
+（`tune=yes` `ranking=no`）にし、ランキング学習2本（日次 `ltr`・直近5営業日の組 `ltr5`）は日曜 14:10 の別の回
+（`tune=yes` `only=ltr,ltr5`。Routine `trig_01EHzyLgapUfmgWTxr2v1Ly1`）で探索・学習する。土曜 09:10 の 1.5σ の3本は変えない。
+週次で作るモデルは今までどおり8本（土曜 3本・日曜 09:10 3本・日曜 14:10 2本）。
+
+- 経緯: 確認「日曜 09:10 1.2σ の LightGBM（基準モデル）・XGBoost・CatBoost この3モデルですが、同時刻にランキング学習も
+  回すのですか？時間をずらせるならずらしたほうが良いと思います。」→ 答え: 同時には動かない（1つの run の中で、学習データの
+  作成 → 基準モデル → XGBoost・CatBoost → ランキング学習（日次）→ 直近5営業日の組の順に1本ずつ。計算の取り合いは無い）。
+  ただ、基準モデルの探索（Tune）と学習（Train production model）は continue-on-error ではないので、どちらかが落ちると後ろの
+  ランキング学習2本も動かず、その週は先週のモデルのままになる（ランキング学習の失敗は 1.2σ の木3本に響かない）
+- AskUserQuestion「ランキング学習2本を別の時刻の回に分けますか？（分けると学習データをもう1回作るので Actions が 10〜15分
+  増え、定時の予約が1つ増えます）」:「土曜 13:10 に分ける」（勧めた）/「日曜 14:10 に分ける」/「今のまま」→
+  「日曜 14:10 に分ける」
+- 作り: `retrain-weekly.yml` に入力 `ranking`（yes / no。既定 yes）を足した。no なら ltr・ltr5 の探索・学習を回さない
+  （no なのに only に ltr・ltr5 を書くと止まる）。入力なしの手動の起動は今までどおり（1.2σ の木3本とランキング学習）。
+  ランキング学習は 1.2σ の木の出力を使わない（同じ学習データ・同じ窓の決め方で別に学ぶ）ので、別の回にしても中身は同じ
+- 時刻: 09:10 の回は 1.5〜2.5時間の見込み（10/24 の 1.2σ の回はロジスティック回帰込みで 2時間27分。ロジスティック回帰の探索は
+  29〜74分）。14:10 の回は 1〜1.5時間の見込み（10/30 の試しの回は直近5営業日の組だけで 55分。日次の探索は 14〜20分）。14:10 に
+  09:10 の回がまだ動いていれば、終わるのを待ってから起動する（同じ concurrency の組なので、重ねて起動しない）
+- Routine: 日曜 09:10（`trig_01MQSVtn55Vmy7HmKjs9mJ6p`）は `ranking=no` を渡し、ランキング学習の報告は 14:10 の回に移した。
+  朝の確認（月曜）は日曜の2つの run を見る
+- テスト: `tests/test_ltr5.py`（TestWorkflow の test_scope・test_ranking_input）

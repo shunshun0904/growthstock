@@ -13,7 +13,8 @@
 - 毎日の予測（predict_daily.attach_ltr5）: 予測の日の候補だけに組の中の順位・組の行の数を付け、組を作り直して採点した順位と
   同じ。3条件・4条件の印（日次の1位・5日の1位・1.5σ / 1.2σ の木3本）。モデルが無い・候補が5営業日に足りないときは何も足さない
 - 日曜の再学習（retrain-weekly.yml）: 「Tune 5-day ranking model」→「Train 5-day ranking model」がランキング学習の後に入り、
-  ジョブの上限に近ければ探索を飛ばし、only に ltr5 と書けばこれだけ、木の形をコミットする
+  ジョブの上限に近ければ探索を飛ばし、only に ltr5 と書けばこれだけ、木の形をコミットする。ranking=no（日曜 09:10 の回）なら
+  ランキング学習2本とも回さない（日曜 14:10 の回が only=ltr,ltr5 で作る）
 
   python3 tests/test_ltr5.py
 """
@@ -525,20 +526,41 @@ class TestWorkflow(unittest.TestCase):
         import subprocess
 
         run = self.step("Resolve scope")["run"]
-        cases = {"": ("", "yes", "yes"), "ltr5": ("", "no", "yes"), "ltr": ("", "yes", "no"),
-                 "lgbm_k15,xgb_k15,cat_k15": ("lgbm_k15,xgb_k15,cat_k15", "no", "no"),
-                 "ltr,ltr5": ("", "yes", "yes"), "xgb,ltr5,cat": ("xgb,cat", "no", "yes")}
+        # (only, ranking) -> (models, ltr, ltr5)。ranking=no は日曜 09:10 の回（1.2σ の木3本だけ）、only=ltr,ltr5 は日曜 14:10 の回
+        # （運用者の選択 2026-10-30「日曜 14:10 に分ける」。§85）。None は入力なし（既定 yes と同じ）
+        cases = {("", None): ("", "yes", "yes"), ("", "yes"): ("", "yes", "yes"), ("", "no"): ("", "no", "no"),
+                 ("ltr5", None): ("", "no", "yes"), ("ltr", "yes"): ("", "yes", "no"),
+                 ("lgbm_k15,xgb_k15,cat_k15", None): ("lgbm_k15,xgb_k15,cat_k15", "no", "no"),
+                 ("lgbm_k15,xgb_k15,cat_k15", "no"): ("lgbm_k15,xgb_k15,cat_k15", "no", "no"),
+                 ("ltr,ltr5", "yes"): ("", "yes", "yes"), ("xgb,ltr5,cat", None): ("xgb,cat", "no", "yes")}
         with tempfile.TemporaryDirectory() as tmp:
-            for only, (models, ltr_, ltr5_) in cases.items():
+            for (only, ranking), (models, ltr_, ltr5_) in cases.items():
                 outp = os.path.join(tmp, "out.txt")
                 open(outp, "w").close()
                 env = dict(os.environ, ONLY=only, GITHUB_OUTPUT=outp)
+                env.pop("RANKING", None)
+                if ranking is not None:
+                    env["RANKING"] = ranking
                 r = subprocess.run(["bash", "-eo", "pipefail", "-c", run], cwd=tmp, env=env, capture_output=True,
                                    text=True)
                 self.assertEqual(r.returncode, 0, r.stderr)
                 with open(outp, encoding="utf-8") as fh:
                     got = dict(line.split("=", 1) for line in fh.read().splitlines() if "=" in line)
-                self.assertEqual((got["models"], got["ltr"], got["ltr5"]), (models, ltr_, ltr5_), only)
+                self.assertEqual((got["models"], got["ltr"], got["ltr5"]), (models, ltr_, ltr5_), (only, ranking))
+                self.assertEqual("外す" in r.stdout, ranking == "no", (only, ranking))
+            # ranking=no なのにランキング学習を名指ししたら止まる（どちらを信じるか分からないので）
+            for only in ("ltr", "ltr5", "ltr,ltr5", "xgb,ltr5"):
+                env = dict(os.environ, ONLY=only, RANKING="no", GITHUB_OUTPUT=os.path.join(tmp, "out.txt"))
+                r = subprocess.run(["bash", "-eo", "pipefail", "-c", run], cwd=tmp, env=env, capture_output=True,
+                                   text=True)
+                self.assertEqual(r.returncode, 1, only)
+                self.assertIn("ranking=no なのに", r.stdout)
+
+    def test_ranking_input(self):
+        # 日曜 09:10 の回は ranking=no を渡す。既定は yes（入力なしの手動の起動は今までどおり 1.2σ の木3本とランキング学習）
+        inp = self.wf[True]["workflow_dispatch"]["inputs"]["ranking"]
+        self.assertEqual((inp["type"], inp["options"], inp["default"]), ("choice", ["yes", "no"], "yes"))
+        self.assertEqual(self.step("Resolve scope")["env"]["RANKING"], "${{ inputs.ranking }}")
 
     def test_commit_includes_params(self):
         run = self.step("Commit model metadata")["run"]

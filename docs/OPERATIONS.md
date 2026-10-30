@@ -88,10 +88,13 @@
 日曜 09:10 JST  Retrain Weekly       J-Quants から差分取得（日曜は取り込みが
                                      走らないので自分で取りに行く）
                                      → 鮮度チェック（2営業日より古ければ停止）
-                                     → Release へ書き戻し → 学習
+                                     → Release へ書き戻し → 学習（1.2σ の木3本。ranking=no）
                                      → モデルを Release へ、meta.json を git へ
                                      → 終わったら New Training Samples（workflow_run）が
                                        学習に加わったサンプルのチャートを作り直す
+
+日曜 14:10 JST  Retrain Weekly       ランキング学習2本（日次・直近5営業日の組。only=ltr,ltr5）。
+                                     手順は 09:10 の回と同じ（2026-11-01 から分けた。§85）
 
 土曜 10:40 JST  Check Data Store     保存データ（data-raw）を API の応答と突き合わせる
                                      （種別ごとに数日ぶんを叩き直す）
@@ -135,11 +138,12 @@
 | 日証金（平日） | 平日 13:10 | Fetch JSF | `mode=both` | `trig_0123KKDZgbRthzbicWPBnr1k` |
 | 日証金（土日） | 土日 10:20 | Fetch JSF | `mode=history` | `trig_01VF9LEPhar2yRaZSzpfZmsX` |
 | EDINET DB | 毎日 10:10 | Fetch EDINET DB | 既定（85社・対応表は auto） | `trig_018mSPXUBa4PBFsHpK5BzNpK` |
-| 週次学習 | 日曜 09:10 | Retrain Weekly | `tune=yes`（1.2σ の木3本とランキング学習（日次・直近5営業日の組。後者は 2026-11-01 の回から）。ロジスティック回帰は 2026-11-01 の回から外した） | `trig_01MQSVtn55Vmy7HmKjs9mJ6p` |
+| 週次学習 | 日曜 09:10 | Retrain Weekly | `tune=yes` `ranking=no`（1.2σ の木3本。ロジスティック回帰は 2026-11-01 の回から外した。ランキング学習は 2026-11-01 から下の 14:10 の回） | `trig_01MQSVtn55Vmy7HmKjs9mJ6p` |
+| ランキング学習の週次 | 日曜 14:10 | Retrain Weekly | `tune=yes` `only=ltr,ltr5`（ランキング学習（日次）と直近5営業日の組のランキング学習。2026-10-30 の運用者の選択「日曜 14:10 に分ける」で 09:10 の回から分けた。§85） | `trig_01EHzyLgapUfmgWTxr2v1Ly1` |
 | ラベル違い 1.5σ | 土曜 09:10 | Retrain Weekly | `tune=yes` `only=lgbm_k15,xgb_k15,cat_k15`（2026-10-11 夜に追加。2026-10-31 の回から `logit_k15` を外した） | `trig_0127nfERdx9RyirNCkFp4BXn` |
 | ~~ラベル違い 1.8σ~~ | ~~土曜 14:10~~ | （2026-10-24 に**無効**。運用者の依頼で 1.8σ の4本を外した） | `only=lgbm_k18,xgb_k18,cat_k18,logit_k18` は名指ししても「知らないモデル」で止まる | `trig_01JHXTaxZLmDgfUBF3CYbTqe`（消さずに無効のまま） |
 | 保存データの検査 | 土曜 10:40 | Check Data Store | 既定（5日） | `trig_01G4KY6RJMAsFgY7t57khocW` |
-| 朝の確認 | 月〜土 07:40 | （確かめるだけ） | 前日の run の結論を見る。取り込みの run が無ければ Update Data Store を起動し直す。取り込みは済んで予測だけ無ければ Predict Breakouts を起動する。月曜は日曜の学習と土曜の検査を見る | `trig_01Pscq9oSei7otJrCjgfxgEc` |
+| 朝の確認 | 月〜土 07:40 | （確かめるだけ） | 前日の run の結論を見る。取り込みの run が無ければ Update Data Store を起動し直す。取り込みは済んで予測だけ無ければ Predict Breakouts を起動する。月曜は日曜の学習（09:10 と 14:10 の2つ）と土曜の検査を見る | `trig_01Pscq9oSei7otJrCjgfxgEc` |
 | 米国株の朝のまとめ | 平日 07:31 | （起動しない。チャットに書くだけ） | 前夜の米国の引け（下の「米国株の朝のまとめ」） | `trig_01QgG7DBXSiFwitT7pPpAWaA` |
 
 Routine はすべて、この運用を続けている Claude のセッション（`session_01HavkjgQwRz5mTV8cGj4KJp`、
@@ -187,7 +191,10 @@ Routine が起動した run は、Actions の一覧では `workflow_dispatch` �
 データが予測に間に合わない種別があったので、10/8 から 18:40 にした（下の「取り込みを 18:40 に移した」）。
 見込みは 18:50 ごろの公開（取り込み 4〜5分・予測 5〜6分は 10/5〜10/7 の実測）。
 
-学習は探索込みで3〜5時間かかるので、日曜 09:10 に始めて昼過ぎに終わる見込み。
+学習は探索込みで、日曜 09:10 の回（1.2σ の木3本）が 1.5〜2.5時間、14:10 の回（ランキング学習2本）が 1〜1.5時間の見込み
+（10/24 の 1.2σ の回はロジスティック回帰込みで 2時間27分、10/30 の試しの回は直近5営業日の組だけで 55分）。どちらも夕方までに
+終わる。2026-10-31 までは1つの回で順番に回していたが、基準モデルの探索・学習が落ちるとランキング学習もその週は作り直されない
+ので、2026-11-01 から分けた（運用者の選択 2026-10-30「日曜 14:10 に分ける」。§85）。
 
 Routine で起動した日の実測（起動から公開まで。時刻は JST）:
 
@@ -883,7 +890,8 @@ XGBoost 25分 / CatBoost 22分。`logit` は153列で70分だったので、そ�
   日付内5分位を学ぶ。実験114 の L と同じ作り）。木の形は `research/ltr_params.json`（最初は実験114 の探索の結果を丸めずに写したもの。
   2026-10-29 から日曜の再学習で毎週探索し直す（下の「週次」）。列の指紋が違えば学習しない）。種 42
 - **週次**: Retrain Weekly の「Train ranking model」（`research/train_ltr.py`）。追加モデルの学習の後に、only が空のときと ltr を
-  含むときに回る（`only=ltr` でランキング学習だけ作れる。基準モデルには触らない）。その直前の「Tune ranking model」
+  含むときに回る（`only=ltr` でランキング学習だけ作れる。基準モデルには触らない。ranking=no なら回らない）。2026-11-01 からは
+  日曜 14:10 の回（`only=ltr,ltr5`）で、直近5営業日の組のランキング学習と一緒に作る（09:10 の 1.2σ の回は ranking=no。§85）。その直前の「Tune ranking model」
   （`research/tune_ltr.py`。運用者の指示 2026-10-29「日曜の再学習に毎週の探索を入れてください」。§78-10）が、tune=yes の回に
   木の形を探索し直して `research/ltr_params.json` を書き換える（実験114 の L と同じ探索。1回 14〜20分・上限45分・
   continue-on-error。最後まで終わったときだけ書くので、落ちたら前の木の形のまま。ジョブの上限までの残りが90分未満なら探索しない。
@@ -921,7 +929,8 @@ XGBoost 25分 / CatBoost 22分。`logit` は153列で70分だったので、そ�
   同じ結果になることを確かめる）。木の形は `research/ltr5_params.json`（最初は実験117 の探索の結果を全桁で）
 - **週次**: Retrain Weekly の「Tune 5-day ranking model」（`research/tune_ltr5.py`。tune=yes の回。実測 31.6分（実験117）・37.2分（2026-10-30 の試しの週次 run 41078055848）・上限60分・
   ジョブの残りが105分を切っていれば探索しない）→「Train 5-day ranking model」（`research/train_ltr5.py`）。ランキング学習（日次）の
-  後に、only が空のときと ltr5 を含むときに回る（`only=ltr5` でこれだけ）。学習のときに値動き4列を日足から直接計算し直し、
+  後に、only が空のときと ltr5 を含むときに回る（`only=ltr5` でこれだけ。ranking=no なら回らない。2026-11-01 からは日曜 14:10 の
+  回（`only=ltr,ltr5`）。§85）。学習のときに値動き4列を日足から直接計算し直し、
   判断日に入った候補の R20 が日次と同じかを確かめ、合わなければ止める（前のモデルのまま）。置き場は `research/model/models/ltr5/`
   （Release には `ltr5_model.joblib` / `ltr5_oof.parquet`、`meta.json` と `ltr5_params.json` は git）。失敗しても日次予測は動く
 - **毎日**: `predict_daily.attach_ltr5` が予測の日の組（その日までの直近5営業日の候補。同じ銘柄は最後の候補の日の行）を採点し、

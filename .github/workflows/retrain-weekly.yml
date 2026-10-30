@@ -16,10 +16,15 @@ name: Retrain Weekly
 on:
   # 予約の起動（cron）は 2026-10-05 にやめた。Claude の Routine が日曜 09:10 JST に
   # workflow_dispatch（tune=yes）で起動する（docs/OPERATIONS.md「起動のしかた」）。
+  # 2026-11-01 から、日曜 09:10 の回は ranking=no（1.2σ の木3本だけ）で、ランキング学習2本（日次・直近5営業日の組）は
+  # 日曜 14:10 JST の別の回（tune=yes・only=ltr,ltr5）で作る（運用者の選択 2026-10-30「日曜 14:10 に分ける」。
+  # docs/MODEL_ADOPTION_RULES.md §85）。同じ回で順番に回すと、基準モデルの探索・学習が落ちたときにランキング学習も
+  # その週は作り直されなかった。土曜 09:10 の回は 1.5σ の木3本（only=lgbm_k15,xgb_k15,cat_k15）
   #
   # GitHub の cron は実測で +4時間01分〜+7時間19分遅れ（docs/OPERATIONS.md）、
   # 日曜 09:05 JST の予約が実際に動くのは 13〜14時台だった。時刻を指定して起動すれば
-  # 09:10 に始まり、所要 3〜5時間（探索込み。探索なしなら20分ほど）で昼過ぎに終わる。
+  # 09:10 に始まり、所要 3〜5時間（探索込み。探索なしなら20分ほど）で昼過ぎに終わる。2026-11-01 からは 09:10 の回（1.2σ の
+  # 木3本）が 1.5〜2.5時間、14:10 の回（ランキング学習2本）が 1〜1.5時間の見込み。
   #
   # 朝に置いても学習の前提は変わらない。使うのは金曜引けまでのデータで、
   # 土日に増えるものは無い（鮮度チェックは営業日で数えるので、朝でも夜でも
@@ -33,9 +38,15 @@ on:
         options: ['yes', 'no']
         default: 'yes'
       only:
-        description: '画面に並べる追加モデルのうち、これだけ探索・学習する（例: lgbm_k15,xgb_k15,cat_k15。空なら 1.2σ の木3本とランキング学習。1.5σ の3本は指定したときだけ。ltr はランキング学習だけ、ltr5 は直近5営業日の組のランキング学習だけ（tune=yes なら木の形も探索し直す）。1.8σ の4本は 2026-10-24 に、ロジスティック回帰（logit・logit_k15）は 2026-11-02 の予測から外した（名指ししても止まる）。指定すると基準モデル（1.2σ の LightGBM）は触らない）'
+        description: '画面に並べる追加モデルのうち、これだけ探索・学習する（例: lgbm_k15,xgb_k15,cat_k15。空なら 1.2σ の木3本とランキング学習（ranking=no なら 1.2σ の木3本だけ）。1.5σ の3本は指定したときだけ。ltr はランキング学習だけ、ltr5 は直近5営業日の組のランキング学習だけ（tune=yes なら木の形も探索し直す）。1.8σ の4本は 2026-10-24 に、ロジスティック回帰（logit・logit_k15）は 2026-11-02 の予測から外した（名指ししても止まる）。指定すると基準モデル（1.2σ の LightGBM）は触らない）'
         required: false
         default: ''
+      ranking:
+        description: 'ランキング学習（日次 ltr・直近5営業日の組 ltr5）も回すか。日曜 09:10 の回は no（ランキング学習は日曜 14:10 の回が only=ltr,ltr5 で作る。2026-10-30 の運用者の選択「日曜 14:10 に分ける」）。no のときに only へ ltr・ltr5 を書くと止まる'
+        required: false
+        type: choice
+        options: ['yes', 'no']
+        default: 'yes'
 
 permissions:
   contents: write
@@ -72,7 +83,8 @@ jobs:
     # 2026-10-29 から、ランキング学習の木の形の探索（Tune ranking model。50試行 × 5分割）を足した。実験114c の実測で
     # 1回 14〜20分（上限 45分）。10/24 の全モデルの回（2時間27分）に足して約2時間50分の見込み
     # 2026-11-01 の回から、直近5営業日の組のランキング学習の探索と学習（Tune / Train 5-day ranking model）を足した
-    # （実験117 の実測で探索 31.6分。上限 60分）。同じ回からロジスティック回帰（探索 29〜74分）を外したので、合計は前と同じくらい
+    # （実験117 の実測で探索 31.6分。2026-10-30 の試しの回で 37.2分。上限 60分）。同じ回からロジスティック回帰（探索 29〜74分）を
+    # 外し、ランキング学習2本は日曜 14:10 の別の回（only=ltr,ltr5。試しの回の実測で ltr5 だけなら 55分）に分けた
     #
     # 実際の打ち切りはステップ単位で掛けてあるので、ここは最後の砦
     timeout-minutes: 330
@@ -163,6 +175,7 @@ jobs:
         id: scope
         env:
           ONLY: ${{ inputs.only }}
+          RANKING: ${{ inputs.ranking }}
         run: |
           # 入力をそのままシェルに展開しない（run-experiment.yml と同じ考え方）。名前の形だけ通す
           if [ -n "$ONLY" ] && ! [[ "$ONLY" =~ ^[a-z0-9_]+(,[a-z0-9_]+)*$ ]]; then
@@ -171,12 +184,18 @@ jobs:
           echo "only=$ONLY" >> "$GITHUB_OUTPUT"
           # ランキング学習（ltr。research/train_ltr.py）と直近5営業日の組のランキング学習（ltr5。research/train_ltr5.py）は
           # 追加モデルの探索・学習とは別のステップ。only から ltr・ltr5 を除いたものを追加モデルの対象（models）にし、ltr・ltr5 は
-          # only が空かその名前を含むときだけ学習する
+          # only が空かその名前を含むときだけ学習する。ranking=no（日曜 09:10 の回）ならどちらも学習しない（日曜 14:10 の回が作る）
+          if [ "$RANKING" = "no" ] && [[ ",$ONLY," == *",ltr,"* || ",$ONLY," == *",ltr5,"* ]]; then
+            echo "ranking=no なのに only にランキング学習（ltr・ltr5）がある: $ONLY"; exit 1
+          fi
           MODELS=$(echo ",$ONLY," | sed 's/,ltr,/,/g; s/,ltr5,/,/g; s/,ltr,/,/g; s/^,//; s/,$//')
           echo "models=$MODELS" >> "$GITHUB_OUTPUT"
-          if [ -z "$ONLY" ] || [[ ",$ONLY," == *",ltr,"* ]]; then echo "ltr=yes" >> "$GITHUB_OUTPUT"; else echo "ltr=no" >> "$GITHUB_OUTPUT"; fi
-          if [ -z "$ONLY" ] || [[ ",$ONLY," == *",ltr5,"* ]]; then echo "ltr5=yes" >> "$GITHUB_OUTPUT"; else echo "ltr5=no" >> "$GITHUB_OUTPUT"; fi
+          for m in ltr ltr5; do
+            if [ "$RANKING" != "no" ] && { [ -z "$ONLY" ] || [[ ",$ONLY," == *",$m,"* ]]; }; then v=yes; else v=no; fi
+            echo "$m=$v" >> "$GITHUB_OUTPUT"
+          done
           if [ -n "$ONLY" ]; then echo "対象を限定: $ONLY（基準モデルは触らない）"; else echo "全モデル"; fi
+          if [ "$RANKING" = "no" ]; then echo "ランキング学習（ltr・ltr5）は外す（日曜 14:10 の回で作る）"; fi
 
       - name: Tune
         if: inputs.tune == 'yes' && steps.scope.outputs.only == ''
