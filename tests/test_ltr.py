@@ -29,8 +29,37 @@ sys.path.insert(0, os.path.join(ROOT, "research", "exp"))
 import features as F  # noqa: E402
 import ltr  # noqa: E402
 import models as M  # noqa: E402
+import tuning  # noqa: E402
 import e52_return_objective as E52  # noqa: E402
 import e114_ltr_retest as E  # noqa: E402
+
+
+def tuned_params_problems(rec: dict) -> list:
+    """
+    週次の探索（tune_ltr.py・tune_ltr5.py）が書いた木の形として正しいかを見る（合わないところの一覧。空なら正しい）。値そのものは
+    日曜の探索で毎週変わるので見ない。固定の値・探索空間（ltr.search_space）の範囲・探索の記録の形だけ。
+    """
+    p, cv = rec.get("params", {}), rec.get("_cv", {})
+    fixed = {"boosting_type": "gbdt", "n_estimators": tuning.SEARCH_N_ESTIMATORS, "subsample_freq": 1, "n_jobs": -1,
+             "verbose": -1}
+    space = {"learning_rate": tuning.lr_range(tuning.SEARCH_N_ESTIMATORS), "num_leaves": (7, 127),
+             "min_child_samples": (10, 300), "subsample": (0.5, 1.0), "colsample_bytree": (0.3, 1.0),
+             "reg_alpha": (1e-8, 10.0), "reg_lambda": (1e-8, 10.0)}
+    bad = []
+    if sorted(rec) != ["_cutoff", "_cv", "_features_sig", "_n_features", "_source", "params"]:
+        bad.append(f"鍵 {sorted(rec)}")
+    if sorted(p) != sorted([*fixed, *space]):
+        bad.append(f"木の形の鍵 {sorted(p)}")
+    bad += [f"{k} = {p.get(k)!r}" for k, v in fixed.items() if p.get(k) != v]
+    bad += [f"{k} = {p.get(k)!r} が {lo}〜{hi} の外" for k, (lo, hi) in space.items()
+            if not isinstance(p.get(k), (int, float)) or not lo <= p[k] <= hi]
+    bad += [f"{k} = {p.get(k)!r} が整数でない" for k in ("num_leaves", "min_child_samples") if not isinstance(p.get(k), int)]
+    if (cv.get("n_trials"), cv.get("n_splits")) != (ltr.TUNE_TRIALS, ltr.TUNE_SPLITS):
+        bad.append(f"試行・分割 {cv.get('n_trials')} / {cv.get('n_splits')}")
+    if not 0 < cv.get("ndcg", 0) < 1:
+        bad.append(f"NDCG@5 {cv.get('ndcg')!r}")
+    return bad
+
 
 FEATS = ["x0", "x1", "x2", "x3"]
 SMALL = {"boosting_type": "gbdt", "n_estimators": 30, "learning_rate": 0.1, "num_leaves": 7,
@@ -111,16 +140,22 @@ class TestParams(unittest.TestCase):
         self.assertIsNotNone(ltr.params_mismatch({}, cols))
 
     def test_committed_params_file(self):
+        # 日曜の「Tune ranking model」が毎週書き換えるので、値（最初は実験114 の結果）は見ない。学習する列で探索した、
+        # 探索空間の中の木の形であることだけ
         rec = ltr.load_params()
         cols = F.columns(F.DEFAULT_PRESET)
         self.assertIsNone(ltr.params_mismatch(rec, cols))
-        p = rec["params"]
-        self.assertEqual(p["n_estimators"], 200)
-        self.assertEqual((p["num_leaves"], p["min_child_samples"]), (69, 29))
-        # 実験114 のログ（4桁に丸めた値）と同じ
-        for k, v in {"learning_rate": 0.01215, "subsample": 0.5001, "colsample_bytree": 0.6665,
-                     "reg_alpha": 2.165, "reg_lambda": 0.1016}.items():
-            self.assertEqual(float(f"{p[k]:.4g}"), v, k)
+        self.assertEqual(tuned_params_problems(rec), [])
+
+    def test_tuned_params_problems(self):
+        rec = {"_source": "s", "_features_sig": "x", "_n_features": 4, "_cutoff": "2025-09-01",
+               "_cv": {"n_trials": 50, "n_splits": 5, "ndcg": 0.58},
+               "params": {**SMALL, "n_estimators": 200, "n_jobs": -1}}
+        self.assertEqual(tuned_params_problems(rec), [])
+        for bad in ({"num_leaves": 128}, {"learning_rate": 0.5}, {"n_estimators": 300}, {"min_child_samples": 10.5}):
+            self.assertEqual(len(tuned_params_problems({**rec, "params": {**rec["params"], **bad}})), 1, bad)
+        self.assertEqual(len(tuned_params_problems({**rec, "_cv": {**rec["_cv"], "n_trials": 3}})), 1)
+        self.assertEqual(len(tuned_params_problems({**rec, "_trials": []})), 1)
 
 
 class TestR20(unittest.TestCase):

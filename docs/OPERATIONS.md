@@ -919,7 +919,7 @@ XGBoost 25分 / CatBoost 22分。`logit` は153列で70分だったので、そ�
 
 - **モデル**: `research/ltr5.py`（組・値動き4列・段階・探索の分割は実験117 と同じ。`tests/test_ltr5.py` が実験117 の関数と
   同じ結果になることを確かめる）。木の形は `research/ltr5_params.json`（最初は実験117 の探索の結果を全桁で）
-- **週次**: Retrain Weekly の「Tune 5-day ranking model」（`research/tune_ltr5.py`。tune=yes の回。実測 31.6分・上限60分・
+- **週次**: Retrain Weekly の「Tune 5-day ranking model」（`research/tune_ltr5.py`。tune=yes の回。実測 31.6分（実験117）・37.2分（2026-10-30 の試しの週次 run 41078055848）・上限60分・
   ジョブの残りが105分を切っていれば探索しない）→「Train 5-day ranking model」（`research/train_ltr5.py`）。ランキング学習（日次）の
   後に、only が空のときと ltr5 を含むときに回る（`only=ltr5` でこれだけ）。学習のときに値動き4列を日足から直接計算し直し、
   判断日に入った候補の R20 が日次と同じかを確かめ、合わなければ止める（前のモデルのまま）。置き場は `research/model/models/ltr5/`

@@ -8,7 +8,7 @@
 - 組の中の順位が実験117 の w5_rank と同じ（同じスコアは銘柄コードの順）
 - 値動きの列の確かめ・判断日に入った候補の R20 の確かめが合う（ずらすと合わない）
 - 3条件・4条件の印（どれかが決まらなければ決めない）
-- 木の形の初期値が実験117 のログの全桁と同じで、学習する列（360列＋値動き4列）で探索したものとして通る
+- コミットした木の形が、学習する列（360列＋値動き4列）で探索した探索空間の中のものとして通る（値は毎週の探索で変わる）
 - 探索の台本が ltr5_params.json と同じ形で書き、学習の台本がその木の形で model.joblib / meta.json / oof.parquet を作る
 - 毎日の予測（predict_daily.attach_ltr5）: 予測の日の候補だけに組の中の順位・組の行の数を付け、組を作り直して採点した順位と
   同じ。3条件・4条件の印（日次の1位・5日の1位・1.5σ / 1.2σ の木3本）。モデルが無い・候補が5営業日に足りないときは何も足さない
@@ -29,6 +29,7 @@ import pandas as pd
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "research"))
 sys.path.insert(0, os.path.join(ROOT, "research", "exp"))
+sys.path.insert(0, os.path.join(ROOT, "tests"))
 
 import features as F  # noqa: E402
 import ltr  # noqa: E402
@@ -37,6 +38,7 @@ import models as M  # noqa: E402
 import e114_ltr_retest as E  # noqa: E402
 import e115_weekly_ltr as W  # noqa: E402
 import e117_rolling5_ltr as R  # noqa: E402
+import test_ltr as TL  # noqa: E402
 
 FEATS = ["x0", "x1", "x2"]
 SMALL = {"boosting_type": "gbdt", "n_estimators": 20, "learning_rate": 0.1, "num_leaves": 7,
@@ -247,18 +249,14 @@ class TestRanksAndConds(unittest.TestCase):
 
 class TestParamsFile(unittest.TestCase):
     def test_committed_params_file(self):
+        # 日曜の「Tune 5-day ranking model」が毎週書き換えるので、値（最初は実験117 の run 41007055654 のログの全桁。
+        # 2026-10-30 の試しの週次の探索で書き換わった）は見ない。学習する列（360列＋値動き4列）で探索した、探索空間の中の
+        # 木の形であることだけ
         rec = ltr5.load_params()
         cols_w = list(F.columns(F.DEFAULT_PRESET)) + list(ltr5.MOVE_COLS)
         self.assertIsNone(ltr.params_mismatch(rec, cols_w))
         self.assertIsNotNone(ltr.params_mismatch(rec, list(F.columns(F.DEFAULT_PRESET))))   # 値動きの列なしでは通らない
-        # 実験117 の run 41007055654 のログの「W5 の木の形（全桁）」と同じ
-        self.assertEqual(rec["params"], {"boosting_type": "gbdt", "colsample_bytree": 0.8804170156336326,
-                                         "learning_rate": 0.024033018135350435, "min_child_samples": 17,
-                                         "n_estimators": 200, "n_jobs": -1, "num_leaves": 7,
-                                         "reg_alpha": 9.2845440412956, "reg_lambda": 0.13416677080302547,
-                                         "subsample": 0.7155999229063561, "subsample_freq": 1, "verbose": -1})
-        self.assertEqual(rec["_cutoff"], "2025-09-01")
-        self.assertEqual(rec["_cv"]["ndcg"], 0.5896)
+        self.assertEqual(TL.tuned_params_problems(rec), [])
 
     def test_settings_same_as_experiment(self):
         self.assertEqual(ltr5.K, R.K)
