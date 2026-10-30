@@ -567,6 +567,64 @@ class TestRuleBuys(unittest.TestCase):
         self.assertAlmostEqual(s["ret"], (0.02 - 0.05 + 0.06) / 3)
 
 
+def triple_pools():
+    """3つとも満たす候補（日次の1位・組の1位・R15）を手で数える組の行。"""
+    days = pd.bdate_range("2020-12-28", "2021-03-31")
+    rows = [  # 判断日, 銘柄, 候補の日, r15, D, W5, RET
+        ("2021-01-04", "1001", "2021-01-04", 1.0, 0.90, 0.80, 0.05),    # 日次1位・組2位
+        ("2021-01-04", "1002", "2021-01-04", 1.0, 0.50, 0.95, -0.02),   # 日次2位・組1位
+        ("2021-01-04", "1003", "2020-12-29", 1.0, 0.99, 0.70, 0.01),    # 候補の日でない（D が高くても日次の順位は付かない）
+        ("2021-01-05", "1004", "2021-01-05", 1.0, 0.80, 0.90, 0.09),    # 3つとも満たす
+        ("2021-01-05", "1005", "2021-01-05", 1.0, 0.70, 0.85, 0.03),
+        ("2021-01-05", "1002", "2021-01-04", 1.0, 0.50, 0.88, -0.02),   # 1日前の候補
+        ("2021-01-06", "1006", "2021-01-06", 0.0, 0.90, 0.99, 0.08),    # 日次1位・組1位だが R15 を満たさない
+        ("2021-01-06", "1007", "2021-01-06", 1.0, 0.10, 0.20, -0.12),
+        ("2021-01-07", "1004", "2021-01-07", 1.0, 0.90, 0.95, 0.04),    # 3つとも満たすが、01-05 に買って持っている
+        ("2021-01-07", "1008", "2021-01-07", 1.0, 0.90, 0.30, 0.02),    # 日次で 1004 と同点 → 銘柄コードの順で2位
+    ]
+    o = pd.DataFrame(rows, columns=["Date", "Code", "cand_date", "r15", "score_D", "score_W5", E.RET])
+    o["Date"] = pd.to_datetime(o["Date"])
+    o["cand_date"] = pd.to_datetime(o["cand_date"])
+    o["r5_days"] = [(pd.bdate_range(c, d).size - 1) for c, d in zip(o["cand_date"], o["Date"])]
+    o[E.HIT] = False
+    o[E.HITDAY] = np.nan
+    o[E.R20] = o[E.RET]
+    o["fold"] = 1
+    return o, days
+
+
+class TestTriple(unittest.TestCase):
+    def test_by_hand(self):
+        o, days = triple_pools()
+        got = {k: list(zip(b["Date"].dt.strftime("%m-%d"), b["Code"])) for k, b in R.triple_buys(o, days).items()}
+        self.assertEqual(got["D1W1"], [("01-05", "1004")])
+        self.assertEqual(got["D1"], [("01-04", "1001"), ("01-05", "1004")])
+        self.assertEqual(got["W1"], [("01-04", "1002"), ("01-05", "1004")])
+        self.assertEqual(got["R15"], [("01-04", "1001"), ("01-04", "1002"), ("01-05", "1004"), ("01-05", "1005"),
+                                      ("01-06", "1007"), ("01-07", "1008")])
+        self.assertEqual(got["REST"], [("01-04", "1001"), ("01-04", "1002"), ("01-05", "1005"), ("01-06", "1007"),
+                                       ("01-07", "1008")])
+
+    def test_stats(self):
+        o, days = triple_pools()
+        t = R.triple_stats(o, days)
+        self.assertEqual(t["days"], 4)
+        self.assertEqual(t["months"], 1)
+        s = t["sets"]
+        self.assertEqual([s[k]["n"] for k in R.TRIPLE_SETS], [1, 2, 2, 6, 5])
+        self.assertAlmostEqual(s["D1W1"]["ret"], 0.09)
+        self.assertTrue(np.isnan(s["D1W1"]["se"]))                  # 1件では標準誤差を出さない
+        r = np.array([0.05, -0.02, 0.09, 0.03, -0.12, 0.02])
+        self.assertAlmostEqual(s["R15"]["ret"], r.mean())
+        self.assertAlmostEqual(s["R15"]["se"], r.std(ddof=1) / np.sqrt(6))
+        self.assertAlmostEqual(s["R15"]["win"], 4 / 6)
+        self.assertAlmostEqual(s["R15"]["bad"], 1 / 6)
+        self.assertAlmostEqual(s["R15"]["pm"], 6.0)
+        o2 = o.copy()
+        o2.loc[o2["Code"] == "1008", "r15"] = np.nan                  # 01-07 の組に印の無い行がある → その日は数えない
+        self.assertEqual(R.triple_stats(o2, days)["days"], 3)
+
+
 class TestAttachAndFlagged(unittest.TestCase):
     def test_attach_rule(self):
         o, _ = hand_pools()
@@ -678,9 +736,25 @@ class TestMain(unittest.TestCase):
             self.assertIn("今の買い R15", out)
             for code in codes:                                                 # 公開ログに銘柄コードを出さない
                 self.assertNotIn(code, out)
-            with contextlib.redirect_stdout(io.StringIO()):                    # 2回目は探索と out-of-fold を読む
-                self.assertEqual(R.main(["--trials", "2", "--shifts", "0,2"]), 0)
+            self.assertNotIn("triple", sm)
+            buf2 = io.StringIO()
+            with contextlib.redirect_stdout(buf2):                             # 2回目は探索と out-of-fold を読む（参考の表も出す）
+                self.assertEqual(R.main(["--trials", "2", "--shifts", "0,2", "--triple"]), 0)
             self.assertEqual(tl.call_count, 1)
+            out2 = buf2.getvalue()
+            with open(os.path.join(tmp, "e117_summary.json"), encoding="utf-8") as fh:
+                sm2 = json.load(fh)
+            self.assertIn("■ 参考（運用者の確認 2026-10-30", out2)
+            self.assertEqual(sorted(sm2["triple"]), ["0", "2"])
+            for sh in ("0", "2"):
+                t = sm2["triple"][sh]["sets"]
+                self.assertEqual(sm2["triple"][sh]["days"], sm2["shifts"][sh]["days"])
+                self.assertEqual(t["R15"]["n"], sm2["shifts"][sh]["rule"]["n"])     # 今の買いは本体の R15 と同じ
+                self.assertLessEqual(t["D1W1"]["n"], min(t["D1"]["n"], t["W1"]["n"]))
+                self.assertLessEqual(max(t["D1"]["n"], t["W1"]["n"]), t["R15"]["n"])
+                self.assertLessEqual(t["REST"]["n"], t["R15"]["n"])
+            for code in codes:
+                self.assertNotIn(code, out2)
 
     def test_stops_without_production_oof(self):
         full, bars, _ = main_data()

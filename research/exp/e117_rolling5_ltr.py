@@ -76,10 +76,17 @@
   - 本番の out-of-fold（1.5σ の木3本）が置き場にある（無ければ R15 を作れないので止まる）
   - 参考に数えるもの: 収益がある行のうち、判断日の翌取引日に買えた割合（売買停止などで遅れる行がある）、R15 の印が付いた行の数
 
+参考（--triple。運用者の確認 2026-10-30「当日のみでのランキングで1位、直近5営業日ランキングでも1位、1.5σモデルでも全部95以上の
+銘柄のみ買ったら、収益がどうなるか確認したいです。そんなに候補はないはずです。」。見るだけ。§82-4）
+  - 候補の日 t の夜に、その日の候補の中の今のランキング学習（日次。D）で1位・t の組の W5 で1位・R15 の3つとも満たす候補を、t の
+    翌営業日の寄りで買う（持っている銘柄は買い増さない）。分けて、R15＋日次の1位・R15＋組の1位・R15 だけ・今の買いのうち3つとも
+    満たすもの以外も出す。数える判断日は本体と同じ。件数・平均収益（全件 ± 標準誤差・窓の平均）・勝率・−10% 未満など
+
 公開ログには集計だけ（件数・平均・割合・木の形）。銘柄ごとの値は出さない。結果は research/_data/oof/e117_*。
 
     exp=e117_rolling5_ltr.py  args=""      （既定は --trials 50 --shifts 0,2,4 --top 2。探索の結果と out-of-fold は置き場に
                                             残し、同じデータ・同じ設定なら次の回は読む）
+    exp=e117_rolling5_ltr.py  args="--triple"   （参考の表も出す）
 """
 from __future__ import annotations
 
@@ -589,6 +596,61 @@ LEAN_JA = {"fresh": "入ったばかりの候補を上に置きやすい", "aged
 
 
 # --------------------------------------------------------------------------- #
+# 参考: 日次の1位・組の1位・R15 の3つとも満たす候補（運用者の確認 2026-10-30。見るだけ）
+# --------------------------------------------------------------------------- #
+
+TRIPLE_SETS = ("D1W1", "D1", "W1", "R15", "REST")
+TRIPLE_JA = {"D1W1": "3つとも満たす（日次1位・組1位・R15）", "D1": "R15＋日次の1位", "W1": "R15＋組の1位（候補の日）",
+             "R15": "R15 だけ（今の買い）", "REST": "今の買いのうち3つとも満たすもの以外"}
+
+
+def triple_buys(o: pd.DataFrame, days, hold: int = E.HOLD) -> Dict[str, pd.DataFrame]:
+    """
+    運用者の確認（2026-10-30）「当日のみでのランキングで1位、直近5営業日ランキングでも1位、1.5σモデルでも全部95以上の銘柄のみ
+    買ったら」。判断日 t の組の行に、その日の候補（r5_days = 0）の中の今のランキング学習（日次。D）の順位 d_rank と、組全体（直近
+    5営業日）の中の W5 の順位 w5_rank を付ける（どちらも同じスコアは銘柄コードの順。候補の日でない行の d_rank は 0）。候補の日の行で
+    R15 を満たし、d_rank と w5_rank がどちらも1位のものを、候補の日の翌営業日の寄りで買う（持っている銘柄は買い増さない。_take）。
+    分けて見るために、R15＋日次の1位・R15＋組の1位・R15 だけ（今の買い）と、今の買いのうち3つとも満たすもの以外も返す。
+    """
+    cal = W.calendar(days)
+    pos = {pd.Timestamp(d): i for i, d in enumerate(cal)}
+    x = o.reset_index(drop=True).copy()
+    s = x.sort_values(["Date", "score_W5", "Code"], ascending=[True, False, True], kind="mergesort")
+    x["w5_rank"] = 0
+    x.loc[s.index, "w5_rank"] = (s.groupby("Date", sort=False).cumcount() + 1).to_numpy()
+    s = x[x["r5_days"] == 0].sort_values(["Date", "score_D", "Code"], ascending=[True, False, True], kind="mergesort")
+    x["d_rank"] = 0
+    x.loc[s.index, "d_rank"] = (s.groupby("Date", sort=False).cumcount() + 1).to_numpy()
+    base = (x["r5_days"] == 0).to_numpy() & (pd.to_numeric(x["r15"], errors="coerce") == 1.0).to_numpy()
+    d1 = (x["d_rank"] == 1).to_numpy()
+    w1 = (x["w5_rank"] == 1).to_numpy()
+    out: Dict[str, pd.DataFrame] = {}
+    for k, m in {"D1W1": base & d1 & w1, "D1": base & d1, "W1": base & w1, "R15": base}.items():
+        sel = x[m].sort_values(["Date", "Code"], kind="mergesort")
+        out[k] = _take(sel, np.ones(len(sel), dtype=bool), pos, hold)
+    r = out["R15"]
+    out["REST"] = r[~((r["d_rank"] == 1) & (r["w5_rank"] == 1))]
+    return out
+
+
+def triple_stats(o: pd.DataFrame, days, hold: int = E.HOLD) -> Dict:
+    """1つのずらし方の参考の集計。数えるのは evaluate と同じ判断日（R15 の印が組のすべてに付いた日）。"""
+    of = flagged(o)
+    nm = n_months(of)
+    sets = triple_buys(of, days, hold)
+    out: Dict = {"days": int(of["Date"].nunique()) if len(of) else 0, "months": nm, "sets": {}}
+    for k in TRIPLE_SETS:
+        b = sets[k]
+        st = W.pick_stats(b)
+        r = b[RET].to_numpy(dtype=float)
+        st["pm"] = float(len(b) / nm) if nm else np.nan
+        st["se"] = float(np.std(r, ddof=1) / np.sqrt(len(r))) if len(r) > 1 else np.nan
+        st["win"] = float(np.mean(r > 0)) if len(r) else np.nan
+        out["sets"][k] = st
+    return out
+
+
+# --------------------------------------------------------------------------- #
 # 今の買いの印（R15）
 # --------------------------------------------------------------------------- #
 
@@ -680,11 +742,27 @@ def report(sh: int, res: Dict, top_n: int) -> None:
               + f" ・平均 {ag['buy_mean'][a]:.2f}日")
 
 
+def report_triple(rows: List[Tuple[int, Dict]]) -> None:
+    """参考（運用者の確認 2026-10-30・見るだけ）の表（公開ログ。集計だけ）。"""
+    print(f"\n■ 参考（運用者の確認 2026-10-30・見るだけ）: 候補の日に「その日の候補の中の今のランキング学習（日次）で1位」"
+          f"「直近{K}営業日の組の W5 で1位」「1.5σ の3本が{LINE:.0f}以上」をすべて満たす候補だけを、翌営業日の寄りで買う")
+    print("  件数（月あたり）/ 平均収益（全件 ± 標準誤差）/ 窓の平均 / 勝率 / −10% 未満 / +10%到達 / 20営業日目の終値")
+    for sh, t in rows:
+        print(f"  ずらし{sh}か月（R15 の印が組のすべてに付いた判断日 {t['days']:,}日・{t['months']}か月）")
+        for k in TRIPLE_SETS:
+            s = t["sets"][k]
+            se = f"{s['se'] * 100:.2f}pt" if np.isfinite(s["se"]) else "—"
+            print(f"    {TRIPLE_JA[k]:<26}{s['n']:>5}件（{_pm(s['n'], t['months'])}）{_p(s['ret']):>8} ± {se:<7}"
+                  f"{_p(s['ret_w']):>8} {_s(s['win']):>6} {_s(s['bad']):>6} {_s(s['hit']):>6} {_p(s['r20']):>8}")
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="実験117: 直近5営業日の組で毎日並べるランキング学習（検証だけ）")
     ap.add_argument("--trials", type=int, default=50)
     ap.add_argument("--shifts", default="0,2,4")
     ap.add_argument("--top", type=int, default=TOP_N)
+    ap.add_argument("--triple", action="store_true",
+                    help="参考（運用者の確認 2026-10-30）: 日次の1位・組の1位・R15 の3つとも満たす候補だけを買った成績も出す")
     args = ap.parse_args(argv)
     shifts = [int(x) for x in args.shifts.split(",") if x.strip()]
     import warnings
@@ -786,12 +864,15 @@ def main(argv=None) -> int:
                      "search_cv": {k: v for k, v in store["W5"]["_cv"].items() if k != "trials"},
                      "cv": cvm, "random_ndcg": rnd, "top": args.top, "shifts": {}}
     rows = []
+    tri: List[Tuple[int, Dict]] = []
     for sh in shifts:
         o = attach_rule(oof_shift(rl_eval, daily, cols, cols_w, params, sh), rule)
         res, _ = evaluate(o, days, args.top)
         report(sh, res, args.top)
         summary["shifts"][str(sh)] = res
         rows.append({"shift": sh, **res})
+        if args.triple:
+            tri.append((sh, triple_stats(o, days)))
 
     rd = reading(rows)
     summary["reading"] = rd
@@ -804,6 +885,9 @@ def main(argv=None) -> int:
               f"新しさの差 {x['fresh_gap']:+.2f}")
     print(f"  → 買い方: {'直近5営業日の上位2件で絞る形は、今の買いや今のスコアで絞るより良い' if rd['better'] else 'はっきりとは良くない'}"
           f" ／ 新しさ: {LEAN_JA[rd['lean']]}")
+    if tri:
+        report_triple(tri)
+        summary["triple"] = {str(sh): t for sh, t in tri}
     summary["minutes"] = round((time.time() - t_all) / 60, 1)
     with open(SUMMARY_PATH, "w", encoding="utf-8") as fh:
         json.dump(summary, fh, ensure_ascii=False, indent=2, default=str)
