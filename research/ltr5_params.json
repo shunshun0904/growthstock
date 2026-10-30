@@ -1,31 +1,41 @@
 {
-  "_source": "実験117 の W5 の探索（run 40934620401・a123773。2025-09-01 までの組の行 90,188件・1,808日・50試行・31.6分・目的は検証分割の組の中の NDCG@5）。run 41007055654 のログの「W5 の木の形（全桁）」を丸めずに写した（2026-10-30）",
+  "_source": "週次の探索（Retrain Weekly run 41078055848・651285f。2025-09-02 までの組の行 90,249件・50試行・5分割・目的は検証分割の組の中の NDCG@5）",
   "_features_sig": "7a3f829d3ee9",
   "_n_features": 364,
-  "_cutoff": "2025-09-01",
+  "_cutoff": "2025-09-02",
   "_cv": {
     "objective": "検証分割の組の中の NDCG@5（候補5件以上の組。利得は組の中の20営業日目の終値の段階 0〜4）",
     "scheme": "month_purged4",
     "n_splits": 5,
     "n_trials": 50,
-    "ndcg": 0.5896,
-    "n_rows": 90188,
-    "n_days": 1808,
-    "train_to": "2025-09-01",
-    "minutes": 31.6
+    "seed": 0,
+    "best_trial": 30,
+    "ndcg": 0.5836,
+    "ndcg_folds": [
+      0.5796,
+      0.584,
+      0.5743,
+      0.5845,
+      0.5958
+    ],
+    "n_rows": 90249,
+    "n_days": 1809,
+    "train_from": "2018-04-03",
+    "train_to": "2025-09-02",
+    "minutes": 37.2
   },
   "params": {
     "boosting_type": "gbdt",
-    "colsample_bytree": 0.8804170156336326,
-    "learning_rate": 0.024033018135350435,
-    "min_child_samples": 17,
     "n_estimators": 200,
-    "n_jobs": -1,
-    "num_leaves": 7,
-    "reg_alpha": 9.2845440412956,
-    "reg_lambda": 0.13416677080302547,
-    "subsample": 0.7155999229063561,
     "subsample_freq": 1,
-    "verbose": -1
+    "n_jobs": -1,
+    "verbose": -1,
+    "learning_rate": 0.023292938448919526,
+    "num_leaves": 9,
+    "min_child_samples": 168,
+    "subsample": 0.7498775102958413,
+    "colsample_bytree": 0.5521318372713037,
+    "reg_alpha": 1.0463661748653903e-08,
+    "reg_lambda": 1.4704959544128534e-08
   }
 }
