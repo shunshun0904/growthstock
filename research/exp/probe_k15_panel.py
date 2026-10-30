@@ -15,7 +15,9 @@ probe_t3_panel との違い: 12本ではなく、規則に使う木の6本（1.2
   1. 件数と 0件の月・重なり・+10% の成績（行全体・月2件の先着・画面の3枠の形）と窓ごとの差（1.5σ − 1.2σ）: 前向き・画面の物差し
   2. 画面の文言用（画面の物差し）: 行全体の +10% に届く割合と届いた日の分位・発火の帯・惜しい帯の幅（両方の規則）
   3. 前向きの発火の帯と、画面の3枠の形を発火を問わず / 発火8件以上の日だけ回した取引（実験88 の形。両方の規則）
-  4. 際どい形 × 一番低いモデル（前向き・発火を問わない・1.5σ の3本）と strategy.js の BORDER_STATS の行
+  4. 際どい形 × 一番低いモデル（前向き・発火を問わない・1.5σ の3本）と strategy.js の BORDER_STATS の行。4c・4d は同じものを
+     1.2σ の3本で（2026-10-30 の運用者の依頼「買いの判断に使うものは1.2σ の3本（すべて95以上）に戻してほしいです」→「すぐ戻す
+     （今夜から）」で、1.2σ の3本の BORDER_STATS を今の OOF で測り直すため。行は js3: で始まる）
   5. まとめ: 1.5σ の3本のほうが 1.2σ の3本より上か（前向きの行全体・3枠の形。窓ごとの差）
 
 公開ログには集計だけ（件数・平均・割合・分位）。銘柄・日付ごとの値は出さない。
@@ -126,6 +128,15 @@ def main(argv=None) -> int:
     print("  BORDER_STATS（js）:")
     for s in PKX.js_lines(k15, "K15"):
         print("js:" + s)
+    PKX.shape_block(ftx, "T3", "4c. 形ごと（前向き・発火を問わない・1.2σ の3本）")
+    print("\n■ 4d. 形 × 一番低いモデル（1.2σ の3本。画面に出す数字）")
+    t3 = PKX.family_table(ftx, "T3")
+    PKX.print_family(t3, "T3")
+    reds3 = [f"{fam}・一番低い {a}" for fam, _, _ in PKX.FAMILIES for a in PKX.GROUPS["T3"] if t3[fam][a]["warn"]]
+    print(f"  赤の注意の組（{PKX.WARN_MIN_N}件以上で平均 {PKX.WARN_RET:g}% 以下）: {'、'.join(reds3) if reds3 else 'なし'}")
+    print("  BORDER_STATS（js。1.2σ の3本）:")
+    for s in PKX.js_lines(t3, "T3"):
+        print("js3:" + s)
 
     sm = summary(fw, fwd)
     print("\n■ 5. まとめ（見るだけ。選定の基準は運用者が決めた。手数料・税・すべりは含まない）")

@@ -64,6 +64,13 @@ class TestProbe(unittest.TestCase):
         js = "\n".join(P.PKX.js_lines(t, "K15"))
         for a in LT.K15:
             self.assertIn(f" {a}: {{ n: ", js)
+        # 1.2σ の3本（2026-10-30 に規則を戻すときの BORDER_STATS）も同じ形で書ける
+        t3 = P.PKX.family_table(ftx, "T3")
+        for fam in ("two95", "min"):
+            self.assertEqual(sum(t3[fam][a]["n"] for a in LT.BOOST), t3[fam]["all"]["n"])
+        js3 = "\n".join(P.PKX.js_lines(t3, "T3"))
+        for a in LT.BOOST:
+            self.assertIn(f" {a}: {{ n: ", js3)
 
     def test_summary(self):
         def fwd(k_rows, k_slots, t_rows, t_slots):
@@ -81,7 +88,7 @@ class TestProbe(unittest.TestCase):
                 contextlib.redirect_stdout(buf):
             self.assertEqual(P.main([]), 0)
         out = buf.getvalue()
-        for h in ("■ 0.", "■ 1.", "■ 2.", "■ 3.", "■ 4b.", "■ 5.", "js:", "1.5σ の3本 95以上（新しい規則）"):
+        for h in ("■ 0.", "■ 1.", "■ 2.", "■ 3.", "■ 4b.", "■ 4d.", "■ 5.", "js:", "js3:", "1.5σ の3本 95以上（新しい規則）"):
             self.assertIn(h, out)
         codes = set(self.df["Code"].astype(str))
         self.assertFalse(any(c in out for c in codes if len(c) >= 4))
