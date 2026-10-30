@@ -86,18 +86,19 @@ const nRows = await page.locator('.pred-row').count();
 check(nRows === 5, `候補が5件描画される (実際: ${nRows})`);
 
 // モデル別の百分位の表（運用者の指示 2026-10-12「12個全てを載せてほしい。棒グラフ形式でなくてよい。大小が分かればよい」）。
-// 行 = ラベル（1.2σ / 1.5σ）、列 = 学習器。合成データは 1.8σ を含む12本（外す前の日の予測ファイルの形）で、5件目だけ
-// logit_k15 が欠ける。1.8σ の4本は運用者の依頼（2026-10-24「1.8σの週次学習はなくしたはずです」→「採点・表示からも外す」）で、
+// 行 = ラベル（1.2σ / 1.5σ）、列 = 学習器。合成データは 1.8σ とロジスティック回帰を含む12本（外す前の日の予測ファイルの形）で、
+// 5件目だけ logit_k15 と 1.2σ の cat が欠ける（欠けたマスの「—」を見るため。logit_k15 は外したモデルなので表に出ない）。
+// ロジスティック回帰（LR / LR15）は運用者の指示（2026-10-29）で 2026-11-02 の予測から外し、前の日の値も出さない。1.8σ の4本は運用者の依頼（2026-10-24「1.8σの週次学習はなくしたはずです」→「採点・表示からも外す」）で、
 // 予測ファイルに値があっても出さない（src/lib/predictions.js の RETIRED_VARIANTS）
 const gridCells = page.locator('.pred-list .pred-row .pred-main .pred-mg .c');
-check((await gridCells.count()) === nRows * 8, `行ごとに8マス（1.8σ の4本は出さない） (実際: ${await gridCells.count()})`);
+check((await gridCells.count()) === nRows * 6, `行ごとに6マス（1.8σ の4本とロジスティック回帰は出さない） (実際: ${await gridCells.count()})`);
 const firstGrid = page.locator('.pred-row').first().locator('.pred-main .pred-mg');
 const heads = await firstGrid.locator('.h').allTextContents();
-check(heads.join(',') === ',LGB,XGB,CAT,LR', `列は LGB / XGB / CAT / LR (実際: ${heads.join(',')})`);
+check(heads.join(',') === ',LGB,XGB,CAT', `列は LGB / XGB / CAT（LR は出さない） (実際: ${heads.join(',')})`);
 const labels = await firstGrid.locator('.r').allTextContents();
 check(labels.join(',') === '1.2σ,1.5σ', `行は 1.2σ / 1.5σ（1.8σ の行は出さない） (実際: ${labels.join(',')})`);
 const vals = await firstGrid.locator('.c').allTextContents();
-check(vals.join(',') === '85,96,98,56,84,97,97,54', `1件目の8本の値 (実際: ${vals.join(',')})`);
+check(vals.join(',') === '85,96,98,84,97,97', `1件目の6本の値 (実際: ${vals.join(',')})`);
 check(((await firstGrid.locator('.c').first().getAttribute('title')) || '').includes('過去スコア分布の下から 85.0%'),
       'マスの title に小数1桁の百分位が出る');
 const look = (loc) => loc.evaluate((el) => {
@@ -119,20 +120,21 @@ check(predBody.includes('決定木系') && predBody.includes('ラベル1.5σ') &
       '塊の名前が一覧パネルに出る（外した 1.8σ の塊は出さない）');
 
 // 同じ表でスコアそのものに切り替えられる（運用者の依頼 2026-10-16「目的変数横断での比較ができないので、モデルのスコア自体も
-// 表示してほしい。同じ形式で、青白の濃淡でモデル×目的変数横断で色付け」）。色の物差しはその表の8本の中の最小〜最大
+// 表示してほしい。同じ形式で、青白の濃淡でモデル×目的変数横断で色付け」）。色の物差しはその表の6本の中の最小〜最大
 await page.locator('.pred-metric button', { hasText: 'スコア' }).click();
 const scoreVals = await firstGrid.locator('.c').allTextContents();
-check(scoreVals.length === 8 && scoreVals.every((v) => /^\d\.\d{2}$/.test(v)),
-      `スコアに切り替えると1件目の8マスが小数2桁のスコアになる (実際: ${scoreVals.slice(0, 3).join(',')}…)`);
+check(scoreVals.length === 6 && scoreVals.every((v) => /^\d\.\d{2}$/.test(v)),
+      `スコアに切り替えると1件目の6マスが小数2桁のスコアになる (実際: ${scoreVals.slice(0, 3).join(',')}…)`);
 check((await page.locator('.pred-row').first().locator('.pred-ms .lab').textContent()).includes('モデル別のスコア'),
       '見出しが「モデル別のスコア」になる');
 check((await page.locator('.pred-row').first().locator('.pred-ms-grad i').count()) === 1, 'スコアの色の物差し（最小〜最大の帯）が見出しに出る');
 await page.locator('.pred-metric button', { hasText: '百分位' }).click();
-check((await firstGrid.locator('.c').allTextContents()).join(',') === '85,96,98,56,84,97,97,54',
+check((await firstGrid.locator('.c').allTextContents()).join(',') === '85,96,98,84,97,97',
       '百分位に戻すと元の値');
 check(predBody.includes('並べているモデル'), 'モデル一覧パネルが表示される');
-check(predBody.includes('LightGBM（1.5σ）') && predBody.includes('ロジスティック回帰（1.5σ）') && !predBody.includes('（1.8σ）'),
-  '8本の日本語名が出る（1.8σ の4本は並べているモデルにも出さない）');
+check(predBody.includes('LightGBM（1.5σ）') && predBody.includes('CatBoost（1.5σ）') && !predBody.includes('（1.8σ）')
+        && !predBody.includes('ロジスティック回帰（1.5σ）'),
+  '6本の日本語名が出る（1.8σ の4本とロジスティック回帰は並べているモデルにも出さない）');
 // 今日の戦略パネル（docs/PLAYBOOK.md の手順）。
 // 合成データは候補5件。2026-10-12 から発火の数では見送らないので「発火が少ない日」。
 // 1.5σ の3本（2026-10-29 からの規則）がすべて95以上の候補は無いので、買う銘柄は出ない
@@ -251,12 +253,12 @@ check(detail.includes('混ぜていません'), 'アンサンブルではない�
 const bigGrids = page.locator('.pred-detail .pred-mg.lg');
 check((await bigGrids.count()) === 2, `詳細には百分位とスコアの2つの表が出る (実際: ${await bigGrids.count()})`);
 const bigCells = await bigGrids.nth(0).locator('.c').allTextContents();
-check(bigCells.length === 8 && bigCells[0] === '85.0', `詳細に8本の表（小数1桁）が出る (実際: ${bigCells.slice(0, 3).join(',')}…)`);
+check(bigCells.length === 6 && bigCells[0] === '85.0', `詳細に6本の表（小数1桁）が出る (実際: ${bigCells.slice(0, 3).join(',')}…)`);
 const bigScores = await bigGrids.nth(1).locator('.c').allTextContents();
-check(bigScores.length === 8 && bigScores.every((v) => /^\d\.\d{3}$/.test(v)),
-      `詳細のスコアの表は8本・小数3桁 (実際: ${bigScores.slice(0, 3).join(',')}…)`);
-check(detail.includes('スコアそのもの') && detail.includes('この表の8本の中の最小〜最大'),
-      '詳細にスコアの表の読み方（色はこの表の8本の中の最小〜最大）が出る');
+check(bigScores.length === 6 && bigScores.every((v) => /^\d\.\d{3}$/.test(v)),
+      `詳細のスコアの表は6本・小数3桁 (実際: ${bigScores.slice(0, 3).join(',')}…)`);
+check(detail.includes('スコアそのもの') && detail.includes('この表の6本の中の最小〜最大'),
+      '詳細にスコアの表の読み方（色はこの表の6本の中の最小〜最大）が出る');
 const bigLabels = await bigGrids.nth(0).locator('.r').allTextContents();
 check(bigLabels.length === 2 && !bigLabels.some((l) => l.includes('1.8σ')), `詳細の表に 1.8σ の行は無い (実際: ${bigLabels.join(' / ')})`);
 // 百分位の表とスコアの表は上下に並べたとき列がそろう（列の最小幅を数字の幅に依らない値にした。2026-10-16）
@@ -270,11 +272,12 @@ check(/並び順\s*1\.5σ の3本の最小\s*（83\.6）/.test(detail) && /帯�
 check(detail.includes('基準モデルの見立ての内訳') && detail.includes('基準モデル（1.2σ の LightGBM）の出力を')
         && detail.includes('一覧の並び順（1.5σ の3本の最小）の内訳ではありません'),
       '寄与の欄は 1.2σ の LightGBM のものと明示される');
-// 1.5σ の数は画面で 1.5σ の4本の百分位から数え直す（予測ファイルの agreeK90 / nK は外す前の日は 1.8σ を含む8本の数）。
-// 1件目の 1.5σ の4本は 83.6・97.1・97.4・54.0 なので 2/4（ファイルの値は 4/8）
-check(detail.includes('上位10%と見たモデル') && /1\.2σ\s*2\/4/.test(detail) && detail.includes('（1.5σ 2/4）')
-        && !detail.includes('4/8'),
-      '詳細に上位10%と見たモデルの数（1.2σ の4本と、1.5σ の4本）が出る');
+// 上位10%と見たモデルの数は、画面で表に出すモデル（1.2σ・1.5σ の木3本ずつ）の百分位から数え直す（予測ファイルの agree90 /
+// agreeK90 は外す前の日はロジスティック回帰・1.8σ を含む数）。1件目の 1.2σ は 85・96・98、1.5σ は 83.6・97.1・97.4 なので
+// どちらも 2/3（ファイルの値は 2/4・4/8）
+check(detail.includes('上位10%と見たモデル') && /1\.2σ\s*2\/3/.test(detail) && detail.includes('（1.5σ 2/3）')
+        && !detail.includes('4/8') && !detail.includes('2/4'),
+      '詳細に上位10%と見たモデルの数（1.2σ の木3本と、1.5σ の木3本）が出る');
 check(detail.includes('実験82'), '詳細に「1.5σ・1.8σ も95以上」を足しても安定しない（実験82）と出る');
 check(!detail.includes('12本の合意'), '詳細にも12本の合意（平均）は出さない');
 // 次の決算発表（予測日までに公表済みの予定）。合成データの1件目は7営業日後（持つ20営業日の中 → 黄）、

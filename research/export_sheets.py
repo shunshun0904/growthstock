@@ -81,9 +81,10 @@ OWNED_COLS = [
 MODEL_COLS = [f"{M.SHORT.get(a, a[:3].upper())}%" for a in M.LINEUP]
 SCORE_COLS = [f"{M.SHORT.get(a, a[:3].upper())}スコア" for a in M.LINEUP]
 AGREE_COL = "一致(上位10%)"
-#: ラベル違いのモデル（L15 など1.5σ の4本。models.ACTIVE_VARIANTS）のうち上位10%と見た数。1.2σ の一致（AGREE_COL）には
+#: ラベル違いのモデル（L15 など1.5σ の木3本。models.ACTIVE_VARIANTS）のうち上位10%と見た数。1.2σ の一致（AGREE_COL）には
 #: 数えない。1.8σ の4本（L18 など）は 2026-10-24 に外したので、それからの行は1.5σ の4本だけで数え、L18% などの列は
-#: 書かない（見出しは残り、それより前の行の値もそのまま）
+#: 書かない（見出しは残り、それより前の行の値もそのまま）。ロジスティック回帰（LR% / LR15% / LRスコア / LR15スコア）も
+#: 2026-11-02 の予測から同じ扱い（運用者の指示 2026-10-29。それからの一致は 1.2σ・1.5σ とも木の3本で数える）
 AGREE_K_COL = "ラベル違い一致(上位10%)"
 AGREE_COLS = [AGREE_COL, AGREE_K_COL]
 
@@ -133,9 +134,10 @@ def rows_from_predictions(pred: Dict) -> List[Dict]:
     5モデルを学習する前の予測ファイル（byModel が無い）でも落ちない。
     """
     # 予測ファイルが持っているモデルの順。無ければ models.LINEUP の順。外した 1.8σ の4本（models.RETIRED_VARIANTS。
-    # 2026-10-24）は、それより前に出した予測ファイルにあっても書かない
+    # 2026-10-24）とロジスティック回帰（models.RETIRED の logit・RETIRED_VARIANTS の logit_k15。2026-11-02 の予測から）は、
+    # それより前に出した予測ファイルにあっても書かない
     algos = [a for a in ([m["algo"] for m in (pred.get("models") or [])] or list(M.LINEUP))
-             if a not in M.RETIRED_VARIANTS]
+             if a not in M.RETIRED_VARIANTS and a not in M.RETIRED]
     short = {m["algo"]: m.get("short") for m in (pred.get("models") or [])}
     out = []
     for c in pred["candidates"]:

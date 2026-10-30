@@ -965,10 +965,6 @@
      "score": 0.55,
      "pctHistorical": 100.0
     },
-    "cat": {
-     "score": 0.4405,
-     "pctHistorical": 78.1
-    },
     "logit": {
      "score": 0.55,
      "pctHistorical": 100.0

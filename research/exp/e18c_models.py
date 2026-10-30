@@ -54,6 +54,9 @@ from train_production import (  # noqa: E402
 
 OOF_DIR = os.path.join(lab.DATA_DIR, "oof")
 PARAMS_PATH = os.path.join(OOF_DIR, "mt_params.json")
+#: 探索し直す学習器。2026-10-30 までの models.ALGOS（2026-11-02 の予測からロジスティック回帰を外したが、実験は同じ条件で
+#: 再現する）
+ALGOS = ("lgbm", "xgb", "cat", "logit")
 N_TRIALS = 50
 
 
@@ -65,7 +68,7 @@ def tune_all(ds: pd.DataFrame, cols: list) -> dict:
     tune_df = ds[d <= train_end]
     print(f"[tune] 探索に使う期間: 〜{train_end.date()} ({len(tune_df):,}件 / "
           f"正例率 {tune_df['label'].mean()*100:.2f}%)")
-    for algo in M.ALGOS:
+    for algo in ALGOS:
         if algo in store:
             cv = store[algo].get("_cv", {})
             print(f"  [{algo}] 探索済みを読む "
@@ -138,7 +141,7 @@ def main() -> int:
 
     print("\n=== 探索したパラメータで out-of-fold を作る ===")
     runs, failed = {}, {}
-    for algo in M.ALGOS:
+    for algo in ALGOS:
         p = os.path.join(OOF_DIR, f"mt_{algo}.parquet")
         if os.path.exists(p):
             runs[algo] = pd.read_parquet(p)

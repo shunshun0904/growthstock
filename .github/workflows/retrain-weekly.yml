@@ -33,7 +33,7 @@ on:
         options: ['yes', 'no']
         default: 'yes'
       only:
-        description: '画面に並べる追加モデルのうち、これだけ探索・学習する（例: lgbm_k15,xgb_k15,cat_k15,logit_k15。空なら 1.2σ の4本とランキング学習。1.5σ の4本は指定したときだけ。ltr はランキング学習だけ（tune=yes なら木の形も探索し直す）。1.8σ の4本は 2026-10-24 に外した。指定すると基準モデル（1.2σ の LightGBM）は触らない）'
+        description: '画面に並べる追加モデルのうち、これだけ探索・学習する（例: lgbm_k15,xgb_k15,cat_k15。空なら 1.2σ の木3本とランキング学習。1.5σ の3本は指定したときだけ。ltr はランキング学習だけ（tune=yes なら木の形も探索し直す）。1.8σ の4本は 2026-10-24 に、ロジスティック回帰（logit・logit_k15）は 2026-11-02 の予測から外した（名指ししても止まる）。指定すると基準モデル（1.2σ の LightGBM）は触らない）'
         required: false
         default: ''
 
@@ -188,7 +188,8 @@ jobs:
         if: steps.scope.outputs.only == ''
         run: python3 research/train_production.py 2>&1 | tee retrain.log
 
-      # 画面に並べる追加モデル（xgb / cat。2026-10-09 に運用者の決定で logit / mlp を外した）の探索。
+      # 画面に並べる追加モデル（xgb / cat。2026-10-09 に運用者の決定で logit / mlp を外し、同日夜に logit を戻したが、
+      # 2026-10-29 の運用者の指示で 2026-11-02 の予測から再び外した）の探索。
       # 基準モデルと完全に同じ条件（本番と同じ分割 tuning.PRODUCTION_CV＝年×時価総額帯で
       # 層別・日付単位 / 5分割 / PR-AUC / 50試行 / 木200本固定 / ホールドアウトより手前だけ）。
       #
@@ -218,11 +219,12 @@ jobs:
         env:
           ONLY: ${{ steps.scope.outputs.models }}
         run: |
-          # only があればそのモデルだけ（名前はカンマ区切り → 引数）。空なら 1.2σ の追加モデル（xgb / cat / logit）。
-          # ラベル違いのモデル（models.ACTIVE_VARIANTS。1.5σ × 4学習器）は既定に入れない。土曜に Routine が
-          # only=lgbm_k15,xgb_k15,cat_k15,logit_k15（09:10 JST）で回す（実験78 の実測: 探索 1本 lgbm 13分・cat 12〜17分・
-          # logit 21〜26分・xgb 25〜35分。1回あたり 1.5〜2時間。2026-10-11 夜）。1.8σ の4本（14:10 JST の回）は
-          # 2026-10-24 に運用者の依頼で外した（models.RETIRED_VARIANTS。名指ししても探索・学習しない）
+          # only があればそのモデルだけ（名前はカンマ区切り → 引数）。空なら 1.2σ の追加モデル（xgb / cat）。
+          # ラベル違いのモデル（models.ACTIVE_VARIANTS。1.5σ の木3本）は既定に入れない。土曜に Routine が
+          # only=lgbm_k15,xgb_k15,cat_k15（09:10 JST）で回す（実験78 の実測: 探索 1本 lgbm 13分・cat 12〜17分・
+          # xgb 25〜35分。2026-10-11 夜）。1.8σ の4本（14:10 JST の回）は 2026-10-24 に運用者の依頼で、ロジスティック回帰
+          # （logit・logit_k15）は運用者の指示（2026-10-29「次週からロジスティック回帰をなくしてください。…週次の更新自体
+          # いらないです」）で 2026-11-02 の予測から外した（models.RETIRED / RETIRED_VARIANTS。名指ししても探索・学習しない）
           read -r -a ONLY_ARGS <<< "${ONLY//,/ }"
           python3 research/exp/e15_tune_all.py "${ONLY_ARGS[@]}" 2>&1 | tail -25
 

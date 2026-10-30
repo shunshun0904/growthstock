@@ -2,8 +2,9 @@
  * モデル別の並び（src/lib/predictions.js modelRows）。
  *
  * - 並び順は payload の models に従い、無いモデルは出さない
- * - ラベル違い（1.5σ のラベルで学習した lgbm / xgb / cat / logit の4本）は塊 k15 で、記号は payload の short
- *   （無ければ L15 / X15 / C15 / LR15）。1.8σ の4本（L18 など）は 2026-10-24 に外したので、予測ファイルにあっても出さない
+ * - ラベル違い（1.5σ のラベルで学習した lgbm / xgb / cat の木3本）は塊 k15 で、記号は payload の short
+ *   （無ければ L15 / X15 / C15）。1.8σ の4本（L18 など）は 2026-10-24 に、ロジスティック回帰（LR / LR15）は 2026-11-02 の
+ *   予測から外したので、予測ファイルにあっても出さない
  *   （RETIRED_VARIANTS・activeModels。表・スコアの物差しにも入れない）
  * - 表の形（modelGrid）: 行 = ラベル（1.2σ / 1.5σ）、列 = 学習器。無いモデルのマスは null。古い予測ファイルは1行
  * - マスの字の色（pctInk）: 明るい区分（60 以上）は暗い字、暗い区分は明るい字
@@ -16,7 +17,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { modelRows, modelGrid, pctInk, scoreRange, scoreT, scoreColor, scoreInk, SCORE_COLORS, MODEL_SHORT, MODEL_FAMILY, FAMILY_JA, LABEL_JA, dayOrigin, featureLabel,
-  earningsNote, earningsSummary, RETIRED_VARIANTS, activeModels } from '../src/lib/predictions.js';
+  earningsNote, earningsSummary, RETIRED_VARIANTS, RETIRED_MODELS, activeModels } from '../src/lib/predictions.js';
 
 const models = [
   { algo: 'lgbm', name: 'LightGBM', short: 'LGB' },
@@ -38,15 +39,16 @@ const cand = {
   },
 };
 
-test('modelRows: ラベル違いは k ごとの塊で、記号は元の記号の頭 + k。外した 1.8σ は予測ファイルにあっても出さない', () => {
+test('modelRows: ラベル違いは k ごとの塊で、記号は元の記号の頭 + k。外した 1.8σ・ロジスティック回帰は予測ファイルにあっても出さない', () => {
   const rows = modelRows(cand, models);
-  assert.deepEqual(rows.map((r) => r.algo), ['lgbm', 'xgb', 'lgbm_k15', 'logit_k15']);
-  assert.deepEqual(rows.map((r) => r.family), ['tree', 'tree', 'k15', 'k15']);
-  assert.deepEqual(rows.map((r) => r.short), ['LGB', 'XGB', 'L15', 'LR15']);
-  // models が無い（古い）ファイルでも、byModel の 1.8σ は出さない
-  assert.deepEqual(modelRows(cand, []).map((r) => r.algo), ['lgbm', 'xgb', 'lgbm_k15', 'logit_k15']);
+  assert.deepEqual(rows.map((r) => r.algo), ['lgbm', 'xgb', 'lgbm_k15']);
+  assert.deepEqual(rows.map((r) => r.family), ['tree', 'tree', 'k15']);
+  assert.deepEqual(rows.map((r) => r.short), ['LGB', 'XGB', 'L15']);
+  // models が無い（古い）ファイルでも、byModel の 1.8σ・ロジスティック回帰は出さない
+  assert.deepEqual(modelRows(cand, []).map((r) => r.algo), ['lgbm', 'xgb', 'lgbm_k15']);
   assert.deepEqual([...RETIRED_VARIANTS].sort(), ['cat_k18', 'lgbm_k18', 'logit_k18', 'xgb_k18']);
-  assert.deepEqual(activeModels(models).map((m) => m.algo), ['lgbm', 'xgb', 'lgbm_k15', 'logit_k15']);
+  assert.deepEqual([...RETIRED_MODELS].sort(), ['cat_k18', 'lgbm_k18', 'logit', 'logit_k15', 'logit_k18', 'xgb_k18']);
+  assert.deepEqual(activeModels(models).map((m) => m.algo), ['lgbm', 'xgb', 'lgbm_k15']);
   assert.deepEqual(activeModels(null), []);
   assert.equal(rows[2].pct, 94);
   assert.equal(FAMILY_JA.k15, 'ラベル1.5σ');
@@ -68,7 +70,7 @@ test('modelRows: payload に無いモデルは並べない（古い予測ファ�
   assert.deepEqual(rows2.map((r) => r.short), ['L15']);
 });
 
-test('modelGrid: ラベル × 学習器の 2行 × 4列（1.8σ の行は出さない）。並びは payload の models の順', () => {
+test('modelGrid: ラベル × 学習器の 2行 × 3列（1.8σ の行・ロジスティック回帰の列は出さない）。並びは payload の models の順', () => {
   const learners = ['lgbm', 'xgb', 'cat', 'logit'];
   const all = [];
   const byModel = {};
@@ -78,21 +80,21 @@ test('modelGrid: ラベル × 学習器の 2行 × 4列（1.8σ の行は出さ�
     byModel[algo] = { score: 0.1, pctHistorical: 90 + r * 3 + i };       // 行と列が分かる値
   }));
   const g = modelGrid({ byModel }, all);
-  assert.deepEqual(g.cols.map((c) => c.short), ['LGB', 'XGB', 'CAT', 'LR']);
+  assert.deepEqual(g.cols.map((c) => c.short), ['LGB', 'XGB', 'CAT']);
   assert.deepEqual(g.rows.map((r) => r.labelJa), ['1.2σ', '1.5σ']);
   assert.deepEqual(g.rows.map((r) => r.cells.map((x) => x.pct)),
-    [[90, 91, 92, 93], [93, 94, 95, 96]]);
+    [[90, 91, 92], [93, 94, 95]]);
   assert.equal(g.rows[1].cells[2].algo, 'cat_k15');
   assert.equal(LABEL_JA.base, '1.2σ');
 });
 
 test('modelGrid: 無いモデルは null、古い予測ファイルは 1.2σ の1行（MLP があれば NN の列）', () => {
-  // ラベル違いが一部だけの日（cand は lgbm / xgb / lgbm_k15 / logit_k15 / lgbm_k18 / xgb_k18）
+  // ラベル違いが一部だけの日（cand は lgbm / xgb / lgbm_k15 / logit_k15 / lgbm_k18 / xgb_k18。logit_k15 は外したので出さない）
   const g = modelGrid(cand, models);
-  assert.deepEqual(g.cols.map((c) => c.learner), ['lgbm', 'xgb', 'logit']);
+  assert.deepEqual(g.cols.map((c) => c.learner), ['lgbm', 'xgb']);
   assert.deepEqual(g.rows.map((r) => r.label), ['base', 'k15']);
-  assert.deepEqual(g.rows[0].cells.map((x) => x && x.pct), [96, 91, null]);
-  assert.deepEqual(g.rows[1].cells.map((x) => x && x.pct), [94, null, 88]);
+  assert.deepEqual(g.rows[0].cells.map((x) => x && x.pct), [96, 91]);
+  assert.deepEqual(g.rows[1].cells.map((x) => x && x.pct), [94, null]);
   const old = modelGrid(
     { byModel: { lgbm: { pctHistorical: 50 }, xgb: { pctHistorical: 60 }, mlp: { pctHistorical: 70 } } },
     [{ algo: 'lgbm', name: 'LightGBM' }, { algo: 'xgb', name: 'XGBoost' }, { algo: 'mlp', name: 'ニューラルネット' }]);
@@ -179,13 +181,13 @@ test('earningsSummary: 持つ間に決算が来る候補の数。項目の無い
 });
 
 // スコアそのものの表（運用者の依頼 2026-10-16）: 色の物差しは渡した候補の全モデル（外した 1.8σ は入れない）
-test('scoreRange: 全候補・全モデルのスコアの最小〜最大。外した 1.8σ は入れない。スコアが無ければ null', () => {
+test('scoreRange: 全候補・全モデルのスコアの最小〜最大。外した 1.8σ・ロジスティック回帰は入れない。スコアが無ければ null', () => {
   const cands = [
-    { byModel: { lgbm: { score: 0.2, pctHistorical: 50 }, xgb_k18: { score: 0.05 } } },
-    { byModel: { cat_k15: { score: 0.61 }, logit: { score: null }, mlp: {} } },
+    { byModel: { lgbm: { score: 0.2, pctHistorical: 50 }, xgb_k18: { score: 0.05 }, logit: { score: 0.9 } } },
+    { byModel: { cat_k15: { score: 0.61 }, logit_k15: { score: 0.01 }, mlp: {} } },
     { date: '2026-10-16' },
   ];
-  assert.deepEqual(scoreRange(cands), { lo: 0.2, hi: 0.61, n: 2 });       // xgb_k18 の 0.05 は物差しに入らない
+  assert.deepEqual(scoreRange(cands), { lo: 0.2, hi: 0.61, n: 2 });       // xgb_k18・logit・logit_k15 は物差しに入らない
   assert.equal(scoreRange([]), null);
   assert.equal(scoreRange([{ byModel: { lgbm: { pctHistorical: 90 } } }]), null);
   assert.equal(scoreRange(null), null);

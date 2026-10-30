@@ -97,11 +97,12 @@ def why_retune(prev: dict, train_to: str, sig: str,
 def main() -> int:
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
     force = "--force" in sys.argv
-    # RETIRED（2026-10-09 に外した mlp）は探索しない。ラベル違いのモデル（M.ACTIVE_VARIANTS。1.5σ の4本）は既定に入れず、
-    # 名指ししたときだけ探索する（土曜の Retrain Weekly が only= で回す。2026-10-11 夜）。2026-10-24 に外した 1.8σ の4本
-    # （M.RETIRED_VARIANTS）は名指ししても探索しない（学習側の train_multi.py も止まる）
+    # RETIRED（2026-10-09 に外した mlp・2026-11-02 の予測から外したロジスティック回帰）は名指ししても探索しない。ラベル違いの
+    # モデル（M.ACTIVE_VARIANTS。1.5σ の木3本）は既定に入れず、名指ししたときだけ探索する（土曜の Retrain Weekly が only= で
+    # 回す。2026-10-11 夜）。外したラベル違い（M.RETIRED_VARIANTS。1.8σ の4本と logit_k15）も名指ししても探索しない
+    # （学習側の train_multi.py も止まる）
     algos = args or [a for a in TM.ALGOS if a not in M.RETIRED]
-    known = list(TM.ALGOS) + list(M.ACTIVE_VARIANTS)
+    known = [a for a in TM.ALGOS if a not in M.RETIRED] + list(M.ACTIVE_VARIANTS)
     unknown = [a for a in algos if a not in known]
     if unknown:
         raise SystemExit(f"知らないモデル: {unknown}（{', '.join(known)} のいずれか）")

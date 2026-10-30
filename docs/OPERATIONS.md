@@ -9,6 +9,11 @@
 > **2026-10-24 から8本**: 運用者の依頼（「1.8σの週次学習はなくしたはずです」→ AskUserQuestion「採点・表示からも外す」）で、1.8σ の
 > 4本を週次の学習・毎日の採点・画面・スプレッドシートから外した（`docs/MODEL_LINEUP.md`「1.8σ の4本を外す」）。
 >
+> **2026-11-02 の予測から6本**: 運用者の指示（2026-10-29「次週からロジスティック回帰をなくしてください。…ダッシュボードから
+> 非表示にするだけでなく、ロジスティックに関して週次の更新自体いらないです」→ AskUserQuestion「月曜の予測から」）で、ロジスティック
+> 回帰（1.2σ の logit・1.5σ の logit_k15）を週次の学習・毎日の採点・画面・スプレッドシートから外した。今は 1.2σ・1.5σ の木の各3本
+> （`docs/MODEL_ADOPTION_RULES.md` §83）。
+>
 > **選定の基準（2026-10-29 から）**: 運用者の依頼「候補銘柄の選定モデルに、1.2σではなく、1.5σのモデルにしてほしいです。」
 > （AskUserQuestion「すぐ（今夜から）」）で、今日の戦略・実運用の追跡・候補銘柄のニュース・リカレンス・ネットワーク・候補の比較・
 > 一覧の並び順・際どい印の規則を **1.5σ の3本（L15・X15・C15）がすべて95以上** に戻した（2026-10-23〜10-29 は 1.2σ の3本
@@ -130,8 +135,8 @@
 | 日証金（平日） | 平日 13:10 | Fetch JSF | `mode=both` | `trig_0123KKDZgbRthzbicWPBnr1k` |
 | 日証金（土日） | 土日 10:20 | Fetch JSF | `mode=history` | `trig_01VF9LEPhar2yRaZSzpfZmsX` |
 | EDINET DB | 毎日 10:10 | Fetch EDINET DB | 既定（85社・対応表は auto） | `trig_018mSPXUBa4PBFsHpK5BzNpK` |
-| 週次学習 | 日曜 09:10 | Retrain Weekly | `tune=yes`（1.2σ の4本） | `trig_01MQSVtn55Vmy7HmKjs9mJ6p` |
-| ラベル違い 1.5σ | 土曜 09:10 | Retrain Weekly | `tune=yes` `only=lgbm_k15,xgb_k15,cat_k15,logit_k15`（2026-10-11 夜に追加） | `trig_0127nfERdx9RyirNCkFp4BXn` |
+| 週次学習 | 日曜 09:10 | Retrain Weekly | `tune=yes`（1.2σ の木3本とランキング学習。ロジスティック回帰は 2026-11-01 の回から外した） | `trig_01MQSVtn55Vmy7HmKjs9mJ6p` |
+| ラベル違い 1.5σ | 土曜 09:10 | Retrain Weekly | `tune=yes` `only=lgbm_k15,xgb_k15,cat_k15`（2026-10-11 夜に追加。2026-10-31 の回から `logit_k15` を外した） | `trig_0127nfERdx9RyirNCkFp4BXn` |
 | ~~ラベル違い 1.8σ~~ | ~~土曜 14:10~~ | （2026-10-24 に**無効**。運用者の依頼で 1.8σ の4本を外した） | `only=lgbm_k18,xgb_k18,cat_k18,logit_k18` は名指ししても「知らないモデル」で止まる | `trig_01JHXTaxZLmDgfUBF3CYbTqe`（消さずに無効のまま） |
 | 保存データの検査 | 土曜 10:40 | Check Data Store | 既定（5日） | `trig_01G4KY6RJMAsFgY7t57khocW` |
 | 朝の確認 | 月〜土 07:40 | （確かめるだけ） | 前日の run の結論を見る。取り込みの run が無ければ Update Data Store を起動し直す。取り込みは済んで予測だけ無ければ Predict Breakouts を起動する。月曜は日曜の学習と土曜の検査を見る | `trig_01Pscq9oSei7otJrCjgfxgEc` |
