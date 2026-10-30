@@ -90,13 +90,13 @@ SWEEP_OVERRIDES: dict = {}
 KEEP_UNLABELED = False
 
 #: True にすると、決算の出し直し（同じ期の後からの版）があった期について、元の版の開示日から出し直しの日までの行の
-#: 決算の列を「その日までに開示された決算だけで作った値」にする（repair_reissued）。既定（False）は今の作り: 同じ
+#: 決算の列を「その日までに開示された決算だけで作った値」にする（repair_reissued。直す版）。False は前の作り: 同じ
 #: （銘柄, 事業年度, 四半期）の最後の版だけを残して結合するので、その間の行には後の版が先回りして効き、予測の時点の値
 #: （元の版）と食い違う（2026-10-28 の一致チェック。docs/DATA_TIMING.md）。運用者の選択「直す版を作って比べる」
 #: （2026-10-29）で比べる版を作り（実験116。docs/MODEL_ADOPTION_RULES.md §80）、運用者の選択「入れる」（同じ日）で、
-#: 2026-11-01（日）の再学習から既定を True にする（金曜 10/30 の予測の後に切り替える）。build_dataset.py --pit-fins で立ち、
-#: --no-pit-fins で今の作りに戻す（比べ直すとき）
-PIT_FINS = False
+#: 金曜 10/30 の予測の後に既定を True にした（土曜 10/31 の 1.5σ・日曜 11/01 の再学習から直す版で学ぶ。§80-5）。
+#: --no-pit-fins で前の作りに戻す（実験116 を比べ直すときなど）。--pit-fins は既定と同じ（明示したいとき）
+PIT_FINS = True
 
 # 78週 ≒ 368営業日。52週(245日)から広げた。
 # 52週だと「1年前の高値を1円抜いただけ」も母集団に入り、
@@ -3454,7 +3454,7 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     samples = attach_fins(samples, q)
     pit_info = None
     if PIT_FINS:
-        # 決算の出し直しの間の行を、その日に分かっていた版で付け直す（既定はオフ。比べる版を作るときだけ）
+        # 決算の出し直しの間の行を、その日に分かっていた版で付け直す（2026-10-30 から既定。--no-pit-fins で前の作り）
         samples, pit_info = repair_reissued(samples, q, fins, data_dir,
                                             adj=df[["Code", "Date", "close_raw", "close"]])
         print(f"[merge] 決算の出し直し（その日の版で付け直す）: 出し直しの窓 {pit_info['windows']:,} / 当たる行 "
@@ -3857,9 +3857,9 @@ def main(argv: List[str] | None = None) -> int:
                     help="ラベル未確定の行も残す（日次予測用。学習には使わない）")
     pit = ap.add_mutually_exclusive_group()
     pit.add_argument("--pit-fins", action="store_true",
-                     help="決算の出し直しの間の行を、その日に分かっていた版で付け直す（PIT_FINS を立てる）")
+                     help="決算の出し直しの間の行を、その日に分かっていた版で付け直す（PIT_FINS を立てる。2026-10-30 から既定）")
     pit.add_argument("--no-pit-fins", action="store_true",
-                     help="決算の出し直しの間の行も、同じ期の最後の版で結合する（PIT_FINS を下ろす。比べ直すとき）")
+                     help="決算の出し直しの間の行も、同じ期の最後の版で結合する（PIT_FINS を下ろす。前の作りで比べ直すとき）")
     args = ap.parse_args(argv)
     if args.keep_unlabeled:
         globals()["KEEP_UNLABELED"] = True

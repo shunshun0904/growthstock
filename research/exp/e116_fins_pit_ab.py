@@ -10,7 +10,9 @@
 docs/MODEL_ADOPTION_RULES.md §80。
 
 2つの版（行・ラベルは同じ。決算の列だけが違う）
-  今の版  Run Experiment の Build dataset が作った research/_data/dataset.parquet（本番と同じ作り）
+  今の版  Run Experiment の Build dataset が作った research/_data/dataset.parquet（2026-10-30 までの本番と同じ作り。
+          2026-10-30 の夜に PIT_FINS の既定を True にしたので、それからの Build dataset は直す版を作り、この台本は「今の版の
+          学習データが PIT_FINS で作られている」で止まる。比べ直すときは今の版を build_dataset.py --no-pit-fins で作る。§80-5）
   直す版  同じデータで build_dataset.py --pit-fins（PIT_FINS: 出し直しの窓の行だけ、その日までに開示された決算だけで作った
           決算パネルの値に付け直す。進捗の順位は付いた版の開示日の順位。そのあとの計算（1年以上古い決算の欠測・時価総額・
           PER・PBR・全銘柄の中の順位など）は今の作りのまま）。research/_data/pit/dataset.parquet

@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """
-決算の出し直しを、その日に分かっていた版で付け直す（build_dataset.PIT_FINS・repair_reissued。既定はオフ）。合成の決算で:
+決算の出し直しを、その日に分かっていた版で付け直す（build_dataset.PIT_FINS・repair_reissued。2026-10-30 から既定はオン）。
+合成の決算で:
 
 - 当たる行（ある期の最初の版の開示日 ≤ 行の日付 < 最後の版の開示日）だけ、決算の列が「その日までに開示された決算だけで
   作った値」（probe_fins_versions.as_of_values と同じ。実データで確かめたもの）になる。当たらない行は1つも変わらない
 - 進捗の順位（全銘柄の中の順位）は、付いた版の開示日の順位（progress_pct_by_version）を引く。今の作りは期ごとの最後の版
 - progress_pct_point_in_time は、版ごとの順位の表から期ごとの最後の版を引いたものと同じ（作り直しの前と同じ値）
-- 窓が無ければ何も変えない。--pit-fins で PIT_FINS が立ち、--no-pit-fins で下りる（両方は付けられない）。
+- 窓が無ければ何も変えない。既定は PIT_FINS が立っていて（2026-10-30 から）、--no-pit-fins で下り、--pit-fins で立つ
+  （両方は付けられない）。
   quarterize_panel を分けて作っても今と同じ表
 
   python3 tests/test_pit_fins.py
@@ -152,12 +154,12 @@ class TestSplitAndFlag(unittest.TestCase):
             self.assertTrue(P.same_values(a[c], b[c]).all(), c)
 
     def test_flag(self):
-        self.assertFalse(BD.PIT_FINS)                                       # 既定は今の作り
+        self.assertTrue(BD.PIT_FINS)                                        # 既定は直す版（2026-10-30 から。§80-5）
         with mock.patch.object(BD, "build") as b, mock.patch.object(BD, "PIT_FINS", False):
             BD.main(["--pit-fins", "--data-dir", "x", "--out", "y.parquet"])
             self.assertTrue(BD.PIT_FINS)
             b.assert_called_once_with("x", "y.parquet")
-        self.assertFalse(BD.PIT_FINS)
+        self.assertTrue(BD.PIT_FINS)                                        # パッチを外すと既定に戻る
         with mock.patch.object(BD, "build"), mock.patch.object(BD, "PIT_FINS", False):
             BD.main(["--data-dir", "x", "--out", "y.parquet"])
             self.assertFalse(BD.PIT_FINS)
