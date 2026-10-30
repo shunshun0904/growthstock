@@ -22,10 +22,12 @@
 
   python3 tests/test_e117_rolling5_ltr.py
 """
+import base64
 import contextlib
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -529,6 +531,16 @@ class TestDailyRule(unittest.TestCase):
         self.assertFalse(info2["found"])
         self.assertEqual(len(empty), 0)
         self.assertEqual(tuple(R.RULE_TREES), tuple(LT.K15))
+        # モデルごとの百分位（封をする一覧用）: 3本の最小が pmin、すべて95以上が r15
+        with tempfile.TemporaryDirectory() as tmp:
+            for a in R.RULE_TREES:
+                daily.assign(score=sc[a], label=(z > 1.0).astype(float), outcome=0.0).to_parquet(
+                    os.path.join(tmp, f"{a}_oof.parquet"), index=False)
+            pc = R.rule_pcts(daily, R.RULE_TREES, data_dir=tmp)
+        cols = [f"pct_{a}" for a in R.RULE_TREES]
+        np.testing.assert_allclose(pc.loc[ok, cols].min(axis=1).to_numpy(), pmin[ok], rtol=0, atol=1e-9)
+        np.testing.assert_array_equal((pc.loc[ok, cols] >= 95.0).all(axis=1).to_numpy(), flag[ok].astype(bool))
+        self.assertTrue(pc.loc[~ok, cols].isna().all().all())
 
 
 def rule_pools():
@@ -633,6 +645,46 @@ class TestTriple(unittest.TestCase):
         self.assertEqual(R.triple_stats(o2, days)["days"], 3)
 
 
+def keypair():
+    """封の受け手の鍵（X25519。base64 の秘密鍵・公開鍵）。"""
+    from cryptography.hazmat.primitives import serialization as ser
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+
+    k = X25519PrivateKey.generate()
+    priv = k.private_bytes(ser.Encoding.Raw, ser.PrivateFormat.Raw, ser.NoEncryption())
+    pub = k.public_key().public_bytes(ser.Encoding.Raw, ser.PublicFormat.Raw)
+    return base64.b64encode(priv).decode(), base64.b64encode(pub).decode()
+
+
+class TestSeal(unittest.TestCase):
+    def test_round_trip_and_wrong_key(self):
+        priv, pub = keypair()
+        data = json.dumps({"rows": [{"code": "7203", "ret": 0.1}]}).encode() * 20
+        blob = R.seal(data, pub)
+        self.assertEqual(R.unseal(blob, priv), data)
+        self.assertNotIn("7203", base64.b64decode(blob).decode("latin-1"))   # 中身は平文で入らない
+        other, _ = keypair()
+        with self.assertRaises(Exception):
+            R.unseal(blob, other)
+        self.assertNotEqual(R.seal(data, pub), blob)                         # 毎回ちがう使い捨ての鍵と nonce
+
+    def test_lines(self):
+        priv, pub = keypair()
+        blob = R.seal(b"x" * 3000, pub)
+        lines = R.seal_lines(blob, width=40)
+        self.assertTrue(lines[0].startswith(R.SEAL_BEGIN) and lines[-1] == R.SEAL_END)
+        self.assertTrue(all(len(ln.split(" ", 1)[1]) <= 40 for ln in lines[1:-1]))
+        logged = ["noise S999 AAAA"] + [f"2026-10-30T03:00:00.0000000Z {ln}" for ln in lines] + ["S000 after"]
+        self.assertEqual(R.read_sealed(logged), blob)                        # 時刻の付いたログの行から組み立て直す
+        with self.assertRaises(ValueError):
+            R.read_sealed(lines[:3] + lines[4:])                             # 1行抜けた
+        bad = list(lines)
+        bad[2] = bad[2][:-2] + ("AB" if not bad[2].endswith("AB") else "CD")
+        with self.assertRaises(ValueError):
+            R.read_sealed(bad)                                               # 1行の中身が違う
+        self.assertEqual(R.unseal(R.read_sealed(lines), priv), b"x" * 3000)
+
+
 class TestAttachAndFlagged(unittest.TestCase):
     def test_attach_rule(self):
         o, _ = hand_pools()
@@ -681,6 +733,14 @@ class TestMain(unittest.TestCase):
 
     def patches(self, tmp, full, bars, cutoff, fake_rule, fake_tune):
         chk = {"hold5_match": 0, "hold5_both": 0}
+
+        def fake_pcts(daily, models, data_dir=None):
+            r = daily[["Code", "Date"]].copy()
+            for a in models:
+                r[f"pct_{a}"] = np.round(daily["f1"].to_numpy() * 10, 1)
+            r.loc[pd.to_datetime(r["Date"]) < pd.Timestamp("2019-03-01"), [f"pct_{a}" for a in models]] = np.nan
+            return r
+
         return [mock.patch.object(R, "OOF_DIR", tmp),
                 mock.patch.object(R, "PARAMS_PATH", os.path.join(tmp, "e117_params.json")),
                 mock.patch.object(R, "SUMMARY_PATH", os.path.join(tmp, "e117_summary.json")),
@@ -688,6 +748,7 @@ class TestMain(unittest.TestCase):
                 mock.patch.object(R.W, "load_all", return_value=(full, bars, cutoff, chk)),
                 mock.patch.object(R.W, "base_params", return_value=dict(T115.SMALL_CLF)),
                 mock.patch.object(R.W, "daily_ltr_params", return_value={"params": dict(T115.SMALL_RANK), "_cutoff": "x"}),
+                mock.patch.object(R, "rule_pcts", side_effect=fake_pcts),
                 mock.patch.object(R, "daily_rule", side_effect=fake_rule),
                 mock.patch.object(R.E, "tune_l", side_effect=fake_tune)]
 
@@ -769,6 +830,35 @@ class TestMain(unittest.TestCase):
                 self.assertLessEqual(t["R15R0"]["n"], t["R15"]["n"])
             for code in codes:
                 self.assertNotIn(code, out2)
+            # 3回目: 一覧を封をして出す（中身は公開ログに平文で出ない。手元の秘密鍵でだけ開ける）
+            priv, pub = keypair()
+            buf3 = io.StringIO()
+            with contextlib.redirect_stdout(buf3):
+                self.assertEqual(R.main(["--trials", "2", "--shifts", "0,2", "--triple", "--seal", pub]), 0)
+            out3 = buf3.getvalue()
+            payload = json.loads(R.unseal(R.read_sealed(out3.splitlines()), priv))
+            self.assertEqual(payload["pct_models"], list(R.RULE_TREES) + list(R.R0_TREES))
+            with open(os.path.join(tmp, "e117_summary.json"), encoding="utf-8") as fh:
+                sm3 = json.load(fh)
+            want = max(sm3["triple"][sh]["sets"]["D1W1"]["n"] for sh in ("0", "2"))
+            self.assertGreaterEqual(len(payload["rows"]), want)
+            for r in payload["rows"]:
+                self.assertIn(r["code"], codes)
+                self.assertTrue(r["d1w1"] or r["q4"])
+                self.assertTrue(set(r["d1w1"]) <= {0, 2} and set(r["q4"]) <= {0, 2})
+                self.assertGreaterEqual(r["n_pool"], r["n_day"])
+                self.assertGreaterEqual(r["n_day"], 1)
+                self.assertEqual(sorted(r["pct"]), sorted(payload["pct_models"]))
+            self.assertEqual(payload["med"]["r15"]["n"], sm3["triple"]["0"]["sets"]["R15"]["n"])
+            self.assertGreater(payload["med"]["all"]["n"], payload["med"]["r15"]["n"])
+            self.assertEqual(payload["med"]["d1w1"]["n"], sum(1 for r in payload["rows"] if r["d1w1"]))
+            self.assertEqual(payload["med"]["q4"]["n"], sum(1 for r in payload["rows"] if r["q4"]))
+            self.assertIn("1.5σ の3本の最小が R15 の pmin と同じ行", out3)
+            plain = [ln for ln in out3.splitlines() if not re.search(r"\bS\d{3} ", ln) and R.SEAL_BEGIN not in ln]
+            for code in codes:
+                self.assertNotIn(code, "\n".join(plain))
+            with self.assertRaises(SystemExit):                                # --seal だけでは使えない
+                R.main(["--trials", "2", "--shifts", "0", "--seal", pub])
 
     def test_stops_without_production_oof(self):
         full, bars, _ = main_data()

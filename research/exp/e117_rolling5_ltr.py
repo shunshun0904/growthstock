@@ -90,6 +90,15 @@
     exp=e117_rolling5_ltr.py  args=""      （既定は --trials 50 --shifts 0,2,4 --top 2。探索の結果と out-of-fold は置き場に
                                             残し、同じデータ・同じ設定なら次の回は読む）
     exp=e117_rolling5_ltr.py  args="--triple"   （参考の表も出す）
+    exp=e117_rolling5_ltr.py  args="--triple --seal <公開鍵>"   （3条件・4条件の候補の一覧を封をして出す。下）
+
+封をした一覧（--seal。運用者の依頼 2026-10-30「どのような銘柄なのか、調査用アーティファクト」）
+  - 銘柄ごとの値は公開ログに出さない約束なので、受け手の公開鍵（X25519・base64）で封をして（使い捨ての鍵・HKDF-SHA256・
+    AES-GCM）、番号付きの base64 の行で出す。秘密鍵は受け手の手元にだけあり、開けるのは受け手だけ（取引の記録を暗号にして
+    置くのと同じ考え方）
+  - 中身: 3条件・4条件の候補ごとの選ばれたずらし方・その日の候補の数と組の行の数・今の売り方の収益・+10% 到達と到達の営業日・
+    20営業日目の終値・6本（1.5σ・1.2σ の木）の百分位・候補の日の列（SEAL_COLS。日証金・EDINET DB の列は入れない）と、
+    候補全体・R15・R15＋R0・3条件・4条件の中央値
 """
 from __future__ import annotations
 
@@ -757,6 +766,171 @@ def report(sh: int, res: Dict, top_n: int) -> None:
               + f" ・平均 {ag['buy_mean'][a]:.2f}日")
 
 
+# --------------------------------------------------------------------------- #
+# 3条件・4条件の候補の一覧を封をして出す（--seal。運用者の依頼 2026-10-30「どのような銘柄なのか、調査用アーティファクト」）
+# --------------------------------------------------------------------------- #
+
+SEAL_INFO = b"growthstock-e117-seal-v1"
+SEAL_BEGIN, SEAL_END = "-----BEGIN E117 SEALED-----", "-----END E117 SEALED-----"
+SEAL_WIDTH = 76
+#: 一覧に入れる候補の日の列（日証金・EDINET DB の列は入れない）
+SEAL_COLS = ("market_cap", "close_raw", "per", "pbr", "div_yield", "ret_5d", "ret_20d", "vol_20d", "break_margin",
+             "base_length", "broken_high_age", "base_depth", "max_dd_120", "sales_growth_q0", "eps_growth_q0",
+             "op_margin_q0", "progress_pct", "days_to_earn", "listing_years", "rel_sector_20", "vol_rel_long", "tx_rsi_14")
+
+
+def _seal_key(shared: bytes) -> bytes:
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+    return HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=SEAL_INFO).derive(shared)
+
+
+def seal(payload: bytes, pub_b64: str) -> str:
+    """
+    受け手の公開鍵（X25519・base64）で封をする: 使い捨ての鍵で鍵を共有し（HKDF-SHA256）、zlib で縮めて AES-GCM で暗号にする。
+    返すのは base64（使い捨ての公開鍵 32バイト・nonce 12バイト・暗号文）。秘密鍵は受け手の手元にだけある。
+    """
+    import base64
+    import zlib
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    peer = X25519PublicKey.from_public_bytes(base64.b64decode(pub_b64, validate=True))
+    eph = X25519PrivateKey.generate()
+    nonce = os.urandom(12)
+    ct = AESGCM(_seal_key(eph.exchange(peer))).encrypt(nonce, zlib.compress(payload, 9), None)
+    raw = eph.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    return base64.b64encode(raw + nonce + ct).decode()
+
+
+def unseal(blob_b64: str, priv_b64: str) -> bytes:
+    """seal の逆（手元で開ける）。鍵が違う・中身が欠けていれば例外。"""
+    import base64
+    import zlib
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    raw = base64.b64decode(blob_b64, validate=True)
+    priv = X25519PrivateKey.from_private_bytes(base64.b64decode(priv_b64, validate=True))
+    key = _seal_key(priv.exchange(X25519PublicKey.from_public_bytes(raw[:32])))
+    return zlib.decompress(AESGCM(key).decrypt(raw[32:44], raw[44:], None))
+
+
+def seal_lines(blob: str, width: int = SEAL_WIDTH) -> List[str]:
+    """公開ログに出す行: 始まり（長さと SHA-256 の先頭12文字）・番号付きの行・終わり。写すときの抜けや誤りを見つけるため。"""
+    import hashlib
+
+    head = f"{SEAL_BEGIN} {len(blob)} {hashlib.sha256(blob.encode()).hexdigest()[:12]}"
+    body = [f"S{i:03d} {blob[j:j + width]}" for i, j in enumerate(range(0, len(blob), width))]
+    return [head] + body + [SEAL_END]
+
+
+def read_sealed(lines: Sequence[str]) -> str:
+    """
+    seal_lines の行（行の頭に時刻などが付いていてもよい）から base64 を組み立て直す。番号が飛んでいる・長さか SHA-256 が
+    合わなければ ValueError。
+    """
+    import hashlib
+    import re
+
+    head, parts, inside = None, {}, False
+    for ln in lines:
+        if SEAL_BEGIN in ln:
+            m = re.search(re.escape(SEAL_BEGIN) + r" (\d+) ([0-9a-f]{12})", ln)
+            head, parts, inside = (int(m.group(1)), m.group(2)) if m else None, {}, True
+            continue
+        if SEAL_END in ln:
+            inside = False
+            continue
+        m = re.search(r"\bS(\d{3}) ([A-Za-z0-9+/=]+)\s*$", ln) if inside else None
+        if m:
+            parts[int(m.group(1))] = m.group(2)
+    blob = "".join(parts[i] for i in sorted(parts))
+    if (head is None or sorted(parts) != list(range(len(parts))) or len(blob) != head[0]
+            or hashlib.sha256(blob.encode()).hexdigest()[:12] != head[1]):
+        raise ValueError("封をした行がそろっていない（番号・長さ・SHA-256 のどれかが合わない）")
+    return blob
+
+
+def rule_pcts(daily: pd.DataFrame, models: Sequence[str], data_dir: str | None = None) -> pd.DataFrame:
+    """daily_rule と同じ作りで、モデルごとの前向きの百分位（画面と同じ小数1桁）。daily の (Code, Date) と pct_<モデル>。"""
+    import lab
+    import e79_model_clusters as E79
+    import e82_and_rule_variants as E82
+
+    data_dir = data_dir or lab.DATA_DIR
+    models = tuple(models)
+    keys = daily[["Code", "Date"]].copy()
+    keys["Code"] = keys["Code"].astype(str)
+    keys["Date"] = pd.to_datetime(keys["Date"])
+    w, _ = E79.load_oofs(data_dir, models=models)
+    folds = E79.make_windows(keys["Date"])
+    w["window"] = E79.assign_windows(w["Date"], folds)
+    w = w[w["window"] > 0].reset_index(drop=True)
+    pc = np.full((len(w), len(models)), np.nan)
+    for _, (_, te, _, Pte) in E79.window_split(w, folds, models=models).items():
+        pc[te] = E82.rounded(Pte)
+    out = w[["Code", "Date"]].copy()
+    for j, a in enumerate(models):
+        out[f"pct_{a}"] = pc[:, j]
+    return keys.merge(out, on=["Code", "Date"], how="left", validate="many_to_one")
+
+
+def _num(v) -> float | None:
+    """JSON に入れる数（有効数字5桁。欠測は null）。"""
+    try:
+        x = float(v)
+    except (TypeError, ValueError):
+        return None
+    return float(f"{x:.5g}") if np.isfinite(x) else None
+
+
+def seal_payload(sets_by_shift: Dict[int, Dict[str, pd.DataFrame]], of: pd.DataFrame, rl: pd.DataFrame,
+                 daily: pd.DataFrame, pcts: pd.DataFrame, cols: Sequence[str] = SEAL_COLS) -> Dict:
+    """
+    封をする中身。rows: 3条件・4条件の候補（どれかのずらし方で選ばれたもの）ごとに、選ばれたずらし方・その日の候補の数と組の行の
+    数・今の売り方の収益・+10% 到達と到達の営業日・20営業日目の終値・6本の百分位・候補の日の列。med: 候補全体（数える日の候補の日
+    の行）・R15・R15＋R0（ずらし0）・3条件・4条件の、列ごとの中央値と件数。
+    """
+    cols = [c for c in cols if c in daily.columns]
+    dk = daily.assign(Code=daily["Code"].astype(str), Date=pd.to_datetime(daily["Date"])).set_index(["Code", "Date"])
+    pk = pcts.set_index(["Code", "Date"])
+    dr = pd.to_datetime(rl["Date"])
+    picked: Dict[Tuple[str, pd.Timestamp], Dict] = {}
+    for sh in sorted(sets_by_shift):
+        for k in ("D1W1", "Q4"):
+            for r in sets_by_shift[sh].get(k, pd.DataFrame()).itertuples():
+                key = (str(r.Code), pd.Timestamp(r.cand_date))
+                d = picked.setdefault(key, {"D1W1": [], "Q4": [], "r": r})
+                d[k].append(int(sh))
+    rows = []
+    for (code, cd), d in sorted(picked.items(), key=lambda kv: (kv[0][1], kv[0][0])):
+        r = d["r"]
+        day = rl[dr == cd]
+        f = dk.loc[(code, cd)] if (code, cd) in dk.index else None
+        p = pk.loc[(code, cd)] if (code, cd) in pk.index else None
+        rows.append({"code": code, "date": str(cd.date()), "d1w1": d["D1W1"], "q4": d["Q4"],
+                     "n_day": int((day["r5_days"] == 0).sum()), "n_pool": int(len(day)),
+                     "ret": _num(getattr(r, RET)), "hit": bool(getattr(r, HIT)), "hit_day": _num(getattr(r, HITDAY)),
+                     "r20": _num(getattr(r, R20)),
+                     "pct": {c[4:]: _num(p[c]) for c in pk.columns} if p is not None else {},
+                     "f": {c: _num(f[c]) for c in cols} if f is not None else {}})
+    sh0 = min(sets_by_shift)
+    groups = {"all": of.loc[of["r5_days"] == 0, ["Code", "cand_date"]],
+              "r15": sets_by_shift[sh0]["R15"][["Code", "cand_date"]]}
+    if "R15R0" in sets_by_shift[sh0]:
+        groups["r15r0"] = sets_by_shift[sh0]["R15R0"][["Code", "cand_date"]]
+    groups["d1w1"] = pd.DataFrame([(c, t) for (c, t), d in picked.items() if d["D1W1"]], columns=["Code", "cand_date"])
+    groups["q4"] = pd.DataFrame([(c, t) for (c, t), d in picked.items() if d["Q4"]], columns=["Code", "cand_date"])
+    med = {}
+    for g, kk in groups.items():
+        idx = pd.MultiIndex.from_arrays([kk["Code"].astype(str), pd.to_datetime(kk["cand_date"])])
+        x = dk.reindex(idx)[cols] if len(kk) else pd.DataFrame(columns=cols)
+        med[g] = {"n": int(len(kk)), "median": {c: _num(x[c].median()) for c in cols}}
+    return {"v": 1, "cols": cols, "pct_models": [c[4:] for c in pk.columns], "rows": rows, "med": med}
+
+
 def report_triple(rows: List[Tuple[int, Dict]]) -> None:
     """参考（運用者の確認 2026-10-30・見るだけ）の表（公開ログ。集計だけ）。"""
     print(f"\n■ 参考（運用者の確認 2026-10-30・見るだけ）: 候補の日に「その日の候補の中の今のランキング学習（日次）で1位」"
@@ -778,7 +952,11 @@ def main(argv=None) -> int:
     ap.add_argument("--top", type=int, default=TOP_N)
     ap.add_argument("--triple", action="store_true",
                     help="参考（運用者の確認 2026-10-30）: 日次の1位・組の1位・R15 の3つとも満たす候補だけを買った成績も出す")
+    ap.add_argument("--seal", default="",
+                    help="（--triple と一緒に）3条件・4条件の候補の一覧を、この公開鍵（X25519・base64）で封をしてログに出す")
     args = ap.parse_args(argv)
+    if args.seal and not args.triple:
+        raise SystemExit("--seal は --triple と一緒に使う")
     shifts = [int(x) for x in args.shifts.split(",") if x.strip()]
     import warnings
     from scipy.stats import ConstantInputWarning
@@ -890,6 +1068,8 @@ def main(argv=None) -> int:
                      "cv": cvm, "random_ndcg": rnd, "top": args.top, "shifts": {}}
     rows = []
     tri: List[Tuple[int, Dict]] = []
+    sealed_sets: Dict[int, Dict[str, pd.DataFrame]] = {}
+    of_seal = None
     for sh in shifts:
         o = attach_rule(oof_shift(rl_eval, daily, cols, cols_w, params, sh), rule)
         res, _ = evaluate(o, days, args.top)
@@ -897,7 +1077,12 @@ def main(argv=None) -> int:
         summary["shifts"][str(sh)] = res
         rows.append({"shift": sh, **res})
         if args.triple:
-            tri.append((sh, triple_stats(attach_rule(o, rule0, ("r0", "pmin0")), days)))
+            o3 = attach_rule(o, rule0, ("r0", "pmin0"))
+            tri.append((sh, triple_stats(o3, days)))
+            if args.seal:
+                of3 = flagged(o3)
+                sealed_sets[sh] = triple_buys(of3, days)
+                of_seal = of3 if of_seal is None else of_seal
 
     rd = reading(rows)
     summary["reading"] = rd
@@ -915,6 +1100,18 @@ def main(argv=None) -> int:
         summary["triple"] = {str(sh): t for sh, t in tri}
         # 手元で同じ out-of-fold を作り直すため（木の形。データの値ではない）
         print("  W5 の木の形（全桁）: " + json.dumps(params["W5"], sort_keys=True, default=str))
+    if sealed_sets:
+        pcts = rule_pcts(daily, tuple(RULE_TREES) + tuple(R0_TREES))
+        k15 = [f"pct_{a}" for a in RULE_TREES]
+        pc3 = pcts.merge(rule[["Code", "Date", "pmin"]], on=["Code", "Date"], how="left", validate="one_to_one")
+        both = pc3["pmin"].notna() & pc3[k15].notna().all(axis=1)
+        same = int(np.isclose(pc3.loc[both, k15].min(axis=1), pc3.loc[both, "pmin"]).sum())
+        log(f"[確かめ] 6本の百分位（封をする一覧用）: 1.5σ の3本の最小が R15 の pmin と同じ行 {same:,} / {int(both.sum()):,}")
+        payload = seal_payload(sealed_sets, of_seal, rl_eval, daily, pcts)
+        blob = seal(json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode(), args.seal)
+        print(f"\n■ 封をした一覧（3条件・4条件の候補 {len(payload['rows'])}件。手元の秘密鍵でだけ開ける。中身は公開ログに出さない）")
+        for ln in seal_lines(blob):
+            print(ln)
     summary["minutes"] = round((time.time() - t_all) / 60, 1)
     with open(SUMMARY_PATH, "w", encoding="utf-8") as fh:
         json.dump(summary, fh, ensure_ascii=False, indent=2, default=str)
