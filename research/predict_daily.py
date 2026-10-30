@@ -386,6 +386,96 @@ def attach_ltr(rows: List[Dict], cand: pd.DataFrame, model_dir: str) -> Optional
         return None
 
 
+def attach_ltr5(rows: List[Dict], cand: pd.DataFrame, data_dir: str, model_dir: str) -> Optional[Dict]:
+    """
+    直近5営業日の組のランキング学習（research/ltr5.py。実験117 の W5）で、予測の日（cand の最後の日）の組を採点し、予測の日の
+    候補の行に ltr5（score・組の中の順位 rank（1 = 最上位。同じスコアは銘柄コードの順）・組の行の数 nPool・組の中の百分位 pct）と、
+    3条件・4条件の印 conds（d1・w1・r15・r0・c3・c4。ltr5.conds）を足す。運用者の選択「画面に並べて確かめる」（2026-10-30。
+    docs/MODEL_ADOPTION_RULES.md §82-6）。**買いの規則には使わない。**
+
+    組は予測の日までの直近5営業日の候補（cand は直近 --days 日の候補なので、5営業日ぶんは必ず入っている）。前の日の行には
+    足さない（その日に出した値のまま。freeze_past_days）。モデルが無い・学習した列がデータに無い・日足が足りない・失敗した
+    ときは何も足さない（予測は止めない。attach_ltr と同じ考え方）。rows は cand と同じ順（attach_ltr のあとに呼ぶ。D1 は ltr を見る）。
+    """
+    import live_track as LT
+    import ltr as LTR
+    import ltr5 as L5
+
+    try:
+        model, meta = L5.load(model_dir)
+        if model is None:
+            print("[ltr5] 直近5営業日のランキング学習のモデルが無いので出さない")
+            return None
+        want = list(meta.get("features") or [])
+        base = [c for c in want if c not in L5.MOVE_COLS]
+        miss = [c for c in base if c not in cand.columns]
+        if not want or miss or len(base) + len(L5.MOVE_COLS) != len(want):
+            print(f"[ltr5] 学習した列のうち {len(miss)}列がデータに無い（または値動きの列が足りない）ので出さない")
+            return None
+        day = pd.Timestamp(pd.to_datetime(cand["Date"]).max())
+        bars = LT.load_bars(data_dir, start=day - pd.Timedelta(days=45), extra=["AdjL"])
+        cal = L5.calendar(bars["Date"].unique())
+        if day not in set(cal):
+            print(f"[ltr5] 予測の日 {day.date()} が日足の取引日に無いので出さない")
+            return None
+        pos = int(np.searchsorted(cal.to_numpy(), day.to_datetime64()))
+        first = cal[max(0, pos - (L5.K - 1))]
+        have = pd.to_datetime(cand["Date"]).min()
+        if have > first:
+            print(f"[ltr5] 候補が {have.date()} からしか無く、組（{first.date()} 〜）に足りないので出さない")
+            return None
+        pool = L5.pool_frame(cand, bars, cal, base, decision_days=[day])
+        sc = np.asarray(model.predict(pool[want].to_numpy(dtype=float)), dtype=float)
+        rank = L5.pool_ranks(pool["Date"], pool["Code"], sc)
+        pct = LTR.within_date_pct(pool["Date"], sc)
+        n = int(len(pool))
+        by_code = {str(c): i for i, c in enumerate(pool.loc[pool["r5_days"] == 0, "Code"])}
+        idx0 = pool.index[pool["r5_days"] == 0].to_numpy()
+        iso = day.date().isoformat()
+        todays = [x for x in rows if x.get("date") == iso]
+        got = 0
+        for x in todays:
+            j = by_code.get(str(x.get("jqCode")))
+            if j is None:
+                continue
+            k = int(idx0[j])
+            x["ltr5"] = {"score": round(float(sc[k]), 6), "rank": int(rank[k]), "nPool": n,
+                         "pct": round(float(pct[k]) * 100, 1)}
+            got += 1
+        if got != len(todays):
+            print(f"[ltr5] 予測の日の候補 {len(todays)}件のうち組に見つかったのが {got}件なので出さない")
+            for x in todays:
+                x.pop("ltr5", None)
+            return None
+        # 3条件・4条件の印（実験117 の参考の表と同じ組み合わせ。D1 は日次のランキング学習のその日の1位（同じスコアは銘柄コードの順））
+        d_ok = bool(todays) and all(isinstance((x.get("ltr") or {}).get("dayRank"), int) for x in todays)
+        d1_code = None
+        if d_ok:
+            firsts = sorted(str(x["jqCode"]) for x in todays if x["ltr"]["dayRank"] == 1)
+            d1_code = firsts[0] if firsts else None
+        n3 = n4 = 0
+        for x in todays:
+            per = x.get("byModel") or {}
+            c = L5.conds(None if not d_ok else (str(x["jqCode"]) == d1_code), x["ltr5"]["rank"] == 1,
+                         L5.all_at_least(per, L5.R15_TREES), L5.all_at_least(per, L5.R0_TREES))
+            x["conds"] = c
+            n3 += int(c["c3"] is True)
+            n4 += int(c["c4"] is True)
+        top = int(rank[idx0].min()) if len(idx0) else None
+        print(f"[ltr5] 予測の日 {iso} の組 {n}行（その日の候補 {len(todays)}件・前の4営業日の候補 {n - len(todays)}件）を採点"
+              f"（学習日 {str(meta.get('trainedAt'))[:10]}）・その日の候補の最上位は組の {top}位・3条件 {n3}件・4条件 {n4}件")
+        return {"algo": L5.NAME, "name": meta.get("name", L5.JA), "short": meta.get("short", L5.SHORT),
+                "note": meta.get("note", L5.NOTE), "trainedAt": meta.get("trainedAt"), "nOof": meta.get("nOof"),
+                "oofMetrics": meta.get("oofMetrics", {}), "day": iso, "nPool": n, "poolDays": L5.K,
+                "line": L5.LINE, "n3": n3, "n4": n4}
+    except Exception as exc:          # noqa: BLE001
+        print(f"[ltr5] 失敗（出さない）: {type(exc).__name__}: {exc}")
+        for x in rows:
+            x.pop("ltr5", None)
+            x.pop("conds", None)
+        return None
+
+
 def progress_fields(data_dir: str, keys) -> Dict[Tuple[str, str], dict]:
     """
     候補（銘柄コード5桁, 'YYYY-MM-DD'）ごとに、画面の「進捗期待」に使う値を出す。
@@ -619,6 +709,9 @@ def main(argv=None) -> int:
 
     # ランキング学習（参考。買いの規則には使わない）。その日の中の順位と上半分の印を足す（attach_ltr。§78-9）
     ltr_info = attach_ltr(rows, cand, args.model_dir)
+    # 直近5営業日の組のランキング学習（参考。買いの規則には使わない）。予測の日の候補に組の中の順位と3条件・4条件の印を
+    # 足す（attach_ltr5。運用者の選択「画面に並べて確かめる」2026-10-30。§82-6）
+    ltr5_info = attach_ltr5(rows, cand, args.data_dir, args.model_dir)
 
     # ファイルの並び・rankInDay（予測ログの「順位」）はどちらも基準モデルのスコア（上の rank_in_day と同じ）。
     # 帯・較正・追跡ファイルも基準モデル基準なので、ここは基準モデルのまま。画面の一覧は 2026-10-13 から
@@ -684,6 +777,9 @@ def main(argv=None) -> int:
         # ランキング学習の素性（attach_ltr。無ければ None）。各候補の ltr と合わせて、画面と実運用の追跡が「両方使う形」を
         # 参考に並べる（買いの規則には使わない。運用者の選択「まず並べて見る」2026-10-24）
         "ltr": ltr_info,
+        # 直近5営業日の組のランキング学習の素性（attach_ltr5。無ければ None）。予測の日の候補の ltr5・conds と合わせて、
+        # 予測タブとスプレッドシート v2 が「5日の順位」と3条件・4条件の印を出す（買いの規則には使わない。§82-6）
+        "ltr5": ltr5_info,
         "notes": [
             "スコアは較正されていない生の出力。確率として読まず、"
             "同じ日の候補の中での順位と、スコア帯の過去実績で読むこと。",
@@ -709,6 +805,10 @@ def main(argv=None) -> int:
             "順番を学んだもの）。dayPct はその日の候補の中の百分位（候補が1件の日は 50）、upper は 50 以上か。"
             "「両方使う形」（今の規則を満たし、かつ upper）を参考に並べるだけで、買いの規則には使わない"
             "（2026-10-24 から。それより前の日には無い）。",
+            "ltr5 は直近5営業日の組のランキング学習（予測の日までの直近5営業日の候補を1つの組にして並べたもの。実験117 の W5）。"
+            "rank は予測の日の組の中の順位（同じスコアは銘柄コードの順）、nPool は組の行の数。conds は3条件（日次の1位・"
+            "5日の1位・1.5σ の木3本が95以上）と4条件（それに 1.2σ の木3本が95以上）の印。参考に並べるだけで、買いの規則には"
+            "使わない（2026-11-02 から。それより前の日には無い）。",
         ],
     }
     os.makedirs(args.out_dir, exist_ok=True)

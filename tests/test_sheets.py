@@ -460,6 +460,78 @@ class TestCodeFixes(unittest.TestCase):
         self.assertEqual(w[(2, "現在値")], 2000.0)
 
 
+class TestV2(unittest.TestCase):
+    """
+    v2 のタブ（運用者の依頼 2026-10-30「…予測＆購買記録をv２として…」→「別スプレッドシートはやっぱやめましょう」→
+    「同じシートに v2 のタブ」）。予測日が V2_FROM（2026-11-02）以降の行は「予測ログ v2」にだけ、それより前の行は今の
+    「予測ログ」にだけ足す。すでにある行の値動きはどちらも更新する。v2 にはランキング学習の列がある。
+    """
+
+    @staticmethod
+    def pred():
+        c = [
+            {"date": "2026-10-30", "code": "1111", "jqCode": "11110", "name": "前の週", "rankInDay": 1, "nInDay": 1,
+             "score": 0.3, "band": 5, "close": 100.0, "ltr": {"dayRank": 1, "dayPct": 50.0}},
+            {"date": "2026-11-02", "code": "2222", "jqCode": "22220", "name": "月曜の1位", "rankInDay": 1, "nInDay": 2,
+             "score": 0.4, "band": 9, "close": 200.0, "ltr": {"dayRank": 1, "dayPct": 100.0},
+             "ltr5": {"rank": 1, "nPool": 30, "score": 0.9, "pct": 100.0},
+             "conds": {"d1": True, "w1": True, "r15": True, "r0": False, "c3": True, "c4": False}},
+            {"date": "2026-11-02", "code": "3333", "jqCode": "33330", "name": "月曜の2位", "rankInDay": 2, "nInDay": 2,
+             "score": 0.2, "band": 3, "close": 300.0, "ltr": {"dayRank": 2, "dayPct": 0.0},
+             "ltr5": {"rank": 7, "nPool": 30, "score": 0.1, "pct": 79.3},
+             "conds": {"d1": False, "w1": False, "r15": None, "r0": False, "c3": None, "c4": None}},
+        ]
+        return {"asOf": "2026-11-02", "dates": ["2026-10-30", "2026-11-02"], "models": [], "candidates": c}
+
+    def test_book_dates_and_headers(self):
+        self.assertEqual(ES.V2_FROM, "2026-11-02")
+        self.assertEqual(ES.V2_TITLE, "予測ログ v2")
+        self.assertTrue(ES.in_book("2026-10-30", "v1"))
+        self.assertFalse(ES.in_book("2026-11-02", "v1"))
+        self.assertTrue(ES.in_book("2026-11-02", "v2"))
+        self.assertFalse(ES.in_book("2026-10-30", "v2"))
+        h1, h2 = ES.header_of("v1"), ES.header_of("v2")
+        self.assertFalse(set(ES.RANK_COLS) & set(h1))
+        self.assertEqual(h2[len(ES.OWNED_COLS):len(ES.OWNED_COLS) + len(ES.RANK_COLS)], ES.RANK_COLS)
+        self.assertEqual([c for c in h2 if c not in ES.RANK_COLS], h1)       # 残りの並びは同じ
+        self.assertEqual(len(set(h2)), len(h2))
+
+    def test_rank_fields(self):
+        rows = {r["コード"]: r for r in ES.rows_from_predictions(self.pred())}
+        a, b, old = rows["2222"], rows["3333"], rows["1111"]
+        self.assertEqual((a["ランキング順位"], a["5日の順位"], a["5日の組の数"]), (1, 1, 30))
+        self.assertEqual((a["1.5σの3本95以上"], a["1.2σの3本95以上"], a["3条件"], a["4条件"]), ("○", "×", "○", "×"))
+        self.assertEqual((b["1.5σの3本95以上"], b["3条件"], b["4条件"]), (None, None, None))   # 決まらないものは空
+        self.assertIsNone(old["5日の順位"])                                    # 前の週の行には無い
+        self.assertEqual(old["ランキング順位"], 1)
+
+    def test_v1_stops_at_the_cutover_but_keeps_tracking(self):
+        header = ES.header_of("v1")
+        line = [""] * len(header)
+        p = {h: i for i, h in enumerate(header)}
+        line[p["予測日"]], line[p["コード"]], line[p["予測時株価"]] = "2026-10-29", "9999", "100"
+        ws = FakeWorksheet([header, line])
+        res = ES.sync(ws, ES.rows_from_predictions(self.pred()), pd.Series({"99990": 110.0, "11110": 120.0}),
+                      pd.Timestamp("2026-11-02"), book="v1")
+        self.assertEqual(res["appended"], 1)                                  # 10/30 の行だけ
+        self.assertEqual([r[p["コード"]] for r in ws.appended], ["1111"])
+        self.assertFalse(set(ES.RANK_COLS) & set(ws.values[0]))                # v1 にはランキングの列を足さない
+        got = {u["range"] for u in ws.batches}
+        self.assertIn(ES.a1(p["現在値"] + 1, 2), got)                          # 既存の行の値動きは更新する
+
+    def test_v2_gets_new_rows_with_rank_columns(self):
+        header = ES.header_of("v2")
+        ws = FakeWorksheet([header])
+        res = ES.sync(ws, ES.rows_from_predictions(self.pred()), pd.Series(dtype=float), None, book="v2")
+        self.assertEqual(res["appended"], 2)                                  # 11/2 の2行だけ
+        rows = [row_dict(header, r) for r in ws.appended]
+        self.assertEqual([r["コード"] for r in rows], ["2222", "3333"])
+        self.assertEqual((rows[0]["5日の順位"], rows[0]["3条件"], rows[0]["4条件"]), (1, "○", "×"))
+        self.assertEqual((rows[1]["5日の順位"], rows[1]["3条件"]), (7, ""))
+        for name in ES.USER_COLS:
+            self.assertEqual(rows[0][name], "")
+
+
 class TestSheetExport(unittest.TestCase):
     """
     スプレッドシートは利用者が手で書き込む台帳でもある。

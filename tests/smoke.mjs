@@ -194,6 +194,18 @@ check(ltrClasses.join(',') === 'upper,upper,upper cut,lower,lower', `上半分�
 check((await ltrCard.locator('.badge').count()) === 0, '規則を満たす候補が無い日は「満たす」「両方使う形」の印が出ない');
 check(((await ltrCard.locator('.ltr-rank-note').textContent()) || '').includes('上の 3 件がその日の中で上半分'),
       '順位表の注記に上半分の件数が出る');
+// 直近5営業日の組のランキング学習（2026-11-02 から。§82-6）の「5日の順位」と「3条件・4条件」の列。合成データでは
+// ソフトバンクが日次の1位・大和自動車交通が5日の1位で、1.5σ の3本 95以上を満たす候補は無いので3条件・4条件の印は出ない
+const ltrHeads = await ltrCard.locator('thead th').allTextContents();
+check(ltrHeads.some((t) => t.includes('5日の順位')) && ltrHeads.some((t) => t.includes('3条件・4条件')),
+      `順位表に「5日の順位」と「3条件・4条件」の列がある (実際: ${ltrHeads.join(' / ')})`);
+const ltr5s = await ltrRows.evaluateAll((trs) => trs.map((tr) => tr.children[5].textContent));
+check(ltr5s.join(',') === '3 / 9,1 / 9,5 / 9,2 / 9,7 / 9', `5日の順位の列は「N / 組の件数」 (実際: ${ltr5s.join(',')})`);
+const condCells = await ltrRows.evaluateAll((trs) => trs.map((tr) => tr.children[6].textContent));
+check(condCells.every((t) => t === '—'), `3条件・4条件を満たす候補が無い日は「—」 (実際: ${condCells.join(',')})`);
+check(((await rowOf('ソフトバンク').locator('.pred-ltr').getAttribute('title')) || '').includes('直近5営業日の組の中で 3位 / 9件'),
+      'ランキング学習の印の title に直近5営業日の組の中の順位が出る');
+check((await page.locator('.pred-list .pred-cond').count()) === 0, '3条件・4条件を満たす候補が無い日は一覧に印が出ない');
 const ltrHead = (await ltrCard.locator('.card-head .sub').textContent()) || '';
 check(ltrHead.includes('参考に並べるだけで、買う銘柄は今日の戦略の規則のまま') && ltrHead.includes('2026/09/10 学習'),
       '順位表の見出しに「参考」とモデルの学習日が出る');

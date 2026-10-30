@@ -5,7 +5,7 @@ import { bandColor, bandLabel, pctColor, pctInk, PCT_LEGEND, scoreRange, scoreCo
 } from '../lib/predictions.js';
 import { STRATEGY, RULE_MODELS, RULE_JA, RULE_SHORT, RULE_ROW, BORDER, strategySignal, exitPlan, nearMisses,
          MODEL_JA, fundContrib, frozenNote, borderNote, orderRows, ruleMinTier,
-         ltrDayPct, ltrUpper, passesBoth, bothSummary, ltrRanking,
+         ltrDayPct, ltrUpper, passesBoth, bothSummary, ltrRanking, ltr5Rank, ltr5Pool, condLevel,
 } from '../lib/strategy.js';
 
 /**
@@ -318,7 +318,8 @@ function LtrRankPanel({ day, ranking, info, onPick }) {
         <h2>ランキング学習の順位</h2>
         <span className="sub">
           {`${fmtDate(day)} の候補を、ランキング学習（同じ日の候補の中で、20営業日目の終値で売った収益の順番を学んだモデル）の`
-            + '順に並べたもの。参考に並べるだけで、買う銘柄は今日の戦略の規則のまま'
+            + '順に並べたもの。「5日の順位」は直近5営業日の候補を1つの組にして並べたときの順位。参考に並べるだけで、買う銘柄は'
+            + '今日の戦略の規則のまま'
             + (info?.trainedAt ? `（モデルは ${fmtDate(info.trainedAt)} 学習）` : '')}
         </span>
       </div>
@@ -335,6 +336,11 @@ function LtrRankPanel({ day, ranking, info, onPick }) {
                   <th scope="col" className="num" title="その日の候補の中での位置（100 = 最上位、0 = 最下位）">その日の中の百分位</th>
                   <th scope="col">{RULE_JA}が{STRATEGY.agreePct}以上</th>
                   <th scope="col" title="今の規則を満たし、かつランキング学習がその日の中で上半分">両方使う形</th>
+                  <th scope="col" className="num"
+                      title="直近5営業日の候補を1つの組にして並べたランキング学習（実験117 の W5）の、組の中の順位 / 組の件数（2026-11-02 の予測から）">
+                    5日の順位
+                  </th>
+                  <th scope="col" title={COND_TITLE}>3条件・4条件</th>
                 </tr>
               </thead>
               <tbody>
@@ -352,6 +358,10 @@ function LtrRankPanel({ day, ranking, info, onPick }) {
                     <td className="num">{fmt(x.dayPct, 1)}</td>
                     <td>{x.rule ? <span className="badge green">満たす</span> : <span className="sub">—</span>}</td>
                     <td>{x.both ? <span className="badge violet">両方使う形</span> : <span className="sub">—</span>}</td>
+                    <td className="num ltr-rank-5">
+                      {x.rank5 !== null ? <>{x.rank5}<span className="sub"> / {x.pool5 ?? DASH}</span></> : <span className="sub">—</span>}
+                    </td>
+                    <td>{x.cond ? <CondBadge c={x.c} /> : <span className="sub">—</span>}</td>
                   </tr>
                 ))}
               </tbody>
@@ -438,6 +448,7 @@ function PickCard({ c, n, models, onSend, sent }) {
           <BorderBadge c={c} />
           <EarnBadge c={c} />
           <LtrBadge c={c} />
+          <CondBadge c={c} />
         </span>
         <button className="btn btn-primary" onClick={onSend} disabled={sent}>
           {sent ? '送信済み' : 'タイムマシーンで見る'}
@@ -477,6 +488,18 @@ function PickCard({ c, n, models, onSend, sent }) {
             <span className="lab">ランキング学習（その日の中）</span>
             <span className="num">{c.ltr?.dayRank ?? DASH}位 / {c.ltr?.nDay ?? DASH}件</span>
             <span className="sub">{ltrUpper(c) ? '上半分（両方使う形に入る）' : '下半分（両方使う形からは外れる）'}</span>
+          </div>
+        )}
+        {ltr5Rank(c) !== null && (
+          <div className="strat-metric strat-ltr5"
+               title={'直近5営業日の候補を1つの組にして並べたランキング学習（実験117 の W5）の、組の中の順位。'
+                      + '参考に並べるだけで、買いの規則には使いません'}>
+            <span className="lab">直近5営業日の中の順位</span>
+            <span className="num">{ltr5Rank(c)}位 / {ltr5Pool(c) ?? DASH}件</span>
+            <span className="sub">
+              {condLevel(c) === 'c4' ? '4条件を満たす' : condLevel(c) === 'c3' ? '3条件を満たす（4条件ではない）'
+                : '3条件・4条件は満たさない'}
+            </span>
           </div>
         )}
         <div className="strat-metric">
@@ -520,11 +543,31 @@ function LtrBadge({ c }) {
   const both = passesBoth(c);
   const title = `ランキング学習: その日の候補 ${c.ltr?.nDay ?? DASH}件の中で ${c.ltr?.dayRank ?? DASH}位（百分位 ${fmt(p, 1)}。`
     + '50以上が上半分）。'
+    + (ltr5Rank(c) !== null ? `直近5営業日の組の中で ${ltr5Rank(c)}位 / ${ltr5Pool(c) ?? DASH}件。` : '')
     + (both ? '今の規則も満たすので「両方使う形」に入ります。' : '')
     + '参考に並べるだけで、買いの規則には使いません';
   return (
     <span className={`badge ${both ? 'violet' : 'slate'} pred-warn pred-ltr`} title={title}>
       {both ? '両方使う形' : `ランキング${ltrUpper(c) ? '上半分' : '下半分'}`}
+    </span>
+  );
+}
+
+/** 3条件・4条件の説明（印と順位表の見出しの title） */
+const COND_TITLE = `3条件: その日の候補の中で日次のランキング学習が1位・直近5営業日の組の中で1位・${RULE_JA}が`
+  + `${STRATEGY.agreePct}以上。4条件: それに加えて 1.2σ の木3本も${STRATEGY.agreePct}以上。実験117 の参考の表と同じ組み合わせで、`
+  + '参考に並べるだけ（買いの規則は今のまま。2026-11-02 の予測から）';
+
+/**
+ * 3条件・4条件の印（予測の conds。research/ltr5.py。§82-6）。4条件は緑、3条件は紫。どちらでもなければ出さない。
+ * 参考に並べるだけで、買いの規則には使わない。2026-11-02 より前の日には値が無い。
+ */
+function CondBadge({ c }) {
+  const lv = condLevel(c);
+  if (!lv) return null;
+  return (
+    <span className={`badge ${lv === 'c4' ? 'green' : 'violet'} pred-warn pred-cond`} title={COND_TITLE}>
+      {lv === 'c4' ? '4条件' : '3条件'}
     </span>
   );
 }
@@ -577,6 +620,7 @@ function Row({ c, models, metric = 'pct', featureNames, open, onToggle, onSend, 
           <BorderBadge c={c} />
           <EarnBadge c={c} />
           <LtrBadge c={c} />
+          <CondBadge c={c} />
         </span>
         {mr.length > 0 ? (
           <span className="pred-ms">

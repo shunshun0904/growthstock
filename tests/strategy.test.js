@@ -9,7 +9,7 @@ import {
   strategySignal, exitPlan,
   freeSlots, pctSpread, laggard, nearMisses, fundContrib, frozenNote,
   BORDER, BORDER_STATS, BORDER_WARN, borderShape, borderNote, borderWarn, orderRows, ruleMinTier,
-  ltrDayPct, ltrUpper, passesBoth, bothSummary, ltrRanking,
+  ltrDayPct, ltrUpper, passesBoth, bothSummary, ltrRanking, ltr5Rank, ltr5Pool, condLevel,
 } from '../src/lib/strategy.js';
 
 const cand = (code, pcts, score = 0.5) => ({
@@ -514,4 +514,29 @@ test('ltrRanking: ランキング学習の順位の順に並べ、上半分・�
   assert.equal(ltrRanking([{ ...rows[0], ltr: { ...rows[0].ltr, dayRank: 1.5 } }]).available, false);
   assert.deepEqual(ltrRanking([]), { available: false, items: [], nUpper: 0 });
   assert.equal(ltrRanking(null).available, false);
+});
+
+test('ltr5Rank / ltr5Pool / condLevel: 直近5営業日の組の中の順位と3条件・4条件の印（予測の ltr5・conds。2026-11-02 から）', () => {
+  const c = { ltr5: { score: 0.3, rank: 2, nPool: 41, pct: 97.5 }, conds: { d1: true, w1: false, r15: true, r0: true, c3: false, c4: false } };
+  assert.equal(ltr5Rank(c), 2);
+  assert.equal(ltr5Pool(c), 41);
+  assert.equal(condLevel(c), null);                                       // 3条件・4条件とも満たさない
+  assert.equal(condLevel({ conds: { c3: true, c4: false } }), 'c3');
+  assert.equal(condLevel({ conds: { c3: true, c4: true } }), 'c4');
+  assert.equal(condLevel({ conds: { c3: null, c4: null } }), null);       // 決まらない（日次の順位が無いなど）
+  // 値が無い日（2026-11-02 より前）・形が違う値は null
+  assert.equal(ltr5Rank({}), null);
+  assert.equal(ltr5Pool({ ltr5: { nPool: '41' } }), null);
+  assert.equal(ltr5Rank({ ltr5: { rank: 1.5 } }), null);
+  assert.equal(condLevel(undefined), null);
+});
+
+test('ltrRanking: 順位表の行に、直近5営業日の組の中の順位と3条件・4条件の印も付ける（無ければ null）', () => {
+  const r = (code, rank, extra = {}) => ({ ...rule(code, [96, 97, 98]), ltr: { score: 0.1, dayPct: 50, dayRank: rank, nDay: 2, upper: rank === 1 },
+                                           ...extra });
+  const k = ltrRanking([
+    r('B', 2),
+    r('A', 1, { ltr5: { rank: 1, nPool: 30 }, conds: { c3: true, c4: true } }),
+  ]);
+  assert.deepEqual(k.items.map((x) => [x.c.code, x.rank5, x.pool5, x.cond]), [['A', 1, 30, 'c4'], ['B', null, null, null]]);
 });

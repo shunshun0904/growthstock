@@ -207,6 +207,20 @@
     "nDay": 5,
     "upper": true,
     "pctHistorical": null
+   },
+   "ltr5": {
+    "score": 0.25,
+    "rank": 5,
+    "nPool": 9,
+    "pct": 50.0
+   },
+   "conds": {
+    "d1": false,
+    "w1": false,
+    "r15": false,
+    "r0": false,
+    "c3": false,
+    "c4": false
    }
   },
   {
@@ -411,6 +425,20 @@
     "nDay": 5,
     "upper": false,
     "pctHistorical": null
+   },
+   "ltr5": {
+    "score": 0.15,
+    "rank": 7,
+    "nPool": 9,
+    "pct": 25.0
+   },
+   "conds": {
+    "d1": false,
+    "w1": false,
+    "r15": false,
+    "r0": false,
+    "c3": false,
+    "c4": false
    }
   },
   {
@@ -615,6 +643,20 @@
     "nDay": 5,
     "upper": false,
     "pctHistorical": null
+   },
+   "ltr5": {
+    "score": 0.4,
+    "rank": 2,
+    "nPool": 9,
+    "pct": 87.5
+   },
+   "conds": {
+    "d1": false,
+    "w1": false,
+    "r15": false,
+    "r0": false,
+    "c3": false,
+    "c4": false
    }
   },
   {
@@ -819,6 +861,20 @@
     "nDay": 5,
     "upper": true,
     "pctHistorical": null
+   },
+   "ltr5": {
+    "score": 0.35,
+    "rank": 3,
+    "nPool": 9,
+    "pct": 75.0
+   },
+   "conds": {
+    "d1": true,
+    "w1": false,
+    "r15": false,
+    "r0": false,
+    "c3": false,
+    "c4": false
    }
   },
   {
@@ -1011,6 +1067,20 @@
     "nDay": 5,
     "upper": true,
     "pctHistorical": null
+   },
+   "ltr5": {
+    "score": 0.45,
+    "rank": 1,
+    "nPool": 9,
+    "pct": 100.0
+   },
+   "conds": {
+    "d1": false,
+    "w1": true,
+    "r15": false,
+    "r0": null,
+    "c3": false,
+    "c4": null
    }
   }
  ],
@@ -2037,5 +2107,20 @@
   "nOof": 0,
   "dayUpper": 50.0,
   "oofMetrics": {}
+ },
+ "ltr5": {
+  "algo": "ltr5",
+  "name": "直近5営業日のランキング学習",
+  "short": "LTR5",
+  "note": "テスト用",
+  "trainedAt": "2026-09-10T00:00:00",
+  "nOof": 0,
+  "oofMetrics": {},
+  "day": "2026-09-11",
+  "nPool": 9,
+  "poolDays": 5,
+  "line": 95.0,
+  "n3": 0,
+  "n4": 0
  }
 }

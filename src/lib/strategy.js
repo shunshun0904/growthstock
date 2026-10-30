@@ -374,6 +374,37 @@ export function ltrUpper(candidate) {
 }
 
 /**
+ * 直近5営業日の組のランキング学習（予測の ltr5。research/ltr5.py。実験117 の W5）の、予測の日の組（その日までの直近5営業日の
+ * 候補）の中の順位（1 = 最上位。同じスコアは銘柄コードの順）。無ければ null。2026-11-02 の予測から入る（それより前の日には
+ * 無い）。参考に並べるだけで、買いの規則には使わない（運用者の選択「画面に並べて確かめる」。docs/MODEL_ADOPTION_RULES.md §82-6）。
+ */
+export function ltr5Rank(candidate) {
+  const v = candidate?.ltr5?.rank;
+  return Number.isInteger(v) ? v : null;
+}
+
+/** 直近5営業日の組の行の数（予測の ltr5.nPool）。無ければ null。 */
+export function ltr5Pool(candidate) {
+  const v = candidate?.ltr5?.nPool;
+  return Number.isInteger(v) ? v : null;
+}
+
+/**
+ * 3条件・4条件の印（予測の conds。research/ltr5.py の conds。実験117 の参考の表と同じ組み合わせ）。
+ *   'c4'  4条件: その日の候補の中で日次のランキング学習が1位・直近5営業日の組の中で1位・1.5σ の木3本がすべて95以上・
+ *         1.2σ の木3本もすべて95以上
+ *   'c3'  3条件（4条件ではない）: 上の3つ（1.2σ は問わない）
+ *   null  どちらでもない・値が無い
+ */
+export function condLevel(candidate) {
+  const c = candidate?.conds;
+  if (!c) return null;
+  if (c.c4 === true) return 'c4';
+  if (c.c3 === true) return 'c3';
+  return null;
+}
+
+/**
  * 両方使う形（参考）: 今の規則（RULE_MODELS がすべて agreePct 以上）を満たし、かつその日の中でランキング学習が上半分。
  * 実験114b の R0D（§78-8）。買う銘柄は strategySignal のまま変えない。research/live_track.py の ■7 と同じ判定。
  */
@@ -398,7 +429,8 @@ export function bothSummary(rows, signal) {
  * 表示してください」→「予測タブに順位表」）。その日の候補を、ランキング学習のその日の中の順位（ltr.dayRank。1 = 最上位）の
  * 順に並べる。同じ順位は銘柄コードの順。参考に並べるだけで、買う銘柄は今日の戦略の規則のまま。
  *   available  その日の候補すべてに順位がある（1件でも欠ければ出さない。bothSummary と同じ扱い）
- *   items      { c, rank, nDay, dayPct, upper（上半分）, rule（今の規則を満たす）, both（両方使う形） } の並び
+ *   items      { c, rank, nDay, dayPct, upper（上半分）, rule（今の規則を満たす）, both（両方使う形）,
+ *                rank5・pool5（直近5営業日の組の中の順位と組の行の数。無ければ null）, cond（condLevel） } の並び
  *   nUpper     上半分の件数（表に区切りの線を引く位置）
  */
 export function ltrRanking(rows, s = STRATEGY) {
@@ -409,7 +441,8 @@ export function ltrRanking(rows, s = STRATEGY) {
     const rule = passesAgree(c, s.agreePct);
     const upper = ltrUpper(c) === true;
     return { c, rank: c.ltr.dayRank, nDay: Number.isInteger(c.ltr.nDay) ? c.ltr.nDay : list.length,
-             dayPct: ltrDayPct(c), upper, rule, both: rule && upper };
+             dayPct: ltrDayPct(c), upper, rule, both: rule && upper,
+             rank5: ltr5Rank(c), pool5: ltr5Pool(c), cond: condLevel(c) };
   });
   items.sort((a, b) => (a.rank - b.rank) || String(a.c.code ?? '').localeCompare(String(b.c.code ?? '')));
   return { available: true, items, nUpper: items.filter((x) => x.upper).length };

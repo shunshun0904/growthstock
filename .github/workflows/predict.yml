@@ -241,7 +241,11 @@ jobs:
             echo "（設定するとこの日から追記されます。過去分は遡りません）"
             exit 0
           fi
-          python3 research/export_sheets.py 2>&1 | tail -10
+          # 予測日が 2026-11-02 より前の行は今のタブ（予測ログ）、11/2 からの行は同じスプレッドシートの v2 のタブ（予測ログ v2。
+          # ランキング学習の列つき）に足す（運用者の依頼 2026-10-30「…予測＆購買記録をv２として…」→「同じシートに v2 のタブ」）。
+          # どちらも、すでにある行の値動きは毎晩更新する
+          python3 research/export_sheets.py --book v1 2>&1 | tail -10
+          python3 research/export_sheets.py --book v2 2>&1 | tail -10
 
       - name: Commit predictions
         if: steps.gate.outputs.run != 'false'

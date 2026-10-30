@@ -17,6 +17,9 @@
   - グラフは合計の「損益(円)」の線だけ（軸は1本。運用者の依頼 2026-10-16。銘柄ごとの線は出さない）
   - 予測ログは保有中を赤、売却済みを青（黄色は文字が見えない。2026-10-09）、取り消した行は塗りを外す
   - 公開ログに銘柄名・株価・損益の値を出さない
+  - v1 / v2 のタブ（2026-11-02 の予測から。同じスプレッドシート）: 予測日が切り替え日以降の買いと、その売り・指値・取消は
+    v2 のタブ（取引の記録 v2・保有の推移 v2・予測ログ v2）だけに、それより前の買いと、その（11月の）売りなどは今のタブだけに。
+    予測ログ v2 がまだ無ければ v2 は何もしない
 
   python3 tests/test_holdings_sheet.py
 """
@@ -684,7 +687,7 @@ class FakeWorksheet:
 
     def update(self, values, range_name, value_input_option=None):
         self.updates.append((values, range_name, value_input_option))
-        if range_name == "A1" and self.title == H.LOG_TAB:
+        if range_name == "A1" and self.title.startswith(H.LOG_TAB):
             self.values[:1] = [list(values[0])]
 
     def append_rows(self, values, value_input_option=None, table_range=None):
@@ -843,6 +846,119 @@ class EndToEnd(unittest.TestCase):
         self.assertIn("取引の記録がありません", book.tabs[H.TAB].updates[-1][0][2][0])
 
 
+class Books(unittest.TestCase):
+    """v1 / v2 のタブへの分け方（運用者の依頼 2026-10-30「…予測＆購買記録をv２として…」→「同じシートに v2 のタブ」）。"""
+
+    def test_position_book(self):
+        cut = H.ES.V2_FROM
+        self.assertEqual(H.position_book(pos(pick="2026-11-02"), cut), "v2")
+        self.assertEqual(H.position_book(pos(pick="2026-10-30", buy="2026-11-02"), cut), "v1")   # 金曜の予測を月曜に買う
+        self.assertEqual(H.position_book(pos(pick=None, buy="2026-11-04"), cut), "v2")
+        self.assertEqual(H.position_book(pos(pick=None, buy="2026-11-02"), cut), "v1")
+        self.assertEqual(H.position_book(pos(pick=None, buy=None), cut), "v1")
+
+    def test_event_books(self):
+        ev = [{"id": ID_A, "action": "buy", "code": "6912", "pick_date": "2026-10-28"},
+              {"id": ID_B, "action": "sell", "code": "6912", "date": "2026-11-05"},         # 10月の買いの11月の売り
+              {"id": ID_C, "action": "buy", "code": "7713", "pick_date": "2026-11-02"},
+              {"id": "d" * 32, "action": "target", "code": "7713", "date": "2026-11-04", "pct": 5.0},
+              {"id": "e" * 32, "action": "buy", "code": "1111", "pick_date": "2026-11-04"},
+              {"id": "f" * 32, "action": "cancel", "ref": "e" * 8},
+              {"id": "0" * 32, "action": "sell", "code": "2222", "date": "2026-11-06"},     # 合う買いが無い
+              {"id": "2" * 32, "action": "buy", "code": "3333", "pick_date": "2026-10-20"},
+              {"id": "1" * 32, "action": "cancel", "ref": "2" * 8, "date": "2026-11-09"}]   # 10月の買いの取消
+        b = H.event_books(ev, H.ES.V2_FROM)
+        self.assertEqual([b[e["id"]] for e in ev], ["v1", "v1", "v2", "v2", "v2", "v2", "v2", "v1", "v1"])
+        # 取り消した10月の買いの後の11月の売りは、付く買いが無いので自分の日付（v2）。取引の記録で「合わない行」になる
+        orphan = H.event_books([ev[0], {"id": "3" * 32, "action": "cancel", "ref": "a" * 8}, ev[1]], H.ES.V2_FROM)
+        self.assertEqual([orphan[i] for i in (ID_A, "3" * 32, ID_B)], ["v1", "v1", "v2"])
+
+
+@unittest.skipUnless(HAVE_CRYPTO, "cryptography を読み込めない")
+class BooksEndToEnd(unittest.TestCase):
+    """同じスプレッドシートの v1 / v2 のタブに分けて書く（--book v1 / v2）。"""
+    PRED1 = [["予測日", "コード", "銘柄名", "建値", "株数", "手仕舞い日", "手仕舞い値", "損益", "メモ"],
+             ["2026-09-24", "6912", "A社", "", "", "", "", "", ""]]
+    PRED2 = [["予測日", "コード", "銘柄名", "建値", "株数", "手仕舞い日", "手仕舞い値", "損益", "メモ"],
+             ["2026-11-02", "7713", "C社", "", "", "", "", "", ""],
+             ["2026-11-02", "1111", "B社", "", "", "", "", "", ""]]
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        pd.concat([make_bars("69120"), make_bars("77130", o=[500] * 30), make_bars("11110")]
+                  ).to_parquet(os.path.join(self.dir, "bars_2026.parquet"), index=False)
+        pd.DataFrame({"Date": [f"{d:%Y-%m-%d}" for d in DAYS], "HolDiv": "1"}).to_parquet(
+            os.path.join(self.dir, "calendar.parquet"), index=False)
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        pem = key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                                serialization.NoEncryption()).decode("ascii")
+        self.inbox = os.path.join(self.dir, "inbox.jsonl")
+        pub = TI.public_pem(key)
+        events = [TI.make_event("buy", "6912", pick_date="2026-09-24"),
+                  TI.make_event("sell", "6912", date="2026-11-03"),            # 予測日なしの11月の売り（v1 の保有）
+                  TI.make_event("buy", "7713", pick_date="2026-11-02"),
+                  TI.make_event("buy", "1111", pick_date="2026-11-02")]
+        events.append(TI.make_event("cancel", ref=events[3]["id"][:8]))
+        for e in events:
+            TI.append(self.inbox, TI.encrypt(e, pub))
+        self.old_env = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+        os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"] = json.dumps({"private_key": pem})
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+        if self.old_env is None:
+            os.environ.pop("GOOGLE_SERVICE_ACCOUNT_JSON", None)
+        else:
+            os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"] = self.old_env
+
+    def run_main(self, book, *extra):
+        orig = H.ES.open_sheet
+        H.ES.open_sheet = lambda sheet_id: book
+        out = io.StringIO()
+        try:
+            with contextlib.redirect_stdout(out):
+                code = H.main(["--sheet-id", "x", "--data-dir", self.dir, "--inbox", self.inbox, *extra])
+        finally:
+            H.ES.open_sheet = orig
+        return code, out.getvalue()
+
+    def book(self, with_v2=True):
+        b = FakeBook(self.PRED1)
+        if with_v2:
+            b.tabs[H.ES.V2_TITLE] = FakeWorksheet(H.ES.V2_TITLE, self.PRED2, sid=3)
+        return b
+
+    def test_v1_and_v2_tabs(self):
+        b = self.book()
+        self.assertEqual(self.run_main(b, "--book", "v1")[0], 0)
+        self.assertEqual(self.run_main(b, "--book", "v2")[0], 0)
+        v1_log, v2_log = b.tabs[H.LOG_TAB], b.tabs[f"{H.LOG_TAB} v2"]
+        self.assertEqual([(r[2], r[4]) for r in v1_log.values[1:]], [("買い", "6912"), ("売り", "6912")])
+        self.assertEqual([(r[2], r[4]) for r in v2_log.values[1:]], [("買い", "7713"), ("買い", "1111"), ("取消", "")])
+        t1 = b.tabs[H.TAB].updates[-1][0]
+        t2 = b.tabs[f"{H.TAB} v2"].updates[-1][0]
+        names1 = {r[0] for r in t1[4:] if r and r[0] in ("A社", "B社", "C社")}
+        names2 = {r[0] for r in t2[4:] if r and r[0] in ("A社", "B社", "C社")}
+        self.assertEqual((names1, names2), ({"A社"}, {"C社"}))           # 取り消した B社 は無い
+        # 色は v2 の予測ログ（sheetId 3）の C社 の行（2行目）に付き、取り消した B社 の行（3行目）は外す
+        reds = [(r["repeatCell"]["range"]["sheetId"], r["repeatCell"]["range"]["startRowIndex"] + 1)
+                for r in b.requests if "repeatCell" in r]
+        self.assertIn((3, 2), reds)
+        self.assertIn((3, 3), reds)
+        self.assertIn((0, 2), reds)                                      # v1 の A社
+
+    def test_v2_waits_for_its_prediction_tab(self):
+        b = self.book(with_v2=False)
+        code, out = self.run_main(b, "--book", "v2")
+        self.assertEqual(code, 0)
+        self.assertIn("まだ無い", out)
+        self.assertNotIn(f"{H.LOG_TAB} v2", b.tabs)
+        self.assertNotIn(f"{H.TAB} v2", b.tabs)
+        self.assertEqual(b.requests, [])
+        for word in ("C社", "7713", "1111"):
+            self.assertNotIn(word, out)
+
+
 class Workflow(unittest.TestCase):
     def test_runs_after_the_daily_prediction(self):
         path = os.path.join(ROOT, ".github", "workflows", "holdings.yml")
@@ -854,6 +970,13 @@ class Workflow(unittest.TestCase):
         self.assertNotIn("git add", text)                  # コミットしない
         self.assertNotIn("gh_release_upload", text)        # Release に書かない
         self.assertIn("research/holdings_sheet.py", text)
+        # 2026-11-02 から、同じスプレッドシートの今のタブと v2 のタブに分けて書く
+        self.assertIn("python3 research/holdings_sheet.py --book v1", text)
+        self.assertIn("python3 research/holdings_sheet.py --book v2", text)
+        with open(os.path.join(ROOT, ".github", "workflows", "predict.yml"), encoding="utf-8") as f:
+            pred = f.read()
+        self.assertIn("python3 research/export_sheets.py --book v1", pred)
+        self.assertIn("python3 research/export_sheets.py --book v2", pred)
         self.assertIn("'bars_*' 'calendar*'", text)        # 日足とカレンダーだけ取り出す
         # export_sheets -> models -> tuning_multi が scikit-learn を読み込むので、予測と同じ一式を入れる
         self.assertIn("pip install -r research/requirements.txt", text)
