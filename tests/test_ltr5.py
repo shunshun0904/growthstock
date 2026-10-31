@@ -240,12 +240,18 @@ class TestRanksAndConds(unittest.TestCase):
         self.assertIsNone(ltr5.all_at_least({k: v for k, v in per.items() if k != "xgb_k15"}, ltr5.R15_TREES))
         self.assertEqual(ltr5.conds(True, True, True, True), {"d1": True, "w1": True, "r15": True, "r0": True,
                                                              "c3": True, "c4": True})
-        self.assertEqual(ltr5.conds(True, True, True, False)["c4"], False)
+        # 3条件は D1・W1・R0（今日の戦略の規則 = 1.2σ の木3本）、4条件はそれに R15（2026-11-02 から。§87）
+        self.assertEqual(ltr5.conds(True, True, False, True), {"d1": True, "w1": True, "r15": False, "r0": True,
+                                                              "c3": True, "c4": False})
+        self.assertEqual(ltr5.conds(True, True, True, False), {"d1": True, "w1": True, "r15": True, "r0": False,
+                                                              "c3": False, "c4": False})
         self.assertEqual(ltr5.conds(True, False, True, True)["c3"], False)
         self.assertIsNone(ltr5.conds(True, None, True, True)["c3"])
         self.assertIsNone(ltr5.conds(True, None, True, True)["c4"])
+        self.assertIsNone(ltr5.conds(True, True, True, None)["c3"])     # R0 が決まらなければ3条件も4条件も決まらない
         self.assertIsNone(ltr5.conds(True, True, True, None)["c4"])
-        self.assertTrue(ltr5.conds(True, True, True, None)["c3"])
+        self.assertTrue(ltr5.conds(True, True, None, True)["c3"])       # R15 が決まらなくても3条件は決まる
+        self.assertIsNone(ltr5.conds(True, True, None, True)["c4"])
 
 
 class TestParamsFile(unittest.TestCase):
@@ -433,16 +439,25 @@ class TestAttach(unittest.TestCase):
         self.assertEqual(got[code], {"d1": True, "w1": True, "r15": True, "r0": True, "c3": True, "c4": True})
         self.assertTrue(all(not c["c3"] and not c["c4"] for k, c in got.items() if k != code))
         self.assertEqual((info["n3"], info["n4"]), (1, 1))
-        # 1.2σ の1本が95未満なら3条件だけ
+        # 1.5σ の1本が95未満なら3条件だけ（3条件 = 日次の1位・5日の1位・1.2σ の木3本。§87）
         rows2 = [dict(x) for x in rows]
         for x in rows2:
             x.pop("ltr5", None)
             x.pop("conds", None)
             if x["jqCode"] == code and x["date"] == iso:
-                x["byModel"] = {**x["byModel"], "cat": {"pctHistorical": 94.9}}
+                x["byModel"] = {**x["byModel"], "cat_k15": {"pctHistorical": 94.9}}
         PD.attach_ltr5(rows2, self.cand, "unused", self.tmp.name)
         c = [x for x in rows2 if x["jqCode"] == code and x["date"] == iso][0]["conds"]
-        self.assertEqual((c["c3"], c["c4"], c["r0"]), (True, False, False))
+        self.assertEqual((c["c3"], c["c4"], c["r15"], c["r0"]), (True, False, False, True))
+        # 1.2σ の1本が95未満なら、1.5σ の3本が95以上でも3条件・4条件とも満たさない
+        for x in rows2:
+            x.pop("ltr5", None)
+            x.pop("conds", None)
+            if x["jqCode"] == code and x["date"] == iso:
+                x["byModel"] = {**x["byModel"], "cat_k15": {"pctHistorical": 96.0}, "cat": {"pctHistorical": 94.9}}
+        PD.attach_ltr5(rows2, self.cand, "unused", self.tmp.name)
+        c = [x for x in rows2 if x["jqCode"] == code and x["date"] == iso][0]["conds"]
+        self.assertEqual((c["c3"], c["c4"], c["r15"], c["r0"]), (False, False, True, False))
         # 日次の1位が2件（同点）なら銘柄コードの小さいほうが D1（実験117 と同じ）
         rows3 = self.rows(self.cand)
         for x in rows3:

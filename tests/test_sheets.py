@@ -475,11 +475,11 @@ class TestV2(unittest.TestCase):
             {"date": "2026-11-02", "code": "2222", "jqCode": "22220", "name": "月曜の1位", "rankInDay": 1, "nInDay": 2,
              "score": 0.4, "band": 9, "close": 200.0, "ltr": {"dayRank": 1, "dayPct": 100.0},
              "ltr5": {"rank": 1, "nPool": 30, "score": 0.9, "pct": 100.0},
-             "conds": {"d1": True, "w1": True, "r15": True, "r0": False, "c3": True, "c4": False}},
+             "conds": {"d1": True, "w1": True, "r15": False, "r0": True, "c3": True, "c4": False}},
             {"date": "2026-11-02", "code": "3333", "jqCode": "33330", "name": "月曜の2位", "rankInDay": 2, "nInDay": 2,
              "score": 0.2, "band": 3, "close": 300.0, "ltr": {"dayRank": 2, "dayPct": 0.0},
              "ltr5": {"rank": 7, "nPool": 30, "score": 0.1, "pct": 79.3},
-             "conds": {"d1": False, "w1": False, "r15": None, "r0": False, "c3": None, "c4": None}},
+             "conds": {"d1": False, "w1": False, "r15": False, "r0": None, "c3": None, "c4": None}},
         ]
         return {"asOf": "2026-11-02", "dates": ["2026-10-30", "2026-11-02"], "models": [], "candidates": c}
 
@@ -500,8 +500,9 @@ class TestV2(unittest.TestCase):
         rows = {r["コード"]: r for r in ES.rows_from_predictions(self.pred())}
         a, b, old = rows["2222"], rows["3333"], rows["1111"]
         self.assertEqual((a["ランキング順位"], a["5日の順位"], a["5日の組の数"]), (1, 1, 30))
-        self.assertEqual((a["1.5σの3本95以上"], a["1.2σの3本95以上"], a["3条件"], a["4条件"]), ("○", "×", "○", "×"))
-        self.assertEqual((b["1.5σの3本95以上"], b["3条件"], b["4条件"]), (None, None, None))   # 決まらないものは空
+        # 3条件 = 日次の1位・5日の1位・1.2σ の3本95以上、4条件 = それに 1.5σ の3本95以上（2026-11-02 から。§87）
+        self.assertEqual((a["1.5σの3本95以上"], a["1.2σの3本95以上"], a["3条件"], a["4条件"]), ("×", "○", "○", "×"))
+        self.assertEqual((b["1.2σの3本95以上"], b["3条件"], b["4条件"]), (None, None, None))   # 決まらないものは空
         self.assertIsNone(old["5日の順位"])                                    # 前の週の行には無い
         self.assertEqual(old["ランキング順位"], 1)
 

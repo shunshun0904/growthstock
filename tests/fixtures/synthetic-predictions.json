@@ -1077,8 +1077,8 @@
    "conds": {
     "d1": false,
     "w1": true,
-    "r15": false,
-    "r0": null,
+    "r15": null,
+    "r0": false,
     "c3": false,
     "c4": null
    }

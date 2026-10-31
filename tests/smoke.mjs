@@ -196,7 +196,8 @@ check((await ltrCard.locator('.badge').count()) === 0, '規則を満たす候補
 check(((await ltrCard.locator('.ltr-rank-note').textContent()) || '').includes('上の 3 件がその日の中で上半分'),
       '順位表の注記に上半分の件数が出る');
 // 直近5営業日の組のランキング学習（2026-11-02 から。§82-6）の「5日の順位」と「3条件・4条件」の列。合成データでは
-// ソフトバンクが日次の1位・大和自動車交通が5日の1位で、1.5σ の3本 95以上を満たす候補は無いので3条件・4条件の印は出ない
+// ソフトバンクが日次の1位・大和自動車交通が5日の1位で、両方を満たす候補は無いので3条件・4条件の印は出ない（3条件 = 日次の
+// 1位・5日の1位・1.2σ の3本 95以上、4条件 = それに 1.5σ の3本 95以上。§87）
 const ltrHeads = await ltrCard.locator('thead th').allTextContents();
 check(ltrHeads.some((t) => t.includes('5日の順位')) && ltrHeads.some((t) => t.includes('3条件・4条件')),
       `順位表に「5日の順位」と「3条件・4条件」の列がある (実際: ${ltrHeads.join(' / ')})`);

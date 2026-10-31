@@ -27,9 +27,11 @@
   同じ）を付ける。予測の日の候補の行に ltr5（score・rank・nPool・pct）と、3条件・4条件の印（conds）を足す
     D1  その日の候補の中で、今のランキング学習（日次。research/ltr.py）が1位（同じスコアは銘柄コードの順）
     W1  直近5営業日の組の中で W5 が1位
-    R15 1.5σ の木3本の百分位がすべて95以上（今日の戦略の規則）
-    R0  1.2σ の木3本の百分位がすべて95以上
-    3条件 = D1 かつ W1 かつ R15、4条件 = 3条件 かつ R0（実験117 の参考の表 §82-4 と同じ組み合わせ。見るだけ）
+    R0  1.2σ の木3本の百分位がすべて95以上（今日の戦略の規則。2026-10-30 から）
+    R15 1.5σ の木3本の百分位がすべて95以上
+    3条件 = D1 かつ W1 かつ R0、4条件 = 3条件 かつ R15（見るだけ）。4条件は実験117 の参考の表 §82-4 と同じ組み合わせ。3条件は
+    2026-11-02 の予測から、運用者の選択「すぐ 1.2σ に替える」（2026-10-31。docs/MODEL_ADOPTION_RULES.md §87）で R15 → R0 に
+    した（実験117 では測っていない組み合わせ）。§82-6 で決めた定義は 3条件 = D1・W1・R15、4条件 = ＋R0 で、4条件は同じ
 
 置き場
   research/model/models/ltr5/{model.joblib, meta.json, oof.parquet}（ほかの追加モデルと同じ。Release には ltr5_model.joblib /
@@ -480,7 +482,11 @@ def all_at_least(per: Dict, algos: Sequence[str], line: float = LINE) -> Optiona
 
 
 def conds(d1: Optional[bool], w1: Optional[bool], r15: Optional[bool], r0: Optional[bool]) -> Dict:
-    """3条件（D1・W1・R15）と4条件（＋R0）。どれかが決まらなければ、その組み合わせは None。"""
-    c3 = None if None in (d1, w1, r15) else bool(d1 and w1 and r15)
-    c4 = None if c3 is None or r0 is None else bool(c3 and r0)
+    """
+    3条件（D1・W1・R0。R0 は今日の戦略の規則 = 1.2σ の木3本）と4条件（＋R15）。どれかが決まらなければ、その組み合わせは None。
+    2026-11-02 の予測から（運用者の選択 2026-10-31「すぐ 1.2σ に替える」。§87）。§82-6 で決めた定義は 3条件 = D1・W1・R15、
+    4条件 = ＋R0（4条件は同じ）。
+    """
+    c3 = None if None in (d1, w1, r0) else bool(d1 and w1 and r0)
+    c4 = None if c3 is None or r15 is None else bool(c3 and r15)
     return {"d1": d1, "w1": w1, "r15": r15, "r0": r0, "c3": c3, "c4": c4}

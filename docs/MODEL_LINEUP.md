@@ -286,8 +286,8 @@ Spearman 相関 / 上位10%の Jaccard 重複。16,431件。
 
 運用者の選択「画面に並べて確かめる」（docs/MODEL_ADOPTION_RULES.md §82-6）。実験117 の W5（判断日ごとに、その日までの直近5営業日の
 候補を1つの組にして並べる LambdaRank。360列＋値動き4列）を `research/ltr5.py` / `research/tune_ltr5.py` / `research/train_ltr5.py`
-で日曜に毎週探索・学習し、毎日の予測の日の組の中の順位と、3条件・4条件（日次の1位・5日の1位・1.5σ の木3本95以上、それに 1.2σ の
-木3本95以上）の印を出す。ランキング学習（日次）と同じく、モデル別の表・合意・一致度・選定の規則には入れない。
+で日曜に毎週探索・学習し、毎日の予測の日の組の中の順位と、3条件・4条件（日次の1位・5日の1位・1.2σ の木3本95以上、それに 1.5σ の
+木3本95以上。3条件は運用者の選択（2026-10-31）で 1.5σ → 1.2σ。docs/MODEL_ADOPTION_RULES.md §87）の印を出す。ランキング学習（日次）と同じく、モデル別の表・合意・一致度・選定の規則には入れない。
 
 - 置き場は `research/model/models/ltr5/`（Release の `ltr5_model.joblib` / `ltr5_oof.parquet`、git の `meta.json`）。
   `models.LINEUP` / `available()` には含めない（`predict_daily.attach_ltr5` が別に読む）
