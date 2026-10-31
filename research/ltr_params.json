@@ -1,37 +1,41 @@
 {
-  "_source": "実験114 の探索（run 40070769689・f5d652a。2025-08-26 までの 18,044行・50試行・目的は検証分割の日付内 NDCG@5）。Actions の置き場の e114_params.json の L を丸めずに写した（run 40095706824 の --show-params。2026-10-24）",
+  "_source": "週次の探索（Retrain Weekly run 41168050273・264d462。2025-09-02 までの 18,099件・50試行・5分割・目的は検証分割の日付内 NDCG@5）",
   "_features_sig": "a0638dfd0880",
   "_n_features": 360,
-  "_cutoff": "2025-08-26",
+  "_cutoff": "2025-09-02",
   "_cv": {
-    "best_trial": 33,
+    "objective": "検証分割の日付内 NDCG@5（候補5件以上の日。利得は20営業日目の終値の段階 0〜4）",
+    "scheme": "year_cap_date",
     "n_splits": 5,
     "n_trials": 50,
-    "ndcg": 0.6587,
+    "seed": 0,
+    "best_trial": 47,
+    "ndcg": 0.6637,
     "ndcg_folds": [
-      0.6554,
-      0.6377,
-      0.6833,
-      0.651,
-      0.6663
+      0.6677,
+      0.6617,
+      0.672,
+      0.6553,
+      0.6618
     ],
-    "objective": "検証分割の日付内 NDCG@5（候補5件以上の日。利得は20営業日目の終値の段階 0〜4）",
-    "pr_auc": 0.2052,
-    "rho": 0.1445,
-    "top10": 0.02131
+    "n_rows": 18099,
+    "n_days": 1751,
+    "train_from": "2018-04-03",
+    "train_to": "2025-09-02",
+    "minutes": 10.3
   },
   "params": {
     "boosting_type": "gbdt",
-    "colsample_bytree": 0.6665493816814735,
-    "learning_rate": 0.01215160763106352,
-    "min_child_samples": 29,
     "n_estimators": 200,
-    "n_jobs": -1,
-    "num_leaves": 69,
-    "reg_alpha": 2.164601775433861,
-    "reg_lambda": 0.10161132610222381,
-    "subsample": 0.5000771908167082,
     "subsample_freq": 1,
-    "verbose": -1
+    "n_jobs": -1,
+    "verbose": -1,
+    "learning_rate": 0.011189641953254732,
+    "num_leaves": 11,
+    "min_child_samples": 212,
+    "subsample": 0.6411061649378713,
+    "colsample_bytree": 0.8816807065987535,
+    "reg_alpha": 0.1477493957155587,
+    "reg_lambda": 0.04230920921534301
   }
 }

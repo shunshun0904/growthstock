@@ -1,5 +1,5 @@
 {
-  "_source": "週次の探索（Retrain Weekly run 41078055848・651285f。2025-09-02 までの組の行 90,249件・50試行・5分割・目的は検証分割の組の中の NDCG@5）",
+  "_source": "週次の探索（Retrain Weekly run 41168050273・264d462。2025-09-02 までの組の行 90,249件・50試行・5分割・目的は検証分割の組の中の NDCG@5）",
   "_features_sig": "7a3f829d3ee9",
   "_n_features": 364,
   "_cutoff": "2025-09-02",
@@ -22,7 +22,7 @@
     "n_days": 1809,
     "train_from": "2018-04-03",
     "train_to": "2025-09-02",
-    "minutes": 37.2
+    "minutes": 23.3
   },
   "params": {
     "boosting_type": "gbdt",
