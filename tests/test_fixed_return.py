@@ -82,6 +82,20 @@ class ArtifactIsolationTest(unittest.TestCase):
         self.assertNotEqual(T.study_name(*args),T.study_name(*args,label_spec=L.for_model('xgb')))
         self.assertNotEqual(T.study_name(*args,label_spec=L.for_model('xgb')),T.study_name(*args,label_spec=L.for_model('xgb_k15')))
 
+class DataProvenanceTest(unittest.TestCase):
+    def test_generated_outputs_do_not_change_the_raw_fingerprint(self):
+        import tempfile
+        from pathlib import Path
+        import model_artifacts as A
+        with tempfile.TemporaryDirectory() as t:
+            d=Path(t);(d/'bars_2026.parquet').write_bytes(b'fresh prices')
+            before=A.data_snapshot(d)
+            for name in ['dataset.parquet','dataset_predict.parquet','fixed_return_v1_xgb_oof.parquet']:
+                (d/name).write_bytes(b'generated output')
+            self.assertEqual(A.data_snapshot(d),before)
+            (d/'bars_2026.parquet').write_bytes(b'updated prices')
+            self.assertNotEqual(A.data_snapshot(d)['dataSnapshot'],before['dataSnapshot'])
+
 class ModelRegistryTest(unittest.TestCase):
     def setup_registry(self, root, fixed):
         import model_artifacts as A,json

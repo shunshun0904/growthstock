@@ -67,6 +67,7 @@ import tuning  # noqa: E402
 import tuning_multi as TM  # noqa: E402
 import lab as L  # noqa: E402
 import label_specs as LS
+import model_artifacts as A
 from train_production import (  # noqa: E402
     DATA_DIR, MODEL_DIR, OOF_MIN_TRAIN_MONTHS, OOF_STEP_MONTHS,
     OOF_TEST_MONTHS, OUTCOME_COL, calibration, oof_metrics, score_bands,
@@ -155,6 +156,8 @@ def train_one(algo: str, ds: pd.DataFrame, cols: List[str],
         "note": M.NOTE.get(algo, ""),
         "trainedAt": pd.Timestamp.utcnow().isoformat(),
         "dataThrough": ds.attrs.get("dataThrough"),
+        "dataSnapshot": ds.attrs.get("dataSnapshot"),
+        "dataInventory": ds.attrs.get("dataInventory", {}),
         "label": label_name,
         # 到達しきい値の倍数（ラベル違いのモデルは k、本番のラベルなら VOL_NORM_K）。画面と記録で見分ける
         "volNormK": None,
@@ -223,6 +226,7 @@ def main(argv=None) -> int:
     ds = ds.merge(S.reference_outcome(S.Panels(bars).get(B.HIGH_WINDOW)),
                   on=["Code", "Date"], how="left")
     ds = ds.merge(L.realized_returns(bars), on=["Code", "Date"], how="left")
+    ds.attrs.update(A.data_snapshot(args.data_dir))
     ds.attrs["dataThrough"] = str(pd.to_datetime(bars["Date"]).max().date())
     del bars
 

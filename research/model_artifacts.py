@@ -21,6 +21,14 @@ def sha256(path):
             h.update(part)
     return h.hexdigest()
 
+def data_snapshot(data_dir):
+    """Fingerprint raw inputs, excluding generated mart and model outputs."""
+    inventory = {p.name: sha256(p) for p in sorted(Path(data_dir).glob("*.parquet"))
+                 if not p.name.endswith("_oof.parquet") and p.name != "oof.parquet"
+                 and not p.name.startswith("dataset") and p.name != "lab.parquet"}
+    digest = hashlib.sha256(json.dumps(inventory, sort_keys=True).encode()).hexdigest()
+    return {"dataSnapshot": digest, "dataInventory": inventory}
+
 def directory(algo, root=MODEL_ROOT):
     return Path(root) if algo == "lgbm" else Path(root) / "models" / algo
 

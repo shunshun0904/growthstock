@@ -290,6 +290,7 @@ def main(argv=None) -> int:
     ds = ds.merge(S.reference_outcome(S.Panels(bars).get(B.HIGH_WINDOW)),
                   on=["Code", "Date"], how="left")
     ds = ds.merge(L.realized_returns(bars), on=["Code", "Date"], how="left")
+    ds.attrs.update(A.data_snapshot(args.data_dir))
     ds.attrs["dataThrough"] = str(pd.to_datetime(bars["Date"]).max().date())
     del bars
 
@@ -327,6 +328,8 @@ def main(argv=None) -> int:
     meta = {
         "trainedAt": pd.Timestamp.utcnow().isoformat(),
         "dataThrough": ds.attrs.get("dataThrough"),
+        "dataSnapshot": ds.attrs.get("dataSnapshot"),
+        "dataInventory": ds.attrs.get("dataInventory", {}),
         "label": LS.name("lgbm"),
         "labelSpec": LS.for_model("lgbm"),
         "volNormK": B.VOL_NORM_K,
