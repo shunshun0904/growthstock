@@ -95,6 +95,7 @@ OWNED_COLS = [
 #:
 #: 「一致」は上位10%と見ているモデルの数。独立した判定の数え上げで、
 #: スコアを混ぜた値ではない（アンサンブルはしない方針）。
+LABEL_COL = "目的変数定義"
 MODEL_COLS = [f"{M.SHORT.get(a, a[:3].upper())}%" for a in M.LINEUP]
 SCORE_COLS = [f"{M.SHORT.get(a, a[:3].upper())}スコア" for a in M.LINEUP]
 AGREE_COL = "一致(上位10%)"
@@ -141,20 +142,20 @@ USER_COLS = ["建値", "株数", "手仕舞い日", "手仕舞い値", "損益",
 #:                                      §87）
 #: 値が無い（モデルが無い日・決まらない）ときは空のまま
 RANK_COLS = ["ランキング順位", "ランキング百分位", "5日の順位", "5日の組の数",
-             "1.5σの3本95以上", "1.2σの3本95以上", "3条件", "4条件"]
+             "1.5σの3本95以上", "1.2σの3本95以上", "+15%の3本95以上", "+10%の3本95以上", "3条件", "4条件"]
 
 
 def header_of(book: str = "v1") -> List[str]:
     """新しく作るタブの見出し（v2 はランキング学習の列を元の列のすぐ右に置く）。"""
     rank = RANK_COLS if book == "v2" else []
-    return (OWNED_COLS + rank + MODEL_COLS + SCORE_COLS + AGREE_COLS + ENTRY_COLS
+    return (OWNED_COLS + [LABEL_COL] + rank + MODEL_COLS + SCORE_COLS + AGREE_COLS + ENTRY_COLS
             + TRACK_COLS + USER_COLS + EARN_COLS)
 
 
 def owned_of(book: str = "v1") -> List[str]:
     """このスクリプトが書く列（見出しに無ければ右端に足す。ensure_columns）。"""
     rank = RANK_COLS if book == "v2" else []
-    return OWNED_COLS + rank + MODEL_COLS + SCORE_COLS + AGREE_COLS + ENTRY_COLS + TRACK_COLS + EARN_COLS
+    return OWNED_COLS + [LABEL_COL] + rank + MODEL_COLS + SCORE_COLS + AGREE_COLS + ENTRY_COLS + TRACK_COLS + EARN_COLS
 
 
 def in_book(pick_date: str, book: str = "v1") -> bool:
@@ -193,6 +194,7 @@ def rows_from_predictions(pred: Dict) -> List[Dict]:
     for c in pred["candidates"]:
         ct = c.get("contrib") or {}
         per = c.get("byModel") or {}
+        fixed = (per.get("lgbm", {}).get("labelSpec") or {}).get("kind") == "fixed_return"
         by_model = {}
         for a in algos:
             if a not in per:
@@ -206,6 +208,9 @@ def rows_from_predictions(pred: Dict) -> List[Dict]:
         out.append({
             "予測日": c["date"], "コード": c["code"], "銘柄名": c.get("name") or "",
             "業種": c.get("sector") or "",
+            LABEL_COL: ("固定+10%/+15%・終盤+5%/+7.5%"
+                        if fixed
+                        else "旧σモデル（1.2σ/1.5σ）"),
             "順位": c["rankInDay"], "候補数": c["nInDay"],
             "スコア": c["score"], "帯": c["band"],
             "較正確率%": c.get("calibProb"),
@@ -230,7 +235,10 @@ def rows_from_predictions(pred: Dict) -> List[Dict]:
             "前回開示からの日数": c.get("daysSinceDisc"),
             "ランキング順位": lt.get("dayRank"), "ランキング百分位": lt.get("dayPct"),
             "5日の順位": l5.get("rank"), "5日の組の数": l5.get("nPool"),
-            "1.5σの3本95以上": _mark(cd.get("r15")), "1.2σの3本95以上": _mark(cd.get("r0")),
+            "1.5σの3本95以上": None if fixed else _mark(cd.get("r15")),
+            "1.2σの3本95以上": None if fixed else _mark(cd.get("r0")),
+            "+15%の3本95以上": _mark(cd.get("r15")) if fixed else None,
+            "+10%の3本95以上": _mark(cd.get("r0")) if fixed else None,
             "3条件": _mark(cd.get("c3")), "4条件": _mark(cd.get("c4")),
             "_jqCode": c["jqCode"],
         })

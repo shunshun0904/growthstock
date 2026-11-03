@@ -88,6 +88,8 @@ def load_model(model_dir: str):
             f"モデルがありません（{path}）。"
             "先に research/train_production.py を実行してください")
     meta = json.load(open(meta_path, encoding="utf-8"))
+    import model_artifacts as A
+    A.require(meta, "lgbm", model_dir)
     return lgb.Booster(model_file=path), meta
 
 
@@ -336,6 +338,7 @@ def score_others(cand: pd.DataFrame, cols: List[str],
                 # ラベル違いのモデル（models.ACTIVE_VARIANTS。1.5σ の木3本）の目印。画面は 1.2σ の一致（agree90）に数えず、並べて見せる
                 "variant": M.label_k(algo) is not None,
                 "labelK": meta.get("volNormK"),
+                "labelSpec": meta.get("labelSpec"),
                 "label": meta.get("label"),
                 "positiveRate": meta.get("positiveRate"),
             })
@@ -526,6 +529,8 @@ def main(argv=None) -> int:
                          "1銘柄あたり4リクエストなので、120で約480リクエスト")
     args = ap.parse_args(argv)
 
+    import model_artifacts as A
+    A.verify_all(args.model_dir)
     booster, meta = load_model(args.model_dir)
     cols = meta["features"]
     ds = pd.read_parquet(args.dataset)
@@ -633,6 +638,9 @@ def main(argv=None) -> int:
     # --- 他モデルの採点を各候補に載せる --- #
     # アンサンブルはしない。並べるだけ。買うかの判断は人間が統合的に行う
     others, model_info = score_others(cand, cols, args.model_dir)
+    import models as M
+    if not cand.empty and set(others) != set(M.MULTI):
+        raise RuntimeError(f"All five additional fixed-return classifiers are required: {sorted(others)}")
     consensus_meta = None
     if others:
         import models as M
@@ -653,6 +661,7 @@ def main(argv=None) -> int:
             "baseline": True,
             "variant": False,
             "labelK": meta.get("volNormK"),
+                "labelSpec": meta.get("labelSpec"),
             "label": meta.get("label"),
             "positiveRate": meta.get("positiveRate"),
         })
@@ -677,11 +686,13 @@ def main(argv=None) -> int:
         base_scores = cand["score"].to_numpy(dtype=float)
         for i, x in enumerate(rows):
             per = {M.BASELINE: {"score": x["score"],
-                                "pctHistorical": x["pctHistorical"]}}
+                                "pctHistorical": x["pctHistorical"],
+                                "labelSpec": meta["labelSpec"]}}
             for algo, sc in others.items():
                 v = float(sc[i])
                 per[algo] = {
                     "score": round(v, 6),
+                    "labelSpec": __import__("label_specs").for_model(algo),
                     # モデルごとに別の過去分布で位置を出す。
                     # 共通の分布を使うとスケールの違いが混ざる
                     "pctHistorical": M.pct_historical(v, hist_by_algo[algo]),
@@ -758,6 +769,7 @@ def main(argv=None) -> int:
         "candidates": rows,
         "model": {
             "trainedAt": meta["trainedAt"], "label": meta["label"],
+            "labelSpec": meta.get("labelSpec"),
             "volNormK": meta["volNormK"], "riseHorizon": meta["riseHorizon"],
             "highWindow": meta["highWindow"], "preset": meta["preset"],
             "nFeatures": len(cols), "nTrain": meta["nTrain"],

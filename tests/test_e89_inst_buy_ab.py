@@ -61,7 +61,7 @@ def label_frame(n=400, seed=0):
     import build_dataset as B
     rng = np.random.default_rng(seed)
     vol = rng.uniform(1.5, 4.0, n)
-    need12, end12 = B.rise_thresholds(pd.Series(vol), B.DEFAULT_RISE)
+    need12, end12 = B.rise_thresholds(pd.Series(vol), __import__("dataclasses").replace(B.DEFAULT_RISE, vol_norm_k=1.2))
     rise = need12.to_numpy() * rng.uniform(0.5, 1.8, n)
     end = end12.to_numpy() * rng.uniform(0.5, 2.5, n)
     up = rng.integers(0, 2, n).astype(float)

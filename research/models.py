@@ -190,7 +190,8 @@ def save(algo: str, model, meta: Dict, oof: pd.DataFrame,
     oof.to_parquet(os.path.join(d, "oof.parquet"), index=False, compression="zstd")
     if "labelSpec" in meta:
         import model_artifacts as A
-        meta["artifactHashes"] = A.hashes(algo, root)
+        meta["artifactHashes"] = {n: A.sha256(os.path.join(d, n))
+                                  for n in ("model.joblib", "oof.parquet")}
     with open(os.path.join(d, "meta.json"), "w", encoding="utf-8") as fh:
         json.dump(meta, fh, ensure_ascii=False, indent=2)
     return d

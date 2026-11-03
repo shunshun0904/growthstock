@@ -52,20 +52,45 @@ def verify_all(root=MODEL_ROOT):
         meta = json.loads((directory(algo, root) / "meta.json").read_text())
         require(meta, algo, root)
 
-def overlay(data_dir, root=MODEL_ROOT):
-    """Supply current OOFs to research consumers of the flat raw-data folder."""
-    data_dir = Path(data_dir)
-    for algo in LS.BASE_MODELS + LS.STRICT_MODELS:
-        meta = json.loads((directory(algo, root) / "meta.json").read_text())
-        LS.require(meta, algo)
-        for kind in ("model", "oof"):
-            src = data_dir / filename(algo, kind)
-            name = local_name(algo, kind)
-            expected = meta.get("artifactHashes", {}).get(name)
-            if not src.is_file() or not expected or sha256(src) != expected:
-                raise ValueError(f"{algo}: downloaded fixed-return {kind} is missing or inconsistent")
-            dst = (name if algo == "lgbm" else algo + "_" + name)
-            shutil.copyfile(src, data_dir / dst)
+def flat_oof_path(algo, data_dir, root=MODEL_ROOT):
+    """Resolve active OOFs without overwriting the legacy release files."""
+    meta_path = directory(algo, root) / "meta.json"
+    if algo in LS.BASE_MODELS + LS.STRICT_MODELS and meta_path.is_file():
+        meta = json.loads(meta_path.read_text())
+        if meta.get("labelSpec", {}).get("version") == LS.VERSION:
+            LS.require(meta, algo)
+            path = Path(data_dir) / filename(algo, "oof")
+            if not path.is_file() or sha256(path) != meta.get("artifactHashes", {}).get("oof.parquet"):
+                raise ValueError(f"{algo}: active OOF is missing or inconsistent")
+            return str(path)
+    return str(Path(data_dir) / ("oof.parquet" if algo == "lgbm" else algo + "_oof.parquet"))
+
+
+def publish(root=MODEL_ROOT):
+    root = Path(root)
+    with tempfile.TemporaryDirectory(prefix="growthstock-publish-") as temp:
+        for algo in LS.BASE_MODELS + LS.STRICT_MODELS:
+            d = directory(algo, root)
+            if not (d / local_name(algo, "model")).is_file():
+                continue
+            meta = json.loads((d / "meta.json").read_text())
+            require(meta, algo, root)
+            files = []
+            for kind in ("model", "oof"):
+                dest = Path(temp) / filename(algo, kind)
+                shutil.copyfile(d / local_name(algo, kind), dest)
+                files.append(str(dest))
+            subprocess.run(["bash", str(ROOT / "scripts/gh_release_upload.sh"), "data-raw", *files], check=True, cwd=ROOT)
+        for algo in ("ltr", "ltr5"):
+            d = directory(algo, root)
+            files = []
+            for kind in ("model", "oof"):
+                src = d / local_name(algo, kind)
+                if src.is_file():
+                    dest = Path(temp) / (algo + "_" + src.name)
+                    shutil.copyfile(src, dest); files.append(str(dest))
+            if files:
+                subprocess.run(["bash", str(ROOT / "scripts/gh_release_upload.sh"), "data-raw", *files], check=True, cwd=ROOT)
 
 def install(root=MODEL_ROOT):
     root = Path(root)
@@ -88,10 +113,7 @@ def install(root=MODEL_ROOT):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("action", choices=["install", "verify", "overlay"])
+    ap.add_argument("action", choices=["install", "verify", "publish"])
     ap.add_argument("--model-dir", default=str(MODEL_ROOT))
-    ap.add_argument("--data-dir")
     args = ap.parse_args()
-    if args.action == "install": install(args.model_dir)
-    elif args.action == "verify": verify_all(args.model_dir)
-    else: overlay(args.data_dir, args.model_dir)
+    {"install": install, "verify": verify_all, "publish": publish}[args.action](args.model_dir)

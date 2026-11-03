@@ -324,6 +324,7 @@ def main(argv=None) -> int:
 
     meta = {
         "trainedAt": pd.Timestamp.utcnow().isoformat(),
+        "dataThrough": ds.attrs.get("dataThrough"),
         "label": LS.name("lgbm"),
         "labelSpec": LS.for_model("lgbm"),
         "volNormK": B.VOL_NORM_K,

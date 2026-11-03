@@ -197,7 +197,7 @@ def label_on(panel: pd.DataFrame, k: float) -> pd.DataFrame:
     panel（銘柄・日付の順に並んだ日足。Code・Date・close・open・vol_20d）に、到達しきい値 k のラベルを付けて
     Code・Date・label を返す。ラベルの式は build_dataset.attach_rise_label（k 以外は本番の設定）。
     """
-    cfg = replace(B.DEFAULT_RISE, vol_norm_k=float(k))
+    cfg = replace(B.DEFAULT_RISE, vol_norm_k=None if k is None else float(k))
     out = B.attach_rise_label(panel[LABEL_INPUTS].copy(), cfg)
     return out[["Code", "Date", "label"]]
 

@@ -50,7 +50,7 @@ class TestRederive(unittest.TestCase):
         d = E.rederive(frame())
         need, end_need = B.rise_thresholds(pd.Series([1.0]), B.DEFAULT_RISE)
         self.assertAlmostEqual(d["rise_need"].iloc[0], float(need.iloc[0]))
-        self.assertAlmostEqual(d["rise_need"].iloc[0], 1.2 * 0.01 * np.sqrt(20))
+        self.assertAlmostEqual(d["rise_need"].iloc[0], 0.10)
         self.assertAlmostEqual(d["end_need"].iloc[0], float(end_need.iloc[0]))
         self.assertAlmostEqual(d["end_need"].iloc[0], 0.5 * d["rise_need"].iloc[0])
         self.assertEqual(list(d["label_re"]), [1, 0, 0, 0, 1, 0])
@@ -74,7 +74,7 @@ class TestRederive(unittest.TestCase):
         yr = E.by_year(d)
         self.assertEqual(list(yr.index), [2024, 2025])
         self.assertAlmostEqual(yr.loc[2024, "pos_rate"], 1 / 3)
-        self.assertAlmostEqual(yr.loc[2025, "need_median"], 1.2 * 0.01 * np.sqrt(20) * 100)
+        self.assertAlmostEqual(yr.loc[2025, "need_median"], 10.0)
 
     def test_report_runs(self):
         d = E.rederive(frame())

@@ -98,34 +98,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mkdir -p research/model
-          if bash scripts/gh_release_download.sh data-raw research/model 'model.txt' 'oof.parquet'; then
-            echo "Release のモデルを使う"
-          else
-            echo "Release にモデルが無いので、リポジトリ内の版を使う"
-          fi
-          ls -lh research/model
-
-          # 画面に並べる追加モデル。Release ではアセット名が衝突しないよう
-          # <algo>_model.joblib の形で上がっているので、research/models.py が
-          # 見る research/model/models/<algo>/ の形に並べ直す。
-          # meta.json は git 側（週次学習がコミットする）から来る。
-          # 片方だけ揃っていない場合は models.load が (None, None) を返し、
-          # そのモデルだけ画面から外れる。日次予測は止まらない。
-          if bash scripts/gh_release_download.sh data-raw /tmp/extra '*_model.joblib' '*_oof.parquet'; then
-            shopt -s nullglob
-            for f in /tmp/extra/*_model.joblib; do
-              a=$(basename "$f" _model.joblib)
-              mkdir -p "research/model/models/$a"
-              mv "$f" "research/model/models/$a/model.joblib"
-              [ -f "/tmp/extra/${a}_oof.parquet" ] \
-                && mv "/tmp/extra/${a}_oof.parquet" "research/model/models/$a/oof.parquet"
-            done
-            echo "追加モデル: $(ls -d research/model/models/*/ 2>/dev/null | wc -l)個"
-            python3 research/model_lineup.py || true
-          else
-            echo "Release に追加モデルが無い（基準モデルだけで予測する）"
-          fi
+          python3 research/model_artifacts.py install
+          for a in ltr ltr5; do
+            mkdir -p "research/model/models/$a"
+            bash scripts/gh_release_download.sh data-raw /tmp/rankers "${a}_model.joblib" "${a}_oof.parquet"
+            cp "/tmp/rankers/${a}_model.joblib" "research/model/models/$a/model.joblib"
+            cp "/tmp/rankers/${a}_oof.parquet" "research/model/models/$a/oof.parquet"
+          done
+          python3 research/model_artifacts.py verify
 
       - name: Check freshness
         if: steps.gate.outputs.run != 'false'
