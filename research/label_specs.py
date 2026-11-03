@@ -2,8 +2,6 @@
 from __future__ import annotations
 import hashlib
 import json
-import numpy as np
-import pandas as pd
 
 VERSION = "fixed_return_v1"
 NUMERIC_TOLERANCE = 1e-12
@@ -25,12 +23,15 @@ def signature(spec: dict) -> str:
     return hashlib.sha256(json.dumps(spec, sort_keys=True).encode()).hexdigest()[:16]
 
 def at_least(values, threshold):
+    import numpy as np
+    import pandas as pd
     values = pd.to_numeric(values, errors="coerce")
     return values.ge(threshold) | pd.Series(
         np.isclose(values.to_numpy(dtype=float), threshold, rtol=0,
                    atol=NUMERIC_TOLERANCE), index=values.index)
 
 def labels(frame: pd.DataFrame, algo: str = "lgbm") -> pd.Series:
+    import pandas as pd
     spec = for_model(algo)
     if spec is None:
         raise ValueError(f"Production label is undefined for {algo}")
@@ -55,6 +56,7 @@ def require(meta: dict, algo: str = "lgbm", field: str = "labelSpec") -> None:
         raise ValueError(f"{algo}: label definition mismatch; expected {name(algo)}")
 
 def check_training_frame(frame: pd.DataFrame, algo: str = "lgbm") -> None:
+    import pandas as pd
     want = labels(frame, algo)
     actual = pd.to_numeric(frame["label"], errors="coerce")
     same = (want.isna() & actual.isna()) | (want.notna() & actual.eq(want))

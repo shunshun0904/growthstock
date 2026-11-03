@@ -17,6 +17,7 @@ def verify(root=A.MODEL_ROOT):
         LS.require(meta.get('tuning',{}),algo,field='label_spec')
         assert meta['tuning']['n_trials']==50, f'{algo}: incomplete tuning'
         assert meta['tuning']['n_splits']==5, f'{algo}: different CV'
+        assert meta['tuning']['n_estimators']==200, f'{algo}: different tree budget'
         snapshots.add(meta['dataSnapshot']);dates.add((meta['dataThrough'],meta['trainTo']))
         features.add(tuple(meta['features']))
         oof=pd.read_parquet(d/'oof.parquet')
@@ -25,13 +26,18 @@ def verify(root=A.MODEL_ROOT):
         x=np.zeros((3,len(meta['features'])));x[1,0]=np.nan;x[2,:]=.1
         if algo=='lgbm':
             model=lgb.Booster(model_file=str(d/'model.txt'));p=model.predict(x)
+            trees=model.current_iteration()
         else:
             model,_=M.load(algo,str(root));p=M.predict(model,x)
+            trees=(model.booster_.current_iteration() if algo.startswith('lgbm')
+                   else model.get_booster().num_boosted_rounds() if algo.startswith('xgb')
+                   else model.tree_count_)
+        assert trees==200, f'{algo}: incomplete fitted trees'
         assert np.asarray(p).shape==(3,) and np.isfinite(p).all() and ((p>=0)&(p<=1)).all()
         labels[algo]=oof.set_index(['Date','Code'])['label'].sort_index()
         records.append({'algo':algo,'threshold':meta['labelSpec']['threshold'],
                         'trainTo':meta['trainTo'],'dataThrough':meta['dataThrough'],
-                        'nTrain':meta['nTrain'],'nOof':len(oof),'hashesVerified':True})
+                        'nTrain':meta['nTrain'],'nOof':len(oof),'trees':int(trees),'hashesVerified':True})
     assert len(snapshots)==1,'Models were trained on different raw snapshots'
     assert len(dates)==1 and len(features)==1,'Model training cohorts differ'
     for group in [LS.BASE_MODELS,LS.STRICT_MODELS]:

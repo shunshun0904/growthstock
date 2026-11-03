@@ -60,6 +60,9 @@ class ArtifactIsolationTest(unittest.TestCase):
             A.require(meta,'lgbm',d)
             (d/'model.txt').write_bytes(b'old sigma weights')
             with self.assertRaisesRegex(ValueError,'training metadata'):A.require(meta,'lgbm',d)
+            (d/'model.txt').write_bytes(b'fixed trained weights')
+            (d/'oof.parquet').write_bytes(b'old sigma scores')
+            with self.assertRaisesRegex(ValueError,'training metadata'):A.require(meta,'lgbm',d)
     def test_release_names_cannot_overwrite_sigma_files(self):
         import model_artifacts as A
         names=[A.filename(a,k) for a in L.BASE_MODELS+L.STRICT_MODELS for k in ('model','oof')]
@@ -78,6 +81,29 @@ class ArtifactIsolationTest(unittest.TestCase):
         args=('xgb',5,'2025-09-02',['a','b'])
         self.assertNotEqual(T.study_name(*args),T.study_name(*args,label_spec=L.for_model('xgb')))
         self.assertNotEqual(T.study_name(*args,label_spec=L.for_model('xgb')),T.study_name(*args,label_spec=L.for_model('xgb_k15')))
+
+class ModelRegistryTest(unittest.TestCase):
+    def setup_registry(self, root, fixed):
+        import model_artifacts as A,json
+        for algo in L.BASE_MODELS+L.STRICT_MODELS:
+            d=A.directory(algo,root/'research/model');d.mkdir(parents=True,exist_ok=True)
+            (d/'meta.json').write_text(json.dumps({'labelSpec':L.for_model(algo) if fixed else None}))
+    def test_registry_checks_all_six_contracts(self):
+        import tempfile,json
+        from pathlib import Path
+        from export_model_registry import export
+        import model_artifacts as A
+        with tempfile.TemporaryDirectory() as t:
+            root=Path(t);self.setup_registry(root,False)
+            self.assertEqual(export(root)['kind'],'legacy_sigma')
+            d=A.directory('lgbm',root/'research/model')
+            (d/'meta.json').write_text(json.dumps({'labelSpec':L.for_model()}))
+            with self.assertRaisesRegex(ValueError,'mixed'):export(root)
+            self.setup_registry(root,True)
+            self.assertEqual(export(root)['kind'],'fixed_return')
+            d=A.directory('cat_k15',root/'research/model')
+            (d/'meta.json').write_text(json.dumps({'labelSpec':L.for_model('cat')}))
+            with self.assertRaisesRegex(ValueError,'label definition'):export(root)
 
 if __name__ == "__main__":
     unittest.main()

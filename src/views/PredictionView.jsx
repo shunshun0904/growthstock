@@ -33,7 +33,7 @@ export default function PredictionView({ data, history, featureNames, onSendToOc
   const [registry, setRegistry] = useState(null);
   useEffect(() => {
     let live = true;
-    fetch(`${import.meta.env.BASE_URL}data/active_models.json`).then((r) => {
+    fetch(`${import.meta.env.BASE_URL}data/active_models.json`, { cache: 'no-store' }).then((r) => {
       if (!r.ok) throw new Error(r.status);
       return r.json();
     }).then((value) => { if (live) setRegistry(value); }).catch(() => {});
