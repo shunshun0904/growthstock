@@ -81,7 +81,7 @@ export default function PredictionView({ data, history, featureNames, onSendToOc
         <b>本番モデル：固定+10%・+15%（各3本）</b>
         <p className="sub">終盤5日平均はそれぞれ+5%・+7.5%以上、20日目にMA5≧MA20。翌営業日の寄りから20営業日以内。
           株価データ：{registry.models[0]?.dataThrough}まで／学習サンプル：{registry.models[0]?.trainTo}まで。</p>
-        <p className="sub">過去の予測は当時の値を保持しています。σと表示される日の値は旧モデルです。新しい市場データの予測から固定%モデルを使います。</p>
+        <p className="sub">過去の予測は当時の値を保持しています。σと表示される日の値は旧モデルです。新しい市場データの予測から固定%モデルを使います。旧σモデルの過去成績は、固定%モデルの運用成績ではありません。</p>
       </section>}
       <StrategyPanel signal={signal} near={near} day={day} models={models} both={both}
                      onSend={(c) => onSendToOctagon(candidateToStock(c))}
