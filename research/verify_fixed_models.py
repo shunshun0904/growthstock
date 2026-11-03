@@ -34,7 +34,7 @@ def verify(root=A.MODEL_ROOT):
                    else model.tree_count_)
         assert trees==200, f'{algo}: incomplete fitted trees'
         assert np.asarray(p).shape==(3,) and np.isfinite(p).all() and ((p>=0)&(p<=1)).all()
-        labels[algo]=oof.set_index(['Date','Code'])['label'].sort_index()
+        labels[algo]=oof.set_index(['Date','Code'])['label'].astype('int8').sort_index()
         records.append({'algo':algo,'threshold':meta['labelSpec']['threshold'],
                         'trainTo':meta['trainTo'],'dataThrough':meta['dataThrough'],
                         'nTrain':meta['nTrain'],'nOof':len(oof),'trees':int(trees),'hashesVerified':True})
