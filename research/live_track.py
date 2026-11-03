@@ -80,6 +80,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import trading_calendar as TC  # noqa: E402
+import build_dataset as B  # noqa: E402
 
 DATA_DIR = os.path.join(HERE, "_data")
 MODEL_DIR = os.path.join(HERE, "model")
@@ -832,6 +833,8 @@ def main(argv=None) -> int:
     vers = load_versions(args.repo)
     cal = trading_days(args.data_dir)
     live = live_rows(vers, cal)
+    if not B.DEFAULT_RISE.normalised:
+        print("[label] OOFと正例判定は固定+10%・終盤+5%。実運用の履歴には切替前のσモデルの判断も含むため、固定モデル単独の実績ではありません")
     if live.empty:
         print("予測の履歴が見つかりません（public/data/predictions.json のコミットが無い）")
         return 1

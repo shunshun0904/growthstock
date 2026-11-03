@@ -336,7 +336,7 @@ def score_others(cand: pd.DataFrame, cols: List[str],
                 "scoreBands": meta.get("scoreBands", {}),
                 "cv": meta.get("tuning", {}),
                 # ラベル違いのモデル（models.ACTIVE_VARIANTS。1.5σ の木3本）の目印。画面は 1.2σ の一致（agree90）に数えず、並べて見せる
-                "variant": M.label_k(algo) is not None,
+                "variant": algo in M.ACTIVE_VARIANTS,
                 "labelK": meta.get("volNormK"),
                 "labelSpec": meta.get("labelSpec"),
                 "label": meta.get("label"),
@@ -808,20 +808,16 @@ def main(argv=None) -> int:
             "スコアで付けてあり、他のモデルは並べて見るためのもの。",
             "過去の日は、その日に出した値のまま（後の再学習や、後から入ったデータで採点し直さない）。"
             "どのモデルで出した値かは dayInfo の学習日。",
-            "L15 / X15 / C15 は到達しきい値 1.5σ のラベルで学習したモデル（学習器は記号の元と同じ"
-            " LightGBM / XGBoost / CatBoost）。1.2σ の3本の一致度（agree90）には数えず、"
-            "agreeK90 / nK で別に数える。今日の戦略の規則は 1.2σ の木の3本（LGB / XGB / CAT）がすべて95以上"
-            "（2026-10-30 から。2026-10-23〜10-29 も同じ。2026-10-12〜10-23 と 2026-10-29〜10-30 は 1.5σ の木の3本）。"
-            "6本とも毎日の予測に使う。"
-            "1.8σ の4本（L18 / X18 / C18 / LR18）は 2026-10-24 に、ロジスティック回帰（LR / LR15）は 2026-11-02 の"
-            "予測から外した（それより前の日の予測ファイルには値が残るが、画面には出さない）。",
+            "LGB / XGB / CAT は固定+10%到達・終盤+5%以上、L15 / X15 / C15 は固定+15%到達・終盤+7.5%以上。"
+            "どちらも翌営業日の寄り基準・20営業日以内・20日目MA5≧MA20。各スコアのlabelSpecで定義を記録する。"
+            "買いの規則は基準側3本（LGB / XGB / CAT）がすべて95以上。過去のσモデルの値は当時の記録として保持する。",
             "ltr はランキング学習（LambdaRank。同じ日の候補の中で、翌営業日の寄りで買い20営業日目の終値で売った収益の"
             "順番を学んだもの）。dayPct はその日の候補の中の百分位（候補が1件の日は 50）、upper は 50 以上か。"
             "「両方使う形」（今の規則を満たし、かつ upper）を参考に並べるだけで、買いの規則には使わない"
             "（2026-10-24 から。それより前の日には無い）。",
             "ltr5 は直近5営業日の組のランキング学習（予測の日までの直近5営業日の候補を1つの組にして並べたもの。実験117 の W5）。"
             "rank は予測の日の組の中の順位（同じスコアは銘柄コードの順）、nPool は組の行の数。conds は3条件（日次の1位・"
-            "5日の1位・1.2σ の木3本が95以上）と4条件（それに 1.5σ の木3本が95以上）の印。参考に並べるだけで、買いの規則には"
+            "5日の1位・基準側+10%の木3本が95以上）と4条件（それに+15%の木3本が95以上）の印。参考に並べるだけで、買いの規則には"
             "使わない（2026-11-02 から。それより前の日には無い）。",
         ],
     }
@@ -1060,6 +1056,7 @@ def update_history(args, rows: List[Dict], days) -> None:
             "name": x["name"], "rank": x["rankInDay"], "nInDay": x["nInDay"],
             "score": x["score"], "band": x["band"],
             "calibProb": x["calibProb"], "needPct": x["needPct"],
+            "labelSpec": ((x.get("byModel") or {}).get("lgbm") or {}).get("labelSpec"),
             "closeAtPick": x["close"],
         })
         added += 1

@@ -290,6 +290,8 @@ def main(argv=None) -> int:
     ds = ds.merge(S.reference_outcome(S.Panels(bars).get(B.HIGH_WINDOW)),
                   on=["Code", "Date"], how="left")
     ds = ds.merge(L.realized_returns(bars), on=["Code", "Date"], how="left")
+    ds.attrs["dataThrough"] = str(pd.to_datetime(bars["Date"]).max().date())
+    del bars
 
     print("\n[oof] スコアの読み方を作るため out-of-fold を計算")
     oof = oof_scores(ds, cols, params)
