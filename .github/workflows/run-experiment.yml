@@ -24,6 +24,10 @@ jobs:
           python-version: '3.12'
           cache: pip
       - run: pip install -r research/requirements.txt
+      - name: Wait for complete six-model preparation
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh run watch 41574087195 --exit-status --interval 60
       - uses: actions/download-artifact@v4
         with:
           pattern: fixed-return-*
