@@ -66,6 +66,7 @@ import sweep_design as S  # noqa: E402
 import tuning  # noqa: E402
 import tuning_multi as TM  # noqa: E402
 import lab as L  # noqa: E402
+import label_specs as LS
 from train_production import (  # noqa: E402
     DATA_DIR, MODEL_DIR, OOF_MIN_TRAIN_MONTHS, OOF_STEP_MONTHS,
     OOF_TEST_MONTHS, OUTCOME_COL, calibration, oof_metrics, score_bands,
@@ -122,6 +123,8 @@ def untuned(algos: List[str], store: Dict, cols: List[str]) -> Dict[str, str]:
         if not why and TM.is_tree(a) and cv.get("n_estimators") != TM.N_ESTIMATORS:
             why = (f"探索した木の本数 {cv.get('n_estimators')} と学習する本数 "
                    f"{TM.N_ESTIMATORS} が違います")
+        if not why and cv.get("label_spec") != LS.for_model(a):
+            why = "目的変数が固定リターンの定義と一致しません"
         if why:
             out[a] = why
     return out
@@ -131,15 +134,11 @@ def train_one(algo: str, ds: pd.DataFrame, cols: List[str],
               out_root: str, preset: str = F.DEFAULT_PRESET) -> Dict:
     """1モデルぶんを学習して保存し、要約を返す。ラベル違いのモデルは k のラベルを引き直してから。"""
     t0 = time.time()
-    k = M.label_k(algo)
-    label_name = B.DEFAULT_RISE.name
-    if k is not None:
-        from dataclasses import replace
-        ds = ds.copy()
-        ds["label"] = B.rise_label_for_k(ds, k)
-        ds = ds[ds["label"].notna()].reset_index(drop=True)
-        label_name = replace(B.DEFAULT_RISE, vol_norm_k=float(k)).name
-        print(f"  [{algo}] ラベルを {k:.1f}σ で引き直し: 正例率 {ds['label'].mean()*100:.2f}%（{len(ds):,}件）")
+    ds = ds.copy()
+    ds["label"] = LS.labels(ds, algo)
+    ds = ds[ds["label"].notna()].reset_index(drop=True)
+    label_name = LS.name(algo)
+    LS.check_training_frame(ds, algo)
     oof = oof_scores(algo, ds, cols)
     bands = score_bands(oof)
     calib = calibration(oof)
@@ -157,9 +156,10 @@ def train_one(algo: str, ds: pd.DataFrame, cols: List[str],
         "trainedAt": pd.Timestamp.utcnow().isoformat(),
         "label": label_name,
         # 到達しきい値の倍数（ラベル違いのモデルは k、本番のラベルなら VOL_NORM_K）。画面と記録で見分ける
-        "volNormK": float(k) if k is not None else B.VOL_NORM_K,
+        "volNormK": None,
+        "labelSpec": LS.for_model(algo),
         "base": M.base_algo(algo),
-        "variant": k is not None,
+        "variant": algo in M.ACTIVE_VARIANTS,
         "preset": preset,
         # 線形・MLP の前処理の版（木は ""）。学習時の tuning_multi.preprocess_version
         "preprocess": TM.preprocess_version(algo),

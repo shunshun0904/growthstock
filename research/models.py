@@ -114,7 +114,7 @@ JA = {
     "cat": "CatBoost",
     "logit": "ロジスティック回帰",
     "mlp": "ニューラルネット",
-    "lgbm_k15": "LightGBM（1.5σ）", "xgb_k15": "XGBoost（1.5σ）", "cat_k15": "CatBoost（1.5σ）",
+    "lgbm_k15": "LightGBM（+15%）", "xgb_k15": "XGBoost（+15%）", "cat_k15": "CatBoost（+15%）",
     "logit_k15": "ロジスティック回帰（1.5σ）",
     "lgbm_k18": "LightGBM（1.8σ）", "xgb_k18": "XGBoost（1.8σ）", "cat_k18": "CatBoost（1.8σ）",
     "logit_k18": "ロジスティック回帰（1.8σ）",
@@ -142,9 +142,9 @@ NOTE = {
     "cat": "勾配ブースティング（欠損と正則化の扱いが違う）",
     "logit": "線形モデル。特徴量の足し算で判断するので、木とは外す銘柄が違う",
     "mlp": "ニューラルネット。滑らかな交互作用を見る。木とも線形とも違う",
-    "lgbm_k15": "LightGBM を、到達しきい値 1.5σ（必要な上昇率が 1.2σ の 1.25倍）のラベルで学習（学習器・列は 1.2σ と同じ）。今日の戦略の規則の3本の1つ",
-    "xgb_k15": "XGBoost を、到達しきい値 1.5σ のラベルで学習（学習器・列は 1.2σ と同じ）。今日の戦略の規則の3本の1つ",
-    "cat_k15": "CatBoost を、到達しきい値 1.5σ のラベルで学習（学習器・列は 1.2σ と同じ）。今日の戦略の規則の3本の1つ",
+    "lgbm_k15": "固定+15%到達・終盤+7.5%以上・20日目MA5≧MA20。翌営業日の寄り基準",
+    "xgb_k15": "固定+15%到達・終盤+7.5%以上・20日目MA5≧MA20。翌営業日の寄り基準",
+    "cat_k15": "固定+15%到達・終盤+7.5%以上・20日目MA5≧MA20。翌営業日の寄り基準",
     "logit_k15": "ロジスティック回帰を、到達しきい値 1.5σ のラベルで学習（線形なので並びは 1.2σ とほぼ同じ）。規則には使わない",
     "lgbm_k18": "LightGBM を、到達しきい値 1.8σ（必要な上昇率が 1.2σ の 1.5倍）のラベルで学習（学習器・列は 1.2σ と同じ）。規則には使わない",
     "xgb_k18": "XGBoost を、到達しきい値 1.8σ のラベルで学習（学習器・列は 1.2σ と同じ）。規則には使わない",
@@ -187,10 +187,12 @@ def save(algo: str, model, meta: Dict, oof: pd.DataFrame,
     os.makedirs(d, exist_ok=True)
     joblib.dump(model, os.path.join(d, "model.joblib"), compress=3)
     import json
+    oof.to_parquet(os.path.join(d, "oof.parquet"), index=False, compression="zstd")
+    if "labelSpec" in meta:
+        import model_artifacts as A
+        meta["artifactHashes"] = A.hashes(algo, root)
     with open(os.path.join(d, "meta.json"), "w", encoding="utf-8") as fh:
         json.dump(meta, fh, ensure_ascii=False, indent=2)
-    oof.to_parquet(os.path.join(d, "oof.parquet"), index=False,
-                   compression="zstd")
     return d
 
 

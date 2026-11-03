@@ -42,6 +42,8 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import label_specs as LS
+import model_artifacts as A
 import build_dataset as B  # noqa: E402
 import features as F  # noqa: E402
 # 実収益の物差しは lab と同じものを使う。別々に定義すると、実験で測っている
@@ -260,9 +262,11 @@ def main(argv=None) -> int:
     if cv_obj != tuning.PRODUCTION_OBJECTIVE:
         print(f"[warn] パラメータ {args.params} は目的関数 {cv_obj} で探索したものです"
               f"（今の本番は {tuning.PRODUCTION_OBJECTIVE}）。週次の再学習（tune=yes）で探索し直す")
+    LS.require(rec.get("_cv", {}), "lgbm", field="label_spec")
     params = tuning.params_for(args.params)
     ds = pd.read_parquet(args.dataset)
     ds["Date"] = pd.to_datetime(ds["Date"])
+    LS.check_training_frame(ds, "lgbm")
     # 予測用データセット（ラベル未確定を含む）で学習させない。
     # メタファイルの有無に頼らず、中身で判定する
     n_unlabeled = int(ds["label"].isna().sum())
@@ -320,7 +324,8 @@ def main(argv=None) -> int:
 
     meta = {
         "trainedAt": pd.Timestamp.utcnow().isoformat(),
-        "label": B.DEFAULT_RISE.name,
+        "label": LS.name("lgbm"),
+        "labelSpec": LS.for_model("lgbm"),
         "volNormK": B.VOL_NORM_K,
         "riseHorizon": B.RISE_HORIZON,
         "highWindow": B.HIGH_WINDOW,
@@ -343,11 +348,11 @@ def main(argv=None) -> int:
         "scoreBands": bands,
         "tuning": tuning.load_params().get(args.params, {}).get("_cv", {}),
     }
-    with open(os.path.join(args.out_dir, "meta.json"), "w", encoding="utf-8") as fh:
-        json.dump(meta, fh, ensure_ascii=False, indent=2)
-    # out-of-fold そのものも残す。あとから帯の切り方を変えて数え直せる
     oof.to_parquet(os.path.join(args.out_dir, "oof.parquet"),
                    index=False, compression="zstd")
+    meta["artifactHashes"] = A.hashes("lgbm", args.out_dir)
+    with open(os.path.join(args.out_dir, "meta.json"), "w", encoding="utf-8") as fh:
+        json.dump(meta, fh, ensure_ascii=False, indent=2)
     print(f"\n[done] {model_path} "
           f"({os.path.getsize(model_path)/1e6:.1f}MB)")
     print(f"[done] {os.path.join(args.out_dir, 'meta.json')}")
