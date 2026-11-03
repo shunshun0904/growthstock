@@ -1,0 +1,27 @@
+{
+  "focused_command": "OPENBLAS_NUM_THREADS=1 python -m unittest discover -s tests -p '*theoretical_value.py' -v",
+  "focused_tests_passed": 12,
+  "numeric_verification": {
+    "original_rows": 22110,
+    "original_columns_identical": 520,
+    "financial_dates_strict": true,
+    "statistical_ordering_and_normalization": true,
+    "independent_cashflow_identity_real_rows": 200,
+    "identity_max_absolute_yen_error": 1.0913936421275139e-11,
+    "source_hashes_verified": 39,
+    "mature_outcome_separation_tasks": 4,
+    "complete_fits": 72
+  },
+  "display_verification": {
+    "executed_notebook_cells": 10,
+    "notebook_errors": 0,
+    "static_visible_tables": 17,
+    "javascript_enabled": false,
+    "external_requests": 0,
+    "browser_errors": []
+  },
+  "production_feature_list_changed": false,
+  "production_parameters_changed": false,
+  "production_models_changed": false,
+  "premium_changed": false
+}

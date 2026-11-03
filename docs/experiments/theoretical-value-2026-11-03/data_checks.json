@@ -1,0 +1,12 @@
+{
+  "rows": 22110,
+  "codes": 3748,
+  "date_min": "2018-04-03 00:00:00",
+  "date_max": "2026-10-02 00:00:00",
+  "existing_columns_identical": true,
+  "financial_reference_strictly_before_candidate": true,
+  "rf_reference_strictly_before_candidate": true,
+  "original_historical_api_versions_independently_verified": false,
+  "yield_reference_last": "2026-09-30 00:00:00",
+  "market_last": "2026-11-02 00:00:00"
+}
