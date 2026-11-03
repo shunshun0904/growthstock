@@ -1586,7 +1586,7 @@ class 探索と学習の列を突き合わせる(unittest.TestCase):
         store = {F.DEFAULT_PRESET: {"_n_features": len(cols),
                                     "_features_sig": F.signature(cols),
                                     "n_estimators": tuning.SEARCH_N_ESTIMATORS,
-                                    "_cv": {"label_spec": __import__("label_specs").for_model()}}
+                                    "_cv": {"label_spec": __import__("label_specs").for_model()}}}
         import train_production as TP
         orig = tuning.load_params
         tuning.load_params = lambda path=None: store

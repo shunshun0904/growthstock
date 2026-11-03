@@ -141,7 +141,7 @@ class TestProductionChecksTheTreeCount(unittest.TestCase):
         return {F.DEFAULT_PRESET: {"_n_features": len(cols),
                                    "_features_sig": F.signature(cols),
                                    "n_estimators": trees, "learning_rate": 0.02,
-                                   "_cv": {"label_spec": __import__("label_specs").for_model()}}
+                                   "_cv": {"label_spec": __import__("label_specs").for_model()}}}
 
     def test_a_search_with_another_tree_count_is_not_used(self):
         """例: 500本で探索した記録（fcbe4c1 の頃の週次実行なら書かれえた）で200本の本番を作らない。"""

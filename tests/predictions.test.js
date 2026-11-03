@@ -51,7 +51,7 @@ test('modelRows: ラベル違いは k ごとの塊で、記号は元の記号の
   assert.deepEqual(activeModels(models).map((m) => m.algo), ['lgbm', 'xgb', 'lgbm_k15']);
   assert.deepEqual(activeModels(null), []);
   assert.equal(rows[2].pct, 94);
-  assert.equal(FAMILY_JA.k15, 'ラベル1.5σ');
+  assert.equal(FAMILY_JA.k15, '厳しい到達条件');
   assert.equal(FAMILY_JA.k18, 'ラベル1.8σ');
   assert.equal(MODEL_FAMILY.cat_k15, 'k15');
   assert.equal(MODEL_FAMILY.logit_k18, 'k18');

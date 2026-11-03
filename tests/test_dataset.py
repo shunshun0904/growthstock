@@ -1820,7 +1820,7 @@ class TestMetaRecordsTheLabelActuallyUsed(unittest.TestCase):
                          "1ヶ月内+10% / 終盤+5% / MA5>=MA20 / 翌営業日寄り基準")
         self.assertEqual(B.DEFAULT_RISE.entry, "next_open")
         self.assertEqual(B.DEFAULT_RISE.horizon, 20)
-        self.assertEqual(B.DEFAULT_RISE.vol_norm_k, 1.2)
+        self.assertIsNone(B.DEFAULT_RISE.vol_norm_k)
         self.assertEqual(B.DEFAULT_RISE.keep_days, 0)
         self.assertTrue(B.DEFAULT_RISE.require_uptrend)
 

@@ -386,7 +386,7 @@ def prepare(cols: list, rebuild: bool = False):
     y15 = B.rise_label_for_k(frame, K)
     print("\n■ 確かめ（ラベルを日足から作り直す。超過ラベルは同じ関数に「株価 ÷ TOPIX」を渡すだけ）")
     checks["label_12"] = compare_labels(keys, y12, label_on(panel, B.VOL_NORM_K))
-    check_or_stop(f"{B.VOL_NORM_K:.1f}σ（データセットのラベル）", checks["label_12"])
+    check_or_stop(f"{B.DEFAULT_RISE.name}（データセットのラベル）", checks["label_12"])
     checks["label_15"] = compare_labels(keys, y15, label_on(panel, K))
     check_or_stop(f"{K:.1f}σ（rise_label_for_k）", checks["label_15"])
 

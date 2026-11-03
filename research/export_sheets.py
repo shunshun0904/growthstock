@@ -96,6 +96,7 @@ OWNED_COLS = [
 #: 「一致」は上位10%と見ているモデルの数。独立した判定の数え上げで、
 #: スコアを混ぜた値ではない（アンサンブルはしない方針）。
 LABEL_COL = "目的変数定義"
+OWNED_COLS = OWNED_COLS + [LABEL_COL]
 MODEL_COLS = [f"{M.SHORT.get(a, a[:3].upper())}%" for a in M.LINEUP]
 SCORE_COLS = [f"{M.SHORT.get(a, a[:3].upper())}スコア" for a in M.LINEUP]
 AGREE_COL = "一致(上位10%)"
@@ -148,14 +149,14 @@ RANK_COLS = ["ランキング順位", "ランキング百分位", "5日の順位
 def header_of(book: str = "v1") -> List[str]:
     """新しく作るタブの見出し（v2 はランキング学習の列を元の列のすぐ右に置く）。"""
     rank = RANK_COLS if book == "v2" else []
-    return (OWNED_COLS + [LABEL_COL] + rank + MODEL_COLS + SCORE_COLS + AGREE_COLS + ENTRY_COLS
+    return (OWNED_COLS + rank + MODEL_COLS + SCORE_COLS + AGREE_COLS + ENTRY_COLS
             + TRACK_COLS + USER_COLS + EARN_COLS)
 
 
 def owned_of(book: str = "v1") -> List[str]:
     """このスクリプトが書く列（見出しに無ければ右端に足す。ensure_columns）。"""
     rank = RANK_COLS if book == "v2" else []
-    return OWNED_COLS + [LABEL_COL] + rank + MODEL_COLS + SCORE_COLS + AGREE_COLS + ENTRY_COLS + TRACK_COLS + EARN_COLS
+    return OWNED_COLS + rank + MODEL_COLS + SCORE_COLS + AGREE_COLS + ENTRY_COLS + TRACK_COLS + EARN_COLS
 
 
 def in_book(pick_date: str, book: str = "v1") -> bool:
