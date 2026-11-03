@@ -1,5 +1,5 @@
 """Tune and train one fixed-return production model; emit only aggregate metadata."""
-import argparse, hashlib, json, os, sys
+import argparse, json, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import pandas as pd
@@ -23,9 +23,7 @@ def main():
         if train_multi.main(['--models',algo])!=0:raise RuntimeError('training did not complete')
     data=Path('research/_data');dest=A.directory(algo)
     meta=json.loads((dest/'meta.json').read_text())
-    files=sorted(data.glob('*.parquet'))
-    inventory={p.name:A.sha256(p) for p in files if not p.name.endswith('_oof.parquet') and p.name!='oof.parquet' and p.name!='dataset.parquet'}
-    meta['dataSnapshot']=hashlib.sha256(json.dumps(inventory,sort_keys=True).encode()).hexdigest()
+    meta.update(A.data_snapshot(data))
     meta['dataThrough']=str(max(pd.read_parquet(p,columns=['Date']).Date.max() for p in data.glob('bars_*.parquet')))[:10]
     meta['dataInventory']=inventory
     (dest/'meta.json').write_text(json.dumps(meta,ensure_ascii=False,indent=2)+'\n')
