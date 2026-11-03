@@ -150,7 +150,7 @@ def eval_keysets(df: pd.DataFrame) -> dict:
 
 def with_label(df: pd.DataFrame, k: float) -> pd.DataFrame:
     """k のラベルに引き直した表（1.2σ はデータセットのラベルのまま）。ラベルの決まらない行は落とす。"""
-    if abs(k - B.VOL_NORM_K) < 1e-9:
+    if abs(k - 1.2) < 1e-9:
         return df[df["label"].notna()].reset_index(drop=True)
     out = df.copy()
     out["label"] = B.rise_label_for_k(out, k)

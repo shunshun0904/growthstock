@@ -6,7 +6,7 @@
   "description": "成長株分析ダッシュボード Focus — J-Quants API による8軸モメンタム・スコアリング",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "python3 research/export_model_registry.py && vite build",
     "preview": "vite preview",
     "test": "node --test tests/*.test.js",
     "test:py": "python3 tests/test_fetcher.py"

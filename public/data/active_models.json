@@ -1,0 +1,144 @@
+{
+  "version": 1,
+  "kind": "fixed_return",
+  "models": [
+    {
+      "algo": "lgbm",
+      "labelSpec": {
+        "version": "fixed_return_v1",
+        "kind": "fixed_return",
+        "threshold": 0.1,
+        "end_ratio": 0.05,
+        "horizon": 20,
+        "end_window": 5,
+        "entry": "next_open",
+        "require_uptrend": true,
+        "trend_short": 5,
+        "trend_long": 20,
+        "vol_norm_k": null,
+        "numeric_tolerance": 1e-12
+      },
+      "trainedAt": "2026-11-03T04:18:33.931553+00:00",
+      "trainTo": "2026-10-02",
+      "dataThrough": "2026-11-02",
+      "nTrain": 22110,
+      "nOof": 16481,
+      "dataSnapshot": "3ce7a4a92191973ee46f507d6853295c167a91f43658b84d341ab94292541ecb"
+    },
+    {
+      "algo": "xgb",
+      "labelSpec": {
+        "version": "fixed_return_v1",
+        "kind": "fixed_return",
+        "threshold": 0.1,
+        "end_ratio": 0.05,
+        "horizon": 20,
+        "end_window": 5,
+        "entry": "next_open",
+        "require_uptrend": true,
+        "trend_short": 5,
+        "trend_long": 20,
+        "vol_norm_k": null,
+        "numeric_tolerance": 1e-12
+      },
+      "trainedAt": "2026-11-03T04:49:35.091845+00:00",
+      "trainTo": "2026-10-02",
+      "dataThrough": "2026-11-02",
+      "nTrain": 22110,
+      "nOof": 16481,
+      "dataSnapshot": "3ce7a4a92191973ee46f507d6853295c167a91f43658b84d341ab94292541ecb"
+    },
+    {
+      "algo": "cat",
+      "labelSpec": {
+        "version": "fixed_return_v1",
+        "kind": "fixed_return",
+        "threshold": 0.1,
+        "end_ratio": 0.05,
+        "horizon": 20,
+        "end_window": 5,
+        "entry": "next_open",
+        "require_uptrend": true,
+        "trend_short": 5,
+        "trend_long": 20,
+        "vol_norm_k": null,
+        "numeric_tolerance": 1e-12
+      },
+      "trainedAt": "2026-11-03T04:11:56.456127+00:00",
+      "trainTo": "2026-10-02",
+      "dataThrough": "2026-11-02",
+      "nTrain": 22110,
+      "nOof": 16481,
+      "dataSnapshot": "3ce7a4a92191973ee46f507d6853295c167a91f43658b84d341ab94292541ecb"
+    },
+    {
+      "algo": "lgbm_k15",
+      "labelSpec": {
+        "version": "fixed_return_v1",
+        "kind": "fixed_return",
+        "threshold": 0.15,
+        "end_ratio": 0.075,
+        "horizon": 20,
+        "end_window": 5,
+        "entry": "next_open",
+        "require_uptrend": true,
+        "trend_short": 5,
+        "trend_long": 20,
+        "vol_norm_k": null,
+        "numeric_tolerance": 1e-12
+      },
+      "trainedAt": "2026-11-03T04:23:05.054984+00:00",
+      "trainTo": "2026-10-02",
+      "dataThrough": "2026-11-02",
+      "nTrain": 22110,
+      "nOof": 16481,
+      "dataSnapshot": "3ce7a4a92191973ee46f507d6853295c167a91f43658b84d341ab94292541ecb"
+    },
+    {
+      "algo": "xgb_k15",
+      "labelSpec": {
+        "version": "fixed_return_v1",
+        "kind": "fixed_return",
+        "threshold": 0.15,
+        "end_ratio": 0.075,
+        "horizon": 20,
+        "end_window": 5,
+        "entry": "next_open",
+        "require_uptrend": true,
+        "trend_short": 5,
+        "trend_long": 20,
+        "vol_norm_k": null,
+        "numeric_tolerance": 1e-12
+      },
+      "trainedAt": "2026-11-03T04:37:17.431893+00:00",
+      "trainTo": "2026-10-02",
+      "dataThrough": "2026-11-02",
+      "nTrain": 22110,
+      "nOof": 16481,
+      "dataSnapshot": "3ce7a4a92191973ee46f507d6853295c167a91f43658b84d341ab94292541ecb"
+    },
+    {
+      "algo": "cat_k15",
+      "labelSpec": {
+        "version": "fixed_return_v1",
+        "kind": "fixed_return",
+        "threshold": 0.15,
+        "end_ratio": 0.075,
+        "horizon": 20,
+        "end_window": 5,
+        "entry": "next_open",
+        "require_uptrend": true,
+        "trend_short": 5,
+        "trend_long": 20,
+        "vol_norm_k": null,
+        "numeric_tolerance": 1e-12
+      },
+      "trainedAt": "2026-11-03T04:22:34.521029+00:00",
+      "trainTo": "2026-10-02",
+      "dataThrough": "2026-11-02",
+      "nTrain": 22110,
+      "nOof": 16481,
+      "dataSnapshot": "3ce7a4a92191973ee46f507d6853295c167a91f43658b84d341ab94292541ecb"
+    }
+  ]
+}

@@ -412,7 +412,7 @@ def fit_eval(algo: str, params: Dict, tr: pd.DataFrame, va: pd.DataFrame,
 # --------------------------------------------------------------------------- #
 
 def study_name(algo: str, n_splits: int, train_to: str, cols: List[str],
-               scheme: str = "year_cap_date", objective: str = "pr_auc") -> str:
+               scheme: str = "year_cap_date", objective: str = "pr_auc", label_spec=None) -> str:
     """
     Optuna の study 名。「解こうとしている問題」を表すものだけで作る
     （モデル・分割数・訓練データの最終日・列、木のモデルは木の本数、分割方式も）。
@@ -430,12 +430,16 @@ def study_name(algo: str, n_splits: int, train_to: str, cols: List[str],
     version = preprocess_version(algo)
     if version and version != "v1":
         name += f"_{version}"
+    if label_spec is not None:
+        import label_specs as LS
+        name += "_label_" + LS.signature(label_spec)
     return name
 
 
 def tune(algo: str, df: pd.DataFrame, cols: List[str], *, n_trials: int = 50,
          n_splits: int = 5, seed: int = SEED, verbose: bool = True,
-         scheme: str = tuning.PRODUCTION_CV, objective: str = tuning.PRODUCTION_OBJECTIVE) -> Dict:
+         scheme: str = tuning.PRODUCTION_CV, objective: str = tuning.PRODUCTION_OBJECTIVE,
+         label_spec=None) -> Dict:
     """
     1アルゴリズムを探索する。df はホールドアウトより手前だけを渡すこと。
 
@@ -500,7 +504,7 @@ def tune(algo: str, df: pd.DataFrame, cols: List[str], *, n_trials: int = 50,
         # 別の列で測った50試行を「完了済み」として引き継ぎ、1試行もせずに
         # 旧い列の最良値を返す（153列 -> 205列 に切り替えた 2026-09-23 に
         # この穴に気づいた）
-        study_name=study_name(algo, n_splits, train_to, cols, scheme, objective),
+        study_name=study_name(algo, n_splits, train_to, cols, scheme, objective, label_spec),
         load_if_exists=True,
     )
     done = len([t for t in study.trials
@@ -515,6 +519,7 @@ def tune(algo: str, df: pd.DataFrame, cols: List[str], *, n_trials: int = 50,
         "params": dict(study.best_params),
         "_cv": {
             "algo": algo, "scheme": scheme, "n_splits": len(folds),
+            **({"label_spec": label_spec} if label_spec is not None else {}),
             "fold_windows": tuning.fold_windows(folds),
             "objective": objective, "objective_value": round(float(study.best_value), 4),
             "n_trials": n_trials, "n_estimators": N_ESTIMATORS,

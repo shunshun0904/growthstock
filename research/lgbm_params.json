@@ -520,17 +520,31 @@
     "random_state": 0,
     "n_jobs": -1,
     "verbose": -1,
-    "learning_rate": 0.018140012086641115,
-    "num_leaves": 91,
-    "min_child_samples": 176,
-    "subsample": 0.8106405633311773,
-    "colsample_bytree": 0.9232317962237111,
-    "reg_alpha": 1.0954454798980054e-08,
-    "reg_lambda": 0.0003115319621667725,
+    "learning_rate": 0.02955716726977837,
+    "num_leaves": 36,
+    "min_child_samples": 173,
+    "subsample": 0.843478335380275,
+    "colsample_bytree": 0.7887994547022888,
+    "reg_alpha": 5.384402084245105e-08,
+    "reg_lambda": 1.1431665266079738e-06,
     "subsample_freq": 1,
     "_cv": {
       "scheme": "year_cap_date",
       "model": "classifier",
+      "label_spec": {
+        "version": "fixed_return_v1",
+        "kind": "fixed_return",
+        "threshold": 0.1,
+        "end_ratio": 0.05,
+        "horizon": 20,
+        "end_window": 5,
+        "entry": "next_open",
+        "require_uptrend": true,
+        "trend_short": 5,
+        "trend_long": 20,
+        "vol_norm_k": null,
+        "numeric_tolerance": 1e-12
+      },
       "n_estimators": 200,
       "lr_range": [
         0.01,
@@ -538,76 +552,76 @@
       ],
       "n_splits": 5,
       "objective": "pr_auc",
-      "objective_value": 0.3444,
-      "mean_pr_auc": 0.3444,
-      "std": 0.0258,
+      "objective_value": 0.3109,
+      "mean_pr_auc": 0.3109,
+      "std": 0.0152,
       "fold_scores": [
-        0.35,
-        0.3233,
-        0.383,
-        0.3094,
-        0.3564
+        0.332,
+        0.2945,
+        0.319,
+        0.3164,
+        0.2924
       ],
-      "mean_roc_auc": 0.7086,
-      "roc_std": 0.0085,
+      "mean_roc_auc": 0.6864,
+      "roc_std": 0.0118,
       "fold_roc": [
-        0.7127,
-        0.7022,
-        0.7183,
-        0.6953,
-        0.7145
+        0.687,
+        0.6847,
+        0.6692,
+        0.7063,
+        0.6847
       ],
-      "base_rate": 0.1628,
+      "base_rate": 0.1799,
       "fold_pos_rate": [
-        0.1587,
-        0.1638,
-        0.1728,
-        0.1579,
-        0.1607
+        0.1833,
+        0.18,
+        0.1912,
+        0.1742,
+        0.171
       ],
-      "fold_pos_rate_spread": 0.0149,
-      "fold_cap_spread_pt": 2.01,
+      "fold_pos_rate_spread": 0.0202,
+      "fold_cap_spread_pt": 1.972,
       "n_trials": 50,
       "fold_windows": [
         {
-          "valid_from": "2018-05-02",
-          "valid_to": "2025-09-01",
-          "train_to": "2025-09-02",
-          "n_train": 14475,
-          "n_valid": 3630,
-          "pos_rate": 0.1587
-        },
-        {
-          "valid_from": "2018-04-04",
-          "valid_to": "2025-08-21",
-          "train_to": "2025-09-02",
-          "n_train": 14435,
-          "n_valid": 3670,
-          "pos_rate": 0.1638
-        },
-        {
-          "valid_from": "2018-04-06",
+          "valid_from": "2018-04-24",
           "valid_to": "2025-08-29",
-          "train_to": "2025-09-02",
-          "n_train": 14563,
-          "n_valid": 3542,
-          "pos_rate": 0.1728
-        },
-        {
-          "valid_from": "2018-04-05",
-          "valid_to": "2025-08-27",
-          "train_to": "2025-09-02",
-          "n_train": 14419,
-          "n_valid": 3686,
-          "pos_rate": 0.1579
+          "train_to": "2025-09-03",
+          "n_train": 14578,
+          "n_valid": 3579,
+          "pos_rate": 0.1833
         },
         {
           "valid_from": "2018-04-03",
-          "valid_to": "2025-09-02",
+          "valid_to": "2025-08-27",
+          "train_to": "2025-09-03",
+          "n_train": 14718,
+          "n_valid": 3439,
+          "pos_rate": 0.18
+        },
+        {
+          "valid_from": "2018-04-04",
+          "valid_to": "2025-08-28",
+          "train_to": "2025-09-03",
+          "n_train": 14631,
+          "n_valid": 3526,
+          "pos_rate": 0.1912
+        },
+        {
+          "valid_from": "2018-04-13",
+          "valid_to": "2025-09-01",
+          "train_to": "2025-09-03",
+          "n_train": 14305,
+          "n_valid": 3852,
+          "pos_rate": 0.1742
+        },
+        {
+          "valid_from": "2018-04-06",
+          "valid_to": "2025-09-03",
           "train_to": "2025-09-01",
-          "n_train": 14528,
-          "n_valid": 3577,
-          "pos_rate": 0.1607
+          "n_train": 14396,
+          "n_valid": 3761,
+          "pos_rate": 0.171
         }
       ]
     },

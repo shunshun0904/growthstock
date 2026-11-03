@@ -230,7 +230,7 @@ export const MODEL_FAMILY = {
   lgbm_k18: 'k18', xgb_k18: 'k18', cat_k18: 'k18', logit_k18: 'k18',
 };
 
-export const FAMILY_JA = { tree: '決定木系', other: '木以外', k15: 'ラベル1.5σ', k18: 'ラベル1.8σ' };
+export const FAMILY_JA = { tree: '決定木系', other: '木以外', k15: '厳しい到達条件', k18: 'ラベル1.8σ' };
 
 /**
  * 外したラベル違いのモデル（research/models.py の RETIRED_VARIANTS）。運用者の依頼（2026-10-24）「1.8σの週次学習は
@@ -271,13 +271,16 @@ export function modelRows(candidate, models) {
   const meta = new Map((models || []).map((m) => [m.algo, m]));
   return order.map((algo) => ({
     algo,
-    name: meta.get(algo)?.name || algo,
-    note: meta.get(algo)?.note || '',
+    name: per[algo].labelSpec ? (meta.get(algo)?.name || algo)
+      : (meta.get(algo)?.name || algo).replace('（+15%）', '（1.5σ）'),
+    note: per[algo].labelSpec ? (meta.get(algo)?.note || '') : '当時のσモデルによる予測',
     short: meta.get(algo)?.short || MODEL_SHORT[algo]
            || algo.slice(0, 3).toUpperCase(),
     family: MODEL_FAMILY[algo] || 'other',
     pct: per[algo].pctHistorical,
     score: per[algo].score,
+    labelSpec: per[algo].labelSpec || null,
+    labelK: per[algo].labelK ?? meta.get(algo)?.labelK ?? null,
   }));
 }
 
@@ -448,7 +451,12 @@ export function modelGrid(candidate, models) {
     })),
     rows: ['base', 'k15'].filter((k) => lines.has(k)).map((k) => ({
       label: k,
-      labelJa: LABEL_JA[k],
+      labelJa: (() => {
+        const cell = [...lines.get(k).values()][0];
+        return cell.labelSpec?.kind === 'fixed_return'
+          ? `+${Math.round(cell.labelSpec.threshold * 100)}%`
+          : LABEL_JA[k];
+      })(),
       cells: cols.map((l) => lines.get(k).get(l) || null),
     })),
   };

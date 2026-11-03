@@ -70,6 +70,9 @@ console.log(launchOptions.executablePath
 const browser = await chromium.launch(launchOptions);
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 
+await page.route('**/data/active_models.json*', (route) => route.fulfill({
+  json: { kind: 'fixed_return', models: [{ dataThrough: '2026-11-02', trainTo: '2026-10-02' }] },
+}));
 const consoleErrors = [];
 page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
 page.on('pageerror', (e) => consoleErrors.push(`pageerror: ${e.message}`));
@@ -88,7 +91,7 @@ check(nRows === 5, `候補が5件描画される (実際: ${nRows})`);
 // モデル別の百分位の表（運用者の指示 2026-10-12「12個全てを載せてほしい。棒グラフ形式でなくてよい。大小が分かればよい」）。
 // 行 = ラベル（1.2σ / 1.5σ）、列 = 学習器。合成データは 1.8σ とロジスティック回帰を含む12本（外す前の日の予測ファイルの形）で、
 // 5件目だけ logit_k15 と 1.5σ の cat が欠ける（欠けたマスの「—」を見るため。logit_k15 は外したモデルなので表に出ない。
-// 2026-10-30 に規則が 1.2σ の3本に戻ったので、欠けるマスを規則の外の 1.5σ の行に移した）。
+// 2026-10-30 に規則が 基準ラベルの3本に戻ったので、欠けるマスを規則の外の 1.5σ の行に移した）。
 // ロジスティック回帰（LR / LR15）は運用者の指示（2026-10-29）で 2026-11-02 の予測から外し、前の日の値も出さない。1.8σ の4本は運用者の依頼（2026-10-24「1.8σの週次学習はなくしたはずです」→「採点・表示からも外す」）で、
 // 予測ファイルに値があっても出さない（src/lib/predictions.js の RETIRED_VARIANTS）
 const gridCells = page.locator('.pred-list .pred-row .pred-main .pred-mg .c');
@@ -117,7 +120,7 @@ check((await naCells.count()) === 1 && ((await naCells.textContent()) || '').inc
       '欠けたモデルのマスは「—」');
 check((await page.locator('.pred-ms-i').count()) === 0, 'モデル別の縦棒は出さない');
 check(!predBody.includes('12本の合意'), '12本の合意（平均）は出さない');
-check(predBody.includes('決定木系') && predBody.includes('ラベル1.5σ') && !predBody.includes('ラベル1.8σ'),
+check(predBody.includes('決定木系') && predBody.includes('厳しい到達条件') && !predBody.includes('ラベル1.8σ'),
       '塊の名前が一覧パネルに出る（外した 1.8σ の塊は出さない）');
 
 // 同じ表でスコアそのものに切り替えられる（運用者の依頼 2026-10-16「目的変数横断での比較ができないので、モデルのスコア自体も
@@ -138,13 +141,13 @@ check(predBody.includes('LightGBM（1.5σ）') && predBody.includes('CatBoost（
   '6本の日本語名が出る（1.8σ の4本とロジスティック回帰は並べているモデルにも出さない）');
 // 今日の戦略パネル（docs/PLAYBOOK.md の手順）。
 // 合成データは候補5件。2026-10-12 から発火の数では見送らないので「発火が少ない日」。
-// 1.2σ の3本（2026-10-30 からの規則）がすべて95以上の候補は無いので、買う銘柄は出ない
+// 基準ラベルの3本（2026-10-30 からの規則）がすべて95以上の候補は無いので、買う銘柄は出ない
 const strat = await page.textContent('.strat');
 check(strat.includes('今日の戦略'), '戦略パネルが表示される');
 check(strat.includes('発火が少ない日'), '発火5件の日は「発火が少ない日」と出る（見送りではない）');
 check(strat.includes('発火の数では見送らない'), 'パネルの見出しに「発火の数では見送らない」と出る');
-check(strat.includes('1.2σ の3本がすべて95以上の銘柄はありません'), '買わない理由（基準を満たす銘柄なし）が出る');
-check(strat.includes('1.2σ の3本（LGB・XGB・CAT）がすべて95以上の銘柄を2件まで'), 'パネルの見出しに規則（1.2σ の3本）が出る');
+check(strat.includes('基準ラベルの3本がすべて95以上の銘柄はありません'), '買わない理由（基準を満たす銘柄なし）が出る');
+check(strat.includes('基準ラベルの3本（LGB・XGB・CAT）がすべて95以上の銘柄を2件まで'), 'パネルの見出しに規則（基準ラベルの3本）が出る');
 check((await page.locator('.strat-pick').count()) === 0,
       '基準を満たす銘柄が無い日は買う銘柄を出さない');
 check(strat.includes('発火数'), '発火数が表示される');
@@ -197,7 +200,7 @@ check(((await ltrCard.locator('.ltr-rank-note').textContent()) || '').includes('
       '順位表の注記に上半分の件数が出る');
 // 直近5営業日の組のランキング学習（2026-11-02 から。§82-6）の「5日の順位」と「3条件・4条件」の列。合成データでは
 // ソフトバンクが日次の1位・大和自動車交通が5日の1位で、両方を満たす候補は無いので3条件・4条件の印は出ない（3条件 = 日次の
-// 1位・5日の1位・1.2σ の3本 95以上、4条件 = それに 1.5σ の3本 95以上。§87）
+// 1位・5日の1位・基準ラベルの3本 95以上、4条件 = それに 1.5σ の3本 95以上。§87）
 const ltrHeads = await ltrCard.locator('thead th').allTextContents();
 check(ltrHeads.some((t) => t.includes('5日の順位')) && ltrHeads.some((t) => t.includes('3条件・4条件')),
       `順位表に「5日の順位」と「3条件・4条件」の列がある (実際: ${ltrHeads.join(' / ')})`);
@@ -221,29 +224,29 @@ await page.locator('.pred-row.open .pred-main').click();
 check(!predBody.includes('NaN'), '予測タブに NaN が出ていない');
 check(!predBody.includes('undefined'), '予測タブに undefined が出ていない');
 
-// 際どい候補の印（今の規則の線「1.2σ の3本とも95以上」の下。2026-10-30 から）。合成データの1件目は 1.2σ の3本で
+// 際どい候補の印（今の規則の線「基準ラベルの3本とも95以上」の下。2026-10-30 から）。合成データの1件目は 基準ラベルの3本で
 // lgbm 85・xgb 96・cat 98（2本95以上で LightGBM が最下位。今の数字では赤の組が無いので黄）。
-// 5件目の大和自動車交通も 1.2σ の3本では際どい形（96・100・78.1。2本95以上で CatBoost が最下位）→ 印が出る
+// 5件目の大和自動車交通も 基準ラベルの3本では際どい形（96・100・78.1。2本95以上で CatBoost が最下位）→ 印が出る
 // （1.5σ の3本（92.9・100・欠け）が規則だった 2026-10-29〜10-30 は際どくなかった）
 const borders = page.locator('.pred-list .pred-border');
 check((await borders.count()) === 2, `際どい候補の印が2件に出る (実際: ${await borders.count()})`);
 const firstBorder = page.locator('.pred-row').first().locator('.pred-border');
-check(((await firstBorder.textContent()) || '').includes('1.2σで際どい・最下位 LightGBM'),
-      '1件目は「1.2σで際どい・最下位 LightGBM」と出る');
+check(((await firstBorder.textContent()) || '').includes('基準ラベルで際どい・最下位 LightGBM'),
+      '1件目は「基準ラベルで際どい・最下位 LightGBM」と出る');
 check(((await firstBorder.getAttribute('class')) || '').includes('amber'), '1件目の印は黄（赤の組は無い）');
 check(((await firstBorder.getAttribute('title')) || '').includes('LightGBM が一番低いときは、過去 +2.3%（200件）'),
       '印の title にその形の過去の数字が出る');
-check(((await rowOf('大和自動車交通').locator('.pred-border').textContent()) || '').includes('1.2σで際どい・最下位 CatBoost'),
-      '大和自動車交通（1.2σ の3本で 2本95以上・残り 85未満）にも印が出る');
+check(((await rowOf('大和自動車交通').locator('.pred-border').textContent()) || '').includes('基準ラベルで際どい・最下位 CatBoost'),
+      '大和自動車交通（基準ラベルの3本で 2本95以上・残り 85未満）にも印が出る');
 
 // 一覧の並び順（運用者の決定 2026-10-13「1.5σ の3本のうち一番低い百分位でいきましょう」を、規則の3本で続ける。2026-10-30 から
-// 規則と一緒に 1.2σ の3本。2026-10-29〜10-30 は 1.5σ の3本）。
-// 合成データの 1.2σ の3本の最小: 安田倉庫 85.0・大和自動車交通 78.1・ソフトバンク 68.4・シンプレクス 58.1・
+// 規則と一緒に 基準ラベルの3本。2026-10-29〜10-30 は 1.5σ の3本）。
+// 合成データの 基準ラベルの3本の最小: 安田倉庫 85.0・大和自動車交通 78.1・ソフトバンク 68.4・シンプレクス 58.1・
 // 野村 37.3（1.2σ の LightGBM のスコア順なら 安田倉庫・野村・シンプレクス・ソフトバンク・大和自動車交通）
 const names = await page.locator('.pred-list .pred-row .pred-id strong').allTextContents();
 const want = ['安田倉庫', '大和自動車交通', 'ソフトバンク', 'シンプレクス', '野村アセットマネジメント'];
 check(names.length === 5 && want.every((w, i) => (names[i] || '').includes(w)),
-      `一覧は 1.2σ の3本の最小が高い順 (実際: ${names.map((t) => t.slice(0, 6)).join(' / ')})`);
+      `一覧は 基準ラベルの3本の最小が高い順 (実際: ${names.map((t) => t.slice(0, 6)).join(' / ')})`);
 const ranks = await page.locator('.pred-list .pred-rank').allTextContents();
 check(ranks.join(',') === '185.0,278.1,368.4,458.1,537.3', `順位の数字は並び順で、下に最小を添える (実際: ${ranks.join(',')})`);
 const rank2 = page.locator('.pred-list .pred-rank').nth(1);
@@ -252,7 +255,7 @@ check(((await rank2.getAttribute('title')) || '').includes('基準モデル（1.
 check((await rank2.evaluate((el) => getComputedStyle(el).color)) === 'rgb(151, 163, 184)',
       '最小が 85 未満の順位は控えめの字');
 check(((await page.textContent('.card-head:has(h2:text-is("ブレイク予測")) .sub')) || '')
-        .includes('1.2σ の3本のうち一番低い百分位が高い順'),
+        .includes('基準ラベルの3本のうち一番低い百分位が高い順'),
       '見出しに並び順の物差しが出る');
 check((await page.locator('.pred-order-note').count()) === 0, '規則の3本の値がそろった日は並び順の注記を出さない');
 
@@ -281,10 +284,10 @@ check(gridWidths.length === 2 && gridWidths[0] === gridWidths[1], `詳細の2つ
 // どれも本番で使うので、1.2σ を「本番」と呼ばない（運用者の指示 2026-10-17）。規則の 1.2σ の行に「規則」と添える（2026-10-30 から）
 check(detail.includes('1.2σ（規則）') && !detail.includes('1.5σ（規則）') && !detail.includes('本番'),
       '詳細の表は 1.2σ の行に「規則」と出て、どこにも「本番」と出ない');
-check(/並び順\s*1\.2σ の3本の最小\s*（85\.0）/.test(detail) && /帯の基準\s*LightGBM（1\.2σ）\s*（1 \/ 5 位）/.test(detail),
-      '詳細に並び順の物差し（1.2σ の3本の最小）と帯の基準（1.2σ の LightGBM の順位）が分けて出る');
-check(detail.includes('基準モデルの見立ての内訳') && detail.includes('基準モデル（1.2σ の LightGBM）の出力を')
-        && detail.includes('一覧の並び順（1.2σ の3本の最小）の内訳ではありません'),
+check(/並び順\s*基準ラベルの3本の最小\s*（85\.0）/.test(detail) && /帯の基準\s*LightGBM（基準ラベル）\s*（1 \/ 5 位）/.test(detail),
+      '詳細に並び順の物差し（基準ラベルの3本の最小）と帯の基準（1.2σ の LightGBM の順位）が分けて出る');
+check(detail.includes('基準モデルの見立ての内訳') && detail.includes('基準モデル（上段のLightGBM）の出力を')
+        && detail.includes('一覧の並び順（基準ラベルの3本の最小）の内訳ではありません'),
       '寄与の欄は 1.2σ の LightGBM のものと明示される');
 // 上位10%と見たモデルの数は、画面で表に出すモデル（1.2σ・1.5σ の木3本ずつ）の百分位から数え直す（予測ファイルの agree90 /
 // agreeK90 は外す前の日はロジスティック回帰・1.8σ を含む数）。1件目の 1.2σ は 85・96・98、1.5σ は 83.6・97.1・97.4 なので
@@ -292,7 +295,7 @@ check(detail.includes('基準モデルの見立ての内訳') && detail.includes
 check(detail.includes('上位10%と見たモデル') && /1\.2σ\s*2\/3/.test(detail) && detail.includes('（1.5σ 2/3）')
         && !detail.includes('4/8') && !detail.includes('2/4'),
       '詳細に上位10%と見たモデルの数（1.2σ の木3本と、1.5σ の木3本）が出る');
-check(detail.includes('実験82'), '詳細に「1.5σ・1.8σ も95以上」を足しても安定しない（実験82）と出る');
+check(detail.includes('旧σモデルでの過去成績は固定%モデルの運用成績を示すものではありません'), '詳細に「1.5σ・1.8σ も95以上」を足しても安定しない（実験82）と出る');
 check(!detail.includes('12本の合意'), '詳細にも12本の合意（平均）は出さない');
 // 次の決算発表（予測日までに公表済みの予定）。合成データの1件目は7営業日後（持つ20営業日の中 → 黄）、
 // 4件目は36営業日後（灰）、ほかは未公表（灰）。帯に「20営業日以内に決算 1 / 5」
@@ -313,8 +316,8 @@ check(featNames.length > 0 && featNames[0] === '20日ボラティリティ' && !
 const featTitle = await page.locator('.pred-detail .pred-feats .pred-b').first().getAttribute('title');
 check((featTitle || '').includes('（vol_20d）'), 'ホバーの説明に元の列名が添えてある');
 const borderNote = await page.textContent('.pred-detail .pred-border-note');
-check((borderNote || '').includes('1.2σ の3本で見た際どい候補') && (borderNote || '').includes('+2.3%（200件）'),
-      '詳細の先頭に際どい候補の注意（1.2σ の3本）が出る');
+check((borderNote || '').includes('基準ラベルの3本で見た際どい候補') && (borderNote || '').includes('+2.3%（200件）'),
+      '詳細の先頭に際どい候補の注意（基準ラベルの3本）が出る');
 await page.screenshot({ path: path.join(SHOTS, 'screenshot-prediction.png') });
 await page.locator('.pred-row').first().locator('.pred-main').click();
 
@@ -388,7 +391,7 @@ check(xTicks.includes('24/4') && xTicks.includes('25/7') && xTicks.every((t) => 
 await page.screenshot({ path: path.join(SHOTS, 'screenshot-samples.png'), fullPage: true });
 
 console.log('\n== 候補銘柄のニュース ==');
-// 出すのは今日の戦略の候補（規則の3本すべて95以上。2026-10-30 から 1.2σ の3本）だけ（運用者の指示 2026-10-17「取得対象は、
+// 出すのは今日の戦略の候補（規則の3本すべて95以上。2026-10-30 から 基準ラベルの3本）だけ（運用者の指示 2026-10-17「取得対象は、
 // 候補銘柄のみで良いです」）。合成の予測データには規則を通る候補が無いので、9324・9434・9082 の規則の3本の百分位を上書きして配り直す
 // （tests/fixtures/synthetic-news-links.json は同じ値から research/news_links.py の書き出しで作った。9082 はリンクの記録が無い）
 const PASS = { 9324: [98.1, 97.1, 97.4], 9434: [97.1, 96.5, 95.2], 9082: [96.0, 100.0, 95.0] };
@@ -452,6 +455,25 @@ console.log('\n== リカレンス・ネットワーク（隠している） ==')
 // smoke.mjs）から戻す
 check(recurrenceRequests.length === 0,
       `リカレンス・ネットワークのデータ（/data/recurrence/）はどのタブを開いても読まない (実際: ${recurrenceRequests.length}件)`);
+
+console.log('\n== 固定リターン本番モデルと履歴の区別 ==');
+await page.goto(base, { waitUntil: 'networkidle' });
+await page.waitForSelector('.pred-row');
+check((await page.getByTestId('active-models').textContent()).includes('固定+10%・+15%'),
+      '本番の固定リターンモデルを表示する');
+check((await page.locator('.pred-row').first().locator('.pred-main .pred-mg .r').allTextContents()).join(',').includes('1.2σ'),
+      '新しい本番モデルに切り替えても過去のσ予測を固定%と表示しない');
+const fixedPrediction = JSON.parse(fs.readFileSync(PRED_FIXTURE, 'utf8'));
+for (const row of fixedPrediction.candidates) {
+  for (const [algo, score] of Object.entries(row.byModel || {})) {
+    score.labelSpec = {kind: 'fixed_return', threshold: algo.endsWith('_k15') ? .15 : .10};
+  }
+}
+await page.route('**/data/predictions.json*', (route) => route.fulfill({json: fixedPrediction}));
+await page.goto(base, { waitUntil: 'networkidle' });
+await page.waitForSelector('.pred-row');
+const fixedHeads = await page.locator('.pred-row').first().locator('.pred-main .pred-mg .r').allTextContents();
+check(fixedHeads.join(',') === '+10%,+15%', '切替後の予測では到達条件+10%・+15%を表示する');
 
 console.log('\n== コンソールエラー ==');
 check(consoleErrors.length === 0, `JS エラーなし (${consoleErrors.length}件)`);

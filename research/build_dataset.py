@@ -36,6 +36,7 @@ sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__f
                              "scripts"))
 import availability as AV  # noqa: E402
 import features  # noqa: E402
+import label_specs as LS  # noqa: E402
 import extra_features  # noqa: E402
 import jquants_data_fetcher as JF  # noqa: E402
 import technicals as TX  # noqa: E402
@@ -208,7 +209,7 @@ BREAKOUT_COOLDOWN = _sweep_override("BREAKOUT_COOLDOWN", 20, int)
 # 終盤条件（END_RATIO）とトレンド条件も同じ t+horizon 時点を見るので、
 # この1行で3条件すべての基準点が t+60 から t+20 に移る。
 RISE_HORIZON = 20        # 営業日。約1ヶ月
-RISE_THRESHOLD = 0.20    # +20%。VOL_NORM_K が None のときだけ効く
+RISE_THRESHOLD = 0.10    # 本番の到達は固定+10%（2026-11-03の運用者指示）
 
 # --- 上昇を測る基準の価格 --- #
 # 2026-09-25 から **翌営業日の寄り付き（分割調整後の始値 AdjO[t+1]）**（運用者の決定）。
@@ -242,7 +243,7 @@ LABEL_ENTRIES = ("next_open", "close")
 # 1.2σ が最も良かったので採用する。
 #
 # None にすると固定 RISE_THRESHOLD に戻る。
-VOL_NORM_K: Optional[float] = 1.2
+VOL_NORM_K: Optional[float] = None
 
 # --- 継続の軸 --- #
 # 「到達したか」だけだと、一瞬吹き上げてすぐ下落トレンドに入った銘柄も
@@ -262,7 +263,7 @@ VOL_NORM_K: Optional[float] = 1.2
 # 差の714件はチャートで見ると「+20%に届いたあと10〜20日で失速した」群で、
 # 買えないほど悪いわけではない。まずは推定を安定させることを優先する。
 KEEP_DAYS = 0            # 維持日数の条件。0 なら課さない
-END_RATIO = 0.10         # t+horizon 後もまだ +10%以上（ボラ正規化時は比例させる）
+END_RATIO = 0.05         # 固定+10%の半分。追加モデルは到達+15%・終盤+7.5%
 END_WINDOW = 5           # 終盤の水準は5営業日平均で見る（1日の綾を拾わない）
 
 # トレンド条件の移動平均。**RISE_HORIZON に合わせて選ぶ必要がある**。
@@ -1172,7 +1173,7 @@ def attach_rise_label(df: pd.DataFrame, cfg: RiseConfig = DEFAULT_RISE) -> pd.Da
     need.index = df.index
     end_need.index = df.index
     df["rise_need"] = need
-    hit = ratio >= need
+    hit = (ratio >= need) if cfg.normalised else LS.at_least(ratio, need)
 
     close = df["close"].to_numpy(dtype=float)
 
@@ -1215,7 +1216,8 @@ def attach_rise_label(df: pd.DataFrame, cfg: RiseConfig = DEFAULT_RISE) -> pd.Da
     if cfg.keep_days:
         ok &= df["keep_days_cnt"] >= cfg.keep_days
     if cfg.end_ratio is not None:
-        ok &= df["end_level"] >= df["end_need"]
+        ok &= ((df["end_level"] >= df["end_need"]) if cfg.normalised
+               else LS.at_least(df["end_level"], df["end_need"]))
     if cfg.require_uptrend:
         ok &= df["uptrend_end"] == 1.0
 

@@ -53,13 +53,13 @@ export const BOOST = ['lgbm', 'xgb', 'cat'];
 export const RULE_MODELS = ['lgbm', 'xgb', 'cat'];
 
 /** 規則の3モデルの呼び名（画面の文言） */
-export const RULE_JA = '1.2σ の3本';
+export const RULE_JA = '基準ラベルの3本';
 
 /** 規則の3モデルの短い記号（予測ファイルのモデルの short。research/models.py と同じ） */
 export const RULE_SHORT = 'LGB・XGB・CAT';
 
 /** 規則のラベル（際どい印の頭に付ける） */
-export const RULE_SIGMA = '1.2σ';
+export const RULE_SIGMA = '基準ラベル';
 
 /** モデル別の表で規則の3本が並ぶ行（predictions.js の modelGrid の label。1.5σ の行は 'k15'） */
 export const RULE_ROW = 'base';
@@ -67,7 +67,7 @@ export const RULE_ROW = 'base';
 /** 画面に出す短い呼び名。正本は research/models.py。 */
 export const MODEL_JA = {
   lgbm: 'LightGBM', xgb: 'XGBoost', cat: 'CatBoost',
-  lgbm_k15: 'LightGBM（1.5σ）', xgb_k15: 'XGBoost（1.5σ）', cat_k15: 'CatBoost（1.5σ）',
+  lgbm_k15: 'LightGBM（厳しい到達条件）', xgb_k15: 'XGBoost（厳しい到達条件）', cat_k15: 'CatBoost（厳しい到達条件）',
 };
 
 /**
@@ -276,7 +276,7 @@ const past = (x) => {
   return Number.isFinite(x?.ret) && x?.n ? `${fmtRet(x.ret)}（${x.n}件）` : '（測っていない）';
 };
 
-/** 短い呼び名（「LightGBM（1.5σ）」→「LightGBM」。印の頭と注意の見出しに規則のラベル（RULE_SIGMA）を書くので）。 */
+/** 短い呼び名（「LightGBM（厳しい到達条件）」→「LightGBM」。印の頭と注意の見出しに規則のラベル（RULE_SIGMA）を書くので）。 */
 const shortJa = (a) => MODEL_JA[String(a).replace(/_k1[58]$/, '')] || a;
 
 /** 先に決めた線（BORDER_WARN）に当たるか: 件数 minN 以上で平均が ret 以下。 */
@@ -309,7 +309,7 @@ export function borderNote(candidate, b = BORDER, st = BORDER_STATS, w = BORDER_
     + (warn ? '。空き枠（0%）と同じか悪い' : '')
     + (few ? '。件数が少なく目安にしにくい' : '')
     + `。ほかが一番低いときは ${others}、3本とも${b.line}以上は ${past(st?.line)}`
-    + `（${RULE_JA}・前向きの百分位。+10% の指値で売り、届かなければ20営業日目の終値で売ったときの平均）`;
+    + `（旧1.2σモデルの参考値・前向きの百分位。+10% の指値で売り、届かなければ20営業日目の終値で売ったときの平均）`;
   return {
     shape, laggard: lag, laggardPct: p[lag], warn, few,
     badge: warn ? `${RULE_SIGMA}で際どい・${name} が最下位` : `${RULE_SIGMA}で際どい・最下位 ${name}`,
@@ -466,7 +466,7 @@ export function dayVerdict(nBreak, s = STRATEGY) {
   }
   if (nBreak >= s.strongBreaks) {
     return { kind: 'strong', tone: 'green', label: '本命の日',
-             note: `発火 ${nBreak} 件。20件以上の帯（${RULE_JA}が95以上で199件 +3.72%・勝率72%）` };
+             note: `発火 ${nBreak} 件。20件以上の帯（旧1.2σモデルの参考値：95以上で199件 +3.72%・勝率72%）` };
   }
   if (nBreak >= s.quietBreaks) {
     return { kind: 'ok', tone: 'amber', label: '枠が空いていれば',

@@ -1585,7 +1585,8 @@ class 探索と学習の列を突き合わせる(unittest.TestCase):
         cols = F.columns(F.DEFAULT_PRESET)
         store = {F.DEFAULT_PRESET: {"_n_features": len(cols),
                                     "_features_sig": F.signature(cols),
-                                    "n_estimators": tuning.SEARCH_N_ESTIMATORS}}
+                                    "n_estimators": tuning.SEARCH_N_ESTIMATORS,
+                                    "_cv": {"label_spec": __import__("label_specs").for_model()}}}
         import train_production as TP
         orig = tuning.load_params
         tuning.load_params = lambda path=None: store
@@ -1624,7 +1625,8 @@ class 探索と学習の列を突き合わせる(unittest.TestCase):
         # （tests/test_tree_count.py）、実際の記録と同じく入れておく
         store = {
             "xgb": {"_cv": {"features_sig": F.signature(cols), "n_features": len(cols),
-                            "n_estimators": TM.N_ESTIMATORS}},
+                            "n_estimators": TM.N_ESTIMATORS,
+                            "label_spec": __import__("label_specs").for_model("xgb")}},
             "cat": {"_cv": {"features_sig": F.signature(F.columns("all")), "n_features": 153}},
             "mlp": {"_cv": {"train_to": "2025-07-23"}},            # 列の記録なし
         }

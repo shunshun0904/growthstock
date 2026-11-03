@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { fmt, fmtInt, fmtSigned, fmtOku, fmtDate, fmtDateTime, DASH } from '../lib/format.js';
 import { bandColor, bandLabel, pctColor, pctInk, PCT_LEGEND, scoreRange, scoreColor, scoreInk, modelRows, modelGrid, MODEL_SHORT, MODEL_FAMILY,
   FAMILY_JA, activeModels, marketTone, candidateToStock, dayOrigin, featureLabel, earningsNote, earningsSummary,
@@ -30,6 +30,15 @@ import { STRATEGY, RULE_MODELS, RULE_JA, RULE_SHORT, RULE_ROW, BORDER, strategyS
  * 基準モデル1本の表示に落ちる作りにしてある。
  */
 export default function PredictionView({ data, history, featureNames, onSendToOctagon, sentIds }) {
+  const [registry, setRegistry] = useState(null);
+  useEffect(() => {
+    let live = true;
+    fetch(`${import.meta.env.BASE_URL}data/active_models.json`, { cache: 'no-store' }).then((r) => {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    }).then((value) => { if (live) setRegistry(value); }).catch(() => {});
+    return () => { live = false; };
+  }, []);
   const dates = data?.dates || [];
   const [day, setDay] = useState(() => data?.asOf || dates[dates.length - 1]);
   const [openId, setOpenId] = useState(null);
@@ -68,6 +77,12 @@ export default function PredictionView({ data, history, featureNames, onSendToOc
 
   return (
     <div className="pred">
+      {registry?.kind === 'fixed_return' && <section className="card" data-testid="active-models">
+        <b>本番モデル：固定+10%・+15%（各3本）</b>
+        <p className="sub">終盤5日平均はそれぞれ+5%・+7.5%以上、20日目にMA5≧MA20。翌営業日の寄りから20営業日以内。
+          株価データ：{registry.models[0]?.dataThrough}まで／学習サンプル：{registry.models[0]?.trainTo}まで。</p>
+        <p className="sub">過去の予測は当時の値を保持しています。σと表示される日の値は旧モデルです。新しい市場データの予測から固定%モデルを使います。</p>
+      </section>}
       <StrategyPanel signal={signal} near={near} day={day} models={models} both={both}
                      onSend={(c) => onSendToOctagon(candidateToStock(c))}
                      sentIds={sentIds} />
@@ -294,7 +309,7 @@ function StrategyPanel({ signal, near, day, models, both, onSend, sentIds }) {
         7件以下の日（23件 +0.61%・−10%割れ 30%）は8件以上の日（406件 +2.99%）より低い（発火の数では見送らない線は
         2026-10-12 の決定のまま）。この手順のとおり3枠で回すと、その時点の百分位で98取引・1取引 +0.90%
         （発火8件以上の日だけなら87取引・+1.38%）。2026-10-29〜10-30 の規則（1.5σ の3本が95以上）は同じ物差しで
-        115取引・+1.84%（発火8件以上の日だけなら102取引・+0.86%）。候補全体の平均は 1.2σ の3本がわずかに上（429件 +2.86% 対
+        115取引・+1.84%（発火8件以上の日だけなら102取引・+0.86%）。候補全体の平均は 基準ラベルの3本がわずかに上（429件 +2.86% 対
         561件 +2.70%）で、どちらが上とは言い切れない。それを見た上で、運用者の依頼で 2026-10-30 に 1.2σ の3本に戻した
         （docs/MODEL_ADOPTION_RULES.md §81・§86）。
       </p>
@@ -554,9 +569,9 @@ function LtrBadge({ c }) {
 }
 
 /** 3条件・4条件の説明（印と順位表の見出しの title） */
-const COND_TITLE = `3条件: その日の候補の中で日次のランキング学習が1位・直近5営業日の組の中で1位・1.2σ の木3本が`
-  + `${STRATEGY.agreePct}以上（この組み合わせの過去の成績は測っていない）。4条件: それに加えて 1.5σ の木3本も`
-  + `${STRATEGY.agreePct}以上（実験117 の参考の表と同じ組み合わせ）。どちらも参考に並べるだけで、買いの規則には使わない`
+const COND_TITLE = `3条件: その日の候補の中で日次のランキング学習が1位・直近5営業日の組の中で1位・基準ラベルの木3本が`
+  + `${STRATEGY.agreePct}以上（この組み合わせの過去の成績は測っていない）。4条件: それに加えて上段より厳しいラベルの木3本も`
+  + `${STRATEGY.agreePct}以上（実験117 は旧σモデルでの参考値）。どちらも参考に並べるだけで、買いの規則には使わない`
   + '（2026-11-02 の予測から）';
 
 /**
@@ -803,15 +818,15 @@ function Detail({ c, models, featureNames, onSend, sent }) {
             <p className="sub" style={{ margin: '10px 0 4px' }}>
               同じ表で<b>スコアそのもの</b>（各モデルが出した確率。混ぜていない）。色は
               この表の6本の中の最小〜最大の線形で、ラベルをまたいで水準を比べられます。
-              1.5σ は正例が少ないラベルなので、同じ銘柄でもスコアは低く出るのが普通です<ScoreLegend range={scoreRange([c])} />
+              目的変数が違うため、行をまたぐスコアの水準は直接比較できません。各モデル自身の百分位で確認してください<ScoreLegend range={scoreRange([c])} />
             </p>
             <ModelGrid c={c} models={models} large metric="score" />
             <div className="pred-split" style={{ marginTop: 10 }}>
               <span>
                 <span className="lab">上位10%と見たモデル</span>
-                <span className="sub">1.2σ </span><b className="num">{base.filter((r) => r.pct >= 90).length}/{base.length}</b>
+                <span className="sub">{modelGrid(c, models).rows.find((r) => r.label === 'base')?.labelJa} </span><b className="num">{base.filter((r) => r.pct >= 90).length}/{base.length}</b>
                 {k15.length > 0 && (
-                  <span className="sub">（1.5σ {k15.filter((r) => r.pct >= 90).length}/{k15.length}）</span>
+                  <span className="sub">（{modelGrid(c, models).rows.find((r) => r.label === 'k15')?.labelJa} {k15.filter((r) => r.pct >= 90).length}/{k15.length}）</span>
                 )}
               </span>
               <span>
@@ -821,18 +836,15 @@ function Detail({ c, models, featureNames, onSend, sent }) {
               </span>
               <span>
                 <span className="lab">帯の基準</span>
-                <b>LightGBM（1.2σ）</b>
+                <b>LightGBM（基準ラベル）</b>
                 <span className="sub num">（{c.rankInDay} / {c.nInDay} 位）</span>
               </span>
             </div>
             <p className="sub" style={{ margin: '8px 0 0' }}>
-              行は学習に使ったラベル（到達しきい値）で、6本とも毎日の予測に使っています（1.8σ の4本は 2026-10-24 に、
-              ロジスティック回帰は 2026-11-02 の予測から外しました）。スコア帯の基準は 1.2σ の LightGBM です。1.5σ は、より大きく上がった銘柄だけを正例にして学習したもの。今日の戦略の規則は、2026-10-30 から 1.2σ の木の3本
-              （{RULE_SHORT}）がすべて{STRATEGY.agreePct}以上です（運用者の依頼。2026-10-23〜10-29 も同じ。2026-10-12〜10-23 と 2026-10-29〜10-30 は 1.5σ の木の3本）。
-              一覧はこの3本の最小が高い順です（2026-10-13 から規則の3本の最小の順。それまでは 1.2σ の LightGBM のスコア順）。
-              同じ行・同じ列のモデルは似た見方をするので、そろって高くても独立した票ではありません。
-              1.2σ の3本が95以上の候補に「1.5σ・1.8σ の3本も95以上」を足しても、過去の前向きの
-              検証では成績は安定して上がりませんでした（実験82）。
+              行は学習に使った到達条件です。固定%への切替後は+10%と+15%を各3本使います。
+              スコア帯とSHAPの基準は上段のLightGBMです。今日の戦略は基準ラベルの木3本
+              （{RULE_SHORT}）がすべて{STRATEGY.agreePct}以上の候補を、3本の最小値が高い順に並べます。
+              旧σモデルでの過去成績は固定%モデルの運用成績を示すものではありません。
             </p>
           </div>
         )}
@@ -840,7 +852,7 @@ function Detail({ c, models, featureNames, onSend, sent }) {
           {/* h4 は大文字に変換される（σ が Σ になる）ので、見出しにはラテン・ギリシャ文字を入れない */}
           <h4>基準モデルの見立ての内訳</h4>
           <p className="sub">
-            基準モデル（1.2σ の LightGBM）の出力を特徴量ごとに分解したもの（TreeSHAP）。
+            基準モデル（上段のLightGBM）の出力を特徴量ごとに分解したもの（TreeSHAP）。
             {`一覧の並び順（${RULE_JA}の最小）の内訳ではありません。`}
             対数オッズ空間の寄与なので、確率の差ではなく
             <b>押し上げ／押し下げの相対の大きさ</b>として読みます。
@@ -1023,7 +1035,7 @@ function ModelLineup({ models }) {
       </div>
       <p className="sub">
         探索PR-AUC は探索時の内側検証（5分割・50試行・木200本固定）の値です。
-        1.5σ のモデル（記号の末尾が 15）はラベルが違うので、この値を 1.2σ のモデルと比べられません。
+        記号の末尾が15のモデルは目的変数が違うため、この値を基準ラベルのモデルと直接比較できません。
         運用は上位だけを買うので、この順位がそのまま運用の優劣にはなりません。
         どのモデルを重く見るかは、上の「スコア帯の実績」と
         「過去に出した銘柄のその後」で確かめてください。

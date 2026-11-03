@@ -30,6 +30,7 @@ import pandas as pd
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import features as F  # noqa: E402
 import tuning  # noqa: E402
+import label_specs as LS
 from train_model import (  # noqa: E402
     DATA_DIR, EMBARGO_DAYS, HOLDOUT_MONTHS, holdout_bounds,
 )
@@ -75,6 +76,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     # 並べ替えは安定でなく、同じ日の中の並びが入力しだいで変わる
     df = (pd.read_parquet(args.dataset)
           .sort_values(["Date", "Code"], kind="mergesort").reset_index(drop=True))
+    if args.model == "classifier":
+        LS.check_training_frame(df, "lgbm")
     dates = pd.to_datetime(df["Date"])
 
     cutoff = tuning_cutoff(dates, args)
@@ -100,7 +103,8 @@ def main(argv: Optional[List[str]] = None) -> int:
               f"— 経過 {el/60:.1f}分")
         params = tuning.tune(tune_df, cols, n_trials=args.n_trials,
                              n_splits=args.n_splits, embargo_days=EMBARGO_DAYS,
-                             scheme=args.cv, model=args.model, objective=args.objective)
+                             scheme=args.cv, model=args.model, objective=args.objective,
+                             label_spec=LS.for_model("lgbm") if args.model == "classifier" else None)
         # 探索の記録を一緒に保存する。params_for が読むときに落とすので
         # LightGBM には渡らない
         # LTR は同じ特徴量セットでも目的関数が違うので鍵を分ける

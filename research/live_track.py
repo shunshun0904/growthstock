@@ -80,6 +80,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 import trading_calendar as TC  # noqa: E402
+import build_dataset as B  # noqa: E402
 
 DATA_DIR = os.path.join(HERE, "_data")
 MODEL_DIR = os.path.join(HERE, "model")
@@ -98,7 +99,7 @@ K15 = ("lgbm_k15", "xgb_k15", "cat_k15")
 #: 2026-10-23〜10-29 も同じ（§75）。2026-10-29〜10-30 は 1.5σ の3本（§81）。画面の RULE_MODELS と同じ
 RULE_MODELS = BOOST
 #: 規則の3モデルの呼び名（画面の RULE_JA と同じ）
-RULE_JA = "1.2σ の3本"
+RULE_JA = "基準ラベルの3本"
 #: 2026-10-12 まで画面の規則だった形（1.2σ の3本がすべて90以上）。過去の実験の再現と、参考の記録（PREV_RULES）に使う
 PREV_MODELS = BOOST
 PREV_AGREE = 90.0
@@ -511,13 +512,15 @@ def find_oof(algo: str, oof_dir: str, model_dir: str) -> Optional[str]:
       Release から落とした形   <oof_dir>/oof.parquet, <oof_dir>/<algo>_oof.parquet
       日次予測が並べ直した形   <model_dir>/oof.parquet, <model_dir>/models/<algo>/oof.parquet
     """
+    import model_artifacts as A
+    flat = A.flat_oof_path(algo, oof_dir, model_dir)
     if algo == "lgbm":
         cands = [os.path.join(oof_dir, "oof.parquet"),
                  os.path.join(model_dir, "oof.parquet")]
     else:
         cands = [os.path.join(oof_dir, f"{algo}_oof.parquet"),
                  os.path.join(model_dir, "models", algo, "oof.parquet")]
-    return next((p for p in cands if os.path.exists(p)), None)
+    return next((p for p in [flat] + cands if os.path.exists(p)), None)
 
 
 def oof_rows(oof_dir: str, model_dir: str, algos: Sequence[str] = RULE_MODELS) -> pd.DataFrame:
@@ -830,6 +833,8 @@ def main(argv=None) -> int:
     vers = load_versions(args.repo)
     cal = trading_days(args.data_dir)
     live = live_rows(vers, cal)
+    if not B.DEFAULT_RISE.normalised:
+        print("[label] OOFと正例判定は固定+10%・終盤+5%。実運用の履歴には切替前のσモデルの判断も含むため、固定モデル単独の実績ではありません")
     if live.empty:
         print("予測の履歴が見つかりません（public/data/predictions.json のコミットが無い）")
         return 1

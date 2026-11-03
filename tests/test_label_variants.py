@@ -139,7 +139,7 @@ def frame(n=500, seed=0):
     df = pd.DataFrame({"vol_20d": rng.uniform(0.8, 5.0, n), "future_rise": rng.normal(0.05, 0.15, n),
                        "uptrend_end": (rng.random(n) < 0.7).astype(float)})
     df["end_level"] = df["future_rise"] - rng.uniform(0.0, 0.12, n)
-    need, end_need = B.rise_thresholds(df["vol_20d"], B.DEFAULT_RISE)
+    need, end_need = B.rise_thresholds(df["vol_20d"], __import__("dataclasses").replace(B.DEFAULT_RISE, vol_norm_k=1.2))
     df["label"] = ((df["future_rise"] >= need.to_numpy()) & (df["end_level"] >= end_need.to_numpy())
                    & (df["uptrend_end"] == 1.0)).astype(float)
     return df
@@ -148,7 +148,7 @@ def frame(n=500, seed=0):
 class TestRelabel(unittest.TestCase):
     def test_k12_matches_and_higher_k_is_subset(self):
         df = frame()
-        y12 = B.rise_label_for_k(df, B.VOL_NORM_K)
+        y12 = B.rise_label_for_k(df, 1.2)
         self.assertTrue((y12 == df["label"]).all())
         y15 = B.rise_label_for_k(df, 1.5)
         y18 = B.rise_label_for_k(df, 1.8)
@@ -176,7 +176,7 @@ class TestTrainMulti(unittest.TestCase):
     def test_untuned_checks_trees_for_variants(self):
         cols = ["a", "b", "c"]
         sig = F.signature(cols)
-        ok = {"lgbm_k15": {"_cv": {"features_sig": sig, "n_features": 3, "n_estimators": TM.N_ESTIMATORS}}}
+        ok = {"lgbm_k15": {"_cv": {"features_sig": sig, "n_features": 3, "n_estimators": TM.N_ESTIMATORS, "label_spec": __import__("label_specs").for_model("lgbm_k15")}}}
         self.assertEqual(TR.untuned(["lgbm_k15"], ok, cols), {})
         bad = {"lgbm_k15": {"_cv": {"features_sig": sig, "n_features": 3, "n_estimators": 500}}}
         self.assertIn("本数", TR.untuned(["lgbm_k15"], bad, cols)["lgbm_k15"])

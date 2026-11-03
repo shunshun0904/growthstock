@@ -33,12 +33,12 @@ on:
   workflow_dispatch:
     inputs:
       tune:
-        description: 'ハイパーパラメータを探索し直す（見込み+30分。no にすると保存済みを使う。基準モデル（1.2σ の LightGBM）は探索したときの木の本数が今と違えば学習しない）'
+        description: 'ハイパーパラメータを探索し直す（見込み+30分。no にすると保存済みを使う。基準モデル（+10%の LightGBM）は探索したときの木の本数が今と違えば学習しない）'
         type: choice
         options: ['yes', 'no']
         default: 'yes'
       only:
-        description: '画面に並べる追加モデルのうち、これだけ探索・学習する（例: lgbm_k15,xgb_k15,cat_k15。空なら 1.2σ の木3本とランキング学習（ranking=no なら 1.2σ の木3本だけ）。1.5σ の3本は指定したときだけ。ltr はランキング学習だけ、ltr5 は直近5営業日の組のランキング学習だけ（tune=yes なら木の形も探索し直す）。1.8σ の4本は 2026-10-24 に、ロジスティック回帰（logit・logit_k15）は 2026-11-02 の予測から外した（名指ししても止まる）。指定すると基準モデル（1.2σ の LightGBM）は触らない）'
+        description: '画面に並べる追加モデルのうち、これだけ探索・学習する（例: lgbm_k15,xgb_k15,cat_k15。空なら +10%の木3本とランキング学習（ranking=no なら +10%の木3本だけ）。+15%の3本は指定したときだけ。ltr はランキング学習だけ、ltr5 は直近5営業日の組のランキング学習だけ（tune=yes なら木の形も探索し直す）。1.8σ の4本は 2026-10-24 に、ロジスティック回帰（logit・logit_k15）は 2026-11-02 の予測から外した（名指ししても止まる）。指定すると基準モデル（+10%の LightGBM）は触らない）'
         required: false
         default: ''
       ranking:
@@ -153,7 +153,7 @@ jobs:
       - name: Build dataset
         run: python3 research/build_dataset.py 2>&1 | tail -20
 
-      # 毎週探索する。精度を優先する判断（基準モデル（1.2σ の LightGBM）は LGBMClassifier なので
+      # 毎週探索する。精度を優先する判断（基準モデル（+10%の LightGBM）は LGBMClassifier なので
       # pointwise のみ。LTR は本番で使っていないので探索しない）。
       #
       # 引き換えに、特徴量も母集団も変えていないのにパラメータが週ごとに動く。
@@ -169,7 +169,7 @@ jobs:
       # 約2分 → 約10分（テクニカル指標の計算）。
       # 探索の記録には探索したときの木の本数（tuning.SEARCH_N_ESTIMATORS）が残り、
       # 基準モデルの学習（train_production.py）は本数が今と違えば止まる。
-      # 追加モデルだけ作る回（only）は、基準モデル（1.2σ の LightGBM）の探索も学習も飛ばす。
+      # 追加モデルだけ作る回（only）は、基準モデル（+10%の LightGBM）の探索も学習も飛ばす。
       # 週の途中で基準モデルを差し替えると、その週の候補が前日までと比較できなくなる
       - name: Resolve scope
         id: scope
@@ -348,23 +348,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 基準モデルを作らない回（only）には model.txt が無い。あるときだけ上げる
-          if [ -f research/model/model.txt ] && [ -f research/model/oof.parquet ]; then
-            bash scripts/gh_release_upload.sh data-raw research/model/model.txt research/model/oof.parquet
-          else
-            echo "基準モデルは作っていないので上げない"
-          fi
-          # 5モデルぶん。ファイル名が algo ごとに衝突するので、
-          # Release のアセット名に algo を入れて上げ直す
-          shopt -s nullglob
-          for d in research/model/models/*/; do
-            a=$(basename "$d")
-            for f in model.joblib oof.parquet; do
-              [ -f "$d$f" ] || continue
-              cp "$d$f" "/tmp/${a}_${f}"
-              bash scripts/gh_release_upload.sh data-raw "/tmp/${a}_${f}"
-            done
-          done
+          python3 research/model_artifacts.py publish
           # Optuna の試行 DB も上げる。来週これを降ろして試行を引き継ぐ
           if [ -f research/_data/optuna_multi.db ]; then
             bash scripts/gh_release_upload.sh data-raw research/_data/optuna_multi.db

@@ -34,9 +34,9 @@ test('規則のモデル: 2026-10-30 から 1.2σ の3本・線 95（運用者�
   assert.deepEqual(RULE_MODELS, ['lgbm', 'xgb', 'cat']);
   assert.deepEqual(RULE_MODELS, BOOST);
   assert.equal(STRATEGY.agreePct, 95);
-  assert.equal(RULE_JA, '1.2σ の3本');
+  assert.equal(RULE_JA, '基準ラベルの3本');
   assert.equal(RULE_SHORT, 'LGB・XGB・CAT');
-  assert.equal(RULE_SIGMA, '1.2σ');
+  assert.equal(RULE_SIGMA, '基準ラベル');
   assert.equal(RULE_ROW, 'base');
 });
 
@@ -305,7 +305,7 @@ test('nearMisses: 境界（85ちょうどは入る / 95ちょうどは入らな�
 });
 
 test('dayVerdict: 文言は今の規則で測った数字（7件以下は件数が少なく当たり外れが大きいと添える）', () => {
-  assert.ok(dayVerdict(25).note.includes('1.2σ の3本が95以上で199件 +3.72%・勝率72%'));
+  assert.ok(dayVerdict(25).note.includes('旧1.2σモデルの参考値：95以上で199件 +3.72%・勝率72%'));
   assert.ok(dayVerdict(10).note.includes('109件 +1.90%・勝率64%'));
   const quiet = dayVerdict(5).note;
   assert.ok(quiet.includes('枠が空いていれば買う') && quiet.includes('20件 +3.00%'));
@@ -389,7 +389,7 @@ test('borderNote: その組の平均が 0% 以下（20件以上）なら赤。�
   assert.equal(n.laggardPct, 85);
   assert.equal(n.warn, true);
   assert.equal(n.few, false);
-  assert.equal(n.badge, '1.2σで際どい・LightGBM が最下位');
+  assert.equal(n.badge, '基準ラベルで際どい・LightGBM が最下位');
   assert.ok(n.text.startsWith('LightGBM が一番低い（85.0）。'));
   assert.ok(n.text.includes('2本が95以上の形で LightGBM が一番低いときは、過去 −0.4%（40件）。空き枠（0%）と同じか悪い'));
   assert.ok(n.text.includes('ほかが一番低いときは XGBoost +2.0%（60件）・CatBoost +1.5%（30件）'));
@@ -402,7 +402,7 @@ test('borderNote: 平均がプラスの組は黄', () => {
   assert.equal(n.shape, 'two95_hi');
   assert.equal(n.laggard, 'cat');
   assert.equal(n.warn, false);
-  assert.equal(n.badge, '1.2σで際どい・最下位 CatBoost');
+  assert.equal(n.badge, '基準ラベルで際どい・最下位 CatBoost');
   assert.ok(n.text.startsWith('CatBoost が一番低い（91.0）。'));
   assert.ok(!n.text.includes('空き枠'));
 });
@@ -437,11 +437,11 @@ test('BORDER_STATS: probe_k15_panel の 1.2σ の3本の数字（■4c・■4d�
   // 実際の数字で作った文言（運用者の例の形）
   const n = borderNote(rule('A', [85, 96, 98]));
   assert.equal(n.warn, false);
-  assert.equal(n.badge, '1.2σで際どい・最下位 LightGBM');
+  assert.equal(n.badge, '基準ラベルで際どい・最下位 LightGBM');
   assert.ok(n.text.includes('2本が95以上の形で LightGBM が一番低いときは、過去 +2.3%（200件）'));
   assert.ok(n.text.includes('ほかが一番低いときは XGBoost +1.7%（106件）・CatBoost +1.6%（144件）'));
   assert.ok(n.text.includes('3本とも95以上は +2.9%（429件）'));
-  assert.ok(n.text.includes('（1.2σ の3本・前向きの百分位。'));
+  assert.ok(n.text.includes('（旧1.2σモデルの参考値・前向きの百分位。'));
   assert.ok(!/NaN|undefined|null|測っていない/.test(n.text));
 });
 

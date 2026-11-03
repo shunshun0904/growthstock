@@ -157,7 +157,7 @@ def check_label(full: pd.DataFrame, k: float) -> dict | None:
     k が基準モデルの倍数（DEFAULT_RISE.vol_norm_k = 1.2）のとき、引き直したラベルがデータセットの label と全行一致するか
     （決まる・決まらないも含めて）。違えば止める。ほかの k では何もしない（None）。
     """
-    if abs(float(k) - float(B.DEFAULT_RISE.vol_norm_k)) > 1e-9:
+    if abs(float(k) - 1.2) > 1e-9:
         return None
     a = B.rise_label_for_k(full, k)
     b = pd.to_numeric(full["label"], errors="coerce")

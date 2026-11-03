@@ -71,7 +71,7 @@ import e68_edinet_ab as E68  # noqa: E402
 log = E68.log
 DEFAULT_ALGOS = "lgbm"                  # --algos で xgb / cat / logit も（E68.ALGOS）
 OUTCOME = lab.OUTCOME                       # ret_o1_20
-K0 = float(B.VOL_NORM_K)                    # 1.2
+K0 = 1.2  # Historical experiment reference; independent of current production label                    # 1.2
 DEFAULT_KS = "1.2,1.5"
 BASE = "K12"
 MONTHLY_N = 2                               # 運用者の「月に2銘柄」
