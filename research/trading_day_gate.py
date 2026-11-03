@@ -283,6 +283,8 @@ def main(argv=None) -> int:
         nd = None
         if force:
             print("[gate] FORCE_PREDICT が指定されたので、予測済みの日でも予測し直す")
+            # 明示した再予測は休場日でも通す。鮮度は後続のチェックで確認する。
+            nd = (True, "FORCE_PREDICT による明示的な再予測", False, "")
         else:
             expected = expected_bar_date(cal, now.astimezone(JST))
             nd = decide_new_data(last_bar, published_as_of(args.predictions), expected)
