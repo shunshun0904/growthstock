@@ -19,6 +19,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r research/requirements.txt
       - uses: actions/download-artifact@v4
         with:
           pattern: fixed-return-*
@@ -26,6 +31,22 @@ jobs:
           path: collected
           run-id: 41574087195
           github-token: ${{ github.token }}
+      - name: Verify all six trained models with production dependencies
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import sys,shutil
+          from pathlib import Path
+          sys.path.insert(0,'research')
+          import model_artifacts as A
+          for algo in ['lgbm','xgb','cat','lgbm_k15','xgb_k15','cat_k15']:
+              d=A.directory(algo);d.mkdir(parents=True,exist_ok=True)
+              shutil.copyfile(Path('collected')/(algo+'_meta.json'),d/'meta.json')
+          PY
+          python3 research/model_artifacts.py install
+          python3 research/verify_fixed_models.py > /tmp/fixed_return_v1_verification.json
+          gh release upload data-raw /tmp/fixed_return_v1_verification.json --clobber
       - name: Verify complete model set and publish aggregate metadata
         env:
           GH_TOKEN: ${{ github.token }}
