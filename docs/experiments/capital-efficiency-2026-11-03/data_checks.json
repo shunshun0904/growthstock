@@ -1,0 +1,16 @@
+{
+  "sample_rows": 22110,
+  "sample_codes": 3748,
+  "new_features": 25,
+  "raw_annual_rows": 24473,
+  "panel_events": 24473,
+  "correction_endpoints": 6,
+  "correction_original_reports": 3,
+  "existing_520_columns_identical": true,
+  "original_examples_reproduced": true,
+  "source_module_sha256": "584111b000f3af498db081a53e0445fef3e487da2a1d27066ee2a4a1942c27d1",
+  "source_mart_sha256": "811680be295a246b8caef85bd0d59d70088ba3507e06df4f144f95b16bec4479",
+  "ratios_api_authenticated": false,
+  "historical_revision_lineage_verified": false,
+  "production_adoption_authorized_by_this_experiment": false
+}
