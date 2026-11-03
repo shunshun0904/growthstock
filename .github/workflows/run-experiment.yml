@@ -40,13 +40,24 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
-          import sys,shutil
+          import sys,shutil,json,hashlib
           from pathlib import Path
           sys.path.insert(0,'research')
           import model_artifacts as A
           for algo in ['lgbm','xgb','cat','lgbm_k15','xgb_k15','cat_k15']:
               d=A.directory(algo);d.mkdir(parents=True,exist_ok=True)
-              shutil.copyfile(Path('collected')/(algo+'_meta.json'),d/'meta.json')
+              p=Path('collected')/(algo+'_meta.json')
+              meta=json.loads(p.read_text())
+              # lab.frame creates a derived cache; it is not an independent raw input.
+              inventory=meta['dataInventory']
+              assert hashlib.sha256(json.dumps(inventory,sort_keys=True).encode()).hexdigest()==meta['dataSnapshot']
+              raw={k:v for k,v in inventory.items() if k!='lab.parquet' and not k.startswith('dataset') and not k.endswith('_oof.parquet') and k!='oof.parquet'}
+              raw_digest=hashlib.sha256(json.dumps(raw,sort_keys=True).encode()).hexdigest()
+              if raw_digest!=meta['dataSnapshot']:
+                  meta['snapshotIncludingDerivedCache']=meta['dataSnapshot']
+              meta['dataInventory']=raw;meta['dataSnapshot']=raw_digest
+              p.write_text(json.dumps(meta,ensure_ascii=False,indent=2)+'\n')
+              shutil.copyfile(p,d/'meta.json')
           PY
           python3 research/model_artifacts.py install
           python3 research/verify_fixed_models.py > /tmp/fixed_return_v1_verification.json
