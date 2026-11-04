@@ -1434,11 +1434,13 @@ class 本番のプリセット(unittest.TestCase):
         """2026-10-18 の夕方、249列 -> 360列（テクニカル指標111列）。運用者の決定（2026-10-18「入れる（2段階）」「今すぐ」、§68）。"""
         import features as F
         import technicals as TX
-        self.assertEqual(F.DEFAULT_PRESET, "all_plus_prog_listing_vol_book_shape_dd_recent_tx")
-        self.assertEqual(len(F.columns(F.DEFAULT_PRESET)), 360)
+        self.assertEqual(F.DEFAULT_PRESET, F.LEGACY_PRESET + "_financial")
+        self.assertEqual(len(F.columns(F.DEFAULT_PRESET)), 373)
         self.assertEqual(F.columns(F.DEFAULT_PRESET),
+                         F.columns(F.LEGACY_PRESET) + F.GROUPS["financial_inputs"])
+        self.assertEqual(F.columns(F.LEGACY_PRESET),
                          F.columns("all_plus_prog_listing_vol_book_shape_dd_recent") + TX.COLUMNS)
-        self.assertEqual(F.signature(F.columns(F.DEFAULT_PRESET)), "a0638dfd0880")
+        self.assertEqual(F.signature(F.columns(F.LEGACY_PRESET)), "a0638dfd0880")
 
     def test_249列は_all_plus_prog_listing_vol_book_shape_dd_recent(self):
         """2026-10-18、239列 -> 249列（抜けた土台の形2列 + 下げの深さ3列 + 直近の増減5列）。運用者の決定（2026-10-17、§62〜§64）。

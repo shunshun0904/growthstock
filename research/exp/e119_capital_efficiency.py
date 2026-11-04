@@ -95,7 +95,7 @@ def shuffled_values(df, seed=PERM_SEED):
 
 
 def column_sets(rolling=False):
-    base = F.columns(F.DEFAULT_PRESET) + (list(ltr5.MOVE_COLS) if rolling else [])
+    base = F.columns("all_plus_prog_listing_vol_book_shape_dd_recent_tx") + (list(ltr5.MOVE_COLS) if rolling else [])
     quality = CE.columns("quality") + ["missing_" + c for c in CE.columns("values")]
     return {"A": base, "Q": base + quality, "B": base + quality + CE.columns("values"),
             "P": base + quality + CE.columns("values")}

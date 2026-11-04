@@ -1,0 +1,165 @@
+name: Adopt Financial Inputs
+
+# One explicit migration: one frozen fresh mart, all eight models, then publish.
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: retrain-weekly
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r research/requirements.txt
+      - name: Load raw data
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/gh_release_download.sh data-raw research/_data
+      - name: Refresh and validate
+        env:
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+        run: |
+          python3 research/jq_bulk.py --incremental --from 2016-10-01 --to "$(date -u '+%Y-%m-%d')" > fetch.log 2>&1
+          tail -20 fetch.log
+          python3 research/check_freshness.py --max-age 1
+          python3 research/build_dataset.py > build.log 2>&1
+          tail -25 build.log
+          python3 research/export_valuations.py
+      - name: Preserve new raw inputs for daily serving
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          shopt -s nullglob
+          keep=()
+          for f in research/_data/*.parquet research/_data/manifest.json; do
+            case "$(basename "$f")" in live_features.parquet|dataset*|lab.parquet|*oof.parquet) continue;; esac
+            keep+=("$f")
+          done
+          bash scripts/gh_release_upload.sh data-raw "${keep[@]}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: financial-inputs-mart
+          path: |
+            research/_data/*.parquet
+            research/_data/dataset_meta.json
+            research/_data/jgb_yields.csv
+            public/data/valuations.json
+          retention-days: 7
+  train:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        scope: [base, strict, ranking]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r research/requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: financial-inputs-mart
+          path: .
+      - name: Retune and train all assigned models
+        env:
+          SCOPE: ${{ matrix.scope }}
+        run: |
+          if [ "$SCOPE" = base ]; then
+            python3 research/run_tuning.py --n-trials 50 --cv year_cap_date --features all_plus_prog_listing_vol_book_shape_dd_recent_tx_financial
+            python3 research/train_production.py
+            python3 research/exp/e15_tune_all.py xgb cat
+            python3 research/train_multi.py --models xgb,cat
+          elif [ "$SCOPE" = strict ]; then
+            python3 research/exp/e15_tune_all.py lgbm_k15 xgb_k15 cat_k15
+            python3 research/train_multi.py --models lgbm_k15,xgb_k15,cat_k15
+          else
+            python3 research/tune_ltr.py
+            python3 research/train_ltr.py
+            python3 research/tune_ltr5.py
+            python3 research/train_ltr5.py
+          fi
+      - name: Package only newly trained model directories
+        env:
+          SCOPE: ${{ matrix.scope }}
+        run: |
+          mkdir -p staged/research/model/models
+          if [ "$SCOPE" = base ]; then
+            cp research/model/model.txt research/model/oof.parquet research/model/meta.json staged/research/model/
+            cp -r research/model/models/xgb research/model/models/cat staged/research/model/models/
+            cp research/lgbm_params.json research/multi_params.json staged/research/
+          elif [ "$SCOPE" = strict ]; then
+            cp -r research/model/models/lgbm_k15 research/model/models/xgb_k15 research/model/models/cat_k15 staged/research/model/models/
+            cp research/multi_params.json staged/research/strict_params.json
+          else
+            cp -r research/model/models/ltr research/model/models/ltr5 staged/research/model/models/
+            cp research/ltr_params.json research/ltr5_params.json staged/research/
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: financial-inputs-${{ matrix.scope }}
+          path: staged/
+          retention-days: 14
+  publish:
+    needs: [prepare, train]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/jquants-browser-app-bwk19a
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r research/requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: financial-inputs-*
+          path: incoming
+      - name: Preserve previous production models for rollback
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p rollback/research
+          cp -r research/model rollback/research/
+          cp research/*params.json rollback/research/
+          bash scripts/gh_release_download.sh data-raw rollback/release 'fixed_return_v1_*' 'ltr_model.joblib' 'ltr_oof.parquet' 'ltr5_model.joblib' 'ltr5_oof.parquet'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: previous-production-models
+          path: rollback/
+          retention-days: 30
+      - name: Assemble and verify all eight models
+        run: python3 research/adopt_financial_models.py incoming
+      - name: Publish complete models and metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 research/model_artifacts.py publish
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add research/model/meta.json research/model/models/*/meta.json research/*params.json public/data/valuations.json
+          git commit -m 'chore(model): adopt retuned financial-input models (all eight)'
+          for i in 1 2 3 4; do
+            if git push; then break; fi
+            sleep $((2 ** i)); git pull --rebase
+          done
+          test "$(git rev-parse HEAD)" = "$(git ls-remote origin refs/heads/claude/jquants-browser-app-bwk19a | cut -f1)"
+          gh workflow run deploy-pages.yml --ref claude/jquants-browser-app-bwk19a
+          # Frozen past predictions stay unchanged. Newly available dates use the new models.
+          gh workflow run predict.yml --ref claude/jquants-browser-app-bwk19a

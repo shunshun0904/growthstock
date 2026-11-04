@@ -1,4 +1,4 @@
-all_plus_prog_listing_vol_book_shape_dd_recent_tx
+all_plus_prog_listing_vol_book_shape_dd_recent_tx_financial
 all_no_sector_index
 all_no_market
 # 探索するプリセット。1行1つ。

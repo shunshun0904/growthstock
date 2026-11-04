@@ -26,6 +26,9 @@ def data_snapshot(data_dir):
     inventory = {p.name: sha256(p) for p in sorted(Path(data_dir).glob("*.parquet"))
                  if not p.name.endswith("_oof.parquet") and p.name != "oof.parquet"
                  and not p.name.startswith("dataset") and p.name != "lab.parquet"}
+    rates = Path(data_dir) / "jgb_yields.csv"
+    if rates.is_file():
+        inventory[rates.name] = sha256(rates)
     digest = hashlib.sha256(json.dumps(inventory, sort_keys=True).encode()).hexdigest()
     return {"dataSnapshot": digest, "dataInventory": inventory}
 

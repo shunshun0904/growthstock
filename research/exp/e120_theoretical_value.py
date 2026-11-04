@@ -33,7 +33,7 @@ QUALITY = ["missing_tv_ri", "missing_tv_ddm"]
 
 
 def column_sets(rolling=False):
-    base = F.columns(F.DEFAULT_PRESET) + (list(ltr5.MOVE_COLS) if rolling else [])
+    base = F.columns("all_plus_prog_listing_vol_book_shape_dd_recent_tx") + (list(ltr5.MOVE_COLS) if rolling else [])
     controls = base + V.CONTROLS + QUALITY
     return {"A": base, "C": controls,
             "R": controls + [x for x in V.VALUES if x.startswith("tv_ri")],

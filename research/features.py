@@ -528,7 +528,12 @@ PRESETS: Dict[str, List[str]] = {
 #: C−P +0.0028・B−A +0.0011。§7 の1モデル分の3条件はどちらのラベルでも満たす。勧めは「1.5σ の xgb・cat でも確かめてから」、
 #: 時期の勧めは「249列の再学習を1回通してから」だった。249列で探索・学習した週は無く、360列の探索・学習は 土曜 10/24 の
 #: 1.5σ・1.8σ と日曜 10/25 の 1.2σ から（それまでのモデルは239列のまま、日次の予測はモデルごとに学習した列で採点する）。
-DEFAULT_PRESET = "all_plus_prog_listing_vol_book_shape_dd_recent_tx"
+# The historical 360-column preset remains reproducible for research.
+LEGACY_PRESET = "all_plus_prog_listing_vol_book_shape_dd_recent_tx"
+from financial_schema import COLUMNS as FINANCIAL_INPUT_COLUMNS
+GROUPS["financial_inputs"] = list(FINANCIAL_INPUT_COLUMNS)
+DEFAULT_PRESET = LEGACY_PRESET + "_financial"
+PRESETS[DEFAULT_PRESET] = PRESETS[LEGACY_PRESET] + ["financial_inputs"]
 
 #: 値の定義を変えた列と、その日（予測日）。学習と予測の一致チェック（check_train_serve）は、
 #: この日より前に控えた行をその列では比べない。前の定義で控えた値と新しい定義で作り直した

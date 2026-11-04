@@ -42,7 +42,7 @@ MACRO: List[tuple] = [
     ("決算（変化）", ["fund_growth", "fund_trend", "fund_streak", "turnaround",
                       "progress", "guidance", "progress_seasonal", "progress_seasonal_pct"],
      "前期との差分・加速・連続性。「良くなっているか」を測る。今回の主役"),
-    ("バリュエーション・配当", ["valuation", "dividend", "cashflow", "efficiency"],
+    ("バリュエーション・配当", ["valuation", "dividend", "cashflow", "efficiency", "financial_inputs"],
      "株価と決算の比。割高・割安と、利益の質"),
     ("株価・ブレイク", ["price", "breakout", "breakout_shape", "drawdown", "recent_change"],
      "高値からの位置と、その日の抜け方・抜けた土台の形・下げの深さ・直近の増減"),
@@ -523,6 +523,10 @@ COL_JA.update({
     "r5_low": "候補の日の翌営業日〜判断日の安値の最小 ÷ 候補の日の終値 − 1（判断日に入った候補は欠測）。直近5営業日の組の"
               "ランキング学習だけが使う",
 })
+
+
+NAME_JA.update({'tv_beta': '対TOPIXベータ（縮小推定）', 'tv_beta_n': 'ベータ推定の有効観測数', 'tv_rf': '国債10年実効利回り', 'tv_rf_age': '金利基準日からの日数', 'tv_fin_age': '財務開示からの日数（評価用）', 'tv_earnings_yield': 'TTM利益利回り（評価用）', 'tv_book_yield': '純資産株価比率（評価用）', 'tv_div_yield': '実績配当利回り（評価用）', 'tv_payout': '実績配当性向（評価用）', 'tv_ri_valid_fraction': '残余利益評価の有効シナリオ割合', 'tv_ddm_valid_fraction': '配当割引評価の有効シナリオ割合', 'missing_tv_ri': '残余利益評価の欠損フラグ', 'missing_tv_ddm': '配当割引評価の欠損フラグ'})
+COL_JA.update({k: v + "。E121 Cと同じ計算。財務と金利は候補日より前に利用可能な値を使う。" for k, v in NAME_JA.items() if k.startswith("tv_") or k.startswith("missing_tv_")})
 
 
 def name_ja(col: str) -> str:

@@ -227,13 +227,17 @@ jobs:
           python3 research/export_sheets.py --book v1 2>&1 | tail -10
           python3 research/export_sheets.py --book v2 2>&1 | tail -10
 
+      - name: Export current valuation comparison
+        if: steps.gate.outputs.run != 'false'
+        run: python3 research/export_valuations.py
+
       - name: Commit predictions
         if: steps.gate.outputs.run != 'false'
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A public/data/predictions.json public/data/prediction_history.json \
-            public/data/stocks.json
+            public/data/stocks.json public/data/valuations.json
           if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
           git commit -m "chore(data): ブレイク予測を更新 ($(date -u '+%Y-%m-%d %H:%M UTC'))"
           for i in 1 2 3 4; do

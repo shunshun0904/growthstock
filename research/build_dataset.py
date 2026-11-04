@@ -3712,6 +3712,15 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     print(f"[tech] テクニカル指標 {len(TX.COLUMNS)}列 / {time.time() - t0:.0f}秒 / {len(samples):,}行 / "
           f"すべて欠測の行 {int(tx_miss.all(axis=1).sum()):,} / 欠測のいちばん多い列 {tx_miss.mean().max() * 100:.2f}%")
 
+    # Same function and availability rules for training and daily serving.
+    import financial_inputs as FI
+    print("[finance] E121 C: 13 financial inputs / quality columns")
+    finance = FI.calculate(samples[["Code", "Date", "close_raw"]],
+                           df[["Code", "Date", "close", "close_raw"]],
+                           fins, topix, FI.yields(data_dir))
+    for col in FI.COLUMNS:
+        samples[col] = finance[col].to_numpy()
+
     print("\n[rank] 横断面正規化（同一日付内のパーセンタイル順位）")
     samples = add_cross_sectional_ranks(samples, features.RAW_FOR_RANK)
 
