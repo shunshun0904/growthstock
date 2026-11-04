@@ -1,0 +1,132 @@
+{
+  "schemaVersion": 1,
+  "asOf": "2020-01-31",
+  "generatedAt": "2020-01-31T09:00:00Z",
+  "warning": "感応度レンジ。株価の予測区間ではありません。",
+  "stocks": [
+    {
+      "code": "TEST0",
+      "name": "テスト銘柄",
+      "date": "2020-01-31",
+      "price": 119,
+      "history": [
+        {
+          "date": "2020-01-06",
+          "close": 100
+        },
+        {
+          "date": "2020-01-07",
+          "close": 101
+        },
+        {
+          "date": "2020-01-08",
+          "close": 102
+        },
+        {
+          "date": "2020-01-09",
+          "close": 103
+        },
+        {
+          "date": "2020-01-10",
+          "close": 104
+        },
+        {
+          "date": "2020-01-13",
+          "close": 105
+        },
+        {
+          "date": "2020-01-14",
+          "close": 106
+        },
+        {
+          "date": "2020-01-15",
+          "close": 107
+        },
+        {
+          "date": "2020-01-16",
+          "close": 108
+        },
+        {
+          "date": "2020-01-17",
+          "close": 109
+        },
+        {
+          "date": "2020-01-20",
+          "close": 110
+        },
+        {
+          "date": "2020-01-21",
+          "close": 111
+        },
+        {
+          "date": "2020-01-22",
+          "close": 112
+        },
+        {
+          "date": "2020-01-23",
+          "close": 113
+        },
+        {
+          "date": "2020-01-24",
+          "close": 114
+        },
+        {
+          "date": "2020-01-27",
+          "close": 115
+        },
+        {
+          "date": "2020-01-28",
+          "close": 116
+        },
+        {
+          "date": "2020-01-29",
+          "close": 117
+        },
+        {
+          "date": "2020-01-30",
+          "close": 118
+        },
+        {
+          "date": "2020-01-31",
+          "close": 119
+        }
+      ],
+      "beta": 1.0,
+      "riskFree": 0.01,
+      "financialDate": "2020-01-01",
+      "annualDate": "2019-06-01",
+      "yieldDate": "2020-01-30",
+      "methods": [
+        {
+          "id": "ri",
+          "label": "RIM（残余利益）",
+          "kind": "price",
+          "available": true,
+          "min": 100,
+          "max": 150,
+          "mean": 124,
+          "median": 125,
+          "std": 5,
+          "deviation": 0.050420168067226934,
+          "note": "検証用の固定シナリオ"
+        },
+        {
+          "id": "adjusted_nav",
+          "label": "修正純資産法（時価）",
+          "kind": "price",
+          "available": false,
+          "reason": "資産別時価のデータ不足",
+          "note": "時価未取得"
+        },
+        {
+          "id": "reverse_cash",
+          "label": "リバースDCF",
+          "kind": "growth",
+          "available": true,
+          "growth": 0.1,
+          "note": "織り込み成長率"
+        }
+      ]
+    }
+  ]
+}

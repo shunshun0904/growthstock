@@ -34,6 +34,7 @@ const server = http.createServer((req, res) => {
   if (rel === '/') rel = '/index.html';
   // データファイルだけは合成フィクスチャに差し替える
   const fixtures = {
+    '/data/valuations.json': path.join(ROOT, 'tests', 'fixtures', 'synthetic-valuations.json'),
     '/data/stocks.json': FIXTURE,
     '/data/predictions.json': PRED_FIXTURE,
     '/data/filings.json': FILINGS_FIXTURE,
@@ -333,6 +334,20 @@ check(tmBody.includes('78週高値を更新'), 'ストーリータイムライ�
 check(await page.locator('.recharts-line').count() >= 1, '株価推移チャートが描画される');
 await page.screenshot({ path: path.join(SHOTS, 'screenshot-timemachine.png') });
 
+console.log('\n== 理論株価 ==');
+await page.getByRole('tab', { name: '理論株価', exact: true }).click();
+await page.getByRole('heading', { name: '手法別の評価額' }).waitFor();
+check(await page.locator('.valuation-table tbody tr').count() === 2, '評価額と算出不可の手法が表示される');
+const valuationText = await page.locator('.valuation-view').textContent();
+check(valuationText.includes('直近20営業日') && valuationText.includes('38.0%'), '20営業日推移と現在株価のレンジ内位置が出る');
+check(valuationText.includes('+5.0%') && valuationText.includes('年率 +10.0%'), '中央値との乖離と織り込み成長率を分けて表示する');
+await page.getByRole('checkbox').check();
+check(await page.locator('.recharts-reference-area').count() === 1, '理論レンジをチャートに重ねられる');
+await page.setViewportSize({ width: 390, height: 844 });
+check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), '理論株価はスマホで横にはみ出さない');
+await page.setViewportSize({ width: 1440, height: 1000 });
+await page.getByRole('tab', { name: 'タイムマシーン' }).click();
+
 console.log('\n== 隠したタブ ==');
 // 運用者の指示（2026-10-13）「決算サンキーとWhat-Ifシミュレーターのタブは消してください。表示から消してくれるだけで
 // 良いです」、同日夜「8軸オクタゴン比較のタブも消してください」。画面のコードは残し、タブの一覧から外しただけ
@@ -347,8 +362,8 @@ const tabNames = (await page.getByRole('tab').allTextContents()).map((t) => t.tr
 // リカレンス・ネットワーク（2026-10-19 に候補銘柄のニュースの右に足した）は、運用者の依頼 2026-10-24「現状、参考にできる
 // レベルでもないので非表示にしてください。なくて良いです」で隠している（src/App.jsx の hidden。画面のコードと日次予測の網の
 // 作成は残す）
-check(tabNames.join(',') === 'ブレイク予測,候補銘柄のニュース,タイムマシーン,再学習で加わったサンプル',
-      `タブは ブレイク予測 / 候補銘柄のニュース / タイムマシーン / 再学習で加わったサンプル の4つ (実際: ${tabNames.join(',')})`);
+check(tabNames.join(',') === 'ブレイク予測,候補銘柄のニュース,理論株価,タイムマシーン,再学習で加わったサンプル',
+      `タブは ブレイク予測 / 候補銘柄のニュース / 理論株価 / タイムマシーン / 再学習で加わったサンプル の5つ (実際: ${tabNames.join(',')})`);
 check(!tabNames.includes('決算サンキー') && !tabNames.includes('What-If シミュレーター')
         && !tabNames.includes('8軸オクタゴン比較') && !tabNames.includes('候補の比較')
         && !tabNames.includes('リカレンス・ネットワーク'),
