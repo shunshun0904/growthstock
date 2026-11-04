@@ -1,0 +1,38 @@
+{
+  "focused_retuning_tests": 6,
+  "numeric": {
+    "studies": 12,
+    "candidates_per_study": 30,
+    "identical_candidate_opportunity": true,
+    "cv_fit_count": 1080,
+    "final_fit_count": 36,
+    "per_company_maturity_purge": true,
+    "all_selections_frozen_before_evaluation": true,
+    "same_holdout_rows_as_E120": true,
+    "all_metrics_recomputed_from_saved_predictions": true,
+    "source_hash_count": 17,
+    "production_changed": false,
+    "previously_observed_holdout": true
+  },
+  "display": {
+    "executed_cells": 8,
+    "notebook_errors": 0,
+    "static_visible_tables": 16,
+    "javascript_enabled": false,
+    "external_requests": 0,
+    "browser_errors": [],
+    "notebook_rerun_from_zip_without_original_dataset": true
+  },
+  "code_ci": {
+    "source_commit": "32c300ac0667cde2b3dc70b2940e1bcdcd8d2fda",
+    "ci_run": "https://github.com/shunshun0904/growthstock/actions/runs/41760243735",
+    "ci_conclusion": "success",
+    "python_tests_run": 2118,
+    "python_tests_skipped": 1,
+    "build": "success",
+    "browser_smoke": "success",
+    "focused_retuning_tests": 6
+  },
+  "report_source_sha256": "86a56b9d7ede1338338c5bf9c328c2d7a0275e9737e4af2dd6e101eadd7006b0",
+  "production_changed": false
+}

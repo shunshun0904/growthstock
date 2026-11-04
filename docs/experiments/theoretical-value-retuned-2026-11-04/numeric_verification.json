@@ -1,0 +1,14 @@
+{
+  "studies": 12,
+  "candidates_per_study": 30,
+  "identical_candidate_opportunity": true,
+  "cv_fit_count": 1080,
+  "final_fit_count": 36,
+  "per_company_maturity_purge": true,
+  "all_selections_frozen_before_evaluation": true,
+  "same_holdout_rows_as_E120": true,
+  "all_metrics_recomputed_from_saved_predictions": true,
+  "source_hash_count": 17,
+  "production_changed": false,
+  "previously_observed_holdout": true
+}

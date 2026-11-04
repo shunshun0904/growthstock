@@ -1,0 +1,10 @@
+{
+  "source_commit": "32c300ac0667cde2b3dc70b2940e1bcdcd8d2fda",
+  "ci_run": "https://github.com/shunshun0904/growthstock/actions/runs/41760243735",
+  "ci_conclusion": "success",
+  "python_tests_run": 2118,
+  "python_tests_skipped": 1,
+  "build": "success",
+  "browser_smoke": "success",
+  "focused_retuning_tests": 6
+}

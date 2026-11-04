@@ -139,7 +139,7 @@ DDMは通期実績配当総額/現在株数をD0とし、成長率0/1/2%の15シ
 原APIの過去訂正履歴の完全監査、会計基準移行時の前年値の組替え、OCI・増資・自社株買い・特別配当などの個別予測は未実施です。
 
 ## 実行・検証記録
-'''),code('''for name in ['completed.json','numeric_verification.json']:
+'''),code('''for name in ['completed.json','numeric_verification.json','code_verification.json']:
     table(pd.DataFrame([{'item':k,'value':v} for k,v in json.loads((P/name).read_text()).items()]))
 '''),md('''データ、計算実装、探索コード、元パラメータとライブラリ版はinputs.json、候補・分割・予算はexperiment_plan.jsonに保存しています。
 全候補のCV成績と選択結果を保存し、後から外側評価で設定を選び直せないよう選択ファイルのSHA256を記録しています。
