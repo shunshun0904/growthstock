@@ -56,7 +56,7 @@ def unavailable_reason(method, row, financials):
                 reasons.append('直近12か月利益の再計算に必要な前年同期・前期通期などの情報が不足')
             else:
                 reasons.append('1株純資産の再計算に必要な財務・株数調整データが不足')
-    if known('tv_eps') and row.tv_eps <= 0:
+    if method == 'ddm' and known('tv_eps') and row.tv_eps <= 0:
         reasons.append(f'直近12か月EPSが0以下（{row.tv_eps:.2f}円）。現行の評価は黒字企業のみ対象')
     if method == 'ri' and known('tv_bps') and row.tv_bps <= 0:
         reasons.append('1株純資産が0以下で、現行RIMの評価対象外')
@@ -69,7 +69,10 @@ def unavailable_reason(method, row, financials):
             reasons.append('実績配当性向が0%以下または100%超で、現行評価の対象外')
     if not reasons:
         fraction = row.get('tv_'+method+'_valid_fraction', np.nan)
-        reasons.append(f'有効な評価シナリオが80%未満（{fraction*100:.1f}%）' if pd.notna(fraction) else '評価シナリオを作成できない')
+        if method == 'ri' and row.get('ri_recovery_assumed',False):
+            reasons.append('回復仮定の途中で純資産が0以下になる等、有効シナリオが80%未満')
+        else:
+            reasons.append(f'有効な評価シナリオが80%未満（{fraction*100:.1f}%）' if pd.notna(fraction) else '評価シナリオを作成できない')
     return '／'.join(reasons)
 
 
@@ -125,4 +128,58 @@ def rim_with_provider_inputs(frame, prices, indicators, market):
     # DDM, coverage flags and the production C features keep their original definitions.
     for col in [c for c in valued if c.startswith('tv_ri_')]:
         out[col] = valued[col]
+    return out
+
+
+def loss_aware_residual_value(book, earnings, ke, horizon, payout):
+    """Conditional RIM: ROE converges to ke; losses reduce book in full.
+
+    A loss never causes a negative dividend/capital injection. Any exhausted
+    book invalidates the path: no recapitalization or return from insolvency is
+    silently assumed. Terminal residual income is zero, so terminal value is book.
+    """
+    if horizon < 1 or not 0 <= payout <= 1:
+        raise ValueError('Invalid RIM horizon or payout')
+    b, earnings, ke = np.broadcast_arrays(np.asarray(book,float),np.asarray(earnings,float),np.asarray(ke,float))
+    b = b.copy()
+    valid = np.isfinite(b)&np.isfinite(earnings)&np.isfinite(ke)&(b>0)&(ke>0)
+    with np.errstate(all='ignore'):
+        roe = earnings/b
+        value = b.copy()
+        for t in range(1,horizon+1):
+            rt = ke+(roe-ke)*(horizon-t)/horizon
+            e = rt*b
+            value = value+(e-ke*b)/(1+ke)**t
+            dividend = np.maximum(e,0)*payout
+            b = b+e-dividend
+            valid &= np.isfinite(b)&(b>0)
+            b = np.where(valid,b,np.nan)
+    return np.where(valid&np.isfinite(value),value,np.nan)
+
+
+def rim_with_loss_recovery(frame):
+    """Display-only extension of the existing 30 scenarios to nonpositive EPS."""
+    import theoretical_value as V
+    out = frame.copy()
+    out['ri_recovery_assumed'] = False
+    earn = pd.to_numeric(out.tv_eps,errors='coerce').to_numpy(dtype=float,na_value=np.nan)
+    book = pd.to_numeric(out.tv_bps,errors='coerce').to_numpy(dtype=float,na_value=np.nan)
+    mask = np.isfinite(earn)&(earn<=0)&np.isfinite(book)&(book>0)
+    if not mask.any():
+        return out
+    target = out.loc[mask]
+    book, earn, beta, rf = [target[c].to_numpy(float) for c in ['tv_bps','tv_eps','tv_beta','tv_rf']]
+    scenarios = []
+    for erp in V.ERP:
+        ke = rf+beta*erp
+        for horizon in V.HORIZONS:
+            for payout in V.PAYOUTS:
+                scenarios.append(loss_aware_residual_value(book,earn,ke,horizon,payout))
+    summary, fraction = V.summarize(np.column_stack(scenarios))
+    out.loc[mask,'ri_recovery_assumed'] = True
+    out.loc[mask,'tv_ri_valid_fraction'] = fraction
+    price = target.close_raw.to_numpy(float)
+    for j, stat in enumerate(V.STATS):
+        out.loc[mask,'tv_ri_'+stat] = summary[:,j]
+        out.loc[mask,'tv_ri_'+stat+'_rel'] = summary[:,j]/price-(0 if stat=='std' else 1)
     return out

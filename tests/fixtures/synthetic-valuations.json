@@ -70,7 +70,11 @@
           "median": 150,
           "std": 5,
           "deviation": 0.050420168067226934,
-          "note": "検証用の固定シナリオ"
+          "note": "検証用の固定シナリオ",
+          "recoveryAssumed": true,
+          "eps": -30.0,
+          "bps": 100.0,
+          "validFraction": 1.0
         },
         {
           "id": "ddm",

@@ -19,11 +19,11 @@ class DisplayValuation(unittest.TestCase):
         keys,_=price_keys(p,pd.DataFrame({'Date':['2026-11-02']}))
         self.assertEqual(keys.close_raw.iloc[0],110)
 
-    def test_losses_are_reported_as_a_policy_not_a_price_date_problem(self):
-        r=pd.Series({'Code':'A','Date':pd.Timestamp('2026-11-02'),'tv_beta':1.,'tv_rf':.02,'tv_eps':-5.94,'tv_bps':236.})
+    def test_failed_recovery_is_a_scenario_problem_not_a_price_date_problem(self):
+        r=pd.Series({'Code':'A','Date':pd.Timestamp('2026-11-02'),'tv_beta':1.,'tv_rf':.02,'tv_eps':-200.,'tv_bps':100.,'ri_recovery_assumed':True})
         reason=unavailable_reason('ri',r,{})
-        self.assertIn('EPSが0以下',reason)
-        self.assertIn('黒字企業のみ',reason)
+        self.assertIn('純資産が0以下',reason)
+        self.assertNotIn('黒字企業のみ',reason)
         self.assertNotIn('TOPIX',reason)
 
     def test_unknown_treasury_is_not_zero_or_a_claim_of_missing_close(self):

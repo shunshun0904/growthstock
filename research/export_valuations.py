@@ -9,10 +9,10 @@ import pandas as pd
 import build_dataset as B
 import financial_inputs as FI
 import theoretical_value as V
-from valuation_display import price_keys, latest_financials, unavailable_reason, rim_with_provider_inputs
+from valuation_display import price_keys, latest_financials, unavailable_reason, rim_with_provider_inputs, rim_with_loss_recovery
 
 METHODS = {
- 'ri': ('RIM（残余利益）', 'ROEを5・10年で資本コストへ収束。ERP3〜7%、配当性向25〜75%。'),
+ 'ri': ('RIM（残余利益）', 'ROEを5・10年で資本コストへ収束。ERP3〜7%、黒字時の配当性向25〜75%。赤字中は無配・損失を純資産から全額控除。'),
  'ddm': ('配当割引法', '実績年間配当、成長率0〜2%、ERP3〜7%。無配・赤字等は算出不可。'),
 }
 
@@ -77,7 +77,7 @@ def export(raw, predictions, output):
                 part['Date'] = pd.to_datetime(part.Date)
                 indicator_parts.append(part[part.Code.isin(tv.Code) & part.Date.isin(indicator_dates)])
             indicators = pd.concat(indicator_parts,ignore_index=True) if indicator_parts else pd.DataFrame()
-            tv = rim_with_provider_inputs(tv, prices, indicators, market)
+            tv = rim_with_loss_recovery(rim_with_provider_inputs(tv, prices, indicators, market))
         by_code = {r.Code:r for _,r in tv.iterrows()}
         for code,c in sorted(candidates.items()):
             r = by_code.get(code)
@@ -91,6 +91,8 @@ def export(raw, predictions, output):
                     **values,'deviation':main/r.close_raw-1 if available else None,
                     'inputSource':r.get('ri_input_source') if name=='ri' and r is not None else None,
                     'inputDate':r.get('ri_input_date') if name=='ri' and r is not None else None,
+                    'recoveryAssumed':bool(r.get('ri_recovery_assumed',False)) if name=='ri' and r is not None else False,
+                    'validFraction':r.get('tv_'+name+'_valid_fraction') if r is not None else None,
                     'eps':r.tv_eps if name=='ri' and r is not None else None,
                     'bps':r.tv_bps if name=='ri' and r is not None else None})
             stocks.append({'code':code,'name':c.get('name',c.get('code',code)),
