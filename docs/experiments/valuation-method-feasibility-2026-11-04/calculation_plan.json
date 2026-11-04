@@ -1,0 +1,70 @@
+{
+  "denominator_rows": 22110,
+  "denominator_codes": 3748,
+  "date_min": "2018-04-03 00:00:00",
+  "date_max": "2026-10-02 00:00:00",
+  "peer_population": "all observed valuation rows, historical TSE33, self excluded, minimum 10 other positive peers",
+  "peer_sector_max_age_days": 62,
+  "annual_max_age_days": 400,
+  "financial_future_values_used": false,
+  "DCF_basis": "JP nonfinancial only; actual cash CapEx vs cash-or-disclosed-investment proxy",
+  "DCF_scenarios": 324,
+  "high_growth": [
+    -0.05,
+    0.0,
+    0.05,
+    0.1
+  ],
+  "ERP": [
+    0.03,
+    0.05,
+    0.07
+  ],
+  "debt_spread": [
+    0.005,
+    0.015,
+    0.03
+  ],
+  "terminal_growth": [
+    0.0,
+    0.01,
+    0.02
+  ],
+  "tax": [
+    0.25,
+    0.3,
+    0.35
+  ],
+  "stable_ROIC": "WACC; terminal reinvestment = g/WACC*NOPAT",
+  "explicit_horizon": 5,
+  "NWC_proxy": "receivables + inventories - trade payables; other operating balances excluded",
+  "debt_warning": "observed component sum is provisional, not proof that missing components equal zero",
+  "reverse_growth_bounds": [
+    -0.5,
+    0.5
+  ],
+  "reverse_fixed": {
+    "ERP": 0.05,
+    "spread": 0.015,
+    "g_terminal": 0.01,
+    "tax": 0.3
+  },
+  "MC_draws": 1024,
+  "MC_seed": 20261104,
+  "MC_priors_calibrated": false,
+  "MC_priors": {
+    "growth": "triangular(-5%,0%,10%)",
+    "ERP": "triangular(3%,5%,7%)",
+    "spread": "triangular(.5%,1.5%,3%)",
+    "tax": "uniform(25%,35%)",
+    "margin": "triangular(.8*m,m,min(1,1.2*m))",
+    "terminal_g": "uniform(0,min(2%,WACC-1%)), conditional on WACC>1%"
+  },
+  "MC_dependence": "parameters independent except terminal_g/WACC; each path persistent for 5 years",
+  "equity_floor": "max(signed equity,0); zero paths retained; not a distress/option valuation",
+  "valid_fraction_min": 0.8,
+  "asset_stress": "book NAV minus 0/20/40% PPE, 0/20/40% inventories, 0/50/100% intangibles",
+  "fair_value_adjusted_NAV": "unavailable, no asset-specific market values or comprehensive off-balance claims",
+  "historical_provider_original_versions_independently_verified": false,
+  "production_changed": false
+}
