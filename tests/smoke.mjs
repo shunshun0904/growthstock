@@ -334,15 +334,15 @@ check(tmBody.includes('78週高値を更新'), 'ストーリータイムライ�
 check(await page.locator('.recharts-line').count() >= 1, '株価推移チャートが描画される');
 await page.screenshot({ path: path.join(SHOTS, 'screenshot-timemachine.png') });
 
-console.log('\n== 理論株価 ==');
+console.log('\n== 理論株価ランキング ==');
 await page.getByRole('tab', { name: '理論株価', exact: true }).click();
-await page.getByRole('heading', { name: '手法別の評価額' }).waitFor();
-check(await page.locator('.valuation-table tbody tr').count() === 2, '評価額と算出不可の手法が表示される');
-const valuationText = await page.locator('.valuation-view').textContent();
-check(valuationText.includes('直近20営業日') && valuationText.includes('38.0%'), '20営業日推移と現在株価のレンジ内位置が出る');
-check(valuationText.includes('+5.0%') && valuationText.includes('年率 +10.0%'), '中央値との乖離と織り込み成長率を分けて表示する');
-await page.getByRole('checkbox').check();
-check(await page.locator('.recharts-reference-area').count() === 1, '理論レンジをチャートに重ねられる');
+await page.locator('.valuation-table tbody tr').first().waitFor();
+check(await page.locator('.valuation-table tbody tr').count() === 3, '算出不可を含む全銘柄を表示する');
+check((await page.locator('.valuation-table tbody tr').first().textContent()).includes('TEST1'), 'RIMは中央値との乖離が大きい順');
+check(await page.locator('.valuation-view .recharts-wrapper').count() === 0, '20営業日の株価比較は表示しない');
+await page.getByRole('combobox', { name: '算出方法' }).selectOption('ddm');
+check((await page.locator('.valuation-table tbody tr').first().textContent()).includes('TEST0'), '配当割引法へ切り替えると順位も切り替わる');
+check(await page.getByRole('combobox', { name: '算出方法' }).locator('option').count() === 2, '算出方法はRIMと配当割引法の2種類');
 await page.setViewportSize({ width: 390, height: 844 });
 check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), '理論株価はスマホで横にはみ出さない');
 await page.setViewportSize({ width: 1440, height: 1000 });

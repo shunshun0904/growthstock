@@ -9,88 +9,6 @@
       "name": "テスト銘柄",
       "date": "2020-01-31",
       "price": 119,
-      "history": [
-        {
-          "date": "2020-01-06",
-          "close": 100
-        },
-        {
-          "date": "2020-01-07",
-          "close": 101
-        },
-        {
-          "date": "2020-01-08",
-          "close": 102
-        },
-        {
-          "date": "2020-01-09",
-          "close": 103
-        },
-        {
-          "date": "2020-01-10",
-          "close": 104
-        },
-        {
-          "date": "2020-01-13",
-          "close": 105
-        },
-        {
-          "date": "2020-01-14",
-          "close": 106
-        },
-        {
-          "date": "2020-01-15",
-          "close": 107
-        },
-        {
-          "date": "2020-01-16",
-          "close": 108
-        },
-        {
-          "date": "2020-01-17",
-          "close": 109
-        },
-        {
-          "date": "2020-01-20",
-          "close": 110
-        },
-        {
-          "date": "2020-01-21",
-          "close": 111
-        },
-        {
-          "date": "2020-01-22",
-          "close": 112
-        },
-        {
-          "date": "2020-01-23",
-          "close": 113
-        },
-        {
-          "date": "2020-01-24",
-          "close": 114
-        },
-        {
-          "date": "2020-01-27",
-          "close": 115
-        },
-        {
-          "date": "2020-01-28",
-          "close": 116
-        },
-        {
-          "date": "2020-01-29",
-          "close": 117
-        },
-        {
-          "date": "2020-01-30",
-          "close": 118
-        },
-        {
-          "date": "2020-01-31",
-          "close": 119
-        }
-      ],
       "beta": 1.0,
       "riskFree": 0.01,
       "financialDate": "2020-01-01",
@@ -111,22 +29,107 @@
           "note": "検証用の固定シナリオ"
         },
         {
-          "id": "adjusted_nav",
-          "label": "修正純資産法（時価）",
+          "id": "ddm",
+          "label": "配当割引法",
           "kind": "price",
-          "available": false,
-          "reason": "資産別時価のデータ不足",
-          "note": "時価未取得"
+          "available": true,
+          "min": 150,
+          "max": 250,
+          "mean": 200,
+          "median": 200,
+          "std": 20,
+          "deviation": 0.050420168067226934,
+          "note": "検証用の固定シナリオ"
+        }
+      ],
+      "inferenceDate": "2020-01-31"
+    },
+    {
+      "code": "TEST1",
+      "name": "別テスト銘柄",
+      "date": "2020-01-31",
+      "price": 100,
+      "beta": 1.0,
+      "riskFree": 0.01,
+      "financialDate": "2020-01-01",
+      "annualDate": "2019-06-01",
+      "yieldDate": "2020-01-30",
+      "methods": [
+        {
+          "id": "ri",
+          "label": "RIM（残余利益）",
+          "kind": "price",
+          "available": true,
+          "min": 100,
+          "max": 200,
+          "mean": 150,
+          "median": 150,
+          "std": 5,
+          "deviation": 0.050420168067226934,
+          "note": "検証用の固定シナリオ"
         },
         {
-          "id": "reverse_cash",
-          "label": "リバースDCF",
-          "kind": "growth",
+          "id": "ddm",
+          "label": "配当割引法",
+          "kind": "price",
           "available": true,
-          "growth": 0.1,
-          "note": "織り込み成長率"
+          "min": 100,
+          "max": 150,
+          "mean": 120,
+          "median": 120,
+          "std": 20,
+          "deviation": 0.050420168067226934,
+          "note": "検証用の固定シナリオ"
         }
-      ]
+      ],
+      "inferenceDate": "2020-01-31"
+    },
+    {
+      "code": "TEST2",
+      "name": "算出不可銘柄",
+      "date": "2020-01-31",
+      "price": 119,
+      "beta": 1.0,
+      "riskFree": 0.01,
+      "financialDate": "2020-01-01",
+      "annualDate": "2019-06-01",
+      "yieldDate": "2020-01-30",
+      "methods": [
+        {
+          "id": "ri",
+          "label": "RIM（残余利益）",
+          "kind": "price",
+          "available": false,
+          "min": 100,
+          "max": 150,
+          "mean": 124,
+          "median": null,
+          "std": 5,
+          "deviation": 0.050420168067226934,
+          "note": "検証用の固定シナリオ",
+          "reason": "必要データ不足"
+        },
+        {
+          "id": "ddm",
+          "label": "配当割引法",
+          "kind": "price",
+          "available": false,
+          "min": 150,
+          "max": 250,
+          "mean": 200,
+          "median": null,
+          "std": 20,
+          "deviation": 0.050420168067226934,
+          "note": "検証用の固定シナリオ",
+          "reason": "必要データ不足"
+        }
+      ],
+      "inferenceDate": "2020-01-31"
     }
+  ],
+  "inferenceDates": [
+    "2020-01-29",
+    "2020-01-30",
+    "2020-01-31"
   ]
 }

@@ -1,10 +1,14 @@
-export function rangePosition(price, low, high) {
-  if (![price, low, high].every(Number.isFinite) || high <= low) return null;
-  return (price - low) / (high - low);
-}
-export function trend(history) {
-  const good = (history || []).filter(x => Number.isFinite(x.close) && x.close > 0);
-  return good.length >= 2 ? good.at(-1).close / good[0].close - 1 : null;
+export function rankedValuations(stocks, method) {
+  return (stocks || []).map(stock => {
+    const value = stock.methods?.find(m => m.id === method);
+    const deviation = value?.available && Number.isFinite(value.median)
+      && Number.isFinite(stock.price) && stock.price > 0 ? value.median / stock.price - 1 : null;
+    return { ...stock, value, deviation };
+  }).sort((a, b) => {
+    const aa = Number.isFinite(a.deviation), bb = Number.isFinite(b.deviation);
+    if (aa !== bb) return aa ? -1 : 1;
+    return (aa ? b.deviation - a.deviation : 0) || a.code.localeCompare(b.code);
+  });
 }
 export async function loadValuations() {
   const base = import.meta.env?.BASE_URL ?? '/';

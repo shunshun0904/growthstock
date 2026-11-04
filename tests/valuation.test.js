@@ -1,14 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { rangePosition, trend } from '../src/lib/valuation.js';
-test('current price position preserves out-of-range values and handles collapsed ranges', () => {
-  assert.equal(rangePosition(150,100,200),0.5);
-  assert.equal(rangePosition(250,100,200),1.5);
-  assert.equal(rangePosition(50,100,200),-0.5);
-  assert.equal(rangePosition(150,100,100),null);
-  assert.equal(rangePosition(null,100,200),null);
-});
-test('trend uses first/last actual observations and does not turn missing data into zero', () => {
-  assert.ok(Math.abs(trend([{close:100},{close:110}])-.1)<1e-12);
-  assert.equal(trend([{close:100}]),null);
+import { rankedValuations } from '../src/lib/valuation.js';
+test('rank all companies by method-specific median/price, keeping unavailable last', () => {
+  const make = (code, price, ri, ddm) => ({code,price,methods:[{id:'ri',available:ri!==null,median:ri},{id:'ddm',available:ddm!==null,median:ddm}]});
+  const stocks=[make('B',100,90,200),make('C',100,null,null),make('A',100,150,110),make('D',0,200,200)];
+  assert.deepEqual(rankedValuations(stocks,'ri').map(x=>x.code),['A','B','C','D']);
+  assert.deepEqual(rankedValuations(stocks,'ddm').map(x=>x.code),['B','A','C','D']);
+  assert.equal(rankedValuations(stocks,'ri')[0].deviation,.5);
+  assert.equal(rankedValuations(stocks,'ri')[3].deviation,null);
+  assert.deepEqual(stocks.map(x=>x.code),['B','C','A','D']);
 });
