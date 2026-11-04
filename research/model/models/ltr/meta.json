@@ -3,10 +3,10 @@
   "name": "ランキング学習",
   "short": "LTR",
   "note": "LambdaRank。同じ日の候補の中で、翌営業日の寄りで買い20営業日目の終値で売った収益の順番を学ぶ（実験114）。その日の中の順位だけを使い、買いの規則には使わない（参考。両方使う形）",
-  "trainedAt": "2026-10-31T07:32:49.567912+00:00",
+  "trainedAt": "2026-11-04T08:03:06.503231+00:00",
   "kind": "lambdarank",
   "target": "同じ日の候補の中の、翌営業日の寄りで買い20営業日目の終値で売った収益の5分位（0〜4）",
-  "preset": "all_plus_prog_listing_vol_book_shape_dd_recent_tx",
+  "preset": "all_plus_prog_listing_vol_book_shape_dd_recent_tx_financial",
   "features": [
     "eps_growth_q0",
     "sales_growth_q0",
@@ -367,7 +367,20 @@
     "tx_range_atr",
     "tx_engulfing",
     "tx_nr7",
-    "tx_three_soldiers"
+    "tx_three_soldiers",
+    "tv_beta",
+    "tv_beta_n",
+    "tv_rf",
+    "tv_rf_age",
+    "tv_fin_age",
+    "tv_earnings_yield",
+    "tv_book_yield",
+    "tv_div_yield",
+    "tv_payout",
+    "tv_ri_valid_fraction",
+    "tv_ddm_valid_fraction",
+    "missing_tv_ri",
+    "missing_tv_ddm"
   ],
   "params": {
     "boosting_type": "gbdt",
@@ -375,25 +388,25 @@
     "subsample_freq": 1,
     "n_jobs": -1,
     "verbose": -1,
-    "learning_rate": 0.011189641953254732,
-    "num_leaves": 11,
-    "min_child_samples": 212,
-    "subsample": 0.6411061649378713,
-    "colsample_bytree": 0.8816807065987535,
-    "reg_alpha": 0.1477493957155587,
-    "reg_lambda": 0.04230920921534301
+    "learning_rate": 0.015593220465304397,
+    "num_leaves": 113,
+    "min_child_samples": 271,
+    "subsample": 0.6872611969247745,
+    "colsample_bytree": 0.7499233734091095,
+    "reg_alpha": 0.06763787798768134,
+    "reg_lambda": 0.028343804059918987
   },
   "seed": 42,
   "dayUpper": 0.5,
-  "nTrain": 22053,
-  "nDays": 2012,
+  "nTrain": 22112,
+  "nDays": 2014,
   "trainFrom": "2018-04-03",
-  "trainTo": "2026-10-01",
-  "nOof": 16442,
+  "trainTo": "2026-10-05",
+  "nOof": 16489,
   "oofFolds": 11,
   "oofMetrics": {
-    "ndcg5": 0.6269,
-    "ndcg5CodeOrder": 0.5887
+    "ndcg5": 0.6238,
+    "ndcg5CodeOrder": 0.5875
   },
   "tuning": {
     "objective": "検証分割の日付内 NDCG@5（候補5件以上の日。利得は20営業日目の終値の段階 0〜4）",
@@ -401,20 +414,24 @@
     "n_splits": 5,
     "n_trials": 50,
     "seed": 0,
-    "best_trial": 47,
-    "ndcg": 0.6637,
+    "best_trial": 45,
+    "ndcg": 0.6617,
     "ndcg_folds": [
-      0.6677,
-      0.6617,
-      0.672,
-      0.6553,
-      0.6618
+      0.6637,
+      0.6627,
+      0.6533,
+      0.6643,
+      0.6644
     ],
-    "n_rows": 18099,
-    "n_days": 1751,
+    "n_rows": 18185,
+    "n_days": 1754,
     "train_from": "2018-04-03",
-    "train_to": "2025-09-02",
-    "minutes": 10.3
+    "train_to": "2025-09-05",
+    "minutes": 17.9
   },
-  "tuningSource": "週次の探索（Retrain Weekly run 41168050273・264d462。2025-09-02 までの 18,099件・50試行・5分割・目的は検証分割の日付内 NDCG@5）"
+  "tuningSource": "週次の探索（Adopt Financial Inputs run 41792145786・47c67e4。2025-09-06 までの 18,185件・50試行・5分割・目的は検証分割の日付内 NDCG@5）",
+  "artifactHashes": {
+    "model.joblib": "47947a28492eb4775c1fab145d35b031c4cd4c6894f6e3aa0e765372b87f9128",
+    "oof.parquet": "d51d061cbca79adfffc966ac0d23b7d0ddf20c324a726e96cd516f12bdcf35de"
+  }
 }

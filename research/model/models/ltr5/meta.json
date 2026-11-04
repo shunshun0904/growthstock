@@ -3,7 +3,7 @@
   "name": "直近5営業日のランキング学習",
   "short": "LTR5",
   "note": "LambdaRank。判断日ごとに、その日までの直近5営業日の候補を1つの組にして、判断日の翌営業日の寄りで買い20営業日目の終値で売った収益の順番を学ぶ（実験117 の W5）。組の中の順位だけを使い、買いの規則には使わない（参考。3条件・4条件）",
-  "trainedAt": "2026-10-31T07:57:33.236144+00:00",
+  "trainedAt": "2026-11-04T08:36:55.375775+00:00",
   "kind": "lambdarank",
   "target": "判断日までの直近5営業日の候補の組の中の、判断日の翌営業日の寄りで買い20営業日目の終値で売った収益の5分位（0〜4）",
   "pool": {
@@ -15,7 +15,7 @@
       "r5_low"
     ]
   },
-  "preset": "all_plus_prog_listing_vol_book_shape_dd_recent_tx",
+  "preset": "all_plus_prog_listing_vol_book_shape_dd_recent_tx_financial",
   "features": [
     "eps_growth_q0",
     "sales_growth_q0",
@@ -377,6 +377,19 @@
     "tx_engulfing",
     "tx_nr7",
     "tx_three_soldiers",
+    "tv_beta",
+    "tv_beta_n",
+    "tv_rf",
+    "tv_rf_age",
+    "tv_fin_age",
+    "tv_earnings_yield",
+    "tv_book_yield",
+    "tv_div_yield",
+    "tv_payout",
+    "tv_ri_valid_fraction",
+    "tv_ddm_valid_fraction",
+    "missing_tv_ri",
+    "missing_tv_ddm",
     "r5_days",
     "r5_ret",
     "r5_high",
@@ -388,24 +401,24 @@
     "subsample_freq": 1,
     "n_jobs": -1,
     "verbose": -1,
-    "learning_rate": 0.023292938448919526,
+    "learning_rate": 0.010055011966562909,
     "num_leaves": 9,
-    "min_child_samples": 168,
-    "subsample": 0.7498775102958413,
-    "colsample_bytree": 0.5521318372713037,
-    "reg_alpha": 1.0463661748653903e-08,
-    "reg_lambda": 1.4704959544128534e-08
+    "min_child_samples": 13,
+    "subsample": 0.5890064827875672,
+    "colsample_bytree": 0.6976281113186222,
+    "reg_alpha": 0.02190131106749423,
+    "reg_lambda": 1.5374165984311912
   },
   "seed": 42,
-  "nTrain": 110052,
-  "nDays": 2070,
+  "nTrain": 110323,
+  "nDays": 2072,
   "trainFrom": "2018-04-03",
-  "trainTo": "2026-10-01",
-  "nOof": 82161,
+  "trainTo": "2026-10-05",
+  "nOof": 82375,
   "oofFolds": 11,
   "oofMetrics": {
-    "ndcg5": 0.5486,
-    "ndcg5CodeOrder": 0.5188
+    "ndcg5": 0.546,
+    "ndcg5CodeOrder": 0.5185
   },
   "checks": {
     "moveCols": {
@@ -413,7 +426,7 @@
       "same": 300
     },
     "sameDay": {
-      "rows": 22060,
+      "rows": 22121,
       "mismatch": 0
     }
   },
@@ -423,20 +436,24 @@
     "n_splits": 5,
     "n_trials": 50,
     "seed": 0,
-    "best_trial": 30,
-    "ndcg": 0.5836,
+    "best_trial": 28,
+    "ndcg": 0.5874,
     "ndcg_folds": [
-      0.5796,
-      0.584,
-      0.5743,
-      0.5845,
-      0.5958
+      0.5811,
+      0.591,
+      0.5804,
+      0.5885,
+      0.5959
     ],
-    "n_rows": 90249,
-    "n_days": 1809,
+    "n_rows": 90621,
+    "n_days": 1812,
     "train_from": "2018-04-03",
-    "train_to": "2025-09-02",
-    "minutes": 23.3
+    "train_to": "2025-09-05",
+    "minutes": 31.9
   },
-  "tuningSource": "週次の探索（Retrain Weekly run 41168050273・264d462。2025-09-02 までの組の行 90,249件・50試行・5分割・目的は検証分割の組の中の NDCG@5）"
+  "tuningSource": "週次の探索（Adopt Financial Inputs run 41792145786・47c67e4。2025-09-06 までの組の行 90,621件・50試行・5分割・目的は検証分割の組の中の NDCG@5）",
+  "artifactHashes": {
+    "model.joblib": "d4b7a2ea30ce3d481e7c092a86ca3acd90dbdc4ed3658eb041cae22282852bf9",
+    "oof.parquet": "a5dbdf2beb8c9c734c6dc4628f83c0967f599a1d3a8f10c9b32015b8be70c51e"
+  }
 }
