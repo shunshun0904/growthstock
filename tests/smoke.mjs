@@ -343,7 +343,7 @@ console.log('\n== 理論株価ランキング ==');
 await page.getByRole('tab', { name: '理論株価', exact: true }).click();
 await page.locator('.valuation-table tbody tr').first().waitFor();
 check(await page.locator('.valuation-table tbody tr').count() === 3, '算出不可を含む全銘柄を表示する');
-check((await page.locator('.valuation-table tbody tr').first().textContent()).includes('TEST1'), 'RIMは中央値との乖離が大きい順');
+check((await page.locator('.valuation-table tbody tr').first().textContent()).includes('TEST1'), 'RIMは理論株価に対する現在株価の割合が低い順');
 check((await page.locator('.valuation-table').textContent()).includes('提供EPS・BPSを使用'), 'RIMの提供EPS・BPSによる補完元を表示する');
 check((await page.locator('.valuation-table tbody tr').first().textContent()).includes('赤字・回復仮定あり'), '赤字RIMの回復仮定を評価額の行に表示する');
 check((await page.locator('.valuation-view').textContent()).includes('回復が実現するという予測ではありません'), '回復ケースを業績予想と区別する');

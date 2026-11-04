@@ -1,13 +1,13 @@
 export function rankedValuations(stocks, method) {
   return (stocks || []).map(stock => {
     const value = stock.methods?.find(m => m.id === method);
-    const deviation = value?.available && Number.isFinite(value.median)
-      && Number.isFinite(stock.price) && stock.price > 0 ? value.median / stock.price - 1 : null;
-    return { ...stock, value, deviation };
+    const priceRatio = value?.available && Number.isFinite(value.median) && value.median > 0
+      && Number.isFinite(stock.price) && stock.price > 0 ? stock.price / value.median : null;
+    return { ...stock, value, priceRatio };
   }).sort((a, b) => {
-    const aa = Number.isFinite(a.deviation), bb = Number.isFinite(b.deviation);
+    const aa = Number.isFinite(a.priceRatio), bb = Number.isFinite(b.priceRatio);
     if (aa !== bb) return aa ? -1 : 1;
-    return (aa ? b.deviation - a.deviation : 0) || a.code.localeCompare(b.code);
+    return (aa ? a.priceRatio - b.priceRatio : 0) || a.code.localeCompare(b.code);
   });
 }
 export async function loadValuations() {
