@@ -343,6 +343,8 @@ check(await page.locator('.valuation-view .recharts-wrapper').count() === 0, '20
 await page.getByRole('combobox', { name: '算出方法' }).selectOption('ddm');
 check((await page.locator('.valuation-table tbody tr').first().textContent()).includes('TEST0'), '配当割引法へ切り替えると順位も切り替わる');
 check(await page.getByRole('combobox', { name: '算出方法' }).locator('option').count() === 2, '算出方法はRIMと配当割引法の2種類');
+check((await page.locator('.valuation-table').textContent()).includes('前営業日'), '前営業日の終値を使った場合は日付に明示する');
+check((await page.locator('.valuation-table').textContent()).includes('自己株式数が欠損'), '算出不可の具体的な原因を表示する');
 await page.setViewportSize({ width: 390, height: 844 });
 check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), '理論株価はスマホで横にはみ出さない');
 await page.setViewportSize({ width: 1440, height: 1000 });

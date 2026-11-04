@@ -82,7 +82,9 @@
           "note": "検証用の固定シナリオ"
         }
       ],
-      "inferenceDate": "2020-01-31"
+      "inferenceDate": "2020-01-31",
+      "priceFallback": true,
+      "latestStockPriceDate": "2020-02-03"
     },
     {
       "code": "TEST2",
@@ -107,7 +109,7 @@
           "std": 5,
           "deviation": 0.050420168067226934,
           "note": "検証用の固定シナリオ",
-          "reason": "必要データ不足"
+          "reason": "自己株式数が欠損"
         },
         {
           "id": "ddm",
@@ -121,7 +123,7 @@
           "std": 20,
           "deviation": 0.050420168067226934,
           "note": "検証用の固定シナリオ",
-          "reason": "必要データ不足"
+          "reason": "自己株式数が欠損"
         }
       ],
       "inferenceDate": "2020-01-31"

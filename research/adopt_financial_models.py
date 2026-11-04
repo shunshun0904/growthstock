@@ -3,6 +3,7 @@ from pathlib import Path
 import json
 import shutil
 import sys
+from datetime import datetime
 import features as F
 import financial_inputs as FI
 import model_artifacts as A
@@ -23,8 +24,22 @@ def assemble(incoming):
     for name in LS.STRICT_MODELS: merged[name]=strict[name]
     path.write_text(json.dumps(merged,ensure_ascii=False,indent=2)+'\n')
     verify(Path(__file__).parent / "model")
-    shutil.copyfile(incoming/'financial-inputs-mart/public/data/valuations.json',Path(__file__).parents[1]/'public/data/valuations.json')
+    copy_valuation_if_newer(incoming/'financial-inputs-mart/public/data/valuations.json',
+                            Path(__file__).parents[1]/'public/data/valuations.json')
     print('Verified eight models; consistent 373/377-column schemas and classifier data snapshot')
+
+def copy_valuation_if_newer(source, target):
+    """Long training runs must not overwrite a newer live valuation export."""
+    source, target = Path(source), Path(target)
+    if target.exists():
+        def generated(path):
+            value = json.loads(path.read_text())["generatedAt"]
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if generated(target) >= generated(source):
+            return False
+    shutil.copyfile(source, target)
+    return True
+
 
 def verify(root):
     expected=F.columns(F.DEFAULT_PRESET)

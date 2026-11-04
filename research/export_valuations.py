@@ -9,6 +9,7 @@ import pandas as pd
 import build_dataset as B
 import financial_inputs as FI
 import theoretical_value as V
+from valuation_display import price_keys, latest_financials, unavailable_reason
 
 METHODS = {
  'ri': ('RIM（残余利益）', 'ROEを5・10年で資本コストへ収束。ERP3〜7%、配当性向25〜75%。'),
@@ -51,12 +52,14 @@ def export(raw, predictions, output):
         prices = bars[['Code','Date','C','AdjC']].rename(columns={'C':'close_raw','AdjC':'close'})
         prices['close'] = prices.close.fillna(prices.close_raw)
         prices = prices[prices.close_raw.gt(0) & prices.close.gt(0)]
-        asof = prices.Date.max().strftime('%Y-%m-%d')
-        # Evaluate every company at its latest available close, using only then-known inputs.
-        keys = prices.groupby('Code').tail(1)[['Code','Date','close_raw']].reset_index(drop=True)
-        fins = B.load_parts('fins', str(raw))
+        # A new stock bar can precede publication of TOPIX. Align both inputs.
         market = B.load_parts('topix', str(raw))
-        tv = FI.calculate(keys, prices, fins, market, FI.yields(raw, refresh=False))
+        keys, latest_prices = price_keys(prices, market)
+        if len(keys):
+            asof = keys.Date.max().strftime('%Y-%m-%d')
+        fins = B.load_parts('fins', str(raw))
+        financials = latest_financials(fins)
+        tv = FI.calculate(keys, prices, fins, market, FI.yields(raw, refresh=False)) if len(keys) else pd.DataFrame()
         by_code = {r.Code:r for _,r in tv.iterrows()}
         for code,c in sorted(candidates.items()):
             r = by_code.get(code)
@@ -66,11 +69,13 @@ def export(raw, predictions, output):
                 main = values['median']
                 available = pd.notna(main)
                 methods.append({'id':name,'label':label,'note':note,'kind':'price','available':available,
-                    'reason':None if available else '必要データ・鮮度・計算条件を満たさない',
+                    'reason':None if available else unavailable_reason(name, r, financials),
                     **values,'deviation':main/r.close_raw-1 if available else None})
             stocks.append({'code':code,'name':c.get('name',c.get('code',code)),
                 'inferenceDate':c['date'],'date':r.Date if r is not None else None,
                 'price':r.close_raw if r is not None else None,
+                'latestStockPriceDate':latest_prices.loc[code,'Date'] if code in latest_prices.index else None,
+                'priceFallback':bool(r is not None and code in latest_prices.index and r.Date < latest_prices.loc[code,'Date']),
                 'financialDate':r.get('tv_fin_source_date') if r is not None else None,
                 'yieldDate':r.get('tv_rf_date') if r is not None else None,'methods':methods})
     payload = clean({'schemaVersion':1,'asOf':asof,'inferenceDates':days,

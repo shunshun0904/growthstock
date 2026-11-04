@@ -21,6 +21,16 @@ class Adoption(unittest.TestCase):
             if name not in ['ltr','ltr5']:meta['labelSpec']=LS.for_model(name)
             (d/'meta.json').write_text(json.dumps(meta))
 
+    def test_long_training_cannot_overwrite_newer_display_data(self):
+        with tempfile.TemporaryDirectory() as t:
+            source, target=Path(t)/'old.json', Path(t)/'live.json'
+            source.write_text(json.dumps({'generatedAt':'2026-11-04T07:00:00Z','stocks':[]}))
+            target.write_text(json.dumps({'generatedAt':'2026-11-04T08:00:00+00:00','stocks':['new']}))
+            self.assertFalse(C.copy_valuation_if_newer(source,target))
+            self.assertEqual(json.loads(target.read_text())['stocks'],['new'])
+            target.unlink()
+            self.assertTrue(C.copy_valuation_if_newer(source,target))
+
     def test_complete_migration_and_corrupt_ranker(self):
         with tempfile.TemporaryDirectory() as t:
             root=Path(t);self.make_models(root);C.verify(root)
