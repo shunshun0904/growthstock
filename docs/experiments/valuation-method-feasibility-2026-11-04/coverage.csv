@@ -1,0 +1,12 @@
+method,family,status,input_rows,calculated_rows,calculated_pct,positive_value_rows,positive_value_pct,codes,reviewed_debt_rows,capex_note_proxy_rows
+per,relative,peer multiple,20142,19920,90.09497964721845,19920.0,90.09497964721845,3478,,
+pbr,relative,peer multiple,22029,21891,99.00949796472185,21891.0,99.00949796472185,3728,,
+ev_ebitda,relative,OP+depreciation proxy,7643,7264,32.85391225689733,7046.0,31.867933061962912,974,0.0,
+dcf_cash,DCF,conditional,1126,978,4.423337856173677,939.0,4.246947082767978,217,0.0,
+reverse_cash,reverse DCF,conditional,1126,984,4.450474898236092,,,206,0.0,
+mc_cash,stochastic DCF,uncalibrated assumed priors,1126,1126,5.092718227046586,1066.0,4.821347806422433,218,0.0,
+dcf_flex,DCF,conditional,5840,5357,24.228855721393035,5152.0,23.301673450927183,837,0.0,4379.0
+reverse_flex,reverse DCF,conditional,5840,5202,23.527815468113975,,,817,0.0,4218.0
+mc_flex,stochastic DCF,uncalibrated assumed priors,5840,5840,26.41338760741746,5576.0,25.21935775667119,843,0.0,4714.0
+asset_stress,NAV,book haircut proxy; NOT market-adjusted NAV,7775,7775,35.16508367254636,7733.0,34.97512437810945,1001,,
+adjusted_nav_market,NAV,missing fair values/off-balance completeness,0,0,0.0,0.0,0.0,0,0.0,

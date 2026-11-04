@@ -1,0 +1,14 @@
+{
+  "denominator_rows": 22110,
+  "codes": 3748,
+  "row_order_and_keys_unchanged": true,
+  "no_future_annual_or_sector_snapshots": true,
+  "coverage_recomputed_for_methods": 11,
+  "independent_DCF_polynomial_rows": 80,
+  "independent_DCF_max_yen_error": 1.0913936421275139e-11,
+  "MC_reproduced_real_rows": 10,
+  "verified_input_hashes": 27,
+  "source_versions_independently_audited": false,
+  "probability_priors_calibrated": false,
+  "production_changed": false
+}
