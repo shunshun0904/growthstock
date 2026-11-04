@@ -260,7 +260,10 @@ class TestParamsFile(unittest.TestCase):
         # 2026-10-30 の試しの週次の探索で書き換わった）は見ない。学習する列（360列＋値動き4列）で探索した、探索空間の中の
         # 木の形であることだけ
         rec = ltr5.load_params()
-        cols_w = list(F.columns(F.DEFAULT_PRESET)) + list(ltr5.MOVE_COLS)
+        with open(os.path.join(ROOT, "research/model/models/ltr5/meta.json")) as fh:
+            meta = json.load(fh)
+        cols_w = meta["features"]
+        self.assertEqual(cols_w, F.columns(meta["preset"]) + list(ltr5.MOVE_COLS))
         self.assertIsNone(ltr.params_mismatch(rec, cols_w))
         self.assertIsNotNone(ltr.params_mismatch(rec, list(F.columns(F.DEFAULT_PRESET))))   # 値動きの列なしでは通らない
         self.assertEqual(TL.tuned_params_problems(rec), [])

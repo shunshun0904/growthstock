@@ -44,7 +44,7 @@ class Columns(unittest.TestCase):
         self.el = E.eligible_columns(self.cols)
 
     def test_count_and_members(self):
-        self.assertEqual(len(self.cols), 360)
+        self.assertEqual(len(self.cols), 373)
         self.assertEqual(len(self.el), 159)
         for c in ("tx_ma_gap_5", "topix_ret_20", "gold_ret_120", "sector_ret_20", "rel_sector_20", "ret_1d",
                   "r_high_3m", "vol_rel_mkt", "volume_trend", "credit_ratio", "short_ratio", "inv_foreign_4w",

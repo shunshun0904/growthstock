@@ -143,7 +143,10 @@ class TestParams(unittest.TestCase):
         # 日曜の「Tune ranking model」が毎週書き換えるので、値（最初は実験114 の結果）は見ない。学習する列で探索した、
         # 探索空間の中の木の形であることだけ
         rec = ltr.load_params()
-        cols = F.columns(F.DEFAULT_PRESET)
+        with open(os.path.join(ROOT, "research/model/models/ltr/meta.json")) as fh:
+            meta = json.load(fh)
+        cols = meta["features"]
+        self.assertEqual(cols, F.columns(meta["preset"]))
         self.assertIsNone(ltr.params_mismatch(rec, cols))
         self.assertEqual(tuned_params_problems(rec), [])
 

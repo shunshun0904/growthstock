@@ -108,6 +108,11 @@ def main(argv=None) -> int:
         "tuning": rec.get("_cv", {}), "tuningSource": rec.get("_source"),
     }
     d = save(model, meta, oof, args.out_dir)
+    import model_artifacts as A
+    meta["artifactHashes"] = A.hashes("ltr5", args.out_dir)
+    import json
+    with open(os.path.join(d, "meta.json"), "w", encoding="utf-8") as fh:
+        json.dump(meta, fh, ensure_ascii=False, indent=2)
     size = os.path.getsize(os.path.join(d, "model.joblib")) / 1e6
     print(f"[done] {os.path.relpath(d)} / {size:.2f}MB / {time.time() - t0:.0f}秒")
     return 0

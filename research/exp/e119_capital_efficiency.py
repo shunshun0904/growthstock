@@ -166,7 +166,7 @@ def prepare_ranking(daily, prices):
 
 
 def parameters():
-    standard = json.loads((HERE / "lgbm_params.json").read_text())[F.DEFAULT_PRESET]
+    standard = json.loads((HERE / "lgbm_params.json").read_text())["all_plus_prog_listing_vol_book_shape_dd_recent_tx"]
     extra = json.loads((HERE / "multi_params.json").read_text())["lgbm_k15"]
     return {"class10": {k: v for k, v in standard.items() if not str(k).startswith("_")},
             "class15": dict(extra["params"], objective="binary", boosting_type="gbdt", n_estimators=200,

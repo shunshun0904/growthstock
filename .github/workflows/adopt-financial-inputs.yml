@@ -160,6 +160,5 @@ jobs:
             sleep $((2 ** i)); git pull --rebase
           done
           test "$(git rev-parse HEAD)" = "$(git ls-remote origin refs/heads/claude/jquants-browser-app-bwk19a | cut -f1)"
-          gh workflow run deploy-pages.yml --ref claude/jquants-browser-app-bwk19a
           # Frozen past predictions stay unchanged. Newly available dates use the new models.
           gh workflow run predict.yml --ref claude/jquants-browser-app-bwk19a

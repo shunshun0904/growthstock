@@ -160,6 +160,14 @@ FLAGS = (
     "tx_squeeze", "tx_nr7", "tx_three_soldiers",
 )
 
+# E121 financial inputs: signed yields/beta, counts, bounded validity and flags.
+SIGNED_HEAVY += ("tv_earnings_yield", "tv_book_yield", "tv_payout")
+SIGNED += ("tv_beta", "tv_rf")
+POSITIVE_HEAVY += ("tv_div_yield",)
+POSITIVE += ("tv_ri_valid_fraction", "tv_ddm_valid_fraction")
+COUNT_DAYS += ("tv_beta_n", "tv_rf_age", "tv_fin_age")
+FLAGS += ("missing_tv_ri", "missing_tv_ddm")
+
 RANK = (
     "progress_pct",
 )

@@ -39,7 +39,7 @@ class TestArms(unittest.TestCase):
         self.assertEqual(E.NEW_PRESET, "all_plus_prog_listing_vol_book")
         self.assertEqual(F.columns(F.DEFAULT_PRESET),
                          F.columns(E.NEW_PRESET) + F.GROUPS["breakout_shape"] + F.GROUPS["drawdown"]
-                         + F.GROUPS["recent_change"] + F.GROUPS["tech_indicators"])
+                         + F.GROUPS["recent_change"] + F.GROUPS["tech_indicators"] + F.GROUPS["financial_inputs"])
 
     def test_tuning_matches_weekly(self):
         self.assertEqual(E.N_SPLITS, 5)

@@ -22,21 +22,28 @@ def assemble(incoming):
     merged=json.loads(path.read_text())
     for name in LS.STRICT_MODELS: merged[name]=strict[name]
     path.write_text(json.dumps(merged,ensure_ascii=False,indent=2)+'\n')
+    verify(Path(__file__).parent / "model")
+    shutil.copyfile(incoming/'financial-inputs-mart/public/data/valuations.json',Path(__file__).parents[1]/'public/data/valuations.json')
+    print('Verified eight models; consistent 373/377-column schemas and classifier data snapshot')
+
+def verify(root):
     expected=F.columns(F.DEFAULT_PRESET)
     if len(expected)!=373 or expected[-13:]!=FI.COLUMNS:
         raise ValueError('Production feature contract changed during adoption')
     snapshots=[]
     for name in [*LS.BASE_MODELS,*LS.STRICT_MODELS,'ltr','ltr5']:
-        d=A.directory(name);meta=json.loads((d/'meta.json').read_text())
+        d=A.directory(name,root);meta=json.loads((d/'meta.json').read_text())
         if meta['features']!=expected+(list(ltr5.MOVE_COLS) if name=='ltr5' else []):
             raise ValueError('Unexpected model features: '+name)
         if name in LS.BASE_MODELS+LS.STRICT_MODELS:
-            A.require(meta,name)
+            A.require(meta,name,root)
+            if not meta.get('dataSnapshot'): raise ValueError('Missing data snapshot: '+name)
             snapshots.append(meta['dataSnapshot'])
-        elif not (d/'model.joblib').is_file() or not (d/'oof.parquet').is_file():
-            raise ValueError('Incomplete ranking model: '+name)
+        else:
+            for local, digest in A.hashes(name,root).items():
+                if meta.get('artifactHashes',{}).get(local) != digest:
+                    raise ValueError('Ranking artifact mismatch: '+name)
     if len(set(snapshots))!=1: raise ValueError('Training data snapshots differ across classifiers')
-    shutil.copyfile(incoming/'financial-inputs-mart/public/data/valuations.json',Path(__file__).parents[1]/'public/data/valuations.json')
-    print('Verified eight models; consistent 373/377-column schemas and classifier data snapshot')
+
 
 if __name__=='__main__': assemble(sys.argv[1])

@@ -32,7 +32,7 @@ import tuning_multi as TM  # noqa: E402
 class TestClassification(unittest.TestCase):
     def test_every_production_column_is_classified(self):
         cols = F.columns(F.DEFAULT_PRESET)
-        self.assertEqual(len(cols), 360)
+        self.assertEqual(len(cols), 373)
         self.assertEqual(LP.unclassified(cols), [])
 
     def test_technical_columns_are_classified(self):

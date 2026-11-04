@@ -57,7 +57,7 @@ def export(raw, predictions, output):
     fins = B.load_parts('fins', str(raw))
     market = B.load_parts('topix', str(raw));market['Date'] = pd.to_datetime(market.Date)
     print('Current financial inputs:',len(keys),flush=True)
-    tv = FI.calculate(keys, prices, fins, market, FI.yields(raw))
+    tv = FI.calculate(keys, prices, fins, market, FI.yields(raw, refresh=False))
     fin = pd.read_parquet(raw/'edinet_fin.parquet')
     companies = pd.read_parquet(raw/'edinet_companies.parquet')
     # Same source-backed normalization/corrections as E122, when supplied in source.
