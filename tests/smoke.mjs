@@ -212,6 +212,11 @@ check(condCells.every((t) => t === '—'), `3条件・4条件を満たす候補�
 check(((await rowOf('ソフトバンク').locator('.pred-ltr').getAttribute('title')) || '').includes('直近5営業日の組の中で 3位 / 9件'),
       'ランキング学習の印の title に直近5営業日の組の中の順位が出る');
 check((await page.locator('.pred-list .pred-cond').count()) === 0, '3条件・4条件を満たす候補が無い日は一覧に印が出ない');
+check((await page.locator('.pred-list .pred-main .pred-ltr5').count()) === 5,
+      '条件を満たす候補がゼロでも、主一覧の全5銘柄に5営業日順位が出る');
+check((await rowOf('シンプレクス').locator('.pred-main .pred-ltr5').allTextContents()).join('').includes('2位 / 9銘柄'),
+      '条件未達銘柄にも5営業日の組全体の順位を表示し、当日5件で順位を付け直さない');
+
 const ltrHead = (await ltrCard.locator('.card-head .sub').textContent()) || '';
 check(ltrHead.includes('参考に並べるだけで、買う銘柄は今日の戦略の規則のまま') && ltrHead.includes('2026/09/10 学習'),
       '順位表の見出しに「参考」とモデルの学習日が出る');
@@ -494,6 +499,21 @@ await page.goto(base, { waitUntil: 'networkidle' });
 await page.waitForSelector('.pred-row');
 const fixedHeads = await page.locator('.pred-row').first().locator('.pred-main .pred-mg .r').allTextContents();
 check(fixedHeads.join(',') === '+10%,+15%', '切替後の予測では到達条件+10%・+15%を表示する');
+
+// 順位が欠ける過去の行でも全銘柄を残し、他の銘柄の順位を隠さない。
+delete fixedPrediction.candidates[0].ltr5;
+await page.goto(base, { waitUntil: 'networkidle' });
+await page.waitForSelector('.pred-row');
+check((await page.locator('.pred-list .pred-main .pred-ltr5').count()) === 5,
+      '5営業日順位の未記録行を含めて全銘柄の欄を出す');
+check((await rowOf(fixedPrediction.candidates[0].name).locator('.pred-main .pred-ltr5').allTextContents()).join('').includes('未記録'),
+      '未記録の順位を推測せず、明示する');
+check((await page.locator('.pred-list .pred-ltr5:not(.unavailable)').count()) === 4,
+      '一部の順位が欠けても他4銘柄の記録済み順位は表示する');
+await page.setViewportSize({ width: 390, height: 844 });
+const rank5Fits = await page.locator('.pred-list .pred-ltr5').evaluateAll(nodes => nodes.every(n => n.getBoundingClientRect().right <= innerWidth));
+check(rank5Fits, '全銘柄の5営業日順位がスマホ幅に収まる');
+await page.setViewportSize({ width: 1440, height: 1000 });
 
 console.log('\n== コンソールエラー ==');
 check(consoleErrors.length === 0, `JS エラーなし (${consoleErrors.length}件)`);

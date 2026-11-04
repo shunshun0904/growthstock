@@ -863,3 +863,8 @@ input[type='range']::-moz-range-thumb {
 .valuation-view { min-width: 0; max-width: 100%; grid-template-columns: minmax(0, 1fr); }
 .valuation-view > .card { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 .valuation-table-wrap { max-width: 100%; }
+
+/* ブレイク予測の全行に5営業日順位を表示。銘柄名の列内で折り返す。 */
+.pred-id .pred-ltr5 { max-width: 100%; white-space: normal; flex-wrap: wrap; gap: 2px; }
+.pred-ltr5 .num { white-space: nowrap; }
+.pred-ltr5.unavailable { color: var(--text-faint); }

@@ -548,6 +548,21 @@ function BorderBadge({ c }) {
   );
 }
 
+/** 直近5営業日順位を主一覧の全銘柄に表示。条件判定や日次順位とは独立する。 */
+function Ltr5Badge({ c }) {
+  const rank = ltr5Rank(c), pool = ltr5Pool(c);
+  const available = rank !== null && pool !== null && rank >= 1 && rank <= pool;
+  return (
+    <span className={`badge slate pred-warn pred-ltr5${available ? '' : ' unavailable'}`}
+          title={available
+            ? 'この予測日までの直近5営業日の推論対象全体の中の順位です。条件未達の銘柄も含めて計算しています。'
+            : 'この予測日の5営業日順位は未記録です。過去の順位は後から採点し直していません。'}>
+      <span>直近5営業日順位：</span>
+      <span className="num">{available ? `${rank}位 / ${pool}銘柄` : '未記録'}</span>
+    </span>
+  );
+}
+
 /**
  * ランキング学習の、その日の候補の中の順位の印（予測の ltr。参考に並べるだけで、買いの規則には使わない。§78-9）。
  * 今の規則を満たし、かつ上半分なら「両方使う形」（紫）。それ以外は上半分 / 下半分を灰で。値の無い日（2026-10-24 より前）は出さない。
@@ -636,6 +651,7 @@ function Row({ c, models, metric = 'pct', featureNames, open, onToggle, onSend, 
           <BorderBadge c={c} />
           <EarnBadge c={c} />
           <LtrBadge c={c} />
+          <Ltr5Badge c={c} />
           <CondBadge c={c} />
         </span>
         {mr.length > 0 ? (
