@@ -36,7 +36,7 @@ export default function ValuationView() {
       {!rows.length ? <p>対象銘柄がありません。</p> : <div className="valuation-table-wrap"><table className="valuation-table"><thead><tr>
         {['順位', '銘柄', '最新推論日', '使用終値', '割安度 ↓', '理論中央値', '下限', '上限', '平均', '標準偏差', '株価日'].map(x => <th key={x}>{x}</th>)}
       </tr></thead><tbody>{rows.map(s => <tr key={s.code}>
-        <td>{s.rank ?? '—'}</td><td>{s.code} {s.name}</td><td>{s.inferenceDate || '—'}</td><td>{yen(s.price)}</td>
+        <td>{s.rank ?? '—'}</td><td>{s.code} {s.name}{s.value?.inputSource === 'provider_eps_bps' && <div className="sub" title={`提供日：${s.value.inputDate}／EPS：${yen(s.value.eps)}／BPS：${yen(s.value.bps)}`}>提供EPS・BPSを使用</div>}</td><td>{s.inferenceDate || '—'}</td><td>{yen(s.price)}</td>
         {s.rank !== null ? <><td><strong>{pct(s.deviation)}</strong></td><td>{yen(s.value.median)}</td><td>{yen(s.value.min)}</td><td>{yen(s.value.max)}</td><td>{yen(s.value.mean)}</td><td>{yen(s.value.std)}</td></> : <td colSpan="6">算出不可：{s.value?.reason || '必要データ・計算条件を満たさない'}</td>}
         <td>{s.date || '—'}{s.priceFallback && <span title={`株価の最新取得日は${s.latestStockPriceDate}。TOPIXとそろう前営業日の終値で評価しています。`}>（前営業日）</span>}</td>
       </tr>)}</tbody></table></div>}
@@ -44,6 +44,7 @@ export default function ValuationView() {
     <section className="card">
       <h3>算出の前提</h3>
       <p>{method === 'ri' ? 'RIMは利益と純資産に基づく残余利益法です。ROEを5年・10年で資本コストに収束させ、ERP3〜7%、配当性向25〜75%のシナリオを比較します。' : '配当割引法は実績年間配当を使い、成長率0〜2%、ERP3〜7%のシナリオを比較します。無配・赤字・配当性向や割引率の条件を満たさない銘柄は算出できません。'}</p>
+      {method === 'ri' && <p>株数などの欠損で再計算できない場合は、J-Quants提供の実績EPS・BPSを使用します。該当銘柄に入力元を表示します。自己株式数の欠損をゼロとは仮定しません。</p>}
       <p>株価とTOPIXの更新日が異なる場合は、両方がそろう直近の終値を使用します（前営業日まで）。使用した株価日は各行に表示します。</p>
       <p>資本コストはCAPMで算出。各銘柄の使用終値時点より前に利用可能な財務・金利を使います。レンジはシナリオの最小・最大値で、将来株価の予測区間ではありません。</p>
       <p className="sub">更新：{data.generatedAt?.slice(0, 16).replace('T', ' ')} UTC</p>

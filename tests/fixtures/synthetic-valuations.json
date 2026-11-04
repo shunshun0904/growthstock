@@ -26,7 +26,11 @@
           "median": 125,
           "std": 5,
           "deviation": 0.050420168067226934,
-          "note": "検証用の固定シナリオ"
+          "note": "検証用の固定シナリオ",
+          "inputSource": "provider_eps_bps",
+          "inputDate": "2020-01-31",
+          "eps": 5.61,
+          "bps": 139.29
         },
         {
           "id": "ddm",

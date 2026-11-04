@@ -339,6 +339,7 @@ await page.getByRole('tab', { name: '理論株価', exact: true }).click();
 await page.locator('.valuation-table tbody tr').first().waitFor();
 check(await page.locator('.valuation-table tbody tr').count() === 3, '算出不可を含む全銘柄を表示する');
 check((await page.locator('.valuation-table tbody tr').first().textContent()).includes('TEST1'), 'RIMは中央値との乖離が大きい順');
+check((await page.locator('.valuation-table').textContent()).includes('提供EPS・BPSを使用'), 'RIMの提供EPS・BPSによる補完元を表示する');
 check(await page.locator('.valuation-view .recharts-wrapper').count() === 0, '20営業日の株価比較は表示しない');
 await page.getByRole('combobox', { name: '算出方法' }).selectOption('ddm');
 check((await page.locator('.valuation-table tbody tr').first().textContent()).includes('TEST0'), '配当割引法へ切り替えると順位も切り替わる');

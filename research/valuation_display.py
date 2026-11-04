@@ -71,3 +71,58 @@ def unavailable_reason(method, row, financials):
         fraction = row.get('tv_'+method+'_valid_fraction', np.nan)
         reasons.append(f'有効な評価シナリオが80%未満（{fraction*100:.1f}%）' if pd.notna(fraction) else '評価シナリオを作成できない')
     return '／'.join(reasons)
+
+
+def rim_with_provider_inputs(frame, prices, indicators, market):
+    """Fill missing RIM inputs from a coherent historical provider EPS/BPS pair.
+
+    Display only: never change training/serving inputs. Preserve nonpositive
+    observed earnings/equity, reject future/stale indicator dates, and convert
+    per-share units using observed split factors rather than invent treasury zero.
+    """
+    import theoretical_value as V
+    out = frame.copy()
+    out['ri_input_source'] = 'reconstructed'
+    out['ri_input_date'] = pd.to_datetime(out.tv_fin_source_date)
+    if indicators.empty:
+        return out
+    right = indicators[['Code','Date','EPS','BPS']].copy()
+    right['Code'] = right.Code.astype(str)
+    right['Date'] = pd.to_datetime(right.Date)
+    right = right.sort_values('Date').drop_duplicates(['Code','Date'],keep='last')
+    right = right.rename(columns={'Date':'indicator_date','EPS':'provider_eps','BPS':'provider_bps'})
+    left = out[['Code','Date']].copy().assign(_i=np.arange(len(out)))
+    joined = pd.merge_asof(left.sort_values('Date'),right.sort_values('indicator_date'),
+                           left_on='Date',right_on='indicator_date',by='Code',direction='backward')
+    joined = joined.sort_values('_i').reset_index(drop=True)
+    calendar = pd.DatetimeIndex(pd.to_datetime(market.Date).dropna().unique()).sort_values()
+    factors = prices.assign(_factor=prices.close_raw/prices.close).set_index(['Code','Date'])._factor
+    for i, r in joined.iterrows():
+        original = out.iloc[i]
+        eps, book = original.tv_eps, original.tv_bps
+        if pd.notna(eps) and pd.notna(book):
+            continue
+        if (pd.notna(eps) and eps <= 0) or (pd.notna(book) and book <= 0):
+            continue
+        if pd.isna(r.indicator_date):
+            continue
+        target_pos, source_pos = calendar.get_indexer([r.Date, r.indicator_date])
+        if min(target_pos, source_pos) < 0 or not 0 <= target_pos-source_pos <= 1:
+            continue
+        pair = pd.to_numeric(pd.Series([r.provider_eps, r.provider_bps]),errors='coerce').to_numpy(float)
+        if not (np.isfinite(pair).all() and (pair > 0).all()):
+            continue
+        source_factor = factors.get((r.Code,r.indicator_date),np.nan)
+        target_factor = factors.get((r.Code,r.Date),np.nan)
+        if not (np.isfinite(source_factor) and np.isfinite(target_factor) and source_factor>0 and target_factor>0):
+            continue
+        converted = pair * target_factor / source_factor
+        idx = out.index[i]
+        out.loc[idx,['tv_eps','tv_bps']] = converted
+        out.loc[idx,'ri_input_source'] = 'provider_eps_bps'
+        out.loc[idx,'ri_input_date'] = r.indicator_date
+    valued = V.valuations(out)
+    # DDM, coverage flags and the production C features keep their original definitions.
+    for col in [c for c in valued if c.startswith('tv_ri_')]:
+        out[col] = valued[col]
+    return out
