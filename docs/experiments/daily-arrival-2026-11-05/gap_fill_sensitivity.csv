@@ -1,0 +1,7 @@
+target,arm,trades,profit_gap,mean_net_pct
+10,static_age,61,opening_price,1.6358714218274644
+10,daily_state,61,opening_price,1.225592798340054
+10,fixed_target,61,opening_price,0.2643154970945601
+15,static_age,61,opening_price,-0.5941134228968095
+15,daily_state,61,opening_price,-0.15437867556777712
+15,fixed_target,61,opening_price,-1.6047504059047197

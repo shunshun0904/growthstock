@@ -1,0 +1,18 @@
+{
+  "tables": 19,
+  "images": 2,
+  "scripts": 0,
+  "javascript_enabled": false,
+  "network_offline": true,
+  "all_tables_visible": true,
+  "target10_and15_visible": true,
+  "limits_and_probabilities_visible": true,
+  "desktop": [
+    1440,
+    1100
+  ],
+  "mobile": [
+    390,
+    844
+  ]
+}

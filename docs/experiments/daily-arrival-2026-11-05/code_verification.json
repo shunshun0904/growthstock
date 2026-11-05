@@ -1,0 +1,8 @@
+{
+  "daily_arrival_tests": 14,
+  "existing_exit_upside_tests": 13,
+  "all_passed": true,
+  "independent_data_checks": 4047,
+  "independent_result_checks": 305,
+  "production_changed": false
+}

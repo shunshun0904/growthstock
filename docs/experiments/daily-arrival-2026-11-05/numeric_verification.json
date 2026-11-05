@@ -1,0 +1,13 @@
+{
+  "all_passed": true,
+  "checks": 305,
+  "strict_trades": 61,
+  "strict_landmarks": 1220,
+  "code_sha256": {
+    "research/daily_arrival.py": "d6aa58017cc497960e1188c2081770b26efcaa302855d700d83eeef1df157298",
+    "research/exp/e124_daily_arrival.py": "cb9c8f2fc511328f4f6c6df87b563cf127a6f1e331bc14bef03f11d7d6c0772d",
+    "research/exp/e124_verify.py": "adb27ce1f05e1bbd91e47e42243ae59e6be4bd071eae28ef04cec819144c341a",
+    "tests/test_daily_arrival.py": "db7fb2757701c7da917208966731452aeaeca99f0da1a479c4e6e28baa16c730",
+    "research/exp/e124_report.py": "02ad6d7a184eca1ac30d6a07daed4df53cd3bcd3ae8943097c815dc1608c6250"
+  }
+}

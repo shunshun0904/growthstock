@@ -1,0 +1,452 @@
+{
+  "protocol_sha256": "be8cab80177af0094b10bc891ae4828c5269e3ebd4b96432c42de12d53a43f79",
+  "selections": {
+    "hit10_static_age": {
+      "candidate": 5,
+      "params": {
+        "n_estimators": 100,
+        "learning_rate": 0.03,
+        "num_leaves": 31,
+        "min_child_samples": 600,
+        "reg_lambda": 1
+      },
+      "cv_loss": 0.11116997627922749,
+      "folds": [
+        {
+          "start": "2023-10-01",
+          "end": "2024-03-31",
+          "n_train_trades": 5437,
+          "n_valid_trades": 1946,
+          "last_train_mature": "2023-09-29 00:00:00"
+        },
+        {
+          "start": "2024-04-01",
+          "end": "2024-09-30",
+          "n_train_trades": 7480,
+          "n_valid_trades": 1316,
+          "last_train_mature": "2024-03-27 00:00:00"
+        },
+        {
+          "start": "2024-10-01",
+          "end": "2025-03-31",
+          "n_train_trades": 9118,
+          "n_valid_trades": 1038,
+          "last_train_mature": "2024-09-30 00:00:00"
+        }
+      ]
+    },
+    "hit10_daily_state": {
+      "candidate": 5,
+      "params": {
+        "n_estimators": 100,
+        "learning_rate": 0.03,
+        "num_leaves": 31,
+        "min_child_samples": 600,
+        "reg_lambda": 1
+      },
+      "cv_loss": 0.0942892347250005,
+      "folds": [
+        {
+          "start": "2023-10-01",
+          "end": "2024-03-31",
+          "n_train_trades": 5437,
+          "n_valid_trades": 1946,
+          "last_train_mature": "2023-09-29 00:00:00"
+        },
+        {
+          "start": "2024-04-01",
+          "end": "2024-09-30",
+          "n_train_trades": 7480,
+          "n_valid_trades": 1316,
+          "last_train_mature": "2024-03-27 00:00:00"
+        },
+        {
+          "start": "2024-10-01",
+          "end": "2025-03-31",
+          "n_train_trades": 9118,
+          "n_valid_trades": 1038,
+          "last_train_mature": "2024-09-30 00:00:00"
+        }
+      ]
+    },
+    "hit15_static_age": {
+      "candidate": 0,
+      "params": {
+        "n_estimators": 100,
+        "learning_rate": 0.05,
+        "num_leaves": 7,
+        "min_child_samples": 100,
+        "reg_lambda": 1
+      },
+      "cv_loss": 0.06503801728013073,
+      "folds": [
+        {
+          "start": "2023-10-01",
+          "end": "2024-03-31",
+          "n_train_trades": 5437,
+          "n_valid_trades": 1971,
+          "last_train_mature": "2023-09-29 00:00:00"
+        },
+        {
+          "start": "2024-04-01",
+          "end": "2024-09-30",
+          "n_train_trades": 7480,
+          "n_valid_trades": 1343,
+          "last_train_mature": "2024-03-27 00:00:00"
+        },
+        {
+          "start": "2024-10-01",
+          "end": "2025-03-31",
+          "n_train_trades": 9118,
+          "n_valid_trades": 1057,
+          "last_train_mature": "2024-09-30 00:00:00"
+        }
+      ]
+    },
+    "hit15_daily_state": {
+      "candidate": 0,
+      "params": {
+        "n_estimators": 100,
+        "learning_rate": 0.05,
+        "num_leaves": 7,
+        "min_child_samples": 100,
+        "reg_lambda": 1
+      },
+      "cv_loss": 0.05580640293236403,
+      "folds": [
+        {
+          "start": "2023-10-01",
+          "end": "2024-03-31",
+          "n_train_trades": 5437,
+          "n_valid_trades": 1971,
+          "last_train_mature": "2023-09-29 00:00:00"
+        },
+        {
+          "start": "2024-04-01",
+          "end": "2024-09-30",
+          "n_train_trades": 7480,
+          "n_valid_trades": 1343,
+          "last_train_mature": "2024-03-27 00:00:00"
+        },
+        {
+          "start": "2024-10-01",
+          "end": "2025-03-31",
+          "n_train_trades": 9118,
+          "n_valid_trades": 1057,
+          "last_train_mature": "2024-09-30 00:00:00"
+        }
+      ]
+    },
+    "gain10_static_age": {
+      "candidate": 0,
+      "params": {
+        "n_estimators": 100,
+        "learning_rate": 0.05,
+        "num_leaves": 7,
+        "min_child_samples": 100,
+        "reg_lambda": 1
+      },
+      "cv_loss": 0.003906846783098388,
+      "folds": [
+        {
+          "start": "2023-10-01",
+          "end": "2024-03-31",
+          "n_train_trades": 5289,
+          "n_valid_trades": 1946,
+          "last_train_mature": "2023-09-29 00:00:00"
+        },
+        {
+          "start": "2024-04-01",
+          "end": "2024-09-30",
+          "n_train_trades": 7287,
+          "n_valid_trades": 1316,
+          "last_train_mature": "2024-03-27 00:00:00"
+        },
+        {
+          "start": "2024-10-01",
+          "end": "2025-03-31",
+          "n_train_trades": 8873,
+          "n_valid_trades": 1038,
+          "last_train_mature": "2024-09-30 00:00:00"
+        }
+      ],
+      "exit_cutoff": -0.01
+    },
+    "gain10_daily_state": {
+      "candidate": 0,
+      "params": {
+        "n_estimators": 100,
+        "learning_rate": 0.05,
+        "num_leaves": 7,
+        "min_child_samples": 100,
+        "reg_lambda": 1
+      },
+      "cv_loss": 0.00387688621658056,
+      "folds": [
+        {
+          "start": "2023-10-01",
+          "end": "2024-03-31",
+          "n_train_trades": 5289,
+          "n_valid_trades": 1946,
+          "last_train_mature": "2023-09-29 00:00:00"
+        },
+        {
+          "start": "2024-04-01",
+          "end": "2024-09-30",
+          "n_train_trades": 7287,
+          "n_valid_trades": 1316,
+          "last_train_mature": "2024-03-27 00:00:00"
+        },
+        {
+          "start": "2024-10-01",
+          "end": "2025-03-31",
+          "n_train_trades": 8873,
+          "n_valid_trades": 1038,
+          "last_train_mature": "2024-09-30 00:00:00"
+        }
+      ],
+      "exit_cutoff": -0.01
+    },
+    "gain15_static_age": {
+      "candidate": 0,
+      "params": {
+        "n_estimators": 100,
+        "learning_rate": 0.05,
+        "num_leaves": 7,
+        "min_child_samples": 100,
+        "reg_lambda": 1
+      },
+      "cv_loss": 0.004441934998222186,
+      "folds": [
+        {
+          "start": "2023-10-01",
+          "end": "2024-03-31",
+          "n_train_trades": 5377,
+          "n_valid_trades": 1971,
+          "last_train_mature": "2023-09-29 00:00:00"
+        },
+        {
+          "start": "2024-04-01",
+          "end": "2024-09-30",
+          "n_train_trades": 7396,
+          "n_valid_trades": 1343,
+          "last_train_mature": "2024-03-27 00:00:00"
+        },
+        {
+          "start": "2024-10-01",
+          "end": "2025-03-31",
+          "n_train_trades": 9014,
+          "n_valid_trades": 1057,
+          "last_train_mature": "2024-09-30 00:00:00"
+        }
+      ],
+      "exit_cutoff": -0.01
+    },
+    "gain15_daily_state": {
+      "candidate": 0,
+      "params": {
+        "n_estimators": 100,
+        "learning_rate": 0.05,
+        "num_leaves": 7,
+        "min_child_samples": 100,
+        "reg_lambda": 1
+      },
+      "cv_loss": 0.004410300114936502,
+      "folds": [
+        {
+          "start": "2023-10-01",
+          "end": "2024-03-31",
+          "n_train_trades": 5377,
+          "n_valid_trades": 1971,
+          "last_train_mature": "2023-09-29 00:00:00"
+        },
+        {
+          "start": "2024-04-01",
+          "end": "2024-09-30",
+          "n_train_trades": 7396,
+          "n_valid_trades": 1343,
+          "last_train_mature": "2024-03-27 00:00:00"
+        },
+        {
+          "start": "2024-10-01",
+          "end": "2025-03-31",
+          "n_train_trades": 9014,
+          "n_valid_trades": 1057,
+          "last_train_mature": "2024-09-30 00:00:00"
+        }
+      ],
+      "exit_cutoff": 0
+    },
+    "comp10_daily_state": {
+      "candidate": 5,
+      "params": {
+        "n_estimators": 100,
+        "learning_rate": 0.03,
+        "num_leaves": 31,
+        "min_child_samples": 600,
+        "reg_lambda": 1
+      },
+      "cv_loss": 0.4730735170340588,
+      "folds": [
+        {
+          "start": "2023-10-01",
+          "end": "2024-03-31",
+          "n_train_trades": 5437,
+          "n_valid_trades": 1817,
+          "last_train_mature": "2023-09-29 00:00:00"
+        },
+        {
+          "start": "2024-04-01",
+          "end": "2024-09-30",
+          "n_train_trades": 7480,
+          "n_valid_trades": 1226,
+          "last_train_mature": "2024-03-27 00:00:00"
+        },
+        {
+          "start": "2024-10-01",
+          "end": "2025-03-31",
+          "n_train_trades": 9118,
+          "n_valid_trades": 955,
+          "last_train_mature": "2024-09-30 00:00:00"
+        }
+      ]
+    },
+    "comp15_daily_state": {
+      "candidate": 0,
+      "params": {
+        "n_estimators": 100,
+        "learning_rate": 0.05,
+        "num_leaves": 7,
+        "min_child_samples": 100,
+        "reg_lambda": 1
+      },
+      "cv_loss": 0.41295222675579035,
+      "folds": [
+        {
+          "start": "2023-10-01",
+          "end": "2024-03-31",
+          "n_train_trades": 5437,
+          "n_valid_trades": 1836,
+          "last_train_mature": "2023-09-29 00:00:00"
+        },
+        {
+          "start": "2024-04-01",
+          "end": "2024-09-30",
+          "n_train_trades": 7480,
+          "n_valid_trades": 1242,
+          "last_train_mature": "2024-03-27 00:00:00"
+        },
+        {
+          "start": "2024-10-01",
+          "end": "2025-03-31",
+          "n_train_trades": 9118,
+          "n_valid_trades": 966,
+          "last_train_mature": "2024-09-30 00:00:00"
+        }
+      ]
+    },
+    "quantile0.25_daily_state": {
+      "candidate": 5,
+      "params": {
+        "n_estimators": 100,
+        "learning_rate": 0.03,
+        "num_leaves": 31,
+        "min_child_samples": 600,
+        "reg_lambda": 1
+      },
+      "cv_loss": 0.013018722450996117,
+      "folds": [
+        {
+          "start": "2023-10-01",
+          "end": "2024-03-31",
+          "n_train_trades": 5437,
+          "n_valid_trades": 1998,
+          "last_train_mature": "2023-09-29 00:00:00"
+        },
+        {
+          "start": "2024-04-01",
+          "end": "2024-09-30",
+          "n_train_trades": 7480,
+          "n_valid_trades": 1359,
+          "last_train_mature": "2024-03-27 00:00:00"
+        },
+        {
+          "start": "2024-10-01",
+          "end": "2025-03-31",
+          "n_train_trades": 9118,
+          "n_valid_trades": 1076,
+          "last_train_mature": "2024-09-30 00:00:00"
+        }
+      ]
+    },
+    "quantile0.5_daily_state": {
+      "candidate": 1,
+      "params": {
+        "n_estimators": 100,
+        "learning_rate": 0.05,
+        "num_leaves": 15,
+        "min_child_samples": 150,
+        "reg_lambda": 1
+      },
+      "cv_loss": 0.020074499178910712,
+      "folds": [
+        {
+          "start": "2023-10-01",
+          "end": "2024-03-31",
+          "n_train_trades": 5437,
+          "n_valid_trades": 1998,
+          "last_train_mature": "2023-09-29 00:00:00"
+        },
+        {
+          "start": "2024-04-01",
+          "end": "2024-09-30",
+          "n_train_trades": 7480,
+          "n_valid_trades": 1359,
+          "last_train_mature": "2024-03-27 00:00:00"
+        },
+        {
+          "start": "2024-10-01",
+          "end": "2025-03-31",
+          "n_train_trades": 9118,
+          "n_valid_trades": 1076,
+          "last_train_mature": "2024-09-30 00:00:00"
+        }
+      ]
+    },
+    "quantile0.75_daily_state": {
+      "candidate": 4,
+      "params": {
+        "n_estimators": 100,
+        "learning_rate": 0.1,
+        "num_leaves": 15,
+        "min_child_samples": 300,
+        "reg_lambda": 3
+      },
+      "cv_loss": 0.020127780334352963,
+      "folds": [
+        {
+          "start": "2023-10-01",
+          "end": "2024-03-31",
+          "n_train_trades": 5437,
+          "n_valid_trades": 1998,
+          "last_train_mature": "2023-09-29 00:00:00"
+        },
+        {
+          "start": "2024-04-01",
+          "end": "2024-09-30",
+          "n_train_trades": 7480,
+          "n_valid_trades": 1359,
+          "last_train_mature": "2024-03-27 00:00:00"
+        },
+        {
+          "start": "2024-10-01",
+          "end": "2025-03-31",
+          "n_train_trades": 9118,
+          "n_valid_trades": 1076,
+          "last_train_mature": "2024-09-30 00:00:00"
+        }
+      ]
+    }
+  },
+  "outer_metrics_computed": false
+}

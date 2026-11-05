@@ -1,0 +1,10 @@
+{
+  "all_passed": true,
+  "checks": 4047,
+  "strict_trades_independently_checked": 61,
+  "landmarks_checked_per_trade": 6,
+  "source_input_sha256": {
+    "paths.npz": "ba57e9b94cb74849ffcb220a952d7ebcd64d69b78041c09db7d9f5d95db7e309",
+    "signal_paths.parquet": "a8c3e9c02c48e79c0de93cfeb32044ff61e9f4449c0849b263d4ed3ebe021e14"
+  }
+}

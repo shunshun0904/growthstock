@@ -1,0 +1,52 @@
+{
+  "source_inputs": {
+    "signal_paths.parquet": "a8c3e9c02c48e79c0de93cfeb32044ff61e9f4449c0849b263d4ed3ebe021e14",
+    "paths.npz": "ba57e9b94cb74849ffcb220a952d7ebcd64d69b78041c09db7d9f5d95db7e309",
+    "adjusted_prices.parquet": "21cf6620d3f27ef5cba9d7814e89ff00c1f42a171c2b006cdb1cb600a841d423",
+    "model_identity.csv": "0c7a1034d00f68e9f46a6450d0cbd5cfb1e2b7d0123da74e3f7ff967966886c3"
+  },
+  "volume_inputs": {
+    "bars_2021.parquet": "19462bef1c82f5fff44c90aa205a3c86b5c1b44898660d5c08d6f9d08dcca906",
+    "bars_2022.parquet": "b4dbc02a01f8ce4de2c1c12d3887055a7517a2c7a26bf58d36aa602f000ad3cf",
+    "bars_2023.parquet": "4b521708aeb2d08296bec128994e5746fa169ed1455adf84e71c5cdf46efe329",
+    "bars_2024.parquet": "1fbc7b9f897763bca68cc6e68df26e8673b351a0f3131132bae51f11fcd0b16a",
+    "bars_2025.parquet": "dfb20f011c58fc55a697f47081a95421d921bc564317c116f453f63c4c96f517",
+    "bars_2026.parquet": "cbb302556d26d2d8b59ae34eff11456bf2cb6357d798302d230fb301dd9d1ac5"
+  },
+  "topix_inputs": {
+    "topix_2016.parquet": "aebf9ba421715f3b55a499968c2ac0c97956d924547a85b8cd0a9bd2c1a54eeb",
+    "topix_2017.parquet": "3be0c5422538e7eec6000b5099b6d7e0534497fb0300a1e882c80083d71fcf82",
+    "topix_2018.parquet": "316439449203694e04938af60f0cc080c5d3a6a8f154ac9187b1af7fa45fdd21",
+    "topix_2019.parquet": "829290c4874bcfeaa2741e7502007f441d1a5050f370a1483bd709f161d7f8fa",
+    "topix_2020.parquet": "cb2dab36f098edf73362301588ef2ae3793714f9b0aa01b3d692a75be3dfd332",
+    "topix_2021.parquet": "94aab67356b29ffb36b66a18284a5640e9fd96dd7d0dbb15a2e42e2838bc6880",
+    "topix_2022.parquet": "2e213e510f5dd2b953cf23d8135ccb9d7138b10530fa8ff4b3db2431cc6780b1",
+    "topix_2023.parquet": "dd70c2b8aa8e48f231d7e48b791a28343fffe59aeba66dd94d9bb45f373e4eb2",
+    "topix_2024.parquet": "ebaad03ad2eb7d6a42f1a114e527da96e9ef32d84a7392a176087c7a018e3f30",
+    "topix_2025.parquet": "2026877b82495f9d78124ea6cd89ebe901e35131fe4f6d90fef25e44b11d0de0",
+    "topix_2026.parquet": "37183b0922e122837e0a9a5f42cf96bba0af7eb66852e2594ffde723758d8b14"
+  },
+  "protocol_sha256": "be8cab80177af0094b10bc891ae4828c5269e3ebd4b96432c42de12d53a43f79",
+  "trades": 15506,
+  "landmarks": 310120,
+  "price_through": "2026-11-05 00:00:00",
+  "topix_through": "2026-11-02 00:00:00",
+  "technical_missing_pct": 0.2644819871216105,
+  "strict_counts": {
+    "calibration": {
+      "selected_before_quality": 3,
+      "complete_rank_and_price": 3,
+      "excluded_count": 0
+    },
+    "outer": {
+      "selected_before_quality": 65,
+      "complete_rank_and_price": 61,
+      "excluded_count": 4
+    }
+  },
+  "targets": [
+    10,
+    15
+  ],
+  "holding_sessions": 20
+}
