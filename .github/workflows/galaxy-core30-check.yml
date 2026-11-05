@@ -63,3 +63,29 @@ jobs:
           print('PASS:',d['meta']['stockCount'],'stocks',
                 d['meta']['pointCount'],'daily observations')
           PY
+      - name: Package offline, single-file interactive preview
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import os
+          src=Path('public/galaxy/index.html').read_text(encoding='utf-8')
+          data=Path(os.environ['RUNNER_TEMP']+'/galaxy.json').read_text(encoding='utf-8')
+          original='''    var r=await fetch("./data.json",{cache:"no-cache"});
+    if(!r.ok)throw Error("data.json の取得に失敗しました (HTTP "+r.status+")");
+    data=await r.json();stocks=data.stocks;'''
+          replacement='''    data=JSON.parse(document.getElementById("preview-data").textContent);stocks=data.stocks;'''
+          assert original in src
+          src=src.replace(original,replacement,1)
+          marker='<script>\n(function () {'
+          assert marker in src
+          src=src.replace(marker,'<script type="application/json" id="preview-data">'+
+              data.replace('</','<\\/')+'</script>\n'+marker,1)
+          output=Path(os.environ['RUNNER_TEMP'])/'STOCK_UNIVERSE_CORE30.html'
+          output.write_text(src,encoding='utf-8')
+          print('Offline preview:',output,output.stat().st_size,'bytes')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stock-universe-core30-offline-preview
+          path: ${{ runner.temp }}/STOCK_UNIVERSE_CORE30.html
+          retention-days: 7
