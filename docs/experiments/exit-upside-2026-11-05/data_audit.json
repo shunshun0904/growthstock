@@ -1,0 +1,27 @@
+{
+  "protocol_sha256": "9550d7766756185862bf554e3ff5859d457da6bf9b8eb752d81d0880f868bb41",
+  "frozen_mart_sha256": "811680be295a246b8caef85bd0d59d70088ba3507e06df4f144f95b16bec4479",
+  "calendar_sha256": "f080b40cc668bdfe9f97f2dbf817a3c574379617ea318cdfcbb153f16f1b2059",
+  "python": "3.12.14",
+  "pandas": "2.2.3",
+  "numpy": "2.3.5",
+  "price_through": "2026-11-05",
+  "tuning_latest_label": "2025-10-07",
+  "key_superset_rows": 22121,
+  "old_mart_rows": 22110,
+  "new_oof_keys_not_in_old_mart": 11,
+  "historical_oof_rows": 16492,
+  "complete_paths": 16438,
+  "path_status": {
+    "complete": 16438,
+    "incomplete_ohlc": 54
+  },
+  "period_rows": {
+    "reference": 13270,
+    "development": 2045,
+    "holdout": 1177
+  },
+  "all8_missing": 3,
+  "identity_matches": 8,
+  "key_audit_limitation": "exact current mart unavailable via artifact download; frozen previous mart plus all current OOF keys forms a conservative reconstructed key audit, not proof of complete input parity"
+}

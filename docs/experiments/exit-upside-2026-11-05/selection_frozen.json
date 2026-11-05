@@ -1,0 +1,18 @@
+{
+  "entry": {
+    "name": "base95",
+    "base": 95
+  },
+  "exit": {
+    "name": "reference",
+    "target": 0.1,
+    "stop": null,
+    "timeout": 20
+  },
+  "neighbor_k": 50,
+  "development_candidates_evaluated": 504,
+  "distinct_exit_rules": 72,
+  "selection_reason": "insufficient development sample; reference fallback",
+  "protocol_sha256": "9550d7766756185862bf554e3ff5859d457da6bf9b8eb752d81d0880f868bb41",
+  "holdout_metrics_computed": false
+}
