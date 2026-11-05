@@ -63,6 +63,11 @@ def main(argv=None) -> int:
         print(f"[stop] 木の形が学習する列（{len(cols_w)}列・指紋 {F.signature(cols_w)}）で探索したものではない（{why}）。"
               "学習しない（前回のモデルのまま）")
         return 1
+    tuned = int((rec.get("_cv") or {}).get("n_grades", ltr.N_GRADES))
+    if tuned != ltr5.N_GRADES:
+        print(f"[stop] 木の形は {tuned}段階で探索したもの（今は {ltr5.N_GRADES}段階で学習する。ltr5.N_GRADES）。"
+              f"{ltr5.N_GRADES}段階で探索し直すまで学習しない（前回のモデルのまま）")
+        return 1
     params = rec["params"]
 
     pool, daily, cal, info = ltr5.load_pool(args.dataset, args.data_dir, cols)
@@ -83,21 +88,23 @@ def main(argv=None) -> int:
     print(f"[setup] 木の形の出どころ: {rec.get('_source', '?')}")
 
     oof = ltr5.oof_scores(pool, cols_w, params)
-    g = ltr.grades(oof["Date"], oof[ltr5.R20].to_numpy(dtype=float))
+    g = ltr.grades(oof["Date"], oof[ltr5.R20].to_numpy(dtype=float), ltr5.N_GRADES)
     ndcg = ltr.ndcg_at_k(oof["Date"], oof["score"], g, ltr5.NDCG_K, ltr5.MIN_POOL)
     rnd = ltr.ndcg_at_k(oof["Date"], np.zeros(len(oof)), g, ltr5.NDCG_K, ltr5.MIN_POOL)
     print(f"[oof] {oof['fold'].nunique()}窓・組の行 {len(oof):,}件・{oof['Date'].min().date()} 〜 "
-          f"{oof['Date'].max().date()} / 組の中の NDCG@{ltr5.NDCG_K}（候補{ltr5.MIN_POOL}件以上の組）{ndcg:.4f}"
+          f"{oof['Date'].max().date()} / 組の中の NDCG@{ltr5.NDCG_K}（候補{ltr5.MIN_POOL}件以上の組・利得 {ltr5.N_GRADES}段階）"
+          f"{ndcg:.4f}"
           f"（銘柄コードの順に並べたとき {rnd:.4f}）")
 
     tr = pool[ok]
-    model = ltr.fit(tr, cols_w, params, ltr5.SEED)
+    model = ltr.fit(tr, cols_w, params, ltr5.SEED, ltr5.N_GRADES)
     meta = {
         "algo": ltr5.NAME, "name": ltr5.JA, "short": ltr5.SHORT, "note": ltr5.NOTE,
         "trainedAt": pd.Timestamp.utcnow().isoformat(),
         "kind": "lambdarank",
-        "target": ("判断日までの直近5営業日の候補の組の中の、判断日の翌営業日の寄りで買い20営業日目の終値で売った収益の5分位"
-                   "（0〜4）"),
+        "target": ("判断日までの直近5営業日の候補の組の中の、判断日の翌営業日の寄りで買い20営業日目の終値で売った収益の"
+                   f"{ltr5.N_GRADES}分位（0〜{ltr5.N_GRADES - 1}）"),
+        "nGrades": ltr5.N_GRADES, "labelGain": list(range(ltr5.N_GRADES)),
         "pool": {"days": ltr5.K, "moveCols": list(ltr5.MOVE_COLS)},
         "preset": args.features, "features": cols_w, "params": params, "seed": ltr5.SEED,
         "nTrain": int(len(tr)), "nDays": int(tr["Date"].nunique()),

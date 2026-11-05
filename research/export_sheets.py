@@ -667,6 +667,68 @@ def sync(ws, rows: List[Dict], closes, as_of, dry_run: bool = False,
     return {"appended": len(appended), "updated": len(updates)}
 
 
+#: 書き直し（rewrite_day）で上書きしない列。翌営業日始値・値動きは実際の値（毎晩の sync が空のセルを埋め、値動きは毎晩書き直す）、
+#: 利用者の記入欄は手で書いたもの
+REWRITE_KEEP = ENTRY_COLS + TRACK_COLS + USER_COLS
+
+
+def rewrite_day(ws, rows: List[Dict], day: str, book: str = "v2", dry_run: bool = False) -> Dict:
+    """
+    タブにある予測日 day の行を、rows（今の predictions.json）の値で書き直す。運用者の選択（2026-11-05「固定%の値に書き直す」）:
+    「予測ログ v2」の 2026-11-02 の行は、11/2 夜に旧σモデルの値で足したあと、11/3 に固定 +10%・+15% のモデルで採点し直した値
+    （画面・predictions.json）と食い違い、あとから足した列（+10%/+15% の印）だけが新しい値で埋まって混ざっていた。
+
+    - v2 のタブの予測日だけ（v1 の行は出した値のまま）。その日の行の銘柄の組が rows と同じでなければ止める
+    - 書くのは rows にある列（予測の値・モデル別・ランキング・印・目的変数定義。値が無ければ空）のセルだけ。REWRITE_KEEP の列と、
+      見出しにあって rows に無い列は書かない（セルごとに書くので、ほかのセルの値と型はそのまま）
+    - その日の行の利用者の記入欄と、見出しにあって rows に無い列がどれも空なら、その日の行が今ある位置の中で順位の順に並べ直す。
+      動いた行の翌営業日始値・値動きの列は空にする（その夜の sync が埋め直す）。どれかに値があれば行は動かさない（その場で書き直す）
+    返すもの: rows（書き直した行の数）・moved（位置が変わった行の数）・inPlace（その場で書き直したか）・cells（書いたセルの数）
+    """
+    if book != "v2":
+        raise SystemExit("書き直すのは v2 のタブの行だけ（v1 の行は出した値のまま）")
+    if not in_book(day, book):
+        raise SystemExit(f"{day} は v2 のタブの予測日ではありません（{V2_FROM} から）")
+    values = ws.get_all_values()
+    if not values:
+        raise SystemExit("シートが空です。見出し行が作られていません")
+    header = ensure_columns(ws, values[0], dry_run=dry_run, book=book)
+    pos = {name: i for i, name in enumerate(header)}
+    d_i, c_i = pos[KEY_COLS[0]], pos[KEY_COLS[1]]
+    old = {}
+    for r, line in enumerate(values[1:], start=2):
+        if len(line) > max(d_i, c_i) and str(line[d_i]).strip() == day:
+            code = str(line[c_i]).strip()
+            if code in old:
+                raise SystemExit(f"{day} の行に同じコードが2行あるので書き直さない")
+            old[code] = (r, list(line) + [""] * (len(header) - len(line)))
+    new = sorted((x for x in rows if x["予測日"] == day), key=lambda x: (x["順位"], x["コード"]))
+    if not new:
+        raise SystemExit(f"predictions.json に {day} の候補がありません")
+    if set(old) != {x["コード"] for x in new}:
+        raise SystemExit(f"{day} の行の銘柄がシート（{len(old)}行）と predictions.json（{len(new)}件）で違うので書き直さない")
+    write = [h for h in header if h in new[0] and not h.startswith("_") and h not in REWRITE_KEEP]
+    others = [h for h in header if h not in write and h not in ENTRY_COLS + TRACK_COLS]
+    in_place = any(str(line[pos[h]]).strip() for _, line in old.values() for h in others)
+    slots = sorted(r for r, _ in old.values())
+    target = {x["コード"]: (old[x["コード"]][0] if in_place else slots[i]) for i, x in enumerate(new)}
+    updates = []
+    for x in new:
+        r = target[x["コード"]]
+        for h in write:
+            v = x.get(h)
+            updates.append({"range": a1(pos[h] + 1, r), "values": [["" if v is None else v]]})
+        if r != old[x["コード"]][0]:
+            for h in ENTRY_COLS + TRACK_COLS:
+                if h in pos:
+                    updates.append({"range": a1(pos[h] + 1, r), "values": [[""]]})
+    moved = sum(target[c] != r for c, (r, _) in old.items())
+    if not dry_run:
+        for i in range(0, len(updates), 500):
+            ws.batch_update(updates[i:i + 500], value_input_option="RAW")
+    return {"rows": len(new), "moved": moved, "inPlace": in_place, "cells": len(updates)}
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="予測をスプレッドシートに追記する")
     ap.add_argument("--data-dir", default=DATA_DIR)
@@ -681,6 +743,9 @@ def main(argv=None) -> int:
                     help="通信せず、書き込む内容だけ出す")
     ap.add_argument("--check", action="store_true",
                     help="疎通テストのみ。予測データは書かない")
+    ap.add_argument("--rewrite-day", default=None, metavar="YYYY-MM-DD",
+                    help="v2 のタブにあるこの予測日の行を、今の predictions.json の値で書き直す（rewrite_day。追記・値動きの"
+                         "更新はしない。運用者の選択 2026-11-05「固定%の値に書き直す」）")
     args = ap.parse_args(argv)
     if args.title is None:
         args.title = V2_TITLE if args.book == "v2" else SHEET_TITLE
@@ -690,6 +755,21 @@ def main(argv=None) -> int:
 
     pred = json.load(open(args.predictions, encoding="utf-8"))
     rows = rows_from_predictions(pred)
+    if args.rewrite_day:
+        if args.book != "v2":
+            raise SystemExit("--rewrite-day は --book v2 だけ（v1 の行は出した値のまま）")
+        n = sum(x["予測日"] == args.rewrite_day for x in rows)
+        print(f"[rewrite] タブ「{args.title}」の予測日 {args.rewrite_day} の行を predictions.json の値（{n}件）で書き直す")
+        if args.dry_run:
+            print("[dry-run] 通信していません")
+            return 0
+        if not args.sheet_id:
+            raise SystemExit("GSHEET_ID が設定されていません（シートのURLの /d/ と /edit の間）")
+        ws = open_sheet(args.sheet_id).worksheet(args.title)     # 無ければ例外（作らない）
+        res = rewrite_day(ws, rows, args.rewrite_day, book=args.book)
+        how = "その場で（行は動かさない）" if res["inPlace"] else "その日の行の中で順位の順に並べ直して"
+        print(f"[rewrite] {res['rows']}行を書き直した（{how}・位置が変わった行 {res['moved']}・書いたセル {res['cells']}）")
+        return 0
     closes = latest_closes(args.data_dir)
     opens = load_opens(args.data_dir)
     as_of = None

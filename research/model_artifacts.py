@@ -64,16 +64,24 @@ def verify_all(root=MODEL_ROOT):
         require(meta, algo, root)
 
 def flat_oof_path(algo, data_dir, root=MODEL_ROOT):
-    """Resolve active OOFs without overwriting the legacy release files."""
+    """Resolve active OOFs without overwriting the legacy release files.
+
+    A fixed-return model's OOF is looked up in two layouts, and a file counts only when its SHA-256 matches the
+    training metadata (the legacy sigma files are never used for a fixed-return model):
+      Release layout   <data_dir>/fixed_return_v1_<...>oof.parquet  (Backfill KNN and Run Experiment download data-raw)
+      installed layout <root>/oof.parquet, <root>/models/<algo>/oof.parquet  (the daily prediction runs install)
+    """
     meta_path = directory(algo, root) / "meta.json"
     if algo in LS.BASE_MODELS + LS.STRICT_MODELS and meta_path.is_file():
         meta = json.loads(meta_path.read_text())
-        if meta.get("labelSpec", {}).get("version") == LS.VERSION:
+        if (meta.get("labelSpec") or {}).get("version") == LS.VERSION:
             LS.require(meta, algo)
-            path = Path(data_dir) / filename(algo, "oof")
-            if not path.is_file() or sha256(path) != meta.get("artifactHashes", {}).get("oof.parquet"):
-                raise ValueError(f"{algo}: active OOF is missing or inconsistent")
-            return str(path)
+            expected = (meta.get("artifactHashes") or {}).get("oof.parquet")
+            for path in (Path(data_dir) / filename(algo, "oof"),
+                         directory(algo, root) / local_name(algo, "oof")):
+                if expected and path.is_file() and sha256(path) == expected:
+                    return str(path)
+            raise ValueError(f"{algo}: active OOF is missing or inconsistent")
     return str(Path(data_dir) / ("oof.parquet" if algo == "lgbm" else algo + "_oof.parquet"))
 
 

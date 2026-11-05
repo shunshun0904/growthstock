@@ -511,6 +511,9 @@ def find_oof(algo: str, oof_dir: str, model_dir: str) -> Optional[str]:
     本番モデルの OOF の置き場所。
       Release から落とした形   <oof_dir>/oof.parquet, <oof_dir>/<algo>_oof.parquet
       日次予測が並べ直した形   <model_dir>/oof.parquet, <model_dir>/models/<algo>/oof.parquet
+    固定 +10%・+15% の6本（meta.json に labelSpec があるもの）は model_artifacts.flat_oof_path が決める: Release の形
+    （<oof_dir>/fixed_return_v1_*oof.parquet）か日次予測が並べ直した形のうち、学習のメタのハッシュと合うものだけを使い、
+    どちらも合わなければ止める（旧σの OOF は使わない）
     """
     import model_artifacts as A
     flat = A.flat_oof_path(algo, oof_dir, model_dir)

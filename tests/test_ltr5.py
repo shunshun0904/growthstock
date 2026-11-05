@@ -4,7 +4,10 @@
 
 - 組の行（判断日・候補の日・値動き4列）が実験117 の rolling_frame と同じ。判断日を絞っても、全部作ってから絞ったものと同じ
 - 組の収益（R20・今の売り方の収益・到達の印）が実験115 の attach_week_exit と同じ
-- 探索の分割が実験117 の search_folds と同じ。探索（少ない試行）が実験114 の tune_l（実験117 の W5 の探索）と同じ木の形を選ぶ
+- 探索の分割が実験117 の search_folds と同じ。5段階で回すと、探索（少ない試行）が実験114 の tune_l（実験117 の W5 の探索）と
+  同じ木の形を選ぶ
+- 段階は2026-11-08 の週次から10段階（運用者の選択 2026-11-05）。段階の付け方・探索・out-of-fold が実験118 の G10T と同じ。
+  日次のランキング学習（ltr）は5段階のまま。5段階で探索した木の形では学習しない（前のモデルのまま）
 - 組の中の順位が実験117 の w5_rank と同じ（同じスコアは銘柄コードの順）
 - 値動きの列の確かめ・判断日に入った候補の R20 の確かめが合う（ずらすと合わない）
 - 3条件・4条件の印（どれかが決まらなければ決めない）
@@ -183,17 +186,18 @@ class TestSearch(unittest.TestCase):
         sub, _ = ltr5.search_rows(self.pool, cutoff)
         cols_w = FEATS + list(ltr5.MOVE_COLS)
         folds = ltr5.search_folds(sub, self.cal)
-        mine = ltr5.tune(sub, cols_w, folds, n_trials=3)
+        mine = ltr5.tune(sub, cols_w, folds, n_trials=3, n_grades=5)     # 実験117 の W5 は5段階
         e_folds = [(tr.rename(columns={ltr5.R20: E.R20}), va.rename(columns={ltr5.R20: E.R20})) for tr, va in folds]
         theirs = E.tune_l(sub.rename(columns={ltr5.R20: E.R20}), cols_w, 3, e_folds)
         self.assertEqual(mine["params"], theirs["params"])
         self.assertEqual(mine["_cv"]["ndcg"], theirs["_cv"]["ndcg"])
+        self.assertEqual(mine["_cv"]["n_grades"], 5)
         self.assertEqual(mine["_cv"]["n_trials"], 3)
         self.assertEqual(mine["_cv"]["n_rows"], len(sub))
 
     def test_oof_windows_same_as_experiment(self):
         cols_w = FEATS + list(ltr5.MOVE_COLS)
-        oof = ltr5.oof_scores(self.pool, cols_w, SMALL)
+        oof = ltr5.oof_scores(self.pool, cols_w, SMALL, n_grades=5)     # 実験117 の W5 は5段階
         ok = self.pool[ltr5.trainable(self.pool)]
         folds = [f for f in R.E41.folds_for(ok["Date"], 0)]
         d = pd.to_datetime(ok["Date"])
@@ -208,6 +212,71 @@ class TestSearch(unittest.TestCase):
         want = W.fit_rank(SMALL, tr.rename(columns={ltr5.R20: W.R20}), te, cols_w)
         got = oof[oof["fold"] == int(f.index)]["score"].to_numpy()
         np.testing.assert_array_equal(got, want)
+
+
+class TestTenGrades(unittest.TestCase):
+    """2026-11-08 の週次から10段階（運用者の選択 2026-11-05「10段階に替える」。§88-4）。実験118 の G10T と同じ作りか。"""
+
+    @classmethod
+    def setUpClass(cls):
+        import e118_ltr5_grades as X
+        cls.X = X
+        cls.bars, cls.days = market(n_codes=10, seed=3)
+        cls.cand = candidates(cls.days, n_codes=10, rate=0.35, seed=4)
+        cls.cal = ltr5.calendar(cls.bars["Date"].unique())
+        pool = ltr5.pool_frame(cls.cand, cls.bars, cls.cal, FEATS, keep=("label",))
+        cls.pool = ltr5.attach_exit(pool, cls.bars)
+
+    def test_settings(self):
+        self.assertEqual(ltr5.N_GRADES, 10)
+        self.assertEqual(ltr.N_GRADES, 5)                    # 日次のランキング学習は5段階のまま
+        self.assertIn("段階 0〜9", ltr5.TUNE_OBJECTIVE)
+        self.assertEqual(ltr5.TUNE_OBJECTIVE, ltr5.tune_objective(10))
+        self.assertIn("段階 0〜4", ltr5.tune_objective(5))
+        self.assertIn("段階 0〜4", ltr.TUNE_OBJECTIVE)
+
+    def test_grades(self):
+        dates = np.repeat(np.array(["2024-01-04", "2024-01-05", "2024-01-09"], dtype="datetime64[ns]"), [10, 20, 1])
+        r = np.r_[np.arange(10)[::-1], np.arange(20), [0.3]].astype(float)
+        g10 = ltr.grades(dates, r, 10)
+        np.testing.assert_array_equal(g10[:10], np.arange(10)[::-1])          # 10件の組は 0〜9 が1件ずつ
+        np.testing.assert_array_equal(np.bincount(g10[10:30], minlength=10), np.full(10, 2))   # 20件は2件ずつ
+        self.assertEqual(g10[30], 5)                                          # 1件の組は真ん中
+        np.testing.assert_array_equal(g10, self.X.grades(dates, r, 10))      # 実験118 の付け方と同じ
+        g5 = ltr.grades(dates, r)                                            # 既定（日次）は5段階のまま
+        self.assertEqual(int(g5.max()), 4)
+        self.assertEqual(g5[30], 2)
+
+    def test_tune_same_as_experiment_118(self):
+        cutoff = pd.Timestamp("2022-06-30")
+        sub, _ = ltr5.search_rows(self.pool, cutoff)
+        cols_w = FEATS + list(ltr5.MOVE_COLS)
+        folds = ltr5.search_folds(sub, self.cal)
+        mine = ltr5.tune(sub, cols_w, folds, n_trials=3)                     # 既定 = 10段階
+        theirs = self.X.tune_g(sub, cols_w, folds, 10, n_trials=3)           # 実験118 の G10T の探索
+        self.assertEqual(mine["params"], theirs["params"])
+        self.assertEqual(mine["_cv"]["ndcg"], theirs["_cv"]["ndcg"])
+        self.assertEqual(mine["_cv"]["ndcg_folds"], theirs["_cv"]["ndcg_folds"])
+        self.assertEqual(mine["_cv"]["best_trial"], theirs["_cv"]["best_trial"])
+        self.assertEqual(mine["_cv"]["n_grades"], 10)
+        self.assertIn("段階 0〜9", mine["_cv"]["objective"])
+        five = ltr5.tune(sub, cols_w, folds, n_trials=3, n_grades=5)
+        self.assertNotEqual(five["_cv"]["ndcg_folds"], mine["_cv"]["ndcg_folds"])   # 段階の数が効いている
+
+    def test_oof_same_as_experiment_118(self):
+        cols_w = FEATS + list(ltr5.MOVE_COLS)
+        oof = ltr5.oof_scores(self.pool, cols_w, SMALL)                      # 既定 = 10段階
+        ok = self.pool[ltr5.trainable(self.pool)]
+        d = pd.to_datetime(ok["Date"])
+        f = [f for f in R.E41.folds_for(ok["Date"], 0)
+             if ((d >= pd.Timestamp(f.test_start)) & (d <= pd.Timestamp(f.test_end))).sum() >= 200
+             and (d <= pd.Timestamp(f.train_end)).sum() >= 1000][0]
+        tr = ok[d <= pd.Timestamp(f.train_end)]
+        te = ok[(d >= pd.Timestamp(f.test_start)) & (d <= pd.Timestamp(f.test_end))]
+        got = oof[oof["fold"] == int(f.index)]["score"].to_numpy()
+        np.testing.assert_array_equal(got, self.X.fit_rank(SMALL, tr, te, cols_w, 10))
+        five = ltr5.oof_scores(self.pool, cols_w, SMALL, n_grades=5)
+        self.assertFalse(np.array_equal(five[five["fold"] == int(f.index)]["score"].to_numpy(), got))
 
 
 class TestRanksAndConds(unittest.TestCase):
@@ -317,11 +386,22 @@ class TestScripts(unittest.TestCase):
                 self.assertEqual(meta["features"], cols_w)
                 self.assertEqual(meta["params"], rec["params"])
                 self.assertEqual(meta["tuning"], rec["_cv"])
+                self.assertEqual(rec["_cv"]["n_grades"], 10)
+                self.assertEqual((meta["nGrades"], meta["labelGain"]), (10, list(range(10))))
+                self.assertIn("10分位（0〜9）", meta["target"])
                 self.assertEqual(meta["checks"]["sameDay"]["mismatch"], 0)
                 self.assertEqual(meta["checks"]["moveCols"]["same"], meta["checks"]["moveCols"]["rows"])
                 oof = pd.read_parquet(os.path.join(M.sub_dir("ltr5", tmp), "oof.parquet"))
                 self.assertEqual(list(oof.columns), ["Code", "Date", "cand_date", "score", "fold"])
                 self.assertEqual(meta["nOof"], len(oof))
+                # 5段階で探索した木の形（今コミットしてある ltr5_params.json の形）なら学習しない。前のモデルはそのまま
+                before = os.path.getmtime(os.path.join(M.sub_dir("ltr5", tmp), "meta.json"))
+                for cv in ({**rec["_cv"], "n_grades": 5}, {k: v for k, v in rec["_cv"].items() if k != "n_grades"}):
+                    with open(pp, "w", encoding="utf-8") as fh:
+                        json.dump({**rec, "_cv": cv}, fh)
+                    self.assertEqual(train_ltr5.main(["--data-dir", data_dir, "--dataset", ds_path, "--out-dir", tmp,
+                                                      "--params", pp]), 1)
+                self.assertEqual(os.path.getmtime(os.path.join(M.sub_dir("ltr5", tmp), "meta.json")), before)
                 # 値動きの列を含まない木の形なら学習しない
                 with open(pp, "w", encoding="utf-8") as fh:
                     json.dump({"params": SMALL, "_features_sig": F.signature(FEATS), "_n_features": len(FEATS)}, fh)

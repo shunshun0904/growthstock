@@ -132,7 +132,7 @@ class TestTune(unittest.TestCase):
         f = pool_rows(seed=3, days=45, per_day=10)
         folds = self.folds(f)
         mine = X.tune_g(f, COLS_W, folds, 5, n_trials=2)
-        prod = L5.tune(f, COLS_W, folds, n_trials=2)
+        prod = L5.tune(f, COLS_W, folds, n_trials=2, n_grades=5)   # この実験のころの本番（5段階）
         self.assertEqual(mine["params"], prod["params"])
         self.assertEqual(mine["_cv"]["ndcg"], prod["_cv"]["ndcg"])
         self.assertEqual(mine["_cv"]["ndcg_folds"], prod["_cv"]["ndcg_folds"])

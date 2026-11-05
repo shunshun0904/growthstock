@@ -481,13 +481,16 @@ console.log('\n== リカレンス・ネットワーク（隠している） ==')
 check(recurrenceRequests.length === 0,
       `リカレンス・ネットワークのデータ（/data/recurrence/）はどのタブを開いても読まない (実際: ${recurrenceRequests.length}件)`);
 
-console.log('\n== 固定リターン本番モデルと履歴の区別 ==');
+console.log('\n== 固定リターンのモデルと履歴の区別 ==');
 await page.goto(base, { waitUntil: 'networkidle' });
 await page.waitForSelector('.pred-row');
-check((await page.getByTestId('active-models').textContent()).includes('固定+10%・+15%'),
-      '本番の固定リターンモデルを表示する');
+const activeModelsText = await page.getByTestId('active-models').textContent();
+check(activeModelsText.includes('使っているモデル：固定+10%・+15%'),
+      '使っている固定リターンのモデルを表示する');
+check(!activeModelsText.includes('本番モデル'),
+      '見出しに「本番モデル」と書かない（運用者の指示「本番モデルって名前やめてください」）');
 check((await page.locator('.pred-row').first().locator('.pred-main .pred-mg .r').allTextContents()).join(',').includes('1.2σ'),
-      '新しい本番モデルに切り替えても過去のσ予測を固定%と表示しない');
+      '固定%のモデルに切り替えても過去のσ予測を固定%と表示しない');
 const fixedPrediction = JSON.parse(fs.readFileSync(PRED_FIXTURE, 'utf8'));
 for (const row of fixedPrediction.candidates) {
   for (const [algo, score] of Object.entries(row.byModel || {})) {

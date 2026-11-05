@@ -110,10 +110,14 @@ def within_date_pct(dates, values) -> np.ndarray:
     return np.where(n > 1, (rk - 1) / (n - 1), 0.5).astype(float)
 
 
-def grades(dates, r) -> np.ndarray:
-    """同じ日の中の収益の5分位（0〜4 の整数。1件だけの日は真ん中の 2）。実験52 の within_date_grade と同じ。"""
+def grades(dates, r, n_grades: int = N_GRADES) -> np.ndarray:
+    """
+    同じ日（組）の中の収益の n_grades 分位（0〜n_grades−1 の整数。1件だけの日は真ん中 = int(0.5 × n_grades)）。
+    既定の5分位（0〜4。1件だけの日は 2）は実験52 の within_date_grade と同じ。直近5営業日のランキング学習（research/ltr5.py）は
+    2026-11-08 の週次から10分位（運用者の選択 2026-11-05「10段階に替える」。docs/MODEL_ADOPTION_RULES.md §88-4）
+    """
     p = within_date_pct(dates, r)
-    return np.minimum((p * N_GRADES).astype(int), N_GRADES - 1)
+    return np.minimum((p * n_grades).astype(int), n_grades - 1)
 
 
 def attach_r20(ds: pd.DataFrame, bars: pd.DataFrame) -> pd.DataFrame:
@@ -154,18 +158,19 @@ def load_frame(dataset: str, data_dir: str, cols: Sequence[str]) -> pd.DataFrame
 # 当てはめ
 # --------------------------------------------------------------------------- #
 
-def fit(tr: pd.DataFrame, cols: Sequence[str], params: Dict, seed: int = SEED):
+def fit(tr: pd.DataFrame, cols: Sequence[str], params: Dict, seed: int = SEED, n_grades: int = N_GRADES):
     """
     tr（ラベルと R20 がある行）で学習する。LGBMRanker は同じ組（日付）が続いて並ぶことを要るので (Date, Code) の順に
-    並べ、組の大きさを日ごとの件数にする（実験114 の fit_score の L と同じ）。
+    並べ、組の大きさを日ごとの件数にする（実験114 の fit_score の L と同じ）。段階は grades の n_grades 分位、
+    label_gain は 0〜n_grades−1（既定は日次のランキング学習の5段階）。
     """
     import lightgbm as lgb
 
     cols = list(cols)
     d = tr.sort_values(["Date", "Code"], kind="mergesort")
-    y = grades(d["Date"], d[R20].to_numpy(dtype=float))
+    y = grades(d["Date"], d[R20].to_numpy(dtype=float), n_grades)
     sizes = d.groupby("Date", sort=True).size().to_numpy()
-    m = lgb.LGBMRanker(objective="lambdarank", label_gain=list(range(N_GRADES)), **ranker_params(params, seed))
+    m = lgb.LGBMRanker(objective="lambdarank", label_gain=list(range(n_grades)), **ranker_params(params, seed))
     m.fit(d[cols].to_numpy(dtype=float), y, group=sizes)
     return m
 

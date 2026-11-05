@@ -137,7 +137,8 @@ def tune_g(sub: pd.DataFrame, cols_w: Sequence[str], folds, n: int, n_trials: in
     """
     木の形の探索（本番の ltr5.tune と同じ: 探索空間 ltr.search_space、各試行で分割ごとに学習→検証の組の中の NDCG@5、その平均を
     最大にする。TPE の種・探索中の当てはめの種はどれも seed）。違うのは段階の数 n（学ぶ並びと NDCG の利得の両方）。n = 5 で
-    本番と同じ結果になる。
+    回したときの本番（この実験のころの5段階。今は ltr5.tune(..., n_grades=5)）と同じ結果になる。本番は 2026-11-08 の週次から
+    10段階（運用者の選択 2026-11-05。§88-4）で、n = 10 がその探索と同じ。
     """
     import optuna
 

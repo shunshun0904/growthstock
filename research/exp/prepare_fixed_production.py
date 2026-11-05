@@ -25,7 +25,6 @@ def main():
     meta=json.loads((dest/'meta.json').read_text())
     meta.update(A.data_snapshot(data))
     meta['dataThrough']=str(max(pd.read_parquet(p,columns=['Date']).Date.max() for p in data.glob('bars_*.parquet')))[:10]
-    meta['dataInventory']=inventory
     (dest/'meta.json').write_text(json.dumps(meta,ensure_ascii=False,indent=2)+'\n')
     A.require(meta,algo)
     print(json.dumps({k:meta[k] for k in ['trainedAt','trainTo','dataThrough','labelSpec','nTrain','nOof','dataSnapshot']},ensure_ascii=False))

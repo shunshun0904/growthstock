@@ -4,7 +4,8 @@
 
 運用者の選択（2026-10-30）「画面に並べて確かめる」: 実験117 の W5（判断日ごとに、その日までの直近5営業日の候補を1つの組にして
 並べる LambdaRank）を、日曜の週次で毎週探索・学習し、毎日の予測で「直近5営業日の中の順位」と3条件・4条件の印を予測タブと
-スプレッドシートに出す。買う銘柄は今の規則のまま（1.5σ の木3本がすべて95以上）。これからの成績を記録して確かめる
+スプレッドシートに出す。買う銘柄は今の規則のまま（規則の木3本がすべて95以上。2026-11-03 からは固定 +10% の3本）。これからの
+成績を記録して確かめる
 （docs/MODEL_ADOPTION_RULES.md §82-6）。
 
 何か（実験117 の W5 と同じ作り。tests/test_ltr5.py が実験117 の関数と同じ結果になることを確かめる）
@@ -15,8 +16,11 @@
             r5_ret   候補の日の終値 → 判断日の終値の騰落（比。調整後終値）
             r5_high  候補の日の翌営業日〜判断日の高値の最大 ÷ 候補の日の終値 − 1（判断日に入った候補は欠測）
             r5_low   同じ期間の安値の最小 ÷ 候補の日の終値 − 1（同じ）
-  段階    組の中の「判断日の翌営業日の寄りで買い、20営業日目の終値で売った収益」の5分位（0〜4。ltr.grades と同じ式で、組 =
-          判断日）。当てはめは ltr.fit と同じ（LGBMRanker・組は Date = 判断日・種42）
+  段階    組の中の「判断日の翌営業日の寄りで買い、20営業日目の終値で売った収益」の10分位（0〜9。ltr.grades と同じ式で、組 =
+          判断日・n_grades = N_GRADES）。label_gain も 0〜9、探索の目的の NDCG@5 の利得も同じ段階。2026-11-08 の週次から
+          （運用者の選択 2026-11-05「10段階に替える」。それまでは5分位 0〜4。実験118 の G10T と同じ作り。docs/MODEL_ADOPTION_RULES.md
+          §88-4）。日次のランキング学習（research/ltr.py）は5分位のまま。当てはめは ltr.fit と同じ（LGBMRanker・組は Date =
+          判断日・種42）
   探索    実験117 の W5 と同じ: 探索の期間は run_tuning.py と同じ打ち切り（ltr.search_cutoff）、50試行・木200本・TPE・種0・
           探索空間は ltr.search_space。5分割は判断日を暦月の塊にまとめ、年で層別して塊ごとに分ける（同じ月の判断日は同じ側）。
           訓練側からは、検証側の判断日の前後4営業日の判断日を外す（同じ候補が両側の組に入らないように）。目的は検証分割の組の
@@ -27,8 +31,9 @@
   同じ）を付ける。予測の日の候補の行に ltr5（score・rank・nPool・pct）と、3条件・4条件の印（conds）を足す
     D1  その日の候補の中で、今のランキング学習（日次。research/ltr.py）が1位（同じスコアは銘柄コードの順）
     W1  直近5営業日の組の中で W5 が1位
-    R0  1.2σ の木3本の百分位がすべて95以上（今日の戦略の規則。2026-10-30 から）
-    R15 1.5σ の木3本の百分位がすべて95以上
+    R0  規則の木3本（lgbm・xgb・cat）の百分位がすべて95以上（今日の戦略の規則。2026-10-30 から。2026-11-03 からは固定 +10% の
+        ラベルの3本、それまでは 1.2σ）
+    R15 lgbm_k15・xgb_k15・cat_k15 の百分位がすべて95以上（2026-11-03 からは固定 +15% の3本、それまでは 1.5σ）
     3条件 = D1 かつ W1 かつ R0、4条件 = 3条件 かつ R15（見るだけ）。4条件は実験117 の参考の表 §82-4 と同じ組み合わせ。3条件は
     2026-11-02 の予測から、運用者の選択「すぐ 1.2σ に替える」（2026-10-31。docs/MODEL_ADOPTION_RULES.md §87）で R15 → R0 に
     した（実験117 では測っていない組み合わせ）。§82-6 で決めた定義は 3条件 = D1・W1・R15、4条件 = ＋R0 で、4条件は同じ
@@ -74,8 +79,18 @@ TUNE_SEED = ltr.TUNE_SEED
 NDCG_K = ltr.NDCG_K
 MIN_POOL = ltr.MIN_DAY           # NDCG に使う組の最小の行数
 PURGE = K - 1                    # 探索の分割で、検証側の判断日の前後この営業日数の判断日を訓練から外す
-TUNE_OBJECTIVE = (f"検証分割の組の中の NDCG@{NDCG_K}（候補{MIN_POOL}件以上の組。利得は組の中の20営業日目の終値の段階 "
-                  f"0〜{ltr.N_GRADES - 1}）")
+#: 段階の数（組の中の20営業日目の終値の N_GRADES 分位。label_gain は 0〜N_GRADES−1）。2026-11-08 の週次から 10（運用者の選択
+#: 2026-11-05「10段階に替える」。それまでは日次と同じ 5。§88-4）
+N_GRADES = 10
+
+
+def tune_objective(n_grades: int = N_GRADES) -> str:
+    """探索の目的の説明（ltr5_params.json の _cv.objective）。"""
+    return (f"検証分割の組の中の NDCG@{NDCG_K}（候補{MIN_POOL}件以上の組。利得は組の中の20営業日目の終値の段階 "
+            f"0〜{n_grades - 1}）")
+
+
+TUNE_OBJECTIVE = tune_objective()
 #: 3条件・4条件の線（今日の戦略の規則と同じ。画面の百分位 = 小数1桁に丸めた値で比べる）
 LINE = 95.0
 R15_TREES = ("lgbm_k15", "xgb_k15", "cat_k15")
@@ -357,10 +372,11 @@ def search_folds(sub: pd.DataFrame, cal, n_splits: int = TUNE_SPLITS, seed: int 
 
 
 def tune(sub: pd.DataFrame, cols_w: Sequence[str], folds, n_trials: int = TUNE_TRIALS,
-         seed: int = TUNE_SEED) -> Dict:
+         seed: int = TUNE_SEED, n_grades: int = N_GRADES) -> Dict:
     """
     木の形を探索する（実験117 の W5 = 実験114 の tune_l と同じ: 探索空間 ltr.search_space、各試行で分割ごとに学習→検証の組の
-    中の NDCG@5、その平均を最大にする。TPE の種・探索中の当てはめの種はどれも seed）。
+    中の NDCG@5、その平均を最大にする。TPE の種・探索中の当てはめの種はどれも seed）。段階（学ぶ並びと NDCG の利得）は
+    n_grades 分位（既定 N_GRADES = 10。実験118 の G10T の探索と同じ。n_grades = 5 で実験117 の W5 と同じ）。
 
     返すもの: params（ltr5_params.json の params にそのまま入る形）・_cv（目的・分割・試行数・最良の試行・分割ごとの値・
     探索に使った行と期間・分）・_trials。
@@ -377,9 +393,9 @@ def tune(sub: pd.DataFrame, cols_w: Sequence[str], folds, n_trials: int = TUNE_T
         p = ltr.search_space(trial)
         nd = []
         for tr, va in folds:
-            m = ltr.fit(tr, cols_w, p, seed)
+            m = ltr.fit(tr, cols_w, p, seed, n_grades)
             s = ltr.predict(m, va[cols_w].to_numpy(dtype=float))
-            nd.append(ltr.ndcg_at_k(va["Date"], s, ltr.grades(va["Date"], va[R20].to_numpy(dtype=float)),
+            nd.append(ltr.ndcg_at_k(va["Date"], s, ltr.grades(va["Date"], va[R20].to_numpy(dtype=float), n_grades),
                                     NDCG_K, MIN_POOL))
         trial.set_user_attr("ndcg_folds", [round(x, 4) for x in nd])
         return float(np.mean(nd))
@@ -390,7 +406,8 @@ def tune(sub: pd.DataFrame, cols_w: Sequence[str], folds, n_trials: int = TUNE_T
             "n_jobs": -1, "verbose": -1, **study.best_params}
     d = pd.to_datetime(sub["Date"])
     return {"params": best,
-            "_cv": {"objective": TUNE_OBJECTIVE, "scheme": f"month_purged{PURGE}", "n_splits": len(folds),
+            "_cv": {"objective": tune_objective(n_grades), "n_grades": int(n_grades),
+                    "scheme": f"month_purged{PURGE}", "n_splits": len(folds),
                     "n_trials": int(n_trials), "seed": int(seed), "best_trial": int(study.best_trial.number),
                     "ndcg": round(float(study.best_value), 4),
                     "ndcg_folds": study.best_trial.user_attrs.get("ndcg_folds"),
@@ -410,10 +427,11 @@ def load_params(path: str = PARAMS_PATH) -> Dict:
         return json.load(fh)
 
 
-def oof_scores(pool: pd.DataFrame, cols_w: Sequence[str], params: Dict, seed: int = SEED) -> pd.DataFrame:
+def oof_scores(pool: pd.DataFrame, cols_w: Sequence[str], params: Dict, seed: int = SEED,
+               n_grades: int = N_GRADES) -> pd.DataFrame:
     """
     組の各行を「その判断日より前のデータだけで学習したモデル」で採点する（実験117 の oof_shift のずらし0と同じ窓: 36ヶ月 /
-    6ヶ月 / 6ヶ月、エンバーゴ = ラベル確定に要る営業日数。判断日で分ける）。学習・採点するのは trainable の行。
+    6ヶ月 / 6ヶ月、エンバーゴ = ラベル確定に要る営業日数。判断日で分ける）。学習・採点するのは trainable の行。段階は n_grades 分位。
     """
     import build_dataset as B
     import walkforward as WF
@@ -430,7 +448,7 @@ def oof_scores(pool: pd.DataFrame, cols_w: Sequence[str], params: Dict, seed: in
         te = p[(d >= pd.Timestamp(f.test_start)) & (d <= pd.Timestamp(f.test_end))]
         if len(te) < 200 or len(tr) < 1000:
             continue
-        m = ltr.fit(tr, cols_w, params, seed)
+        m = ltr.fit(tr, cols_w, params, seed, n_grades)
         part = te[["Code", "Date", "cand_date", "r5_days", R20, RET, HIT]].copy()
         part["score"] = ltr.predict(m, te[list(cols_w)].to_numpy(dtype=float))
         part["fold"] = int(f.index)
