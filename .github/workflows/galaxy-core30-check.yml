@@ -1,0 +1,65 @@
+name: Verify TOPIX Core30 Galaxy
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/build_core30_galaxy.py'
+      - 'public/galaxy/**'
+      - '.github/workflows/deploy-pages.yml'
+      - '.github/workflows/galaxy-core30-check.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  full-history-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax check standalone WebGL page
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          html = Path('public/galaxy/index.html').read_text(encoding='utf-8')
+          script = html.split('<script>', 1)[1].split('</script>', 1)[0]
+          Path('/tmp/core30-galaxy.js').write_text(script, encoding='utf-8')
+          PY
+          node --check /tmp/core30-galaxy.js
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install generator dependencies
+        run: |
+          pip install "numpy==2.1.3" "pandas==2.2.3" "pyarrow==18.1.0" \
+            "scikit-learn==1.6.0" "umap-learn>=0.5.7,<0.6"
+      - name: Download full historical daily bars
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/bars"
+          bash scripts/gh_release_download.sh data-raw "$RUNNER_TEMP/bars" 'bars_*.parquet'
+      - name: Build galaxy and validate completeness
+        run: |
+          python scripts/build_core30_galaxy.py \
+            --data-dir "$RUNNER_TEMP/bars" \
+            --output "$RUNNER_TEMP/galaxy.json"
+          python - <<'PY'
+          import json, os
+          p=os.environ['RUNNER_TEMP']+'/galaxy.json'
+          with open(p,encoding='utf-8') as f: d=json.load(f)
+          assert d['meta']['stockCount']==30
+          assert d['meta']['pointCount']==sum(len(s['points']) for s in d['stocks'])
+          assert len({s['code'] for s in d['stocks']})==30
+          for stock in d['stocks']:
+              dates=[p[0] for p in stock['points']]
+              assert dates==sorted(set(dates)),stock['code']
+              assert len(dates)>=252
+              assert len(stock['neighbors'])==5
+          print('PASS:',d['meta']['stockCount'],'stocks',
+                d['meta']['pointCount'],'daily observations')
+          PY
