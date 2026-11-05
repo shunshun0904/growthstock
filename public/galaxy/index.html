@@ -1,0 +1,385 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#02040d">
+<title>STOCK UNIVERSE — TOPIX Core30</title>
+<style>
+:root{color-scheme:dark;font-family:ui-sans-serif,"Noto Sans JP",system-ui,sans-serif;--ink:#e8f5ff;--muted:#8ba9bd;--line:rgba(132,194,227,.18);--panel:rgba(6,18,32,.82);--cyan:#83dfff}
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#02040c;color:var(--ink)}
+body:before{content:"";pointer-events:none;position:fixed;inset:0;background:radial-gradient(ellipse at 53% 45%,rgba(25,54,92,.25),transparent 53%),radial-gradient(ellipse at 78% 12%,rgba(93,37,107,.15),transparent 38%);z-index:0}
+#space{position:fixed;inset:0;width:100%;height:100%;display:block;touch-action:none;z-index:1}
+#links{position:fixed;inset:0;pointer-events:none;z-index:2}
+#labels{position:fixed;inset:0;pointer-events:none;z-index:3}
+.pin{position:absolute;transform:translate(-50%,-50%);font-size:10px;line-height:1.1;color:rgba(213,235,249,.84);background:rgba(8,23,39,.68);border:1px solid rgba(130,209,246,.22);border-radius:15px;padding:5px 9px;white-space:nowrap;pointer-events:auto;cursor:pointer;transition:background .2s,border-color .2s}
+.pin:before{content:"";display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--cyan);box-shadow:0 0 9px var(--cyan);vertical-align:middle;margin-right:5px}
+.pin:hover,.pin.active{background:rgba(17,62,91,.95);border-color:#77d5ff;color:white}
+header{position:fixed;top:22px;left:26px;z-index:5;pointer-events:none}
+.overline{font-size:10px;letter-spacing:.35em;color:#78c0e2;text-transform:uppercase}
+h1{font-size:clamp(22px,2.6vw,40px);font-weight:300;letter-spacing:.14em;margin:8px 0 2px}
+.subtitle{font-size:11px;color:var(--muted);letter-spacing:.06em;max-width:420px}
+.panel{position:fixed;z-index:6;background:var(--panel);border:1px solid var(--line);backdrop-filter:blur(20px);box-shadow:0 12px 48px rgba(0,0,0,.25);border-radius:18px}
+#catalog{top:144px;left:24px;width:245px;max-height:calc(100vh - 260px);display:flex;flex-direction:column;overflow:hidden}
+.section-head{display:flex;align-items:center;justify-content:space-between;padding:17px 16px 10px}
+.section-title{font-size:11px;letter-spacing:.18em;color:#c3e6fa}
+.small{color:var(--muted);font-size:10px}
+#search{display:block;outline:0;width:calc(100% - 30px);margin:0 15px 10px;background:rgba(255,255,255,.045);border:1px solid var(--line);border-radius:9px;padding:10px;color:white;font-size:12px}
+#search:focus{border-color:#85cde8}
+#stocklist{overflow:auto;padding:0 8px 10px;scrollbar-color:#325a73 transparent}
+.stock{border:0;color:#bdd3df;width:100%;border-radius:8px;background:none;display:flex;align-items:center;gap:10px;padding:10px 9px;cursor:pointer;text-align:left}
+.stock:hover,.stock.selected{background:rgba(74,162,207,.14);color:white}
+.stock .number{color:#648da5;font-size:10px;width:35px;flex:none}
+.stock .name{font-size:12px;flex:1}
+.stock .dot{width:6px;height:6px;border-radius:50%;background:var(--dot,#6fd3ef);box-shadow:0 0 8px var(--dot,#6fd3ef)}
+#info{top:144px;right:25px;width:285px;padding:19px}
+#info .ticker{font-size:12px;letter-spacing:.2em;color:#7ad0fb;margin-bottom:9px}
+#info .company{font-size:20px;line-height:1.3;margin-bottom:5px;font-weight:400}
+#info .sector{font-size:11px;color:var(--muted)}
+.kpis{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px;margin-top:21px;border-top:1px solid var(--line);padding-top:16px}
+.kpi-label{font-size:10px;color:var(--muted);margin-bottom:6px}
+.kpi-value{font-size:18px;font-variant-numeric:tabular-nums}
+.positive{color:#ff8b99}.negative{color:#80b8ff}
+#neighbors{margin-top:19px}
+.neighbor{display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line);background:none;border-left:0;border-right:0;border-top:0;color:var(--ink);width:100%;cursor:pointer;text-align:left;font-size:12px;gap:8px}
+.neighbor:hover{color:#7bd8ff}.neighbor small{color:#759bb5;white-space:nowrap}
+#controls{position:fixed;z-index:7;bottom:23px;left:50%;transform:translateX(-50%);max-width:calc(100vw - 32px);width:540px;padding:12px 18px 16px}
+.tabs{display:flex;gap:8px;justify-content:center;margin-bottom:14px}
+button.action{border:1px solid var(--line);color:#bfdaeb;background:rgba(12,29,45,.8);border-radius:9px;padding:9px 14px;font-size:12px;cursor:pointer;white-space:nowrap}
+button.action:hover,button.action.selected{border-color:#70c9f3;color:white;background:rgba(53,122,160,.25)}
+.time-head{display:flex;justify-content:space-between;color:#b6d6ea;font-size:11px;gap:10px}
+#time{width:100%;accent-color:#83dfff;cursor:pointer;margin:13px 0 3px}
+#help{position:fixed;bottom:28px;right:27px;z-index:4;text-align:right;color:#7392aa;font-size:10px;line-height:1.9}
+#loading{position:fixed;inset:0;z-index:20;background:radial-gradient(circle at center,#0b2541,#02040c 60%);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:20px;text-align:center;padding:24px}
+#loading strong{font-weight:300;letter-spacing:.3em;font-size:22px}
+#loading span{font-size:12px;color:#9eb4c8;line-height:1.8}
+#loading .orbit{width:38px;height:38px;border:1px solid rgba(102,201,245,.25);border-top-color:#8cddff;border-radius:50%;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+#intro{position:fixed;top:49%;left:50%;transform:translate(-50%,-50%);z-index:4;text-align:center;pointer-events:none;opacity:0;transition:opacity .8s}
+#intro.visible{opacity:1}
+#intro b{font-size:clamp(18px,4vw,34px);font-weight:300;letter-spacing:.2em;text-shadow:0 0 26px #13476d}
+#intro p{font-size:12px;letter-spacing:.25em;color:#a4ccdd}
+#tooltip{position:fixed;z-index:9;display:none;padding:10px 12px;background:rgba(5,15,25,.96);border:1px solid #38799c;border-radius:8px;color:white;pointer-events:none;font-size:12px;line-height:1.7;white-space:nowrap}
+#quality{margin-top:15px;color:#769bb4;font-size:10px;line-height:1.65}
+a{color:#8dd8fc}
+@media(max-width:1000px){header{top:14px;left:15px}h1{font-size:22px}#catalog{top:auto;bottom:114px;left:12px;width:205px;max-height:37vh}#info{top:100px;right:12px;width:234px;padding:13px}.pin{font-size:9px}#controls{bottom:12px}#help{display:none}}
+@media(max-width:620px){header{left:12px;top:10px}h1{font-size:19px}.subtitle{font-size:10px;max-width:300px}#catalog{top:85px;bottom:auto;left:10px;width:145px;max-height:28vh;border-radius:12px}#catalog .section-head{padding:10px}#search{width:calc(100% - 16px);margin:0 8px 5px;padding:7px;font-size:11px}.stock{padding:7px 5px}.stock .number{width:29px;font-size:9px}.stock .name{font-size:10px}#stocklist{padding:0 4px 5px}#info{top:85px;right:9px;width:170px;padding:11px;border-radius:12px}#info .company{font-size:14px}#info .ticker,#info .sector{font-size:10px}.kpis{gap:7px;margin-top:10px;padding-top:10px}.kpi-value{font-size:13px}.kpi-label{font-size:9px}#neighbors{margin-top:9px}.neighbor{font-size:10px;padding:6px 0}.neighbor small{font-size:9px}#quality{display:none}#controls{width:calc(100vw - 18px);padding:8px 10px 11px;bottom:8px;border-radius:12px}.tabs{gap:5px;margin-bottom:8px}button.action{padding:7px 9px;font-size:10px}#links{opacity:.4}}
+@media(prefers-reduced-motion:reduce){#intro{transition:none}.pin{transition:none}}
+</style>
+</head>
+<body>
+<canvas id="space" aria-label="TOPIX Core30 の30銀河と全営業日の3D可視化"></canvas>
+<svg id="links" aria-hidden="true"></svg>
+<div id="labels"></div>
+<header>
+  <div class="overline">An Atlas of Market States / 2026</div>
+  <h1>STOCK UNIVERSE</h1>
+  <div class="subtitle">TOPIX CORE30 · Every trading day is a star</div>
+</header>
+<aside class="panel" id="catalog">
+  <div class="section-head"><span class="section-title">GALAXIES</span><span class="small" id="count">30</span></div>
+  <input id="search" placeholder="銘柄名・コードで探す" aria-label="銘柄検索">
+  <div id="stocklist"></div>
+</aside>
+<aside class="panel" id="info">
+  <div class="ticker" id="ticker">30 GALAXIES</div>
+  <div class="company" id="company">銘柄を選択してください</div>
+  <div class="sector" id="sector">星ひとつが、ある銘柄の1取引日</div>
+  <div class="kpis">
+    <div><div class="kpi-label">表示対象の銘柄</div><div class="kpi-value" id="stockCount">30</div></div>
+    <div><div class="kpi-label">記録された取引日</div><div class="kpi-value" id="dayCount">—</div></div>
+    <div><div class="kpi-label" id="dateLabel">最古の日付</div><div class="kpi-value" id="firstDate">—</div></div>
+    <div><div class="kpi-label" id="priceLabel">最新の日付</div><div class="kpi-value" id="lastDate">—</div></div>
+  </div>
+  <div id="neighbors">
+    <div class="section-head" style="padding:14px 0 4px"><span class="section-title">NEARBY GALAXIES</span><span class="small">96D 類似度</span></div>
+    <div id="neighborlist" class="small">銘柄を選択すると近隣が表示されます。</div>
+  </div>
+  <div id="quality">銀河中心は32指標の履歴要約をUMAP 3Dに圧縮。近隣順位は圧縮前の96次元で算出。画面上の距離は厳密な類似度ではありません。</div>
+</aside>
+<div id="intro"><b>ひとつの銀河から、30の宇宙へ。</b><p>LOOK BEYOND THE STARS</p></div>
+<div class="panel" id="controls">
+  <div class="tabs">
+    <button class="action" id="overview">◎ 宇宙全景</button>
+    <button class="action selected" id="focus">◉ 銘柄フォーカス</button>
+    <button class="action" id="replay">↻ 出発シーン</button>
+    <button class="action" id="reset">↺ 視点リセット</button>
+  </div>
+  <div class="time-head"><span>TIME EXPLORER — 累積表示</span><span id="timeText">—</span></div>
+  <input type="range" id="time" min="0" max="0" value="0" step="1" aria-label="表示する最終取引日">
+</div>
+<div id="help">ドラッグで回転 · ホイール／ピンチでズーム<br>銀河ラベルを選択 · 近隣の銘柄へジャンプ</div>
+<div id="tooltip"></div>
+<div id="loading"><div class="orbit"></div><strong>STOCK UNIVERSE</strong><span>全営業日の星を読み込んでいます…</span></div>
+<script>
+(function () {
+"use strict";
+var gl, program, buffer, uMatrix, uFocus, uCutoff, uSize, aPos, aColor, aDate, aStock;
+var canvas=document.getElementById("space"), labels=document.getElementById("labels"), links=document.getElementById("links");
+var data=null,stocks=[],byCode={},startOffsets=[], allDates=[], mode="focus", selected=-1, cutoff=30000, cutoffDate=99999999;
+var goalTarget=[0,0,0], cameraTarget=[0,0,0], goalDistance=18, cameraDistance=18;
+var yaw=0.56,pitch=0.24,viewProj=null,overviewDistance=160,frame=0, dragging=false,dragX=0,dragY=0,moveAt=0,autoTimer=null;
+var pointers=new Map(), pinchSpan=0;
+var sectorColors={"食品":"#f39c79","化学":"#a0edaa","医薬品":"#acb0ff","非鉄金属":"#ffa0ba","サービス":"#90eff1","電気機器":"#8dd9ff","機械":"#d4a3f8","輸送用機器":"#83eca9","精密機器":"#ffd597","その他製品":"#b3b2ff","卸売業":"#e8a1e9","銀行":"#ffcf94","保険":"#d9a6ff","通信":"#94caed","小売業":"#cbe989"};
+function $(id){return document.getElementById(id)}
+function fmtDate(n){var s=String(n);return s.slice(0,4)+"/"+s.slice(4,6)+"/"+s.slice(6,8)}
+function dayNumber(n){var s=String(n);return Math.floor(Date.UTC(Number(s.slice(0,4)),Number(s.slice(4,6))-1,Number(s.slice(6,8)))/86400000)}
+function fmtNum(n){return Number(n).toLocaleString("ja-JP")}
+function make(tag,cls,txt){var e=document.createElement(tag);if(cls)e.className=cls;if(txt!==undefined)e.textContent=txt;return e}
+function rgb(h){h=h.replace("#","");return [parseInt(h.slice(0,2),16)/255,parseInt(h.slice(2,4),16)/255,parseInt(h.slice(4,6),16)/255]}
+function mix(a,b,t){return a.map(function(x,i){return x*(1-t)+b[i]*t})}
+function vecSub(a,b){return [a[0]-b[0],a[1]-b[1],a[2]-b[2]]}
+function cross(a,b){return [a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]]}
+function dot(a,b){return a[0]*b[0]+a[1]*b[1]+a[2]*b[2]}
+function unit(a){var v=Math.sqrt(dot(a,a))||1;return a.map(function(x){return x/v})}
+function lookAt(eye,target){var z=unit(vecSub(eye,target)),x=unit(cross([0,1,0],z)),y=cross(z,x);return [x[0],y[0],z[0],0,x[1],y[1],z[1],0,x[2],y[2],z[2],0,-dot(x,eye),-dot(y,eye),-dot(z,eye),1]}
+function perspective(fov,aspect,near,far){var f=1/Math.tan(fov/2);return [f/aspect,0,0,0,0,f,0,0,0,0,(far+near)/(near-far),-1,0,0,(2*far*near)/(near-far),0]}
+function multiply(a,b){var o=new Array(16);for(var c=0;c<4;c++)for(var r=0;r<4;r++){var v=0;for(var k=0;k<4;k++)v+=a[k*4+r]*b[c*4+k];o[c*4+r]=v}return o}
+function project(p){if(!viewProj)return null;var m=viewProj,x=p[0],y=p[1],z=p[2];var w=m[3]*x+m[7]*y+m[11]*z+m[15];if(w<=.05)return null;var px=(m[0]*x+m[4]*y+m[8]*z+m[12])/w;var py=(m[1]*x+m[5]*y+m[9]*z+m[13])/w;return [(px+1)*innerWidth/2,(1-py)*innerHeight/2,w]}
+function shader(type,source){var s=gl.createShader(type);gl.shaderSource(s,source);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS))throw Error(gl.getShaderInfoLog(s));return s}
+function initGL(){
+  gl=canvas.getContext("webgl",{alpha:true,antialias:false,preserveDrawingBuffer:false});
+  if(!gl)throw Error("WebGLが利用できません。対応ブラウザのGPU設定をご確認ください。");
+  var vs=shader(gl.VERTEX_SHADER,[
+    "attribute vec3 aPosition;attribute vec3 aColor;attribute float aDate;attribute float aStock;",
+    "uniform mat4 uMatrix;uniform float uFocus;uniform float uCutoff;uniform float uSize;",
+    "varying vec3 vColor;varying float vAlpha;",
+    "void main(){vec4 p=uMatrix*vec4(aPosition,1.0);gl_Position=p;",
+    "float same=1.0-step(0.5,abs(aStock-uFocus));",
+    "float active=step(aDate,uCutoff);",
+    "vAlpha=active*(uFocus<0.0?0.7:mix(0.045,0.97,same));",
+    "vColor=aColor;",
+    "gl_PointSize=(uFocus<0.0?2.5:mix(1.3,5.0,same))*uSize;",
+    "}"
+  ].join("\n"));
+  var fs=shader(gl.FRAGMENT_SHADER,[
+    "precision mediump float;varying vec3 vColor;varying float vAlpha;",
+    "void main(){vec2 d=gl_PointCoord-vec2(0.5);float r=length(d)*2.0;",
+    "float halo=exp(-r*r*7.0);float core=exp(-r*r*38.0);",
+    "gl_FragColor=vec4(vColor*(0.65*halo+1.75*core),vAlpha*(0.27*halo+0.83*core));}"
+  ].join("\n"));
+  program=gl.createProgram();gl.attachShader(program,vs);gl.attachShader(program,fs);gl.linkProgram(program);
+  if(!gl.getProgramParameter(program,gl.LINK_STATUS))throw Error(gl.getProgramInfoLog(program));
+  gl.useProgram(program);
+  aPos=gl.getAttribLocation(program,"aPosition");aColor=gl.getAttribLocation(program,"aColor");
+  aDate=gl.getAttribLocation(program,"aDate");aStock=gl.getAttribLocation(program,"aStock");
+  uMatrix=gl.getUniformLocation(program,"uMatrix");uFocus=gl.getUniformLocation(program,"uFocus");
+  uCutoff=gl.getUniformLocation(program,"uCutoff");uSize=gl.getUniformLocation(program,"uSize");
+  buffer=gl.createBuffer();gl.enable(gl.BLEND);gl.blendFunc(gl.SRC_ALPHA,gl.ONE);gl.disable(gl.DEPTH_TEST);
+  gl.clearColor(0,0,0,0);
+}
+function upload(){
+  var total=stocks.reduce(function(n,s){return n+s.points.length},0),arr=new Float32Array(total*8),at=0;
+  stocks.forEach(function(s,i){
+    startOffsets[i]=at/8;var color=rgb(sectorColors[s.sector]||"#9fcdff");
+    s.points.forEach(function(p){
+      var glow=Math.min(1,Math.abs(p[5])/7),c=mix(color,p[5]>=0?[1,.53,.67]:[.48,.72,1],glow*.48);
+      arr[at++]=s.center[0]+p[2];arr[at++]=s.center[1]+p[3];arr[at++]=s.center[2]+p[4];
+      arr[at++]=c[0];arr[at++]=c[1];arr[at++]=c[2];arr[at++]=dayNumber(p[0]);arr[at++]=i;
+    });
+  });
+  gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.bufferData(gl.ARRAY_BUFFER,arr,gl.STATIC_DRAW);
+  var stride=32;
+  [[aPos,3,0],[aColor,3,12],[aDate,1,24],[aStock,1,28]].forEach(function(a){
+    gl.enableVertexAttribArray(a[0]);gl.vertexAttribPointer(a[0],a[1],gl.FLOAT,false,stride,a[2]);
+  });
+  return total;
+}
+function rangeOverview(){
+  var m=0;stocks.forEach(function(s){m=Math.max(m,Math.hypot(s.center[0],s.center[1],s.center[2]))});
+  return Math.max(72,m*2.35+14);
+}
+function updateButtons(){
+  $("overview").classList.toggle("selected",mode==="overview");
+  $("focus").classList.toggle("selected",mode==="focus");
+}
+function overview(){
+  mode="overview";selected=-1;goalTarget=[0,0,0];goalDistance=overviewDistance;renderInfo();updateButtons();highlight();
+}
+function focus(i){
+  if(i<0||i>=stocks.length)return;
+  mode="focus";selected=i;goalTarget=stocks[i].center.slice();goalDistance=16;
+  renderInfo();updateButtons();highlight();
+}
+function highlight(){
+  document.querySelectorAll(".stock").forEach(function(e){e.classList.toggle("selected",Number(e.dataset.idx)===selected)});
+}
+function renderInfo(){
+  if(selected<0){
+    $("ticker").textContent="TOPIX CORE30";
+    $("company").textContent="30の銀河、そのすべての歴史";
+    $("sector").textContent="各星は株価データの1取引日です";
+    $("stockCount").textContent=fmtNum(stocks.length);
+    $("dayCount").textContent=fmtNum(data.meta.pointCount);
+    $("dateLabel").textContent="観測開始";$("priceLabel").textContent="観測終了";
+    $("firstDate").textContent=fmtDate(data.meta.from);$("lastDate").textContent=fmtDate(data.meta.to);
+    $("neighborlist").textContent="銀河を選択すると特徴が近い銘柄を表示します。";return;
+  }
+  var s=stocks[selected];
+  $("ticker").textContent=s.code+" / "+data.meta.universe;
+  $("company").textContent=s.name;
+  $("sector").textContent=s.sector+" · 実際の営業日をすべて表示";
+  $("stockCount").textContent="1 / 30";$("dayCount").textContent=fmtNum(s.points.length);
+  $("dateLabel").textContent="最初の記録";$("priceLabel").textContent="最終記録";
+  $("firstDate").textContent=fmtDate(s.from);$("lastDate").textContent=fmtDate(s.to);
+  var panel=$("neighborlist");panel.replaceChildren();
+  s.neighbors.forEach(function(nb,k){
+    var target=byCode[nb.code];if(!target)return;
+    var btn=make("button","neighbor");
+    var label=make("span",null,(k+1)+". "+target.name);
+    var dist=make("small",null,nb.code);
+    btn.append(label,dist);btn.title="圧縮前の96次元特徴量で近い銘柄へ移動";
+    btn.addEventListener("click",function(){focus(target.index)});panel.appendChild(btn);
+  });
+}
+function initList(){
+  byCode={};stocks.forEach(function(s,i){s.index=i;byCode[s.code]=s});
+  var list=$("stocklist");
+  stocks.forEach(function(s,i){
+    var btn=make("button","stock");btn.dataset.idx=i;
+    btn.append(make("span","number",s.code),make("span","name",s.name),make("i","dot"));
+    btn.style.setProperty("--dot",sectorColors[s.sector]||"#9fcdff");
+    btn.addEventListener("click",function(){focus(i)});list.appendChild(btn);
+  });
+  $("search").addEventListener("input",function(){
+    var q=$("search").value.trim().toLowerCase(),shown=0;
+    list.querySelectorAll(".stock").forEach(function(b){
+      var s=stocks[Number(b.dataset.idx)],yes=(s.code+" "+s.name+" "+s.sector).toLowerCase().includes(q);
+      b.style.display=yes?"flex":"none";if(yes)shown++;
+    });
+    $("count").textContent=shown;
+  });
+}
+function createPins(){
+  labels.replaceChildren();
+  stocks.forEach(function(s,i){
+    var b=make("button","pin",s.code+" "+s.name);b.dataset.idx=i;
+    b.addEventListener("click",function(){focus(i)});
+    labels.appendChild(b);
+  });
+}
+function updateLabels(){
+  var pins=labels.children,lines=[];
+  for(var i=0;i<stocks.length;i++){
+    var q=project(stocks[i].center),el=pins[i];
+    var show=q&&q[0]>-90&&q[0]<innerWidth+90&&q[1]>-35&&q[1]<innerHeight+35&&(mode==="overview"||i===selected||stocks[selected].neighbors.some(function(n){return n.code===stocks[i].code}));
+    el.style.display=show?"block":"none";
+    if(show){el.style.left=q[0]+"px";el.style.top=q[1]+"px"}
+    el.classList.toggle("active",i===selected);
+  }
+  if(selected>=0){
+    var origin=project(stocks[selected].center);
+    if(origin)stocks[selected].neighbors.forEach(function(n){
+      var dest=project(byCode[n.code].center);
+      if(dest)lines.push('<line x1="'+origin[0]+'" y1="'+origin[1]+'" x2="'+dest[0]+'" y2="'+dest[1]+'" stroke="#6ec7f7" stroke-opacity=".22" stroke-width="1"/>');
+    });
+  }
+  links.innerHTML=lines.join("");
+}
+function resize(){
+  var d=Math.min(devicePixelRatio||1,1.7),w=Math.floor(innerWidth*d),h=Math.floor(innerHeight*d);
+  if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h}
+  gl.viewport(0,0,w,h);
+  links.setAttribute("width",innerWidth);links.setAttribute("height",innerHeight);
+}
+function draw(){
+  frame=requestAnimationFrame(draw);
+  resize();
+  for(var i=0;i<3;i++)cameraTarget[i]+=(goalTarget[i]-cameraTarget[i])*.057;
+  cameraDistance+=(goalDistance-cameraDistance)*.048;
+  var eye=[cameraTarget[0]+Math.cos(pitch)*Math.sin(yaw)*cameraDistance,
+           cameraTarget[1]+Math.sin(pitch)*cameraDistance,
+           cameraTarget[2]+Math.cos(pitch)*Math.cos(yaw)*cameraDistance];
+  viewProj=multiply(perspective(Math.PI/3,innerWidth/innerHeight,.1,8000),lookAt(eye,cameraTarget));
+  gl.clear(gl.COLOR_BUFFER_BIT);gl.useProgram(program);
+  gl.uniformMatrix4fv(uMatrix,false,new Float32Array(viewProj));
+  gl.uniform1f(uFocus,selected);gl.uniform1f(uCutoff,cutoff);
+  gl.uniform1f(uSize,Math.min(devicePixelRatio||1,1.7));
+  gl.drawArrays(gl.POINTS,0,data.meta.pointCount);
+  updateLabels();
+}
+function initTime(){
+  var all={};stocks.forEach(function(s){s.points.forEach(function(p){all[p[0]]=1})});
+  allDates=Object.keys(all).map(Number).sort(function(a,b){return a-b});
+  var input=$("time");input.max=allDates.length-1;input.value=allDates.length-1;
+  input.addEventListener("input",function(){
+    cutoffDate=allDates[Number(input.value)]||data.meta.to;cutoff=dayNumber(cutoffDate);
+    $("timeText").textContent=fmtDate(cutoffDate);
+    $("tooltip").style.display="none";
+  });
+  cutoffDate=data.meta.to;cutoff=dayNumber(cutoffDate);$("timeText").textContent=fmtDate(cutoffDate);
+}
+function intro(){
+  if(autoTimer)clearTimeout(autoTimer);
+  var t=byCode["7203"];if(t){selected=t.index;mode="focus";cameraTarget=t.center.slice();goalTarget=t.center.slice();cameraDistance=16;goalDistance=16;renderInfo();updateButtons();highlight()}
+  $("intro").classList.add("visible");
+  autoTimer=setTimeout(function(){
+    $("intro").classList.remove("visible");
+    overview();
+  },2300);
+}
+function initInput(){
+  $("overview").addEventListener("click",function(){if(autoTimer)clearTimeout(autoTimer);overview()});
+  $("focus").addEventListener("click",function(){focus(selected<0?byCode["7203"].index:selected)});
+  $("replay").addEventListener("click",intro);
+  $("reset").addEventListener("click",function(){yaw=.56;pitch=.24;if(mode==="overview")overview();else focus(selected<0?byCode["7203"].index:selected)});
+  canvas.addEventListener("wheel",function(e){e.preventDefault();goalDistance=Math.max(4,Math.min(overviewDistance*2.8,goalDistance*Math.exp(e.deltaY*.0012)))},{passive:false});
+  canvas.addEventListener("pointerdown",function(e){canvas.setPointerCapture(e.pointerId);pointers.set(e.pointerId,[e.clientX,e.clientY]);dragX=e.clientX;dragY=e.clientY;dragging=true;$("tooltip").style.display="none"});
+  canvas.addEventListener("pointermove",function(e){
+    if(pointers.has(e.pointerId)){
+      pointers.set(e.pointerId,[e.clientX,e.clientY]);
+      if(pointers.size===2){
+        var p=Array.from(pointers.values()),span=Math.hypot(p[0][0]-p[1][0],p[0][1]-p[1][1]);
+        if(pinchSpan)goalDistance=Math.max(4,Math.min(overviewDistance*2.8,goalDistance*pinchSpan/span));
+        pinchSpan=span;return;
+      }
+      yaw+=(e.clientX-dragX)*.006;pitch=Math.max(-1.32,Math.min(1.32,pitch+(e.clientY-dragY)*.004));
+      dragX=e.clientX;dragY=e.clientY;return;
+    }
+    if(selected<0||performance.now()-moveAt<40)return;
+    moveAt=performance.now();
+    // Hover selection uses the real projected daily points, not decorative lights.
+    var s=stocks[selected],best=140,daily=null;
+    for(var i=0;i<s.points.length;i++){
+      var p=s.points[i];if(p[0]>cutoffDate)continue;
+      var q=project([s.center[0]+p[2],s.center[1]+p[3],s.center[2]+p[4]]);
+      if(!q)continue;
+      var d=(q[0]-e.clientX)*(q[0]-e.clientX)+(q[1]-e.clientY)*(q[1]-e.clientY);
+      if(d<best){best=d;daily=p}
+    }
+    var el=$("tooltip");
+    if(!daily){el.style.display="none";return}
+    el.textContent=s.name+" · "+fmtDate(daily[0])+" / 調整後終値 "+fmtNum(daily[1])+"円 / 前日比 "+daily[5]+"%";
+    el.style.display="block";el.style.left=Math.min(innerWidth-290,e.clientX+16)+"px";el.style.top=Math.min(innerHeight-80,e.clientY+14)+"px";
+  });
+  function pointerEnd(e){pointers.delete(e.pointerId);pinchSpan=0;if(!pointers.size)dragging=false}
+  canvas.addEventListener("pointerup",pointerEnd);canvas.addEventListener("pointercancel",pointerEnd);
+  canvas.addEventListener("pointerleave",function(){$("tooltip").style.display="none"});
+  addEventListener("keydown",function(e){
+    if(e.key==="Escape"&&document.activeElement!==$("search"))overview();
+    if(e.key==="ArrowRight"&&selected>=0&&document.activeElement!==$("time")&&document.activeElement!==$("search"))focus(byCode[stocks[selected].neighbors[0].code].index);
+  });
+}
+async function start(){
+  try{
+    var r=await fetch("./data.json",{cache:"no-cache"});
+    if(!r.ok)throw Error("data.json の取得に失敗しました (HTTP "+r.status+")");
+    data=await r.json();stocks=data.stocks;
+    if(stocks.length!==30)throw Error("銘柄数が30ではありません");
+    var n=stocks.reduce(function(x,s){return x+s.points.length},0);
+    if(n!==data.meta.pointCount)throw Error("全観測点の件数が一致しません");
+    initGL();upload();initList();initTime();createPins();initInput();
+    overviewDistance=rangeOverview();renderInfo();
+    $("loading").style.display="none";
+    if(matchMedia("(prefers-reduced-motion:reduce)").matches)overview();else intro();
+    draw();
+  }catch(err){
+    $("loading").replaceChildren(make("strong",null,"読み込みに失敗しました"),make("span",null,err.message+"。Release からのデータ生成が正常に完了したか確認してください。"));
+    console.error(err);
+  }
+}
+start();
+})();
+</script>
+</body>
+</html>
