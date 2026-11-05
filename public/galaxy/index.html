@@ -116,13 +116,14 @@ a{color:#8dd8fc}
 "use strict";
 var gl, program, buffer, uMatrix, uFocus, uCutoff, uSize, aPos, aColor, aDate, aStock;
 var canvas=document.getElementById("space"), labels=document.getElementById("labels"), links=document.getElementById("links");
-var data=null,stocks=[],byCode={},startOffsets=[], allDates=[], mode="focus", selected=-1, cutoff=99999999;
+var data=null,stocks=[],byCode={},startOffsets=[], allDates=[], mode="focus", selected=-1, cutoff=30000, cutoffDate=99999999;
 var goalTarget=[0,0,0], cameraTarget=[0,0,0], goalDistance=18, cameraDistance=18;
 var yaw=0.56,pitch=0.24,viewProj=null,overviewDistance=160,frame=0, dragging=false,dragX=0,dragY=0,moveAt=0,autoTimer=null;
 var pointers=new Map(), pinchSpan=0;
 var sectorColors={"食品":"#f39c79","化学":"#a0edaa","医薬品":"#acb0ff","非鉄金属":"#ffa0ba","サービス":"#90eff1","電気機器":"#8dd9ff","機械":"#d4a3f8","輸送用機器":"#83eca9","精密機器":"#ffd597","その他製品":"#b3b2ff","卸売業":"#e8a1e9","銀行":"#ffcf94","保険":"#d9a6ff","通信":"#94caed","小売業":"#cbe989"};
 function $(id){return document.getElementById(id)}
 function fmtDate(n){var s=String(n);return s.slice(0,4)+"/"+s.slice(4,6)+"/"+s.slice(6,8)}
+function dayNumber(n){var s=String(n);return Math.floor(Date.UTC(Number(s.slice(0,4)),Number(s.slice(4,6))-1,Number(s.slice(6,8)))/86400000)}
 function fmtNum(n){return Number(n).toLocaleString("ja-JP")}
 function make(tag,cls,txt){var e=document.createElement(tag);if(cls)e.className=cls;if(txt!==undefined)e.textContent=txt;return e}
 function rgb(h){h=h.replace("#","");return [parseInt(h.slice(0,2),16)/255,parseInt(h.slice(2,4),16)/255,parseInt(h.slice(4,6),16)/255]}
@@ -174,7 +175,7 @@ function upload(){
     s.points.forEach(function(p){
       var glow=Math.min(1,Math.abs(p[5])/7),c=mix(color,p[5]>=0?[1,.53,.67]:[.48,.72,1],glow*.48);
       arr[at++]=s.center[0]+p[2];arr[at++]=s.center[1]+p[3];arr[at++]=s.center[2]+p[4];
-      arr[at++]=c[0];arr[at++]=c[1];arr[at++]=c[2];arr[at++]=p[0];arr[at++]=i;
+      arr[at++]=c[0];arr[at++]=c[1];arr[at++]=c[2];arr[at++]=dayNumber(p[0]);arr[at++]=i;
     });
   });
   gl.bindBuffer(gl.ARRAY_BUFFER,buffer);gl.bufferData(gl.ARRAY_BUFFER,arr,gl.STATIC_DRAW);
@@ -302,11 +303,11 @@ function initTime(){
   allDates=Object.keys(all).map(Number).sort(function(a,b){return a-b});
   var input=$("time");input.max=allDates.length-1;input.value=allDates.length-1;
   input.addEventListener("input",function(){
-    cutoff=allDates[Number(input.value)]||data.meta.to;
-    $("timeText").textContent=fmtDate(cutoff);
+    cutoffDate=allDates[Number(input.value)]||data.meta.to;cutoff=dayNumber(cutoffDate);
+    $("timeText").textContent=fmtDate(cutoffDate);
     $("tooltip").style.display="none";
   });
-  cutoff=data.meta.to;$("timeText").textContent=fmtDate(cutoff);
+  cutoffDate=data.meta.to;cutoff=dayNumber(cutoffDate);$("timeText").textContent=fmtDate(cutoffDate);
 }
 function intro(){
   if(autoTimer)clearTimeout(autoTimer);
@@ -340,7 +341,7 @@ function initInput(){
     // Hover selection uses the real projected daily points, not decorative lights.
     var s=stocks[selected],best=140,daily=null;
     for(var i=0;i<s.points.length;i++){
-      var p=s.points[i];if(p[0]>cutoff)continue;
+      var p=s.points[i];if(p[0]>cutoffDate)continue;
       var q=project([s.center[0]+p[2],s.center[1]+p[3],s.center[2]+p[4]]);
       if(!q)continue;
       var d=(q[0]-e.clientX)*(q[0]-e.clientX)+(q[1]-e.clientY)*(q[1]-e.clientY);
