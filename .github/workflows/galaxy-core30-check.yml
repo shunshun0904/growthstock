@@ -70,9 +70,9 @@ jobs:
           import os
           src=Path('public/galaxy/index.html').read_text(encoding='utf-8')
           data=Path(os.environ['RUNNER_TEMP']+'/galaxy.json').read_text(encoding='utf-8')
-          original='''    var r=await fetch("./data.json",{cache:"no-cache"});
-    if(!r.ok)throw Error("data.json の取得に失敗しました (HTTP "+r.status+")");
-    data=await r.json();stocks=data.stocks;'''
+          original=('    var r=await fetch("./data.json",{cache:"no-cache"});\n'
+                    '    if(!r.ok)throw Error("data.json の取得に失敗しました (HTTP "+r.status+")");\n'
+                    '    data=await r.json();stocks=data.stocks;')
           replacement='''    data=JSON.parse(document.getElementById("preview-data").textContent);stocks=data.stocks;'''
           assert original in src
           src=src.replace(original,replacement,1)
