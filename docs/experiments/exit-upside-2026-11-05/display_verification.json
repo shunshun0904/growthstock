@@ -6,6 +6,7 @@
   "network_offline": true,
   "key_aggregates_visible": true,
   "limitations_visible": true,
+  "ranking_coverage_correction_visible": true,
   "markdown_visible": true,
   "desktop": [
     1440,

@@ -28,7 +28,7 @@ check('eight_exact_oof_hash_matches',pd.read_csv(P/'model_identity.csv').matches
 check('frozen_protocol_hash',hashlib.sha256((P/'protocol.json').read_bytes()).hexdigest()==selection['protocol_sha256'])
 check('no_development_rule_selection_below_minimum',selection['selection_reason'].startswith('insufficient') and selection['exit']['target']==.10)
 check('all_holdout_dates_in_declared_period',d.loc[test.id,'Date'].between(*plan['sell_rule_holdout']).all())
-check('all_holdout_ids_complete_and_all_eight_available',d.loc[test.id,'status'].eq('complete').all() and d.loc[test.id,'all_eight'].all())
+check('all_holdout_ids_complete_and_classifier_scores_available',d.loc[test.id,'status'].eq('complete').all() and d.loc[test.id,[f'pct_{a}' for a in ['lgbm','xgb','cat','lgbm_k15','xgb_k15','cat_k15']]].notna().all().all())
 check('holdout_tuning_labels_already_known',d.loc[test.id,'Date'].gt(pd.Timestamp('2025-10-07')).all())
 check('daily_top_two',d.loc[test.id].groupby('Date').size().max()<=2)
 check('all_rolling_untrainable_keys_predate_last_training_cutoff',len(pd.read_csv(P/'rolling_untrainable_keys.csv'))==7)
@@ -63,6 +63,7 @@ features=[f'pct_{a}' for a in ['lgbm','xgb','cat','lgbm_k15','xgb_k15','cat_k15'
 for r in pred.itertuples(index=False):
     month=pd.Timestamp(r.Date).to_period('M').start_time
     pool=d[d.fit_reference&complete&d.base_min.ge(95)&d.mature_date.lt(month)]
+    check(f'forecast_{r.id}_full_ranking_pools',bool(d.at[r.id,'all_eight']) and pool.ltr_pool_complete.all() and pool.ltr5_pool_complete.all())
     check(f'forecast_{r.id}_no_unmatured_labels',pd.Timestamp(r.fit_latest_maturity)<month and r.n_fit==len(pool))
     delta=pool[features].to_numpy(float)-d.loc[r.id,features].to_numpy(float)
     ni=pool.index.to_numpy()[np.argsort(np.sum(delta*delta,axis=1),kind='stable')[:int(r.k)]]

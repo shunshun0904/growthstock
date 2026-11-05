@@ -1,0 +1,6 @@
+{
+  "coverage_mismatches_detected": true,
+  "ranking_incomplete_study_dates": 16,
+  "rank_based_gates_and_estimator_exclude_those_dates": true,
+  "classifier_only_results_unchanged": true
+}

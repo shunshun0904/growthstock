@@ -1,8 +1,9 @@
 {
-  "new_exit_tests": 12,
+  "new_exit_tests": 13,
   "existing_live_track_tests": 28,
   "existing_data_store_tests": 79,
   "all_passed": true,
-  "numeric_checks": 532,
-  "production_source_changed": false
+  "numeric_checks": 569,
+  "production_source_changed": false,
+  "ranking_pool_correction_tested": true
 }

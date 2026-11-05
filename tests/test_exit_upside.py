@@ -103,6 +103,17 @@ class ExitPaths(unittest.TestCase):
         with self.assertRaises(ValueError):
             E.combine_scores(frames,date)
 
+    def test_omitted_future_label_invalidates_rank_but_not_classifier_gate(self):
+        date=pd.Timestamp('2026-01-05')
+        d=pd.DataFrame({'Date':[date], 'Code':['1'],'base_min':[98.], 'score_lgbm':[.9],
+                        'pct_ltr':[90.], 'pct_ltr5':[95.]})
+        cov=pd.DataFrame({'daily_complete':[True], 'rolling_complete':[False]},index=[date])
+        out=E.require_full_ranking_pools(d,cov)
+        self.assertTrue(E.entry_mask(out,{'base':95}).iloc[0])
+        self.assertFalse(E.entry_mask(out,{'base':95,'rolling':80}).iloc[0])
+        self.assertTrue(np.isnan(out.pct_ltr5.iloc[0]))
+        self.assertEqual(out.pct_ltr.iloc[0],90.)
+
 
 if __name__ == "__main__":
     unittest.main()

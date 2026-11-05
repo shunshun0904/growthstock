@@ -17,11 +17,12 @@
     "incomplete_ohlc": 54
   },
   "period_rows": {
-    "reference": 13270,
-    "development": 2045,
+    "reference": 13269,
+    "development": 2046,
     "holdout": 1177
   },
-  "all8_missing": 3,
+  "all8_missing": 774,
+  "ranking_incomplete_study_dates": 16,
   "identity_matches": 8,
   "key_audit_limitation": "exact current mart unavailable via artifact download; frozen previous mart plus all current OOF keys forms a conservative reconstructed key audit, not proof of complete input parity"
 }

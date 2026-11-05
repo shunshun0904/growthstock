@@ -163,6 +163,16 @@ def entry_mask(d, spec):
     return mask.fillna(False)
 
 
+def require_full_ranking_pools(scores, coverage):
+    """A rank of future-label-eligible rows is not a full decision-time rank."""
+    out = scores.copy()
+    for algo, field in [('ltr', 'daily_complete'), ('ltr5', 'rolling_complete')]:
+        safe = out.Date.map(coverage[field]).fillna(False)
+        out[f'{algo}_pool_complete'] = safe
+        out.loc[~safe, f'pct_{algo}'] = np.nan
+    return out
+
+
 def selected_ids(d, spec, top_k=2):
     """Signal selection precedes checking future path completeness."""
     return d.loc[entry_mask(d, spec)].sort_values(

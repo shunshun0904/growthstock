@@ -1,13 +1,13 @@
 {
-  "passed": 532,
+  "passed": 569,
   "holdout_paths_independently_rebuilt": 52,
-  "forecasts_independently_rebuilt": 52,
+  "forecasts_independently_rebuilt": 49,
   "code_sha256": {
-    "research/exit_upside.py": "36123deb4965c345785479244ef6fbe5c4b39dbe2970ed249a489d63432abe0b",
-    "research/exp/e123_exit_upside.py": "ffa740f44debb528cc914c1ee5abfa972d7ecd52f6c9b27eff068879247fab21",
-    "research/exp/e123_report.py": "7fb7860591c4cc98780e308663bb07ab2a412db49c808d127af8ab02339fb834",
-    "research/exp/e123_verify.py": "e5918152bd3c5de48c787d611f60bdaacda736497f48167cdef9c1f4faf00697",
-    "tests/test_exit_upside.py": "5ad49687a6f379ddae88361e0fd75aac366fbd9a3843689cc067778b58c85f0c"
+    "research/exit_upside.py": "e9c576feac8867e4f7b5205af105c075480eac591ce25ddec7a7470d4ad07e14",
+    "research/exp/e123_exit_upside.py": "decb1954aeac2845c3766c32caa702667b596602a990c69b015fc63c48224dd1",
+    "research/exp/e123_report.py": "65fbbb75b9905babc8ae83eca39b040eb88fd783c9ecb78eb8fd674dcf1acec9",
+    "research/exp/e123_verify.py": "3c44ac981835a8eb3644e601d562673f11945818bab7455124f7777361bd683e",
+    "tests/test_exit_upside.py": "04962e53d8307988beba9b915acb9bf6adf11f8b841dc420b398077c8e14e409"
   },
   "all_passed": true
 }

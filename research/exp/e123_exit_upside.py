@@ -121,6 +121,22 @@ def prepare(args, plan):
     folds = walkforward.make_folds(keys.Date, min_train_months=36, test_months=6, step_months=6, embargo_days=20)
     pool.loc[pool.label_mature.isna() & pool.Date.le(max(f.train_end for f in folds)),
              ["Code", "Date", "cand_date"]].to_csv(p / "rolling_untrainable_keys.csv", index=False)
+    coverage = pd.DataFrame(index=pd.DatetimeIndex(scores.Date.unique()).sort_values())
+    coverage.index.name = "Date"
+    coverage['expected_daily'] = keys.groupby('Date').size().reindex(coverage.index, fill_value=0)
+    coverage['scored_daily'] = frames['ltr'].groupby('Date').size().reindex(coverage.index, fill_value=0)
+    coverage['expected_rolling'] = pool.groupby('Date').size().reindex(coverage.index, fill_value=0)
+    coverage['scored_rolling'] = frames['ltr5'].groupby('Date').size().reindex(coverage.index, fill_value=0)
+    coverage['daily_complete'] = coverage.expected_daily.eq(coverage.scored_daily)
+    coverage['rolling_complete'] = coverage.expected_rolling.eq(coverage.scored_rolling)
+    for algo, universe in [('ltr',keys),('ltr5',pool)]:
+        extra = frames[algo][['Code','Date']].merge(universe[['Code','Date']], on=['Code','Date'], how='left', indicator=True)
+        if extra._merge.eq('left_only').any():
+            raise ValueError(f'OOF rank keys outside reconstructed universe: {algo}')
+    coverage.to_csv(p / 'ranking_pool_coverage.csv')
+    # Ranking OOF excludes unavailable future R20 rows. Do not interpret ranks
+    # among that subset as ranks of the decision-time full candidate universe.
+    scores = E.require_full_ranking_pools(scores, coverage)
     scores["fold"] = 0
     scores["fold_safe"] = False
     checks = []
@@ -146,7 +162,9 @@ def prepare(args, plan):
     tune_last = max(keys.loc[keys.Date.le(cutoff), "label_mature"].max(), pool.loc[pool.Date.le(cutoff), "label_mature"].max())
     scores["post_tuning"] = scores.Date.gt(tune_last)
     scores["all_eight"] = scores[list(E.SCORE_FEATURES)].notna().all(axis=1)
-    scores["eligible"] = scores.fold_safe & scores.post_tuning & scores.all_eight
+    # Classifier-only gates do not depend on a ranking pool's completeness.
+    all_six = scores[[f'pct_{a}' for a in E.CLASSIFIERS]].notna().all(axis=1)
+    scores["eligible"] = scores.fold_safe & scores.post_tuning & all_six
     # Ineligible historical rows may be meta-model fitting inputs, never test observations.
     scores["fit_reference"] = scores.fold_safe & scores.all_eight
     scores["period"] = "reference"
@@ -166,6 +184,8 @@ def prepare(args, plan):
              "path_status": scores.status.value_counts().to_dict(),
              "period_rows": scores.period.value_counts().to_dict(),
              "all8_missing": int((~scores.all_eight).sum()),
+             "ranking_incomplete_study_dates": int((~coverage.daily_complete | ~coverage.rolling_complete).loc[
+                 coverage.index.isin(scores.loc[scores.period.isin(['development','holdout']),'Date'])].sum()),
              "identity_matches": len(identities),
              "key_audit_limitation": plan["known_limitations"][2]}
     dump(p / "data_audit.json", audit)
@@ -259,7 +279,7 @@ def develop(d, paths, cal, plan, p):
     chosen_exit = next(x for x in rules if x["name"] == choice.exit) if choice is not None else {"name": "reference", **plan["reference_exit"]}
     # Tune estimator only in development, using all high-base95 daily top2 queries.
     query_ids = E.selected_ids(dev, {"base": 95})
-    query_ids = np.array([i for i in query_ids if d.at[i, "status"] == "complete"], dtype=int)
+    query_ids = np.array([i for i in query_ids if d.at[i, "status"] == "complete" and d.at[i,'all_eight']], dtype=int)
     forecasts = []
     for k in (50, 100, 200):
         f = estimate_rows(d, paths, query_ids, k)
@@ -368,7 +388,7 @@ def evaluate(d, paths, cal, plan, selected, p):
                                     "target_first_net_pct": E.trade_summary(hi, cost).get("mean_net_pct")})
         # Locked-estimator forecasts for both base95 and the selected entry.
         q = E.selected_ids(sub, {"base": 95})
-        q = np.array([i for i in q if d.at[i, "status"] == "complete"], dtype=int)
+        q = np.array([i for i in q if d.at[i, "status"] == "complete" and d.at[i,'all_eight']], dtype=int)
         f = estimate_rows(d, paths, q, selected["neighbor_k"])
         if len(f):
             f["selected_entry"] = f.id.isin(ids)

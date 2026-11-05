@@ -1,0 +1,17 @@
+{
+  "date": "2026-11-05",
+  "reason": "OOF rankings omit some rows with unavailable future R20, so subset ranks must not stand in for full decision-time pool ranks",
+  "first_commit": "bf63c06fa4214dcc83dca3a68904acedbca310da",
+  "basis": "candidate-key coverage; no realized profit threshold or outcome optimization",
+  "correction": "Mark ranking percentiles unavailable for incomplete decision-date pools; classifier-only gates stay independent; exclude unavailable rank rows from neighbor fit and query",
+  "study_incomplete_pool_dates": 16,
+  "base_classifier_exit_comparison_trades_unchanged": 52,
+  "estimator_development_before": 5,
+  "estimator_development_after": 4,
+  "estimator_holdout_before": 52,
+  "estimator_holdout_after": 49,
+  "entry_exit_selection_unchanged": true,
+  "neighbor_k_still": 50,
+  "superseded_estimator_values": true,
+  "limitation": "Ranking-dependent evaluation is conditional on historical pool reconstruction; no claim that future missingness could be anticipated live"
+}
