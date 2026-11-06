@@ -1,0 +1,51 @@
+{
+  "experiment": "E126",
+  "recorded_utc": "2026-11-06T13:51:44.916803+00:00",
+  "branch": "codex/optimal-stopping-exit-research-20261106",
+  "base_commit": "199afc2e1532dd8a525a47efbf8b934d8f4b6191",
+  "protocol_sha256": "4b65434764eddc535d29ceeb2a68ec4395355c43ec486320adf63726fd3abaf6",
+  "versions": {
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "pandas": "2.2.3",
+    "scipy": "1.17.0",
+    "pyarrow": "18.1.0"
+  },
+  "source_sha256": {
+    "research/optimal_exit.py": "c7dafbd016042056c062edb1d6788eae1ca1eba2c5655c1d67bfc155e358e114",
+    "research/exp/e126_optimal_exit.py": "453c4b3e6b67d68173edddea127b44156ae028650e6590341b99b801f95f64d9",
+    "research/exp/e126_verify.py": "d671a4f7bc326bc08831c05a3749c65696171182c1141bbc026af2d3c7533ee3",
+    "research/exp/e126_report.py": "2612fd326694486a3374c84b38af0959ca8a6414f858a7aff5aa3993f75ebde8",
+    "research/exp/e126_verify_display.py": "c997e401e879d2ca8a09691551c098c710161091251a164d38c29bd515424126",
+    "tests/test_optimal_exit.py": "c71ae2653c967a7a79130b29a3a52abae2bc80acef51c1ff9f86c9e710096ea2"
+  },
+  "result_sha256": {
+    "episodes.parquet": "a518e2719802ba37d31e3281d9d7626693b4de5c167578971f275023acbf598a",
+    "states.parquet": "60ee88cc1a2e806e29cf93a440d402854b2032407048c30dd7d6e9c2239feee1",
+    "paths.npz": "5c98e2b3924c475339da0aec08a51edfc6c05f34aa9e9eb046156d790d9d408d",
+    "boundary_grid.npz": "29d7f46e8a67d267e46a3a2f0891b9d7fa7e35289324275dbf662665e3b8b8e8",
+    "outer_episodes.parquet": "0e1c40645252e080af7b325f6d3a09446bba0c4c67cfc477a8a5a3ea4483f510",
+    "outer_states.parquet": "a39da8c29c65a1c0aab2277cc4fb60aacae325a797e35c9f719fccd730a2e61d",
+    "predictions.parquet": "7aa019cde23a7db248748864c739d7c5d6cb17f3c0e36510570df29dfee07907",
+    "exits.parquet": "0d4bd7cafa96343995937296d7f2db18ab6ef934718b9c94cd503c1e6e00c55a",
+    "prior_assignments.parquet": "02bcf73bd91fdc5a85e77914686ac186e9447c80f0112490883976431c1cd642",
+    "daily_forecasts.csv": "c783d6030031aed0541ca6965bee7169a110befef9defd6e7afbc7b7170817fc",
+    "trade_outcomes.csv": "2d952526880000294dbdc6b1a8a8846ac62ba82434b847fd402069e6d3b9ecde"
+  },
+  "verification": {
+    "all_passed": true,
+    "checks": 57631,
+    "episodes": 3265,
+    "daily_states": 62035,
+    "exit_cases": 35915,
+    "methods": 11,
+    "max_volatility_error": 1.8100836584808433e-14,
+    "independence_unit": "Episodes and 21-market-session signal-date blocks; daily states and synthetic paths are not trade sample size"
+  },
+  "targeted_tests": {
+    "passed": 42,
+    "new_tests": 16
+  },
+  "public_rows": "Only aggregate metrics/audits; all row-level vendor data remain private",
+  "production_changed": false
+}

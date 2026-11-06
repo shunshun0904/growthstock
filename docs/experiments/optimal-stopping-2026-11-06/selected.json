@@ -1,0 +1,281 @@
+{
+  "protocol_sha256": "4b65434764eddc535d29ceeb2a68ec4395355c43ec486320adf63726fd3abaf6",
+  "selected": {
+    "fixed_trailing": {
+      "candidate": "fixed_trailing_00",
+      "cv_score": -0.007749956150266547,
+      "family": "fixed_trailing",
+      "threshold": 0.03
+    },
+    "drift_gate": {
+      "candidate": "drift_gate_03",
+      "cv_score": -0.004742730514714957,
+      "family": "drift_gate",
+      "prior_type": "pooled",
+      "strength": "infinite",
+      "vol_window": 60
+    },
+    "drawdown_boundary": {
+      "candidate": "drawdown_boundary_09",
+      "cv_score": -0.008167806596887936,
+      "family": "drawdown_boundary",
+      "prior_type": "score_band",
+      "strength": 20,
+      "vol_window": 60
+    }
+  },
+  "configs": {
+    "fixed_trailing_00": {
+      "family": "fixed_trailing",
+      "threshold": 0.03
+    },
+    "fixed_trailing_01": {
+      "family": "fixed_trailing",
+      "threshold": 0.05
+    },
+    "fixed_trailing_02": {
+      "family": "fixed_trailing",
+      "threshold": 0.08
+    },
+    "fixed_trailing_03": {
+      "family": "fixed_trailing",
+      "threshold": 0.12
+    },
+    "drift_gate_00": {
+      "family": "drift_gate",
+      "prior_type": "pooled",
+      "strength": 20,
+      "vol_window": 60
+    },
+    "drift_gate_01": {
+      "family": "drift_gate",
+      "prior_type": "pooled",
+      "strength": 60,
+      "vol_window": 60
+    },
+    "drift_gate_02": {
+      "family": "drift_gate",
+      "prior_type": "pooled",
+      "strength": 120,
+      "vol_window": 60
+    },
+    "drift_gate_03": {
+      "family": "drift_gate",
+      "prior_type": "pooled",
+      "strength": "infinite",
+      "vol_window": 60
+    },
+    "drift_gate_04": {
+      "family": "drift_gate",
+      "prior_type": "score_band",
+      "strength": 20,
+      "vol_window": 60
+    },
+    "drift_gate_05": {
+      "family": "drift_gate",
+      "prior_type": "score_band",
+      "strength": 60,
+      "vol_window": 60
+    },
+    "drift_gate_06": {
+      "family": "drift_gate",
+      "prior_type": "score_band",
+      "strength": 120,
+      "vol_window": 60
+    },
+    "drift_gate_07": {
+      "family": "drift_gate",
+      "prior_type": "score_band",
+      "strength": "infinite",
+      "vol_window": 60
+    },
+    "drawdown_boundary_00": {
+      "family": "drawdown_boundary",
+      "prior_type": "pooled",
+      "strength": 20,
+      "vol_window": 20
+    },
+    "drawdown_boundary_01": {
+      "family": "drawdown_boundary",
+      "prior_type": "pooled",
+      "strength": 20,
+      "vol_window": 60
+    },
+    "drawdown_boundary_02": {
+      "family": "drawdown_boundary",
+      "prior_type": "pooled",
+      "strength": 60,
+      "vol_window": 20
+    },
+    "drawdown_boundary_03": {
+      "family": "drawdown_boundary",
+      "prior_type": "pooled",
+      "strength": 60,
+      "vol_window": 60
+    },
+    "drawdown_boundary_04": {
+      "family": "drawdown_boundary",
+      "prior_type": "pooled",
+      "strength": 120,
+      "vol_window": 20
+    },
+    "drawdown_boundary_05": {
+      "family": "drawdown_boundary",
+      "prior_type": "pooled",
+      "strength": 120,
+      "vol_window": 60
+    },
+    "drawdown_boundary_06": {
+      "family": "drawdown_boundary",
+      "prior_type": "pooled",
+      "strength": "infinite",
+      "vol_window": 20
+    },
+    "drawdown_boundary_07": {
+      "family": "drawdown_boundary",
+      "prior_type": "pooled",
+      "strength": "infinite",
+      "vol_window": 60
+    },
+    "drawdown_boundary_08": {
+      "family": "drawdown_boundary",
+      "prior_type": "score_band",
+      "strength": 20,
+      "vol_window": 20
+    },
+    "drawdown_boundary_09": {
+      "family": "drawdown_boundary",
+      "prior_type": "score_band",
+      "strength": 20,
+      "vol_window": 60
+    },
+    "drawdown_boundary_10": {
+      "family": "drawdown_boundary",
+      "prior_type": "score_band",
+      "strength": 60,
+      "vol_window": 20
+    },
+    "drawdown_boundary_11": {
+      "family": "drawdown_boundary",
+      "prior_type": "score_band",
+      "strength": 60,
+      "vol_window": 60
+    },
+    "drawdown_boundary_12": {
+      "family": "drawdown_boundary",
+      "prior_type": "score_band",
+      "strength": 120,
+      "vol_window": 20
+    },
+    "drawdown_boundary_13": {
+      "family": "drawdown_boundary",
+      "prior_type": "score_band",
+      "strength": 120,
+      "vol_window": 60
+    },
+    "drawdown_boundary_14": {
+      "family": "drawdown_boundary",
+      "prior_type": "score_band",
+      "strength": "infinite",
+      "vol_window": 20
+    },
+    "drawdown_boundary_15": {
+      "family": "drawdown_boundary",
+      "prior_type": "score_band",
+      "strength": "infinite",
+      "vol_window": 60
+    }
+  },
+  "fit_audits": [
+    {
+      "cutoff": "2023-10-01",
+      "train_n": 5437,
+      "train_codes": 2414,
+      "train_dates": 540,
+      "last_mature": "2023-09-29 00:00:00",
+      "pooled": -0.00035993678181240365,
+      "bands": [
+        -0.00032459890438349496,
+        -0.0003564732721209192,
+        -0.0005312238653174797,
+        4.6174751383420654e-05,
+        -0.00021120838478348286,
+        -0.0009914279195511464,
+        -0.0009310454218946721
+      ],
+      "band_n": [
+        3214,
+        1527,
+        423,
+        172,
+        53,
+        33,
+        15
+      ],
+      "fallback_sigma": 0.019246383920324465,
+      "winsor_low": -0.01959768864540185,
+      "winsor_high": 0.016998341405693885,
+      "train_trade_sha256": "36499eef319a24e33ebfe11fc49014f556a54d542053d66dc97bfda2d601ba2e"
+    },
+    {
+      "cutoff": "2024-04-01",
+      "train_n": 7480,
+      "train_codes": 2720,
+      "train_dates": 652,
+      "last_mature": "2024-03-27 00:00:00",
+      "pooled": -0.0002727942140824852,
+      "bands": [
+        -0.0004035239801011622,
+        -0.00010776318193430243,
+        0.0001537542227214229,
+        -0.00011452185893188536,
+        -4.696813408849417e-05,
+        -0.0010503119434389693,
+        -0.0009390739502146152
+      ],
+      "band_n": [
+        4444,
+        2090,
+        587,
+        214,
+        83,
+        46,
+        16
+      ],
+      "fallback_sigma": 0.01891383210895204,
+      "winsor_low": -0.019248505853875362,
+      "winsor_high": 0.016799799753721784,
+      "train_trade_sha256": "5fd5557c9155f9dbcf5a77a67e4c42f42ed518a2eb14af02072a45293aa1ba8f"
+    },
+    {
+      "cutoff": "2024-10-01",
+      "train_n": 9118,
+      "train_codes": 2920,
+      "train_dates": 772,
+      "last_mature": "2024-09-30 00:00:00",
+      "pooled": -0.0003540109138358477,
+      "bands": [
+        -0.0005230629220628068,
+        -0.00018371935019615343,
+        7.044227732397077e-05,
+        -0.00014934989796572143,
+        1.1569932809389727e-05,
+        -0.0003197916465890915,
+        -0.001124975083416175
+      ],
+      "band_n": [
+        5419,
+        2560,
+        693,
+        267,
+        104,
+        55,
+        20
+      ],
+      "fallback_sigma": 0.019040224534199728,
+      "winsor_low": -0.019948593882637523,
+      "winsor_high": 0.01603051482410079,
+      "train_trade_sha256": "def9950f72f9be9aac14dc8ec7778c1e67813ffc7f56094e730be7b7b812a5da"
+    }
+  ]
+}

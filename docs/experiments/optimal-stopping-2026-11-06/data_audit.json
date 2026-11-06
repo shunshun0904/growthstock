@@ -1,0 +1,21 @@
+{
+  "protocol_sha256": "4b65434764eddc535d29ceeb2a68ec4395355c43ec486320adf63726fd3abaf6",
+  "source_rows": 16492,
+  "episodes": 15506,
+  "states": 294614,
+  "outer_episodes": 3265,
+  "initial_fit": 12002,
+  "outer_states": 62035,
+  "max_spot_error": 0.0,
+  "price_last": "2026-11-05 00:00:00",
+  "sigma20_missing": 110,
+  "sigma60_missing": 131,
+  "source_hashes": {
+    "/workspace/scratch/daily-arrival-20261105/results/source_signals.parquet": "e47a4c2e1ecde67d43bf41507e81d1aa94a296018cfcb305c3557d49497a4df5",
+    "/workspace/scratch/daily-arrival-20261105/results/landmarks.parquet": "03198ae2f126695faad7abdc4c6c9177a5b37ee2a20b9ac5aaf08c48e67bda30",
+    "/workspace/scratch/daily-arrival-20261105/results/calendar.csv": "b7d188ece06f05f11bf768c2c995e6169852ab0248734cf0613fef747911ad68",
+    "/workspace/scratch/daily-arrival-20261105/results/model_identity.csv": "0c7a1034d00f68e9f46a6450d0cbd5cfb1e2b7d0123da74e3f7ff967966886c3",
+    "/workspace/scratch/exit-upside-20261105/results/paths.npz": "ba57e9b94cb74849ffcb220a952d7ebcd64d69b78041c09db7d9f5d95db7e309",
+    "/workspace/scratch/exit-upside-20261105/results/adjusted_prices.parquet": "21cf6620d3f27ef5cba9d7814e89ff00c1f42a171c2b006cdb1cb600a841d423"
+  }
+}

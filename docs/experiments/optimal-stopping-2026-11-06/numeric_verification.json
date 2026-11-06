@@ -1,0 +1,10 @@
+{
+  "all_passed": true,
+  "checks": 57631,
+  "episodes": 3265,
+  "daily_states": 62035,
+  "exit_cases": 35915,
+  "methods": 11,
+  "max_volatility_error": 1.8100836584808433e-14,
+  "independence_unit": "Episodes and 21-market-session signal-date blocks; daily states and synthetic paths are not trade sample size"
+}

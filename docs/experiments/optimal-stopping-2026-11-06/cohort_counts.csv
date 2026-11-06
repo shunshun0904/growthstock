@@ -1,0 +1,13 @@
+cohort,period,episodes,codes,signal_dates
+all,history,15506,3442,1242
+all,initial_fit,12002,3240,1005
+all,outer,3265,1945,221
+base95,history,307,268,211
+base95,initial_fit,238,210,168
+base95,outer,69,66,43
+base97,history,146,139,115
+base97,initial_fit,115,111,92
+base97,outer,31,31,23
+base99,history,31,30,29
+base99,initial_fit,28,27,26
+base99,outer,3,3,3

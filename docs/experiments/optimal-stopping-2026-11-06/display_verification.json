@@ -1,0 +1,23 @@
+{
+  "all_passed": true,
+  "javascript_enabled": false,
+  "network_offline": true,
+  "viewports": [
+    {
+      "width": 1440,
+      "aggregate_tables_visible": 19,
+      "trade_details": 69,
+      "daily_rows": 1311,
+      "embedded_images": 2,
+      "body_overflow": false
+    },
+    {
+      "width": 390,
+      "aggregate_tables_visible": 19,
+      "trade_details": 69,
+      "daily_rows": 1311,
+      "embedded_images": 2,
+      "body_overflow": false
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "log_boundary_error_bound": 0.005345486772037944,
+  "grids": 391,
+  "finite_boundaries": true,
+  "max_non_upper_nodes": 0,
+  "monotonic_failures": 0,
+  "bound_interpretation": "Maximum observed mesh/domain/interpolation discrepancy on prespecified probes; not a rigorous global error bound",
+  "seconds": 59.60256505012512,
+  "protocol_sha256": "4b65434764eddc535d29ceeb2a68ec4395355c43ec486320adf63726fd3abaf6"
+}
