@@ -1,0 +1,10 @@
+{
+  "all_passed": true,
+  "checks": 9752,
+  "trades": 60,
+  "states": 1140,
+  "exit_cases": 1680,
+  "methods": 3,
+  "tsfm_input": "past high rolling maxima only; no labels, scores or future covariates",
+  "independence_unit": "trade and 21-session signal-date blocks, never simulated paths or daily state count"
+}

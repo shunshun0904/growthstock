@@ -1,0 +1,34 @@
+{
+  "protocol_sha256": "32c34c0de258b7cd2f2fd9775d5b4316160eaa64a5d43df77a5e32330a5386a8",
+  "prior_trades": 215,
+  "prior_last_mature": "2025-09-05 00:00:00",
+  "outer_trades": 60,
+  "outer_codes": 57,
+  "signal_dates": 43,
+  "queries": 1140,
+  "min_finite_context": 193,
+  "signal_start": "2025-11-14 00:00:00",
+  "signal_end": "2026-10-02 00:00:00",
+  "max_spot_error": 2.916823049758932e-08,
+  "max_forward_error": 4.440892098500626e-16,
+  "risks": {
+    "10": {
+      "trades": 55,
+      "states": 652
+    },
+    "15": {
+      "trades": 59,
+      "states": 880
+    }
+  },
+  "source_hashes": {
+    "/workspace/scratch/daily-arrival-20261105/results/landmarks.parquet": "03198ae2f126695faad7abdc4c6c9177a5b37ee2a20b9ac5aaf08c48e67bda30",
+    "/workspace/scratch/daily-arrival-20261105/results/source_signals.parquet": "e47a4c2e1ecde67d43bf41507e81d1aa94a296018cfcb305c3557d49497a4df5",
+    "/workspace/scratch/exit-upside-20261105/results/adjusted_prices.parquet": "21cf6620d3f27ef5cba9d7814e89ff00c1f42a171c2b006cdb1cb600a841d423",
+    "/workspace/scratch/exit-upside-20261105/results/paths.npz": "ba57e9b94cb74849ffcb220a952d7ebcd64d69b78041c09db7d9f5d95db7e309",
+    "/workspace/scratch/daily-arrival-20261105/results/calendar.csv": "b7d188ece06f05f11bf768c2c995e6169852ab0248734cf0613fef747911ad68",
+    "/workspace/scratch/daily-arrival-20261105/results/model_identity.csv": "0c7a1034d00f68e9f46a6450d0cbd5cfb1e2b7d0123da74e3f7ff967966886c3"
+  },
+  "excluded_trade_count": 1,
+  "excluded_minimum_finite_context": 157
+}

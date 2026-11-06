@@ -1,0 +1,16 @@
+{
+  "isolation_max_abs_log_error": 1.7881393432617188e-07,
+  "torch": "2.14.0+cpu",
+  "chronos": "2.3.2",
+  "dtype": "float32",
+  "device": "cpu",
+  "cross_learning": false,
+  "fine_tuned": false,
+  "model_sha256": "ddcda3c7508bf2528087723e98a20707cc04b7f370ae275a9fd88078ddba4f42",
+  "model_revision": "95a9710e2596287d08352589f42634fa5abdf0a7",
+  "batch_size": 16,
+  "queries.parquet": "711174c244b1b2e27bbd641d60fb9d904176964bee2cc5b5a438f8b7668f0a25",
+  "contexts.npy": "e6e3af8695f72041b3f00162e2c61f71f53823aa04591e7bd345a4a2ee05492e",
+  "protocol.json": "32c34c0de258b7cd2f2fd9775d5b4316160eaa64a5d43df77a5e32330a5386a8",
+  "model": "ddcda3c7508bf2528087723e98a20707cc04b7f370ae275a9fd88078ddba4f42"
+}

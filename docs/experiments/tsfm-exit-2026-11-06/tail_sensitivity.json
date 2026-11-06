@@ -1,0 +1,10 @@
+{
+  "mean_abs_change_mean": 0.00037750351034160855,
+  "max_abs_change_mean": 0.09431736606274166,
+  "mean_abs_change_sd": 0.0030616757221512475,
+  "crossings": 15,
+  "outside10_fraction": 0.11052631578947368,
+  "outside15_fraction": 0.16842105263157894,
+  "p10_max_abs_tail_change": 0.009967902385447425,
+  "p15_max_abs_tail_change": 0.009831974639619823
+}

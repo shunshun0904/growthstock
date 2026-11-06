@@ -1,0 +1,35 @@
+{
+  "experiment": "E125",
+  "date": "2026-11-06",
+  "branch": "codex/tsfm-exit-research-20261106",
+  "parent_commit": "37bd6bd9462b1516db22c65be50825300de8d5a8",
+  "production_changed": false,
+  "validation": {
+    "targeted_tests": 40,
+    "numeric_checks": 9752,
+    "all_passed": true
+  },
+  "code_sha256": {
+    "research/tsfm_exit.py": "7df179bdcedda2e557302a596b05ec88050bc8a967aa241ef204124a8e7c9013",
+    "research/exit_upside.py": "e9c576feac8867e4f7b5205af105c075480eac591ce25ddec7a7470d4ad07e14",
+    "research/exp/e125_tsfm_exit.py": "212b473cee17900e989e3f9c15258a3975461631d7d1b8284448b111461bde9b",
+    "research/exp/e125_report.py": "6a1857f659612d5b0f7d7a30171f5fa8bd5527819022b6fc5c7bcf304c2204dc",
+    "research/exp/e125_verify.py": "2a848b6830fb6c659a16d96e47ce9e7cc9027674ff63820d9fbf04ffc107e43c",
+    "research/exp/e125_verify_display.py": "cfb3957e76e26d24449d2ed3bfc7d933c1960a04ea3618ad3a61a8ac4b748d80",
+    "research/requirements-tsfm-exit.txt": "c90769442f6ea207c342345a3f7d1f99d218f4cc0982e4390b91df8a9c610e44",
+    "tests/test_tsfm_exit.py": "60d50b9f2600fdce510b213fa571425c1079e70a60844c80e075b4a272ec5359"
+  },
+  "result_sha256": {
+    "scores.csv": "faec138f8b106c3a1c090609517effb3205952aa1d90e49a8ecc9917c854ad22",
+    "paired_brier.csv": "39f36a0f21e119e31c83bd988a485618d30f25119b165a475cece14e1966d8e4",
+    "day_buckets.csv": "b0fd35caa8e143953990fd636f46be0d2eafcec428859a532daca8b36ce806ba",
+    "calibration.csv": "c2fc0ebe3754c2594d00483d58a4d5b3203a982dd3d84aff012faaf2bf4ddafb",
+    "maxima.csv": "8c90d26c1cf2d6e035cec591fb5041b21e7ba4acce37ed3e755cab78d4d91004",
+    "policies.csv": "146f9b53342b8bd8a7a5158d96b30e94b2da81d6743b44872fc2cd180b84c540",
+    "age_prior.csv": "f3276711f9840d3e593f239cd8137e1cb536ee3f6b5bd172910d47c36150f5b8",
+    "tail_sensitivity.json": "d2bd876272f207a07d686ce663f12e7f0fd4a4631c376ca68c73456ef3ba45f5",
+    "inference_audit.json": "5c453d06ddfaf1ca466a1ad4b81ce8188e03d1ce940e71506bbd2ec62f134f77",
+    "numeric_verification.json": "6aa8c2cdcd356d8d4fa137a62163e1f230fb2f1bf065cce567bc03cd06433470",
+    "display_verification.json": "9416f296c71af6c611a9bfed11d1465f24ae59978b397cd51977505ffd1c0d76"
+  }
+}
