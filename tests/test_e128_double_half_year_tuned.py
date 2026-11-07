@@ -214,6 +214,26 @@ class OutcomeTest(unittest.TestCase):
         self.assertAlmostEqual(out["peak_ratio"][0], 1.5)
         self.assertAlmostEqual(out["end_ratio"][1], 5.0)                      # 別の銘柄は影響しない
 
+    def test_take_profit_sells_at_the_first_close_over_thirty_percent_or_holds_to_the_end(self):
+        closes = [100, 110, 125, 135, 90, 150, 80, 85, 95, 100, 105, 110, 115, 120]
+        a = bars_frame("1111", closes, opens=[100.0] * len(closes))
+        b = bars_frame("2222", [100, 120, 110, 90, 80, 85, 88, 92, 95, 97, 99, 100, 101, 102], opens=[100.0] * len(closes))
+        rows = pd.DataFrame({"Code": ["1111", "2222", "1111"], "Date": [a["Date"][0], b["Date"][0], a["Date"][3]]})
+        out = X.forward_outcomes(pd.concat([a, b], ignore_index=True), rows, horizon=5)
+        # 1111 初日: 終値 110・125・135 → 135 で利益確定（ちょうど +30% ではなくその日の終値）
+        self.assertTrue(out["tp_hit"][0])
+        self.assertAlmostEqual(out["tp_ratio"][0], 1.35)
+        # 2222: +30% に届かない → 半年後（5行先）の終値 85
+        self.assertFalse(out["tp_hit"][1])
+        self.assertAlmostEqual(out["tp_ratio"][1], out["end_ratio"][1])
+        self.assertAlmostEqual(out["tp_ratio"][1], 0.85)
+        # 1111 4日目（135）: 買値は翌日の寄り 100、窓 90・150 → 150 で利益確定（あとの 80 は関係ない）
+        self.assertAlmostEqual(out["tp_ratio"][2], 1.5)
+        df = pd.concat([out, pd.DataFrame({"x2": [0, 0, 0]})], axis=1)
+        self.assertEqual(X.take_profit_mismatch(df), 0)
+        df.loc[0, "tp_ratio"] = 1.2
+        self.assertGreater(X.take_profit_mismatch(df), 0)
+
     def test_outcome_stats_counts_levels_and_losses(self):
         rows = pd.DataFrame({"peak_ratio": [2.5, 1.6, 1.3, 1.1, 1.0], "end_ratio": [1.8, 1.2, 0.9, 1.3, 0.8]})
         st = X.outcome_stats(rows)
@@ -325,6 +345,8 @@ class EndToEndTest(unittest.TestCase):
         self.assertIn("行方（銘柄ごと。", text2)
         self.assertIn(" 外れ ", text2)
         self.assertIn("[check] 半年後の終値の倍率が無い行 0 / 最高値の倍率を超える行 0", text2)
+        self.assertIn("売り方「+30% で利益確定」", text2)
+        self.assertIn("で利益確定」の損益が無い行・最高値と合わない行", text2)
         self.assertAlmostEqual(saved2["cv"]["arms"]["C"]["pr_auc"], saved["cv"]["arms"]["C"]["pr_auc"])
         for part in ("holdout", "oof"):
             for arm in ("A", "C"):

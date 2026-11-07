@@ -118,6 +118,9 @@ ARM_NAME = {a: name for a, _, _, name in ARMS}
 PREC_TOPS = (0.10, 0.05, 0.02, 0.01, 0.005)
 #: 行方で数える上がり幅（+30%・+50%）
 GAIN_LEVELS = (0.30, 0.50)
+#: 売り方（運用者の指示「+30% で利益確定」）: 半年以内に終値が初めて買値の +30% 以上になった日の終値で売る。届かなければ半年後の
+#: 終値で売る。損切りなし
+TAKE_PROFIT = 0.30
 #: 前進分割（参考）のテストの年と、学習とテストのあいだの暦日（125営業日×1.5＋5＝193日。実験127 と同じ式）
 OOF_YEARS = (2021, 2022, 2023, 2024, 2025)
 PURGE_DAYS = int(np.ceil(TARGET[1] * E.PURGE_PER_DAY)) + E.PURGE_PAD
@@ -226,9 +229,61 @@ def forward_outcomes(bars: pd.DataFrame, rows: pd.DataFrame, horizon: int = TARG
         fr["have_forward"], close.transform("last").where(fr["stopped"]))
     fr["peak_ratio"] = fr["fmax"] / fr["entry"]
     fr["end_ratio"] = end_close / fr["entry"]
-    m = rows[["Code", "Date"]].merge(fr[["Code", "Date", "peak_ratio", "end_ratio"]], on=["Code", "Date"], how="left",
-                                     validate="one_to_one")
-    return m[["peak_ratio", "end_ratio"]].reset_index(drop=True)
+    m = rows[["Code", "Date"]].merge(fr[["Code", "Date", "peak_ratio", "end_ratio"]].reset_index(), on=["Code", "Date"],
+                                     how="left", validate="one_to_one")
+    tp_ratio, tp_hit = take_profit(prices, fr, m["index"].to_numpy(), horizon, TAKE_PROFIT)
+    out = m[["peak_ratio", "end_ratio"]].reset_index(drop=True)
+    out["tp_ratio"] = tp_ratio
+    out["tp_hit"] = tp_hit
+    return out
+
+
+def take_profit_mismatch(df: pd.DataFrame, level: float = TAKE_PROFIT) -> int:
+    """利益確定の損益の確かめ: 無い行、利益確定できたかが最高値と食い違う行、できた行の値が +level 未満か最高値超え、できない行が
+    半年後の終値と違う行の数。"""
+    tp = df["tp_ratio"].to_numpy(dtype=float)
+    hit = df["tp_hit"].to_numpy(dtype=bool)
+    peak = df["peak_ratio"].to_numpy(dtype=float)
+    end = df["end_ratio"].to_numpy(dtype=float)
+    reach = peak >= 1.0 + level - 1e-9
+    bad = (np.isnan(tp) | (hit != reach)
+           | (hit & ((tp < 1.0 + level - 1e-9) | (tp > peak + 1e-12)))
+           | (~hit & ~np.isclose(tp, end, rtol=0, atol=1e-12)))
+    return int(bad.sum())
+
+
+def take_profit(prices: pd.DataFrame, fr: pd.DataFrame, pos: np.ndarray, horizon: int, level: float
+                ) -> Tuple[np.ndarray, np.ndarray]:
+    """
+    売り方「+level で利益確定」の損益の倍率と、利益確定できたか。pos は prices の行番号（無い行は NaN）。
+    t+1〜t+horizon 営業日の終値のうち、初めて 買値×(1+level) 以上になった日の終値で売る（その日の終値なので +level ちょうどとは
+    限らない）。届かなければ end_ratio（半年後の終値）。窓は銘柄ごとの行で数える（売買が止まればそこまで）。
+    """
+    close = prices["close"].to_numpy(dtype=float)
+    code = prices["Code"].to_numpy()
+    entry = fr["entry"].to_numpy(dtype=float)
+    end_ratio = fr["end_ratio"].to_numpy(dtype=float)
+    n = len(close)
+    ratio = np.full(len(pos), np.nan)
+    hit = np.zeros(len(pos), dtype=bool)
+    for j, p in enumerate(pos):
+        if p is None or not np.isfinite(p):
+            continue
+        i = int(p)
+        e = entry[i]
+        if not np.isfinite(e) or e <= 0:
+            continue
+        stop = min(i + 1 + horizon, n)
+        w = close[i + 1:stop]
+        same = code[i + 1:stop] == code[i]
+        w = w[same]
+        idx = np.flatnonzero(w >= e * (1.0 + level) - 1e-9 * e)
+        if idx.size:
+            ratio[j] = w[idx[0]] / e
+            hit[j] = True
+        else:
+            ratio[j] = end_ratio[i]
+    return ratio, hit
 
 
 def peak_ratio(bars: pd.DataFrame, rows: pd.DataFrame, horizon: int = TARGET[1]) -> np.ndarray:
@@ -313,11 +368,18 @@ def outcome_stats(rows: pd.DataFrame) -> Dict:
     peak = rows["peak_ratio"].to_numpy(dtype=float) - 1.0
     end = (rows["end_ratio"].to_numpy(dtype=float) - 1.0) if "end_ratio" in rows.columns else np.full(n, np.nan)
     has_end = n > 0 and not np.isnan(end).all()
+    tp = (rows["tp_ratio"].to_numpy(dtype=float) - 1.0) if "tp_ratio" in rows.columns else np.full(n, np.nan)
+    has_tp = n > 0 and not np.isnan(tp).all()
     out: Dict = {"n": n,
                  "peak_median": float(np.nanmedian(peak)) if n else nan,
                  "end_median": float(np.nanmedian(end)) if has_end else nan,
                  "end_mean": float(np.nanmean(end)) if has_end else nan,
-                 "end_lt0": int(np.sum(end < 0))}
+                 "end_lt0": int(np.sum(end < 0)),
+                 "tp_mean": float(np.nanmean(tp)) if has_tp else nan,
+                 "tp_median": float(np.nanmedian(tp)) if has_tp else nan,
+                 "tp_hit": int(rows["tp_hit"].astype(bool).sum()) if "tp_hit" in rows.columns else 0,
+                 "tp_lt0": int(np.sum(tp < 0)),
+                 "tp_le_m20": int(np.sum(tp <= -0.20 + 1e-12))}
     for lv in GAIN_LEVELS:
         tag = int(round(lv * 100))
         out[f"peak_ge_{tag}"] = int(np.sum(peak >= lv - 1e-12))
@@ -347,7 +409,7 @@ def precision_table(parts: Sequence[Tuple[pd.DataFrame, np.ndarray]], tops: Sequ
 
 
 def score_frame(rows: pd.DataFrame, period: str, key: str = TARGET[0]) -> pd.DataFrame:
-    keep = ["Date", "Code", key, "peak_ratio"] + (["end_ratio"] if "end_ratio" in rows.columns else [])
+    keep = ["Date", "Code", key, "peak_ratio"] + [c for c in ("end_ratio", "tp_ratio", "tp_hit") if c in rows.columns]
     return rows[keep].assign(period=str(period))
 
 
@@ -606,6 +668,33 @@ def fate_text(st: Dict) -> str:
             f"・+50%以上 {st['end_ge_50']}・マイナス {st['end_lt0']}")
 
 
+def tp_text(st: Dict) -> str:
+    def p(v):
+        if v is None or not np.isfinite(v):
+            return "—"
+        return "±0%" if abs(100 * v) < 0.05 else f"{100 * v:+.1f}%"
+    return (f"利益確定 {st['tp_hit']} / 残りは半年後に売る {st['n'] - st['tp_hit']} | 損益 平均 {p(st['tp_mean'])}・中央値 {p(st['tp_median'])}"
+            f"・マイナス {st['tp_lt0']}・−20%以下 {st['tp_le_m20']}")
+
+
+def tp_lines(tables: Dict[str, List[Dict]], log=print) -> None:
+    """売り方「+30% で利益確定」の銘柄ごとの損益（全体と、2倍に届かなかった銘柄）。"""
+    first = next(iter(tables.values()), None)
+    if not first or "tp_mean" not in first[0]["stocks"]["all"]:
+        return
+    log(f"    売り方「+{100 * TAKE_PROFIT:.0f}% で利益確定」（終値が初めて買値の +{100 * TAKE_PROFIT:.0f}% 以上になった日の終値で売る。"
+        "届かなければ半年後の終値で売る。損切りなし。銘柄ごと・1銘柄同じ金額）")
+    for i, row in enumerate(first):
+        head = f"上位 {100 * row['top']:g}%"
+        for arm, _, name in SCORE_ARMS:
+            t = tables.get(arm)
+            if not t:
+                continue
+            st = t[i]["stocks"]
+            log(f"    {head:<8} {arm} {name:<14} 全体 {st['all']['n']:>4,}銘柄: {tp_text(st['all'])}")
+            head = ""
+
+
 def fate_lines(tables: Dict[str, List[Dict]], log=print) -> None:
     """銘柄ごとの行方（選んだ銘柄の全体と、2倍に届かなかった銘柄）。"""
     first = next(iter(tables.values()), None)
@@ -634,6 +723,7 @@ def report_precision(prec_hold: Dict[str, List[Dict]], hold: Optional[Dict], pre
             f"（{100 * hold['base']:.2f}%）。学習は探索に使った {hold['n_train']:,}行]")
         precision_lines(prec_hold, hold["base"], log)
         fate_lines(prec_hold, log)
+        tp_lines(prec_hold, log)
     if prec_oof and oof_years:
         n = sum(y["n_test"] for y in oof_years)
         pos = sum(y["pos_test"] for y in oof_years)
@@ -645,6 +735,7 @@ def report_precision(prec_hold: Dict[str, List[Dict]], hold: Optional[Dict], pre
             f"{y['year']}: {y['n_train']:,}・{y['n_test']:,}・{y['pos_test']:,}" for y in oof_years))
         precision_lines(prec_oof, base, log)
         fate_lines(prec_oof, log)
+        tp_lines(prec_oof, log)
 
 
 # --------------------------------------------------------------------------- #
@@ -689,6 +780,8 @@ def main(argv: Optional[Sequence[str]] = None, log=print) -> int:
     outcomes = forward_outcomes(bars, df, horizon)
     df["peak_ratio"] = outcomes["peak_ratio"].to_numpy(dtype=float)
     df["end_ratio"] = outcomes["end_ratio"].to_numpy(dtype=float)
+    df["tp_ratio"] = outcomes["tp_ratio"].to_numpy(dtype=float)
+    df["tp_hit"] = outcomes["tp_hit"].to_numpy(dtype=bool)
     del bars, ds, outcomes
     bad = ratio_mismatch(df, key, multiple)
     log(f"[check] 半年以内の終値の最高値 ÷ 買値 から作り直した「2倍に届いたか」がラベルと合わない行 {100 * bad:.3f}%（許容 0）")
@@ -696,6 +789,11 @@ def main(argv: Optional[Sequence[str]] = None, log=print) -> int:
         raise SystemExit("伸びに使う最高値の倍率が2倍のラベルと合わない")
     no_end = int(df["end_ratio"].isna().sum())
     over = int((df["end_ratio"] > df["peak_ratio"] + 1e-12).sum())
+    tp_bad = take_profit_mismatch(df)
+    log(f"[check] 「+{100 * TAKE_PROFIT:.0f}% で利益確定」の損益が無い行・最高値と合わない行（利益確定できたか＝最高値が +{100 * TAKE_PROFIT:.0f}% 以上、"
+        f"できた行は +{100 * TAKE_PROFIT:.0f}% 以上で最高値以下、できない行は半年後の終値）{tp_bad:,}（許容 0）")
+    if tp_bad:
+        raise SystemExit("利益確定の損益が最高値・半年後の終値と合わない")
     log(f"[check] 半年後の終値の倍率が無い行 {no_end:,} / 最高値の倍率を超える行 {over:,}（どちらも許容 0）")
     if no_end or over:
         raise SystemExit("半年後の終値の倍率が無いか、最高値の倍率を超える行がある")
