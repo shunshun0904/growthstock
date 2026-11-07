@@ -212,14 +212,18 @@ def forward_outcomes(bars: pd.DataFrame, rows: pd.DataFrame, horizon: int = TARG
     """
     rows の各行の、買値（翌営業日の寄り）に対する倍率を2つ（rows と同じ並び）:
       peak_ratio  t+1〜t+horizon 営業日の終値の最高値 ÷ 買値（2倍のラベルと同じ値）
-      end_ratio   半年後の終値 ÷ 買値。t+horizon 営業日目の終値。それより前に売買が止まった銘柄は最後の終値。
+      end_ratio   半年後の終値 ÷ 買値。t+horizon 営業日目の終値（その日に値が無ければ直前の終値）。それより前に売買が止まった
+                  銘柄は最後の終値。
                   先が足りず、売買も止まっていない行は NaN
     窓は実験127 の price_columns・forward_frame と同じ（銘柄ごとの行で数える）。日足の重ねは build_frame と同じく後ろの行を残す。
     """
     prices = E.price_columns(bars).drop_duplicates(["Code", "Date"], keep="last").reset_index(drop=True)
     fr = E.forward_frame(prices, horizon)
     close = prices.groupby("Code", sort=False)["close"]
-    end_close = close.shift(-horizon).where(fr["have_forward"], close.transform("last").where(fr["stopped"]))
+    # その日に終値が無い（売買が無かった）ときは、その日までの直近の終値（銘柄をまたがない）
+    filled = close.ffill()
+    end_close = filled.groupby(prices["Code"], sort=False).shift(-horizon).where(
+        fr["have_forward"], close.transform("last").where(fr["stopped"]))
     fr["peak_ratio"] = fr["fmax"] / fr["entry"]
     fr["end_ratio"] = end_close / fr["entry"]
     m = rows[["Code", "Date"]].merge(fr[["Code", "Date", "peak_ratio", "end_ratio"]], on=["Code", "Date"], how="left",

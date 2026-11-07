@@ -202,6 +202,18 @@ class OutcomeTest(unittest.TestCase):
         known = out["end_ratio"].notna()
         self.assertTrue((out.loc[known, "end_ratio"] <= out.loc[known, "peak_ratio"] + 1e-12).all())
 
+    def test_missing_close_on_the_last_day_uses_the_previous_close_of_the_same_stock(self):
+        closes = [100, 110, 150, np.nan, 130, 125, 140, 90, 95, 100, 105, 110, 115, 120]
+        a = bars_frame("1111", closes, opens=[100.0] * len(closes))
+        a.loc[3, "AdjC"] = np.nan
+        a.loc[3, "C"] = np.nan
+        b = bars_frame("2222", [500.0] * len(closes), opens=[100.0] * len(closes))
+        rows = pd.DataFrame({"Code": ["1111", "2222"], "Date": [a["Date"][0], a["Date"][0]]})
+        out = X.forward_outcomes(pd.concat([a, b], ignore_index=True), rows, horizon=3)
+        self.assertAlmostEqual(out["end_ratio"][0], 1.5)                      # 4日目が空 → 3日目の 150
+        self.assertAlmostEqual(out["peak_ratio"][0], 1.5)
+        self.assertAlmostEqual(out["end_ratio"][1], 5.0)                      # 別の銘柄は影響しない
+
     def test_outcome_stats_counts_levels_and_losses(self):
         rows = pd.DataFrame({"peak_ratio": [2.5, 1.6, 1.3, 1.1, 1.0], "end_ratio": [1.8, 1.2, 0.9, 1.3, 0.8]})
         st = X.outcome_stats(rows)
