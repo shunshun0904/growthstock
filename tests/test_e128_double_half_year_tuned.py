@@ -11,6 +11,10 @@
 - しきい値を上げたときの的中率: 上位はちょうど round(q×行数) 件（少なくとも1）で、スコアの高い順。銘柄ごとは期間ごとに
   しきい値を初めて越えた日の行だけ。期間ごとに上位を切ってまとめる。的中率の95%の幅（Wilson）。伸び（最高値の倍率 − 1）の
   中央値。最高値の倍率から作り直した「2倍に届いたか」が2倍のラベルとすべての行で合い、ずらせば見つかる
+- 行方: 半年後の終値は窓の最後の日（t+h 行目）の終値、窓の途中で売買が止まった銘柄は最後の終値、先が足りず止まってもいない行は
+  不明。+30%・+50% 以上・マイナスの数と中央値・平均。2倍に届かなかった銘柄だけの行方も出る
+- 前の回の探索を使う: 列の指紋・ラベル・境界が同じときだけ読み、違えば止まる。前の回と件数・的中が同じかを数える。通しで2回
+  回すと、2回目は探索をやり直さず、同じ銘柄が選ばれ（一致 20 / 20）、行方が出る
 - 通しで回す（データの読み込みと本番の木は差し替え、探索は本物の tuning.tune を小さな木・2試行で）: 探索は本番と同じ分割
   （year_cap_date・5分割・PR-AUC）で2倍のラベルを学び、本番の research/lgbm_params.json は書かない（save_params を呼ばない・
   ファイルが変わらない）。表と2つの読み方・CV とホールドアウトの参考・しきい値を上げたときの的中率（ホールドアウトと前進分割、
@@ -40,7 +44,7 @@ import train_model  # noqa: E402
 import tuning  # noqa: E402
 import e127_triple_one_year as E  # noqa: E402
 import e128_double_half_year_tuned as X  # noqa: E402
-from test_e127_triple_one_year import synthetic_inputs  # noqa: E402
+from test_e127_triple_one_year import bars_frame, synthetic_inputs  # noqa: E402
 
 
 def frame(days, have_until, stopped_after=0):
@@ -175,6 +179,86 @@ class PrecisionTest(unittest.TestCase):
         self.assertGreater(X.ratio_mismatch(df), 0.0)
 
 
+class OutcomeTest(unittest.TestCase):
+    def test_end_is_the_close_on_the_last_day_of_the_window_and_stopped_names_use_their_last_close(self):
+        closes = [100, 110, 150, 120, 130, 125, 140, 90, 95, 100, 105, 110, 115, 120, 125, 130, 135, 140, 145, 150]
+        a = bars_frame("1111", closes, opens=[100.0] * len(closes))
+        b = bars_frame("2222", [100, 120, 80, 90], opens=[100.0] * 4)        # 4日で売買が止まる（上場廃止の形）
+        bars = pd.concat([a, b], ignore_index=True)
+        rows = pd.DataFrame({"Code": ["1111", "1111", "2222", "1111"],
+                             "Date": [a["Date"][0], a["Date"][5], b["Date"][1], a["Date"][18]]})
+        out = X.forward_outcomes(bars, rows, horizon=3)
+        # 初日: 買値は翌日の寄り 100、窓は2〜4日目の終値（110・150・120）→ 最高 1.5・窓の最後の日 120 → 1.2
+        self.assertAlmostEqual(out["peak_ratio"][0], 1.5)
+        self.assertAlmostEqual(out["end_ratio"][0], 1.2)
+        # 6日目: 窓は 140・90・95 → 最高 1.4・最後の日 0.95（最高値から下がって終わる）
+        self.assertAlmostEqual(out["peak_ratio"][1], 1.4)
+        self.assertAlmostEqual(out["end_ratio"][1], 0.95)
+        # 止まった銘柄の2日目: 窓は 80・90 しかない → 最高 0.9・最後の終値 0.9
+        self.assertAlmostEqual(out["peak_ratio"][2], 0.9)
+        self.assertAlmostEqual(out["end_ratio"][2], 0.9)
+        # 先が足りず、売買も止まっていない → 半年後の終値は不明
+        self.assertTrue(np.isnan(out["end_ratio"][3]))
+        known = out["end_ratio"].notna()
+        self.assertTrue((out.loc[known, "end_ratio"] <= out.loc[known, "peak_ratio"] + 1e-12).all())
+
+    def test_outcome_stats_counts_levels_and_losses(self):
+        rows = pd.DataFrame({"peak_ratio": [2.5, 1.6, 1.3, 1.1, 1.0], "end_ratio": [1.8, 1.2, 0.9, 1.3, 0.8]})
+        st = X.outcome_stats(rows)
+        self.assertEqual(st["n"], 5)
+        self.assertEqual((st["peak_ge_30"], st["peak_ge_50"]), (3, 2))          # ちょうど +30% も数える
+        self.assertEqual((st["end_ge_30"], st["end_ge_50"]), (2, 1))
+        self.assertEqual(st["end_lt0"], 2)
+        self.assertAlmostEqual(st["peak_median"], 0.3)
+        self.assertAlmostEqual(st["end_median"], 0.2)
+        self.assertAlmostEqual(st["end_mean"], 0.2)
+
+    def test_pick_stats_splits_hits_and_misses(self):
+        f = PrecisionTest.frame().assign(end_ratio=[1.9, 1.5, 0.9, 1.4, 1.2, 1.0])
+        st = X.pick_stats(f)
+        self.assertEqual((st["all"]["n"], st["miss"]["n"]), (6, 3))              # 2倍に届かなかったのは3行
+        self.assertEqual(st["miss"]["end_lt0"], 1)
+        self.assertEqual(st["miss"]["peak_ge_30"], 2)
+        self.assertEqual(st["miss"]["end_ge_30"], 0)
+
+
+class ParamsFromTest(unittest.TestCase):
+    BOUNDS = {"train_end": "2024-11-01", "test_start": "2025-05-01", "last_full": "2026-05-01"}
+
+    def write(self, tmp, **over):
+        rec = {"learning_rate": 0.05, "num_leaves": 31, "n_estimators": 200,
+               "_cv": {"scheme": "year_cap_date", "n_splits": 5, "n_trials": 50, "mean_pr_auc": 0.165},
+               "_features_sig": "abc", "_label": {"key": "x2", "horizon": 125, "multiple": 2.0},
+               "_bounds": dict(self.BOUNDS)}
+        rec.update(over)
+        path = os.path.join(tmp, "p.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({X.PARAMS_KEY: rec}, fh)
+        return path
+
+    def test_reads_params_only_when_columns_label_and_bounds_match(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            params, rec = X.load_params_from(self.write(tmp), "abc", self.BOUNDS)
+            self.assertEqual(params, {"learning_rate": 0.05, "num_leaves": 31, "n_estimators": 200, "verbose": -1})
+            self.assertEqual(rec["n_trials"], 50)
+            with self.assertRaises(SystemExit):
+                X.load_params_from(self.write(tmp), "xyz", self.BOUNDS)
+            with self.assertRaises(SystemExit):
+                X.load_params_from(self.write(tmp, _label={"key": "x2", "horizon": 250, "multiple": 3.0}), "abc", self.BOUNDS)
+            with self.assertRaises(SystemExit):
+                X.load_params_from(self.write(tmp), "abc", {**self.BOUNDS, "test_start": "2025-05-08"})
+            with self.assertRaises(SystemExit):
+                X.load_params_from(os.path.join(tmp, "none.json"), "abc", self.BOUNDS)
+
+    def test_compare_prev_counts_identical_tables(self):
+        t = {"holdout": {"C": [{"top": 0.01, "rows": {"n": 43, "hits": 13}, "stocks": {"n": 39, "hits": 13}}]}}
+        self.assertEqual(X.compare_prev({"precision": t}, t), (1, 1))
+        changed = json.loads(json.dumps(t))
+        changed["holdout"]["C"][0]["stocks"]["hits"] = 12
+        self.assertEqual(X.compare_prev({"precision": t}, changed), (0, 1))
+        self.assertEqual(X.compare_prev(None, t), (0, 1))
+
+
 class EndToEndTest(unittest.TestCase):
     PARAMS = {"objective": "binary", "boosting_type": "gbdt", "n_estimators": 15, "num_leaves": 7, "learning_rate": 0.1,
               "min_child_samples": 5, "subsample": 0.8, "subsample_freq": 1, "colsample_bytree": 0.8,
@@ -202,6 +286,7 @@ class EndToEndTest(unittest.TestCase):
             with mock.patch.object(E, "load_inputs", return_value=(ds, bars)), \
                     mock.patch.object(E, "production_params", return_value=dict(self.PARAMS)), \
                     mock.patch.object(tuning, "SEARCH_N_ESTIMATORS", 8), \
+                    mock.patch.dict(tuning.FIXED, {"n_jobs": 1}), \
                     mock.patch.object(tuning, "tune", side_effect=spy), \
                     mock.patch.object(tuning, "save_params", side_effect=AssertionError("本番のパラメータを書いた")), \
                     contextlib.redirect_stdout(out):
@@ -211,6 +296,35 @@ class EndToEndTest(unittest.TestCase):
                 saved = json.load(fh)
             with open(par, encoding="utf-8") as fh:
                 params = json.load(fh)
+            # 2回目: 探索はやり直さず、1回目のパラメータを読む。同じ銘柄が選ばれ、行方が出る
+            out2 = io.StringIO()
+            with mock.patch.object(E, "load_inputs", return_value=(ds, bars)), \
+                    mock.patch.object(E, "production_params", return_value=dict(self.PARAMS)), \
+                    mock.patch.object(tuning, "tune", side_effect=AssertionError("探索をやり直した")), \
+                    contextlib.redirect_stdout(out2):
+                rc2 = X.main(["--seeds", "0,1", "--ends", "2020-06-30,all", "--out", res, "--params-out", par,
+                              "--params-from", par, "--prev", res])
+            with open(res, encoding="utf-8") as fh:
+                saved2 = json.load(fh)
+        text2 = out2.getvalue()
+        self.assertEqual(rc2, 0)
+        self.assertIn("探索はやり直さず、前の回の探索したパラメータを使う", text2)
+        self.assertIn("一致 20 / 20", text2)
+        self.assertIn("行方（銘柄ごと。", text2)
+        self.assertIn(" 外れ ", text2)
+        self.assertIn("[check] 半年後の終値の倍率が無い行 0 / 最高値の倍率を超える行 0", text2)
+        self.assertAlmostEqual(saved2["cv"]["arms"]["C"]["pr_auc"], saved["cv"]["arms"]["C"]["pr_auc"])
+        for part in ("holdout", "oof"):
+            for arm in ("A", "C"):
+                for r1, r2 in zip(saved["precision"][part][arm], saved2["precision"][part][arm]):
+                    self.assertEqual((r1["stocks"]["n"], r1["stocks"]["hits"]), (r2["stocks"]["n"], r2["stocks"]["hits"]))
+                    st = r2["stocks"]
+                    self.assertEqual(st["all"]["n"], st["n"])
+                    self.assertEqual(st["miss"]["n"], st["n"] - st["hits"])
+                    self.assertLessEqual(st["miss"]["peak_ge_50"], st["miss"]["peak_ge_30"])
+                    self.assertLessEqual(st["miss"]["end_ge_30"], st["miss"]["peak_ge_30"])
+        for code in ds["Code"].unique():
+            self.assertNotIn(code, text2)
         with open(tuning.PARAMS_PATH, "rb") as fh:
             self.assertEqual(fh.read(), before)
         text = out.getvalue()

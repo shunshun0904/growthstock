@@ -14,6 +14,10 @@
   追加の指示（同日・結果が出る前）「B：2倍のラベル × +10% 用の木（前回の実験127と同じ組み合わせ） この比較はいらないです。検証は
   いまlgbmだけでお願いします。」→ 比べるのは本番の lgbm（A）と 2倍用に探索した LightGBM（C）の2つだけにする（いったん回した
   run 42373190959 は B を含んでいたので、結果が出る前に止めた）。
+  追加の依頼（同日・run 42375605469 の結果を見て）「例えば、上位1%で残りの26サンプルが、2倍には届かなくとも最終的にどこまで上昇
+  したのかは気になります。半年で+30%や+50%でも十分なので。」→ 的中率の表に、選んだ銘柄（全体と、2倍に届かなかった銘柄）の行方を
+  足す（下の「行方」）。探索はやり直さず、前の回の探索したパラメータを --params-from で読み（列の指紋・ラベル・境界が同じことを
+  確かめる）、選ばれた銘柄が前の回と同じかを、上位の割合×木×期間ごとの件数・的中で確かめる（--prev）。
 
 ラベル: 実験127 の「2倍（半年以内）」と同じ（買値は翌営業日の寄り。t+1〜t+125 営業日の終値の最大が買値の2倍以上なら正例。
   売買が止まった銘柄は止まるまでで判定。先が足りない行は使わない）。使う行は +10% と 2倍の両方が分かる新高値の候補。
@@ -52,15 +56,21 @@
     日に1回だけ買うとみなす。的中率に95%の幅（Wilson））の2通り。期間はホールドアウトと、前進分割 2021〜2025年（学習はテストの
     年の始まりの PURGE_DAYS 暦日前より前の行。年ごとに上位を切ってまとめる。C の木は探索に使った期間の行で探索したので、その期間に
     入る年の C は楽観側）。上位の割合はその期間の行のスコアの順位で切るので、そのまま本番のしきい値にはならない
+  - 行方（銘柄ごと。選んだ銘柄の全体と、2倍に届かなかった銘柄）: 半年以内の終値の最高値までの上がり幅と、半年後（125営業日目。
+    それより前に売買が止まった銘柄は最後の終値）の終値での損益。どちらも買値（翌営業日の寄り）に対する割合で、中央値・+30% 以上・
+    +50% 以上の数、半年後の損益は平均とマイナスの数も
 
 確かめ（合わなければ止まる）
   実験127 と同じ（+10% のラベルが本番の定義・買値と20営業日の窓が本番のラベルと合う・373列すべてに区分が付く・本番のパラメータが
   373列で探索したもの）。加えて、探索に渡すラベルが2倍のラベルであること・探索の行がホールドアウトの起点からエンバーゴぶん前で
-  終わること・探索が分割を作れたこと・伸びに使う最高値の倍率から作り直した「2倍に届いたか」がラベルとすべての行で合うこと。
+  終わること・探索が分割を作れたこと・伸びに使う最高値の倍率から作り直した「2倍に届いたか」がラベルとすべての行で合うこと・
+  半年後の終値の倍率がすべての行にあり、最高値の倍率を超えないこと。
 
 公開ログには集計だけ（件数・割合・区分名・列名・指標・パラメータ）。銘柄ごとの値は出さない。結果は research/_data/oof/e128_results.json。
 
     exp=e128_double_half_year_tuned.py  args=""   （既定は --n-trials 50 --seeds 0,1,2）
+    前の回の探索を使う: args="--params-from research/_data/oof/e128_params.json --prev research/_data/oof/e128_results.json"
+    （Run Experiment は research/_data/oof を同じ台本の前の回から引き継ぐ）
 """
 from __future__ import annotations
 
@@ -106,6 +116,8 @@ ARMS = (("A", "p10", "prod", "+10%（本番の lgbm）"),
 ARM_NAME = {a: name for a, _, _, name in ARMS}
 #: しきい値を上げたときの的中率（参考）で見る上位の割合
 PREC_TOPS = (0.10, 0.05, 0.02, 0.01, 0.005)
+#: 行方で数える上がり幅（+30%・+50%）
+GAIN_LEVELS = (0.30, 0.50)
 #: 前進分割（参考）のテストの年と、学習とテストのあいだの暦日（125営業日×1.5＋5＝193日。実験127 と同じ式）
 OOF_YEARS = (2021, 2022, 2023, 2024, 2025)
 PURGE_DAYS = int(np.ceil(TARGET[1] * E.PURGE_PER_DAY)) + E.PURGE_PAD
@@ -196,17 +208,28 @@ def cv_scores(tdf: pd.DataFrame, cols: Sequence[str], params_by_arm: Dict[str, D
 # --------------------------------------------------------------------------- #
 # 当たり具合（参考）
 # --------------------------------------------------------------------------- #
-def peak_ratio(bars: pd.DataFrame, rows: pd.DataFrame, horizon: int = TARGET[1]) -> np.ndarray:
+def forward_outcomes(bars: pd.DataFrame, rows: pd.DataFrame, horizon: int = TARGET[1]) -> pd.DataFrame:
     """
-    rows の各行の t+1〜t+horizon 営業日の終値の最高値 ÷ 買値（翌営業日の寄り）。2倍のラベルと同じ窓・同じ値（実験127 の
-    price_columns・forward_frame。日足の銘柄・日の重ねは build_frame と同じく後ろの行を残す）。
+    rows の各行の、買値（翌営業日の寄り）に対する倍率を2つ（rows と同じ並び）:
+      peak_ratio  t+1〜t+horizon 営業日の終値の最高値 ÷ 買値（2倍のラベルと同じ値）
+      end_ratio   半年後の終値 ÷ 買値。t+horizon 営業日目の終値。それより前に売買が止まった銘柄は最後の終値。
+                  先が足りず、売買も止まっていない行は NaN
+    窓は実験127 の price_columns・forward_frame と同じ（銘柄ごとの行で数える）。日足の重ねは build_frame と同じく後ろの行を残す。
     """
     prices = E.price_columns(bars).drop_duplicates(["Code", "Date"], keep="last").reset_index(drop=True)
     fr = E.forward_frame(prices, horizon)
+    close = prices.groupby("Code", sort=False)["close"]
+    end_close = close.shift(-horizon).where(fr["have_forward"], close.transform("last").where(fr["stopped"]))
     fr["peak_ratio"] = fr["fmax"] / fr["entry"]
-    m = rows[["Code", "Date"]].merge(fr[["Code", "Date", "peak_ratio"]], on=["Code", "Date"], how="left",
+    fr["end_ratio"] = end_close / fr["entry"]
+    m = rows[["Code", "Date"]].merge(fr[["Code", "Date", "peak_ratio", "end_ratio"]], on=["Code", "Date"], how="left",
                                      validate="one_to_one")
-    return m["peak_ratio"].to_numpy(dtype=float)
+    return m[["peak_ratio", "end_ratio"]].reset_index(drop=True)
+
+
+def peak_ratio(bars: pd.DataFrame, rows: pd.DataFrame, horizon: int = TARGET[1]) -> np.ndarray:
+    """rows の各行の t+1〜t+horizon 営業日の終値の最高値 ÷ 買値（2倍のラベルと同じ窓・同じ値）。"""
+    return forward_outcomes(bars, rows, horizon)["peak_ratio"].to_numpy(dtype=float)
 
 
 def ratio_mismatch(df: pd.DataFrame, key: str = TARGET[0], multiple: float = TARGET[2]) -> float:
@@ -276,14 +299,37 @@ def wilson(k: int, n: int, z: float = 1.96) -> Tuple[float, float]:
     return max(0.0, mid - half), min(1.0, mid + half)
 
 
+def outcome_stats(rows: pd.DataFrame) -> Dict:
+    """
+    選んだ行の行方: 半年以内の終値の最高値までの上がり幅（peak）と、半年後の終値での損益（end）。どちらも買値に対する割合。
+    中央値、+30%・+50%（GAIN_LEVELS）以上の数、半年後の損益の平均とマイナスの数。end_ratio の列が無ければ peak だけ。
+    """
+    n = int(len(rows))
+    nan = float("nan")
+    peak = rows["peak_ratio"].to_numpy(dtype=float) - 1.0
+    end = (rows["end_ratio"].to_numpy(dtype=float) - 1.0) if "end_ratio" in rows.columns else np.full(n, np.nan)
+    has_end = n > 0 and not np.isnan(end).all()
+    out: Dict = {"n": n,
+                 "peak_median": float(np.nanmedian(peak)) if n else nan,
+                 "end_median": float(np.nanmedian(end)) if has_end else nan,
+                 "end_mean": float(np.nanmean(end)) if has_end else nan,
+                 "end_lt0": int(np.sum(end < 0))}
+    for lv in GAIN_LEVELS:
+        tag = int(round(lv * 100))
+        out[f"peak_ge_{tag}"] = int(np.sum(peak >= lv - 1e-12))
+        out[f"end_ge_{tag}"] = int(np.sum(end >= lv - 1e-12))
+    return out
+
+
 def pick_stats(picks: pd.DataFrame, key: str = TARGET[0]) -> Dict:
-    """選んだ行の件数・的中・的中率（95%の幅）・伸び（最高値の倍率 − 1）の中央値。"""
+    """選んだ行の件数・的中・的中率（95%の幅）・伸び（最高値の倍率 − 1）の中央値と、行方（全体・2倍に届かなかった行）。"""
     y = picks[key].to_numpy(dtype=int)
     n, k = int(len(y)), int(y.sum())
     lo, hi = wilson(k, n)
     gain = picks["peak_ratio"].to_numpy(dtype=float) - 1.0
     return {"n": n, "hits": k, "precision": (k / n) if n else float("nan"), "lo": lo, "hi": hi,
-            "median_gain": float(np.nanmedian(gain)) if n else float("nan")}
+            "median_gain": float(np.nanmedian(gain)) if n else float("nan"),
+            "all": outcome_stats(picks), "miss": outcome_stats(picks[y == 0])}
 
 
 def precision_table(parts: Sequence[Tuple[pd.DataFrame, np.ndarray]], tops: Sequence[float] = PREC_TOPS,
@@ -297,7 +343,47 @@ def precision_table(parts: Sequence[Tuple[pd.DataFrame, np.ndarray]], tops: Sequ
 
 
 def score_frame(rows: pd.DataFrame, period: str, key: str = TARGET[0]) -> pd.DataFrame:
-    return rows[["Date", "Code", key, "peak_ratio"]].assign(period=str(period))
+    keep = ["Date", "Code", key, "peak_ratio"] + (["end_ratio"] if "end_ratio" in rows.columns else [])
+    return rows[keep].assign(period=str(period))
+
+
+def load_params_from(path: str, sig: str, bounds: Dict) -> Tuple[Dict, Dict]:
+    """
+    前の回の探索したパラメータ（e128_params.json）を読む。列の指紋・ラベル・ホールドアウトの境界が今の回と同じでなければ止める
+    （違えば、前の回とは別のデータか別の作りで探索したもの）。
+    """
+    if not os.path.exists(path):
+        raise SystemExit(f"前の回の探索結果がない: {path}（探索をやり直すなら --params-from を付けない）")
+    with open(path, encoding="utf-8") as fh:
+        rec = json.load(fh).get(PARAMS_KEY) or {}
+    if rec.get("_features_sig") != sig:
+        raise SystemExit(f"前の回の探索結果の列の指紋が違う: {rec.get('_features_sig')} / {sig}")
+    want = {"key": TARGET[0], "horizon": TARGET[1], "multiple": TARGET[2]}
+    if rec.get("_label") != want:
+        raise SystemExit(f"前の回の探索結果のラベルが違う: {rec.get('_label')} / {want}")
+    old = rec.get("_bounds") or {}
+    for k in ("train_end", "test_start", "last_full"):
+        if old.get(k) != bounds.get(k):
+            raise SystemExit(f"前の回と境界が違う（{k}: {old.get(k)} / {bounds.get(k)}）。データが変わったので探索をやり直す")
+    params = {k: v for k, v in rec.items() if not str(k).startswith("_")}
+    params["verbose"] = -1
+    return params, dict(rec.get("_cv") or {})
+
+
+def compare_prev(prev: Optional[Dict], prec: Dict[str, Dict]) -> Tuple[int, int]:
+    """前の回の的中の表と、上位の割合×木×期間ごとの件数・的中（行ごと・銘柄ごと）が同じか。(同じ数, 比べた数)。"""
+    old = (prev or {}).get("precision") or {}
+    same = total = 0
+    for part in ("holdout", "oof"):
+        for arm, rows in (prec.get(part) or {}).items():
+            olds = (old.get(part) or {}).get(arm) or []
+            for i, r in enumerate(rows):
+                total += 1
+                o = olds[i] if i < len(olds) else None
+                if o and float(o.get("top", -1)) == float(r["top"]) and all(
+                        int(r[kind][f]) == int(o[kind][f]) for kind in ("rows", "stocks") for f in ("n", "hits")):
+                    same += 1
+    return same, total
 
 
 def oof_parts(df: pd.DataFrame, cols: Sequence[str], arms: Dict[str, Tuple[str, Dict]], seeds: Sequence[int],
@@ -506,6 +592,34 @@ def precision_lines(tables: Dict[str, List[Dict]], base: float, log=print) -> No
             head = ""
 
 
+def fate_text(st: Dict) -> str:
+    def p(v):
+        if v is None or not np.isfinite(v):
+            return "—"
+        return "±0%" if abs(100 * v) < 0.5 else f"{100 * v:+.0f}%"
+    return (f"最高値まで 中央値 {p(st['peak_median'])}・+30%以上 {st['peak_ge_30']}・+50%以上 {st['peak_ge_50']}"
+            f" | 半年後の終値 中央値 {p(st['end_median'])}・平均 {p(st['end_mean'])}・+30%以上 {st['end_ge_30']}"
+            f"・+50%以上 {st['end_ge_50']}・マイナス {st['end_lt0']}")
+
+
+def fate_lines(tables: Dict[str, List[Dict]], log=print) -> None:
+    """銘柄ごとの行方（選んだ銘柄の全体と、2倍に届かなかった銘柄）。"""
+    first = next(iter(tables.values()), None)
+    if not first or "all" not in first[0]["stocks"]:
+        return
+    log("    行方（銘柄ごと。最高値まで＝半年以内の終値の最高値の上がり幅、半年後の終値＝125営業日目の終値での損益。どちらも買値に対して）")
+    for i, row in enumerate(first):
+        head = f"上位 {100 * row['top']:g}%"
+        for arm, _, name in SCORE_ARMS:
+            t = tables.get(arm)
+            if not t:
+                continue
+            st = t[i]["stocks"]
+            log(f"    {head:<8} {arm} {name:<14} 全体 {st['all']['n']:>4,}銘柄: {fate_text(st['all'])}")
+            log(f"    {'':<8} {'':<1} {'':<14} 外れ {st['miss']['n']:>4,}銘柄: {fate_text(st['miss'])}")
+            head = ""
+
+
 def report_precision(prec_hold: Dict[str, List[Dict]], hold: Optional[Dict], prec_oof: Dict[str, List[Dict]],
                      oof_years: List[Dict], bounds: Dict, log=print) -> None:
     log("\n参考: しきい値を上げたときの的中率（2倍に届いた割合）。上位の割合は、その期間の行のスコア（種の平均）の順位で切る")
@@ -515,6 +629,7 @@ def report_precision(prec_hold: Dict[str, List[Dict]], hold: Optional[Dict], pre
         log(f"  [ホールドアウト {hold['from']}〜{hold['to']}・{hold['n_test']:,}行・2倍の正例 {hold['pos_test']:,}"
             f"（{100 * hold['base']:.2f}%）。学習は探索に使った {hold['n_train']:,}行]")
         precision_lines(prec_hold, hold["base"], log)
+        fate_lines(prec_hold, log)
     if prec_oof and oof_years:
         n = sum(y["n_test"] for y in oof_years)
         pos = sum(y["pos_test"] for y in oof_years)
@@ -525,6 +640,7 @@ def report_precision(prec_hold: Dict[str, List[Dict]], hold: Optional[Dict], pre
         log("    年ごと（学習・テスト・2倍の正例）: " + " / ".join(
             f"{y['year']}: {y['n_train']:,}・{y['n_test']:,}・{y['pos_test']:,}" for y in oof_years))
         precision_lines(prec_oof, base, log)
+        fate_lines(prec_oof, log)
 
 
 # --------------------------------------------------------------------------- #
@@ -536,6 +652,9 @@ def main(argv: Optional[Sequence[str]] = None, log=print) -> int:
     ap.add_argument("--data-dir", default=lab.DATA_DIR)
     ap.add_argument("--out", default=OUT)
     ap.add_argument("--params-out", default=PARAMS_OUT)
+    ap.add_argument("--params-from", default="",
+                    help="探索をやり直さず、前の回の e128_params.json からパラメータを読む（列の指紋・ラベル・境界が同じことを確かめる）")
+    ap.add_argument("--prev", default="", help="前の回の e128_results.json。的中の件数が同じか（同じ銘柄が選ばれたか）を確かめる")
     args = ap.parse_args(argv)
     t0 = time.time()
     key, horizon, multiple = TARGET
@@ -553,14 +672,29 @@ def main(argv: Optional[Sequence[str]] = None, log=print) -> int:
     log("[setup] 区分ごとの列の数: " + " / ".join(f"{name} {counts.get(cat, 0)}" for cat, name in E.CATEGORIES))
     log(f"[setup] ラベル: +10%（本番） / {xname}。比べる木: " + " / ".join(f"{a} {name}" for a, _, _, name in ARMS))
 
+    prev = None
+    if args.prev:
+        if os.path.exists(args.prev):
+            with open(args.prev, encoding="utf-8") as fh:
+                prev = json.load(fh)
+        else:
+            log(f"[warn] 前の回の結果がない（{os.path.basename(args.prev)}）。同じ銘柄が選ばれたかは確かめられない")
+
     ds, bars = E.load_inputs(args.data_dir)
     df, info = E.build_frame(ds, bars, [TARGET], cols, log=log)
-    df["peak_ratio"] = peak_ratio(bars, df, horizon)
-    del bars, ds
+    outcomes = forward_outcomes(bars, df, horizon)
+    df["peak_ratio"] = outcomes["peak_ratio"].to_numpy(dtype=float)
+    df["end_ratio"] = outcomes["end_ratio"].to_numpy(dtype=float)
+    del bars, ds, outcomes
     bad = ratio_mismatch(df, key, multiple)
     log(f"[check] 半年以内の終値の最高値 ÷ 買値 から作り直した「2倍に届いたか」がラベルと合わない行 {100 * bad:.3f}%（許容 0）")
     if bad > 0:
         raise SystemExit("伸びに使う最高値の倍率が2倍のラベルと合わない")
+    no_end = int(df["end_ratio"].isna().sum())
+    over = int((df["end_ratio"] > df["peak_ratio"] + 1e-12).sum())
+    log(f"[check] 半年後の終値の倍率が無い行 {no_end:,} / 最高値の倍率を超える行 {over:,}（どちらも許容 0）")
+    if no_end or over:
+        raise SystemExit("半年後の終値の倍率が無いか、最高値の倍率を超える行がある")
     t = info["targets"][key]
     log(f"[label] 候補 {info['candidates']:,}行のうち、+10% と {xname} の両方が分かる行 {info['known']:,}"
         f"（{info['first']}〜{info['last']}）/ 先が足りない行 {t['unknown_recent']:,}・ほかの理由で分からない行 "
@@ -579,9 +713,14 @@ def main(argv: Optional[Sequence[str]] = None, log=print) -> int:
     log(f"[tune] ホールドアウト: {bounds['test_start']}〜{bounds['last_full']}（{len(hold):,}行）/ あいだ {bounds['embargo_days']}営業日"
         f"（{bounds['embargo_calendar_days']}暦日・{bounds['embargo_rows']:,}行は使わない）/ 窓の揃った最後の日より後の行"
         f" {bounds['after_last_full']:,}（売買が止まった銘柄だけ。ホールドアウトに入れない）")
-    log(f"[tune] 本番と同じ設定: 分割 {SCHEME}・{N_SPLITS}分割・{args.n_trials}試行・目的 {tuning.OBJECTIVE_JA[OBJECTIVE]}")
     t1 = time.time()
-    tuned, record = run_tuning(tdf, cols, args.n_trials)
+    if args.params_from:
+        tuned, record = load_params_from(args.params_from, sig, bounds)
+        log(f"[tune] 探索はやり直さず、前の回の探索したパラメータを使う（{os.path.basename(args.params_from)}。列の指紋・ラベル・"
+            f"境界が同じ。前の回の探索: 分割 {record.get('scheme')}・{record.get('n_splits')}分割・{record.get('n_trials')}試行）")
+    else:
+        log(f"[tune] 本番と同じ設定: 分割 {SCHEME}・{N_SPLITS}分割・{args.n_trials}試行・目的 {tuning.OBJECTIVE_JA[OBJECTIVE]}")
+        tuned, record = run_tuning(tdf, cols, args.n_trials)
     log(f"[tune] {(time.time() - t1) / 60:.1f}分 / 探索した木: "
         + " / ".join(f"{ja} {fmt_param(k, prod.get(k))} → {fmt_param(k, tuned.get(k))}" for k, ja in SEARCHED)
         + f" / 木 {tuned.get('n_estimators')}本（左が本番の +10% の木）")
@@ -611,6 +750,10 @@ def main(argv: Optional[Sequence[str]] = None, log=print) -> int:
     prec_hold = {arm: precision_table([(hframe, np.mean(per_seed, axis=0))]) for arm, per_seed in hs.items()}
     oparts, oyears = oof_parts(df, cols, arms_fit, seeds)
     prec_oof = {arm: precision_table(parts) for arm, parts in oparts.items() if parts}
+    if args.prev:
+        same, total = compare_prev(prev, {"holdout": prec_hold, "oof": prec_oof})
+        log(f"[check] 前の回と同じ銘柄が選ばれたか（上位の割合×木×期間ごとの件数・的中。行ごと・銘柄ごと）: 一致 {same} / {total}"
+            + ("" if total and same == total else "（一致しないので、前の回の表とは別の選ばれ方。下の行方は今回の選び方のもの）"))
     report(summary, cv, hold_res, log=log)
     report_precision(prec_hold, hold_res, prec_oof, oyears, bounds, log=log)
 
