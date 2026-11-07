@@ -11,6 +11,9 @@
   「前進分割（直近の半年×5本）」）。
   追加の依頼（同日・回す前）「それと、閾値をかなり上げた場合の、Precisionをみたいです。少ない弾数で伸びのよいお宝銘柄を当てるのが
   目的ですので。」→ 参考に「しきい値を上げたときの的中率」を出す（下）。
+  追加の指示（同日・結果が出る前）「B：2倍のラベル × +10% 用の木（前回の実験127と同じ組み合わせ） この比較はいらないです。検証は
+  いまlgbmだけでお願いします。」→ 比べるのは本番の lgbm（A）と 2倍用に探索した LightGBM（C）の2つだけにする（いったん回した
+  run 42373190959 は B を含んでいたので、結果が出る前に止めた）。
 
 ラベル: 実験127 の「2倍（半年以内）」と同じ（買値は翌営業日の寄り。t+1〜t+125 営業日の終値の最大が買値の2倍以上なら正例。
   売買が止まった銘柄は止まるまでで判定。先が足りない行は使わない）。使う行は +10% と 2倍の両方が分かる新高値の候補。
@@ -25,26 +28,26 @@
   検証に分かれるので、CV の値は楽観側に出る。当たり具合はホールドアウトの値を参考に並べる。
   探索したパラメータは research/_data/oof/e128_params.json にだけ書く（本番の research/lgbm_params.json には書かない）。
 
-比べる3つ（同じ行・同じ373列・期間×種の15組。学習の仕方は実験127 と同じ）
-  A  +10%（本番の木）    本番のラベル・本番の373列のパラメータ（research/lgbm_params.json）
-  B  2倍（+10%の木）      2倍のラベル・本番の373列のパラメータ（実験127 と同じ作り。この回の行で測り直す）
-  C  2倍（探索した木）    2倍のラベル・この回で探索したパラメータ
+比べる2つ（同じ行・同じ373列・期間×種の15組。学習の仕方は実験127 と同じ）
+  A  +10%（本番の lgbm）  本番のラベル・本番の373列のパラメータ（research/lgbm_params.json）
+  C  2倍（探索した木）    2倍のラベル・この回で探索したパラメータ（LightGBM）
 
-読み方（回す前に決めたもの。採用の判定ではない。どれも割合を%の小数1桁に丸め、期間×種の15組それぞれで比べる）
-  1. 運用者の見立て「目的変数に合わせて探索すれば決算が効いてくる」: 決算・財務＋バリュエーション（fund+val）の割合を C と B で
-     - 15組すべてで C > B →「見立てどおり（探索した木のほうが決算・財務＋バリュエーションの割合が高い）」
-     - 15組すべてで C < B →「見立てと逆（探索した木のほうが決算・財務＋バリュエーションの割合が低い）」
+読み方（回す前に決めたもの。採用の判定ではない。どれも割合を%の小数1桁に丸め、期間×種の15組それぞれで C と A を比べる）
+  1. 運用者の見立て「目的変数に合わせて探索すれば決算が効いてくる（半年なら決算を2回はまたぐ）」: 決算・財務＋バリュエーション
+     （fund+val）の割合
+     - 15組すべてで C > A →「仮説どおり（2倍（探索した木）のほうが決算・財務＋バリュエーションの割合が高い）」
+     - 15組すべてで C < A →「仮説と逆（…低い）」
      - それ以外 →「はっきりしない」
-  2. もとの仮説「本番のモデルよりテクニカルの重要度が下がる」: テクニカルの割合を C と A で（実験127 と同じ読み方）
+  2. もとの仮説「本番のモデルよりテクニカルの重要度が下がる」: テクニカルの割合（実験127 と同じ読み方）
      - 15組すべてで C < A →「仮説どおり」・すべてで C > A →「仮説と逆」・それ以外 →「はっきりしない」
-  見るだけ: fund+val の C と A、テクニカルの C と B、値動きの荒さの5列（VOL_COLS。実験127 でテクニカルの増えた分のほぼすべて）
-  の合計、区分・グループ・列ごとの割合、探索したパラメータ。
+  見るだけ: 値動きの荒さの5列（VOL_COLS。実験127 でテクニカルの増えた分のほぼすべて）の合計、区分・グループ・列ごとの割合、
+  探索したパラメータ。
 
 参考（読み方には入れない）
-  - 同じ5分割での CV の値（楽観側に出る）: 本番の木と探索した木を、探索と同じ分割で計算し直す
+  - 同じ5分割での CV の値（楽観側に出る）: 探索した木を探索と同じ分割で計算し直し、探索の記録と合うかを見る
   - ホールドアウト（直近12か月）: 探索に使った期間の行で学習し（種ごと）、2倍のラベルの PR-AUC（正例率の何倍か）と ROC-AUC を
-    A（+10% のラベルで学習した木の順位で2倍を当てる）・B・C で比べる
-  - しきい値を上げたときの的中率（2倍に届いた割合）: A・B・C のスコア（種の平均）の上位 PREC_TOPS で切り、件数・的中・的中率
+    A（+10% のラベルで学習した本番の lgbm の順位で2倍を当てる）と C で比べる
+  - しきい値を上げたときの的中率（2倍に届いた割合）: A・C のスコア（種の平均）の上位 PREC_TOPS で切り、件数・的中・的中率
     （正例率の何倍か）・伸び（半年以内の終値の最高値 ÷ 買値 − 1）の中央値。数え方は行ごとと、銘柄ごと（しきい値を初めて越えた
     日に1回だけ買うとみなす。的中率に95%の幅（Wilson））の2通り。期間はホールドアウトと、前進分割 2021〜2025年（学習はテストの
     年の始まりの PURGE_DAYS 暦日前より前の行。年ごとに上位を切ってまとめる。C の木は探索に使った期間の行で探索したので、その期間に
@@ -97,20 +100,19 @@ VOL_COLS = ("tx_vol_parkinson_20", "tx_vol_gk_20", "tx_natr_14", "tx_vol_60", "v
 OUT = os.path.join(lab.DATA_DIR, "oof", "e128_results.json")
 PARAMS_OUT = os.path.join(lab.DATA_DIR, "oof", "e128_params.json")
 PARAMS_KEY = "x2_half_year"
-#: 比べる3つ（記号・ラベルの列・木・名前）
-ARMS = (("A", "p10", "prod", "+10%（本番の木）"),
-        ("B", "x2", "prod", "2倍（+10%の木）"),
+#: 比べる2つ（記号・ラベルの列・木・名前）。運用者の指示で、2倍のラベル × +10% 用の木（実験127 の作り）は比べない
+ARMS = (("A", "p10", "prod", "+10%（本番の lgbm）"),
         ("C", "x2", "tuned", "2倍（探索した木）"))
 ARM_NAME = {a: name for a, _, _, name in ARMS}
-#: 探索するパラメータ（tuning.tune の探索範囲と同じ並び）と表示名
 #: しきい値を上げたときの的中率（参考）で見る上位の割合
 PREC_TOPS = (0.10, 0.05, 0.02, 0.01, 0.005)
 #: 前進分割（参考）のテストの年と、学習とテストのあいだの暦日（125営業日×1.5＋5＝193日。実験127 と同じ式）
 OOF_YEARS = (2021, 2022, 2023, 2024, 2025)
 PURGE_DAYS = int(np.ceil(TARGET[1] * E.PURGE_PER_DAY)) + E.PURGE_PAD
-#: 当たり具合を比べる木（記号・学習のラベル・名前）。A は +10% のラベルで学習した木の順位で2倍を当てる
-SCORE_ARMS = (("A", "p10", "+10%で学習（本番の木）"), ("B", TARGET[0], "2倍（+10%の木）"), ("C", TARGET[0], "2倍（探索した木）"))
+#: 当たり具合を比べる木（記号・学習のラベル・名前）。A は +10% のラベルで学習した本番の lgbm の順位で2倍を当てる
+SCORE_ARMS = (("A", "p10", "+10%で学習（本番の lgbm）"), ("C", TARGET[0], "2倍（探索した木）"))
 SCORE_NAME = {a: name for a, _, name in SCORE_ARMS}
+#: 探索するパラメータ（tuning.tune の探索範囲と同じ並び）と表示名
 SEARCHED = (("learning_rate", "学習率"), ("num_leaves", "葉"), ("min_child_samples", "葉の最小件数"),
             ("subsample", "行の抜き取り"), ("colsample_bytree", "列の抜き取り"),
             ("reg_alpha", "L1"), ("reg_lambda", "L2"))
@@ -324,17 +326,17 @@ def oof_parts(df: pd.DataFrame, cols: Sequence[str], arms: Dict[str, Tuple[str, 
 # --------------------------------------------------------------------------- #
 def importance_arms(df: pd.DataFrame, cols: Sequence[str], prod: Dict, tuned: Dict, seeds: Sequence[int],
                     ends: Sequence[str], log=print) -> List[Dict]:
-    """期間×種ごとに A（+10%・本番の木）・B（2倍・本番の木）・C（2倍・探索した木）を学習し、列ごとの割合を返す。"""
+    """期間×種ごとに A（+10%・本番の lgbm の木）・C（2倍・探索した木）を学習し、列ごとの割合を返す。"""
     key = TARGET[0]
     # ここでの名前は窓ごとの正例の件数の表示にだけ使う（ラベルの名前）
-    runs_prod = E.importance_runs(df, cols, prod, seeds, ends, [("p10", "+10%"), (key, "2倍")], log=log)
-    runs_tuned = E.importance_runs(df, cols, tuned, seeds, ends, [(key, ARM_NAME["C"])], log=lambda *a, **k: None)
+    runs_prod = E.importance_runs(df, cols, prod, seeds, ends, [("p10", "+10%")], log=log)
+    runs_tuned = E.importance_runs(df, cols, tuned, seeds, ends, [(key, "2倍")], log=log)
     tuned_by = {(r["end"], r["seed"]): r for r in runs_tuned}
     runs = []
     for r in runs_prod:
         t = tuned_by.get((r["end"], r["seed"]))
         if t is not None:
-            runs.append({"end": r["end"], "seed": r["seed"], "n": r["n"], "A": r["p10"], "B": r[key], "C": t[key]})
+            runs.append({"end": r["end"], "seed": r["seed"], "n": r["n"], "A": r["p10"], "C": t[key]})
     return runs
 
 
@@ -343,14 +345,14 @@ def vol_share(col_share: Dict[str, float]) -> float:
     return 100.0 * sum(float(col_share.get(c, 0.0)) for c in VOL_COLS)
 
 
-def tuning_verdict(pairs: Sequence[Tuple[float, float]]) -> str:
-    """pairs = [(B の fund+val %, C の fund+val %)]。小数1桁に丸めて、すべての組で同じ向きのときだけ決める。"""
+def fund_verdict(pairs: Sequence[Tuple[float, float]], name: str = "2倍（探索した木）") -> str:
+    """pairs = [(A の fund+val %, C の fund+val %)]。小数1桁に丸めて、すべての組で同じ向きのときだけ決める。"""
     if not pairs:
         return "比べられない（組が無い）"
-    if all(round(c, 1) > round(b, 1) for b, c in pairs):
-        return "見立てどおり（探索した木のほうが決算・財務＋バリュエーションの割合が高い）"
-    if all(round(c, 1) < round(b, 1) for b, c in pairs):
-        return "見立てと逆（探索した木のほうが決算・財務＋バリュエーションの割合が低い）"
+    if all(round(c, 1) > round(a, 1) for a, c in pairs):
+        return f"仮説どおり（{name}のほうが決算・財務＋バリュエーションの割合が高い）"
+    if all(round(c, 1) < round(a, 1) for a, c in pairs):
+        return f"仮説と逆（{name}のほうが決算・財務＋バリュエーションの割合が低い）"
     return "はっきりしない"
 
 
@@ -371,11 +373,8 @@ def summarize(runs: List[Dict], cmap: Dict[str, str], cols: Sequence[str]) -> Di
     def fund_val(row, arm):
         return 100 * (row[arm]["gain"].get("fund", 0.0) + row[arm]["gain"].get("val", 0.0))
 
-    pairs = {"fund_val_CB": [(fund_val(r, "B"), fund_val(r, "C")) for r in rows],
+    pairs = {"fund_val_CA": [(fund_val(r, "A"), fund_val(r, "C")) for r in rows],
              "tech_CA": [(tech(r, "A"), tech(r, "C")) for r in rows],
-             "fund_val_CA": [(fund_val(r, "A"), fund_val(r, "C")) for r in rows],
-             "tech_CB": [(tech(r, "B"), tech(r, "C")) for r in rows],
-             "vol_CB": [(r["B"]["vol"], r["C"]["vol"]) for r in rows],
              "vol_CA": [(r["A"]["vol"], r["C"]["vol"]) for r in rows]}
 
     def mean_over(level: str, arm: str, kind: str = "gain") -> Dict[str, float]:
@@ -392,11 +391,9 @@ def summarize(runs: List[Dict], cmap: Dict[str, str], cols: Sequence[str]) -> Di
         return {k: float(np.mean(v)) for k, v in acc.items()}
 
     return {"rows": rows, "pairs": pairs,
-            "readings": {"tuning": tuning_verdict(pairs["fund_val_CB"]),
-                         "original": E.verdict(pairs["tech_CA"], ARM_NAME["C"])},
-            "look": {"fund_val_CA": E.direction(pairs["fund_val_CA"], ARM_NAME["C"]),
-                     "tech_CB": E.direction(pairs["tech_CB"], ARM_NAME["C"]),
-                     "vol_CB": E.direction(pairs["vol_CB"], ARM_NAME["C"])},
+            "readings": {"fund": fund_verdict(pairs["fund_val_CA"], ARM_NAME["C"]),
+                         "tech": E.verdict(pairs["tech_CA"], ARM_NAME["C"])},
+            "look": {"vol_CA": E.direction(pairs["vol_CA"], ARM_NAME["C"])},
             "mean": {arm: {"category": mean_over("category", arm), "category_split": mean_over("category", arm, "split"),
                            "group": mean_over("group", arm), "column": mean_over("column", arm),
                            "vol": float(np.mean([r[arm]["vol"] for r in rows])) if rows else 0.0}
@@ -428,37 +425,33 @@ def report(summary: Dict, cv: Optional[Dict], hold: Optional[Dict], log=print) -
     log("\n" + "=" * 110)
     log(f"区分ごとの重要度の割合（gain。期間×種の{len(summary['rows'])}組の平均。括弧は split＝分岐に使われた回数の割合）")
     log("=" * 110)
-    log("  " + "区分".ljust(30) + "".join(f"{ARM_NAME[a]:>22}" for a, _, _, _ in ARMS)
-        + f"{'差 C−B':>12}{'差 C−A':>12}")
+    log("  " + "区分".ljust(30) + "".join(f"{ARM_NAME[a]:>22}" for a, _, _, _ in ARMS) + f"{'差 C−A':>12}")
     for cat, cname in E.CATEGORIES:
         cells = []
         for a, _, _, _ in ARMS:
             g = 100 * m[a]["category"].get(cat, 0.0)
             sp = 100 * m[a]["category_split"].get(cat, 0.0)
             cells.append(f"{g:>13.1f}%（{sp:4.1f}%）")
-        cb = 100 * (m["C"]["category"].get(cat, 0.0) - m["B"]["category"].get(cat, 0.0))
         ca = 100 * (m["C"]["category"].get(cat, 0.0) - m["A"]["category"].get(cat, 0.0))
-        log("  " + cname.ljust(28) + "".join(cells) + f"{cb:>+10.1f}pt{ca:>+10.1f}pt")
+        log("  " + cname.ljust(28) + "".join(cells) + f"{ca:>+10.1f}pt")
     log("  " + "値動きの荒さの5列（テクニカルの内数）".ljust(23)
         + "".join(f"{m[a]['vol']:>21.1f}%" for a, _, _, _ in ARMS)
-        + f"{m['C']['vol'] - m['B']['vol']:>+10.1f}pt{m['C']['vol'] - m['A']['vol']:>+10.1f}pt")
+        + f"{m['C']['vol'] - m['A']['vol']:>+10.1f}pt")
 
     log("\n組ごと（決算・財務＋バリュエーション＝fund+val と テクニカル の割合 gain %）")
     for i, r in enumerate(summary["rows"]):
-        fv_b, fv_c = summary["pairs"]["fund_val_CB"][i]
+        fv_a, fv_c = summary["pairs"]["fund_val_CA"][i]
         te_a, te_c = summary["pairs"]["tech_CA"][i]
-        log(f"  〜{r['end']:<11} 種{r['seed']} {r['n']:>7,}行 正例 +10% {r['A']['pos']:,}・2倍 {r['B']['pos']:,}"
-            f" | fund+val B {fv_b:.1f}% → C {fv_c:.1f}%（{fv_c - fv_b:+.1f}pt）"
-            f" | テクニカル A {te_a:.1f}% / C {te_c:.1f}%（{te_c - te_a:+.1f}pt）"
-            f" | 荒さ5列 B {r['B']['vol']:.1f}% → C {r['C']['vol']:.1f}%")
+        log(f"  〜{r['end']:<11} 種{r['seed']} {r['n']:>7,}行 正例 +10% {r['A']['pos']:,}・2倍 {r['C']['pos']:,}"
+            f" | fund+val A {fv_a:.1f}% → C {fv_c:.1f}%（{fv_c - fv_a:+.1f}pt）"
+            f" | テクニカル A {te_a:.1f}% → C {te_c:.1f}%（{te_c - te_a:+.1f}pt）"
+            f" | 荒さ5列 A {r['A']['vol']:.1f}% → C {r['C']['vol']:.1f}%")
     p = summary["pairs"]
-    log(f"  fund+val の差 C−B: {spread(p['fund_val_CB'])} / テクニカルの差 C−A: {spread(p['tech_CA'])}")
-    log(f"  見るだけ: fund+val の差 C−A {spread(p['fund_val_CA'])} → {summary['look']['fund_val_CA']}"
-        f" / テクニカルの差 C−B {spread(p['tech_CB'])} → {summary['look']['tech_CB']}"
-        f" / 荒さ5列の差 C−B {spread(p['vol_CB'])} → {summary['look']['vol_CB']}")
-    log("\n読み方（回す前に決めたもの）:")
-    log(f"  1. 目的変数に合わせた探索で決算が効いてくるか（fund+val、C と B）: {summary['readings']['tuning']}")
-    log(f"  2. 本番よりテクニカルの重要度が下がるか（テクニカル、C と A）: {summary['readings']['original']}")
+    log(f"  fund+val の差 C−A: {spread(p['fund_val_CA'])} / テクニカルの差 C−A: {spread(p['tech_CA'])}")
+    log(f"  見るだけ: 荒さ5列の差 C−A {spread(p['vol_CA'])} → {summary['look']['vol_CA']}")
+    log("\n読み方（回す前に決めたもの。C と A）:")
+    log(f"  1. 2倍用に探索した木では本番の lgbm より決算が効いてくるか（fund+val）: {summary['readings']['fund']}")
+    log(f"  2. 本番の lgbm よりテクニカルの重要度が下がるか（テクニカル）: {summary['readings']['tech']}")
 
     for a, _, _, name in ARMS:
         top = sorted(m[a]["group"].items(), key=lambda kv: -kv[1])[:12]
@@ -473,7 +466,7 @@ def report(summary: Dict, cv: Optional[Dict], hold: Optional[Dict], log=print) -
         log("\n参考: 探索と同じ5分割での2倍のラベルの当たり具合（日付単位のランダムな分割なので楽観側に出る）")
         rates = " ".join(f"{100 * b:.2f}%" for b in cv["base_rate"])
         log(f"  検証の正例率: {rates}")
-        for arm in ("B", "C"):
+        for arm in ("C",):
             c = cv["arms"].get(arm)
             if c:
                 folds = " ".join(f"{x:.4f}" for x in c["fold_pr_auc"])
@@ -495,7 +488,7 @@ def pct(v: float, digits: int = 1) -> str:
 
 
 def precision_lines(tables: Dict[str, List[Dict]], base: float, log=print) -> None:
-    """上位の割合ごとに A・B・C を並べる（行ごと | 銘柄ごと）。"""
+    """上位の割合ごとに A・C を並べる（行ごと | 銘柄ごと）。"""
     first = next(iter(tables.values()), None)
     if not first:
         return
@@ -594,7 +587,7 @@ def main(argv: Optional[Sequence[str]] = None, log=print) -> int:
         + f" / 木 {tuned.get('n_estimators')}本（左が本番の +10% の木）")
     if record.get("n_splits") != N_SPLITS:
         log(f"[warn] 分割が {record.get('n_splits')} 本になった（正例か負例が無い分割は飛ばされる）")
-    cv = cv_scores(tdf, cols, {"B": prod, "C": tuned})
+    cv = cv_scores(tdf, cols, {"C": tuned})
     log(f"[tune] 探索の記録の最良の PR-AUC {float(record.get('mean_pr_auc', float('nan'))):.4f}"
         f"・同じ分割で計算し直した値 {cv['arms']['C']['pr_auc']:.4f}")
 
@@ -607,11 +600,11 @@ def main(argv: Optional[Sequence[str]] = None, log=print) -> int:
 
     seeds = [int(s) for s in args.seeds.split(",") if s.strip()]
     ends = [e.strip() for e in args.ends.split(",") if e.strip()]
-    log(f"\n[fit] 期間 {len(ends)}つ × 種 {len(seeds)}つ × 木3つ（A・B・C）")
+    log(f"\n[fit] 期間 {len(ends)}つ × 種 {len(seeds)}つ × 木2つ（A・C）")
     runs = importance_arms(df, cols, prod, tuned, seeds, ends, log=log)
     summary = summarize(runs, cmap, cols)
-    arms_fit = {"A": ("p10", prod), "B": (key, prod), "C": (key, tuned)}
-    log(f"\n[score] ホールドアウトと前進分割（{OOF_YEARS[0]}〜{OOF_YEARS[-1]}年）で A・B・C を学習（種 {len(seeds)}つ）")
+    arms_fit = {"A": ("p10", prod), "C": (key, tuned)}
+    log(f"\n[score] ホールドアウトと前進分割（{OOF_YEARS[0]}〜{OOF_YEARS[-1]}年）で A・C を学習（種 {len(seeds)}つ）")
     hs = arm_scores(tune_rows, hold, cols, arms_fit, seeds)
     hold_res = holdout_metrics(hold, hs, len(tune_rows), key)
     hframe = score_frame(hold, "hold", key)

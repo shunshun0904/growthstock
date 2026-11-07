@@ -6,14 +6,15 @@
   換算）。直近12か月の終わりは窓が最後まで揃っている最後の日で、それより後の行（売買が止まった銘柄だけ）はホールドアウトに
   入れない。探索の行はすべてエンバーゴより前
 - 探索に渡すラベル: label の列を2倍のラベルに差し替える（+10% のラベルのままにしない）。片方のクラスしか無ければ止まる
-- 読み方: fund+val は小数1桁に丸めてすべての組で同じ向きのときだけ決まる。値動きの荒さの5列の合計
+- 読み方（C と A。2倍のラベル × +10% 用の木（B）は運用者の指示で比べない）: fund+val は小数1桁に丸めてすべての組で同じ向きの
+  ときだけ決まる。値動きの荒さの5列の合計
 - しきい値を上げたときの的中率: 上位はちょうど round(q×行数) 件（少なくとも1）で、スコアの高い順。銘柄ごとは期間ごとに
   しきい値を初めて越えた日の行だけ。期間ごとに上位を切ってまとめる。的中率の95%の幅（Wilson）。伸び（最高値の倍率 − 1）の
   中央値。最高値の倍率から作り直した「2倍に届いたか」が2倍のラベルとすべての行で合い、ずらせば見つかる
 - 通しで回す（データの読み込みと本番の木は差し替え、探索は本物の tuning.tune を小さな木・2試行で）: 探索は本番と同じ分割
   （year_cap_date・5分割・PR-AUC）で2倍のラベルを学び、本番の research/lgbm_params.json は書かない（save_params を呼ばない・
   ファイルが変わらない）。表と2つの読み方・CV とホールドアウトの参考・しきい値を上げたときの的中率（ホールドアウトと前進分割、
-  A・B・C）が出て、結果と探索したパラメータのファイルが書かれ、公開ログに銘柄コードを出さない
+  A・C）が出て、結果と探索したパラメータのファイルが書かれ、公開ログに銘柄コードを出さない
 
   python3 tests/test_e128_double_half_year_tuned.py
 """
@@ -96,13 +97,19 @@ class TuningFrameTest(unittest.TestCase):
 
 
 class ReadingTest(unittest.TestCase):
-    def test_tuning_verdict_needs_every_pair_in_the_same_direction(self):
-        self.assertTrue(X.tuning_verdict([(30.0, 31.0), (32.0, 32.2)]).startswith("見立てどおり"))
-        self.assertTrue(X.tuning_verdict([(30.0, 29.0), (32.0, 31.8)]).startswith("見立てと逆"))
-        self.assertEqual(X.tuning_verdict([(30.0, 31.0), (32.0, 31.0)]), "はっきりしない")
+    def test_fund_verdict_needs_every_pair_in_the_same_direction(self):
+        self.assertTrue(X.fund_verdict([(30.0, 31.0), (32.0, 32.2)]).startswith("仮説どおり"))
+        self.assertIn("決算・財務＋バリュエーションの割合が高い", X.fund_verdict([(30.0, 31.0)]))
+        self.assertTrue(X.fund_verdict([(30.0, 29.0), (32.0, 31.8)]).startswith("仮説と逆"))
+        self.assertEqual(X.fund_verdict([(30.0, 31.0), (32.0, 31.0)]), "はっきりしない")
         # 丸めると同じ値は「高い」に数えない
-        self.assertEqual(X.tuning_verdict([(30.0, 31.0), (32.01, 32.04)]), "はっきりしない")
-        self.assertTrue(X.tuning_verdict([]).startswith("比べられない"))
+        self.assertEqual(X.fund_verdict([(30.0, 31.0), (32.01, 32.04)]), "はっきりしない")
+        self.assertTrue(X.fund_verdict([]).startswith("比べられない"))
+
+    def test_only_the_production_lgbm_and_the_tuned_tree_are_compared(self):
+        self.assertEqual([a for a, _, _, _ in X.ARMS], ["A", "C"])
+        self.assertEqual([a for a, _, _ in X.SCORE_ARMS], ["A", "C"])
+        self.assertEqual(dict((a, (label, tree)) for a, label, tree, _ in X.ARMS), {"A": ("p10", "prod"), "C": ("x2", "tuned")})
 
     def test_vol_share_sums_the_five_columns(self):
         share = {c: 0.01 for c in X.VOL_COLS}
@@ -231,26 +238,31 @@ class EndToEndTest(unittest.TestCase):
 
         # 表・読み方・参考
         self.assertIn("区分ごとの重要度の割合", text)
-        self.assertIn("読み方（回す前に決めたもの）:", text)
-        self.assertIn("1. 目的変数に合わせた探索で決算が効いてくるか", text)
-        self.assertIn("2. 本番よりテクニカルの重要度が下がるか", text)
+        self.assertIn("読み方（回す前に決めたもの。C と A）:", text)
+        self.assertIn("1. 2倍用に探索した木では本番の lgbm より決算が効いてくるか（fund+val）: ", text)
+        self.assertIn("2. 本番の lgbm よりテクニカルの重要度が下がるか（テクニカル）: ", text)
+        self.assertNotIn("2倍（+10%の木）", text)
         self.assertIn("参考: 探索と同じ5分割", text)
         self.assertIn("参考: ホールドアウト", text)
         self.assertIn("[check] 半年以内の終値の最高値 ÷ 買値 から作り直した「2倍に届いたか」がラベルと合わない行 0.000%", text)
         self.assertIn("参考: しきい値を上げたときの的中率", text)
         self.assertIn("[ホールドアウト ", text)
         self.assertIn("[前進分割 ", text)
-        self.assertEqual(len(saved["pairs"]["fund_val_CB"]), 4)          # 期間2つ × 種2つ
+        self.assertEqual(len(saved["pairs"]["fund_val_CA"]), 4)          # 期間2つ × 種2つ
+        self.assertEqual(sorted(saved["pairs"]), ["fund_val_CA", "tech_CA", "vol_CA"])
+        self.assertEqual(sorted(saved["readings"]), ["fund", "tech"])
+        self.assertEqual(sorted(saved["cv"]["arms"]), ["C"])
         self.assertEqual(len(saved["pairs"]["tech_CA"]), 4)
-        for arm in ("A", "B", "C"):
+        self.assertEqual(sorted(saved["mean"]), ["A", "C"])
+        for arm in ("A", "C"):
             self.assertAlmostEqual(sum(saved["mean"][arm]["category"].values()), 1.0, places=6)
         self.assertIsNotNone(saved["holdout"])
-        self.assertEqual(sorted(saved["holdout"]["arms"]), ["A", "B", "C"])
+        self.assertEqual(sorted(saved["holdout"]["arms"]), ["A", "C"])
         prec = saved["precision"]
         self.assertEqual(prec["purge_days"], 193)
         for part in ("holdout", "oof"):
-            self.assertEqual(sorted(prec[part]), ["A", "B", "C"])
-            for arm in ("A", "B", "C"):
+            self.assertEqual(sorted(prec[part]), ["A", "C"])
+            for arm in ("A", "C"):
                 rows = prec[part][arm]
                 self.assertEqual([r["top"] for r in rows], list(X.PREC_TOPS))
                 for r in rows:
