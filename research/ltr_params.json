@@ -1,28 +1,28 @@
 {
-  "_source": "週次の探索（Adopt Financial Inputs run 41792145786・47c67e4。2025-09-06 までの 18,185件・50試行・5分割・目的は検証分割の日付内 NDCG@5）",
+  "_source": "週次の探索（Retrain Weekly run 42449739185・f540577。2025-09-08 までの 18,206件・50試行・5分割・目的は検証分割の日付内 NDCG@5）",
   "_features_sig": "7091517f6ec2",
   "_n_features": 373,
-  "_cutoff": "2025-09-06",
+  "_cutoff": "2025-09-08",
   "_cv": {
     "objective": "検証分割の日付内 NDCG@5（候補5件以上の日。利得は20営業日目の終値の段階 0〜4）",
     "scheme": "year_cap_date",
     "n_splits": 5,
     "n_trials": 50,
     "seed": 0,
-    "best_trial": 45,
-    "ndcg": 0.6617,
+    "best_trial": 48,
+    "ndcg": 0.6635,
     "ndcg_folds": [
-      0.6637,
-      0.6627,
-      0.6533,
-      0.6643,
-      0.6644
+      0.6592,
+      0.6523,
+      0.6605,
+      0.6761,
+      0.6695
     ],
-    "n_rows": 18185,
-    "n_days": 1754,
+    "n_rows": 18206,
+    "n_days": 1755,
     "train_from": "2018-04-03",
-    "train_to": "2025-09-05",
-    "minutes": 17.9
+    "train_to": "2025-09-08",
+    "minutes": 15.6
   },
   "params": {
     "boosting_type": "gbdt",
@@ -30,12 +30,12 @@
     "subsample_freq": 1,
     "n_jobs": -1,
     "verbose": -1,
-    "learning_rate": 0.015593220465304397,
-    "num_leaves": 113,
-    "min_child_samples": 271,
-    "subsample": 0.6872611969247745,
-    "colsample_bytree": 0.7499233734091095,
-    "reg_alpha": 0.06763787798768134,
-    "reg_lambda": 0.028343804059918987
+    "learning_rate": 0.016639460913714585,
+    "num_leaves": 55,
+    "min_child_samples": 207,
+    "subsample": 0.8829970814092569,
+    "colsample_bytree": 0.46586063414144147,
+    "reg_alpha": 0.0003099261532703653,
+    "reg_lambda": 0.0007302496155702827
   }
 }
