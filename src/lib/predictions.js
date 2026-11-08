@@ -29,6 +29,7 @@ const PRED_URL = () => `${base()}data/predictions.json?v=${BUILD}`;
 const HIST_URL = () => `${base()}data/prediction_history.json?v=${BUILD}`;
 const SAMPLES_URL = () => `${base()}data/new_samples.json?v=${BUILD}`;
 const NEWS_LINKS_URL = () => `${base()}data/news_links.json?v=${BUILD}`;
+const SCORE_DIST_URL = () => `${base()}data/score_dist.json?v=${BUILD}`;
 
 async function getJson(url) {
   const res = await fetch(url, { cache: 'no-cache' });
@@ -94,6 +95,19 @@ export async function loadNewSamples() {
   try {
     const d = await getJson(SAMPLES_URL());
     return d && Array.isArray(d.cases) ? d : { ...(d || {}), cases: [] };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * スコアと収益の分布（public/data/score_dist.json。Score Distribution が週次の再学習の後に research/score_dist.py で書く）。
+ * 無ければ null（まだ作っていない）。lgbm・ltr5 が無い形なら null。
+ */
+export async function loadScoreDist() {
+  try {
+    const d = await getJson(SCORE_DIST_URL());
+    return d && typeof d === 'object' && d.lgbm && d.ltr5 ? d : null;
   } catch {
     return null;
   }

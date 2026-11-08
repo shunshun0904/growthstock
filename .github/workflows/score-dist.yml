@@ -1,0 +1,100 @@
+name: Score Distribution
+
+# 画面のタブ「スコアと収益の分布」の集計（public/data/score_dist.json）を書く（運用者の依頼 2026-11-08「なんなら、
+# ダッシュボードにほしいくらいです」→ AskUserQuestion「3つとも載せる」。research/score_dist.py）。
+#   +10% の LightGBM の out-of-fold のスコアの分布・帯ごとの到達率、直近5営業日の組のランキング学習（ltr5）の out-of-fold の
+#   収益（20営業日目の終値・20営業日以内の終値の最高値）の分布、2つの上位10% の重なり
+#
+# Retrain Weekly が終わったら workflow_run で続けて走る（日曜 09:10 の +10% の回・14:10 のランキング学習の回の両方）。
+# 2つのモデルの学習日（meta.json の trainedAt）が画面のファイルと同じなら何もしない（手で起動したときは作り直す）。
+# out-of-fold は Release data-raw から降ろし、学習の記録（artifactHashes）と SHA-256 が違えば止まる。
+#
+# ログ・ファイルに出すのは件数・日付・割合だけ（銘柄は出さない）。
+on:
+  workflow_run:
+    workflows: ['Retrain Weekly']
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: score-dist
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # 再学習が積んだ meta.json のコミットを含む公開ブランチの先頭（deploy-pages.yml と同じ理由）
+          ref: ${{ github.event_name == 'workflow_run' && 'claude/jquants-browser-app-bwk19a' || github.ref }}
+
+      - name: Check whether the models changed
+        id: check
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json, os
+          lg = json.load(open("research/model/meta.json", encoding="utf-8")).get("trainedAt")
+          lt = json.load(open("research/model/models/ltr5/meta.json", encoding="utf-8")).get("trainedAt")
+          p = "public/data/score_dist.json"
+          old = json.load(open(p, encoding="utf-8")) if os.path.exists(p) else {}
+          same = lg and lt and lg == (old.get("lgbm") or {}).get("trainedAt") and lt == (old.get("ltr5") or {}).get("trainedAt")
+          print(f"changed={'false' if same else 'true'}")
+          PY
+          tail -1 "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-python@v5
+        if: steps.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r research/requirements.txt
+        if: steps.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+
+      - name: Download out-of-fold and daily bars (release)
+        if: steps.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p research/_data
+          bash scripts/gh_release_download.sh data-raw research/_data \
+            'fixed_return_v1_oof.parquet' 'ltr5_oof.parquet' 'bars_*.parquet'
+
+      - name: Build the distribution
+        if: steps.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+        run: |
+          set -o pipefail
+          python3 research/score_dist.py 2>&1 | tee score_dist.log
+
+      - name: Commit
+        if: steps.check.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/data/score_dist.json
+          if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
+          git commit -m "chore(data): スコアと収益の分布を更新 ($(date -u '+%Y-%m-%d %H:%M UTC'))"
+          for i in 1 2 3 4; do
+            if git push; then exit 0; fi
+            sleep $((2 ** i)); git pull --rebase
+          done
+          exit 1
+
+      - name: Summary
+        if: always()
+        run: |
+          { echo '## スコアと収益の分布'
+            echo '```'
+            cat score_dist.log 2>/dev/null || echo '(実行せず)'
+            echo '```'; } >> "$GITHUB_STEP_SUMMARY"

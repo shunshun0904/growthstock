@@ -41,6 +41,7 @@
 | 今日の予測 | `public/data/predictions.json`（直近5営業日の全候補・寄与分解つき） | git → GitHub Pages | 平日夜 | 画面が直接読む静的ファイル。毎日書き直すが、**過去の日はその日に出した値のまま**（2026-10-12 から。下の「過去の日の予測は固定」） |
 | 画面用の追跡 | `public/data/prediction_history.json`（上位5件/日・400日で削除） | git | 平日夜 | 画面に出すぶんだけ。**長期の台帳ではない** |
 | 再学習で加わったサンプル | `public/data/new_samples.json`（週次の再学習で新しく学習に入ったサンプルから正例・負例を最大5件ずつ。日足（更新日の78週前〜判定の20営業日の後5日）・到達の線・終盤の線・成否の内訳） | git → GitHub Pages | 日曜の Retrain Weekly の後に `New Training Samples` が workflow_run で続けて走る（基準モデル（1.2σ の LightGBM）の学習日が変わったときだけ作り直す。手で起動すると今の週を作り直す） | 画面のタブ「再学習で加わったサンプル」（運用者の依頼 2026-10-13。同日夜に名前を「例」から「サンプル」に、チャートを78週に）。加わったサンプル = 前回の学習期間の終わり（meta.json の git の履歴）より後・今回の終わりまでの更新日。選び方は学習期間の終わりを種にした無作為抽出。線は学習のラベルと同じ式（`research/new_samples.py` → `export_label_samples.build_case`）。内訳から引き直したラベルがデータセットと食い違えば止まる |
+| スコアと収益の分布 | `public/data/score_dist.json`（集計だけ: +10% の LightGBM の out-of-fold のスコアの度数（正例・負例）・分位点・スコア帯ごとの到達率と収益、直近5営業日の組のランキング学習（ltr5）の out-of-fold のスコアの度数と収益（20営業日目の終値・20営業日以内の終値の最高値）の度数・要約・組の中の10分位ごとの平均、2つの上位10% の重なりと組み合わせごとの収益） | git → GitHub Pages | Retrain Weekly の後に `Score Distribution` が workflow_run で続けて走る（2つのモデルの学習日が画面のファイルと同じなら何もしない。手で起動すると作り直す） | 画面のタブ「スコアと収益の分布」（運用者の依頼 2026-11-08）。out-of-fold は Release data-raw の `fixed_return_v1_oof.parquet`・`ltr5_oof.parquet` で、学習の記録（artifactHashes）と SHA-256 が違えば止まる。収益は日足から計算し、20営業日目の終値の収益を `live_track.forward` と300行で突き合わせて合わなければ止まる（`research/score_dist.py`）。直近の予測の候補のスコアは画面が予測ファイルから数える |
 | 候補銘柄のニュースのリンク | `public/data/news_links.json`（候補ごとのリンクと、開いて確かめた結果・理由） | git → GitHub Pages | 平日の Predict Breakouts の後に `Check News Links` が workflow_run で続けて走る（手でも起動できる） | 画面のタブ「候補銘柄のニュース」。今日の戦略の候補（規則の3本すべて95以上。2026-10-30 から 1.2σ の3本）のリンクを毎晩開いて確かめ、通らなかったものは出さない（画面に確かめの印は出さない）。URL の正本は `research/news_links.py` |
 | リカレンス・ネットワーク | `recurrence.tar.gz`（中は `recurrence/index.json` と、購入条件を満たした銘柄ごとの `recurrence/<日付>_<コード>.json`。予測ファイルの5日ぶん・1銘柄 約130KB） | **GitHub Release（`data-raw`）** → デプロイで `dist/data/recurrence/` | 平日の Predict Breakouts の中（予測の後） | 画面のタブ「リカレンス・ネットワーク」（運用者の依頼 2026-10-19。2026-10-24 からタブは隠している。作成は続ける）。取れる全期間（1銘柄 約2,200営業日 × テクニカル指標9列）で作るので git に入れない（運用者の選択「Release に置く」。選んだときは高値更新の全銘柄で1日あたり約1MB の見込みだった。同日に対象を購入条件を満たした銘柄だけに絞り、色付けの値を足した後で、10/09〜16 の5日で5銘柄・0.7MB、archive 0.2MB）。過去の日は前の archive から引き継ぐ。下の「リカレンス・ネットワーク」 |
 | 特徴量の日本語名 | `public/data/feature_names.json`（列名 → 短い日本語名と説明） | git → GitHub Pages | 特徴量を足したとき（手で） | 画面の「効いた特徴量」を日本語名で出す。正本は `research/feature_dict.py`（`NAME_JA`・軸 × 接尾辞）で、`python3 research/feature_dict.py --names-json public/data/feature_names.json` で書き出す。辞書とずれると `tests/test_feature_names.py` が落ちる |
@@ -103,9 +104,12 @@
                                      → モデルを Release へ、meta.json を git へ
                                      → 終わったら New Training Samples（workflow_run）が
                                        学習に加わったサンプルのチャートを作り直す
+                                     → 終わったら Score Distribution（workflow_run）が
+                                       スコアと収益の分布を作り直す（+10% の LightGBM が変わったとき）
 
 日曜 14:10 JST  Retrain Weekly       ランキング学習2本（日次・直近5営業日の組。only=ltr,ltr5）。
                                      手順は 09:10 の回と同じ（2026-11-01 から分けた。§85）
+                                     → 終わったら Score Distribution が ltr5 の分と重なりを作り直す
 
 土曜 10:40 JST  Check Data Store     保存データ（data-raw）を API の応答と突き合わせる
                                      （種別ごとに数日ぶんを叩き直す）

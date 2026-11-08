@@ -7,6 +7,7 @@ import PredictionView from './views/PredictionView.jsx';
 import KnnCompareView from './views/KnnCompareView.jsx';
 import FilingsView from './views/FilingsView.jsx';
 import SamplesView from './views/SamplesView.jsx';
+import ScoreDistView from './views/ScoreDistView.jsx';
 import NewsView from './views/NewsView.jsx';
 import NetworkView from './views/NetworkView.jsx';
 import AddStockModal from './components/AddStockModal.jsx';
@@ -17,7 +18,7 @@ import {
   manualStockFromForm, mergeStocks, resetSavedState,
 } from './lib/store.js';
 import {
-  loadPredictions, loadHistory, loadFilings, loadFeatureNames, loadNewSamples, loadNewsLinks,
+  loadPredictions, loadHistory, loadFilings, loadFeatureNames, loadNewSamples, loadNewsLinks, loadScoreDist,
 } from './lib/predictions.js';
 
 /*
@@ -47,6 +48,9 @@ const TABS = [
   { id: 'simulator', label: 'What-If シミュレーター', hidden: true },
   // 週次の再学習で加わったサンプルのチャート（運用者の依頼 2026-10-13。名前は同日夜「「例」ではなく「サンプル」」）。
   // 一番右（運用者の指示 2026-10-14「一番右側に持ってきてください」）
+  // +10% の LightGBM と直近5営業日の組のランキング学習のスコア・収益の分布と、2つの上位の重なり（運用者の依頼 2026-11-08
+  // 「なんなら、ダッシュボードにほしいくらいです」→ AskUserQuestion「3つとも載せる」）。サンプルのタブを一番右に保つため、その左
+  { id: 'scoredist', label: 'スコアと収益の分布' },
   { id: 'samples', label: '再学習で加わったサンプル' },
 ];
 const VISIBLE_TABS = TABS.filter((t) => !t.hidden);
@@ -71,6 +75,7 @@ export default function App() {
   const [featureNames, setFeatureNames] = useState({});
   // 再学習で加わったサンプル。undefined = 読み込み中、null = まだ無い
   const [newSamples, setNewSamples] = useState(undefined);
+  const [scoreDist, setScoreDist] = useState(undefined);
   // 候補銘柄のニュースのリンクを確かめた結果。undefined = 読み込み中、null = まだ無い
   const [newsLinks, setNewsLinks] = useState(undefined);
   const [tab, setTab] = useState('prediction');
@@ -99,6 +104,7 @@ export default function App() {
     // 特徴量の日本語名（効いた特徴量の表示）。読めなければ元の列名のまま
     loadFeatureNames().then((n) => { if (!cancelled) setFeatureNames(n); });
     loadNewSamples().then((d) => { if (!cancelled) setNewSamples(d); });
+    loadScoreDist().then((d) => { if (!cancelled) setScoreDist(d); });
     loadNewsLinks().then((d) => { if (!cancelled) setNewsLinks(d); });
     return () => { cancelled = true; };
   }, []);
@@ -263,7 +269,7 @@ export default function App() {
 
         {!loading && dataset && <DataNotices dataset={dataset} />}
 
-        {!loading && rows.length === 0 && tab !== 'prediction' && tab !== 'news' && tab !== 'knn' && tab !== 'samples'
+        {!loading && rows.length === 0 && tab !== 'prediction' && tab !== 'news' && tab !== 'knn' && tab !== 'samples' && tab !== 'scoredist'
           && tab !== 'network' && tab !== 'valuation' && (
           <div className="card empty">
             分析対象の銘柄がありません。
@@ -342,6 +348,7 @@ export default function App() {
         {/* 予測ファイルは候補の並び（今日の戦略の順）にだけ使う。読めなくてもネットワークの目次の順で出す */}
         {tab === 'network' && isVisible('network') && <NetworkView data={pred} />}
 
+        {tab === 'scoredist' && <ScoreDistView data={scoreDist} pred={pred} />}
         {tab === 'samples' && <SamplesView data={newSamples} />}
 
         {tab === 'filings' && isVisible('filings') && (

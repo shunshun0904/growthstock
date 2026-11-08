@@ -868,3 +868,10 @@ input[type='range']::-moz-range-thumb {
 .pred-id .pred-ltr5 { max-width: 100%; white-space: normal; flex-wrap: wrap; gap: 2px; }
 .pred-ltr5 .num { white-space: nowrap; }
 .pred-ltr5.unavailable { color: var(--text-faint); }
+
+/* スコアと収益の分布（ScoreDistView） */
+.sdist { display: flex; flex-direction: column; gap: var(--s4); }
+.sdist-h { font-size: 13px; font-weight: 600; color: var(--text-dim); margin: var(--s4) 0 var(--s2); text-wrap: balance; }
+.sdist-note { margin: var(--s3) 0 0; max-width: 78ch; line-height: 1.6; }
+.sdist-foot { margin: 0; max-width: 78ch; line-height: 1.6; }
+.sdist .tbl td:first-child, .sdist .tbl th:first-child { text-align: left; }
