@@ -406,6 +406,8 @@ check(/out-of-fold\s*45\s*件/.test(sd) && sd.includes('2024-01-11 〜 2024-03-1
 check(/組の行\s*204\s*件/.test(sd) && sd.includes('判断日 42 日'), 'ltr5 の組の行と判断日の数');
 check(/両方の上位10%\s*4\s*件/.test(sd), '両方の上位10% の件数');
 check(sd.includes('固定 +10% で採点した候補はまだありません'), '直近の予測に固定 +10% の候補が無ければそう書く');
+check(sd.includes('予測の候補が分布のどこにいるか') && sd.includes('固定 +10% で採点した予測の候補はまだありません'),
+      '予測の候補の位置の欄が出て、固定 +10% の候補が無ければそう書く');
 // グラフは lgbm の out-of-fold・ltr5 の収益2枚・10分位・ltr5 のスコアの5枚（直近の予測の候補が無いのでその1枚は出ない）
 check((await page.locator('.sdist .recharts-wrapper').count()) === 5,
       `グラフは5枚 (実際: ${await page.locator('.sdist .recharts-wrapper').count()})`);

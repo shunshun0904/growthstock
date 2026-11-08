@@ -95,3 +95,93 @@ export function pct(v, digits = 1, signed = false) {
   const s = (x * 100).toFixed(digits);
   return `${signed && x > 0 ? '+' : ''}${s}%`;
 }
+
+/**
+ * スコアを out-of-fold の中の百分位（0〜100）に直す。grid は 0〜100% の1%刻みの分位点（101個。research/score_dist.py の
+ * pctGrid）。分位点の間は線形に補間し、外側は 0 / 100。同じ値が続く区間は、その区間の真ん中の百分位。
+ */
+export function percentileOf(score, grid) {
+  const x = num(score);
+  const g = Array.isArray(grid) ? grid.map(num) : [];
+  if (x === null || g.length < 2 || g.some((v) => v === null)) return null;
+  const n = g.length - 1;
+  if (x <= g[0]) return 0;
+  if (x >= g[n]) return 100;
+  let lo = 0;
+  while (lo < n && g[lo + 1] <= x) lo += 1;          // g[lo] <= x < g[lo+1]
+  let first = lo;
+  while (first > 0 && g[first - 1] === g[lo]) first -= 1;
+  if (first !== lo && x === g[lo]) return ((first + lo) / 2) * (100 / n);
+  const span = g[lo + 1] - g[lo];
+  return (lo + (span > 0 ? (x - g[lo]) / span : 0)) * (100 / n);
+}
+
+/**
+ * 組の中の順位（1 = 最上位）を、上からの百分位と10分位（10 = 上位10%）に直す（research/score_dist.pool_rank と同じ式:
+ * pp = 1 − (順位 − 1) / 組の行の数、10分位 = ceil(pp × 10)）。
+ */
+export function poolDecile(rank, nPool) {
+  const r = num(rank);
+  const n = num(nPool);
+  if (r === null || n === null || n <= 0 || r < 1 || r > n) return null;
+  const pp = 1 - (r - 1) / n;
+  return { pp, dec: Math.min(Math.ceil(pp * 10 - 1e-12), 10), top10: pp > 0.9 };
+}
+
+/** スコア帯（bands の lo < score ≤ hi。最初の帯は lo を含む）。 */
+export function bandOf(score, bands) {
+  const x = num(score);
+  if (x === null) return null;
+  const b = Array.isArray(bands) ? bands : [];
+  return b.find((r, i) => (i === 0 ? x >= r.lo : x > r.lo) && x <= r.hi) || null;
+}
+
+/**
+ * 予測の候補が分布のどこにいるか（運用者の依頼 2026-11-08「予測を実施したときに、各サンプルが分布のどこに位置するのか、
+ * 表示してほしいです」）。date の候補（固定 +10% の lgbm のスコアがあるもの）を、lgbm のスコアの高い順に並べる。
+ *   lgbmPct … out-of-fold の中の百分位、band … そのスコア帯の out-of-fold の +10% 到達率など、lgbmTop10 … 上位10% の線以上
+ *   ltr5 … 組の中の順位・10分位と、その10分位の out-of-fold の平均収益（無ければ null）
+ *   group … 重なりの4つの組み合わせのどれか（ltr5 が無ければ null）
+ */
+export function candidatePositions(pred, dist, date) {
+  const L = dist?.lgbm || {};
+  const R = dist?.ltr5 || {};
+  const O = dist?.overlap || {};
+  const thr = num(O.lgbmThreshold);
+  const decs = new Map((R.deciles || []).map((d) => [d.dec, d]));
+  const groups = new Map((O.groups || []).map((g) => [g.key, g]));
+  const seen = new Set();
+  const rows = [];
+  for (const c of pred?.candidates || []) {
+    if (date && c?.date !== date) continue;
+    const m = c?.byModel?.lgbm;
+    if (!m || m.labelSpec?.version !== FIXED_VERSION || num(m.score) === null) continue;
+    const key = `${c.code}|${c.date}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const score = m.score;
+    const lgbmTop10 = thr !== null && score >= thr;
+    const pd = c.ltr5 ? poolDecile(c.ltr5.rank, c.ltr5.nPool) : null;
+    const ltr5 = pd ? { rank: c.ltr5.rank, nPool: c.ltr5.nPool, ...pd, stats: decs.get(pd.dec) || null } : null;
+    let group = null;
+    if (ltr5) {
+      const k = lgbmTop10 ? (ltr5.top10 ? 'both' : 'lgbmOnly') : (ltr5.top10 ? 'ltr5Only' : 'neither');
+      group = groups.get(k) || { key: k };
+    }
+    rows.push({
+      key, code: c.code, name: c.name, date: c.date, score,
+      lgbmPct: percentileOf(score, L.pctGrid), band: bandOf(score, L.bands), lgbmTop10, ltr5, group,
+    });
+  }
+  rows.sort((a, b) => b.score - a.score || String(a.code).localeCompare(String(b.code)));
+  return rows;
+}
+
+/** 予測の候補がある日付（固定 +10% の lgbm のスコアがあるもの。新しい順）。 */
+export function candidateDates(pred) {
+  const s = new Set();
+  for (const c of pred?.candidates || []) {
+    if (c?.byModel?.lgbm?.labelSpec?.version === FIXED_VERSION && c.date) s.add(c.date);
+  }
+  return [...s].sort().reverse();
+}

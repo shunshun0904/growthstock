@@ -875,3 +875,11 @@ input[type='range']::-moz-range-thumb {
 .sdist-note { margin: var(--s3) 0 0; max-width: 78ch; line-height: 1.6; }
 .sdist-foot { margin: 0; max-width: 78ch; line-height: 1.6; }
 .sdist .tbl td:first-child, .sdist .tbl th:first-child { text-align: left; }
+.sdist-dates { display: flex; flex-wrap: wrap; gap: var(--s2); margin: var(--s3) 0; }
+.sdist-cands tbody tr { cursor: pointer; }
+.sdist-cands tbody tr:hover { background: var(--border-soft); }
+.sdist-cands tbody tr.sel { background: color-mix(in srgb, var(--green) 14%, transparent); }
+.sdist-cands tbody tr:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.sdist-badge { margin-left: 6px; }
+.sdist-dates .btn { padding: 4px 10px; font-size: 12px; }
+.sdist-warn { color: var(--amber); margin: 0 0 var(--s3); max-width: 78ch; }

@@ -4,7 +4,7 @@ import {
 } from 'recharts';
 import { fmtDate, fmtInt } from '../lib/format.js';
 import {
-  histRows, toShares, countInto, liveLgbmScores, rangeLabel, decileLabel, pct,
+  histRows, toShares, countInto, liveLgbmScores, rangeLabel, decileLabel, pct, candidatePositions, candidateDates,
 } from '../lib/scoredist.js';
 
 /**
@@ -19,6 +19,12 @@ const AX = { fill: 'var(--text-faint)', fontSize: 10 };
 const C = { neg: 'var(--slate)', pos: 'var(--amber)', live: 'var(--green)', all: 'var(--slate)', top: 'var(--accent)' };
 
 export default function ScoreDistView({ data, pred }) {
+  const dates = React.useMemo(() => candidateDates(pred), [pred]);
+  const [date, setDate] = React.useState(null);
+  const [selKey, setSelKey] = React.useState(null);
+  const day = date && dates.includes(date) ? date : dates[0] || null;
+  const cands = React.useMemo(() => (data?.lgbm ? candidatePositions(pred, data, day) : []), [pred, data, day]);
+  const sel = cands.find((c) => c.key === selKey) || null;
   if (data === undefined) return <div className="empty">読み込んでいます…</div>;
   if (!data || !data.lgbm || !data.ltr5) {
     return (
@@ -29,8 +35,12 @@ export default function ScoreDistView({ data, pred }) {
   }
   return (
     <div className="sdist">
-      <LgbmSection d={data.lgbm} pred={pred} />
-      <Ltr5Section d={data.ltr5} />
+      <CandidatesSection rows={cands} dates={dates} day={day} sel={sel}
+                         stale={staleModels(pred, data)}
+                         onDate={(d) => { setDate(d); setSelKey(null); }}
+                         onSelect={(k) => setSelKey(k === selKey ? null : k)} />
+      <LgbmSection d={data.lgbm} pred={pred} sel={sel} />
+      <Ltr5Section d={data.ltr5} sel={sel} />
       <OverlapSection d={data.overlap} />
       <p className="sub sdist-foot">
         {`集計の作成 ${fmtDate(data.generatedAt)}。収益の確かめ: 20営業日目の終値の収益を日次の計算と `
@@ -68,7 +78,7 @@ function CountTip({ active, payload, keys, unit = '件', digits = 0, rangeDigits
   );
 }
 
-function LgbmSection({ d, pred }) {
+function LgbmSection({ d, pred, sel }) {
   const edges = d.hist?.edges || [];
   const rows = histRows(edges, { neg: d.hist?.neg, pos: d.hist?.pos });
   const live = liveLgbmScores(pred);
@@ -107,6 +117,14 @@ function LgbmSection({ d, pred }) {
                              label={{ value: `${lab} ${q[k]}`, position: 'top', fill: 'var(--text-dim)', fontSize: 10 }} />
             );
           })}
+          {sel && (() => {
+            const r = rows.find((x) => sel.score >= x.lo && sel.score < x.hi) || rows[rows.length - 1];
+            return r ? (
+              <ReferenceLine x={r.lo} stroke="var(--green)" strokeWidth={2}
+                             label={{ value: `${sel.name || sel.code} ${sel.score.toFixed(3)}`, position: 'insideTopRight',
+                                      fill: 'var(--green)', fontSize: 11 }} />
+            ) : null;
+          })()}
         </BarChart>
       </ResponsiveContainer>
       <h3 className="sdist-h">
@@ -180,7 +198,7 @@ function ReturnHist({ h, title }) {
   );
 }
 
-function Ltr5Section({ d }) {
+function Ltr5Section({ d, sel }) {
   const s = d.summary || {};
   const scoreRows = histRows(d.scoreHist?.edges, { n: d.scoreHist?.counts });
   const dec = (d.deciles || []).map((x) => ({
@@ -235,6 +253,11 @@ function Ltr5Section({ d }) {
                 isAnimationActive={false} />
           <Line dataKey="rmax" name="終値の最高値（平均）" stroke={C.pos} strokeWidth={2} strokeDasharray="5 3"
                 dot={{ r: 3 }} isAnimationActive={false} />
+          {sel?.ltr5 && (
+            <ReferenceLine x={decileLabel(sel.ltr5.dec)} stroke="var(--green)" strokeWidth={2}
+                           label={{ value: `${sel.name || sel.code} ${sel.ltr5.rank}位 / ${sel.ltr5.nPool}`,
+                                    position: 'insideTopLeft', fill: 'var(--green)', fontSize: 11 }} />
+          )}
         </LineChart>
       </ResponsiveContainer>
       <p className="sub sdist-note">
@@ -305,6 +328,87 @@ function OverlapSection({ d }) {
           + '買い方は ltr5 と同じ（判断日の翌営業日の寄り）。組には5営業日前までの候補も入るので、lgbm にとっては本来の買い日'
           + 'より最大4日遅い。「最高値が +10% 以上」は lgbm の正解ラベル（終盤 +5%・20日目の MA5 ≥ MA20 も条件）と同じではない。'
           + '同じ候補が最大5つの組に入るので、行どうしは独立していない。'}
+      </p>
+    </section>
+  );
+}
+
+/** 予測ファイルのモデル（予測のときに使った）と、分布の集計のモデルの学習日が違うもの。 */
+function staleModels(pred, data) {
+  const out = [];
+  const at = (v) => (v ? String(v).slice(0, 19) : null);
+  if (at(pred?.model?.trainedAt) && at(data?.lgbm?.trainedAt) && at(pred.model.trainedAt) !== at(data.lgbm.trainedAt)) {
+    out.push('lgbm');
+  }
+  if (at(pred?.ltr5?.trainedAt) && at(data?.ltr5?.trainedAt) && at(pred.ltr5.trainedAt) !== at(data.ltr5.trainedAt)) {
+    out.push('ltr5');
+  }
+  return out;
+}
+
+/**
+ * 予測の候補が分布のどこにいるか（運用者の依頼 2026-11-08「予測を実施したときに、各サンプルが分布のどこに位置するのか、
+ * 表示してほしいです」）。予測ファイルの候補を、lgbm の out-of-fold の中の百分位・スコア帯、ltr5 の組の中の10分位、
+ * 重なりの組み合わせに当て、それぞれの out-of-fold の成績を並べる。行を押すと、下の図にその候補の位置の線を引く。
+ */
+function CandidatesSection({ rows, dates, day, sel, stale, onDate, onSelect }) {
+  return (
+    <section className="card">
+      <div className="card-head">
+        <h2>予測の候補が分布のどこにいるか</h2>
+        <span className="sub">行を押すと、下の図（lgbm のスコア・ltr5 の10分位）にその候補の位置を緑の線で引く</span>
+      </div>
+      {dates.length > 1 && (
+        <div className="sdist-dates" role="group" aria-label="予測の日付">
+          {dates.map((d) => (
+            <button key={d} type="button" className={`btn btn-sm${d === day ? ' btn-primary' : ''}`}
+                    aria-pressed={d === day} onClick={() => onDate(d)}>{d}</button>
+          ))}
+        </div>
+      )}
+      {stale.length > 0 && rows.length > 0 && (
+        <p className="sub sdist-warn">
+          {`この日付の候補は、${stale.join('・')} を今の分布より前のモデルで採点した。下の分布は今のモデルの out-of-fold `
+            + 'なので、位置は目安（次の予測から同じモデルになる）。'}
+        </p>
+      )}
+      {!rows.length ? (
+        <div className="empty">固定 +10% で採点した予測の候補はまだありません。</div>
+      ) : (
+        <div className="tbl-wrap">
+          <table className="tbl sdist-cands">
+            <thead>
+              <tr>
+                <th>銘柄</th><th>lgbm スコア</th><th>out-of-fold の中の位置</th><th>その帯の +10% 到達率</th>
+                <th>ltr5 の組の中</th><th>その10分位の 20営業日目の終値</th><th>終値の最高値</th>
+                <th>重なり</th><th>その組み合わせの −10% 未満</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.key} className={sel?.key === r.key ? 'sel' : ''} tabIndex={0}
+                    onClick={() => onSelect(r.key)}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(r.key); } }}>
+                  <td><strong>{r.name || r.code}</strong> <span className="sub num">{r.code}</span></td>
+                  <td className="num">{r.score.toFixed(3)}</td>
+                  <td className="num">{r.lgbmPct == null ? '—' : `上位 ${(100 - r.lgbmPct).toFixed(1)}%`}
+                    {r.lgbmTop10 ? <span className="badge green sdist-badge">上位10%</span> : null}</td>
+                  <td className="num">{r.band ? `${pct(r.band.posRate)}（${rangeLabel(r.band.lo, r.band.hi, 1)}）` : '—'}</td>
+                  <td className="num">{r.ltr5 ? `${r.ltr5.rank}位 / ${r.ltr5.nPool}（${decileLabel(r.ltr5.dec)}）` : '—'}</td>
+                  <td className="num">{r.ltr5?.stats ? pct(r.ltr5.stats.r20Mean, 2, true) : '—'}</td>
+                  <td className="num">{r.ltr5?.stats ? pct(r.ltr5.stats.rmaxMean, 2, true) : '—'}</td>
+                  <td>{r.group?.label || '—'}</td>
+                  <td className="num">{r.group?.r20Below10 != null ? pct(r.group.r20Below10) : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="sub sdist-note">
+        {'out-of-fold の中の位置は、候補の lgbm のスコアが学習に使っていない行の採点の中で上から何%か（予測は全期間で学習した'
+          + 'モデル、out-of-fold は期間ごとのモデルの採点なので、物差しは近いが同じではない）。ltr5 の組の中の10分位は、予測の日の'
+          + '直近5営業日の候補の組の中の順位（右ほど上位）。成績はどれも過去の out-of-fold の平均で、その候補の見込みではない。'}
       </p>
     </section>
   );

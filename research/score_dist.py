@@ -8,7 +8,7 @@
 重なっているのか」→ AskUserQuestion「3つとも載せる」。
 
 出すもの（すべて集計だけ。銘柄ごとの値は出さない）
-  lgbm   … +10% の LightGBM（固定 +10% のラベル）の out-of-fold のスコアの分布（正例・負例に分けた度数）、分位点、
+  lgbm   … +10% の LightGBM（固定 +10% のラベル）の out-of-fold のスコアの分布（正例・負例に分けた度数）、分位点（1%刻みも）、
              スコア帯ごとの件数・+10% 到達率・収益（ret_o1_20: 翌営業日の寄りで買い、20営業日後の5日平均終値で売った上昇率）
   ltr5   … 直近5営業日の組のランキング学習の out-of-fold。スコアの度数、組の行すべて・組の1位の収益の度数と要約
              （R20: 判断日の翌営業日の寄りで買い20営業日目の終値で売った収益。RMAX: 同じ窓の終値の最高値で売った収益）、
@@ -22,7 +22,9 @@
   - R20 を live_track.forward の ret_close（同じ買い方・売り方）と 300 行で突き合わせ、すべて一致すること
   - RMAX ≥ R20（窓に20営業日目の終値が入っているので）
 
-ログには件数・日付・割合だけを出す（銘柄は出さない）。
+ログには件数・日付・割合だけを出す（銘柄は出さない）。予測の候補がこの分布のどこにいるか（運用者の依頼 2026-11-08「予測を
+実施したときに、各サンプルが分布のどこに位置するのか、表示してほしいです」）は、画面が予測ファイルの候補と、ここの分位点・帯・
+10分位・重なりの組み合わせを突き合わせて出す（src/lib/scoredist.js candidatePositions）。
 
   python3 research/score_dist.py                  # research/_data の out-of-fold と日足から
   python3 research/score_dist.py --data-dir DIR --out FILE
@@ -172,6 +174,8 @@ def lgbm_part(lg: pd.DataFrame, meta: Dict) -> Dict:
         "positiveRate": _r(y.mean()), "prAuc": (meta.get("oofMetrics") or {}).get("prAuc"),
         "rocAuc": (meta.get("oofMetrics") or {}).get("rocAuc"),
         "quantiles": quantiles(s), "quantilesPos": quantiles(s[y == 1]), "quantilesNeg": quantiles(s[y == 0]),
+        # 0〜100% の1%刻みの分位点。画面が予測の候補のスコアを out-of-fold の中の百分位に直す（線形に補間）
+        "pctGrid": [_r(v) for v in s.quantile(np.linspace(0, 1, 101)).to_numpy()],
         "hist": {"edges": LGBM_EDGES, "pos": hist(s[y == 1], LGBM_EDGES), "neg": hist(s[y == 0], LGBM_EDGES)},
         "bands": bands,
     }
