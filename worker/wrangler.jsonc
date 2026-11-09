@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "growthstock-plamo",
+  "main": "src/index.js",
+  "compatibility_date": "2026-07-01",
+  "workers_dev": true,
+  "observability": { "enabled": false },
+  "vars": {
+    "ALLOWED_ORIGINS": "https://shunshun0904.github.io",
+    "PLAMO_ENDPOINT": "https://api.platform.preferredai.jp/v1/chat/completions",
+    "PLAMO_MODEL": "plamo-3.0-fin-beta",
+    // 契約画面で無料β・上限・データ利用条件を確認するまで上流呼び出しを止める。
+    "PLAMO_FREE_BETA_CONFIRMED": "false",
+    "MAX_OUTPUT_TOKENS": "1536",
+    "UPSTREAM_TIMEOUT_MS": "25000",
+    "CHAT_PER_MINUTE": "3",
+    "CHAT_PER_DAY": "20",
+    "CHAT_PER_MONTH": "300"
+  },
+  "durable_objects": {
+    "bindings": [{ "name": "AI_LIMITER", "class_name": "AiLimiter" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["AiLimiter"] }]
+}

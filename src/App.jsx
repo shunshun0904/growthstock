@@ -21,6 +21,8 @@ import {
   loadPredictions, loadHistory, loadFilings, loadFeatureNames, loadNewSamples, loadNewsLinks, loadScoreDist,
 } from './lib/predictions.js';
 
+const AiView = React.lazy(() => import('./views/AiView.jsx'));
+
 /*
  * hidden のタブは画面に出さない（運用者の指示 2026-10-13「決算サンキーとWhat-Ifシミュレーターのタブは消してください。
  * 表示から消してくれるだけで良いです」、同日夜「8軸オクタゴン比較のタブも消してください」）。画面のコード
@@ -31,6 +33,7 @@ const TABS = [
   // 候補銘柄のニュース（候補ごとのニュース・適時開示・アナリスト予想・個人投資家の声へのリンク）。運用者の依頼 2026-10-17
   // 「候補銘柄のニュース として新たにタブを追加してほしいです。左から2番目で」
   { id: 'news', label: '候補銘柄のニュース' },
+  { id: 'ai', label: 'AI銘柄分析' },
   { id: 'valuation', label: '理論株価' },
   // 候補ごとのリカレンス・ネットワーク（点 = その銘柄の1営業日、線 = テクニカル指標9列の状態が似た日どうし。参考で、選定には
   // 使わない）。運用者の依頼 2026-10-19「Obsidian の球状のプロットのようなことを、ノードを1営業日として…その日の各候補銘柄単体で」。
@@ -270,7 +273,7 @@ export default function App() {
         {!loading && dataset && <DataNotices dataset={dataset} />}
 
         {!loading && rows.length === 0 && tab !== 'prediction' && tab !== 'news' && tab !== 'knn' && tab !== 'samples' && tab !== 'scoredist'
-          && tab !== 'network' && tab !== 'valuation' && (
+          && tab !== 'network' && tab !== 'valuation' && tab !== 'ai' && (
           <div className="card empty">
             分析対象の銘柄がありません。
             <div style={{ marginTop: 'var(--s4)' }}>
@@ -289,6 +292,9 @@ export default function App() {
         )}
 
         {tab === 'valuation' && <ValuationView />}
+        {tab === 'ai' && <React.Suspense fallback={<div className="empty">AI分析画面を読み込んでいます…</div>}>
+          <AiView dataset={dataset} predictionData={pred} selectedId={selectedId} featureNames={featureNames} />
+        </React.Suspense>}
         {tab === 'prediction' && (
           predError ? (
             <div className="banner warn">

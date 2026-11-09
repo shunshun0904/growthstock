@@ -52,6 +52,9 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+        env:
+          # 公開してよいWorkerのURLだけ。APIキー・本人認証パスワードは渡さない。
+          VITE_PLAMO_WORKER_URL: ${{ vars.VITE_PLAMO_WORKER_URL }}
 
       # リカレンス・ネットワーク（日次予測が Release に上げた recurrence.tar.gz。research/recurrence_net.py）を
       # dist/data/recurrence/ に置く。購入条件を満たした銘柄ごとに全期間で作る（1銘柄 約130KB）のでリポジトリには入れていない

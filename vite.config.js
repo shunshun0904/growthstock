@@ -1,5 +1,5 @@
 import { execSync } from 'node:child_process';
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 
 /**
@@ -23,9 +23,26 @@ function buildId() {
   }
 }
 
+function protectPublicEnvironment() {
+  return { name: 'protect-public-environment', config(_, { mode }) {
+    const publicEnv = loadEnv(mode, process.cwd(), 'VITE_');
+    const names = Object.keys(publicEnv)
+      .filter(name => /^VITE_.*(?:API_?KEY|PASSWORD|SECRET|TOKEN)/i.test(name));
+    if (names.length) throw new Error(`秘密情報をVITE_変数に設定できません。Worker Secretsを使用してください（${names.join(', ')}）。`);
+    if (publicEnv.VITE_PLAMO_WORKER_URL) {
+      try {
+        const url = new URL(publicEnv.VITE_PLAMO_WORKER_URL.trim());
+        const local = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+        if ((url.protocol !== 'https:' && !(local && url.protocol === 'http:'))
+            || url.username || url.password || url.search || url.hash || url.pathname !== '/') throw new Error();
+      } catch { throw new Error('VITE_PLAMO_WORKER_URLには認証情報・クエリを含まないHTTPSのルートURLを指定してください。'); }
+    }
+  } };
+}
+
 // base: './' -> GitHub Pages のサブパス配信でも、ローカルの file/preview でも動くようにする
 export default defineConfig({
-  plugins: [react()],
+  plugins: [protectPublicEnvironment(), react()],
   base: './',
   define: {
     __BUILD_ID__: JSON.stringify(buildId()),

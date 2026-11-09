@@ -23,7 +23,7 @@ const SAMPLES_FIXTURE = path.join(ROOT, 'tests', 'fixtures', 'synthetic-new-samp
 const SCORE_DIST_FIXTURE = path.join(ROOT, 'tests', 'fixtures', 'synthetic-score-dist.json');
 // 候補銘柄のニュースのリンクを確かめた結果。research/news_links.py の書き出しで作った（偽の取得。9324 の掲示板は開けない）
 const NEWS_FIXTURE = path.join(ROOT, 'tests', 'fixtures', 'synthetic-news-links.json');
-const SHOTS = path.join(ROOT, 'docs');
+const SHOTS = process.env.SMOKE_ARTIFACT_DIR || path.join(ROOT, 'docs');
 fs.mkdirSync(SHOTS, { recursive: true });
 
 const MIME = {
@@ -376,9 +376,9 @@ const tabNames = (await page.getByRole('tab').allTextContents()).map((t) => t.tr
 // レベルでもないので非表示にしてください。なくて良いです」で隠している（src/App.jsx の hidden。画面のコードと日次予測の網の
 // 作成は残す）
 // スコアと収益の分布（運用者の依頼 2026-11-08）は、サンプルを一番右に保つためその左
-check(tabNames.join(',') === 'ブレイク予測,候補銘柄のニュース,理論株価,タイムマシーン,スコアと収益の分布,再学習で加わったサンプル',
-      'タブは ブレイク予測 / 候補銘柄のニュース / 理論株価 / タイムマシーン / スコアと収益の分布 / 再学習で加わったサンプル'
-      + ` の6つ (実際: ${tabNames.join(',')})`);
+check(tabNames.join(',') === 'ブレイク予測,候補銘柄のニュース,AI銘柄分析,理論株価,タイムマシーン,スコアと収益の分布,再学習で加わったサンプル',
+      'タブは ブレイク予測 / 候補銘柄のニュース / AI銘柄分析 / 理論株価 / タイムマシーン / スコアと収益の分布 / 再学習で加わったサンプル'
+      + ` の7つ (実際: ${tabNames.join(',')})`);
 check(!tabNames.includes('決算サンキー') && !tabNames.includes('What-If シミュレーター')
         && !tabNames.includes('8軸オクタゴン比較') && !tabNames.includes('候補の比較')
         && !tabNames.includes('リカレンス・ネットワーク'),
