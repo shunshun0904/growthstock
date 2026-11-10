@@ -21,7 +21,17 @@ def _fetch(url):
 
 
 def _parse(content):
-    frame = pd.read_csv(io.BytesIO(content), skiprows=1, na_values=['-'])
+    # 過去分は UTF-8 で読めるが、今月分は Shift_JIS（cp932）で配られている（2026-11-10 の Refresh Valuations が
+    # UnicodeDecodeError で落ちて判明）。どちらでも読めるように順に試す
+    for enc in ('utf-8', 'cp932'):
+        try:
+            text = content.decode(enc)
+            break
+        except UnicodeDecodeError:
+            continue
+    else:
+        raise ValueError('Unexpected MOF yield encoding')
+    frame = pd.read_csv(io.StringIO(text), skiprows=1, na_values=['-'])
     frame.columns = [str(c).strip() for c in frame.columns]
     if not {'Date', '10Y'} <= set(frame):
         raise ValueError('Unexpected MOF yield format')
@@ -44,7 +54,8 @@ def yields(data_dir, refresh=True):
         try:
             current = _parse(_fetch(CURRENT_YIELD_URL))
         except Exception as exc:  # 今月分が取れなくても過去分で続ける（金利が7日超古ければ riskfree が欠測にする）
-            print(f'[yields] 今月分（jgbcme.csv）を取れなかった: {type(exc).__name__}。過去分だけで続ける', flush=True)
+            print(f'[yields] 今月分（jgbcme.csv）を取れなかった: {type(exc).__name__}: {str(exc)[:120]}。過去分だけで続ける',
+                  flush=True)
             current = None
         merged = merge_yields(history, current)
         tmp = path.with_suffix('.tmp')

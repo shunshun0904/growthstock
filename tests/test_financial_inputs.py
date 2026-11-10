@@ -37,7 +37,7 @@ class FinancialInputs(unittest.TestCase):
         import tempfile
         from unittest import mock
         hist=b'Interest Rate (historical)\nDate,1Y,10Y\n2026/10/29,0.9,1.70\n2026/10/30,0.9,1.72\n'
-        cur=b'Interest Rate (current)\nDate,1Y,10Y\n2026/10/30,0.9,1.73\n2026/11/4,0.9,-\n2026/11/9,0.9,1.75\n'
+        cur='国債金利情報（今月分）\nDate,1Y,10Y\n2026/10/30,0.9,1.73\n2026/11/4,0.9,-\n2026/11/9,0.9,1.75\n'.encode('cp932')  # 今月分は Shift_JIS
         with tempfile.TemporaryDirectory() as d:
             with mock.patch.object(FI,'_fetch',side_effect=lambda u: hist if u==FI.YIELD_URL else cur):
                 out=FI.yields(d)
@@ -54,6 +54,8 @@ class FinancialInputs(unittest.TestCase):
             self.assertEqual(only.Date.max(),pd.Timestamp('2026-10-30'))
         with self.assertRaises(ValueError):
             FI._parse(b'title\nDay,X\n1,2\n')
+        with self.assertRaises(ValueError):
+            FI._parse(b'\xff\xfe\x00\x81')
 
     def test_export_does_not_turn_missing_prices_into_zero(self):
         import json
