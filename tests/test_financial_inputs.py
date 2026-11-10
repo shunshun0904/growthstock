@@ -32,6 +32,29 @@ class FinancialInputs(unittest.TestCase):
         self.assertTrue(out.missing_tv_ddm.eq(1).all())
         self.assertAlmostEqual(out.tv_rf.iloc[1],(1+.01/2)**2-1)
 
+    def test_yields_join_the_current_month_file(self):
+        # 過去分（前月末まで）だけだと月の8日ごろから金利が7日超古くなり、理論株価が欠ける（2026-11-10）。今月分もつなぐ
+        import tempfile
+        from unittest import mock
+        hist=b'Interest Rate (historical)\nDate,1Y,10Y\n2026/10/29,0.9,1.70\n2026/10/30,0.9,1.72\n'
+        cur=b'Interest Rate (current)\nDate,1Y,10Y\n2026/10/30,0.9,1.73\n2026/11/4,0.9,-\n2026/11/9,0.9,1.75\n'
+        with tempfile.TemporaryDirectory() as d:
+            with mock.patch.object(FI,'_fetch',side_effect=lambda u: hist if u==FI.YIELD_URL else cur):
+                out=FI.yields(d)
+            self.assertEqual([x.strftime('%Y-%m-%d') for x in out.Date],['2026-10-29','2026-10-30','2026-11-04','2026-11-09'])
+            self.assertAlmostEqual(out.set_index('Date')['10Y'][pd.Timestamp('2026-10-30')],1.73)   # 同じ日は今月分
+            self.assertTrue(pd.isna(out.set_index('Date')['10Y'][pd.Timestamp('2026-11-04')]))
+            again=FI.yields(d,refresh=False)                                                        # 保存した形を読み直せる
+            pd.testing.assert_frame_equal(again,out)
+            rf=__import__('theoretical_value').riskfree(pd.Series([pd.Timestamp('2026-11-10')]),out)
+            self.assertEqual(rf.tv_rf_date.iloc[0],pd.Timestamp('2026-11-09'))
+            self.assertTrue(rf.tv_rf.notna().all())
+            with mock.patch.object(FI,'_fetch',side_effect=lambda u: hist if u==FI.YIELD_URL else (_ for _ in ()).throw(OSError('x'))):
+                only=FI.yields(d)                                                                  # 今月分が取れなくても続ける
+            self.assertEqual(only.Date.max(),pd.Timestamp('2026-10-30'))
+        with self.assertRaises(ValueError):
+            FI._parse(b'title\nDay,X\n1,2\n')
+
     def test_export_does_not_turn_missing_prices_into_zero(self):
         import json
         payload=clean({'zero':0.,'missing':np.nan,'infinite':np.inf,'date':pd.Timestamp('2020-01-01'),'x':[np.float64(1)]})

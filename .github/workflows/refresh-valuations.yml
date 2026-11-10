@@ -1,0 +1,88 @@
+name: Refresh Valuations
+
+# 画面のタブ「理論株価」（public/data/valuations.json）だけを作り直す。予測（Predict Breakouts）は毎晩これを書くが、
+# 予測済みの日に予測をやり直すと予測の記録も上書きするので、理論株価だけをやり直したいときに手で起動する。
+#
+# 運用者の指摘（2026-11-10）「理論株価の算出が、失敗してるので再挑戦してください」。原因は国債10年金利の取り方
+# （research/financial_inputs.yields が財務省の過去分 jgbcme_all.csv（前月末まで）だけを読み、今月分 jgbcme.csv を
+# 読んでいなかった。基準日が7日を超えると RIM・配当割引法を出さない）。直した版で金利を取り直し、直近3日の予測の候補の
+# 理論株価を作り直す。予測ファイル・予測の記録・スプレッドシートには触らない。
+#
+# ログに出すのは件数・日付だけ（銘柄の値は出さない）。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: refresh-valuations
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r research/requirements.txt
+
+      - name: Download raw data (release)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p research/_data
+          bash scripts/gh_release_download.sh data-raw research/_data \
+            'bars_*.parquet' 'topix_*.parquet' 'fins_*.parquet' 'valuation_*.parquet'
+
+      - name: Fetch JGB yields (MOF)
+        run: |
+          cd research
+          python3 -c "import financial_inputs as FI; FI.yields('_data')"
+
+      - name: Export valuations
+        run: |
+          set -o pipefail
+          python3 research/export_valuations.py 2>&1 | tee valuations.log
+          python3 - <<'PY' | tee -a valuations.log
+          import json, collections
+          d = json.load(open("public/data/valuations.json", encoding="utf-8"))
+          n = collections.Counter()
+          for s in d["stocks"]:
+              for m in s["methods"]:
+                  n[(m["id"], bool(m["available"]))] += 1
+          ys = sorted({s.get("yieldDate") for s in d["stocks"] if s.get("yieldDate")})
+          print(f"[valuations] 基準日 {d['asOf']} / 銘柄 {len(d['stocks'])} / 金利の基準日 {ys}")
+          for k in ("ri", "ddm"):
+              print(f"[valuations] {k}: 出せた {n[(k, True)]} / 出せない {n[(k, False)]}")
+          PY
+
+      - name: Commit
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/data/valuations.json
+          if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
+          git commit -m "chore(data): 理論株価を作り直す ($(date -u '+%Y-%m-%d %H:%M UTC'))"
+          for i in 1 2 3 4; do
+            if git push; then exit 0; fi
+            sleep $((2 ** i)); git pull --rebase
+          done
+          exit 1
+
+      - name: Summary
+        if: always()
+        run: |
+          { echo '## 理論株価の作り直し'
+            echo '```'
+            cat valuations.log 2>/dev/null || echo '(実行せず)'
+            echo '```'; } >> "$GITHUB_STEP_SUMMARY"

@@ -14,7 +14,7 @@ on:
     # 他のワークフローを起こさないため（GitHub のループ防止）。
     workflows: ['Fetch J-Quants Data', 'Predict Breakouts', 'Refresh Stock Details', 'Fetch Filings',
                 'New Training Samples', 'Backfill KNN', 'Check News Links', 'Adopt Financial Inputs',
-                'Score Distribution']
+                'Score Distribution', 'Refresh Valuations']
     types: [completed]
 
 permissions:
