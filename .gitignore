@@ -6,6 +6,10 @@ dist/
 __pycache__/
 *.pyc
 .env
+worker/.dev.vars*
+worker/.env*
+worker/.wrangler/
+docs/screenshot-ai-smoke-*.png
 research/_data/
 # モデル本体は GitHub Release（タグ data-raw）に置く。
 # 2.7MB のバイナリを毎週コミットすると差分圧縮が効かず、年138MB 膨らむ。

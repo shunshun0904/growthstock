@@ -27,6 +27,14 @@ jobs:
       - name: データパイプラインの単体テスト
         run: python3 tests/test_fetcher.py
 
+      - name: AI Workerの認証・制限・外部APIモック
+        run: |
+          npm ci --prefix worker
+          npm test --prefix worker
+          npm run check --prefix worker
+        env:
+          WRANGLER_SEND_METRICS: 'false'
+
       # research/ 配下は pandas / scikit-learn が要る。
       # ここを回していなかったため、特徴量の列がデータセットから
       # 黙って落ちる不具合を実際の学習実行まで検出できなかった。
@@ -52,6 +60,7 @@ jobs:
           npm install --no-save playwright
           npx playwright install --with-deps chromium
           node tests/smoke.mjs
+          node tests/ai-smoke.mjs
 
       - uses: actions/upload-artifact@v4
         if: always()
