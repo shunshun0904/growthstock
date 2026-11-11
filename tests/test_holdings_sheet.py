@@ -970,12 +970,13 @@ class Workflow(unittest.TestCase):
         self.assertNotIn("git add", text)                  # コミットしない
         self.assertNotIn("gh_release_upload", text)        # Release に書かない
         self.assertIn("research/holdings_sheet.py", text)
-        # 2026-11-02 から、同じスプレッドシートの今のタブと v2 のタブに分けて書く
-        self.assertIn("python3 research/holdings_sheet.py --book v1", text)
+        # 2026-11-02 から、同じスプレッドシートの今のタブと v2 のタブに分けて書く。2026-11-11 から v1 は更新しない
+        # （運用者の依頼「v1の記録は止めて大丈夫です。v2があるので。」）
+        self.assertNotIn("python3 research/holdings_sheet.py --book v1", text)
         self.assertIn("python3 research/holdings_sheet.py --book v2", text)
         with open(os.path.join(ROOT, ".github", "workflows", "predict.yml"), encoding="utf-8") as f:
             pred = f.read()
-        self.assertIn("python3 research/export_sheets.py --book v1", pred)
+        self.assertNotIn("python3 research/export_sheets.py --book v1", pred)
         self.assertIn("python3 research/export_sheets.py --book v2", pred)
         self.assertIn("'bars_*' 'calendar*'", text)        # 日足とカレンダーだけ取り出す
         # export_sheets -> models -> tuning_multi が scikit-learn を読み込むので、予測と同じ一式を入れる

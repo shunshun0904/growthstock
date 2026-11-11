@@ -7,6 +7,8 @@ name: Update Holdings Sheet
 # 2026-11-02 の予測から、同じスプレッドシートの v2 のタブ（取引の記録 v2・保有の推移 v2・予測ログ v2）に分ける
 # （運用者の依頼 2026-10-30「…予測＆購買記録をv２として…」→「同じシートに v2 のタブ」）。予測日が 11/2 より前の買いと
 # その売りは今のタブ（--book v1）、11/2 からの予測の買いは v2 のタブ（--book v2）。
+# 2026-11-11 から v1 は更新しない（運用者の依頼「v1の記録は止めて大丈夫です。v2があるので。」）。v1 のタブはその日の
+# 中身のまま残る。戻すときは下の Update holdings tab に --book v1 の行を足す
 #
 # 毎晩の予測（Predict Breakouts）が終わったら workflow_run で続けて走る。予測が休場日で
 # 飛んだ日も走る（同じ中身で作り直すだけ）。手でも起動できる（Actions の Run workflow）。
@@ -79,8 +81,7 @@ jobs:
             echo "GOOGLE_SERVICE_ACCOUNT_JSON / GSHEET_ID が未設定のため飛ばします"
             exit 0
           fi
-          python3 research/holdings_sheet.py --book v1 2>&1 | tee holdings.log
-          python3 research/holdings_sheet.py --book v2 2>&1 | tee -a holdings.log
+          python3 research/holdings_sheet.py --book v2 2>&1 | tee holdings.log
 
       - name: Summary
         if: always()
