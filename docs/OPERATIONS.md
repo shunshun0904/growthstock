@@ -92,7 +92,9 @@
 
 平日 13:10 JST  Fetch JSF            日証金の前営業日の確報（daily）と、銘柄ごとの
 土日 10:20 JST                       過去3年の続き（history）を Release（data-jsf）へ。
-                                     土日は history だけ
+                                     土日は history だけ。2026-11-13 から history は全銘柄の
+                                     取り直し（1回45分・約320銘柄ずつ。11/26 ごろまで。
+                                     docs/DATA_JSF.md「取り直し（2026-11）」）
 
 毎日 10:10 JST  Fetch EDINET DB      EDINET DB から年次財務を 85社ぶん取って
                                      Release へ（1社1リクエスト。月 850 で止まる）

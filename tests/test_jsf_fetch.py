@@ -329,6 +329,90 @@ class TestHistoryRobustness(unittest.TestCase):
         self.assertEqual(h["code"].nunique(), done)
 
 
+class TestRefetch(unittest.TestCase):
+    """取り直し（2026-11。運用者の選択「全銘柄の過去を取り直す」「控えを残して上書き」）。"""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def test_fetched_on_reads_jst_date(self):
+        self.assertEqual(J.fetched_on({"at": "2026-11-12T13:30:00+09:00"}), pd.Timestamp("2026-11-12").date())
+        # UTC の 16時は JST の翌日 1時
+        self.assertEqual(J.fetched_on({"at": "2026-11-12T16:00:00+00:00"}), pd.Timestamp("2026-11-13").date())
+        self.assertIsNone(J.fetched_on({"at": "not a date"}))
+        self.assertIsNone(J.fetched_on({}))
+
+    def test_needs_fetch(self):
+        cut = pd.Timestamp("2026-11-13").date()
+        old = {"status": "ok", "at": "2026-11-12T13:30:00+09:00"}
+        new = {"status": "ok", "at": "2026-11-13T13:20:00+09:00"}
+        self.assertTrue(J.needs_fetch({}, cut))
+        self.assertTrue(J.needs_fetch({"status": "error", "at": "2026-11-13T13:20:00+09:00"}, cut))
+        self.assertTrue(J.needs_fetch(old, cut))
+        self.assertFalse(J.needs_fetch(new, cut))
+        self.assertTrue(J.needs_fetch({"status": "no_data", "at": "2026-10-01T13:00:00+09:00"}, cut))
+        self.assertTrue(J.needs_fetch({"status": "ok"}, cut))            # 取った日が読めなければ取り直す
+        self.assertFalse(J.needs_fetch(old, None))                       # 取り直しを頼まなければ今までどおり
+        self.assertFalse(J.needs_fetch({"status": "ok"}, None))
+
+    def test_refetch_overwrites_overlap_keeps_old_only_rows_and_skips_new(self):
+        jst = PJ.JST
+        old_csv = HIST_CSV.replace("424242", "999999")            # 前に取った値（重なる日で違う）
+        site = FakeSite({})
+        for c4, body in (("7203", old_csv), ("1301", HIST_CSV.replace("7203", "1301"))):
+            site.routes[f"{J.BASE}/app/stock/detail/{c4}-01"] = (200, DETAIL_HTML.format(c=c4).encode())
+            site.routes[f"{J.BASE}/app/stock/detail/{c4}/search"] = (200, b"<html>ok</html>")
+            site.routes[f"{J.BASE}/app/stock/detail/{c4}/csv"] = (200, cp932(body))
+        m = J.load_manifest(self.dir)
+        printed(J.fetch_history, PJ.Fetcher(100, 0, opener=site), self.dir, m, ["72030"], 10, 3.0,
+                now=pd.Timestamp("2026-11-10 13:30").to_pydatetime().replace(tzinfo=jst))
+        # 控えより前の日の行（取り直しの窓の外）を足しておく
+        p = os.path.join(self.dir, "jsf_hist.parquet")
+        h = pd.read_parquet(p)
+        extra = h.iloc[[0]].copy()
+        extra["申込日"] = pd.Timestamp("2023-01-05")
+        pd.concat([h, extra], ignore_index=True).to_parquet(p, index=False)
+        # 13010 は取り直しの日以降に取ったことにする（飛ばされるはず）
+        printed(J.fetch_history, PJ.Fetcher(100, 0, opener=site), self.dir, m, ["13010"], 10, 3.0,
+                now=pd.Timestamp("2026-11-13 13:30").to_pydatetime().replace(tzinfo=jst))
+        site2 = history_site(["7203"])
+        (done, _), out = printed(J.fetch_history, PJ.Fetcher(100, 0, opener=site2), self.dir, m,
+                                 ["72030", "13010"], 10, 3.0,
+                                 now=pd.Timestamp("2026-11-13 14:00").to_pydatetime().replace(tzinfo=jst),
+                                 refetch_before=pd.Timestamp("2026-11-13").date())
+        self.assertEqual(done, 1)
+        self.assertNotIn(("GET", f"{J.BASE}/app/stock/detail/1301-01"), site2.calls)
+        self.assertEqual(J.fetched_on(m["hist"]["72030"]), pd.Timestamp("2026-11-13").date())
+        h = pd.read_parquet(p)
+        a = h[h["code"] == "72030"].set_index("申込日")
+        self.assertEqual(float(a.loc[pd.Timestamp("2023-09-26"), "融資残高（株）"]), 424242.0)   # 新しい値で上書き
+        self.assertIn(pd.Timestamp("2023-01-05"), a.index)                                     # 窓の外の古い行は残る
+        self.assertEqual(int(h.duplicated(["申込日", "code"]).sum()), 0)
+        self.assertIn("取り直し", out)
+        for v in SECRETS + ["999999"]:
+            self.assertNotIn(v, out, v)
+
+    def test_describe_counts_without_values(self):
+        jst = PJ.JST
+        m = J.load_manifest(self.dir)
+        printed(J.fetch_history, PJ.Fetcher(100, 0, opener=history_site(["7203", "1301"])), self.dir, m,
+                ["72030"], 10, 3.0, now=pd.Timestamp("2026-11-10 13:30").to_pydatetime().replace(tzinfo=jst))
+        printed(J.fetch_history, PJ.Fetcher(100, 0, opener=history_site(["7203", "1301"])), self.dir, m,
+                ["13010"], 10, 3.0, now=pd.Timestamp("2026-11-13 13:30").to_pydatetime().replace(tzinfo=jst))
+        n, out = printed(J.describe, self.dir, pd.Timestamp("2026-11-13").date())
+        self.assertEqual(n, 1)
+        self.assertIn("REFETCHED=1", out)
+        self.assertIn("4行・2銘柄", out)
+        for v in SECRETS:
+            self.assertNotIn(v, out, v)
+        rc, out2 = printed(J.main, ["describe", "--data-dir", self.dir, "--refetch-before", "2026-11-14"])
+        self.assertEqual(rc, 0)
+        self.assertIn("REFETCHED=0", out2)
+
+
 class TestTargets(unittest.TestCase):
     def test_population_order_first(self):
         d = tempfile.mkdtemp()

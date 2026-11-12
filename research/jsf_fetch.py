@@ -35,7 +35,7 @@ import os
 import re
 import sys
 import urllib.parse
-from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import Callable, Iterable, List, Optional, Sequence, Tuple
 
 import pandas as pd
 
@@ -302,12 +302,44 @@ def _flush(data_dir: str, m: dict, frames: List[pd.DataFrame], now: dt.datetime)
     return added
 
 
+def fetched_on(rec: dict) -> Optional[dt.date]:
+    """manifest の1銘柄の記録から、最後に取りに行った日（JST）。読めなければ None。"""
+    at = rec.get("at") if isinstance(rec, dict) else None
+    if not at:
+        return None
+    try:
+        t = dt.datetime.fromisoformat(str(at))
+    except ValueError:
+        return None
+    if t.tzinfo is not None:
+        t = t.astimezone(JST)
+    return t.date()
+
+
+def needs_fetch(rec: dict, refetch_before: Optional[dt.date] = None) -> bool:
+    """
+    この銘柄を取りに行くか。済んでいない（未取得・失敗）なら取る。refetch_before を渡したときは、
+    済んだ銘柄（ok・no_data）でもその日より前に取ったものは取り直す（運用者の選択 2026-11-12
+    「全銘柄の過去を取り直す」。docs/DATA_JSF.md「取り直し」）。取った日が読めない記録も取り直す。
+    """
+    status = rec.get("status") if isinstance(rec, dict) else None
+    if status not in ("ok", "no_data"):
+        return True
+    if refetch_before is None:
+        return False
+    day = fetched_on(rec)
+    return day is None or day < refetch_before
+
+
 def fetch_history(f: PJ.Fetcher, data_dir: str, m: dict, codes: List[str], max_codes: int,
                   years: float, now: Optional[dt.datetime] = None,
                   time_budget: Optional[float] = None, checkpoint: int = 50,
-                  clock: Callable[[], float] = None) -> Tuple[int, int]:
+                  clock: Callable[[], float] = None,
+                  refetch_before: Optional[dt.date] = None) -> Tuple[int, int]:
     """
     (取りに行った銘柄数, 増えた行数)。済んだ銘柄は飛ばす。失敗は次回また試す。
+    refetch_before を渡すと、その日より前に取った銘柄も取り直す（needs_fetch）。積むときは
+    申込日・銘柄が重なれば新しく取った値を残す（merge_store）。
 
     checkpoint 銘柄ごとに保存する。1銘柄に実測約8.4秒（3リクエスト）かかるので、
     ステップの打ち切りに掛かっても、それまでの分は失わない。time_budget（秒）を過ぎたら
@@ -319,7 +351,10 @@ def fetch_history(f: PJ.Fetcher, data_dir: str, m: dict, codes: List[str], max_c
     now = now or dt.datetime.now(JST)
     end = now.date()
     start = end - dt.timedelta(days=int(365.25 * years))
-    todo = [c for c in codes if m["hist"].get(c, {}).get("status") not in ("ok", "no_data")]
+    todo = [c for c in codes if needs_fetch(m["hist"].get(c, {}), refetch_before)]
+    if refetch_before is not None:
+        n_re = sum(1 for c in todo if m["hist"].get(c, {}).get("status") in ("ok", "no_data"))
+        print(f"  取り直し: {refetch_before} より前に取った銘柄のうち 残り {n_re:,}")
     print(f"  取る銘柄 残り {len(todo):,} / {len(codes):,}（この実行の上限 {max_codes}"
           f"{f'・{time_budget / 60:.0f}分' if time_budget else ''}） / 期間 {start} 〜 {end}")
     frames: List[pd.DataFrame] = []
@@ -355,6 +390,10 @@ def fetch_history(f: PJ.Fetcher, data_dir: str, m: dict, codes: List[str], max_c
     st = pd.Series([v.get("status") for v in m["hist"].values()]).value_counts().to_dict()
     print(f"  [hist] 済み {st.get('ok', 0):,} / データ無し {st.get('no_data', 0):,} / "
           f"失敗（次回また試す）{st.get('error', 0):,} / 取る銘柄 {len(codes):,}")
+    if refetch_before is not None:
+        left = sum(1 for c in codes if needs_fetch(m["hist"].get(c, {}), refetch_before))
+        print(f"  [hist] 取り直しの残り {left:,} / {len(codes):,}（{refetch_before} より前に取った銘柄"
+              f"・未取得・失敗）")
     return done, added
 
 
@@ -368,9 +407,37 @@ def jsf_codes(data_dir: str) -> List[str]:
     return sorted(set((tse if len(tse) else b)["code"].astype(str)))
 
 
+def describe(data_dir: str, refetch_before: Optional[dt.date] = None,
+             path: Optional[str] = None) -> int:
+    """
+    過去ファイルの件数と、取り直しの進み（refetch_before 以降に取った銘柄の数）を出す。値は出さない。
+    最後の行は機械向け（REFETCHED=数）。ワークフローは 0 のときだけ控えを作る（取り直しが始まった後の
+    ファイルを控えにしない）。戻り値はその数。
+    """
+    p = path or os.path.join(data_dir, HIST["file"])
+    if os.path.exists(p):
+        h = pd.read_parquet(p, columns=["申込日", "code"])
+        print(f"[describe] 過去ファイル: {len(h):,}行・{h['code'].nunique():,}銘柄・申込日 "
+              f"{span(h['申込日'])}")
+    else:
+        print("[describe] 過去ファイルが無い")
+    m = load_manifest(data_dir)
+    recs = m.get("hist", {})
+    st = pd.Series([v.get("status") for v in recs.values()], dtype=object).value_counts().to_dict()
+    n_after = 0
+    if refetch_before is not None:
+        n_after = sum(1 for v in recs.values()
+                      if v.get("status") in ("ok", "no_data") and (fetched_on(v) or dt.date.min) >= refetch_before)
+    print(f"[describe] manifest: 済み {st.get('ok', 0):,} / データ無し {st.get('no_data', 0):,} / "
+          f"失敗 {st.get('error', 0):,}"
+          + (f" / {refetch_before} 以降に取った銘柄 {n_after:,}" if refetch_before is not None else ""))
+    print(f"REFETCHED={n_after}")
+    return n_after
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="日証金（taisyaku.jp）の需給データを取り込む")
-    ap.add_argument("mode", choices=["daily", "history", "both"])
+    ap.add_argument("mode", choices=["daily", "history", "both", "describe"])
     ap.add_argument("--data-dir", default=DATA_DIR)
     ap.add_argument("--targets", default=TARGETS)
     ap.add_argument("--max-codes", type=int, default=400, help="history で1回に取る銘柄数")
@@ -379,8 +446,15 @@ def main(argv=None) -> int:
     ap.add_argument("--max-requests", type=int, default=1300)
     ap.add_argument("--time-budget", type=float, default=None,
                     help="history でこの秒数を過ぎたら次の銘柄に進まない（ステップの打ち切り対策）")
+    ap.add_argument("--refetch-before", type=dt.date.fromisoformat, default=None,
+                    help="history で、この日（YYYY-MM-DD、JST）より前に取った銘柄も取り直す。"
+                         "ワークフローは過去ファイルの控えを Release に置けたときだけ渡す")
+    ap.add_argument("--path", default=None, help="describe で数える過去ファイル（既定は data-dir の jsf_hist.parquet）")
     args = ap.parse_args(argv)
 
+    if args.mode == "describe":                    # サイトには行かない
+        describe(args.data_dir, args.refetch_before, args.path)
+        return 0
     os.makedirs(args.data_dir, exist_ok=True)
     print(f"[jsf] {PJ.now_jst()} / {args.mode} / 間隔 {args.pause}秒 / 上限 {args.max_requests}回")
     f = PJ.Fetcher(args.max_requests, args.pause)
@@ -400,7 +474,7 @@ def main(argv=None) -> int:
             print("[stop] 取る銘柄が分からない（先に daily を回して残高の銘柄を得る）")
             return rc or 1
         fetch_history(f, args.data_dir, m, codes, args.max_codes, args.years,
-                      time_budget=args.time_budget)
+                      time_budget=args.time_budget, refetch_before=args.refetch_before)
         save_manifest(args.data_dir, m)
     print(f"\n[done] 使ったリクエスト {f.used}（{PJ.now_jst()}）")
     return rc

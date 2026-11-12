@@ -229,11 +229,22 @@ class TestWorkflows(unittest.TestCase):
         upd = read_wf("update-data.yml")
         self.assertIn("if: github.event_name == 'workflow_dispatch' && inputs.wait != 'no'", upd)
         self.assertRegex(upd, r"wait:\n\s+description:.*\n\s+required: false\n\s+type: choice\n\s+options: \['yes', 'no'\]\n\s+default: 'yes'")
-        # 日証金は mode だけで daily / history を選ぶ
+        # 日証金は mode だけで daily / history を選ぶ。backup（2026-11-12 に足した。取り直し前の控えを置くだけ）は
+        # daily も history も走らせない（サイトに行かない）
         jsf = read_wf("fetch-jsf.yml")
-        self.assertEqual(jsf.count("if: inputs.mode != 'history'"), 2)        # Daily / Upload (daily)
-        self.assertIn("if: inputs.mode != 'daily'", jsf)                       # History
-        self.assertIn("steps.prepare.outcome == 'success' && inputs.mode != 'daily'", jsf)  # Upload (history)
+        self.assertIn("options: ['both', 'daily', 'history', 'backup']", jsf)
+        self.assertEqual(jsf.count("if: inputs.mode == 'both' || inputs.mode == 'daily'\n"), 2)   # Daily / Upload (daily)
+        self.assertEqual(jsf.count("if: inputs.mode == 'both' || inputs.mode == 'history'\n"), 1)  # History
+        self.assertIn("steps.prepare.outcome == 'success' && (inputs.mode == 'both' || inputs.mode == 'history')",
+                      jsf)                                                                         # Upload (history)
+        self.assertNotIn("inputs.mode != ", jsf)                     # 否定の条件だと backup で daily / history が走る
+        # 取り直し（docs/DATA_JSF.md「取り直し（2026-11）」）: 控えを確かめた run でだけ --refetch-before を渡す
+        self.assertIn("HIST_BACKUP: backup_jsf_hist_20261112.parquet", jsf)
+        self.assertIn("echo \"REFETCH_OK=1\" >> \"$GITHUB_ENV\"", jsf)
+        self.assertIn("if [ \"${REFETCH_OK:-}\" = \"1\" ]; then\n            extra=(--refetch-before \"$REFETCH_BEFORE\")", jsf)
+        self.assertIn("sum_up\" != \"$sum_back", jsf)                 # 置いた控えを取り出して確かめる
+        self.assertLess(jsf.index("- name: Upload (daily)"), jsf.index("- name: Back up history before the refetch"))
+        self.assertLess(jsf.index("- name: Back up history before the refetch"), jsf.index("- name: History"))
         # 週次学習の探索は tune=yes のときだけ（Routine は tune=yes を渡す。既定も yes）。Tune / Tune extra models /
         # Tune ranking model（2026-10-29 に足した。docs/MODEL_ADOPTION_RULES.md §78-10）/ Tune 5-day ranking model
         # （2026-10-30 に足した。§82-6）の4つ

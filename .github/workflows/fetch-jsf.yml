@@ -27,9 +27,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: 'daily: DATA の CSV / history: 銘柄ごとの過去 / both: 両方'
+        description: 'daily: DATA の CSV / history: 銘柄ごとの過去 / both: 両方 / backup: 取り直し前の過去ファイルの控えを置くだけ（サイトには行かない）'
         type: choice
-        options: ['both', 'daily', 'history']
+        options: ['both', 'daily', 'history', 'backup']
         default: 'both'
       max_codes:
         description: 'history で1回に取る銘柄数（1銘柄3リクエスト・間隔2秒）'
@@ -50,6 +50,12 @@ concurrency:
 
 env:
   RELEASE_TAG: data-jsf
+  # 運用者の選択（2026-11-12）「全銘柄の過去を取り直す」「控えを残して上書き」「定時の続きで取る」
+  # （docs/DATA_JSF.md「取り直し（2026-11）」）。取り直す前の過去ファイルを、この名前で Release に控えとして置く。
+  # 名前は jsf_* に合わない（取り込みの取り出し・上げ直しに混ざらない）
+  HIST_BACKUP: backup_jsf_hist_20261112.parquet
+  # この日（JST）より前に取った銘柄を取り直す。控えが Release にあると確かめた run でだけ渡す
+  REFETCH_BEFORE: '2026-11-13'
 
 jobs:
   fetch:
@@ -78,13 +84,13 @@ jobs:
           ls -lh research/_data/jsf_* 2>/dev/null || true
 
       - name: Daily
-        if: inputs.mode != 'history'
+        if: inputs.mode == 'both' || inputs.mode == 'daily'
         run: |
           python3 -u research/jsf_fetch.py daily 2>&1 | tee jsf.log
           exit "${PIPESTATUS[0]}"
 
       - name: Upload (daily)
-        if: inputs.mode != 'history'
+        if: inputs.mode == 'both' || inputs.mode == 'daily'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -94,21 +100,73 @@ jobs:
           bash scripts/gh_release_upload.sh "$RELEASE_TAG" "${files[@]}"
           echo "${#files[@]} ファイルをアップロードしました"
 
+      # 取り直し（2026-11）の前に、今の過去ファイルを控えとして Release に置く（1回だけ）。置いたら取り出して
+      # SHA-256 が一致するかを確かめる。控えがあると確かめられた run でだけ、History に --refetch-before を渡す
+      # （REFETCH_OK=1）。一覧が引けない・控えを置けない run では取り直しをしない（控えの無いまま上書きしない）。
+      # 取り直しが始まった後（REFETCH_BEFORE 以降に取った銘柄がある）は、控えが無くても新しく作らない（上書き
+      # された後のファイルを控えにしない）
+      - name: Back up history before the refetch
+        if: inputs.mode == 'both' || inputs.mode == 'history' || inputs.mode == 'backup'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          say() { echo "$1" | tee -a jsf.log; }
+          if ! names=$(gh release view "$RELEASE_TAG" --json assets \
+                         --jq '.assets[] | select(.state == "uploaded") | .name'); then
+            say "[backup] Release の一覧が引けない。今回は取り直しをしない"
+            exit 0
+          fi
+          if grep -qxF -- "$HIST_BACKUP" <<<"$names"; then
+            say "[backup] 控えは Release にある（$HIST_BACKUP）"
+            echo "REFETCH_OK=1" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          src=research/_data/jsf_hist.parquet
+          if [ ! -s "$src" ]; then
+            say "[backup] 過去ファイルが無い。控えを作らず、取り直しもしない"
+            exit 0
+          fi
+          started=$(python3 research/jsf_fetch.py describe --data-dir research/_data --refetch-before "$REFETCH_BEFORE" 2>&1 \
+                      | tee -a jsf.log | sed -n 's/^REFETCHED=//p')
+          if [ "$started" != "0" ]; then
+            say "[backup] 取り直しが始まった後なのに控えが無い（${started:-?}銘柄）。控えを作らず、取り直しもしない"
+            exit 1
+          fi
+          tmp="$RUNNER_TEMP/backup"
+          mkdir -p "$tmp/up" "$tmp/back"
+          cp "$src" "$tmp/up/$HIST_BACKUP"
+          sum_up=$(sha256sum "$tmp/up/$HIST_BACKUP" | cut -d' ' -f1)
+          bash scripts/gh_release_upload.sh "$RELEASE_TAG" "$tmp/up/$HIST_BACKUP"
+          bash scripts/gh_release_download.sh "$RELEASE_TAG" "$tmp/back" "$HIST_BACKUP"
+          sum_back=$(sha256sum "$tmp/back/$HIST_BACKUP" | cut -d' ' -f1)
+          if [ "$sum_up" != "$sum_back" ]; then
+            say "[backup] 置いた控えを取り出すと中身が違う。取り直しはしない"
+            exit 1
+          fi
+          say "[backup] 控えを置いた（$HIST_BACKUP・SHA-256 ${sum_up:0:12}…・取り出して一致）"
+          echo "REFETCH_OK=1" >> "$GITHUB_ENV"
+
       # 過去の取り込みが失敗しても、daily の分はもう上げてある
       - name: History
-        if: inputs.mode != 'daily'
+        if: inputs.mode == 'both' || inputs.mode == 'history'
         continue-on-error: true
         timeout-minutes: 60
         env:
           MAX_CODES: ${{ inputs.max_codes || '400' }}
         run: |
+          extra=()
+          if [ "${REFETCH_OK:-}" = "1" ]; then
+            extra=(--refetch-before "$REFETCH_BEFORE")
+          else
+            echo "[refetch] 控えを確かめられないので取り直しはしない（未取得・失敗の銘柄だけ取る）" | tee -a jsf.log
+          fi
           python3 -u research/jsf_fetch.py history --max-codes "$MAX_CODES" \
-            --time-budget 2700 2>&1 | tee -a jsf.log
+            --time-budget 2700 ${extra[@]+"${extra[@]}"} 2>&1 | tee -a jsf.log
           exit "${PIPESTATUS[0]}"
 
       - name: Upload (history)
         # 取り出しが一部だけで止まったときは上げない（欠けた・短いファイルで Release を上書きしない）
-        if: always() && steps.prepare.outcome == 'success' && inputs.mode != 'daily'
+        if: always() && steps.prepare.outcome == 'success' && (inputs.mode == 'both' || inputs.mode == 'history')
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
