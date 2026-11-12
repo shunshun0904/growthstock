@@ -61,7 +61,7 @@ def q(s: pd.Series, qs=(0.01, 0.5, 0.99)) -> str:
     s = pd.to_numeric(s, errors="coerce").dropna()
     if not len(s):
         return "値なし"
-    return " / ".join(f"p{int(round(k * 100))} {s.quantile(k):.4g}" for k in qs)
+    return " / ".join(f"p{k * 100:g} {s.quantile(k):.4g}" for k in qs)
 
 
 # ---------------------------------------------------------------------- #
