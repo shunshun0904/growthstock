@@ -111,6 +111,9 @@ SCORE_COLS = [f"score_{a}" for a in SCORE_MODELS]
 STATE_COLS = PRICE_COLS + SCORE_COLS
 VARIANTS = ("L", "N")
 VARIANT_JA = {"L": "指値を残す版", "N": "指値なし版"}
+#: 試運転（2026-11-14 の run 43457622788。--max-windows 2）で結果を見た窓。追加の作り B はこの後に足したので、
+#: B の判定は、これらの窓を除いた形も並べる
+TRIAL_WINDOWS = (10, 11)
 
 
 def log(msg: str) -> None:
@@ -367,6 +370,8 @@ class Agent:
         self.cols = list(cols)
         self.models: Dict[int, object] = {}
         self.info: Dict[int, Dict] = {}
+        #: 学習の取引の上での成績（交差の予測で売買したときの平均 value・いつも持ち続けたときの平均 base。%）
+        self.train: Dict = {}
 
     def hold_fn(self, P: Paths) -> HoldFn:
         cache: Dict[int, pd.DataFrame] = {}
@@ -419,7 +424,92 @@ def fit_agent(P: Paths, variant: str, cols: Sequence[str] = STATE_COLS, seed: in
             rec["d_mean"] = float(d[rows].mean())
         agent.info[k] = rec
         v_next = np.where(hold, y_hold, y_sell)          # k日目の引けの判断の時点の値（方針に従った実現損益）
+    # 学習の取引の上での成績: 1日目に指値に届いた取引は +10%、ほかは 1日目の引けの判断の時点の値
+    start = np.where(hits[:, 0], LIMIT, v_next)
+    base = simulate(P, always_hold, variant)["ret"].to_numpy()
+    agent.train = {"n": int(n), "value": float(np.mean(start)) if n else float("nan"),
+                   "base": float(np.mean(base)) if n else float("nan"),
+                   "hold_share": float(np.mean([x["hold_share"] for x in agent.info.values() if "hold_share" in x]))
+                   if agent.models else float("nan")}
     return agent
+
+
+# --------------------------------------------------------------------------- #
+# 追加の作り B（案）: 今のルールを土台にした方針の改善。売ると決める線を学習の取引の中で選ぶ
+# --------------------------------------------------------------------------- #
+#: 売ると決める線 δ の候補（%）。「持ち続けた場合の損益 − 売った場合の損益」の予測が −δ より悪いときだけ売る。inf = 売らない
+DELTAS = (float("inf"), 5.0, 4.0, 3.0, 2.0, 1.5, 1.0, 0.5, 0.0)
+
+
+class Improver:
+    """
+    今のルール（売らない。指値を残す版は指値だけ）を土台にした方針。k日目の引けに、
+        A_k = （このあとも売らずに今のルールを続けたときの損益） − （k+1 日目の寄りで売った損益）
+    の予測が −delta より悪いときだけ売る。delta は学習の取引の上で、交差の予測で売買したときの平均の損益がいちばん高いものを
+    DELTAS から選ぶ（同じなら大きい方 = 売らない側）。delta = inf なら今のルールと同じ。
+    """
+
+    def __init__(self, variant: str, cols: List[str]):
+        self.variant = variant
+        self.cols = list(cols)
+        self.models: Dict[int, object] = {}
+        self.delta = float("inf")
+        self.train: Dict = {}
+
+    def hold_fn(self, P: Paths) -> HoldFn:
+        cache: Dict[int, pd.DataFrame] = {}
+
+        def fn(k: int, rows: np.ndarray) -> np.ndarray:
+            m = self.models.get(k)
+            if m is None or not np.isfinite(self.delta):
+                return np.ones(len(rows), dtype=bool)
+            if k not in cache:
+                cache[k] = state_at(P, k)[self.cols]
+            return m.predict(cache[k].iloc[rows].to_numpy(dtype=float)) >= -self.delta
+        return fn
+
+
+def fit_improver(P: Paths, variant: str, cols: Sequence[str] = STATE_COLS, seed: int = SEED,
+                 params: Optional[dict] = None, n_folds: int = N_FOLDS, min_rows: int = MIN_FIT_ROWS,
+                 deltas: Sequence[float] = DELTAS) -> Improver:
+    """
+    学習の取引 P から Improver を作る。目的変数は今のルールを続けたときの実現損益との差なので、ほかの日のモデルの予測に
+    依らない（日ごとに独立に学習できる）。線 delta を選ぶときの売買は交差の予測（その取引を使わずに学習したモデルの予測）で行う。
+    """
+    imp = Improver(variant, list(cols))
+    n = len(P)
+    groups = fold_groups(P.keys["Date"], n_folds)
+    hits = np.column_stack([P.hit(d) for d in range(1, HOLD + 1)]) if variant == "L" else np.zeros((n, HOLD), dtype=bool)
+    hit_by = np.cumsum(hits, axis=1) > 0
+    close_end = P.r_close(HOLD)
+    oof = {k: np.full(n, np.inf) for k in range(1, HOLD)}        # 予測の無い行は持ち続ける
+    for k in range(1, HOLD):
+        g0 = np.where(hits[:, k:].any(axis=1), LIMIT, close_end)  # k+1 日目以降に指値に届けば +10%、届かなければ20日目の終値
+        a = g0 - P.sell_pay(k, variant)
+        rows = np.flatnonzero(~hit_by[:, k - 1] & np.isfinite(a))
+        if len(rows) < min_rows:
+            continue
+        X = state_at(P, k)[imp.cols].to_numpy(dtype=float)
+        for g in range(n_folds):
+            te = rows[groups[rows] == g]
+            tr = rows[groups[rows] != g]
+            if len(te) and len(tr) >= min_rows:
+                oof[k][te] = _fit(X[tr], a[tr], seed, params).predict(X[te])
+        imp.models[k] = _fit(X[rows], a[rows], seed, params)
+    table = []
+    best = None
+    for dl in deltas:
+        res = simulate(P, lambda k, rows, _d=dl: oof[k][rows] >= -_d, variant)
+        rec = {"delta": float(dl), "value": float(res["ret"].mean()) if n else float("nan"),
+               "sold": float((res["how"] == "agent").mean()) if n else float("nan")}
+        table.append(rec)
+        if best is None or rec["value"] > best["value"] + 1e-12:   # 同じなら先（= 大きい線。売らない側）を残す
+            best = rec
+    base = next((r["value"] for r in table if not np.isfinite(r["delta"])), float("nan"))
+    imp.delta = best["delta"] if (best is not None and imp.models) else float("inf")
+    imp.train = {"n": int(n), "value": best["value"] if best else float("nan"), "base": base,
+                 "delta": imp.delta, "sold": best["sold"] if best else float("nan"), "table": table}
+    return imp
 
 
 # --------------------------------------------------------------------------- #
@@ -558,15 +648,20 @@ def check_against_live_track(P: Paths, bars: pd.DataFrame, rows: np.ndarray) -> 
 # 実行
 # --------------------------------------------------------------------------- #
 POLICIES = (("rule", "今のルール（+10% の指値・20日目の終値）"), ("agent_L", "エージェント・指値を残す版"),
-            ("agent_N", "エージェント・指値なし版"), ("c20", "参考: 指値なし・20日目の終値"),
+            ("agent_N", "エージェント・指値なし版"),
+            ("agentb_L", "追加の作り B（方針の改善）・指値を残す版"), ("agentb_N", "追加の作り B（方針の改善）・指値なし版"),
+            ("c20", "参考: 指値なし・20日目の終値"),
             ("stop_L", f"参考: 損切り {STOP_REF:g}%（終値）＋指値"), ("hold10_L", f"参考: {HOLD10}日目で見切り＋指値"),
             ("agentp_L", "参考: スコアなしのエージェント・指値を残す版"), ("agentp_N", "参考: スコアなしのエージェント・指値なし版"),
             ("oracle_L", "上限（先が見えた場合）・指値あり"), ("oracle_N", "上限（先が見えた場合）・指値なし"))
 
 
 def run_windows(P: Paths, flags: pd.DataFrame, folds: list, with_ref: bool = True, max_windows: int = 0,
-                seed: int = SEED) -> Tuple[pd.DataFrame, Dict]:
-    """テスト窓ごとに学習して当てる。戻り: 評価の行（方針ごとの損益・売った日・売り方）と学習の記録。"""
+                seed: int = SEED, with_b: bool = False, train_only: bool = False) -> Tuple[pd.DataFrame, Dict]:
+    """
+    テスト窓ごとに学習して当てる。戻り: 評価の行（方針ごとの損益・売った日・売り方）と学習の記録。
+    train_only なら学習だけして、テスト窓の取引には当てない（評価の行は空。学習の中の確かめだけを見るとき）。
+    """
     key = P.keys[["Code", "Date"]].assign(_p=np.arange(len(P)))
     fl = flags.merge(key, on=["Code", "Date"], how="inner")
     start = {f.index: pd.Timestamp(f.test_start) for f in folds}
@@ -579,21 +674,33 @@ def run_windows(P: Paths, flags: pd.DataFrame, folds: list, with_ref: bool = Tru
         t0 = time.time()
         te = fl[fl["window"] == w]
         tr = np.flatnonzero(end < np.datetime64(start[w]))
-        Ptr, Pte = P.take(tr), P.take(te["_p"].to_numpy())
-        ev = te[["Code", "Date", "window", "r0", "top10"]].reset_index(drop=True)
-        rec = {"train": int(len(Ptr)), "test": int(len(Pte)), "train_to": str(pd.Timestamp(end[tr].max()).date()) if len(tr) else "",
+        Ptr = P.take(tr)
+        rec = {"train": int(len(Ptr)), "test": int(len(te)), "train_to": str(pd.Timestamp(end[tr].max()).date()) if len(tr) else "",
                "test_from": str(start[w].date())}
+        Pte = None if train_only else P.take(te["_p"].to_numpy())
+        ev = te[["Code", "Date", "window", "r0", "top10"]].reset_index(drop=True)
         arms = [("agent", STATE_COLS)] + ([("agentp", PRICE_COLS)] if with_ref else [])
         for name, cols in arms:
             for v in VARIANTS:
                 ag = fit_agent(Ptr, v, cols, seed)
-                res = simulate(Pte, ag.hold_fn(Pte), v)
-                ev[f"{name}_{v}"], ev[f"{name}_{v}_day"], ev[f"{name}_{v}_how"] = res["ret"], res["exit_day"], res["how"]
-                rec[f"{name}_{v}"] = {"models": len(ag.models),
-                                      "hold_share": float(np.mean([x["hold_share"] for x in ag.info.values() if "hold_share" in x]))
-                                      if ag.models else float("nan")}
+                rec[f"{name}_{v}"] = {"models": len(ag.models), "hold_share": ag.train["hold_share"], "train": ag.train}
                 if name == "agent":
                     rec[f"gain_{v}"] = gain_share(ag)
+                if Pte is not None:
+                    res = simulate(Pte, ag.hold_fn(Pte), v)
+                    ev[f"{name}_{v}"], ev[f"{name}_{v}_day"], ev[f"{name}_{v}_how"] = res["ret"], res["exit_day"], res["how"]
+        if with_b:
+            for v in VARIANTS:
+                im = fit_improver(Ptr, v, STATE_COLS, seed)
+                rec[f"agentb_{v}"] = {"models": len(im.models), "train": im.train}
+                if Pte is not None:
+                    res = simulate(Pte, im.hold_fn(Pte), v)
+                    ev[f"agentb_{v}"], ev[f"agentb_{v}_day"], ev[f"agentb_{v}_how"] = res["ret"], res["exit_day"], res["how"]
+        if Pte is None:
+            rec["seconds"] = round(time.time() - t0)
+            record[w] = rec
+            log(f"  窓{w}: 学習 {rec['train']:,}件（20日目が 〜{rec['train_to']}）だけ（テスト窓には当てない）/ {rec['seconds']}秒")
+            continue
         for v, col in (("L", "rule"), ("N", "c20")):
             res = simulate(Pte, always_hold, v)
             ev[col], ev[f"{col}_day"], ev[f"{col}_how"] = res["ret"], res["exit_day"], res["how"]
@@ -621,6 +728,34 @@ def gain_share(ag: Agent) -> Dict[str, float]:
             tot += g / s
     s = float(tot.sum())
     return {c: float(v / s) for c, v in tot.items()} if s > 0 else {}
+
+
+ARM_JA = (("agent", "決めた作り A"), ("agentp", "参考: スコアなしの A"), ("agentb", "追加の作り B"))
+
+
+def train_report(record: Dict) -> None:
+    """学習の取引の上での成績（テスト窓の取引は使わない）。交差の予測で売買したときの1取引の損益と、いつも持ち続けたとき。"""
+    print("\n■ 学習の中の確かめ（テスト窓の取引は使わない。学習の取引を、その取引を使わずに学習したモデルの予測で売買したときの"
+          "1取引の損益。「持ち続ける」は指値を残す版 = 今のルール、指値なし版 = 20日目の終値）")
+    for w, rec in record.items():
+        print(f"  窓{w}（学習 {rec['train']:,}件・20日目が 〜{rec['train_to']}）")
+        for name, ja in ARM_JA:
+            for v in VARIANTS:
+                r = rec.get(f"{name}_{v}")
+                if not r or "train" not in r:
+                    continue
+                t = r["train"]
+                line = (f"    {ja}・{VARIANT_JA[v]}: 方針 {t['value']:+.2f}% / 持ち続ける {t['base']:+.2f}% / "
+                        f"差 {t['value'] - t['base']:+.2f}pt")
+                if name == "agentb":
+                    dl = t["delta"]
+                    line += (f"・選んだ線 {'売らない' if not np.isfinite(dl) else f'{dl:g}%'}（方針で売った割合 {t['sold'] * 100:.0f}%）"
+                             "｜線ごとの差 " + " / ".join(
+                                 f"{'売らない' if not np.isfinite(x['delta']) else format(x['delta'], 'g')} {x['value'] - t['base']:+.2f}"
+                                 for x in t["table"]))
+                else:
+                    line += f"・持ち続けると決めた割合（日ごとの平均）{t['hold_share'] * 100:.0f}%"
+                print(line)
 
 
 def check_oracle(ev: pd.DataFrame) -> int:
@@ -668,6 +803,23 @@ def report(ev: pd.DataFrame, record: Dict, n_perm: int = N_PERM, seed: int = SEE
             summary["judge"][flag][v] = j
             tag = "判定" if flag == "r0" else "参考"
             print(f"  [{tag}] {ja}・{VARIANT_JA[v]}: {judge_text(j)}")
+    has_b = "agentb_L" in ev.columns
+    if has_b:
+        print("  追加の作り B（試運転の後に足した案。同じ3条件。エージェント B の損益 − 今のルールの損益）")
+        for flag, ja in groups:
+            for v in VARIANTS:
+                j = judge(ev[ev[flag].astype(bool)], f"agentb_{v}", "rule", n_perm, seed)
+                summary["judge"][flag][f"B_{v}"] = j
+                print(f"  [{'追加' if flag == 'r0' else '参考'}] {ja}・{VARIANT_JA[v]}: {judge_text(j)}")
+    rest = ev[~ev["window"].isin(TRIAL_WINDOWS)]
+    if len(rest) and len(rest) != len(ev):
+        print(f"  試運転で見た窓（{'・'.join(map(str, TRIAL_WINDOWS))}）を除いた形（買いの規則を満たした行）")
+        summary["judge"]["r0_untried"] = {}
+        for name, ja in (("agent", "決めた作り A"),) + ((("agentb", "追加の作り B"),) if has_b else ()):
+            for v in VARIANTS:
+                j = judge(rest[rest["r0"].astype(bool)], f"{name}_{v}", "rule", n_perm, seed)
+                summary["judge"]["r0_untried"][f"{name}_{v}"] = j
+                print(f"    {ja}・{VARIANT_JA[v]}: {judge_text(j)}")
     print("  参考: 同じ形で、ほかの方針 − 今のルール（買いの規則を満たした行）")
     for col in ("c20", "stop_L", "hold10_L", "agentp_L", "agentp_N"):
         if col in ev.columns:
@@ -677,25 +829,36 @@ def report(ev: pd.DataFrame, record: Dict, n_perm: int = N_PERM, seed: int = SEE
     print("\n■ 4. 窓ごとの差（買いの規則を満たした行。エージェント − 今のルール、pt）")
     r0 = ev[ev["r0"].astype(bool)]
     wl, wn = window_diffs(r0, "agent_L", "rule", 1), window_diffs(r0, "agent_N", "rule", 1)
+    tab = wl.merge(wn, on=["window", "n"], suffixes=("_L", "_N"))
+    if has_b:
+        bl = window_diffs(r0, "agentb_L", "rule", 1).rename(columns={"mean": "mean_BL"})
+        bn = window_diffs(r0, "agentb_N", "rule", 1).rename(columns={"mean": "mean_BN"})
+        tab = tab.merge(bl, on=["window", "n"], how="left").merge(bn, on=["window", "n"], how="left")
     span = ev.groupby("window")["Date"].agg(["min", "max"])
-    print(f"    {'窓':>3}  {'期間':<23}{'件数':>6}{'指値を残す版':>12}{'指値なし版':>11}")
-    for _, r in wl.merge(wn, on=["window", "n"], suffixes=("_L", "_N")).iterrows():
+    print(f"    {'窓':>3}  {'期間':<23}{'件数':>6}{'A 指値を残す版':>13}{'A 指値なし版':>12}"
+          + (f"{'B 指値を残す版':>13}{'B 指値なし版':>12}" if has_b else ""))
+    for _, r in tab.iterrows():
         w = int(r["window"])
-        print(f"    {w:>3}  {span.loc[w, 'min'].date()}〜{span.loc[w, 'max'].date()}{int(r['n']):>6}{r['mean_L']:>+11.2f}{r['mean_N']:>+11.2f}"
-              + ("  （5件未満。判定には入らない）" if r["n"] < MIN_GROUP else ""))
-        summary["windows"][w] = {"n": int(r["n"]), "L": float(r["mean_L"]), "N": float(r["mean_N"])}
+        print(f"    {w:>3}  {span.loc[w, 'min'].date()}〜{span.loc[w, 'max'].date()}{int(r['n']):>6}{r['mean_L']:>+12.2f}{r['mean_N']:>+12.2f}"
+              + (f"{r['mean_BL']:>+12.2f}{r['mean_BN']:>+12.2f}" if has_b else "")
+              + ("  （5件未満。判定には入らない）" if r["n"] < MIN_GROUP else "")
+              + ("  （試運転で見た窓）" if w in TRIAL_WINDOWS else ""))
+        summary["windows"][w] = {"n": int(r["n"]), "L": float(r["mean_L"]), "N": float(r["mean_N"]),
+                                 **({"BL": float(r["mean_BL"]), "BN": float(r["mean_BN"])} if has_b else {})}
     print("\n■ 5. エージェントの売り方（買いの規則を満たした行。売った日ごとの割合 %。寄りで売った日）")
-    for v in VARIANTS:
-        d = r0.loc[r0[f"agent_{v}_how"] == "agent", f"agent_{v}_day"]
-        share = (d.value_counts(normalize=True).sort_index() * 100) if len(d) else pd.Series(dtype=float)
-        summary["sell_days"][v] = {int(k): float(x) for k, x in share.items()}
-        early = float(share[share.index <= 5].sum()) if len(share) else float("nan")
-        print(f"  {VARIANT_JA[v]}: 方針で売った {len(d):,}件 / {len(r0):,}件・うち 2〜5日目 {early:.0f}%・"
-              + " ".join(f"{int(k)}日 {x:.0f}" for k, x in share.items()))
+    for name, ja in (("agent", "A"),) + ((("agentb", "B"),) if has_b else ()):
+        for v in VARIANTS:
+            d = r0.loc[r0[f"{name}_{v}_how"] == "agent", f"{name}_{v}_day"]
+            share = (d.value_counts(normalize=True).sort_index() * 100) if len(d) else pd.Series(dtype=float)
+            summary["sell_days"][f"{name}_{v}"] = {int(k): float(x) for k, x in share.items()}
+            early = float(share[share.index <= 5].sum()) if len(share) else float("nan")
+            print(f"  {ja}・{VARIANT_JA[v]}: 方針で売った {len(d):,}件 / {len(r0):,}件・うち 2〜5日目 {early:.0f}%・"
+                  + " ".join(f"{int(k)}日 {x:.0f}" for k, x in share.items()))
     print("\n■ 6. 学習の記録（窓ごと）と、判断に効いた材料（寄与 gain の割合。日ごとのモデルの平均。最後の窓）")
     for w, rec in record.items():
         print(f"    窓{w}: 学習 {rec['train']:,}件 → テスト {rec['test']:,}件・学習の中で持ち続けると決めた割合（日ごとの平均） "
               + " / ".join(f"{VARIANT_JA[v]} {rec[f'agent_{v}']['hold_share'] * 100:.0f}%" for v in VARIANTS))
+    train_report(record)
     if record:
         last = record[max(record)]
         for v in VARIANTS:
@@ -710,6 +873,9 @@ def main(argv=None) -> int:
     ap.add_argument("--perm", type=int, default=N_PERM)
     ap.add_argument("--max-windows", type=int, default=0, help="試運転: 最後の n 窓だけ（0 で全部）")
     ap.add_argument("--no-ref", action="store_true", help="スコアなしのエージェント（参考）を作らない")
+    ap.add_argument("--with-b", action="store_true", help="追加の作り B（今のルールを土台にした方針の改善）も作る")
+    ap.add_argument("--train-only", action="store_true",
+                    help="学習だけして、テスト窓の取引には当てない（学習の中の確かめだけを出す。評価の結果は見ない）")
     args = ap.parse_args(argv)
     import build_dataset as B
     import lab
@@ -743,7 +909,17 @@ def main(argv=None) -> int:
     print(f"  評価の行のうち使える取引 {len(ev_rows):,} / {len(flags):,}")
     chk = check_against_live_track(P, bars, ev_rows)
     del bars
-    ev, record = run_windows(P, flags, folds, with_ref=not args.no_ref, max_windows=args.max_windows)
+    ev, record = run_windows(P, flags, folds, with_ref=not args.no_ref, max_windows=args.max_windows,
+                             with_b=args.with_b, train_only=args.train_only)
+    os.makedirs(os.path.join(lab.DATA_DIR, "oof"), exist_ok=True)
+    if args.train_only:
+        train_report(record)
+        path = os.path.join(lab.DATA_DIR, "oof", "e131_train_only.json")
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"record": record, "paths": pinfo, "check": chk, "params": PARAMS, "deltas": list(DELTAS)}, fh,
+                      ensure_ascii=False, indent=1, default=str)
+        log(f"学習の中の確かめだけ（テスト窓の取引には当てていない）。記録: {path} / 全体 {time.time() - t0:.0f}秒")
+        return 0
     if not len(ev):
         raise SystemExit("評価の行が無い")
     bad = check_oracle(ev)

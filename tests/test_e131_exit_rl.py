@@ -250,9 +250,82 @@ class TestFit(unittest.TestCase):
 
     def test_too_few_rows_means_always_hold(self):
         P, _ = synth_paths(120, seed=3)
-        ag = E.fit_agent(P, "N")
-        self.assertEqual(ag.models, {})
-        self.assertTrue(E.simulate(P, ag.hold_fn(P), "N")["ret"].equals(E.simulate(P, E.always_hold, "N")["ret"]))
+        for v in E.VARIANTS:
+            ag = E.fit_agent(P, v)
+            self.assertEqual(ag.models, {})
+            base = E.simulate(P, E.always_hold, v)["ret"]
+            self.assertTrue(E.simulate(P, ag.hold_fn(P), v)["ret"].equals(base))
+            # 学習の中の成績: 売らない方針なら「いつも持ち続ける」と同じ値になる（数え方の確かめ）
+            self.assertAlmostEqual(ag.train["value"], float(base.mean()), places=9)
+            self.assertAlmostEqual(ag.train["base"], float(base.mean()), places=9)
+            im = E.fit_improver(P, v)
+            self.assertEqual(im.models, {})
+            self.assertEqual(im.delta, float("inf"))
+            self.assertTrue(E.simulate(P, im.hold_fn(P), v)["ret"].equals(base))
+
+    def test_train_value_is_the_cross_fitted_policy_value(self):
+        P, _ = synth_paths(2500, seed=12)
+        ag = E.fit_agent(P, "N", E.PRICE_COLS)
+        self.assertEqual(ag.train["n"], 2500)
+        self.assertAlmostEqual(ag.train["base"], float(E.simulate(P, E.always_hold, "N")["ret"].mean()), places=9)
+        self.assertGreater(ag.train["value"], ag.train["base"] + 0.5)        # 下げ続ける取引を売れるので、学習の中でも上回る
+        self.assertTrue(0.0 < ag.train["hold_share"] < 1.0)
+
+
+class TestImprover(unittest.TestCase):
+    """追加の作り B（案）: 今のルールを土台にした方針の改善。売ると決める線を学習の取引の中で選ぶ。"""
+
+    def test_learns_and_picks_a_line(self):
+        train, _ = synth_paths(4000, seed=10)
+        test, mu = synth_paths(2000, seed=11)
+        for v in E.VARIANTS:
+            im = E.fit_improver(train, v)
+            self.assertEqual(sorted(im.models), list(range(1, E.HOLD)))
+            t = im.train
+            self.assertEqual([x["delta"] for x in t["table"]], [float(d) for d in E.DELTAS])
+            base = float(E.simulate(train, E.always_hold, v)["ret"].mean())
+            self.assertAlmostEqual(t["table"][0]["value"], base, places=9)    # 線 = 売らない → 今のルールと同じ
+            self.assertEqual(t["table"][0]["sold"], 0.0)
+            self.assertAlmostEqual(t["base"], base, places=9)
+            self.assertEqual(t["value"], max(x["value"] for x in t["table"]))
+            self.assertTrue(np.isfinite(im.delta))                            # 下げ続ける取引があるので、売る線が選ばれる
+            self.assertGreater(t["value"], t["base"] + 0.5)
+            res = E.simulate(test, im.hold_fn(test), v)
+            gain = res["ret"].mean() - E.simulate(test, E.always_hold, v)["ret"].mean()
+            self.assertGreater(gain, 1.0, v)
+            sold = (res["how"] == "agent").to_numpy()
+            self.assertLess(mu[sold].mean(), mu[~sold].mean())
+            self.assertTrue((res["ret"].to_numpy() <= E.oracle(test, v) + 1e-9).all())
+        again = E.fit_improver(train, "N")
+        self.assertEqual(again.delta, im.delta)
+        self.assertEqual(again.train["table"], im.train["table"])
+
+    def test_keeps_the_current_rule_when_selling_only_hurts(self):
+        """どの取引も上げ続けるなら、売らない（今のルールのまま）を選ぶ。学習の中の成績は今のルールを下回らない。"""
+        rng = np.random.default_rng(7)
+        P, _ = synth_paths(3000, seed=13, drift_sd=0.0, noise=0.01)
+        up = np.exp(0.004 * np.arange(W))[None, :]                             # 毎日 +0.4% の上げを全取引に乗せる
+        Q = E.Paths(P.keys, P.O * up, P.H * up, P.L * up, P.C * up, P.V, P.T, P.pre_vol, P.vol_20d, P.end_date, P.scores)
+        test, _ = synth_paths(1500, seed=14, drift_sd=0.0, noise=0.01)
+        T = E.Paths(test.keys, test.O * up, test.H * up, test.L * up, test.C * up, test.V, test.T, test.pre_vol, test.vol_20d,
+                    test.end_date, test.scores)
+        del rng
+        im = E.fit_improver(Q, "N")
+        self.assertGreaterEqual(im.train["value"], im.train["base"])
+        self.assertLess(im.train["sold"], 0.05)
+        res = E.simulate(T, im.hold_fn(T), "N")
+        base = E.simulate(T, E.always_hold, "N")
+        self.assertLess((res["how"] == "agent").mean(), 0.05)
+        self.assertGreater(res["ret"].mean(), base["ret"].mean() - 0.1)
+        # 線 = 売らない なら、予測によらずいつも持ち続ける
+        im.delta = float("inf")
+        self.assertTrue(E.simulate(T, im.hold_fn(T), "N")["ret"].equals(base["ret"]))
+
+    def test_ties_keep_the_more_conservative_line(self):
+        P, _ = synth_paths(120, seed=3)                                        # モデルを作れない → どの線でも同じ値
+        im = E.fit_improver(P, "L")
+        self.assertEqual(len({round(x["value"], 12) for x in im.train["table"]}), 1)
+        self.assertEqual(im.delta, float("inf"))
 
     def test_fold_groups_keep_a_quarter_together(self):
         d = pd.to_datetime(pd.Series(["2024-01-05", "2024-03-29", "2024-04-01", "2025-04-01", "2025-07-01"]))
@@ -324,6 +397,8 @@ class TestRunWindows(unittest.TestCase):
             self.assertEqual(rec["agent_N"]["models"], E.HOLD - 1)
         self.assertGreater(record[2]["train"], record[1]["train"])            # 学習の取引は窓が進むと増える
         for col, _ in E.POLICIES:
+            if col.startswith("agentb"):
+                continue                                                      # 追加の作り B は頼んだときだけ（下で確かめる）
             self.assertIn(col, ev.columns)
             self.assertFalse(ev[col].isna().any(), col)
         pos = fl.merge(P.keys[["Code", "Date"]].assign(_p=np.arange(len(P))), on=["Code", "Date"])
@@ -336,11 +411,76 @@ class TestRunWindows(unittest.TestCase):
         self.assertIn("判定", out)
         for code in P.keys["Code"].head(300):
             self.assertNotIn(code, out)                                       # 銘柄コードを出さない
+        self.assertNotIn("agentb_L", ev.columns)                              # 追加の作り B は頼んだときだけ
+        self.assertIn("学習の中の確かめ", out)
+        self.assertAlmostEqual(record[1]["agent_N"]["train"]["base"],
+                               float(E.simulate(P.take(np.flatnonzero(P.end_date < np.datetime64("2021-01-01"))),
+                                                E.always_hold, "N")["ret"].mean()), places=9)
         # 最後の n 窓だけ
         with redirect_stdout(io.StringIO()):
             ev1, rec1 = E.run_windows(P, fl, folds, with_ref=False, max_windows=1)
         self.assertEqual(sorted(rec1), [2])
         self.assertNotIn("agentp_L", ev1.columns)
+
+    def test_with_b_and_train_only(self):
+        P, _ = synth_paths(2200, seed=21, days=1200)
+        d = P.keys["Date"]
+        folds = [types.SimpleNamespace(index=1, test_start="2021-01-01", test_end="2021-06-30"),
+                 types.SimpleNamespace(index=2, test_start="2021-07-01", test_end="2021-12-31")]
+        rng = np.random.default_rng(1)
+        fl = P.keys[["Code", "Date"]].copy()
+        fl["window"] = np.where(d < "2021-01-01", 0, np.where(d < "2021-07-01", 1, 2))
+        fl = fl[fl["window"] > 0].reset_index(drop=True)
+        fl["r0"] = rng.random(len(fl)) < 0.3
+        fl["top10"] = fl["r0"] | (rng.random(len(fl)) < 0.2)
+        # 学習だけ: テスト窓の取引には当てない（評価の列が1つも無い）
+        calls = []
+        real = E.simulate
+
+        def spy(Pp, fn, v):
+            calls.append(len(Pp))
+            return real(Pp, fn, v)
+        E.simulate = spy
+        try:
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                ev0, rec0 = E.run_windows(P, fl, folds, with_ref=False, with_b=True, train_only=True)
+                E.train_report(rec0)
+        finally:
+            E.simulate = real
+        self.assertEqual(len(ev0), 0)
+        self.assertEqual(sorted(rec0), [1, 2])
+        self.assertTrue(set(calls) <= {rec0[1]["train"], rec0[2]["train"]})    # 売買したのは学習の取引だけ
+        for w in (1, 2):
+            self.assertIn("delta", rec0[w]["agentb_L"]["train"])
+            self.assertGreaterEqual(rec0[w]["agentb_N"]["train"]["value"], rec0[w]["agentb_N"]["train"]["base"])
+            self.assertIn("value", rec0[w]["agent_L"]["train"])
+        out0 = buf.getvalue()
+        self.assertIn("追加の作り B", out0)
+        self.assertIn("選んだ線", out0)
+        self.assertIn("テスト窓には当てない", out0)
+        for code in P.keys["Code"].head(200):
+            self.assertNotIn(code, out0)
+        # B も評価する回: 列・判定・試運転で見た窓を除いた形
+        old = E.TRIAL_WINDOWS
+        E.TRIAL_WINDOWS = (2,)
+        try:
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                ev, record = E.run_windows(P, fl, folds, with_ref=False, with_b=True)
+                self.assertEqual(E.check_oracle(ev), 0)
+                summary = E.report(ev, record, n_perm=50)
+        finally:
+            E.TRIAL_WINDOWS = old
+        out = buf.getvalue()
+        for col in ("agentb_L", "agentb_N", "agentb_L_day", "agentb_N_how"):
+            self.assertIn(col, ev.columns)
+        self.assertEqual(set(summary["judge"]["r0"]), {"L", "N", "B_L", "B_N"})
+        self.assertEqual(set(summary["judge"]["r0_untried"]), {"agent_L", "agent_N", "agentb_L", "agentb_N"})
+        self.assertEqual(summary["judge"]["r0_untried"]["agentb_N"]["windows"], 1)   # 窓2を除いた1窓
+        self.assertIn("試運転で見た窓", out)
+        self.assertGreater(summary["groups"]["all"]["agentb_N"]["mean"], summary["groups"]["all"]["c20"]["mean"])
+        self.assertEqual(rec0[1]["agentb_N"]["train"]["delta"], record[1]["agentb_N"]["train"]["delta"])
 
 
 if __name__ == "__main__":
