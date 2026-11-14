@@ -4,6 +4,11 @@ name: Preview Price Band Demand
 # 既存のJ-Quants SecretをActions内だけで使い、約定金額・公表日も確認する。
 on:
   workflow_dispatch:
+  # 開発ブランチでは、この検証ワークフロー自体を変更したときだけ実接続を確認。
+  # 公開ブランチでのpush・通常の日次更新では自動実行しない。
+  push:
+    branches: ['codex/price-band-demand-*']
+    paths: ['.github/workflows/preview-supply-demand.yml']
 
 permissions:
   contents: read
