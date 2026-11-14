@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import ValuationView from './views/ValuationView.jsx';
+import SupplyDemandView from './views/SupplyDemandView.jsx';
 import CompareView from './views/CompareView.jsx';
 import TimeMachineView from './views/TimeMachineView.jsx';
 import SimulatorView from './views/SimulatorView.jsx';
@@ -32,6 +33,7 @@ const TABS = [
   // 「候補銘柄のニュース として新たにタブを追加してほしいです。左から2番目で」
   { id: 'news', label: '候補銘柄のニュース' },
   { id: 'valuation', label: '理論株価' },
+  { id: 'supplydemand', label: '価格帯別需給' },
   // 候補ごとのリカレンス・ネットワーク（点 = その銘柄の1営業日、線 = テクニカル指標9列の状態が似た日どうし。参考で、選定には
   // 使わない）。運用者の依頼 2026-10-19「Obsidian の球状のプロットのようなことを、ノードを1営業日として…その日の各候補銘柄単体で」。
   // データは Release の recurrence.tar.gz（research/recurrence_net.py）をデプロイで dist/data/recurrence/ に置く。
@@ -270,7 +272,7 @@ export default function App() {
         {!loading && dataset && <DataNotices dataset={dataset} />}
 
         {!loading && rows.length === 0 && tab !== 'prediction' && tab !== 'news' && tab !== 'knn' && tab !== 'samples' && tab !== 'scoredist'
-          && tab !== 'network' && tab !== 'valuation' && (
+          && tab !== 'network' && tab !== 'valuation' && tab !== 'supplydemand' && (
           <div className="card empty">
             分析対象の銘柄がありません。
             <div style={{ marginTop: 'var(--s4)' }}>
@@ -350,6 +352,8 @@ export default function App() {
 
         {tab === 'scoredist' && <ScoreDistView data={scoreDist} pred={pred} />}
         {tab === 'samples' && <SamplesView data={newSamples} />}
+        {tab === 'supplydemand' && !loading && <SupplyDemandView stocks={stocks} candidates={pred?.candidates}
+          selectedId={selectedId} onSelect={setSelectedId} />}
 
         {tab === 'filings' && isVisible('filings') && (
           <FilingsView pred={pred} rows={rows} filings={filings} />

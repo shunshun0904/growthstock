@@ -52,6 +52,7 @@ jobs:
           npm install --no-save playwright
           npx playwright install --with-deps chromium
           node tests/smoke.mjs
+          node tests/supply-demand-browser.mjs
 
       - uses: actions/upload-artifact@v4
         if: always()
