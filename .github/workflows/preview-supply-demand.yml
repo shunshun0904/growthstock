@@ -15,6 +15,7 @@ permissions:
 
 jobs:
   preview:
+    if: ${{ !startsWith(github.ref, 'refs/heads/codex/price-band-demand-coverage-') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -52,5 +53,41 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: price-band-demand-data
+          path: preview/
+          retention-days: 7
+
+  catalog:
+    if: startsWith(github.ref, 'refs/heads/codex/price-band-demand-coverage-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pandas==2.2.3 pyarrow==18.1.0
+      - name: Verify catalog and existing calculations
+        run: python3 -m unittest discover -s tests -p 'test_supply_demand*.py'
+      - name: Build all-code display data without changing production
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+        run: bash scripts/build_supply_demand_assets.sh preview/supply-demand
+      - name: Check stocks outside the daily detailed snapshot
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('preview/supply-demand')
+          index = json.loads((root / 'index.json').read_text())
+          for code in ['28940', '64670']:
+              data = json.loads((root / f'{code}.json').read_text())
+              assert index['stocks'][code]['status'] == 'ok'
+              assert data['supplyDemand']['long']['averagePrice'] > 0
+          print('Known saved stocks have published demand data')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: price-band-demand-catalog
           path: preview/
           retention-days: 7

@@ -10,6 +10,12 @@ test('detailed stock data wins over candidate snapshots; missing stocks stay sel
   assert.equal(choices[1].id, 'pred:56780');
 });
 
+test('four-digit saved stocks do not replace five-digit API details for the same security', () => {
+  const detailed = { id: 'jq-28940', jqCode: '28940', code: '2894', supplyDemand: { status: 'ok' } };
+  const saved = { id: 'manual-old', code: '2894' };
+  assert.deepEqual(supplyChoices([detailed, saved], []), [detailed]);
+});
+
 test('table combines both sides on the same price bands without losing shares', () => {
   const bands = profileBands({ long: { bins: [{ low: 10, high: 20, price: 15, shares: 120 }] },
     short: { bins: [{ low: 10, high: 20, price: 16, shares: 60 }, { low: 20, high: 30, price: 25, shares: 10 }] } });
