@@ -70,11 +70,14 @@ def _price_rows(quotes, as_of):
     if not valid:
         return [], None, None
     latest = valid[-1]
+    rows = [r for r in rows if r['Date'] <= latest['Date']]
     raw = _positive(latest.get('C'))
     adj = _positive(latest.get('AdjC'))
     anchor = adj / raw if raw and adj else 1.0
     result = []
     for r in rows:
+        empty = dict(date=r['Date'], close=None, factor=None, volume=None,
+                     vwap=None, source='unavailable')
         close, adjusted = _positive(r.get('C')), _positive(r.get('AdjC'))
         # Adjusted/raw ratios remove splits AFTER the price date as well.
         factor = adjusted / close / anchor if adjusted and close else None
@@ -84,9 +87,11 @@ def _price_rows(quotes, as_of):
             later = [x for x in rows if x['Date'] > r['Date']]
             factors = [_positive(x.get('AdjFactor')) for x in later]
             if any(x is not None and x != 1 for x in factors):
+                result.append(empty)
                 continue
             factor = 1.0
         if factor is None:
+            result.append(empty)
             continue
         price = close * factor
         turnover = _positive(r.get('Va'))

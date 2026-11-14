@@ -25,7 +25,8 @@ const server = http.createServer((req, res) => {
   fs.createReadStream(file).pipe(res);
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
-const browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_PATH || '/usr/bin/chromium' });
+const chromiumPath = process.env.PLAYWRIGHT_CHROMIUM_PATH || '/usr/bin/chromium';
+const browser = await chromium.launch(fs.existsSync(chromiumPath) ? { executablePath: chromiumPath } : {});
 const page = await browser.newPage({ viewport: { width: 1440, height: 1100 }, hasTouch: true });
 const errors = [], requests = [];
 page.on('pageerror', e => errors.push(e.message));

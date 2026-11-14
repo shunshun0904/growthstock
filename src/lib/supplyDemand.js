@@ -40,6 +40,6 @@ export function sideDisplay(side, profile) {
 export const PROFILE_STATUS = {
   missing_quantity: '信用残の株数が未取得のため分布を算出できません。',
   missing_volume: '対象期間の出来高を取得できず、価格帯への配分ができません。',
-  mean_outside_window: '平均建値が対象期間の価格範囲外のため分布を推定できません。より長い期間を選んでください。',
+  mean_outside_window: '平均建値が対象期間の価格範囲外のため分布を推定できません。期間を延ばしても範囲外の場合は、上の平均建値と残高をご確認ください。',
   no_positions: '公表された信用残は0株です。',
 };

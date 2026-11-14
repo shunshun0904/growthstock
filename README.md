@@ -65,19 +65,20 @@ APIキーはブラウザに置けないため、**取得はGitHub Actions、表�
 - 基準日と公表日を区別し、株価基準日より後の公表データは使いません。旧週次データは翌週第2営業日の公表を推定し、2026-09-25以降の公表日不明データは、公開済みスナップショットでその日までの取得を確認できる場合にのみ利用します。その場合も実際の公表日は未取得と表示します。株式分割・併合は株価基準日の株価・株数にそろえ、約定金額を保存します。
 - 含み損益は「公表時の建玉が終値の時点まで残っている」前提で、買いが `終値 / 平均建値 - 1`、売りが `1 - 終値 / 平均建値`。金利・貸株料・担保・返済は反映しません。大口空売りの取得価格、PTS、追証ラインは明細がなく表示しません。信用売り残との重複を避けるため大口空売りの合算もしません。
 
-初回は2026-11-13の既存公開スナップショット51銘柄を、同日までの保存済み日足で補完しています。既存の株価・財務・予測値は変えず、表示用フィールドだけを追加しました。元スナップショットに約定金額がないため、この初回データの分布・平均建値・含み損益はすべて出来高配分による推定です。次の日次取得からはAPIの金額・公表日を取得できた場合に利用します。
+初回は2026-11-13の既存公開スナップショット51銘柄を、同日までの保存済み日足と、[2026-11-14のAPI接続検証](https://github.com/shunshun0904/growthstock/actions/runs/43547538083)で取得した約定金額・公表日で補完しています。既存の株価・財務・予測値は変えず、表示用フィールドだけを追加しました。51銘柄すべてで平均建値の集計値を取得でき、残高が正の92側（買い51・売り41）のうち、250営業日の価格範囲で分布を推定できるのは89側です。残る3側は、平均建値・残高を表示し、根拠のない分布は作りません。検証入力を `docs/validation/price-band-demand-20261114.json` に保存しています。
 
 初回補完の再現（研究環境のpandas / pyarrowが必要。通常の日次更新は標準ライブラリのみ）：
 
 ```bash
 python3 scripts/backfill_supply_demand.py \
   --stocks public/data/stocks.json --bars-dir research/_data \
+  --margin-snapshot docs/validation/price-band-demand-20261114.json \
   --output public/data/stocks.json
 ```
 
 数値検証は `python3 -m unittest discover -s tests -p 'test_supply_demand.py'`、表示はビルド後に `node tests/supply-demand-browser.mjs`。`PRICE_DEMAND_REAL=1` で実データを確認でき、`SMOKE_ARTIFACT_DIR` でスクリーンショットの出力先を指定できます。GitHub Pagesの `/growthstock/` 配下でも同じテストを行います。
 
-`Preview Price Band Demand` は、手動実行したブランチの詳細取得済み銘柄（最大100件）について、既存の `JQUANTS_API` Secretで信用残だけを取り直すプレビューです。保存済みの日足を使い、金額・公表日を含むAPI応答で計算を検証します。成果物 `price-band-demand-data` に表示用フィールドを追加した `stocks.json` と件数を保存し、リポジトリ・Release・GitHub Pagesには書き込みません。ローカルでは上記コマンドに `--refresh-margin` を付けると同じ処理を実行できます。
+`Preview Price Band Demand` は、手動実行したブランチの詳細取得済み銘柄（最大100件）について、既存の `JQUANTS_API` Secretで信用残だけを取り直すプレビューです。開発用 `codex/price-band-demand-*` ブランチで当該ワークフローを変更したときにも実行します。保存済みの日足を使い、金額・公表日を含むAPI応答で計算を検証します。成果物 `price-band-demand-data` に表示用フィールドを追加した `stocks.json` と件数を保存し、リポジトリ・Release・GitHub Pagesには書き込みません。ローカルでは上記の `--margin-snapshot ...` を `--refresh-margin` に替えると同じ処理を実行できます。両方省略した場合は公開スナップショットの株数だけで推計します。
 
 ### リカレンス・ネットワーク（2026-10-19）
 

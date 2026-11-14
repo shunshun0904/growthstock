@@ -111,6 +111,12 @@ class SupplyDemandTests(unittest.TestCase):
         self.assertEqual(p['profiles']['60']['long']['status'], 'missing_volume')
         self.assertEqual(build_supply_demand([], [balance()])['status'], 'missing_price')
 
+    def test_nontraded_sessions_count_in_window_without_inventing_prices(self):
+        q = quotes(); q[1].update(C=None, AdjC=None, Vo=0, Va=0, AdjVo=0)
+        p = build_supply_demand(q, [balance()])
+        self.assertEqual(p['profiles']['60']['sessions'], 3)
+        self.assertEqual(p['profiles']['60']['tradedSessions'], 2)
+
     def test_profile_prior_ends_at_balance_date_not_after_it(self):
         row = balance(); row.update(Date='2026-11-03', LongVal=None)
         p = build_supply_demand(quotes((80, 100, 900)), [row])

@@ -92,7 +92,10 @@ export default function SupplyDemandView({ stocks, candidates, selectedId, onSel
   const [search, setSearch] = useState('');
   const [window, setWindow] = useState('120');
   const [unit, setUnit] = useState('value');
-  const stock = choices.find(s => s.id === selectedId) || choices.find(s => s.supplyDemand) || choices[0];
+  const selectedCode = selectedId?.replace(/^(jq-|pred:)/, '');
+  const stock = choices.find(s => s.id === selectedId)
+    || choices.find(s => String(s.jqCode || s.code) === selectedCode)
+    || choices.find(s => s.supplyDemand?.status === 'ok') || choices[0];
   const filtered = choices.filter(s => `${s.code} ${s.name}`.toLowerCase().includes(search.trim().toLowerCase()));
   const options = stock && !filtered.includes(stock) ? [stock, ...filtered] : filtered;
   const data = stock?.supplyDemand, profile = data?.profiles?.[window];

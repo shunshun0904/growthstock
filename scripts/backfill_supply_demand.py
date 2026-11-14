@@ -7,9 +7,11 @@ from research/requirements.txt. Normal daily refresh uses the stdlib producer
 directly; this command is only a reproducible initial backfill.
 """
 import argparse
+from contextlib import redirect_stdout
 import datetime as dt
 import json
 from pathlib import Path
+import sys
 
 from supply_demand import build_supply_demand
 
@@ -47,8 +49,10 @@ def main():
     parser.add_argument('--stocks', default='public/data/stocks.json')
     parser.add_argument('--bars-dir', required=True, help='Directory containing bars_YYYY.parquet')
     parser.add_argument('--output', required=True)
-    parser.add_argument('--refresh-margin', action='store_true',
-                        help='Fetch margin rows with existing J-Quants credentials; do not update other metrics')
+    margin_input = parser.add_mutually_exclusive_group()
+    margin_input.add_argument('--refresh-margin', action='store_true',
+                              help='Fetch margin rows with existing J-Quants credentials; do not update other metrics')
+    margin_input.add_argument('--margin-snapshot', help='Saved marginByCode JSON, including actual publication dates and amounts')
     args = parser.parse_args()
     import pandas as pd
     import pyarrow.parquet as pq
@@ -64,18 +68,22 @@ def main():
     bars = bars.astype(object).where(pd.notna(bars), None)
     grouped = {code: group.sort_values('Date').to_dict('records') for code, group in bars.groupby('Code')}
     margins = None
+    if args.margin_snapshot:
+        margins = json.loads(Path(args.margin_snapshot).read_text())['marginByCode']
     if args.refresh_margin:
         from jquants_data_fetcher import JQuantsClient, resolve_api_key
         if len(codes) > 100:
             raise ValueError('Manual margin refresh is limited to 100 detailed stocks')
-        client = JQuantsClient(resolve_api_key(), pause=.6)
-        margins = {}
-        for stock in dataset['stocks']:
-            end = dt.date.fromisoformat(stock['asOf'])
-            code = stock.get('jqCode') or stock['code']
-            margins[code] = client.margin_interest(code, (end - dt.timedelta(days=400)).isoformat(), end.isoformat())
-            if not margins[code]:
-                raise ValueError(f'No margin response for {code}; public data has not been overwritten')
+        # Keep stdout machine-readable; existing auth/retry diagnostics use stderr.
+        with redirect_stdout(sys.stderr):
+            client = JQuantsClient(resolve_api_key(), pause=.6)
+            margins = {}
+            for stock in dataset['stocks']:
+                end = dt.date.fromisoformat(stock['asOf'])
+                code = stock.get('jqCode') or stock['code']
+                margins[code] = client.margin_interest(code, (end - dt.timedelta(days=400)).isoformat(), end.isoformat())
+                if not margins[code]:
+                    raise ValueError(f'No margin response for {code}; public data has not been overwritten')
     summary = backfill(dataset, grouped, margins)
     Path(args.output).write_text(json.dumps(dataset, ensure_ascii=False, indent=2, allow_nan=False) + '\n')
     print(json.dumps(summary, ensure_ascii=False))
