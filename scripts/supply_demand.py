@@ -122,7 +122,8 @@ def _tilt(prices, weights, target):
         z = [w + lam * x for x, w in zip(xs, logs)]
         zmax = max(z)
         exps = [math.exp(v - zmax) for v in z]
-        return [v / sum(exps) for v in exps]
+        total = sum(exps)
+        return [v / total for v in exps]
 
     low, high = -1.0, 1.0
     while sum(p*w for p, w in zip(prices, probabilities(low))) > target:

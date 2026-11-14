@@ -1,4 +1,5 @@
 /** Display helpers only. Raw margin balances are never inferred from model scores. */
+import { normalizeSupplyCode } from './supplyDemandData.js';
 export const finite = v => typeof v === 'number' && Number.isFinite(v);
 export const yen = v => finite(v) ? `${v.toLocaleString('ja-JP', { maximumFractionDigits: 1 })}円` : '未取得';
 export const shares = v => finite(v) ? `${v.toLocaleString('ja-JP', { maximumFractionDigits: 0 })}株` : '未取得';
@@ -6,9 +7,12 @@ export const percent = v => finite(v) ? `${v > 0 ? '+' : ''}${(v * 100).toFixed(
 
 export function supplyChoices(stocks = [], candidates = []) {
   const byCode = new Map();
-  for (const stock of stocks) byCode.set(String(stock.jqCode || stock.code), stock);
+  for (const stock of stocks) {
+    const code = normalizeSupplyCode(stock.jqCode || stock.code) || String(stock.jqCode || stock.code);
+    if (!byCode.has(code) || (!byCode.get(code).supplyDemand && stock.supplyDemand)) byCode.set(code, stock);
+  }
   for (const c of candidates) {
-    const code = String(c.jqCode || c.code);
+    const code = normalizeSupplyCode(c.jqCode || c.code) || String(c.jqCode || c.code);
     if (!byCode.has(code)) byCode.set(code, { ...c, id: `pred:${code}` });
   }
   return [...byCode.values()].sort((a, b) => String(a.code).localeCompare(String(b.code), 'ja'));

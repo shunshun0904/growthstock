@@ -53,6 +53,21 @@ jobs:
       - run: npm test
       - run: npm run build
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pandas==2.2.3 pyarrow==18.1.0
+
+      # 全銘柄の表示専用データ。株価キャッシュを使い、選択時は小さな銘柄別JSONだけを読む。
+      # 本体をGitへ日次コミットせず、Pages成果物へ直接生成する。学習・予測データは変更しない。
+      # API障害でも既存の詳細銘柄の表示とサイト公開を維持する（画面には再試行を表示）。
+      - name: Build per-security price-band demand data
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+        run: bash scripts/build_supply_demand_assets.sh dist/data/supply-demand
+
       # リカレンス・ネットワーク（日次予測が Release に上げた recurrence.tar.gz。research/recurrence_net.py）を
       # dist/data/recurrence/ に置く。購入条件を満たした銘柄ごとに全期間で作る（1銘柄 約130KB）のでリポジトリには入れていない
       # （運用者の選択「Release に置く」、2026-10-19）。中の名前は recurrence/index.json と recurrence/<日付>_<コード>.json だけのはずなので、

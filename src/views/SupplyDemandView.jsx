@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { finite, yen, shares, percent, supplyChoices, profileBands, sideDisplay, PROFILE_STATUS } from '../lib/supplyDemand.js';
+import { createSupplyDemandClient, normalizeSupplyCode } from '../lib/supplyDemandData.js';
 
 function PositionCard({ label, side, profile }) {
   const d = sideDisplay(side, profile);
@@ -89,17 +90,55 @@ function PriceProfile({ data, profile, unit }) {
 
 export default function SupplyDemandView({ stocks, candidates, selectedId, onSelect }) {
   const choices = useMemo(() => supplyChoices(stocks, candidates), [stocks, candidates]);
+  const client = useMemo(() => createSupplyDemandClient(), []);
+  const [index, setIndex] = useState(null);
+  const [indexLoading, setIndexLoading] = useState(true);
+  const [indexError, setIndexError] = useState(null);
+  const [profiles, setProfiles] = useState({});
+  const [request, setRequest] = useState(null);
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setIndexLoading(true);
+    setIndexError(null);
+    client.loadIndex().then(d => { if (active) setIndex(d); })
+      .catch(e => { if (active) setIndexError(e.message); })
+      .finally(() => { if (active) setIndexLoading(false); });
+    return () => { active = false; };
+  }, [client, retry]);
   const [search, setSearch] = useState('');
   const [window, setWindow] = useState('120');
   const [unit, setUnit] = useState('value');
-  const selectedCode = selectedId?.replace(/^(jq-|pred:)/, '');
+  const selectedEntry = stocks.find(s => s.id === selectedId);
+  const selectedCode = normalizeSupplyCode(selectedEntry?.jqCode || selectedEntry?.code || selectedId?.replace(/^(jq-|pred:)/, ''));
   const stock = choices.find(s => s.id === selectedId)
-    || choices.find(s => String(s.jqCode || s.code) === selectedCode)
+    || (selectedCode && choices.find(s => normalizeSupplyCode(s.jqCode || s.code) === selectedCode))
     || choices.find(s => s.supplyDemand?.status === 'ok') || choices[0];
+  const code = normalizeSupplyCode(stock?.jqCode || stock?.code);
+  useEffect(() => {
+    if (!code || !index?.stocks?.[code] || profiles[code]) return;
+    let active = true;
+    setRequest({ code, loading: true });
+    client.loadStock(code).then(d => {
+      if (active) { setProfiles(prev => ({ ...prev, [code]: d })); setRequest({ code, loading: false }); }
+    }).catch(e => { if (active) setRequest({ code, loading: false, error: e.message }); });
+    return () => { active = false; };
+  }, [client, code, index, retry]);
   const filtered = choices.filter(s => `${s.code} ${s.name}`.toLowerCase().includes(search.trim().toLowerCase()));
   const options = stock && !filtered.includes(stock) ? [stock, ...filtered] : filtered;
-  const data = stock?.supplyDemand, profile = data?.profiles?.[window];
-  const complete = choices.filter(s => s.supplyDemand?.status === 'ok').length;
+  const remote = profiles[code];
+  const data = remote?.status === 'ok' ? remote : stock?.supplyDemand?.status === 'ok' ? stock.supplyDemand : remote || stock?.supplyDemand;
+  const profile = data?.profiles?.[window];
+  const statusFor = s => {
+    const c = normalizeSupplyCode(s.jqCode || s.code);
+    return profiles[c]?.status === 'ok' || s.supplyDemand?.status === 'ok' ? 'ok'
+      : profiles[c]?.status || index?.stocks?.[c]?.status || s.supplyDemand?.status;
+  };
+  const statusLabel = s => ({ ok: '', missing_balance: '（信用残データなし）', missing_price: '（株価データなし）',
+    missing_adjustment: '（分割調整を確認できず）' }[statusFor(s)] ?? (indexLoading ? '（需給データ確認中）' : index ? '（配信データなし）' : '（需給データ未取得）'));
+  const complete = choices.filter(s => statusFor(s) === 'ok').length;
+  const pending = !data && (indexLoading || (index?.stocks?.[code] && !(request?.code === code && request.error)));
+  const loadError = indexError || (request?.code === code ? request.error : null);
   return <div className="supply-demand-view">
     <section className="card">
       <div className="card-head"><h2>価格帯別需給 <span className="sd-badge">推計</span></h2><span className="sub">データ取得済み {complete}銘柄</span></div>
@@ -108,15 +147,18 @@ export default function SupplyDemandView({ stocks, candidates, selectedId, onSel
         <label>銘柄を検索<input aria-label="需給の銘柄検索" value={search} onChange={e => setSearch(e.target.value)} placeholder="証券コード・銘柄名" /></label>
         <label className="sd-stock-select">分析対象<select aria-label="需給の分析対象銘柄" value={stock?.id || ''} onChange={e => onSelect(e.target.value)}>
           {!options.length && <option value="">該当する銘柄がありません</option>}
-          {options.map(s => <option key={s.id} value={s.id}>{s.code} {s.name}{s.supplyDemand?.status === 'ok' ? '' : '（需給データ未取得）'}</option>)}
+          {options.map(s => <option key={s.id} value={s.id}>{s.code} {s.name}{statusLabel(s)}</option>)}
         </select></label>
       </div>
       {search && filtered.length === 0 && <p role="status">検索条件に一致する銘柄がありません。</p>}
+      {loadError && <div role="status"><p>{loadError}{data ? ' 取得済みの詳細データを表示しています。' : ''}</p>
+        <button className="btn" onClick={() => setRetry(n => n + 1)}>需給データを再試行</button></div>}
     </section>
-    {!data || !['ok', 'missing_adjustment'].includes(data.status) ? <section className="card" role="status">
+    {pending ? <section className="card" role="status">{stock?.code} {stock?.name} の需給データを読み込んでいます…</section>
+    : !data || !['ok', 'missing_adjustment'].includes(data.status) ? <section className="card" role="status">
       <h3>{stock ? `${stock.code} ${stock.name}` : '銘柄データがありません'}</h3>
       <p>{data?.status === 'missing_balance' ? '株価基準日までに利用可能と確認できた信用残がありません。' : data?.status === 'missing_price' ? '株価データを取得できていません。' : 'この銘柄の価格帯別需給データはまだ取得されていません。'}</p>
-      <p>日次更新の詳細データ取得対象になった銘柄から表示します。データがない銘柄を残高0としては扱いません。</p>
+      <p>需給データは銘柄ごとに配信しています。信用残・株価を確認できない場合は、残高0としては扱いません。</p>
     </section> : <>
       <section className="card">
         <div className="card-head"><h2>{stock.code} {stock.name}</h2><strong>終値 {yen(data.currentPrice)}</strong></div>

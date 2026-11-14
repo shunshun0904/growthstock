@@ -14,12 +14,20 @@ const SHOTS = process.env.SMOKE_ARTIFACT_DIR || path.join(ROOT, 'docs');
 fs.mkdirSync(SHOTS, { recursive: true });
 const real = process.env.PRICE_DEMAND_REAL === '1';
 const fixture = JSON.parse(fs.readFileSync(path.join(ROOT, 'tests/fixtures/synthetic-supply-demand.json')));
+let retryRequests = 0;
+const catalog = { schemaVersion: 1, stocks: { '28940': { status: 'ok' }, '88880': { status: 'ok' } } };
 const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json' };
 const server = http.createServer((req, res) => {
   const pathname = new URL(req.url, 'http://localhost').pathname;
   const rel = pathname.replace(/^\/growthstock\//, '');
   const file = path.join(ROOT, 'dist', rel || 'index.html');
   if (!real && rel === 'data/stocks.json') return res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(fixture));
+  if (!real && rel === 'data/supply-demand/index.json') return res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(catalog));
+  if (!real && /^data\/supply-demand\/(28940|88880)\.json$/.test(rel)) {
+    const code = rel.match(/([0-9]+)\.json$/)[1];
+    if (code === '88880' && ++retryRequests === 1) return res.writeHead(503).end('temporarily unavailable');
+    return setTimeout(() => res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify({ code, supplyDemand: fixture.stocks[0].supplyDemand })), 80);
+  }
   if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) return res.writeHead(404).end('not found');
   res.writeHead(200, { 'Content-Type': mime[path.extname(file)] || 'application/octet-stream' });
   fs.createReadStream(file).pipe(res);
@@ -32,6 +40,14 @@ const errors = [], requests = [];
 page.on('pageerror', e => errors.push(e.message));
 page.on('request', r => requests.push(r.url()));
 try {
+  if (!real) await page.addInitScript(() => localStorage.setItem('focus.manualStocks.v1', JSON.stringify([
+    { id: 'saved-2894', code: '2894', name: '合成・保存済み銘柄', origin: 'prediction', metrics: {} },
+    { id: 'saved-8888', code: '8888', name: '合成・再試行', origin: 'prediction', metrics: {} },
+  ])));
+  if (real) await page.addInitScript(() => localStorage.setItem('focus.manualStocks.v1', JSON.stringify([
+    { id: 'saved-2894', code: '2894', name: '石井食品', origin: 'prediction', metrics: {} },
+    { id: 'saved-6467', code: '6467', name: 'ニチダイ', origin: 'prediction', metrics: {} },
+  ])));
   await page.goto(`http://127.0.0.1:${server.address().port}/growthstock/`, { waitUntil: 'networkidle' });
   await page.getByRole('tab', { name: '価格帯別需給', exact: true }).click();
   await page.waitForSelector('.sd-positions');
@@ -61,6 +77,19 @@ try {
     await page.getByLabel('需給の銘柄検索').fill('存在しないテスト検索');
     assert.match(await page.locator('.supply-demand-view').innerText(), /一致する銘柄がありません/);
     await page.getByLabel('需給の銘柄検索').fill('');
+    // A stock outside stocks.json is delivered through its own static asset.
+    await page.getByLabel('需給の分析対象銘柄').selectOption('saved-2894');
+    await page.waitForFunction(() => document.querySelector('.sd-positions')?.textContent.includes('9.1%'));
+    assert.match(await page.locator('.supply-demand-view .card-head').allTextContents().then(x => x.join(' ')), /合成・保存済み銘柄/);
+    assert.ok(requests.some(u => new URL(u).pathname === '/growthstock/data/supply-demand/28940.json'));
+    // The request fails once; retry is explicit and never fabricates zero data.
+    await page.getByLabel('需給の分析対象銘柄').selectOption('saved-8888');
+    await page.getByRole('button', { name: '需給データを再試行' }).waitFor();
+    assert.match(await page.locator('.supply-demand-view').innerText(), /503/);
+    assert.equal(retryRequests, 1);
+    await page.getByRole('button', { name: '需給データを再試行' }).click();
+    await page.waitForFunction(() => document.querySelector('.sd-positions')?.textContent.includes('9.1%'));
+    assert.equal(retryRequests, 2);
     await page.getByLabel('需給の分析対象銘柄').selectOption('jq-11110');
   } else {
     const options = await page.getByLabel('需給の分析対象銘柄').locator('option').allTextContents();
@@ -68,6 +97,13 @@ try {
     if (example >= 0) await page.getByLabel('需給の分析対象銘柄').selectOption({ index: example });
     assert.match(await page.locator('.card-head').allTextContents().then(x => x.join(' ')), /価格帯別需給/);
     assert.ok(await page.locator('.sd-band').count() > 0);
+    for (const [id, name, code] of [['saved-2894', '石井食品', '28940'], ['saved-6467', 'ニチダイ', '64670']]) {
+      await page.getByLabel('需給の分析対象銘柄').selectOption(id);
+      await page.locator('.sd-positions').waitFor();
+      assert.match(await page.locator('.supply-demand-view .card-head').allTextContents().then(x => x.join(' ')), new RegExp(name));
+      assert.ok(await page.locator('.sd-band').count() > 0);
+      assert.ok(requests.some(u => new URL(u).pathname === `/growthstock/data/supply-demand/${code}.json`));
+    }
   }
   await page.evaluate(() => scrollTo(0, 0));
   await page.screenshot({ path: path.join(SHOTS, `screenshot-price-demand-${real ? 'real' : 'synthetic'}-desktop.png`), fullPage: true });
