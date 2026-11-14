@@ -17,7 +17,7 @@ import re
 import sys
 import tempfile
 
-from supply_demand import build_supply_demand
+from supply_demand import build_supply_demand, DAILY_MARGIN_START
 
 
 def collect_margin_rows(client, trading_days, as_of, lookback=10):
@@ -37,6 +37,34 @@ def collect_margin_rows(client, trading_days, as_of, lookback=10):
         print(json.dumps({'margin_date': day, 'rows': len(batch)}), flush=True)
     if not rows:
         raise ValueError('no published margin records available')
+    return rows
+
+
+def cached_margin_rows(directory):
+    import pandas as pd
+    paths = sorted(Path(directory).glob('margin_*.parquet'))
+    if not paths:
+        return []
+    frame = pd.concat([pd.read_parquet(p) for p in paths], ignore_index=True)
+    frame['Date'] = pd.to_datetime(frame.Date).dt.strftime('%Y-%m-%d')
+    known = frame.Date < DAILY_MARGIN_START
+    if 'PubDate' in frame:
+        known |= frame.PubDate.notna()
+    return frame[known].astype(object).where(pd.notna(frame[known]), None).to_dict('records')
+
+
+def collect_stale_margin_rows(client, last_closes, recent_rows):
+    import pandas as pd
+    earliest = min(str(r['Date'])[:10] for r in recent_rows)
+    dates = pd.to_datetime(last_closes)
+    stale = last_closes[(dates < earliest) & (dates >= DAILY_MARGIN_START)]
+    rows = []
+    for code, last in stale.items():
+        end = pd.Timestamp(last).date()
+        historical = client.get_paginated('/markets/margin-interest', {'code': str(code),
+            'from': (end - dt.timedelta(days=400)).isoformat(), 'to': end.isoformat()})
+        rows.extend(historical)
+        print(json.dumps({'historical_margin_code': str(code), 'rows': len(historical)}), flush=True)
     return rows
 
 
@@ -113,17 +141,11 @@ def main():
             calendar_rows = client.get_paginated('/markets/calendar', {'from': f'{int(as_of[:4])-1}-01-01', 'to': as_of})
             calendar = sorted(str(r['Date'])[:10] for r in calendar_rows if str(r.get('HolDiv')) in ['1', '2'])
             margins = collect_margin_rows(client, calendar, as_of)
-            # Rare illiquid issues may have no close during these ten sessions.
-            # Fetch their own published history instead of applying a future balance.
+            # Include historical issues too, even after they leave recent snapshots.
+            # Never apply a balance published after the issue's last price date.
             last_closes = bars[pd.to_numeric(bars.C, errors='coerce') > 0].groupby('Code').Date.max()
-            earliest = min(str(r['Date'])[:10] for r in margins)
-            stale = last_closes[(pd.to_datetime(last_closes) < earliest) & last_closes.index.isin({str(r['Code']) for r in margins})]
-            for code, last in stale.items():
-                end = pd.Timestamp(last).date()
-                historical = client.get_paginated('/markets/margin-interest', {'code': str(code),
-                    'from': (end - dt.timedelta(days=400)).isoformat(), 'to': end.isoformat()})
-                margins.extend(historical)
-                print(json.dumps({'historical_margin_code': str(code), 'rows': len(historical)}), flush=True)
+            margins.extend(collect_stale_margin_rows(client, last_closes, margins))
+            margins.extend(cached_margin_rows(args.bars_dir))
         index = build_catalog(bars, margins, args.output_dir, calendar, as_of)
         print(json.dumps({'status': 'complete', 'asOf': index['asOf'], 'codes': len(index['stocks']), 'counts': index['counts']}), flush=True)
         return 0

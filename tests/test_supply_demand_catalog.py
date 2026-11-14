@@ -8,7 +8,7 @@ import unittest
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from build_supply_demand_catalog import build_catalog, collect_margin_rows
+from build_supply_demand_catalog import build_catalog, collect_margin_rows, collect_stale_margin_rows, cached_margin_rows
 
 
 def quotes(code):
@@ -77,6 +77,26 @@ class CatalogTests(unittest.TestCase):
                 return []
         with self.assertRaisesRegex(ValueError, 'no published'):
             collect_margin_rows(Empty(), ['2026-11-12'], '2026-11-13')
+
+    def test_stored_historical_issue_is_not_limited_to_the_current_margin_code_list(self):
+        calls = []
+        class Client:
+            def get_paginated(self, endpoint, params):
+                calls.append(params['code'])
+                return [balance(params['code'], Date='2026-10-01', PubDate='2026-10-02')]
+        prices = pd.Series(pd.to_datetime(['2026-10-02', '2025-12-01', '2026-11-13']),
+                           index=['28940', '22220', '64670'])
+        rows = collect_stale_margin_rows(Client(), prices, [balance('64670')])
+        self.assertEqual(calls, ['28940'])
+        self.assertEqual(rows[0]['Code'], '28940')
+
+    def test_old_weekly_cache_is_retained_but_daily_rows_without_publication_are_not_assumed_available(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            pd.DataFrame([dict(Code='28940', Date='2026-09-18', LongVol=10, ShrtVol=0),
+                          dict(Code='28940', Date='2026-10-02', LongVol=20, ShrtVol=0)]).to_parquet(Path(tmp)/'margin_2026.parquet')
+            rows = cached_margin_rows(tmp)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]['Date'], '2026-09-18')
 
 
 if __name__ == '__main__':

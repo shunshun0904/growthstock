@@ -12,7 +12,10 @@ names = [x for x in pathlib.Path(sys.argv[1]).read_text().splitlines() if re.ful
 if not names:
     raise SystemExit('No cached daily-bar assets available')
 # Select available years rather than the current year, including New Year holidays.
-print('\n'.join(sorted(names)[-2:]))
+selected = sorted(names)[-2:]
+assets = set(pathlib.Path(sys.argv[1]).read_text().splitlines())
+selected += [x.replace('bars_', 'margin_') for x in selected if x.replace('bars_', 'margin_') in assets]
+print('\n'.join(selected))
 PY
 while IFS= read -r asset; do
   bash scripts/gh_release_download.sh data-raw "$catalog_work/raw" "$asset"

@@ -73,6 +73,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           JQUANTS_API: ${{ secrets.JQUANTS_API }}
         run: bash scripts/build_supply_demand_assets.sh preview/supply-demand
+      - name: Check stocks outside the daily detailed snapshot
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('preview/supply-demand')
+          index = json.loads((root / 'index.json').read_text())
+          for code in ['28940', '64670']:
+              data = json.loads((root / f'{code}.json').read_text())
+              assert index['stocks'][code]['status'] == 'ok'
+              assert data['supplyDemand']['long']['averagePrice'] > 0
+          print('Known saved stocks have published demand data')
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: price-band-demand-catalog
