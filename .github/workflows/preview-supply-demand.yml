@@ -15,6 +15,7 @@ permissions:
 
 jobs:
   preview:
+    if: ${{ !startsWith(github.ref, 'refs/heads/codex/price-band-demand-validation-') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -53,4 +54,29 @@ jobs:
         with:
           name: price-band-demand-data
           path: preview/
+          retention-days: 7
+
+  collect-validation-history:
+    if: startsWith(github.ref, 'refs/heads/codex/price-band-demand-validation-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pandas==2.2.3 pyarrow==18.1.0
+      - name: Verify read-only collection contract
+        run: python3 -m unittest discover -s tests -p 'test_price_band_validation_collect.py'
+      - name: Collect margin contract values and dated master data
+        env:
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+        run: >-
+          python3 research/collect_price_band_validation_data.py
+          --start 2026-09-25
+          --output-dir validation-source
+      - uses: actions/upload-artifact@v4
+        with:
+          name: price-band-validation-source
+          path: validation-source/
           retention-days: 7
