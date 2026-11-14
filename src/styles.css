@@ -48,6 +48,57 @@
 
 * { box-sizing: border-box; }
 
+/* Per-stock margin profiles. Estimates are visually distinct from observed totals. */
+.supply-demand-view { display: grid; gap: var(--s4); min-width: 0; }
+.supply-demand-view p { font-size: 13px; line-height: 1.8; }
+.sd-intro, .sd-dates, .sd-method p { color: var(--text-dim); }
+.sd-badge { display: inline-block; margin-left: 8px; padding: 2px 7px; border: 1px solid #66502d; border-radius: 4px; color: var(--amber); font-size: 11px; font-weight: 500; vertical-align: middle; }
+.sd-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+.sd-controls label { display: grid; gap: 6px; font-size: 12px; color: var(--text-dim); }
+.sd-controls input, .sd-controls select { width: 100%; background: var(--bg-input); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px; font: inherit; font-size: 14px; }
+.sd-stock-select { flex: 1; min-width: 200px; max-width: 520px; }
+.sd-positions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.sd-position { padding: 16px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-raised); min-width: 0; }
+.sd-position h3 { margin: 0 0 8px; font-size: 14px; color: var(--text-dim); }
+.sd-position p { margin: 5px 0; font-size: 12px; color: var(--text-dim); }
+.sd-position b { color: var(--text); }
+.sd-pnl { display: block; font-family: var(--mono); font-size: clamp(26px, 4vw, 40px); font-weight: 500; }
+.sd-profit { color: var(--green); }
+.sd-loss { color: var(--red); }
+.sd-ratio span { color: var(--text-dim); margin-left: 12px; font-size: 11px; }
+.sd-chart-controls { justify-content: space-between; }
+.sd-controls fieldset { display: flex; gap: 6px; border: 0; padding: 0; margin: 0; min-width: 0; }
+.sd-controls legend { color: var(--text-dim); font-size: 12px; margin-bottom: 8px; }
+.sd-controls [aria-pressed='true'] { background: var(--accent-dim); border-color: var(--accent); color: white; }
+.sd-estimate-note { padding: 10px 14px; margin: 12px 0; background: #292318; border: 1px solid #564728; border-radius: 6px; font-size: 12px; color: #eed6a2; line-height: 1.7; }
+.sd-chart { max-width: 980px; margin: auto; }
+.sd-chart svg { display: block; width: 100%; overflow: visible; }
+.sd-reference-lines { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 12px; margin: 18px 0 8px; }
+.sd-svg-heading { fill: var(--text-dim); font-size: 13px; }
+.sd-svg-tick { fill: var(--text-dim); font-size: 11px; font-family: var(--mono); }
+.sd-grid { stroke: var(--border); stroke-width: 1; }
+.sd-axis { stroke: var(--text-faint); stroke-width: 1; }
+.sd-bar-profit { fill: var(--green); opacity: .8; }
+.sd-bar-loss { fill: var(--red); opacity: .8; }
+.sd-band { cursor: pointer; }
+.sd-band:hover, .sd-band:focus { opacity: .65; outline: 1px solid var(--accent); }
+.sd-chart-caption { display: flex; flex-wrap: wrap; gap: 16px; justify-content: center; color: var(--text-dim); font-size: 12px; }
+.sd-band-detail { padding: 12px; min-height: 48px; margin: 12px 0; border-radius: 6px; background: var(--bg-input); font-size: 12px; line-height: 1.8; font-variant-numeric: tabular-nums; }
+.sd-status { color: var(--text-dim); }
+.sd-table summary { cursor: pointer; color: var(--accent); font-size: 13px; padding: 10px 0; }
+.sd-table .table-scroll { overflow-x: auto; }
+.sd-method h3 { margin-top: 0; }
+@media (max-width: 600px) {
+  .sd-controls label { width: 100%; max-width: none; }
+  .sd-position { padding: 10px; }
+  .sd-position h3 { font-size: 12px; }
+  .sd-position p { font-size: 11px; }
+  .sd-position .sd-badge { margin: 4px 0; }
+  .sd-reference-lines { gap: 8px; font-size: 11px; }
+  .supply-demand-view .card-head { flex-wrap: wrap; gap: 8px; }
+  .sd-ratio span { display: block; margin-left: 0; }
+}
+
 html, body, #root { height: 100%; }
 
 body {

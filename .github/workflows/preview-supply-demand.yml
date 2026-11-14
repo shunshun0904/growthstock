@@ -1,0 +1,51 @@
+name: Preview Price Band Demand
+
+# 表示用データだけを検証する手動プレビュー。公開ブランチ・Release・Pagesへは書かない。
+# 既存のJ-Quants SecretをActions内だけで使い、約定金額・公表日も確認する。
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: research/requirements.txt
+      - run: pip install -r research/requirements.txt
+      - name: Download cached daily bars
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p research/_data
+          python3 - <<'PY' > /tmp/demand-years.txt
+          import json
+          data = json.load(open('public/data/stocks.json'))
+          years = {int(s['asOf'][:4]) for s in data['stocks']}
+          print('\n'.join(str(y) for y in sorted(years | {y - 1 for y in years})))
+          PY
+          while read -r year; do
+            gh release download data-raw --pattern "bars_${year}.parquet" --dir research/_data
+          done < /tmp/demand-years.txt
+      - name: Verify calculations
+        run: python3 -m unittest discover -s tests -p 'test_supply_demand.py'
+      - name: Refresh display context only
+        env:
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+        run: |
+          mkdir -p preview
+          python3 scripts/backfill_supply_demand.py --stocks public/data/stocks.json \
+            --bars-dir research/_data --refresh-margin --output preview/stocks.json \
+            | tee preview/summary.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: price-band-demand-data
+          path: preview/
+          retention-days: 7
