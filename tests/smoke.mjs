@@ -375,14 +375,20 @@ const tabNames = (await page.getByRole('tab').allTextContents()).map((t) => t.tr
 // リカレンス・ネットワーク（2026-10-19 に候補銘柄のニュースの右に足した）は、運用者の依頼 2026-10-24「現状、参考にできる
 // レベルでもないので非表示にしてください。なくて良いです」で隠している（src/App.jsx の hidden。画面のコードと日次予測の網の
 // 作成は残す）
-// スコアと収益の分布（運用者の依頼 2026-11-08）は、サンプルを一番右に保つためその左
-check(tabNames.join(',') === 'ブレイク予測,候補銘柄のニュース,理論株価,価格帯別需給,タイムマシーン,スコアと収益の分布,再学習で加わったサンプル',
-      'タブは ブレイク予測 / 候補銘柄のニュース / 理論株価 / 価格帯別需給 / タイムマシーン / スコアと収益の分布 / 再学習で加わったサンプル'
-      + ` の7つ (実際: ${tabNames.join(',')})`);
+// スコアと収益の分布（2026-11-08 に足した）と再学習で加わったサンプル（2026-10-13 に足した）は、運用者の依頼 2026-11-15
+// 「再学習で加わったサンプル、スコアと収益の分布タグを消してください。」→「隠して自動更新も止める」で隠している（src/App.jsx の
+// hidden。画面のコードとデータの作り方は残す）
+check(tabNames.join(',') === 'ブレイク予測,候補銘柄のニュース,理論株価,価格帯別需給,タイムマシーン',
+      'タブは ブレイク予測 / 候補銘柄のニュース / 理論株価 / 価格帯別需給 / タイムマシーン'
+      + ` の5つ (実際: ${tabNames.join(',')})`);
 check(!tabNames.includes('決算サンキー') && !tabNames.includes('What-If シミュレーター')
         && !tabNames.includes('8軸オクタゴン比較') && !tabNames.includes('候補の比較')
-        && !tabNames.includes('リカレンス・ネットワーク'),
-      '決算サンキー・What-If シミュレーター・8軸オクタゴン比較・候補の比較・リカレンス・ネットワークのタブは出ない');
+        && !tabNames.includes('リカレンス・ネットワーク') && !tabNames.includes('スコアと収益の分布')
+        && !tabNames.includes('再学習で加わったサンプル'),
+      '決算サンキー・What-If シミュレーター・8軸オクタゴン比較・候補の比較・リカレンス・ネットワーク・スコアと収益の分布・'
+      + '再学習で加わったサンプルのタブは出ない');
+check((await page.locator('.sdist').count()) === 0 && (await page.locator('.samples').count()) === 0,
+      'スコアと収益の分布・再学習で加わったサンプルの画面はどのタブにも出ない（隠している間）');
 check((await page.locator('.knn').count()) === 0, '候補の比較の画面はどのタブにも出ない（隠している間）');
 check((await page.locator('.net').count()) === 0 && (await page.locator('.net-canvas').count()) === 0,
       'リカレンス・ネットワークの画面はどのタブにも出ない（隠している間）');
@@ -394,51 +400,9 @@ check(!((await page.textContent('.footer')) || '').includes('EDINET'),
 // 候補の比較の画面の確かめ（3枚の図・Q / M・母集団の件数・ホバー）は、タブを隠している間は外してある。純粋な計算の
 // テストは tests/knn.test.js に残っている。タブを戻すときは git の履歴（2026-10-16 より前の smoke.mjs）から戻す
 
-console.log('\n== スコアと収益の分布 ==');
-// 運用者の依頼（2026-11-08）。合成データは lgbm の out-of-fold 45件、ltr5 の組の行 204件・判断日 42日、両方の上位10% 4件。
-// 合成の予測データには固定 +10% で採点した候補が無いので、直近の予測は「まだありません」と出る
-await page.getByRole('tab', { name: 'スコアと収益の分布' }).click();
-await page.waitForSelector('.sdist .recharts-bar', { timeout: 10000 });
-const sd = (await page.textContent('.sdist')) || '';
-check(sd.includes('+10% の LightGBM のスコアの分布') && sd.includes('直近5営業日の組のランキング学習')
-        && sd.includes('2つのモデルの上位の重なり'), '3つの欄（lgbm・ltr5・重なり）が出る');
-check(/out-of-fold\s*45\s*件/.test(sd) && sd.includes('2024-01-11 〜 2024-03-11'), 'lgbm の out-of-fold の件数と期間');
-check(/組の行\s*204\s*件/.test(sd) && sd.includes('判断日 42 日'), 'ltr5 の組の行と判断日の数');
-check(/両方の上位10%\s*4\s*件/.test(sd), '両方の上位10% の件数');
-check(sd.includes('固定 +10% で採点した候補はまだありません'), '直近の予測に固定 +10% の候補が無ければそう書く');
-check(sd.includes('予測の候補が分布のどこにいるか') && sd.includes('固定 +10% で採点した予測の候補はまだありません'),
-      '予測の候補の位置の欄が出て、固定 +10% の候補が無ければそう書く');
-// グラフは lgbm の out-of-fold・ltr5 の収益2枚・10分位・ltr5 のスコアの5枚（直近の予測の候補が無いのでその1枚は出ない）
-check((await page.locator('.sdist .recharts-wrapper').count()) === 5,
-      `グラフは5枚 (実際: ${await page.locator('.sdist .recharts-wrapper').count()})`);
-check(!sd.includes('NaN') && !sd.includes('undefined'), 'スコアと収益の分布に NaN / undefined が出ていない');
-await page.screenshot({ path: path.join(SHOTS, 'screenshot-scoredist.png'), fullPage: true });
-
-console.log('\n== 再学習で加わったサンプル ==');
-// 運用者の依頼（2026-10-13）「直近追加されたサンプルのチャート（週次のリトレインで新たに追加されたサンプルのチャート）、
-// 正例、負例で5例ずつ程度」、同日夜「チャートの表示期間は78週にしてください。タブの名前も「例」ではなく「サンプル」」。
-// 合成データは加わった4件（正例2・負例2）を全部出す。日足は更新日（2025-07-28）の78週前 2024-02-28 から 2025-09-01 まで
-await page.getByRole('tab', { name: '再学習で加わったサンプル' }).click();
-await page.waitForSelector('.sample-card', { timeout: 10000 });
-await page.waitForSelector('.sample-card .recharts-line', { timeout: 10000 });
-const smp = (await page.textContent('.samples')) || '';
-check((await page.locator('.sample-card').count()) === 4, `正例2・負例2の4枚のチャート (実際: ${await page.locator('.sample-card').count()})`);
-check((await page.locator('.sample-card .recharts-line').count()) === 4, '各カードに終値の線が1本ずつ');
-check(smp.includes('2026/10/11') && smp.includes('2025/07/25 より後 〜 2025/07/28'),
-      '再学習の日と、加わった更新日の範囲が出る');
-check(/加わった件数\s*4\s*件/.test(smp) && smp.includes('正例 2・負例 2・正例率 50.0%'), '加わった件数と正例率が出る');
-check(smp.includes('2件中 2件を表示'), '正例・負例の見出しに件数が出る');
-check(smp.includes('最大 +15.0%（必要 +9.5%）'), '正例の成否の内訳（到達）が数字で出る');
-check((await page.locator('.sample-verdict li.ng').count()) === 6, '負例2件の3条件はどれも ✗（6行）');
-check((await page.locator('.sample-verdict li.ok').count()) === 6, '正例2件の3条件はどれも ✓（6行）');
-check(smp.includes('到達に必要な水準') && smp.includes('判定の20営業日'), '線の見分け方（凡例）が言葉で出る');
-check(!smp.includes('NaN') && !smp.includes('undefined'), '再学習で加わったサンプルに NaN / undefined が出ていない');
-check(smp.includes('再学習で加わったサンプル') && smp.includes('更新日の78週前から'), '見出しが「サンプル」で、78週の表示と書いてある');
-const xTicks = (await page.locator('.sample-card').first().locator('.recharts-xAxis .recharts-cartesian-axis-tick-value')
-  .allTextContents()).map((t) => t.trim());
-check(xTicks.includes('24/4') && xTicks.includes('25/7') && xTicks.every((t) => /^\d{2}\/\d{1,2}$/.test(t)),
-      `横軸は78週を四半期の初め（年/月）で刻む (実際: ${xTicks.join(' ')})`);
-await page.screenshot({ path: path.join(SHOTS, 'screenshot-samples.png'), fullPage: true });
+// スコアと収益の分布・再学習で加わったサンプルの画面の確かめ（3つの欄・件数・グラフの枚数、正例・負例のカード・78週の横軸）は、
+// タブを隠している間は外してある（2026-11-15）。集計・表示の純粋な計算のテストは tests/scoredist.test.js・tests/samples.test.js・
+// tests/test_score_dist.py・tests/test_new_samples.py に残っている。タブを戻すときは git の履歴（2026-11-15 より前の smoke.mjs）から戻す
 
 console.log('\n== 候補銘柄のニュース ==');
 // 出すのは今日の戦略の候補（規則の3本すべて95以上。2026-10-30 から 基準ラベルの3本）だけ（運用者の指示 2026-10-17「取得対象は、

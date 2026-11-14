@@ -52,8 +52,11 @@ const TABS = [
   // 一番右（運用者の指示 2026-10-14「一番右側に持ってきてください」）
   // +10% の LightGBM と直近5営業日の組のランキング学習のスコア・収益の分布と、2つの上位の重なり（運用者の依頼 2026-11-08
   // 「なんなら、ダッシュボードにほしいくらいです」→ AskUserQuestion「3つとも載せる」）。サンプルのタブを一番右に保つため、その左
-  { id: 'scoredist', label: 'スコアと収益の分布' },
-  { id: 'samples', label: '再学習で加わったサンプル' },
+  // 2026-11-15「再学習で加わったサンプル、スコアと収益の分布タグを消してください。」→ AskUserQuestion「隠して自動更新も止める」で
+  // 2つとも hidden に。画面のコード（ScoreDistView / SamplesView）とデータの作り方（research/score_dist.py・new_samples.py。
+  // ワークフローは手で起動するときだけ）は残してあり、hidden を外して手で作り直せば戻る
+  { id: 'scoredist', label: 'スコアと収益の分布', hidden: true },
+  { id: 'samples', label: '再学習で加わったサンプル', hidden: true },
 ];
 const VISIBLE_TABS = TABS.filter((t) => !t.hidden);
 const isVisible = (id) => VISIBLE_TABS.some((t) => t.id === id);
@@ -105,8 +108,9 @@ export default function App() {
     if (isVisible('filings')) loadFilings().then((f) => { if (!cancelled) setFilings(f); });
     // 特徴量の日本語名（効いた特徴量の表示）。読めなければ元の列名のまま
     loadFeatureNames().then((n) => { if (!cancelled) setFeatureNames(n); });
-    loadNewSamples().then((d) => { if (!cancelled) setNewSamples(d); });
-    loadScoreDist().then((d) => { if (!cancelled) setScoreDist(d); });
+    // 再学習で加わったサンプル・スコアと収益の分布。タブを隠している間は読まない
+    if (isVisible('samples')) loadNewSamples().then((d) => { if (!cancelled) setNewSamples(d); });
+    if (isVisible('scoredist')) loadScoreDist().then((d) => { if (!cancelled) setScoreDist(d); });
     loadNewsLinks().then((d) => { if (!cancelled) setNewsLinks(d); });
     return () => { cancelled = true; };
   }, []);
@@ -350,8 +354,8 @@ export default function App() {
         {/* 予測ファイルは候補の並び（今日の戦略の順）にだけ使う。読めなくてもネットワークの目次の順で出す */}
         {tab === 'network' && isVisible('network') && <NetworkView data={pred} />}
 
-        {tab === 'scoredist' && <ScoreDistView data={scoreDist} pred={pred} />}
-        {tab === 'samples' && <SamplesView data={newSamples} />}
+        {tab === 'scoredist' && isVisible('scoredist') && <ScoreDistView data={scoreDist} pred={pred} />}
+        {tab === 'samples' && isVisible('samples') && <SamplesView data={newSamples} />}
         {tab === 'supplydemand' && !loading && <SupplyDemandView stocks={stocks} candidates={pred?.candidates}
           selectedId={selectedId} onSelect={setSelectedId} />}
 

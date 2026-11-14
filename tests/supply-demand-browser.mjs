@@ -35,9 +35,10 @@ try {
   await page.goto(`http://127.0.0.1:${server.address().port}/growthstock/`, { waitUntil: 'networkidle' });
   await page.getByRole('tab', { name: '価格帯別需給', exact: true }).click();
   await page.waitForSelector('.sd-positions');
-  assert.equal(await page.getByRole('tab').count(), 7);
+  // スコアと収益の分布・再学習で加わったサンプルは 2026-11-15 から隠している（src/App.jsx の hidden）
+  assert.equal(await page.getByRole('tab').count(), 5);
   assert.equal(await page.getByRole('tab').nth(1).textContent(), '候補銘柄のニュース');
-  assert.equal(await page.getByRole('tab').last().textContent(), '再学習で加わったサンプル');
+  assert.equal(await page.getByRole('tab').last().textContent(), 'タイムマシーン');
   if (!real) {
     await page.getByLabel('需給の分析対象銘柄').selectOption('jq-11110');
     assert.match(await page.locator('.sd-positions').innerText(), /9\.1%/);
