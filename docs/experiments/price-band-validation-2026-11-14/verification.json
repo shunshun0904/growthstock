@@ -1,5 +1,5 @@
 {
-  "checked_at_utc": "2026-11-14T20:55:00.067192+00:00",
+  "checked_at_utc": "2026-11-14T21:08:48.897310+00:00",
   "focused_tests": {
     "command": "python -m unittest discover -s tests -p 'test_price_band_validation*.py'",
     "tests": 20,
@@ -19,6 +19,30 @@
   },
   "production_files_changed": false,
   "source_collection_workflow": "https://github.com/shunshun0904/growthstock/actions/runs/43637969504",
-  "full_python_suite": "running",
-  "ci": "pending_current_source_commit"
+  "full_python_suite": {
+    "ci": {
+      "tests": 2307,
+      "failures": 0,
+      "skipped": 1,
+      "duration_seconds": 600.068,
+      "result": "passed"
+    },
+    "local": {
+      "tests": 2307,
+      "failures": 1,
+      "skipped": 1,
+      "duration_seconds": 923.039,
+      "cause": "Existing backup test invoked python3 outside the selected venv; that interpreter lacks pyarrow.",
+      "recheck": "All 4 backup tests passed with the venv bin first on PATH; no source modification."
+    }
+  },
+  "ci": {
+    "url": "https://github.com/shunshun0904/growthstock/actions/runs/43640057308",
+    "code_commit": "9ce7ce3cf9c2fcb2e9f0a1229898491f7bcf75b3",
+    "conclusion": "success",
+    "javascript_tests": 171,
+    "javascript_failures": 0,
+    "build": "passed",
+    "existing_browser_smoke": "passed"
+  }
 }

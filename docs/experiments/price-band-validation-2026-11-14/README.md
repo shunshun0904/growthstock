@@ -99,3 +99,14 @@ Notebookは確定結果を読み直すだけで、チューニング・最終評
 - https://jpx-jquants.com/ja/spec/eq-master
 - https://jpx-jquants.com/ja/spec/eq-master/product-category
 - https://jpx-jquants.com/ja/help/data
+
+## 確認結果
+
+- 追加した20件の数値・取得・時点整合・漏洩防止のテストに成功。
+- [CI](https://github.com/shunshun0904/growthstock/actions/runs/43640057308)でPython 2,307件（1件skip）、JavaScript 171件、ビルド、既存ブラウザテストに成功。
+- 静的HTMLの11表・3図を、PC・スマートフォン幅で、オフライン・JavaScript無効の状態でも表示できることを確認。
+- 入力SHA256の一致、公表平均の元データとの一致、全180,844レコードから独立に再集計したRMSPE、調整・最終の日付分離も確認。
+
+ローカルの全体テストでは、既存のバックアップ検証1件が、子プロセスの`python3`が仮想環境外を指し`pyarrow`を読み込めず失敗しました。
+参照先を揃えると該当テスト群4件すべてが成功し、標準環境のCIでも全体テストが通過しています。対象外コードの変更はしていません。
+詳細は[verification.json](verification.json)を参照してください。
