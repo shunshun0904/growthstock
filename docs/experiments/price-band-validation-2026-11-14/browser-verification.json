@@ -1,0 +1,46 @@
+{
+  "offline": true,
+  "javascriptEnabled": false,
+  "results": [
+    {
+      "name": "desktop",
+      "tables": 11,
+      "rows": 155,
+      "images": [
+        {
+          "loaded": true
+        },
+        {
+          "loaded": true
+        },
+        {
+          "loaded": true
+        }
+      ],
+      "rmspe": true,
+      "scope": true,
+      "overflow": false,
+      "scripts": 0
+    },
+    {
+      "name": "mobile",
+      "tables": 11,
+      "rows": 155,
+      "images": [
+        {
+          "loaded": true
+        },
+        {
+          "loaded": true
+        },
+        {
+          "loaded": true
+        }
+      ],
+      "rmspe": true,
+      "scope": true,
+      "overflow": false,
+      "scripts": 0
+    }
+  ]
+}

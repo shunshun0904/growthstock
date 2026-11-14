@@ -1,0 +1,24 @@
+{
+  "checked_at_utc": "2026-11-14T20:55:00.067192+00:00",
+  "focused_tests": {
+    "command": "python -m unittest discover -s tests -p 'test_price_band_validation*.py'",
+    "tests": 20,
+    "result": "passed"
+  },
+  "frozen_source_hashes": "all_match",
+  "independent_target_and_rmspe_audit_records": 180844,
+  "notebook": {
+    "executed_code_cells": 6,
+    "errors": 0
+  },
+  "html": {
+    "tables": 11,
+    "embedded_images": 3,
+    "scripts": 0,
+    "offline_desktop_and_mobile": "passed"
+  },
+  "production_files_changed": false,
+  "source_collection_workflow": "https://github.com/shunshun0904/growthstock/actions/runs/43637969504",
+  "full_python_suite": "running",
+  "ci": "pending_current_source_commit"
+}

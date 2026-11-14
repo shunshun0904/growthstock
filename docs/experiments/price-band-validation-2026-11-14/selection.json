@@ -1,0 +1,16 @@
+{
+  "chosen_coefficient": 0.0,
+  "exact_ties": [
+    0.0
+  ],
+  "at_search_boundary": true,
+  "tuning_start": "2026-09-25",
+  "tuning_end": "2026-10-28",
+  "final_start": "2026-10-29",
+  "final_end": "2026-11-12",
+  "tuning_dates": 23,
+  "final_dates": 10,
+  "tuning_records": 126028,
+  "persisted_before_final_scoring": true,
+  "selected_at_utc": "2026-11-14T20:42:33.110081+00:00"
+}

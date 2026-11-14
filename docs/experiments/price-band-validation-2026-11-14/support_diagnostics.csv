@@ -1,0 +1,5 @@
+phase,side,records,outside_support_records,outside_support_percent,split_window_records,zero_volume_window_records
+final,long,32336,9807,30.328426521523998,595,0
+final,short,22480,3438,15.29359430604982,512,0
+tuning,long,74344,23121,31.10002152157538,1337,0
+tuning,short,51684,8175,15.81727420478291,1102,0

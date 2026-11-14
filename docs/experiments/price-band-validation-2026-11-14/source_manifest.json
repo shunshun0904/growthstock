@@ -1,0 +1,133 @@
+{
+  "frozen_at_utc": "2026-11-14T20:40:08.492504+00:00",
+  "input_sha256": {
+    "/workspace/worktrees/growthstock-priceband-validation/research/price_band_validation_config.json": "437192e779c4b8d570e5784ab86e66c60044fa88948552d9d132b02d9dc3da0d",
+    "/workspace/scratch/price-band-demand-validation-20261114/source/margin_amount_history.parquet": "86c2e077dadb3ff10c13cbe5e028919d92035be772f2753063fdab36e1d7ce86",
+    "/workspace/scratch/price-band-demand-validation-20261114/source/master_validation_dates.parquet": "7453bba7bba46f1cfc6250baa680ef68bfe21467321cc0ee2be4bc27de9c8627",
+    "/workspace/scratch/price-band-demand-validation-20261114/source/validation_calendar.parquet": "c1c826b38e1fc8f640c662ece18178a1e9f01631ae0552f6bb6532f5dd67b716",
+    "/workspace/scratch/production-fixed-return/raw/calendar.parquet": "e6f107049b89b1a0d44ae34d7fa261b7f35a32cbde3981653525c71f68d8ab8c",
+    "/workspace/scratch/price-band-demand-validation-20261114/raw/bars_2025.parquet": "dfb20f011c58fc55a697f47081a95421d921bc564317c116f453f63c4c96f517",
+    "/workspace/scratch/price-band-demand-validation-20261114/raw/bars_2026.parquet": "3e55b46e7772d3d8413528fe350bbca733c995f84b64f11375390595e8123692",
+    "/workspace/scratch/production-fixed-return/raw/fins_2016.parquet": "51a630424a5e627856177d4e65f326b43942f1b41080e16f944178be9fcc3c9e",
+    "/workspace/scratch/production-fixed-return/raw/fins_2017.parquet": "0aa17e4fffb39b552c42e3fde9008165757fd9357e185f55a148b2b803e1b097",
+    "/workspace/scratch/production-fixed-return/raw/fins_2018.parquet": "ef8c26414858ff6d32f6ee4c625d2133248dee6307ec61cb0dddeab503bf86c4",
+    "/workspace/scratch/production-fixed-return/raw/fins_2019.parquet": "5e1ce0980fd5235ad081dbd73057b8dac784de59f456f43ce48b499223e16e7e",
+    "/workspace/scratch/production-fixed-return/raw/fins_2020.parquet": "678e64b305155d4b86614d865bf6b0ffbbb0448b1b9c97a56a9dc25185ec87a2",
+    "/workspace/scratch/production-fixed-return/raw/fins_2021.parquet": "6564115e865a52e1d0f6e86a31b637e76c1fcdeb8cdf3e5384ddd51eff013274",
+    "/workspace/scratch/production-fixed-return/raw/fins_2022.parquet": "d402a6e21378c284d9baabfcf09c28612652b0a9303ea3b0da0f5add209ea7ff",
+    "/workspace/scratch/production-fixed-return/raw/fins_2023.parquet": "6e024e03e20d9948dae99d7552e85dd14e37b9e018c9cfeb0e7990b90689fb77",
+    "/workspace/scratch/production-fixed-return/raw/fins_2024.parquet": "161c9744aadec803f20710600e24aaadcecfe76a054fb1194f01147a8d505536",
+    "/workspace/scratch/production-fixed-return/raw/fins_2025.parquet": "09a3bae857d0fd65330d21549a89123a68b8d7181672ad1dfedb70c366ba0974",
+    "/workspace/scratch/price-band-demand-validation-20261114/raw/fins_2026.parquet": "52af71e6531204fd1f09b4856bc8b322c47b69b13d14562765219abd9c24a3b3",
+    "/workspace/scratch/production-fixed-return/raw/bars_2017.parquet": "91d51426c583d8ee67693a9d0513ec4af9834668e1bc17f9686db9cc61864a80",
+    "/workspace/scratch/production-fixed-return/raw/bars_2018.parquet": "3836aef45b3ee9d1ba6daf64d7ac0846dc1e977abcf6f7449cf4ddb650b5e940",
+    "/workspace/scratch/production-fixed-return/raw/bars_2019.parquet": "0777c15f03cb47cb2bdea8c0d040815adc4f89e20c3e5b04850e605d1c51f663",
+    "/workspace/scratch/production-fixed-return/raw/bars_2020.parquet": "e3cc086cc9bd02938ed180cfe4bb29b6c47c4c4d43683dacf93383ea6a022fee",
+    "/workspace/scratch/production-fixed-return/raw/bars_2021.parquet": "3f888eaa7a222091080063bf62328e07af63ebdf7aa652dab9bb08b3750c2a89",
+    "/workspace/scratch/production-fixed-return/raw/bars_2022.parquet": "5a1a03c62176888cb2c58c6bd6b148bb0b97432af007bb7e88a05356fbf361c2",
+    "/workspace/scratch/production-fixed-return/raw/bars_2023.parquet": "c3ff6c0956e5b1284c8cb017735d7c9e4a6d0e7015dff7252479e294882c08a4",
+    "/workspace/scratch/production-fixed-return/raw/bars_2024.parquet": "2426aba186e0d1181b6ca0b4004b2072f502c85585ebe1842feb8e0e4cf06f32"
+  },
+  "collection": {
+    "status": "complete",
+    "retrieved_at_utc": "2026-11-14T20:35:22.488114+00:00",
+    "requested_start": "2026-09-25",
+    "requested_end": "2026-11-15",
+    "observed_end": "2026-11-12",
+    "margin_rows": 140303,
+    "master_rows": 146668,
+    "day_counts": {
+      "2026-09-25": 4261,
+      "2026-09-28": 4259,
+      "2026-09-29": 4259,
+      "2026-09-30": 4260,
+      "2026-10-01": 4250,
+      "2026-10-02": 4250,
+      "2026-10-05": 4250,
+      "2026-10-06": 4250,
+      "2026-10-07": 4250,
+      "2026-10-08": 4250,
+      "2026-10-09": 4247,
+      "2026-10-13": 4247,
+      "2026-10-14": 4247,
+      "2026-10-15": 4250,
+      "2026-10-16": 4250,
+      "2026-10-19": 4249,
+      "2026-10-20": 4249,
+      "2026-10-21": 4249,
+      "2026-10-22": 4249,
+      "2026-10-23": 4250,
+      "2026-10-26": 4250,
+      "2026-10-27": 4250,
+      "2026-10-28": 4250,
+      "2026-10-29": 4249,
+      "2026-10-30": 4250,
+      "2026-11-02": 4251,
+      "2026-11-04": 4253,
+      "2026-11-05": 4253,
+      "2026-11-06": 4254,
+      "2026-11-09": 4254,
+      "2026-11-10": 4255,
+      "2026-11-11": 4254,
+      "2026-11-12": 4254,
+      "2026-11-13": 0
+    },
+    "trailing_unpublished_dates": [
+      "2026-11-13"
+    ],
+    "files": {
+      "margin_amount_history.parquet": {
+        "rows": 140303,
+        "columns": [
+          "PubDate",
+          "Date",
+          "Code",
+          "IssType",
+          "ShrtVol",
+          "LongVol",
+          "ShrtNegVol",
+          "LongNegVol",
+          "ShrtStdVol",
+          "LongStdVol",
+          "ShrtVal",
+          "LongVal",
+          "ShrtNegVal",
+          "LongNegVal",
+          "ShrtStdVal",
+          "LongStdVal"
+        ],
+        "sha256": "86c2e077dadb3ff10c13cbe5e028919d92035be772f2753063fdab36e1d7ce86"
+      },
+      "master_validation_dates.parquet": {
+        "rows": 146668,
+        "columns": [
+          "Date",
+          "Code",
+          "CoName",
+          "CoNameEn",
+          "S17",
+          "S17Nm",
+          "S33",
+          "S33Nm",
+          "ScaleCat",
+          "Mkt",
+          "MktNm",
+          "Mrgn",
+          "MrgnNm",
+          "ProdCat"
+        ],
+        "sha256": "7453bba7bba46f1cfc6250baa680ef68bfe21467321cc0ee2be4bc27de9c8627"
+      },
+      "validation_calendar.parquet": {
+        "rows": 684,
+        "columns": [
+          "Date",
+          "HolDiv"
+        ],
+        "sha256": "c1c826b38e1fc8f640c662ece18178a1e9f01631ae0552f6bb6532f5dd67b716"
+      }
+    },
+    "production_outputs_modified": false
+  },
+  "note": "retrospective current-vintage API values; historical corrections may be reflected"
+}
