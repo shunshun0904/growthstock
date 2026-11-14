@@ -1,8 +1,8 @@
 {
-  "_source": "週次の探索（Retrain Weekly run 42449739185・f540577。2025-09-08 までの組の行 90,707件・50試行・5分割・目的は検証分割の組の中の NDCG@5）",
+  "_source": "週次の探索（Retrain Weekly run 43624640872・a3a8a6d。2025-09-16 までの組の行 91,207件・50試行・5分割・目的は検証分割の組の中の NDCG@5）",
   "_features_sig": "d1019d0a3eb3",
   "_n_features": 377,
-  "_cutoff": "2025-09-08",
+  "_cutoff": "2025-09-16",
   "_cv": {
     "objective": "検証分割の組の中の NDCG@5（候補5件以上の組。利得は組の中の20営業日目の終値の段階 0〜9）",
     "n_grades": 10,
@@ -11,19 +11,19 @@
     "n_trials": 50,
     "seed": 0,
     "best_trial": 31,
-    "ndcg": 0.5874,
+    "ndcg": 0.5862,
     "ndcg_folds": [
-      0.5808,
-      0.5858,
-      0.5805,
-      0.5981,
-      0.592
+      0.5828,
+      0.5944,
+      0.5691,
+      0.5903,
+      0.5945
     ],
-    "n_rows": 90707,
-    "n_days": 1813,
+    "n_rows": 91207,
+    "n_days": 1818,
     "train_from": "2018-04-03",
-    "train_to": "2025-09-08",
-    "minutes": 32.5
+    "train_to": "2025-09-16",
+    "minutes": 23.5
   },
   "params": {
     "boosting_type": "gbdt",
@@ -31,12 +31,12 @@
     "subsample_freq": 1,
     "n_jobs": -1,
     "verbose": -1,
-    "learning_rate": 0.04263924742061188,
-    "num_leaves": 7,
-    "min_child_samples": 16,
-    "subsample": 0.5103879098030296,
-    "colsample_bytree": 0.6967487639728546,
-    "reg_alpha": 0.2390305181694588,
-    "reg_lambda": 9.265629709991137
+    "learning_rate": 0.0163806615244215,
+    "num_leaves": 10,
+    "min_child_samples": 28,
+    "subsample": 0.5273200396291522,
+    "colsample_bytree": 0.6917761226173154,
+    "reg_alpha": 4.339248437158729,
+    "reg_lambda": 0.8057272246225028
   }
 }
