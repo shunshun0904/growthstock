@@ -16,3 +16,24 @@
 生の財務残高・全銘柄の日次系列・個別予測スコアは公開Gitへ追加していない。
 
 [最新モデル仕様](../../../MODEL_CASH_UNSEGREGATED_EVA_RIM.md)と[実験計画・状況](../../../MODEL_VALUATION_GAP_EXPERIMENT.md)を参照。
+
+## 直近2窓の比較結果（完了）
+
+2025-10-03〜2026-04-02、2026-04-03〜2026-10-01。
+全評価行3,654件、両ギャップがある共通行1,446件。全行の評価日数は212日、共通行は123日。
+固定設定・各群30候補×内側3窓の再探索を完了し、最終は各群・各窓で3種の予測を平均した。
+再探索の全行NDCG@5はA=0.60852、D=0.60658、R=0.60351で、追加学習の改善は一貫しなかった。
+共通行の単純な割安順には改善があったが、独立した将来検証ではなく本番採用は行わない。
+
+- `fixed-*.csv`、`retuned-*.csv`：全行・共通行、期間別、集計平均、Aとの差、各対照との差。
+- `*-samples.csv`：各窓の行数・銘柄数・評価日数。
+- `*-direct_gap_comparison.csv`：学習なしの割安順。同一の共通行だけで比較。
+- `retuned-cv-summary.csv`：全420候補の内側3スコア・平均・選択結果。外側の結果で選ばない。
+- `*-selection_frozen.json`、`*-plan.json`：評価前に確定した設定・列・種・予算。
+- `*-completed.json`：完了状態、実際の窓、論理適合数、設定SHA256。
+- `*-input_fingerprints.json`：固定・再探索の入力と実行ライブラリの版。
+- `comparison-verification.json`：全28予測ファイルのキー・ラベル一致、両実験の入力一致、本番23ファイル不変。
+- `retuned-feature_overlap.csv`、`*-importance-share.csv`：情報重複・モデルによる利用量。因果効果を表さない。
+
+`preflight.json`の`backtest_completed=false`は学習前の検査時点の記録。
+実際の完了は`fixed-completed.json`と`retuned-completed.json`で確認できる。
