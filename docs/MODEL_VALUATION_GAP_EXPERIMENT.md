@@ -2,6 +2,8 @@
 
 2026-11-15。**直近2評価窓のランキング比較を完了。本番採用・公開サイトへの反映は行わない。**
 
+追加依頼のLightGBM固定+10%分類は[別の比較記録](MODEL_VALUATION_GAP_CLASS10_EXPERIMENT.md)で扱う。以下の分類未評価の記述は、ランキング初回比較の範囲を示す。
+
 設計は[現金区分なしEVA・外生RIM](MODEL_CASH_UNSEGREGATED_EVA_RIM.md)。
 現金区分必須の[営業EVAの当初設計](MODEL_ROIC_WACC_VALUATION.md)も別系列に残す。
 

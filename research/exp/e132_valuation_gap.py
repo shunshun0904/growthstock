@@ -22,6 +22,7 @@ HERE = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE / "exp"))
 import features as F
+import label_specs as LS
 import valuation_gap as G
 import ltr
 import e119_capital_efficiency as E
@@ -33,6 +34,17 @@ SEEDS = (42, 43, 44)
 # Neutral, predeclared settings, NOT production settings tuned on later dates.
 FIXED = dict(learning_rate=.05, num_leaves=31, min_child_samples=20,
              subsample=.8, colsample_bytree=.8, reg_alpha=0., reg_lambda=1.)
+
+
+def selected_tasks(args):
+    explicit = getattr(args, 'tasks', None)
+    if explicit is None:
+        return ['ltr', 'class10', 'class15'] if getattr(args, 'classification', False) else ['ltr']
+    if getattr(args, 'classification', False):
+        raise ValueError('Use either --tasks or --classification')
+    if not explicit or len(set(explicit)) != len(explicit) or set(explicit) - {'ltr', 'class10', 'class15'}:
+        raise ValueError('Select distinct tasks from ltr, class10, class15')
+    return list(explicit)
 
 
 def walk_forward(frame, train_months=36, test_months=6):
@@ -190,6 +202,7 @@ def retune_study(task,outer,arm,train,columns,bank,output,source_fingerprint,inn
 
 
 def evaluate(args):
+    tasks = selected_tasks(args)
     args.output.mkdir(parents=True, exist_ok=True)
     if args.run and (args.output/'completed.json').exists():
         raise ValueError('Completed evaluation exists: choose a fresh output directory for a new run')
@@ -198,7 +211,7 @@ def evaluate(args):
                          'lightgbm':version('lightgbm'),'optuna':version('optuna'),'scikit-learn':version('scikit-learn')},
               "series": {p.name: digest(p) for p in sorted((args.feature_mart or args.series_dir).glob("*.parquet"))},
               "source": {p.name: digest(p) for p in [Path(__file__), HERE / "fundamental_value.py", HERE / "fundamental_series.py",
-                           HERE / "valuation_gap.py", HERE / "features.py",HERE/'ltr.py',HERE/'tuning.py',
+                           HERE / "valuation_gap.py", HERE / "features.py",HERE/'ltr.py',HERE/'tuning.py',HERE/'label_specs.py',
                            HERE/'exp/e119_capital_efficiency.py',HERE/'exp/e121_theoretical_value_retune.py']}}
     old_inputs=args.output/'inputs.json'
     if old_inputs.exists() and json.loads(old_inputs.read_text())!=source:
@@ -208,6 +221,8 @@ def evaluate(args):
     d, preflight = prepare(args.dataset, args.series_dir, args.prices, args.output,args.feature_mart)
     cols = G.column_sets()
     plan = {"arms": {k: v for k, v in cols.items()}, "fixed_parameters": FIXED,
+            "tasks": tasks, "label_specs": {t: LS.for_model('lgbm' if t == 'class10' else 'lgbm_k15')
+                                            for t in tasks if t.startswith('class')},
             "retune": args.retune, "trials_per_arm_fold": args.trials, "inner_folds": args.inner_folds,
             "outer_train_months": 36, "outer_test_months": 6, "trees": args.trees, "seeds": SEEDS,
             'last_outer_folds':args.last_folds,
@@ -229,7 +244,6 @@ def evaluate(args):
         raise ValueError("No eligible walk-forward windows")
     shuffled = G.shuffle_within_date(d, list(dict.fromkeys(
         ["roic_conservative_tax30", "roic_operating_tax30", "wacc", "actual_tax"] + G.GAPS + G.TIME)))
-    tasks = ["ltr", "class10", "class15"] if args.classification else ["ltr"]
     bank = RETUNE.candidate_bank(FIXED, args.trials) if args.retune else [FIXED]
     selected = []
     # Stage 1: only INNER validation outcomes, for EVERY arm/task/window.
@@ -292,7 +306,10 @@ def evaluate(args):
         if complete.any():
             metric = ranking_metrics(test.loc[complete], score[complete]) if task == "ltr" else E.evaluate(task, test.loc[complete], score[complete])
             results.append({**spec, "parameters": json.dumps(spec["parameters"], sort_keys=True), "cohort": "identical_valued_rows", **metric})
-        pd.DataFrame({"Code": test.Code, "Date": test.Date, "score": score, "return_20d": test[ltr.R20]}).to_parquet(
+        exported = {"Code": test.Code, "Date": test.Date, "score": score, "return_20d": test[ltr.R20]}
+        if task.startswith('class'):
+            exported.update(y_true=test['y_' + task].to_numpy(dtype=int), valuation_available=complete)
+        pd.DataFrame(exported).to_parquet(
             args.output / f"predictions-{task}-{outer}-{arm}.parquet", index=False)
         print(json.dumps({'phase':'outer_evaluation','task':task,'outer':outer,'arm':arm,'rows':len(test)}),flush=True)
     pd.DataFrame(results).to_csv(args.output / "results.csv", index=False)
@@ -311,11 +328,14 @@ def evaluate(args):
         test=d.iloc[vi]
         common=test.valuation_gap.notna()&test.rim_valuation_gap.notna()
         test=test.loc[common]
-        for method,gap in [('cash_unsegregated_EVA','valuation_gap'),('external_Ke_RIM','rim_valuation_gap')]:
-            direct.append({'outer':outer,'method':method,'rows':len(test),**ranking_metrics(test,-test[gap].to_numpy())})
+        for task in tasks:
+            for method,gap in [('cash_unsegregated_EVA','valuation_gap'),('external_Ke_RIM','rim_valuation_gap')]:
+                score = -test[gap].to_numpy()
+                metric = ranking_metrics(test, score) if task == 'ltr' else E.evaluate(task, test, score)
+                direct.append({'task': task, 'outer':outer,'method':method,'rows':len(test),**metric})
     pd.DataFrame(direct).to_csv(args.output/'direct_gap_comparison.csv',index=False)
     result = {"status": "exploratory_completed", "outer_windows": len(folds), "adoption_status": "not_approved",
-              'backtest_completed':True,'arms':list(ARMS),'trials_per_study':len(bank),
+              'backtest_completed':True,'arms':list(ARMS),'tasks':tasks,'trials_per_study':len(bank),
               'logical_cv_fits':len(selected)*len(bank)*args.inner_folds if args.retune else 0,
               'outer_fits':len(selected)*len(SEEDS),
               'evaluation_windows':[{'from':str(d.iloc[vi].Date.min().date()),'to':str(d.iloc[vi].Date.max().date())} for _,vi in folds],
@@ -333,6 +353,8 @@ def main():
     p.add_argument("--run", action="store_true")
     p.add_argument("--retune", action="store_true")
     p.add_argument("--classification", action="store_true")
+    p.add_argument('--tasks', nargs='+', choices=['ltr', 'class10', 'class15'],
+                   help='Run only these tasks; default ltr, or all three with legacy --classification')
     p.add_argument("--trials", type=int, default=30)
     p.add_argument("--inner-folds", type=int, default=3)
     p.add_argument("--trees", type=int, default=200)
@@ -340,6 +362,10 @@ def main():
     p.add_argument('--last-folds',type=int,default=0,help='Use a predeclared number of latest outer folds; 0 means all')
     p.add_argument('--jobs',type=int,default=1,help='1/2 independent CV studies; outer evaluation starts after ALL complete')
     args = p.parse_args()
+    try:
+        selected_tasks(args)
+    except ValueError as exc:
+        p.error(str(exc))
     if args.trials < 2 or args.inner_folds < 1 or args.trees < 1 or args.threads < 1 or args.last_folds<0 or args.jobs not in (1,2):
         p.error("Invalid experiment budget")
     if bool(args.series_dir)==bool(args.feature_mart):
