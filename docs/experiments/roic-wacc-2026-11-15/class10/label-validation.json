@@ -1,0 +1,26 @@
+{
+  "rows": 22110,
+  "codes": 3748,
+  "from": "2018-04-03",
+  "to": "2026-10-02",
+  "known_labels": 22110,
+  "positive": 4067,
+  "positive_rate": 0.18394391677973768,
+  "stored_label_mismatches": 0,
+  "label_spec": {
+    "version": "fixed_return_v1",
+    "kind": "fixed_return",
+    "threshold": 0.1,
+    "end_ratio": 0.05,
+    "horizon": 20,
+    "end_window": 5,
+    "entry": "next_open",
+    "require_uptrend": true,
+    "trend_short": 5,
+    "trend_long": 20,
+    "vol_norm_k": null,
+    "numeric_tolerance": 1e-12
+  },
+  "signature": "21ad2ac852df94b4",
+  "global_rate_used_for_training_weights": false
+}

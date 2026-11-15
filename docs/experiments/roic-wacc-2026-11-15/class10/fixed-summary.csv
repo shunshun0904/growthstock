@@ -1,0 +1,15 @@
+task,cohort,arm,primary,roc_auc,top_decile_precision,top_decile_close_return_pct,aggregation
+class10,identical_all_rows,A,0.2841490036104187,0.6078820362674351,0.3391666666666666,5.433162601379571,arithmetic mean of two outer-window metrics
+class10,identical_all_rows,B,0.2859121889702557,0.6083133788091618,0.3291666666666666,4.47942688975479,arithmetic mean of two outer-window metrics
+class10,identical_all_rows,C,0.27760989578244777,0.6043345779769346,0.31638888888888883,4.499348532713179,arithmetic mean of two outer-window metrics
+class10,identical_all_rows,D,0.2823348780012923,0.6038615161407275,0.2962962962962963,3.24036135469436,arithmetic mean of two outer-window metrics
+class10,identical_all_rows,M,0.2736874737556942,0.6043491214098959,0.2996296296296296,3.967654281508614,arithmetic mean of two outer-window metrics
+class10,identical_all_rows,P,0.2693773884327559,0.5976241462819947,0.3106481481481481,4.989783454268742,arithmetic mean of two outer-window metrics
+class10,identical_all_rows,R,0.2788534416369486,0.6089391698798314,0.3397222222222222,4.494718591551246,arithmetic mean of two outer-window metrics
+class10,identical_valued_rows,A,0.2791829012927606,0.6197145859629374,0.346078431372549,4.8368916488677876,arithmetic mean of two outer-window metrics
+class10,identical_valued_rows,B,0.2891799765535397,0.6202279172924985,0.36470588235294116,4.288970172529163,arithmetic mean of two outer-window metrics
+class10,identical_valued_rows,C,0.2821656453094763,0.6323571673987929,0.3254901960784313,4.726155492867492,arithmetic mean of two outer-window metrics
+class10,identical_valued_rows,D,0.2724441145814067,0.6250260081027885,0.3068627450980391,2.980203584987535,arithmetic mean of two outer-window metrics
+class10,identical_valued_rows,M,0.2786485293555012,0.6321599228075901,0.3044117647058823,3.0775351942589744,arithmetic mean of two outer-window metrics
+class10,identical_valued_rows,P,0.2609596813544073,0.6165449173846389,0.32696078431372544,3.8551168365086177,arithmetic mean of two outer-window metrics
+class10,identical_valued_rows,R,0.28380886852004816,0.6311128928586891,0.36470588235294116,4.893719382379183,arithmetic mean of two outer-window metrics

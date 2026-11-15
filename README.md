@@ -64,6 +64,8 @@ APIキーはブラウザに置けないため、**取得はGitHub Actions、表�
 
 直近2評価窓のランキングは、各群30候補・内側3窓の再探索と固定設定の比較を完了しました。追加学習の改善は一貫せず、研究用のまま保持します。
 
+LightGBM固定+10%分類も同じ2窓・各群30候補で再探索しました。全行PR-AUCは既存0.27693、EVA時系列追加0.27267、RIM追加0.27478で、改善は一貫しませんでした。[分類の仕様・結果](docs/MODEL_VALUATION_GAP_CLASS10_EXPERIMENT.md)に記録しています。
+
 [現金区分なしEVA・外生RIMの仕様](docs/MODEL_CASH_UNSEGREGATED_EVA_RIM.md) ／ [営業EVAの当初設計](docs/MODEL_ROIC_WACC_VALUATION.md) ／ [算出率・検証状況・実験手順](docs/MODEL_VALUATION_GAP_EXPERIMENT.md)
 
 ### 価格帯別需給（2026-11-14）

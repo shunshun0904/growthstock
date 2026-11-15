@@ -1,0 +1,41 @@
+{
+  "as_of": "2026-11-15T15:13:36.562547+00:00",
+  "scope": "LightGBM fixed +10% only; latest two outer windows",
+  "arms": [
+    "A",
+    "B",
+    "C",
+    "D",
+    "R",
+    "P",
+    "M"
+  ],
+  "trials_per_arm_fold": 30,
+  "inner_folds": 3,
+  "outer_train_months": 36,
+  "outer_test_months": 6,
+  "seeds": [
+    42,
+    43,
+    44
+  ],
+  "trees": 200,
+  "threads": 1,
+  "parallel_cv_studies": 2,
+  "fixed_comparison": true,
+  "primary": "average_precision (PR-AUC)",
+  "secondary": [
+    "ROC-AUC",
+    "global-window top10% precision",
+    "global-window top10% mean20d close return"
+  ],
+  "label": "fixed +10%, terminal +5%, MA5>=MA20, next open, max20 sessions",
+  "cohorts": [
+    "identical_all_rows",
+    "identical_both_gaps_rows"
+  ],
+  "production_changes": false,
+  "valuation_assumptions_retuned": false,
+  "independent_holdout": false,
+  "data_mart": "same frozen 22110 original keys / 3748 codes as ranking study; no production rebuild"
+}
