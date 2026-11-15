@@ -1,0 +1,69 @@
+{
+  "fixed": {
+    "matched_prediction_files": 14,
+    "outer_fits": 42,
+    "logical_cv_fits": 0,
+    "windows": [
+      {
+        "from": "2025-10-03",
+        "to": "2026-04-02"
+      },
+      {
+        "from": "2026-04-03",
+        "to": "2026-10-01"
+      }
+    ],
+    "identical_security_date_labels": true,
+    "all_arms_same_eligible_dates": true,
+    "inputs_sha256": "d425481b2088688c4313fc990227fedac7fe600d6b38a1afc7199fb5c8330800",
+    "selection_sha256": "5c5265a5e9f3e6da1fef9dfc4009c6ccb5932d87ed366c6521798bdf8137300f"
+  },
+  "retuned": {
+    "matched_prediction_files": 14,
+    "outer_fits": 42,
+    "logical_cv_fits": 1260,
+    "windows": [
+      {
+        "from": "2025-10-03",
+        "to": "2026-04-02"
+      },
+      {
+        "from": "2026-04-03",
+        "to": "2026-10-01"
+      }
+    ],
+    "identical_security_date_labels": true,
+    "all_arms_same_eligible_dates": true,
+    "inputs_sha256": "d425481b2088688c4313fc990227fedac7fe600d6b38a1afc7199fb5c8330800",
+    "selection_sha256": "2aeacfd79ae6b3c4374eb32644fb62554980a6e6f6ca836321871a3581f13109"
+  },
+  "recorded_at_utc": "2026-11-15T14:12:10.153670+00:00",
+  "production_files_unchanged": {
+    "research/features.py": true,
+    "research/build_dataset.py": true,
+    "research/lgbm_params.json": true,
+    "research/multi_params.json": true,
+    "research/ltr_params.json": true,
+    "research/ltr5_params.json": true,
+    "public/data/predictions.json": true,
+    "public/data/prediction_history.json": true,
+    "research/model/meta.json": true,
+    "research/model/models/ltr/meta.json": true,
+    "research/model/models/lgbm_k18/meta.json": true,
+    "research/model/models/cat_k15/meta.json": true,
+    "research/model/models/mlp/meta.json": true,
+    "research/model/models/cat/meta.json": true,
+    "research/model/models/lgbm_k15/meta.json": true,
+    "research/model/models/logit/meta.json": true,
+    "research/model/models/xgb_k15/meta.json": true,
+    "research/model/models/xgb/meta.json": true,
+    "research/model/models/cat_k18/meta.json": true,
+    "research/model/models/xgb_k18/meta.json": true,
+    "research/model/models/ltr5/meta.json": true,
+    "research/model/models/logit_k18/meta.json": true,
+    "research/model/models/logit_k15/meta.json": true
+  },
+  "research_only": true,
+  "production_adoption": false,
+  "source_commit": "75d763765fd95bb3f40195fe0f880f8bf45fc5f4"
+}

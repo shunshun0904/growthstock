@@ -1,0 +1,15 @@
+task,cohort,arm,ndcg_at_5,top5_return_20d,top10pct_excess_20d,spearman_ic,aggregation
+ltr,identical_all_rows,A,0.6085162637884555,0.022408673678904,0.0051767682136612,0.08763570178998675,arithmetic mean of two outer-window metrics
+ltr,identical_all_rows,B,0.6043525142927823,0.0240255338324414,0.0067945381097733,0.07470452098803755,arithmetic mean of two outer-window metrics
+ltr,identical_all_rows,C,0.5931167053913093,0.0181653335069768,0.0058008960490072,0.0419674324931184,arithmetic mean of two outer-window metrics
+ltr,identical_all_rows,D,0.6065840402069536,0.023975937883464,0.0092348765617599,0.0656110111243534,arithmetic mean of two outer-window metrics
+ltr,identical_all_rows,M,0.6019069122496656,0.027078402365214596,0.0024269740708218,0.0681461534902345,arithmetic mean of two outer-window metrics
+ltr,identical_all_rows,P,0.5938194273428196,0.0195150677083251,-0.0007121801205481498,0.06853583073447786,arithmetic mean of two outer-window metrics
+ltr,identical_all_rows,R,0.6035080958619616,0.0219535781037479,0.0016207210276186993,0.07262444759515149,arithmetic mean of two outer-window metrics
+ltr,identical_valued_rows,A,0.6559528063769269,0.021012135993614102,-0.00017122648521205024,0.0160949531721584,arithmetic mean of two outer-window metrics
+ltr,identical_valued_rows,B,0.6719592704635801,0.02265997349443805,0.00981365394605075,0.0238281769704162,arithmetic mean of two outer-window metrics
+ltr,identical_valued_rows,C,0.6505804135343212,0.01995310188759455,-0.0006914319060525006,-0.0062439522244712,arithmetic mean of two outer-window metrics
+ltr,identical_valued_rows,D,0.6570512617382339,0.01983100766085,-0.00920781106984165,-0.0007854567738449,arithmetic mean of two outer-window metrics
+ltr,identical_valued_rows,M,0.6551525447243596,0.02072444971303505,-0.00529343727111075,0.0037317376886798,arithmetic mean of two outer-window metrics
+ltr,identical_valued_rows,P,0.6591949374594672,0.0205629520521337,-0.00316769483890245,0.02787041267680935,arithmetic mean of two outer-window metrics
+ltr,identical_valued_rows,R,0.6404014547369162,0.01796296496992385,-0.01133657514996205,-0.0093069473355602,arithmetic mean of two outer-window metrics
