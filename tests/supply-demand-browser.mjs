@@ -1,6 +1,7 @@
 /** Built-site regression checks, including GitHub Pages' /growthstock/ prefix.
  * node tests/supply-demand-browser.mjs
- * PRICE_DEMAND_REAL=1 also captures the checked-in public dataset.
+ * While the tab is hidden, verify its absence and that no demand assets are fetched.
+ * When enabled, PRICE_DEMAND_REAL=1 also captures the checked-in public dataset.
  */
 import { chromium } from 'playwright';
 import http from 'node:http';
@@ -39,7 +40,7 @@ const page = await browser.newPage({ viewport: { width: 1440, height: 1100 }, ha
 const errors = [], requests = [];
 page.on('pageerror', e => errors.push(e.message));
 page.on('request', r => requests.push(r.url()));
-try {
+async function checkSupplyDemandView() {
   if (!real) await page.addInitScript(() => localStorage.setItem('focus.manualStocks.v1', JSON.stringify([
     { id: 'saved-2894', code: '2894', name: '合成・保存済み銘柄', origin: 'prediction', metrics: {} },
     { id: 'saved-8888', code: '8888', name: '合成・再試行', origin: 'prediction', metrics: {} },
@@ -49,6 +50,23 @@ try {
     { id: 'saved-6467', code: '6467', name: 'ニチダイ', origin: 'prediction', metrics: {} },
   ])));
   await page.goto(`http://127.0.0.1:${server.address().port}/growthstock/`, { waitUntil: 'networkidle' });
+  // 運用者の指示 2026-11-15。非表示中もPages配下・PC/スマホでタブと画面が出ないことを確かめる。
+  if (await page.getByRole('tab', { name: '価格帯別需給', exact: true }).count() === 0) {
+    assert.deepEqual(await page.getByRole('tab').allTextContents(), [
+      'ブレイク予測', '候補銘柄のニュース', '理論株価', 'タイムマシーン',
+    ]);
+    assert.equal(await page.locator('.supply-demand-view').count(), 0);
+    await page.screenshot({ path: path.join(SHOTS, 'screenshot-price-demand-hidden-desktop.png') });
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.getByRole('tab', { name: '価格帯別需給', exact: true }).count(), 0);
+    assert.equal(await page.locator('.supply-demand-view').count(), 0);
+    await page.screenshot({ path: path.join(SHOTS, 'screenshot-price-demand-hidden-mobile.png') });
+    assert.ok(!requests.some(u => new URL(u).pathname.includes('/data/supply-demand/')), 'Hidden view does not fetch demand assets');
+    assert.deepEqual(errors, []);
+    assert.ok(requests.filter(u => /\/(assets|data)\//.test(u)).every(u => new URL(u).pathname.startsWith('/growthstock/')), 'All assets resolve under the Pages prefix');
+    console.log('PASS: price-demand tab is hidden (desktop/mobile; no demand asset requests; Pages subpath)');
+    return;
+  }
   await page.getByRole('tab', { name: '価格帯別需給', exact: true }).click();
   await page.waitForSelector('.sd-positions');
   // スコアと収益の分布・再学習で加わったサンプルは 2026-11-15 から隠している（src/App.jsx の hidden）
@@ -118,6 +136,9 @@ try {
   assert.deepEqual(errors, []);
   assert.ok(requests.filter(u => /\/(assets|data)\//.test(u)).every(u => new URL(u).pathname.startsWith('/growthstock/')), 'All assets resolve under the Pages prefix');
   console.log(`PASS: price-demand browser checks (${real ? 'real snapshot' : 'synthetic edge cases'}; desktop/mobile; Pages subpath)`);
+}
+try {
+  await checkSupplyDemandView();
 } finally {
   await browser.close();
   await new Promise(resolve => server.close(resolve));

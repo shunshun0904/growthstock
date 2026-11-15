@@ -378,15 +378,16 @@ const tabNames = (await page.getByRole('tab').allTextContents()).map((t) => t.tr
 // スコアと収益の分布（2026-11-08 に足した）と再学習で加わったサンプル（2026-10-13 に足した）は、運用者の依頼 2026-11-15
 // 「再学習で加わったサンプル、スコアと収益の分布タグを消してください。」→「隠して自動更新も止める」で隠している（src/App.jsx の
 // hidden。画面のコードとデータの作り方は残す）
-check(tabNames.join(',') === 'ブレイク予測,候補銘柄のニュース,理論株価,価格帯別需給,タイムマシーン',
-      'タブは ブレイク予測 / 候補銘柄のニュース / 理論株価 / 価格帯別需給 / タイムマシーン'
-      + ` の5つ (実際: ${tabNames.join(',')})`);
+// 価格帯別需給も 2026-11-15「推定は本番運用レベルではないので非表示に」で隠している。
+check(tabNames.join(',') === 'ブレイク予測,候補銘柄のニュース,理論株価,タイムマシーン',
+      'タブは ブレイク予測 / 候補銘柄のニュース / 理論株価 / タイムマシーン'
+      + ` の4つ (実際: ${tabNames.join(',')})`);
 check(!tabNames.includes('決算サンキー') && !tabNames.includes('What-If シミュレーター')
         && !tabNames.includes('8軸オクタゴン比較') && !tabNames.includes('候補の比較')
         && !tabNames.includes('リカレンス・ネットワーク') && !tabNames.includes('スコアと収益の分布')
-        && !tabNames.includes('再学習で加わったサンプル'),
+        && !tabNames.includes('再学習で加わったサンプル') && !tabNames.includes('価格帯別需給'),
       '決算サンキー・What-If シミュレーター・8軸オクタゴン比較・候補の比較・リカレンス・ネットワーク・スコアと収益の分布・'
-      + '再学習で加わったサンプルのタブは出ない');
+      + '再学習で加わったサンプル・価格帯別需給のタブは出ない');
 check((await page.locator('.sdist').count()) === 0 && (await page.locator('.samples').count()) === 0,
       'スコアと収益の分布・再学習で加わったサンプルの画面はどのタブにも出ない（隠している間）');
 check((await page.locator('.knn').count()) === 0, '候補の比較の画面はどのタブにも出ない（隠している間）');
