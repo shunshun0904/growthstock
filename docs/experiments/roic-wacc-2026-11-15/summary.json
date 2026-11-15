@@ -1,0 +1,16 @@
+{
+  "as_of": "2026-11-13",
+  "securities": 51,
+  "date_min": "2016-10-03",
+  "date_max": "2026-11-13",
+  "primary_model": "price-independent EVA; five-year ROIC convergence",
+  "theoretical_value_available_rows": 0,
+  "backtest_completed": false,
+  "production_changed": false,
+  "rows": 118467,
+  "duplicate_security_dates": 0,
+  "source_availability_violations": 0,
+  "revision_unverified_rows": 118467,
+  "corporate_action_unverified_rows": 5034,
+  "independent_shares_available_rows": 111657
+}

@@ -1,0 +1,24 @@
+{
+  "status": "blocked",
+  "reasons": [
+    "incomplete_historical_universe",
+    "no_observed_fundamental_valuation_gap"
+  ],
+  "rows": 22110,
+  "codes": 3748,
+  "date_min": "2018-04-03",
+  "date_max": "2026-10-02",
+  "covered_codes": 50,
+  "missing_code_count": 3698,
+  "gap_available_rows": 0,
+  "original_columns_identical": true,
+  "production_preset": "all_plus_prog_listing_vol_book_shape_dd_recent_tx_financial",
+  "production_feature_count": 373,
+  "adoption_status": "not_evaluated",
+  "backtest_completed": false,
+  "limitations": [
+    "E120/E121 periods already observed; no independent holdout claim",
+    "Historical API revisions not fully archived",
+    "Current inference selection cannot define historical universe"
+  ]
+}

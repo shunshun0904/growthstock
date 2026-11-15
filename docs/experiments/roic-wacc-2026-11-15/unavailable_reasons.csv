@@ -1,0 +1,11 @@
+reason,rows,percent
+non_operating_cash_unidentified,118467,100.0
+operating_roic_unavailable_or_nonpositive,118467,100.0
+nci_missing,38066,32.132154946103135
+company_loss_or_profit_unverified,32467,27.40594427140047
+debt_missing,25304,21.359534722749796
+annual_stale_or_missing,18440,15.56551613529506
+financial_or_unknown,18424,15.552010264461833
+shares_missing_or_nonpositive,6810,5.74843627339259
+corporate_action_type_unverified,5034,4.2492846109043025
+risk_free_missing,45,0.03798526171845324

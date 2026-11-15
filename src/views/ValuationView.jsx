@@ -1,23 +1,31 @@
 import React, { useEffect, useState } from 'react';
 import { loadValuations, rankedValuations } from '../lib/valuation.js';
+import RoicWaccView from './RoicWaccView.jsx';
 const yen = v => Number.isFinite(v) ? `¥${v.toLocaleString('ja-JP', { maximumFractionDigits: 1 })}` : '—';
 const pct = v => Number.isFinite(v) ? `${(v * 100).toLocaleString('ja-JP', { minimumFractionDigits: 1, maximumFractionDigits: 1 })}%` : '—';
 export default function ValuationView() {
   const [data, setData] = useState(null), [error, setError] = useState(null);
   const [method, setMethod] = useState('ri'), [search, setSearch] = useState('');
+  const [panel, setPanel] = useState('ranking');
   useEffect(() => {
     let active = true;
     loadValuations().then(x => { if (active) setData(x); }).catch(e => { if (active) setError(e.message); });
     return () => { active = false; };
   }, []);
-  if (error) return <section className="card"><h2>理論株価ランキング</h2><p role="alert">{error}</p></section>;
-  if (!data) return <div className="card" role="status">理論株価データを読み込んでいます…</div>;
+  const navigation = <div className="valuation-controls rw-navigation" aria-label="理論株価の表示切り替え">
+    <button className="btn btn-ghost" aria-pressed={panel === 'ranking'} onClick={() => setPanel('ranking')}>銘柄ランキング</button>
+    <button className="btn btn-ghost" aria-pressed={panel === 'roic'} onClick={() => setPanel('roic')}>ROIC・WACC（研究）</button>
+  </div>;
+  if (panel === 'roic') return <div className="valuation-view">{navigation}<RoicWaccView /></div>;
+  if (error) return <div className="valuation-view">{navigation}<section className="card"><h2>理論株価ランキング</h2><p role="alert">{error}</p></section></div>;
+  if (!data) return <div className="valuation-view">{navigation}<div className="card" role="status">理論株価データを読み込んでいます…</div></div>;
   const ranked = rankedValuations(data.stocks, method);
   const rows = ranked.map((s, i) => ({ ...s, rank: Number.isFinite(s.priceRatio) ? i + 1 : null }))
     .filter(s => `${s.code} ${s.name}`.toLowerCase().includes(search.toLowerCase()));
   const label = method === 'ri' ? 'RIM（残余利益）' : '配当割引法';
   const available = ranked.filter(s => Number.isFinite(s.priceRatio)).length;
   return <div className="valuation-view">
+    {navigation}
     <section className="card">
       <h2>理論株価ランキング</h2>
       <p>直近3営業日の推論対象銘柄すべてを、理論株価に対する現在株価の割合が低い順に表示します。同じ銘柄は最新の推論日で1件にまとめています。</p>

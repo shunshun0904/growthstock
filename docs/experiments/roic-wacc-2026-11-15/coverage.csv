@@ -1,0 +1,9 @@
+feature,available,rows,percent
+ev_valuation_gap,0,118467,0.0
+roic_conservative_actual,61882,118467,52.235643681362745
+roic_conservative_tax30,68565,118467,57.87687710501659
+roic_operating_tax30,0,118467,0.0
+theoretical_price,0,118467,0.0
+valuation_gap,0,118467,0.0
+valuation_gap_zscore_252,0,118467,0.0
+wacc,84328,118467,71.18269222652722
