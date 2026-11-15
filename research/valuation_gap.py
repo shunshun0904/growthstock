@@ -15,6 +15,12 @@ TIME = ["valuation_gap_zscore_252", "valuation_gap_pct_252", "valuation_gap_chan
 MARKET_CONTROLS = ["control_price_zscore_252", "control_price_pct_252", "control_price_return_5d",
                    "control_price_return_20d", "control_price_return_60d", "control_price_vol_60",
                    "control_forecast_per_zscore_252", "control_pbr_zscore_252"]
+RIM_TIME_RENAME = {**{f'valuation_gap_{suffix}':f'rim_gap_{suffix}' for suffix in (
+    'zscore_252','pct_252','change_5d','change_20d','change_60d','ma_20','ma_60','vol_60','log_change_20d')},
+    'theoretical_price_change_20d':'rim_value_change_20d', 'wacc_change_20d':'rim_ke_change_20d',
+    'valuation_value_log_change_20d':'rim_value_log_change_20d'}
+RIM_FIELDS = ['rim_roe','rim_ke_05','rim_payout','rim_financial_age','rim_valuation_gap',
+              'rim_valuation_log_gap', *RIM_TIME_RENAME.values()]
 
 
 def compare_with_market(fundamental_value_per_share, market_price):
@@ -32,7 +38,8 @@ def column_sets():
     b = unique(base + CONTROLS)
     c = unique(b + GAPS)
     d = unique(c + TIME)
-    return {"A": base, "B": b, "C": c, "D": d, "P": d, "M": unique(b + MARKET_CONTROLS)}
+    return {"A": base, "B": b, "C": c, "D": d, "P": d, "M": unique(b + MARKET_CONTROLS),
+            'R':unique(base + RIM_FIELDS)}
 
 
 def market_control_features(frame):

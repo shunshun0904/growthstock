@@ -25,6 +25,21 @@ test('sensitivity ranges separate business growth and market-dependent compariso
   assert.equal(scenarioSeries(d, { model: 'steady' })[0].selectedWacc, .09);
 });
 
+test('cash-unsegregated EVA and external-Ke RIM use separate definitions and controls', () => {
+  const d = decodeSeries(fixture(1));
+  const a = scenarioSeries(d,{model:'eva_total_fade5'})[0];
+  assert.equal(a.selectedRoic,.09);
+  assert.equal(a.value_basis,'cash_unsegregated_EVA_approximation');
+  const b = scenarioSeries(d,{model:'rim_book5',tax:'tax30',growth:'0.03'})[0];
+  assert.equal(b.median,100);
+  assert.equal(b.selectedWacc,.08);
+  assert.equal(b.selectedRoic,.12);
+  assert.equal(b.selectedEvGap,null);
+  assert.equal(b.tax_assumption,'reported');
+  assert.equal(b.growth_assumption,'not_applicable');
+  assert.equal(b.selectedReinvestment,.7);
+});
+
 test('forecast EPS does not fall back to TTM and CSV retains assumptions', () => {
   const d = decodeSeries(fixture(1));
   assert.equal(scenarioSeries(d)[0].marketPer, null);
@@ -89,6 +104,19 @@ test('Pages subpath and gzip JSON are supported without calling market APIs', as
   const d = await client.series({ code: '1000', file: '10000.json.gz' });
   assert.equal(d.rows.length, 1);
   assert.deepEqual(calls, ['/growthstock/data/roic-wacc/10000.json.gz']);
+});
+
+test('valid full scenario histories larger than 16 MB remain readable', async () => {
+  const body=' '.repeat(17000000)+JSON.stringify(fixture(1));
+  const client=createRoicWaccClient({fetchImpl:async()=>new Response(body)});
+  assert.equal((await client.series({code:'1000'})).rows.length,1);
+});
+
+test('an unavailable zero quote is not plotted as a zero stock price', () => {
+  const d=decodeSeries(fixture(1));d.rows[0].price=0;
+  const row=scenarioSeries(d)[0];
+  assert.equal(row.price,null);
+  assert.equal(row.gap,null);
 });
 
 test('paths, response errors and wrong-security data are rejected', async () => {

@@ -25,6 +25,28 @@ class Fundamentals:
 
 
 @dataclass(frozen=True, slots=True)
+class TotalCapitalFundamentals:
+    """Explicit cash-unsegregated approximation; no unknown-cash argument."""
+    total_book_equity: object
+    debt_book: object
+    historical_capital_return: object
+    historical_nopat: object
+    non_controlling_interests: object
+    shares: object
+    risk_free: object
+    tax_rate: object
+
+
+@dataclass(frozen=True, slots=True)
+class RimFundamentals:
+    parent_equity: object
+    annual_parent_profit: object
+    shares: object
+    risk_free: object
+    payout: object
+
+
+@dataclass(frozen=True, slots=True)
 class DiscountPolicy:
     equity_risk_premium: float = .05
     credit_spread: float = .015
@@ -134,6 +156,75 @@ def evaluate(inputs: Fundamentals, growth, policy=DiscountPolicy(), *, fade=True
     result.update(fundamental_value_per_share=np.where(valid, value, np.nan),
                   equity_value=np.where(valid, equity, np.nan), discount_rate=wacc)
     return result
+
+
+def evaluate_total(inputs: TotalCapitalFundamentals, growth, policy=DiscountPolicy(), *, fade=True):
+    """EVA of ALL book capital, with no separate cash deduction/add-back.
+
+    This is an operating-profit-based approximation, NOT a measurement that
+    excess cash is zero, nor a guaranteed lower bound on equity value. Its
+    forecast treats all capital as invested in the common profit/reinvestment
+    path; financial income and separately realizable assets are not valued.
+    """
+    if type(inputs) is not TotalCapitalFundamentals:
+        raise TypeError('Closed TotalCapitalFundamentals inputs required')
+    e, d, nci, q, n = np.broadcast_arrays(*[np.asarray(v, float) for v in (
+        inputs.total_book_equity, inputs.debt_book, inputs.non_controlling_interests,
+        inputs.shares, inputs.historical_nopat)])
+    w = book_wacc(e, d, inputs.risk_free, inputs.tax_rate, policy)
+    result = economic_profit(e + d, inputs.historical_capital_return, w, growth,
+                             fade=fade, min_spread=policy.minimum_wacc_minus_growth)
+    equity = result['enterprise_value'] - d - nci
+    valid = (np.isfinite(e + d + nci + q + n + equity) & (e > 0) & (d >= 0)
+             & (nci >= 0) & (q > 0) & (n > 0) & (equity > 0))
+    with np.errstate(invalid='ignore', divide='ignore'):
+        value = equity / q
+    result.update(fundamental_value_per_share=np.where(valid, value, np.nan),
+                  equity_value=np.where(valid, equity, np.nan), discount_rate=w)
+    return result
+
+
+def evaluate_rim(inputs: RimFundamentals, equity_risk_premium=.05, *, horizon=5):
+    """Exogenous Ke and the existing RIM's linear ROE fade / clean surplus.
+
+    RI = parent book + PV((ROE_t-Ke)*beginning book). Reconcile independently
+    with PV(dividends)+PV(terminal book), using EXACTLY the same equity path.
+    Payout is an observed annual ratio held fixed as a forecast assumption;
+    missing dividends are never a zero payout. No debt/NCI/cash bridge.
+    """
+    if type(inputs) is not RimFundamentals:
+        raise TypeError('Closed RimFundamentals inputs required')
+    if horizon not in (5, 10) or not np.isfinite(equity_risk_premium) or equity_risk_premium <= 0:
+        raise ValueError('Predeclared positive equity premium and 5/10-year horizon required')
+    book, earn, q, rf, payout = np.broadcast_arrays(*[np.asarray(v, float) for v in (
+        inputs.parent_equity, inputs.annual_parent_profit, inputs.shares, inputs.risk_free, inputs.payout)])
+    ke = rf + equity_risk_premium
+    valid = (np.isfinite(book + earn + q + rf + payout) & (book > 0) & (earn > 0)
+             & (q > 0) & (ke > 0) & (payout >= 0) & (payout <= 1))
+    with np.errstate(invalid='ignore', divide='ignore', over='ignore'):
+        roe = earn / book
+        current = book.copy()
+        value = book.copy()
+        ddm = np.zeros_like(book)
+        for year in range(1, horizon + 1):
+            rt = ke + (roe - ke) * (horizon - year) / horizon
+            profit = rt * current
+            dividend = profit * payout
+            value += (profit - ke * current) / (1 + ke) ** year
+            ddm += dividend / (1 + ke) ** year
+            current += profit - dividend
+        ddm += current / (1 + ke) ** horizon
+        error = np.abs(value - ddm) / np.maximum(1, np.abs(value))
+        valid &= np.isfinite(value + ddm) & (value > 0) & (current > 0)
+        per_share = value / q
+    if np.any(valid & (error > 1e-10)):
+        raise ArithmeticError('RIM and dividend DCF disagree on a common equity path')
+    return {'fundamental_value_per_share':np.where(valid, per_share, np.nan),
+            'equity_value':np.where(valid, value, np.nan),
+            'dividend_dcf_value':np.where(valid, ddm, np.nan),
+            'rim_dcf_relative_error':np.where(valid, error, np.nan),
+            'cost_of_equity':np.where(np.isfinite(ke) & (ke > 0), ke, np.nan),
+            'roe':np.where(valid, roe, np.nan)}
 
 
 def business_growth(sales, prior_sales, nopat, prior_nopat, capital_change=None, marginal_roic=None, cap=.03):

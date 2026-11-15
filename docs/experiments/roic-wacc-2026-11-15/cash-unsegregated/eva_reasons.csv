@@ -1,0 +1,12 @@
+reason,rows,percent
+total_capital_return_unavailable_or_nonpositive,55127,46.533633838959375
+available,46893,39.583175061409506
+nci_missing,38066,32.132154946103135
+company_loss_or_profit_unverified,32467,27.405944271400475
+debt_missing,25304,21.359534722749796
+annual_stale_or_missing,18440,15.565516135295061
+financial_or_unknown,18424,15.552010264461833
+shares_missing_or_nonpositive,6810,5.74843627339259
+corporate_action_type_unverified,5034,4.2492846109043025
+no_valid_positive_equity_scenario,338,0.28531152135193766
+risk_free_missing,45,0.03798526171845324

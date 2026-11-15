@@ -1,0 +1,16 @@
+{
+  "as_of": "2026-11-13",
+  "securities": 51,
+  "rows": 118467,
+  "from": "2016-10-03",
+  "to": "2026-11-13",
+  "eva_price_rows": 46893,
+  "rim_price_rows": 88452,
+  "common_gap_rows": 42632,
+  "latest_eva_codes": 25,
+  "latest_rim_codes": 44,
+  "latest_common_gap_codes": 24,
+  "revision_unverified_rows": 118467,
+  "production_changed": false,
+  "cash_zero_imputed": false
+}

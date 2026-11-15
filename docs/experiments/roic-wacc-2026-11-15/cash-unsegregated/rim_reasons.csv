@@ -1,0 +1,8 @@
+reason,rows,percent
+available,88452,74.66383043379169
+payout_missing_or_invalid,23173,19.560721551149264
+parent_ttm_profit_missing_or_nonpositive,22185,18.72673402719745
+shares_missing_or_nonpositive,6810,5.74843627339259
+parent_equity_missing_or_nonpositive,1394,1.1766989963449737
+financial_stale_or_missing,1332,1.124363746866216
+risk_free_missing,45,0.03798526171845324

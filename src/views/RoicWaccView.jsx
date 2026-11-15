@@ -35,8 +35,11 @@ export default function RoicWaccView() {
   const [catalog, setCatalog] = useState(null), [code, setCode] = useState(''), [query, setQuery] = useState('');
   const [data, setData] = useState(null), [error, setError] = useState(''), [loading, setLoading] = useState(false);
   const [retry, setRetry] = useState(0), [period, setPeriod] = useState('252'), [day, setDay] = useState('');
-  const [model, setModel] = useState('eva_fade5'), [tax, setTax] = useState('tax30'), [erp, setErp] = useState('all');
+  const [model, setModel] = useState('eva_total_fade5'), [tax, setTax] = useState('tax30'), [erp, setErp] = useState('all');
   const [growth, setGrowth] = useState('all'), [epsBasis, setEpsBasis] = useState('forecast');
+  const isRim = model.startsWith('rim_'), isTotal = model.startsWith('eva_total_');
+  const returnName = isRim ? '親会社ROE' : isTotal ? '現金控除なしの資本収益率' : '営業投下資本ROIC';
+  const discountName = isRim ? '自己資本コストKe' : 'WACC';
   useEffect(() => {
     let active = true;
     const abort = new AbortController();
@@ -44,7 +47,7 @@ export default function RoicWaccView() {
     client.catalog(abort.signal).then(value => {
       if (!active) return;
       setCatalog(value);
-      setCode(current => current || value.stocks.find(s => s.rows > 0)?.code || '');
+      setCode(current => current || value.stocks.find(s => s.valuedRows > 0)?.code || value.stocks.find(s => s.rows > 0)?.code || '');
     }).catch(e => { if (active) setError(e.message); });
     return () => { active = false; abort.abort(); };
   }, [client, retry]);
@@ -74,8 +77,9 @@ export default function RoicWaccView() {
   };
   return <div className="rw-view">
     <section className="card">
-      <h2>ROIC・WACCによる理論株価 <span className="sd-badge">研究用</span></h2>
-      <p>現在のモデルの推論対象銘柄を使った日次分析です。主モデルは投下資本＋将来EVAの現在価値で、対象銘柄の株価・β・時価総額を計算に使いません。予測モデルの特徴量や売買判断には採用していません。</p>
+      <h2>資本効率と理論株価（EVA・RIM） <span className="sd-badge">研究用</span></h2>
+      <p>現在のモデルの推論対象銘柄を使った日次分析です。主モデルは現金を区分しない総投下資本＋将来EVAの現在価値、比較は外生的な自己資本コストを使うRIMです。対象銘柄の株価・β・時価総額を計算に使いません。予測モデルの特徴量や売買判断には採用していません。</p>
+      <p>現金区分なしEVAは、現金を資本から控除せず、評価後にも加算しない近似です。非事業性現金が0と判明したという意味ではなく、理論価値の下限も保証しません。</p>
       <p>表示範囲はERP・成長率などの仮定を変えた感応度で、信頼区間や将来株価の予測区間ではありません。</p>
       <div className="valuation-controls rw-controls">
         <label>銘柄検索 <input aria-label="研究対象の銘柄検索" value={query} onChange={e => setQuery(e.target.value)} placeholder="コード・銘柄名" /></label>
@@ -86,19 +90,21 @@ export default function RoicWaccView() {
         <label>表示期間 <select aria-label="ROIC・WACCの表示期間" value={period} onChange={e => setPeriod(e.target.value)}>
           <option value="126">直近126営業日</option><option value="252">直近252営業日</option><option value="756">直近756営業日</option><option value="all">利用可能な全期間</option>
         </select></label>
-        <label>理論価値モデル <select aria-label="理論価値モデル" value={model} onChange={e => setModel(e.target.value)}>
-          <option value="eva_fade5">主：経済的利益（5年ROIC収束）</option><option value="eva_steady">主：経済的利益（ROIC一定）</option>
+        <label>理論価値モデル <select aria-label="理論価値モデル" value={model} onChange={e => { setModel(e.target.value); if (!e.target.value.startsWith('eva_')) setGrowth('all'); }}>
+          <option value="eva_total_fade5">近似EVA：現金区分なし・5年収束</option><option value="eva_total_steady">近似EVA：現金区分なし・収益率一定</option>
+          <option value="rim_book5">RIM：外生Ke・5年ROE収束</option><option value="rim_book10">RIM：外生Ke・10年ROE収束</option>
+          <option value="eva_fade5">営業EVA：現金区分必須・5年収束</option><option value="eva_steady">営業EVA：現金区分必須・ROIC一定</option>
           <option value="steady">比較：市場依存CAPM・定常成長DCF</option><option value="fade5">比較：市場依存CAPM・5年DCF</option>
         </select></label>
-        <label>税率 <select aria-label="税率シナリオ" value={tax} onChange={e => setTax(e.target.value)}>
+        <label>税率{isRim ? '（RIMは実績純利益）' : ''} <select aria-label="税率シナリオ" value={tax} disabled={isRim} onChange={e => setTax(e.target.value)}>
           <option value="tax30">30%固定</option><option value="actual">実績税率</option>
         </select></label>
         <label>株主資本リスクプレミアム <select aria-label="ERPシナリオ" value={erp} onChange={e => setErp(e.target.value)}>
           <option value="all">3・5・7%の全ケース</option>{[.03, .05, .07].map(v => <option key={v} value={v}>{v * 100}%</option>)}
         </select></label>
-        <label>長期成長率 <select aria-label="成長率シナリオ" value={growth} onChange={e => setGrowth(e.target.value)}>
+        <label>長期成長率{isRim ? '（RIMはROE収束）' : ''} <select aria-label="成長率シナリオ" value={growth} disabled={isRim} onChange={e => setGrowth(e.target.value)}>
           <option value="all">0〜3%の全ケース</option>{[0, .01, .02, .03].map(v => <option key={v} value={v}>{v * 100}%</option>)}
-          <option value="business">事業実績の単純継続予測</option>
+          <option value="business" disabled={!model.startsWith('eva_')}>事業実績の単純継続予測</option>
         </select></label>
         <label>PERの利益系列 <select aria-label="PERの利益系列" value={epsBasis} onChange={e => setEpsBasis(e.target.value)}>
           <option value="forecast">会社予想利益から計算したEPS</option><option value="ttm">TTM実績EPS</option>
@@ -114,6 +120,7 @@ export default function RoicWaccView() {
     {data && <>
       <div className="rw-grid">
         <Chart title="A. 市場株価・理論株価" rows={rows} lines={[["price", "市場株価"], ["median", "理論株価中央値"]]} band disclosures={disclosed} format={v => number(v, 0)} />
+        <Chart title="現金区分なしEVA・RIM（基準シナリオ中央値）" rows={rows} lines={[["baseEvaValue", "近似EVA・5年収束"], ["baseRimValue", "RIM・5年収束"]]} disclosures={disclosed} format={v => number(v, 0)} />
         <Chart title={`B. 市場PER・理論PER（${epsBasis === 'forecast' ? '会社予想' : 'TTM実績'}）`} rows={rows} lines={[["marketPer", "市場PER"], ["theoreticalPer", "理論PER"]]} disclosures={disclosed} />
         <Chart title="C. 評価乖離率（1.0で理論価値と一致）" rows={rows} lines={[["gap", "市場株価÷理論株価"]]} reference={1} disclosures={disclosed} />
         <Chart title="市場価格と理論価値の変化（20営業日・ログ）" rows={rows}
@@ -121,7 +128,7 @@ export default function RoicWaccView() {
           reference={0} disclosures={disclosed} format={rate} />
         <Chart title="過去252営業日のZスコア" rows={rows} lines={[["gapZ", "Zスコア"]]} reference={0} disclosures={disclosed} />
         <Chart title="過去252営業日の百分位順位" rows={rows} lines={[["gapPercentile", "百分位順位"]]} disclosures={disclosed} format={rate} />
-        <Chart title="D. 資本効率と資本コスト" rows={rows} lines={[["selectedRoic", "営業投下資本ROIC"], ["selectedWacc", "WACC"], ["selectedSpread", "ROIC−WACC"], ["conservativeRoic", "現金控除なしROIC（参考）"]]} disclosures={disclosed} format={rate} />
+        <Chart title="D. 資本効率と資本コスト" rows={rows} lines={[["selectedRoic", returnName], ["selectedWacc", discountName], ["selectedSpread", `${returnName}−${discountName}`], ...(!isTotal ? [["conservativeRoic", "現金控除なしの資本収益率（参考）"]] : [])]} disclosures={disclosed} format={rate} />
       </div>
       <section className="card">
         <div className="rw-detail-head"><h3>任意日付の因子・計算条件</h3><label>確認日 <input type="date" aria-label="因子の確認日" value={day} min={allRows[0]?.Date} max={allRows.at(-1)?.Date} onChange={e => setDay(e.target.value)} /></label>
@@ -130,15 +137,17 @@ export default function RoicWaccView() {
           <p>指定日以前の直近営業日：{current.Date} ／ 有効シナリオ {current.scenarioCount}/{current.scenarioTotal}</p>
           <dl className="rw-factors">
             {[['市場株価', yen(current.price)], ['理論株価中央値', yen(current.median)], ['下限〜上限', `${yen(current.min)}〜${yen(current.max)}`],
-              ['平均／母標準偏差', `${yen(current.mean)}／${yen(current.std)}`], ['評価乖離率', number(current.gap, 3)], ['EV評価乖離率', number(current.selectedEvGap, 3)],
+              ['平均／母標準偏差', `${yen(current.mean)}／${yen(current.std)}`], ['評価乖離率', number(current.gap, 3)], [isTotal ? '総資本価値の評価乖離率' : isRim ? 'EV評価乖離率（RIMは対象外）' : 'EV評価乖離率', number(current.selectedEvGap, 3)],
               ['市場価格の20日ログ変化', rate(current.valuation_price_log_change_20d)], ['理論価値の20日ログ変化', rate(current.valuation_value_log_change_20d)],
-              ['営業投下資本ROIC', rate(current.selectedRoic)], ['現金控除なしROIC（参考）', rate(current.conservativeRoic)], ['WACC', rate(current.selectedWacc)],
-              ['長期成長率の仮定', growth === 'all' ? '固定0・1・2・3%' : growth === 'business' ? rate(current.business_growth_estimate) : rate(Number(growth))],
+              [returnName, rate(current.selectedRoic)], ['現金控除なしの資本収益率（参考）', rate(current.conservativeRoic)], [discountName, rate(current.selectedWacc)],
+              ['長期成長率の仮定', isRim ? 'ROEがKeへ収束（固定gは使わない）' : growth === 'all' ? '固定0・1・2・3%' : growth === 'business' ? rate(isTotal ? current.business_growth_total_estimate : current.business_growth_estimate) : rate(Number(growth))],
+              ['RIMの配当性向', isRim ? rate(current.rim_payout) : '—'],
               ['再投資率', rate(current.selectedReinvestment)], ['市場依存比較モデルのβ', number(current.tv_beta, 3)], ['比較モデルβの有効観測数', number(current.tv_beta_n, 0)],
               ['国債10年金利', rate(current.tv_rf)], ['金利基準日', current.tv_rf_date || '—'], ['負債コスト仮定', `国債金利＋${rate(data.creditSpread)}`],
               ['売上高純利益率M', rate(current.net_margin)], ['総資産回転率T', number(current.asset_turnover)], ['財務レバレッジL', number(current.leverage)],
               ['平均自己資本ベースBPS', yen(current.bps_average_equity)],
               ['財務の公表日', current.financial_source_date || '—'], ['財務の利用開始日', current.financial_available_date || '—'],
+              ['EVA年次財務の利用開始日', current.avail_date || '—'], ['RIM利益の根拠公表日', current.rim_source_date || '—'],
               ['過去の訂正履歴', current.revision_unverified ? '原本の全バージョンは未照合' : '系列データの照合状態を確認']]
               .map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
           </dl>
@@ -148,7 +157,9 @@ export default function RoicWaccView() {
       </section>
       <section className="card">
         <h3>解釈と制約</h3>
-        <p>ROICは年次NOPAT÷期首末平均投下資本です。現金控除なしROICは参考系列で、非事業性現金が不明な場合の理論株価を代用するものではありません。</p>
+        <p>営業ROICは年次NOPAT÷期首末平均営業投下資本です。近似EVAは現金を含む総資本の収益率を使い、資本経路と同じ定義で利益・再投資を予測します。現金や金融収益を別建て評価する営業EVAとは区別します。</p>
+        <p>RIMは親会社自己資本＋将来残余利益の現在価値です。実績TTM利益と年次配当性向を使い、ROEを5年または10年で外生Keへ収束させます。欠損配当を0にせず、配当性向0〜100%を要求します。予測期間のクリーンサープラスと終価＝簿価を仮定しています。</p>
+        <p>基準シナリオ比較のEVAは固定g0〜3%・ERP3/5/7%・税率30%、RIMはERP3/5/7%・実績TTM利益・配当性向・5年収束の中央値です。この比較線はフィルタ選択とは別に、同じ日付の基準値を表示します。</p>
         <p>主モデルの割引率は、国債金利＋事前固定の株主資本リスクプレミアムと、簿価の資本構成から計算します。株価由来のβ・時価総額ウェイトを使うCAPMは比較モデルに限定しています。</p>
         <p>主モデルは期首投下資本×予測ROICからNOPATを作り、投下資本の成長と整合する再投資を計算します。ROIC一定と、5年で外生的割引率に収束するケースを比較し、同じ利益・投資の経路でDCFとの一致を検証しています。</p>
         <p>事業データによる成長率は、過去の売上・NOPAT成長率と、取得できた場合の再投資・限界ROICに基づく単純継続予測です。事前に0〜3%へ制限した探索的仮定で、固定成長率ケースとは混ぜません。</p>

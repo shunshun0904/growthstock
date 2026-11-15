@@ -41,7 +41,9 @@ export function createRoicWaccClient({ baseUrl = import.meta.env?.BASE_URL ?? '/
         if (typeof DecompressionStream === 'undefined') throw new Error('このブラウザーは圧縮データに対応していません');
         body = await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
       } else body = new TextDecoder().decode(bytes);
-      if (body.length > 16000000) throw new Error('研究データが大きすぎます');
+      // Current full histories reach 18 MB with both EVA and RIM cases.
+      // Still bounded per stock, with a separate 25,000-row schema limit.
+      if (body.length > 32000000) throw new Error('研究データが大きすぎます');
       return JSON.parse(body);
     } catch (error) {
       if (error.name === 'AbortError') throw new Error(signal?.aborted ? '読み込みを中止しました' : '研究データの読み込みがタイムアウトしました');
@@ -68,10 +70,11 @@ export function createRoicWaccClient({ baseUrl = import.meta.env?.BASE_URL ?? '/
   };
 }
 
-export function scenarioSeries(payload, { model = 'eva_fade5', tax = 'tax30', erp = 'all', growth = 'all', epsBasis = 'forecast' } = {}) {
-  const scenarios = (payload.scenarios || []).filter(s => s.model === model && s.tax === tax
+export function scenarioSeries(payload, { model = payload.primaryModel || 'eva_fade5', tax = 'tax30', erp = 'all', growth = 'all', epsBasis = 'forecast' } = {}) {
+  const rim = model.startsWith('rim_'), total = model.startsWith('eva_total_');
+  const scenarios = (payload.scenarios || []).filter(s => s.model === model && (rim || s.tax === tax)
     && (erp === 'all' || Math.abs(s.erp - Number(erp)) < 1e-10)
-    && (growth === 'business' ? s.growth === 'business' : s.growth !== 'business' && (growth === 'all' || Math.abs(s.growth - Number(growth)) < 1e-10)));
+    && (rim || (growth === 'business' ? s.growth === 'business' : s.growth !== 'business' && (growth === 'all' || Math.abs(s.growth - Number(growth)) < 1e-10))));
   const rows = payload.rows.map(row => {
     const values = scenarios.map(s => row.scenarios?.[s.id]).filter(positive).sort((a, b) => a - b);
     const n = values.length;
@@ -79,23 +82,28 @@ export function scenarioSeries(payload, { model = 'eva_fade5', tax = 'tax30', er
     const mean = n ? values.reduce((sum, value) => sum + value, 0) / n : null;
     const eps = row[`eps_${epsBasis}`];
     const waccKey = `${tax}_${String(Math.round((erp === 'all' ? .05 : Number(erp)) * 100)).padStart(2, '0')}`;
-    const independent = model.startsWith('eva_');
-    const bridge = row[independent ? 'ev_bridge_per_share' : 'comparison_ev_bridge_per_share'];
+    const independent = model.startsWith('eva_') || rim;
+    const bridge = total ? row.ev_bridge_per_share : independent ? row.strict_ev_bridge_per_share ?? row.ev_bridge_per_share : row.comparison_ev_bridge_per_share;
     const cost = row[independent ? 'waccScenarios' : 'comparisonWaccScenarios'];
     const reinvest = scenarios.map(s => row.reinvestmentScenarios?.[s.id]).filter(finite).sort((a, b) => a - b);
-    return { ...row, median, mean, min: n ? values[0] : null, max: n ? values[n - 1] : null,
+    return { ...row, price:positive(row.price) ? row.price : null, median, mean, min: n ? values[0] : null, max: n ? values[n - 1] : null,
       std: n ? Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / n) : null,
       scenarioCount: n, scenarioTotal: scenarios.length,
       gap: positive(row.price) && positive(median) ? row.price / median : null,
-      selectedEvGap: finite(bridge) && positive(row.price + bridge) && positive(median + bridge) && positive(median)
+      selectedEvGap: !rim && finite(bridge) && positive(row.price + bridge) && positive(median + bridge) && positive(median)
         ? (row.price + bridge) / (median + bridge) : null,
       marketPer: positive(eps) && positive(row.price) ? row.price / eps : null,
       theoreticalPer: positive(eps) && positive(median) ? median / eps : null,
-      selectedRoic: row[`roic_operating_${tax}`] ?? (tax === 'tax30' ? row.roic : null),
+      selectedRoic: rim ? row.rim_roe ?? null : total ? row[`roic_conservative_${tax}`] ?? null : row[`roic_operating_${tax}`] ?? (tax === 'tax30' ? row.roic : null),
       conservativeRoic: row[`roic_conservative_${tax}`] ?? null,
-      selectedWacc: cost?.[waccKey] ?? null,
-      selectedReinvestment: reinvest.length ? (reinvest[Math.floor((reinvest.length - 1) / 2)] + reinvest[Math.floor(reinvest.length / 2)]) / 2 : null,
-      valuation_model: model, tax_assumption: tax, equity_premium_scenario: erp, growth_assumption: growth, price_independent_model: independent,
+      selectedWacc: rim ? row.rimKeScenarios?.[String(Math.round((erp === 'all' ? .05 : Number(erp))*100)).padStart(2,'0')] ?? null : cost?.[waccKey] ?? null,
+      selectedReinvestment: rim ? finite(row.rim_payout) ? 1-row.rim_payout : null : reinvest.length ? (reinvest[Math.floor((reinvest.length - 1) / 2)] + reinvest[Math.floor(reinvest.length / 2)]) / 2 : null,
+      baseEvaValue: row.theoretical_price ?? null, baseRimValue: row.rim_value_per_share ?? null,
+      unavailable_reason: n ? '' : rim ? row.rim_unavailable_reason || 'no_valid_positive_equity_scenario' :
+        [row.unavailable_reason, ...(!total && !row.cash_identified ? ['non_operating_cash_unidentified'] : [])].filter(Boolean).join(';'),
+      valuation_model: model, tax_assumption: rim ? 'reported' : tax, equity_premium_scenario: erp,
+      growth_assumption: rim ? 'not_applicable' : growth, price_independent_model: independent,
+      value_basis: rim ? 'parent_equity_RIM' : total ? 'cash_unsegregated_EVA_approximation' : independent ? 'operating_EVA' : 'market_dependent_DCF',
       range: n ? [values[0], values[n - 1]] : null };
   });
   // Compute BEFORE slicing the display period; use the selected assumptions.
@@ -146,6 +154,11 @@ export const REASONS = {
   beta_unavailable: 'ベータの有効観測数などが不足', operating_roic_unavailable_or_nonpositive: '営業投下資本ROICが不明または0以下',
   nopat_nonpositive_or_missing: 'NOPATが不明または0以下', no_valid_positive_equity_scenario: '割引率・再投資率・正の株式価値の条件を満たさない',
   corporate_action_type_unverified: '企業行動が分割・併合と確認できない、またはライツ後の株数が未確認',
+  total_capital_return_unavailable_or_nonpositive:'現金控除なしの資本収益率が不明または0以下',
+  parent_equity_missing_or_nonpositive:'親会社の自己資本が不明または0以下',
+  parent_ttm_profit_missing_or_nonpositive:'親会社のTTM利益が不明または0以下',
+  payout_missing_or_invalid:'実績配当性向が不明または0〜100%の範囲外',
+  financial_stale_or_missing:'利用可能な決算がない、または365日超',
 };
 export const reasonText = text => (text || '').split(';').filter(Boolean).map(x => REASONS[x] || x).join('／');
 
@@ -167,7 +180,8 @@ export function seriesCsv(rows) {
     'selectedEvGap', 'valuation_log_gap', 'valuation_gap_change_5d', 'valuation_gap_change_20d', 'valuation_gap_change_60d',
     'valuation_gap_ma_20', 'valuation_gap_ma_60', 'valuation_gap_vol_60', 'theoretical_price_change_20d', 'wacc_change_20d',
     'valuation_price_log_change_20d', 'valuation_value_log_change_20d', 'valuation_gap_log_change_20d',
-    'selectedReinvestment', 'valuation_model', 'tax_assumption', 'equity_premium_scenario', 'growth_assumption', 'price_independent_model',
+    'selectedReinvestment', 'valuation_model', 'value_basis', 'tax_assumption', 'equity_premium_scenario', 'growth_assumption', 'price_independent_model',
+    'rim_payout', 'rim_source_date', 'rim_payout_source_date', 'avail_date', 'annual_age', 'tv_rf_date', 'revision_unverified',
     'scenarioCount', 'scenarioTotal', 'financial_source_date', 'financial_available_date', 'unavailable_reason'];
   const cell = value => {
     const s = value == null ? '' : String(value);

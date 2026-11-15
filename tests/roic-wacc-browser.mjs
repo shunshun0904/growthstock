@@ -12,6 +12,7 @@ const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const SHOTS = process.env.SMOKE_ARTIFACT_DIR || path.join(ROOT, 'docs');
 fs.mkdirSync(SHOTS, { recursive: true });
 const realDir = process.env.ROIC_WACC_REAL_DIR;
+const realCode = process.env.ROIC_WACC_REAL_CODE;
 const fixture = researchFixture();
 const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.gz': 'application/gzip' };
 const index = { schemaVersion: 1, researchOnly: true, stocks: [
@@ -52,9 +53,14 @@ try {
   assert.ok(!requests.some(u => u.includes('/data/roic-wacc/')), 'Research files are lazy-loaded');
   await page.getByRole('button', { name: 'ROIC・WACC（研究）', exact: true }).click();
   await page.getByRole('button', { name: '表示期間のCSVをダウンロード' }).waitFor();
+  if (realDir && realCode) {
+    await page.getByLabel('ROIC・WACCの分析対象', { exact:true }).selectOption(realCode);
+    await page.waitForFunction(code=>[...document.querySelectorAll('.rw-view > .card p')]
+      .some(p=>p.textContent.startsWith(`${code} `)),realCode);
+  }
   await page.getByRole('heading', { name: '市場価格と理論価値の変化（20営業日・ログ）', exact: true }).waitFor();
   assert.match(await page.locator('.rw-view').innerText(), /株価・β・時価総額を計算に使いません/);
-  assert.equal(await page.getByLabel('理論価値モデル', { exact: true }).inputValue(), 'eva_fade5');
+  assert.equal(await page.getByLabel('理論価値モデル', { exact: true }).inputValue(), 'eva_total_fade5');
   if (!realDir) {
     assert.match(await page.locator('.rw-factors').innerText(), /¥110/);
     await page.getByLabel('成長率シナリオ', { exact: true }).selectOption('business');
@@ -62,13 +68,19 @@ try {
     await page.getByLabel('成長率シナリオ', { exact: true }).selectOption('all');
     await page.getByLabel('理論価値モデル', { exact: true }).selectOption('steady');
     assert.match(await page.locator('.rw-factors').innerText(), /¥300/);
-    await page.getByLabel('理論価値モデル', { exact: true }).selectOption('eva_fade5');
+    await page.getByLabel('理論価値モデル', { exact: true }).selectOption('rim_book5');
+    assert.match(await page.locator('.rw-factors').innerText(), /¥100/);
+    assert.equal(await page.getByLabel('税率シナリオ', { exact: true }).isDisabled(),true);
+    assert.equal(await page.getByLabel('成長率シナリオ', { exact: true }).isDisabled(),true);
+    await page.getByLabel('理論価値モデル', { exact: true }).selectOption('eva_total_fade5');
     await page.getByLabel('PERの利益系列', { exact: true }).selectOption('ttm');
     const [download] = await Promise.all([page.waitForEvent('download'), page.getByRole('button', { name: '表示期間のCSVをダウンロード' }).click()]);
     assert.match(fs.readFileSync(await download.path(), 'utf8'), /price_independent_model/);
   } else {
-    assert.match(await page.locator('.rw-view').innerText(), /非事業性現金を識別できない/);
-    assert.match(await page.locator('.rw-view').innerText(), /理論株価・評価乖離率は算出できません/);
+    assert.match(await page.locator('.rw-view').innerText(), /現金を資本から控除せず/);
+    assert.ok(!/理論株価を算出できる日：0\s*\//.test(await page.locator('.rw-view').innerText()));
+    await page.getByLabel('理論価値モデル', { exact: true }).selectOption('rim_book5');
+    assert.ok(!/理論株価を算出できる日：0\s*\//.test(await page.locator('.rw-view').innerText()));
   }
   await page.screenshot({ path: path.join(SHOTS, `screenshot-eva-${realDir ? 'real' : 'synthetic'}-desktop.png`), fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
