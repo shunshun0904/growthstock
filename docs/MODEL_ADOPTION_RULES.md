@@ -7112,6 +7112,10 @@ Routine が土曜の夜の学習の新しいモデルで出す。予測するの
   今回の予測で置き換え（`predict_daily.update_history` の REPLACE_HISTORY_DAY。force のときだけ効く）、予測ログ v2 の 11/13 の
   行は Rewrite Prediction Log Day（§ の 11/2 と同じ書き直し）で新しいスコア・順位に書き直す。候補の銘柄は同じで、スコア・順位・
   印が変わる。予測に使った特徴量の控え（live_features）は最初の予測のまま（特徴量はモデルに依らない）
+- 2026-11-15 の結果: Predict Breakouts [run 43671912380](https://github.com/shunshun0904/growthstock/actions/runs/43671912380)
+  （force・replace_day=2026-11-13。学習日 2026-11-14 16:24 UTC のモデル。候補 12件。追跡の記録 5件を置き換え・予測ログ v2 への追記 0行）、
+  Rewrite Prediction Log Day [run 43673065249](https://github.com/shunshun0904/growthstock/actions/runs/43673065249)（12行を書き直し・
+  位置が変わった行 11）。買いの規則を満たす候補は 0件。日曜の朝の予測の Routine は `trig_011n5RCpbdKNnTprvpC1iu8f`（初回 11/22）
 
 ## 固定+10%・+15%の分類モデルへの切替（2026-11-03）
 

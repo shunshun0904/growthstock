@@ -165,7 +165,7 @@
 | ラベル違い 1.5σ | 土曜 09:10 | Retrain Weekly | `tune=yes` `only=lgbm_k15,xgb_k15,cat_k15`（2026-10-11 夜に追加。2026-10-31 の回から `logit_k15` を外した） | `trig_0127nfERdx9RyirNCkFp4BXn` |
 | ~~ラベル違い 1.8σ~~ | ~~土曜 14:10~~ | （2026-10-24 に**無効**。運用者の依頼で 1.8σ の4本を外した） | `only=lgbm_k18,xgb_k18,cat_k18,logit_k18` は名指ししても「知らないモデル」で止まる | `trig_01JHXTaxZLmDgfUBF3CYbTqe`（消さずに無効のまま） |
 | 保存データの検査 | 土曜 10:40 | Check Data Store | 既定（5日） | `trig_01G4KY6RJMAsFgY7t57khocW` |
-| 日曜の予測 | 日曜 09:00 | Predict Breakouts | `force=false`（金曜の分を土曜の夜の学習の新しいモデルで出す。完了で Update Holdings Sheet が連鎖。2026-11-15 から。運用者の選択「金曜の夜はやめる」「日曜の朝9時」） | （下の §96 の記録） |
+| 日曜の予測 | 日曜 09:00 | Predict Breakouts | `force=false`（金曜の分を土曜の夜の学習の新しいモデルで出す。完了で Update Holdings Sheet が連鎖。2026-11-15 から。運用者の選択「金曜の夜はやめる」「日曜の朝9時」） | `trig_011n5RCpbdKNnTprvpC1iu8f` |
 | 朝の確認 | 月〜土 07:40 | （確かめるだけ） | 前日の run の結論を見る。取り込みの run が無ければ Update Data Store を起動し直す。取り込みは済んで予測だけ無ければ Predict Breakouts を起動する。月曜は日曜の学習（09:10 と 14:10 の2つ）と土曜の検査を見る | `trig_01Pscq9oSei7otJrCjgfxgEc` |
 | 米国株の朝のまとめ | 平日 07:31 | （起動しない。チャットに書くだけ） | 前夜の米国の引け（下の「米国株の朝のまとめ」） | `trig_01QgG7DBXSiFwitT7pPpAWaA` |
 
