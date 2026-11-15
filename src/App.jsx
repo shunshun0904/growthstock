@@ -33,7 +33,8 @@ const TABS = [
   // 「候補銘柄のニュース として新たにタブを追加してほしいです。左から2番目で」
   { id: 'news', label: '候補銘柄のニュース' },
   { id: 'valuation', label: '理論株価' },
-  { id: 'supplydemand', label: '価格帯別需給' },
+  // 2026-11-15「推定は本番運用レベルではないので非表示に」で hidden に。画面・推計処理・データは残す。
+  { id: 'supplydemand', label: '価格帯別需給', hidden: true },
   // 候補ごとのリカレンス・ネットワーク（点 = その銘柄の1営業日、線 = テクニカル指標9列の状態が似た日どうし。参考で、選定には
   // 使わない）。運用者の依頼 2026-10-19「Obsidian の球状のプロットのようなことを、ノードを1営業日として…その日の各候補銘柄単体で」。
   // データは Release の recurrence.tar.gz（research/recurrence_net.py）をデプロイで dist/data/recurrence/ に置く。
