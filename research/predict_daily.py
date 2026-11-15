@@ -30,6 +30,7 @@ out-of-fold 予測から作った較正表とスコア帯統計を meta.json に
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import glob
 import json
 import os
@@ -1043,6 +1044,24 @@ def update_history(args, rows: List[Dict], days) -> None:
     # 記録が1件でもあれば足さない。追跡列（現在値など）の更新は続ける
     recorded = {e["date"] for e in hist.get("entries", [])}
     added = 0
+    # 運用者が置き換えを指示した日（workflow の force と replace_day。2026-11-15「今夜から新モデルで」: 金曜の夜に前の
+    # モデルで出した 11/13 を、土曜の夜の学習の新しいモデルで出し直して置き換える）だけ、その日の記録を消してから足す
+    replace = os.environ.get("REPLACE_HISTORY_DAY", "").strip()
+    if replace:
+        try:
+            replace = dt.date.fromisoformat(replace).isoformat()
+        except ValueError:
+            print(f"[warn] REPLACE_HISTORY_DAY の形が不正なので置き換えない: {replace!r}")
+            replace = ""
+    if replace and replace != latest:
+        print(f"[warn] REPLACE_HISTORY_DAY={replace} は今回の日 {latest} と違うので置き換えない")
+        replace = ""
+    if replace and latest in recorded:
+        before = len(hist.get("entries", []))
+        hist["entries"] = [e for e in hist.get("entries", []) if e.get("date") != latest]
+        print(f"[history] {latest} の記録 {before - len(hist['entries'])}件を、今回の予測で置き換える（REPLACE_HISTORY_DAY）")
+        existing = {(e["date"], e["jqCode"]) for e in hist["entries"]}
+        recorded = {e["date"] for e in hist["entries"]}
     if latest in recorded:
         print(f"[history] {latest} は記録済み。最初の予測のまま凍結する（追加しない）")
         rows = []

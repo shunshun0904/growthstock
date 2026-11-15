@@ -67,6 +67,18 @@
 意図して予測し直すときは FORCE_PREDICT=true（workflow_dispatch の force）。
 最終バー日か asOf が読めないときは、従来の判定に落ちる。
 
+週末の学習の前の日は、日曜の朝まで予測しない（2026-11-15 に足した第二の規則）
+------------------------------------------------------------------------
+運用者の依頼（2026-11-15）「新モデルで、日曜の夜に月曜購入分の予測を実施してほしいです」→ 選択「金曜の夜はやめる」
+「日曜の朝9時」。週次の学習（+10% の木3本・ランキング学習）は土曜の夜に回るので、**次の営業日が土曜をまたぐ日**
+（ふつうは金曜。金曜が休みなら木曜）の予測は、その土曜の翌日（日曜）になるまで出さない。日曜 09:00 の Routine が
+新しいモデルで予測する（その日はまだ予測していないので、上の第一の規則で進む）。1つの日付に予測は1つのまま。
+
+  最終バー日 D の次の営業日 N の間に土曜 S がある、かつ今日（JST）が S 以前 → 飛ばす
+  （連休で土曜が2つ以上あれば、N に近いほうの土曜で数える）
+
+カレンダーが D か N を覆っていなければこの規則は使わない（進む側に倒す）。FORCE_PREDICT は通す。
+
 止めない
 ------
 判断できない事情（manifest が読めない、バーが無い、時刻が壊れている）は
@@ -160,6 +172,28 @@ def decide_new_data(last_bar: Optional[dt.date], as_of: Optional[dt.date],
             stale, stale_why
     return False, (f"新しい日足が無い（最終バー {last_bar} は予測済み {as_of}）。"
                    "予測済みの日を予測し直さない"), stale, stale_why
+
+
+def weekend_hold(cal, last_bar: Optional[dt.date], today: dt.date) -> Optional[str]:
+    """
+    最終バー日の次の営業日が週末の学習（土曜の夜）の後なら、その翌日（日曜）まで待つ理由を返す。待たなくてよければ None。
+    カレンダーが分からなければ None（進む側）。
+    """
+    if cal is None or not cal or last_bar is None:
+        return None
+    nxt = cal.next_trading_day(last_bar)
+    if nxt is None:
+        return None
+    sats = [last_bar + dt.timedelta(days=k) for k in range(1, (nxt - last_bar).days)
+            if (last_bar + dt.timedelta(days=k)).weekday() == 5]
+    if not sats:
+        return None
+    sat = max(sats)
+    release = sat + dt.timedelta(days=1)
+    if today >= release:
+        return None
+    return (f"{last_bar} の次の営業日 {nxt} は週末の学習（{sat} 土曜の夜）の後なので、"
+            f"{release} 日曜の朝に新しいモデルで予測する（金曜の夜は予測しない）")
 
 
 def stale_excused(manifest: dict, expected: Optional[dt.date]) -> Optional[str]:
@@ -270,6 +304,7 @@ def main(argv=None) -> int:
 
     run, why = True, "判定できなかったので通常どおり進む"
     stale, stale_why = False, ""
+    held = False
     force = os.environ.get("FORCE_PREDICT", "").strip().lower() in ("1", "true", "yes")
     try:
         path = os.path.join(args.data_dir, "manifest.json")
@@ -293,6 +328,11 @@ def main(argv=None) -> int:
                 if excuse:
                     print(f"[gate] 日足が欠けているが、取り込みの故障ではない — {excuse}")
                     nd = (nd[0], nd[1], False, "")
+            if nd is not None and nd[0]:
+                hold = weekend_hold(cal, last_bar, now.astimezone(JST).date())
+                if hold:
+                    held = True
+                    nd = (False, hold, nd[2], nd[3])
         if nd is not None:
             run, why, stale, stale_why = nd
         else:
@@ -309,7 +349,10 @@ def main(argv=None) -> int:
         print(f"[gate] 予測を実行する — {why}")
     else:
         print(f"[gate] 予測を飛ばす — {why}")
-        print("       新しい日足が無いので新しい候補は出ない。画面は予測済みの日のまま。")
+        if held:
+            print("       日曜の朝の予測（Routine）で出す。それまで画面は予測済みの日のまま。")
+        else:
+            print("       新しい日足が無いので新しい候補は出ない。画面は予測済みの日のまま。")
 
     out = os.environ.get("GITHUB_OUTPUT")
     if out:

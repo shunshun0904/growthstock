@@ -89,6 +89,13 @@ class Calendar:
             return None
         return sum(1 for d in self.days if start <= d < end)
 
+    def next_trading_day(self, after: dt.date) -> Optional[dt.date]:
+        """after より後でいちばん早い営業日。after が範囲外か、範囲の中に無ければ None（分からない）。"""
+        if not self.covers(after):
+            return None
+        future = [d for d in self.days if after < d <= self.end]
+        return min(future) if future else None
+
     def last_trading_day(self, as_of: dt.date) -> Optional[dt.date]:
         """as_of 以前でいちばん新しい営業日。範囲外なら None。"""
         if not self.covers(as_of):
