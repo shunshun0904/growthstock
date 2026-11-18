@@ -1,4 +1,4 @@
-"""Contracts that matter for add-on data and matched research rows."""
+"""Contracts that matter for add-on data and dashboard output."""
 
 from contextlib import closing, redirect_stdout
 from datetime import datetime, timedelta, timezone
@@ -15,11 +15,10 @@ import numpy as np
 import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path[:0] = [str(ROOT / "research"), str(ROOT / "research/exp"), str(ROOT / "tests/fixtures")]
+sys.path[:0] = [str(ROOT / "research"), str(ROOT / "tests/fixtures")]
 from build_volume_profile import main, expected_window, fetch_intraday
 from volume_profile_data import AddonClient, ProfileCache, bulk_plan
-from volume_profile import Intraday, Quote, feature_columns, window_profiles
-from volume_profile_ablation import attach
+from volume_profile import Intraday, Quote, window_profiles
 from volume_profile_inputs import write_inputs
 
 
@@ -32,7 +31,7 @@ class VolumeProfileTest(unittest.TestCase):
         tick = Intraday(np.array([[100., 100, 10_000], [110., 300, 33_000]]), self.at)
         minute = Intraday(np.array([[107.5, 400, 43_000]]), self.at)
         profile = window_profiles([self.day], 1, {self.day: quote},
-                                  {"tick": {self.day: tick}, "minute": {self.day: minute}}, self.at, False)
+                                  {"tick": {self.day: tick}, "minute": {self.day: minute}}, self.at)
         self.assertEqual(profile["tick"]["poc"], [110., 110.5])
         self.assertEqual(profile["minute"]["poc"], [107.5, 108.])
         self.assertEqual(profile["tick"]["aboveCloseShare"], .75)
@@ -51,7 +50,7 @@ class VolumeProfileTest(unittest.TestCase):
         for action, status in [("1", "ok"), (None, "share_basis_unknown"), ("3", "share_basis_unknown")]:
             newer = Quote(100, 100, 100, 300, 30_000, .5, action, self.at)
             profile = window_profiles([before, self.day], 2, {before: older, self.day: newer},
-                                      {"tick": tape, "minute": {}}, self.at, False)["tick"]
+                                      {"tick": tape, "minute": {}}, self.at)["tick"]
             self.assertEqual(profile["status"], status)
             if status == "ok":
                 self.assertEqual(profile["shares"], 500)
@@ -65,10 +64,10 @@ class VolumeProfileTest(unittest.TestCase):
         x = Intraday(np.array([[100., 100, 10_000]]), self.at + timedelta(minutes=1))
         y = Intraday(np.array([[100., 50, 5_000]]), self.at)
         args = ([self.day], 1, {self.day: quote}, {"tick": {self.day: x}, "minute": {self.day: y}})
-        observed = window_profiles(*args, self.at, False)
+        observed = window_profiles(*args, self.at)
         self.assertEqual(observed["tick"]["status"], "not_available_at_cutoff")
         self.assertEqual(observed["minute"]["status"], "daily_totals_mismatch")
-        self.assertEqual(window_profiles(*args, self.at, True)["tick"]["status"], "ok")
+        self.assertEqual(window_profiles(*args, self.at + timedelta(minutes=1))["tick"]["status"], "ok")
 
     def test_bulk_plan_uses_the_daily_file_once_when_monthly_also_exists(self):
         prefix = "equities/trades/"
@@ -122,7 +121,7 @@ class VolumeProfileTest(unittest.TestCase):
             _, data = cache.load_code("123A0", self.day, self.day)
             np.testing.assert_array_equal(data["tick"][self.day].points, [[100, 2, 200]])
 
-    def test_vendor_shaped_files_to_dashboard_features_and_preserved_base_rows(self):
+    def test_vendor_shaped_files_create_only_the_dashboard_output(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             write_inputs(root)
@@ -130,7 +129,7 @@ class VolumeProfileTest(unittest.TestCase):
             args = ["--calendar", str(root / "calendar.csv"), "--daily", str(root / "daily.csv"),
                     "--minute", str(root / "minute.csv.gz"), "--ticks", str(root / "tick.csv.gz"),
                     "--as-of", self.day, "--codes", "123A", "9999", "--cache-dir", str(root / "cache"),
-                    "--output", str(output), "--targets", str(root / "targets.csv"), "--demo", "--historical"]
+                    "--output", str(output), "--demo"]
             with redirect_stdout(StringIO()):
                 self.assertEqual(main(args), 0)
                 self.assertEqual(main(args), 0)  # Re-import is replacement, not accumulation.
@@ -141,14 +140,7 @@ class VolumeProfileTest(unittest.TestCase):
             self.assertEqual(first["windows"]["20"]["tick"]["status"], "ok")
             self.assertEqual(second["windows"]["20"]["tick"]["status"], "intraday_missing")
             self.assertEqual(second["windows"]["20"]["minute"]["status"], "ok")
-            derived = pd.read_parquet(output / "volume-features.parquet")
-            base = pd.DataFrame({"Code": ["9999", "123A", "7777"], "Date": [self.day] * 3, "label": [0, 1, 0]})
-            joined = attach(base, derived)
-            pd.testing.assert_frame_equal(joined[base.columns], base)
-            self.assertTrue(joined.loc[0, feature_columns("tick")].isna().all())
-            self.assertTrue(joined.loc[1, feature_columns("tick") + feature_columns("minute")].notna().all())
-            self.assertTrue(joined.loc[2, feature_columns("tick") + feature_columns("minute")].isna().all())
-            self.assertTrue(derived.loc[derived.Date.eq(derived.Date.min()), "vp_tick_poc_gap_20d"].isna().all())
+            self.assertEqual([item.name for item in output.iterdir()], ["volume-profile.json"])
 
 
 if __name__ == "__main__":

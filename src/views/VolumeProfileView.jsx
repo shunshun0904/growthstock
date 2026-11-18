@@ -128,7 +128,11 @@ export default function VolumeProfileView({ data, onData, stocks, candidates, se
     </div>
     {error && <p className="banner warn" role="alert">{error}</p>}
     {busy && <p role="status">集計ファイルを読み込み中です…</p>}
-    {!data ? <p className="volume-note">手元で作成した volume-profile.json を選ぶと、分足・ティックの集計がこのブラウザに表示されます。</p> : <>
+    {!data ? <p className="volume-note">
+      手元で作成した volume-profile.json を選ぶと、分足・ティックの集計がこのブラウザに表示されます。{' '}
+      <a href="https://github.com/shunshun0904/growthstock/blob/claude/jquants-browser-app-bwk19a/docs/VOLUME_PROFILE.md"
+        target="_blank" rel="noreferrer">集計ファイルの作り方</a>
+    </p> : <>
       <p className="volume-note">基準日 {data.asOf}{data.demo === true ? ' ／ 合成データの表示例' : ''}</p>
       <div className="volume-controls">
         <label>銘柄検索<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="銘柄名・コード" /></label>

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import gzip
-import hashlib
 import http.client
 import io
 import re
@@ -44,11 +43,6 @@ def private_dir(path):
         raise ValueError("個人用データの保存先は public/・dist/ の外に指定してください。")
     path.mkdir(mode=0o700, parents=True, exist_ok=True)
     return path
-
-
-def file_sha256(path):
-    with Path(path).open("rb") as stream:
-        return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
 def _optional_number(value):

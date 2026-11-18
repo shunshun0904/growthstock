@@ -1,4 +1,4 @@
-"""Price-band volume and research features from verified intraday sessions."""
+"""Price-band volume from verified intraday sessions."""
 
 from __future__ import annotations
 
@@ -6,18 +6,13 @@ import math
 import re
 from bisect import bisect_right
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 
 JST = timezone(timedelta(hours=9))
 WINDOWS = (1, 5, 20)
 SOURCES = ("tick", "minute")
-PUBLISH_ESTIMATE = time(17, 0)
-FEATURES = (
-    "poc_gap", "vwap_gap", "value_low_gap", "value_high_gap", "poc_share",
-    "above_close_share", "near_close_share",
-)
 
 
 def normalize_code(value):
@@ -25,12 +20,6 @@ def normalize_code(value):
     if not re.fullmatch(r"[0-9A-Z]{4,5}", code):
         raise ValueError("4桁または5桁の銘柄コードが必要です。")
     return code + "0" if len(code) == 4 else code
-
-
-def feature_columns(source):
-    if source not in SOURCES:
-        raise ValueError("Unknown intraday source")
-    return [f"vp_{source}_{metric}_{window}d" for window in WINDOWS for metric in FEATURES]
 
 
 @dataclass(frozen=True)
@@ -82,14 +71,6 @@ def reconciles(points, quote):
             and abs(qty.sum() - quote.volume) < .01
             and abs(value.sum() - quote.turnover) <= 1
             and price.min() >= quote.low - 1e-6 and price.max() <= quote.high + 1e-6)
-
-
-def available(day, observed_at, cutoff, historical):
-    # Schedules are approximate. Historical reconstruction is a separate mode
-    # because the vendor does not retain versions or first-availability times.
-    if historical:
-        observed_at = datetime.combine(date.fromisoformat(day), PUBLISH_ESTIMATE, JST)
-    return observed_at <= cutoff
 
 
 def share_factors(dates, quotes):
@@ -152,7 +133,6 @@ def make_profile(points, close, grid):
             hi += 1
             included += right
     bounds = lambda i: round((first + i) * width, 8)
-    poc = (bounds(peak) + bounds(peak + 1)) / 2
     above = float(shares[price > close + 1e-8].sum()) / total
     nearby = float(shares[(price >= close * .99 - 1e-8) & (price <= close * 1.01 + 1e-8)].sum()) / total
     return {
@@ -162,12 +142,10 @@ def make_profile(points, close, grid):
         "aboveCloseShare": above, "nearCloseShare": nearby,
         "bands": [[bounds(i), bounds(i + 1), float(qty), float(cash)]
                   for i, (qty, cash) in enumerate(zip(counts, amounts))],
-        "features": [poc / close - 1, vwap / close - 1, bounds(lo) / close - 1,
-                     bounds(hi + 1) / close - 1, float(counts[peak]) / total, above, nearby],
     }
 
 
-def window_profiles(dates, count, quotes, intraday, cutoff, historical):
+def window_profiles(dates, count, quotes, intraday, cutoff):
     """Return a comparable profile for each source and explicit gaps."""
     def missing(reason):
         return {source: {"status": reason, "coveredSessions": 0} for source in SOURCES}
@@ -176,7 +154,7 @@ def window_profiles(dates, count, quotes, intraday, cutoff, historical):
         return missing("calendar_history_missing")
     if any(day not in quotes for day in dates):
         return missing("daily_missing")
-    if any(not available(day, quotes[day].observed_at, cutoff, historical) for day in dates):
+    if any(quotes[day].observed_at > cutoff for day in dates):
         return missing("not_available_at_cutoff")
     if any(not (quotes[day].valid or quotes[day].no_trades) for day in dates):
         return missing("invalid_daily")
@@ -200,7 +178,7 @@ def window_profiles(dates, count, quotes, intraday, cutoff, historical):
                 continue
             if session is None:
                 reasons.append("intraday_missing")
-            elif not available(day, session.observed_at, cutoff, historical):
+            elif session.observed_at > cutoff:
                 reasons.append("not_available_at_cutoff")
             elif not reconciles(session.points, quote):
                 reasons.append("daily_totals_mismatch")

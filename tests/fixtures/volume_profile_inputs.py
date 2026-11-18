@@ -14,7 +14,7 @@ def write_inputs(output):
     root.mkdir(parents=True, exist_ok=True)
     calendar = pd.date_range("2025-10-01", "2025-11-18")
     holidays = {"2025-10-13", "2025-11-03"}
-    daily, minute, tick, targets, cal = [], [], [], [], []
+    daily, minute, tick, cal = [], [], [], []
     for index, current in enumerate(calendar):
         day = current.date().isoformat()
         trading = current.weekday() < 5 and day not in holidays
@@ -28,7 +28,6 @@ def write_inputs(output):
             shares = [190, 390, 680, 2050, 1770, 770, 420, 270]
             values = [p * q for p, q in zip(prices, shares)]
             daily.append((day, code, prices[0], prices[-1], prices[4], sum(shares), sum(values), 1., 0))
-            targets.append((day, code))  # Mirrors CSVs whose Date column is first.
             for minute_index in range(4):
                 section = slice(minute_index * 2, minute_index * 2 + 2)
                 pair = prices[section]
@@ -45,7 +44,6 @@ def write_inputs(output):
         root / "minute.csv.gz", index=False)
     pd.DataFrame(tick, columns=["Date", "Code", "Time", "SessionDistinction", "Price", "TradingVolume", "TransactionId"]).to_csv(
         root / "tick.csv.gz", index=False)
-    pd.DataFrame(targets, columns=["Date", "Code"]).to_csv(root / "targets.csv", index=False)
 
 
 if __name__ == "__main__":

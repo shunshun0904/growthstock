@@ -16,10 +16,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import features as F
 import label_specs as LS
 import ltr
+from build_volume_profile_features import feature_columns, file_sha256
 from e119_capital_efficiency import evaluate, forward_maturity
 from e121_theoretical_value_retune import Trainer, candidate_bank, forward_folds, primary, select_candidate
-from volume_profile import feature_columns, normalize_code
-from volume_profile_data import file_sha256, private_dir
+from volume_profile import normalize_code
+from volume_profile_data import private_dir
 
 SEEDS = (42, 43, 44)
 FIXED = dict(learning_rate=.05, num_leaves=31, min_child_samples=20,
