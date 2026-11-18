@@ -270,12 +270,12 @@ def bulk_period(key: str) -> Optional[Tuple[dt.date, dt.date]]:
     return first, nxt - dt.timedelta(days=1)
 
 
-def list_bulk(api: Api) -> List[dict]:
-    """分足の一括ファイルの一覧。期間の古い順。"""
+def list_bulk(api: Api, endpoint: str = ENDPOINT) -> List[dict]:
+    """一括ファイルの一覧（既定は分足）。期間の古い順。"""
     entries = []
     last_exc: Optional[Exception] = None
     # endpoint の書き方は公式の一覧では "/equities/bars/minute"。通らなければ先頭の / を外して試す
-    for ep in (ENDPOINT, ENDPOINT.lstrip("/")):
+    for ep in (endpoint, endpoint.lstrip("/")):
         try:
             for page in api.pages(BULK_LIST, {"endpoint": ep}):
                 for r in page.get("data") or []:
