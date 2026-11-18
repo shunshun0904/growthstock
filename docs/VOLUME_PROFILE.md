@@ -1,19 +1,24 @@
 # 価格帯別出来高
 
-J-Quantsの分足・ティックアドオンから、銘柄ごとの直近1・5・20営業日の価格帯別出来高を作ります。画面は「価格帯別出来高」タブで表示します。
+「価格帯別出来高」タブには、最新の予測基準日と日付が一致する予測対象を全件表示します。購入条件に達していない銘柄も含みます。J-Quantsの分足・ティックから直近1・5・20営業日を集計し、未集計の銘柄も一覧に表示します。銘柄名を押すとグラフが開きます。
 
-## データ取得と画面の使い方
+## 保存先の初期設定
 
-1. J-Quantsのダッシュボードでアドオンを有効にし、手元の端末にV2 APIキーを設定します。既存の `JQUANTS_API_KEY` または `JQUANTS_API` を利用できます。 [J-Quantsのデータ提供仕様](https://jpx-jquants.com/ja/spec/data-spec)
-2. リポジトリのルートで研究用依存をインストールし、1銘柄・1営業日で疎通を確認します。コード省略時は `public/data/predictions.json` の直近予測対象を使います。日付の既定値は予測の基準日です。利用したい営業日は `--as-of` で指定できます。
+1. `shunshun0904/growthstock-minute` を **Private** で作成し、READMEで初期化します。分足・ティックを蓄積する非公開リポジトリがあれば、同じリポジトリを使えます。 [リポジトリ作成](https://github.com/new)
+2. 保存先だけを対象とする fine-grained PAT を **Contents: Read and write** で発行し、公開側 `growthstock` の Actions Secret `MINUTE_DATA_TOKEN` に登録します。別名の保存先を使う場合は Actions Variable `MINUTE_DATA_REPO` に `owner/repository` を設定します。 [PAT発行](https://github.com/settings/personal-access-tokens/new) · [Actions Secrets](https://github.com/shunshun0904/growthstock/settings/secrets/actions) · [Actions Variables](https://github.com/shunshun0904/growthstock/settings/variables/actions)
+3. J-Quantsで分足・ティックアドオンを有効にした契約のAPIキーを、既存の Actions Secret `JQUANTS_API` に設定します。初回は **Update Volume Profiles** を手動で起動できます。以降は **Predict Breakouts** の成功後に自動実行します。 [J-Quantsのデータ提供仕様](https://jpx-jquants.com/ja/spec/data-spec) · [実行履歴](https://github.com/shunshun0904/growthstock/actions/workflows/update-volume-profile.yml)
 
-   ```bash
-   python3 -m pip install -r research/requirements.txt
-   python3 research/build_volume_profile.py --fetch --codes 7203 --lookback 1
-   ```
+更新ジョブは最新予測と同じ日付・銘柄であることを確認して、非公開リポジトリの `dashboard/volume-profile.json` を更新します。公開側に出るのは画面と既存の予測一覧です。アドオンデータと集計結果へのアクセスは非公開リポジトリで管理します。 [J-Quants利用規約 第8条](https://jpx-jquants.com/ja/termsofservice?lang=ja)
 
-3. ダッシュボードの「価格帯別出来高」タブで `research/_data/volume_profile/output/volume-profile.json` を選びます。銘柄・期間・ティック／分足・株数／売買代金を切り替えられます。 [ダッシュボード](https://shunshun0904.github.io/growthstock/)
-4. 通常の更新には `python3 research/build_volume_profile.py --fetch` を使います。予測対象の最大20営業日分から、日足と照合済みのセッションをキャッシュから再利用します。追加契約や取得状況に合わせて `--source minute` または `--source tick` を指定できます。取得済みの訂正を取り込む場合は `--refresh` を付けます。
+## ダッシュボードで見る
+
+1. 保存先だけに **Contents: Read-only** を持つ閲覧用の fine-grained PAT を別途発行します。 [PAT発行](https://github.com/settings/personal-access-tokens/new)
+2. 「価格帯別出来高」タブの「閲覧用GitHubトークン」に入力し、「接続」を押します。ブラウザからGitHubに認証し、そのセッションの間はタブを開くと自動で読み込みます。「接続を解除」でセッションから消去できます。 [ダッシュボード](https://shunshun0904.github.io/growthstock/)
+3. 一覧で分足・ティックの照合状況が分かります。銘柄を押し、集計期間と株数・売買代金を切り替えられます。予測と集計の基準日がずれている間は、最新予測の一覧に更新待ちを表示します。「再取得」で保存先を読み直します。
+
+## 集計の確認方法
+
+手元で疎通を確認する場合は、端末で `JQUANTS_API_KEY` または `JQUANTS_API` を設定し、`python3 -m pip install -r research/requirements.txt` を実行します。`python3 research/build_volume_profile.py --fetch --lookback 1` で最新日の全対象銘柄を1営業日分集計します。`--codes` と `--as-of` で銘柄と営業日を指定できます。
 
 ティックはBulkのCSV/GZで取得します。日別ファイルと月別ファイルの両方がある日は日別ファイルを使います。ティックは銘柄を指定しても対象日・月の一括ファイルを読むため、初回は1日から確認できます。分足は少数銘柄では銘柄別API、大きい対象ではBulkを使います。公式の提供範囲は直近2年、日次更新は16:30頃です。 [ティック](https://jpx-jquants.com/ja/spec/eq-trades) · [分足](https://jpx-jquants.com/ja/spec/eq-bars-minute) · [Bulk一覧](https://jpx-jquants.com/ja/spec/bulk-list) · [更新時刻](https://jpx-jquants.com/ja/spec/data-update)
 
@@ -25,7 +30,7 @@ python3 research/build_volume_profile.py --as-of YYYY-MM-DD --codes 7203 \
   --minute /path/to/minute.csv.gz --ticks /path/to/trades.csv.gz
 ```
 
-APIキー・取得データ・集計ファイルは個人の端末に置きます。既定の `research/_data/` はGitの対象外です。画面に渡すデータはファイル選択でブラウザ内に読み込み、ページを再読み込みするまで保持します。アドオンデータの取扱いは契約の利用条件に従います。 [J-Quants利用規約 第8条](https://jpx-jquants.com/ja/termsofservice?lang=ja)
+端末のAPIキーは環境変数で設定します。キャッシュと集計ファイルの既定の保存先 `research/_data/` はGitの対象外です。
 
 ## 計算と品質管理
 

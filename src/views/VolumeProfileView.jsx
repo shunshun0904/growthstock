@@ -1,6 +1,6 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { MAX_PROFILE_FILE_BYTES, PROFILE_WINDOWS, parseVolumeProfile, volumeCode } from '../lib/volumeProfile.js';
+import { PROFILE_REPO, PROFILE_WINDOWS, latestVolumeTargets, loadVolumeProfile } from '../lib/volumeProfile.js';
 
 const SOURCE_LABEL = { tick: 'ティック（約定価格）', minute: '分足（VWAP近似）' };
 const REASON = {
@@ -19,6 +19,20 @@ const yen = (n) => `${number(n)}円`;
 const percent = (n) => `${(n * 100).toFixed(1)}%`;
 const bandLabel = ([low, high]) => `${number(low)}–${number(high)}`;
 const displayCode = (code) => code.endsWith('0') ? code.slice(0, 4) : code;
+const SESSION_KEY = `growthstock.volume-profile.${PROFILE_REPO}`;
+const GUIDE = 'https://github.com/shunshun0904/growthstock/blob/claude/jquants-browser-app-bwk19a/docs/VOLUME_PROFILE.md';
+
+function savedToken() {
+  try { return sessionStorage.getItem(SESSION_KEY) || ''; }
+  catch { return ''; }
+}
+
+function saveToken(value) {
+  try {
+    if (value) sessionStorage.setItem(SESSION_KEY, value);
+    else sessionStorage.removeItem(SESSION_KEY);
+  } catch { /* The view still works when browser storage is disabled. */ }
+}
 
 function VolumeChart({ series, close, unit }) {
   const chartRows = series.bands.map(([low, high, shares, turnover]) => ({
@@ -73,74 +87,99 @@ function VolumeChart({ series, close, unit }) {
   </>;
 }
 
-export default function VolumeProfileView({ data, onData, stocks, candidates, selectedId }) {
+export default function VolumeProfileView({ predictions, predictionError }) {
   const [selected, setSelected] = useState('');
   const [query, setQuery] = useState('');
-  const [days, setDays] = useState(20);
+  const [periodChoice, setPeriodChoice] = useState(null);
   const [source, setSource] = useState(null);
   const [unit, setUnit] = useState('shares');
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [token, setToken] = useState(savedToken);
+  const [entry, setEntry] = useState('');
+  const [tokenError, setTokenError] = useState('');
+  const [request, setRequest] = useState({ status: 'idle' });
+  const [reload, setReload] = useState(0);
+  const targets = useMemo(() => latestVolumeTargets(predictions), [predictions]);
+  const day = predictions?.asOf;
+  const hasTargets = targets.length > 0;
 
-  const names = useMemo(() => new Map([...stocks, ...(candidates ?? [])]
-    .filter((stock) => stock.code && stock.name)
-    .map((stock) => [volumeCode(stock.code), stock.name])), [stocks, candidates]);
-  const choices = (data?.stocks ?? []).map((stock) => ({ ...stock, name: stock.name || names.get(stock.code) || '' }));
+  useEffect(() => {
+    if (!token || !day || !hasTargets) return undefined;
+    const abort = new AbortController();
+    setRequest({ status: 'loading' });
+    loadVolumeProfile(token, abort.signal).then((data) => {
+      if (abort.signal.aborted) return;
+      saveToken(token);
+      setRequest({ status: 'loaded', data });
+    }).catch((error) => {
+      if (!abort.signal.aborted) setRequest({ status: 'error', message: error instanceof TypeError
+        ? 'GitHubに接続できませんでした。時間を置いて再取得してください。' : error.message });
+    });
+    return () => abort.abort();
+  }, [token, day, hasTargets, reload]);
+
+  const data = request.data?.asOf === day ? request.data : null;
+  const byCode = useMemo(() => new Map((data?.stocks ?? []).map((stock) => [stock.code, stock])), [data]);
   const search = query.trim().toUpperCase();
-  const matching = choices.filter((stock) => `${stock.code} ${stock.name}`.toUpperCase().includes(search));
-  const preferred = selected || volumeCode(stocks.find((stock) => stock.id === selectedId)?.code);
-  const stock = matching.find((candidate) => candidate.code === preferred) ?? matching[0];
+  const matching = targets.filter((stock) => `${stock.code} ${stock.name}`.toUpperCase().includes(search));
+  const target = matching.find((candidate) => candidate.code === selected) ?? matching[0];
+  const stock = byCode.get(target?.code);
+  const suggestedPeriod = [...PROFILE_WINDOWS].reverse().find((count) => stock?.windows[count].tick.status === 'ok'
+    || stock?.windows[count].minute.status === 'ok');
+  const days = periodChoice ?? suggestedPeriod ?? 20;
   const period = stock?.windows[days];
-  const activeSource = source ?? (period?.tick.status === 'ok' || period?.minute.status !== 'ok' ? 'tick' : 'minute');
+  const activeSource = source ?? (period?.minute.status === 'ok' && period.tick.status !== 'ok' ? 'minute' : 'tick');
   const series = period?.[activeSource];
+  const available = targets.filter((item) => byCode.get(item.code)?.windows[days][activeSource].status === 'ok').length;
 
-  async function readFile(event) {
-    const input = event.currentTarget;
-    const file = input.files?.[0];
-    input.value = '';
-    if (!file) return;
-    setError('');
-    setBusy(true);
-    try {
-      if (file.size > MAX_PROFILE_FILE_BYTES) throw new Error('12MB以内の集計ファイルを選んでください。');
-      const next = parseVolumeProfile(await file.text());
-      onData(next);
-      setSelected('');
-      setSource(null);
-      setQuery('');
-      const available = [...PROFILE_WINDOWS].reverse().find((count) => next.stocks.some((item) =>
-        item.windows[count].tick.status === 'ok' || item.windows[count].minute.status === 'ok'));
-      setDays(available ?? 20);
-    } catch (problem) {
-      setError(problem.message || 'ファイルを読み込めませんでした。');
-    } finally {
-      setBusy(false);
+  function connect(event) {
+    event.preventDefault();
+    const value = entry.trim();
+    if (!/^[A-Za-z0-9_-]{20,255}$/.test(value)) {
+      setTokenError('GitHubで発行した閲覧用トークンを入力してください。');
+      return;
     }
+    setTokenError('');
+    setEntry('');
+    setToken(value);
+  }
+
+  function disconnect() {
+    saveToken('');
+    setToken('');
+    setRequest({ status: 'idle' });
+  }
+
+  function statusOf(code, kind) {
+    const current = byCode.get(code)?.windows[days][kind];
+    if (!current) return token ? '集計待ち' : '接続待ち';
+    return current.status === 'ok' ? '表示可' : `${current.coveredSessions}/${days}日`;
   }
 
   return <section className="card volume-view">
     <div className="card-head"><h2>価格帯別出来高</h2></div>
-    <div className="volume-import">
-      <label className="btn volume-file">集計ファイルを選択
-        <input className="sr-only" type="file" accept=".json,application/json" onChange={readFile} disabled={busy} />
-      </label>
-      {data && <button className="btn btn-ghost" type="button" onClick={() => { onData(null); setError(''); }}>読み込みを解除</button>}
-    </div>
-    {error && <p className="banner warn" role="alert">{error}</p>}
-    {busy && <p role="status">集計ファイルを読み込み中です…</p>}
-    {!data ? <p className="volume-note">
-      手元で作成した volume-profile.json を選ぶと、分足・ティックの集計がこのブラウザに表示されます。{' '}
-      <a href="https://github.com/shunshun0904/growthstock/blob/claude/jquants-browser-app-bwk19a/docs/VOLUME_PROFILE.md"
-        target="_blank" rel="noreferrer">集計ファイルの作り方</a>
-    </p> : <>
-      <p className="volume-note">基準日 {data.asOf}{data.demo === true ? ' ／ 合成データの表示例' : ''}</p>
+    {predictionError && <p className="banner warn" role="alert">予測対象一覧を取得できませんでした。</p>}
+    {!predictions && !predictionError && <p role="status">予測対象一覧を読み込み中です…</p>}
+    {day && <p className="volume-note">予測基準日 {day} ／ 対象 {targets.length}銘柄
+      {data && ` ／ ${days}営業日の${activeSource === 'tick' ? 'ティック' : '分足'} ${available}/${targets.length}銘柄`}</p>}
+    {day && !hasTargets && <p>この日の予測対象銘柄はありません。</p>}
+    {hasTargets && <>
+      {!token ? <form className="volume-connect" onSubmit={connect}>
+        <label>閲覧用GitHubトークン<input type="password" autoComplete="off" required value={entry}
+          onChange={(event) => setEntry(event.target.value)} /></label>
+        <button className="btn btn-primary" type="submit">接続</button>
+        <a href={GUIDE} target="_blank" rel="noreferrer">非公開データの接続手順</a>
+      </form> : <div className="volume-connect">
+        <button className="btn" type="button" disabled={request.status === 'loading'}
+          onClick={() => setReload((value) => value + 1)}>再取得</button>
+        <button className="btn btn-ghost" type="button" onClick={disconnect}>接続を解除</button>
+      </div>}
+      {tokenError && <p className="banner warn" role="alert">{tokenError}</p>}
+      {request.status === 'loading' && <p role="status">価格帯別出来高を読み込み中です…</p>}
+      {request.status === 'error' && <p className="banner warn" role="alert">{request.message}</p>}
+      {request.data && !data && <p className="volume-note" role="status">{day}の出来高は集計待ちです。保存済みの基準日は{request.data.asOf}です。</p>}
       <div className="volume-controls">
         <label>銘柄検索<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="銘柄名・コード" /></label>
-        <label>分析対象銘柄<select value={stock?.code ?? ''} onChange={(event) => setSelected(event.target.value)} disabled={!stock}>
-          {!stock && <option value="">該当する銘柄なし</option>}
-          {matching.map((item) => <option key={item.code} value={item.code}>{displayCode(item.code)} {item.name}</option>)}
-        </select></label>
-        <label>集計期間<select value={days} onChange={(event) => setDays(Number(event.target.value))}>
+        <label>集計期間<select value={days} onChange={(event) => setPeriodChoice(Number(event.target.value))}>
           {PROFILE_WINDOWS.map((count) => <option key={count} value={count}>{count}営業日</option>)}
         </select></label>
         <label>データ種別<select value={activeSource} onChange={(event) => setSource(event.target.value)}>
@@ -150,12 +189,26 @@ export default function VolumeProfileView({ data, onData, stocks, candidates, se
           <option value="shares">出来高（株）</option><option value="turnover">売買代金（円）</option>
         </select></label>
       </div>
-      {stock && series.status !== 'ok' && <div className="volume-empty" role="status">
+      <div className="volume-list volume-table-scroll">
+        <table aria-label="当日の予測対象銘柄">
+          <thead><tr><th scope="col">予測順位</th><th scope="col">銘柄</th><th scope="col">ティック</th><th scope="col">分足</th></tr></thead>
+          <tbody>{matching.map((item) => <tr key={item.code}>
+            <td>{item.rank ?? '–'}</td>
+            <td><button className="btn btn-ghost volume-stock" type="button" aria-pressed={item.code === target?.code}
+              onClick={() => { setSelected(item.code); setSource(null); }}>{displayCode(item.code)} {item.name}</button></td>
+            <td>{statusOf(item.code, 'tick')}</td><td>{statusOf(item.code, 'minute')}</td>
+          </tr>)}</tbody>
+        </table>
+        {!matching.length && <p>検索条件に一致する銘柄はありません。</p>}
+      </div>
+      {target && <h3 className="volume-stock-heading">{displayCode(target.code)} {target.name}</h3>}
+      {target && data && !stock && <p className="volume-note" role="status">この銘柄の出来高は集計待ちです。</p>}
+      {series && series.status !== 'ok' && <div className="volume-empty" role="status">
         <strong>{SOURCE_LABEL[activeSource]}／{days}営業日</strong>
         <p>{REASON[series.status]}</p>
         <span>照合済み {series.coveredSessions}/{days}営業日</span>
       </div>}
-      {stock && series.status === 'ok' && <>
+      {series?.status === 'ok' && <>
         <p className="volume-note">{series.from}〜{series.to} ／ 日足照合 {series.coveredSessions}/{days}営業日
           {series.adjustedShares === true ? ' ／ 分割・併合を基準日の株数に換算' : ''}</p>
         <dl className="volume-metrics">

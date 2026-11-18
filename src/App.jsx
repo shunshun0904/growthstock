@@ -81,7 +81,6 @@ export default function App() {
   const [history, setHistory] = useState({ entries: [] });
   const [filings, setFilings] = useState(null);
   const [featureNames, setFeatureNames] = useState({});
-  const [volumeProfile, setVolumeProfile] = useState(null);
   // 再学習で加わったサンプル。undefined = 読み込み中、null = まだ無い
   const [newSamples, setNewSamples] = useState(undefined);
   const [scoreDist, setScoreDist] = useState(undefined);
@@ -299,8 +298,7 @@ export default function App() {
         )}
 
         {tab === 'valuation' && <ValuationView />}
-        {tab === 'volumeprofile' && <VolumeProfileView data={volumeProfile} onData={setVolumeProfile}
-          stocks={stocks} candidates={pred?.candidates} selectedId={selectedId} />}
+        {tab === 'volumeprofile' && <VolumeProfileView predictions={pred} predictionError={predError} />}
         {tab === 'prediction' && (
           predError ? (
             <div className="banner warn">

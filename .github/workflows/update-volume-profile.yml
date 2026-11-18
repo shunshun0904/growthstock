@@ -1,47 +1,64 @@
 name: Update Volume Profiles
 
 on:
-  push:
-    branches: ['codex/automatic-volume-profile-20261118']
-    paths: ['.github/workflows/update-volume-profile.yml']
+  workflow_run:
+    workflows: ['Predict Breakouts']
+    types: [completed]
+    branches: ['claude/jquants-browser-app-bwk19a']
+  workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: daily-volume-profile
+  cancel-in-progress: false
+
 jobs:
-  check:
+  update:
+    if: >-
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') ||
+      (github.event_name == 'workflow_dispatch' && github.ref_name == github.event.repository.default_branch)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      PROFILE_REPO: ${{ vars.MINUTE_DATA_REPO || format('{0}/growthstock-minute', github.repository_owner) }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Predictions commit the latest output during their workflow.
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Check private destination
+        id: store
+        env:
+          GH_TOKEN: ${{ secrets.MINUTE_DATA_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo '::notice::MINUTE_DATA_TOKEN を登録すると価格帯別出来高の自動更新が有効になります。'
+            exit 0
+          fi
+          if [[ ! "$PROFILE_REPO" =~ ^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$ ]] ||
+             [ "$(gh api "repos/$PROFILE_REPO" --jq '.private' 2>/dev/null)" != true ]; then
+            echo '::error::価格帯別出来高の保存先を非公開リポジトリとして確認できません。'
+            exit 1
+          fi
+          echo 'ready=true' >> "$GITHUB_OUTPUT"
       - uses: actions/setup-python@v5
+        if: steps.store.outputs.ready == 'true'
         with:
           python-version: '3.12'
       - run: pip install pandas==2.2.3 pyarrow==18.1.0
-      - name: Check private storage access
-        env:
-          GH_TOKEN: ${{ secrets.MINUTE_DATA_TOKEN }}
-          PROFILE_REPO: ${{ vars.MINUTE_DATA_REPO || format('{0}/growthstock-minute', github.repository_owner) }}
-        run: |
-          if [ -z "$GH_TOKEN" ]; then
-            echo 'MINUTE_DATA_TOKEN is not configured.'
-          elif [ "$(gh api "repos/$PROFILE_REPO" --jq '.private' 2>/dev/null)" = true ]; then
-            echo 'The private destination is accessible.'
-          else
-            echo 'The private destination cannot be confirmed.'
-          fi
-      - name: Verify J-Quants intraday data for the latest predictions
+        if: steps.store.outputs.ready == 'true'
+      - name: Build today's profiles
+        if: steps.store.outputs.ready == 'true'
         env:
           JQUANTS_API: ${{ secrets.JQUANTS_API }}
-          PROFILE_TEMP: ${{ runner.temp }}/volume-profile-check
         run: |
           python3 research/build_volume_profile.py --fetch \
-            --cache-dir "$PROFILE_TEMP/cache" --output "$PROFILE_TEMP/output"
-          python3 - "$PROFILE_TEMP/output/volume-profile.json" <<'PY'
-          import json, sys
-          with open(sys.argv[1], encoding='utf-8') as handle:
-              data = json.load(handle)
-          counts = {days: {source: sum(stock['windows'][days][source]['status'] == 'ok' for stock in data['stocks'])
-                           for source in ('tick', 'minute')} for days in ('1', '5', '20')}
-          print(json.dumps({'asOf': data['asOf'], 'targets': len(data['stocks']), 'reconciled': counts}))
-          PY
+            --cache-dir "$RUNNER_TEMP/volume-profile/cache" --output "$RUNNER_TEMP/volume-profile/output"
+      - name: Save dashboard profiles in the private repository
+        if: steps.store.outputs.ready == 'true'
+        env:
+          MINUTE_DATA_TOKEN: ${{ secrets.MINUTE_DATA_TOKEN }}
+        run: python3 research/publish_volume_profile.py "$RUNNER_TEMP/volume-profile/output/volume-profile.json"

@@ -3,6 +3,7 @@
 from contextlib import closing, redirect_stdout
 from datetime import datetime, timedelta, timezone
 from io import BytesIO, StringIO
+import base64
 import gzip
 import json
 from pathlib import Path
@@ -16,7 +17,8 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / "research"), str(ROOT / "tests/fixtures")]
-from build_volume_profile import main, expected_window, fetch_intraday
+from build_volume_profile import main, expected_window, fetch_intraday, prediction_codes
+from publish_volume_profile import PrivateStore, checked_snapshot
 from volume_profile_data import AddonClient, ProfileCache, bulk_plan
 from volume_profile import Intraday, Quote, window_profiles
 from volume_profile_inputs import write_inputs
@@ -25,6 +27,57 @@ from volume_profile_inputs import write_inputs
 class VolumeProfileTest(unittest.TestCase):
     at = datetime(2025, 11, 18, 10, tzinfo=timezone.utc)
     day = "2025-11-18"
+
+    def test_prediction_targets_are_all_and_only_current_day(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "predictions.json"
+            path.write_text(json.dumps({"asOf": self.day, "candidates": [
+                {"date": self.day, "code": "123A", "name": "A", "agree90": 0},
+                {"date": self.day, "code": "9999", "name": "B", "agree90": 3},
+                {"date": "2025-11-17", "code": "8888", "name": "Earlier"},
+            ]}))
+            self.assertEqual(prediction_codes(path), (self.day, {"123A0": "A", "99990": "B"}))
+
+    def test_zero_targets_produce_empty_snapshot_without_api(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            path = root / "predictions.json"
+            path.write_text(json.dumps({"asOf": self.day, "candidates": []}))
+            with patch("build_volume_profile.AddonClient") as client, redirect_stdout(StringIO()):
+                self.assertEqual(main(["--fetch", "--predictions", str(path), "--output", str(root / "out")]), 0)
+            client.assert_not_called()
+            profile = json.loads((root / "out/volume-profile.json").read_text())
+            self.assertEqual((profile["asOf"], profile["stocks"]), (self.day, []))
+
+    def test_publication_rechecks_date_universe_and_disallows_demo(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            predictions = root / "predictions.json"
+            predictions.write_text(json.dumps({"asOf": self.day, "candidates": [{"date": self.day, "code": "123A"}]}))
+            snapshot = root / "volume-profile.json"
+            profile = {"kind": "growthstock.volume-profile", "schemaVersion": 1, "asOf": self.day, "demo": False,
+                       "stocks": [{"code": "123A0", "date": self.day}]}
+            snapshot.write_text(json.dumps(profile))
+            self.assertEqual(checked_snapshot(snapshot, predictions)[1:], (self.day, 1))
+            for update in ({"asOf": "2025-11-17"}, {"stocks": []}, {"demo": True}):
+                snapshot.write_text(json.dumps({**profile, **update}))
+                with self.assertRaisesRegex(ValueError, "最新の予測と一致しません"):
+                    checked_snapshot(snapshot, predictions)
+
+    def test_destination_must_be_private_and_updates_use_expected_blob(self):
+        store = PrivateStore("owner/private-volume", "test-token")
+        metadata = {"private": True, "full_name": "owner/private-volume", "default_branch": "main"}
+        with patch.object(store, "request", return_value={**metadata, "private": False}) as request:
+            with self.assertRaisesRegex(ValueError, "非公開"):
+                store.publish(b"{}", self.day)
+        request.assert_called_once_with("")
+        with patch.object(store, "request", side_effect=[metadata, {"sha": "expected"}, {}]) as request:
+            store.publish(b"{}", self.day)
+        target, payload = request.call_args.args
+        self.assertEqual(target, "/contents/dashboard/volume-profile.json")
+        self.assertEqual(payload["branch"], "main")
+        self.assertEqual(payload["sha"], "expected")
+        self.assertEqual(base64.b64decode(payload["content"]), b"{}")
 
     def test_tick_and_minute_distributions_keep_the_same_total(self):
         quote = Quote(100, 110, 106, 400, 43_000, 1, None, self.at)
