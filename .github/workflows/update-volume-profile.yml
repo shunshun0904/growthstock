@@ -11,7 +11,7 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -35,13 +35,13 @@ jobs:
           JQUANTS_API: ${{ secrets.JQUANTS_API }}
           PROFILE_TEMP: ${{ runner.temp }}/volume-profile-check
         run: |
-          python3 research/build_volume_profile.py --fetch --lookback 1 \
+          python3 research/build_volume_profile.py --fetch \
             --cache-dir "$PROFILE_TEMP/cache" --output "$PROFILE_TEMP/output"
           python3 - "$PROFILE_TEMP/output/volume-profile.json" <<'PY'
           import json, sys
           with open(sys.argv[1], encoding='utf-8') as handle:
               data = json.load(handle)
-          counts = {source: sum(stock['windows']['1'][source]['status'] == 'ok' for stock in data['stocks'])
-                    for source in ('tick', 'minute')}
+          counts = {days: {source: sum(stock['windows'][days][source]['status'] == 'ok' for stock in data['stocks'])
+                           for source in ('tick', 'minute')} for days in ('1', '5', '20')}
           print(json.dumps({'asOf': data['asOf'], 'targets': len(data['stocks']), 'reconciled': counts}))
           PY
