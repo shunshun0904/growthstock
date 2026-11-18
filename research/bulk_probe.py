@@ -24,7 +24,6 @@ import gzip
 import io
 import json
 import os
-import re
 import statistics
 import sys
 import tempfile
@@ -41,11 +40,11 @@ import pyarrow.csv as pcsv  # noqa: E402
 import pyarrow.parquet as pq  # noqa: E402
 
 import minute_bars as MB  # noqa: E402
+from ticks import time_to_us  # noqa: E402,F401  （時刻の変換はティックの取り込みと同じものを使う）
 from jquants_data_fetcher import JQuantsError, resolve_api_key  # noqa: E402
 
 #: 数字だけでも数値にしない列（識別子・区分。先頭の 0 に意味がある）
 ID_COLUMNS = {"Code", "TransactionId", "SessionDistinction"}
-_DIGITS = re.compile(r"^\d+$")
 _HMS = r"^\d{2}:\d{2}:\d{2}(\.\d{1,6})?$"
 
 
@@ -102,22 +101,6 @@ def gunzip_size(path: str) -> int:
             if not b:
                 return n
             n += len(b)
-
-
-def time_to_us(arr) -> pa.ChunkedArray:
-    """"HH:MM:SS(.ffffff)" -> time64[us]。形が違う行があれば ValueError。"""
-    s = pc.utf8_trim_whitespace(arr)
-    ok = pc.match_substring_regex(s, _HMS)
-    bad = pc.sum(pc.cast(pc.invert(pc.fill_null(ok, False)), pa.int64())).as_py() or 0
-    if bad:
-        raise ValueError(f"時刻が HH:MM:SS(.ffffff) でない行が {bad}行")
-    h = pc.cast(pc.utf8_slice_codeunits(s, 0, 2), pa.int64())
-    m = pc.cast(pc.utf8_slice_codeunits(s, 3, 5), pa.int64())
-    sec = pc.cast(pc.utf8_slice_codeunits(s, 6, 8), pa.int64())
-    frac = pc.utf8_rpad(pc.utf8_slice_codeunits(s, 9, 15), width=6, padding="0")
-    us = pc.add(pc.multiply(pc.add(pc.multiply(pc.add(pc.multiply(h, 60), m), 60), sec), 1_000_000),
-                pc.cast(frac, pa.int64()))
-    return pc.cast(us, pa.time64("us"))
 
 
 def column_profile(col: pa.ChunkedArray) -> dict:

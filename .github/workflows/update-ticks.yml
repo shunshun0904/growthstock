@@ -1,0 +1,201 @@
+name: Update Ticks
+
+# J-Quants のティック（約定。/equities/trades。アドオン「株価 分足・ティック」）を取得して蓄積する。
+# 中身は research/ticks.py、経緯と実測は docs/TICKS.md。
+#
+# ティックは CSV の一括ダウンロードでしか提供されない（API では取れない）。2年分で 21GB（CSV.gz）、
+# 1日 約514万行。J-Quants が持つのは直近2年分で、毎日1日ずつ古い日が取れなくなる。取った日は消さない。
+#
+# 置き場は分足と同じ**非公開**リポジトリ（既定 <owner>/growthstock-minute。運用者の選択 2026-11-18）:
+#   Release data-tick        取得記録 tick_manifest.json
+#   Release data-tick-YYYY   その年の日ごとのファイル tick_YYYYMMDD.parquet（1 Release に置けるのは 1,000 個まで）
+# 書き込みは分足と同じ Secret MINUTE_DATA_TOKEN。置き場が公開になっていたら、何も上げずに止める。
+#
+#   初回: 月ごとの一括ファイル（24件・1件 645MB〜1.16GB）を古い月から。1回で終わらなければ、次の実行が続きを取る
+#   毎日: 取り込み（Update Data Store。平日 18:40 JST の Routine）の完了に続けて、その日の日ごとの
+#         ファイル（16:44 JST ごろにできる）を取る。予測・分足とは別のワークフロー
+on:
+  workflow_run:
+    workflows: ['Update Data Store']
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'update = 取得して蓄積 / probe = 一覧と取り込む予定だけ（何も保存しない）'
+        required: false
+        type: choice
+        options: ['update', 'probe']
+        default: 'update'
+      forget_from:
+        description: 'この日（YYYY-MM-DD）以降の取得記録を外し、その日を含む一括ファイルを取り込み直す'
+        required: false
+        default: ''
+      reingest_bulk:
+        description: '一括ファイルを全部取り込み直す（2年分で 21GB を落とし直す）'
+        required: false
+        type: choice
+        options: ['no', 'yes']
+        default: 'no'
+      max_minutes:
+        description: '新しいファイルに手を付けない分数（ジョブの上限 330分より短く）'
+        required: false
+        default: '300'
+  # 既定ブランチへ入る前に、作業ブランチから過去分の取得を始めるための起動（2026-11-18）。
+  # 要求ファイルの1行目が probe なら一覧だけ、それ以外は取得して蓄積
+  push:
+    branches: ['ccr-de5c973d-d8c3zi']
+    paths: ['research/tick_request.txt']
+
+# このリポジトリには書かない（置き場は別のリポジトリ）
+permissions:
+  contents: read
+
+concurrency:
+  group: update-ticks
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  MANIFEST_TAG: data-tick
+  DATA_DIR: research/_tick
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      GH_REPO: ${{ vars.MINUTE_DATA_REPO || format('{0}/growthstock-minute', github.repository_owner) }}
+      GH_TOKEN: ${{ secrets.MINUTE_DATA_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # ティックのスクリプトは pyarrow だけで動く。版は research/requirements.txt に合わせる
+      - run: pip install pyarrow==18.1.0 numpy==2.1.3
+
+      - name: Mode
+        id: mode
+        env:
+          MODE_IN: ${{ inputs.mode || 'update' }}
+        run: |
+          MODE="$MODE_IN"
+          if [ "${{ github.event_name }}" = "push" ] && [ -f research/tick_request.txt ]; then
+            # 空・コメントだけのときに grep が 1 を返して（pipefail）止まらないよう || true
+            REQ=$(grep -v '^#' research/tick_request.txt | head -1 | tr -d '\r' | awk '{print $1}' || true)
+            [ "$REQ" = "probe" ] && MODE=probe
+          fi
+          [ "$MODE" = "probe" ] || MODE=update
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "モード: $MODE / 起動: ${{ github.event_name }}"
+
+      # probe は何も保存しないので置き場を使わない
+      - name: Check storage
+        if: steps.mode.outputs.mode != 'probe'
+        run: |
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error title=MINUTE_DATA_TOKEN が無い::Settings > Secrets and variables > Actions に、置き場（$GH_REPO）だけに Contents の読み書きを持つ fine-grained PAT を MINUTE_DATA_TOKEN として登録する（docs/MINUTE_BARS.md）"
+            exit 1
+          fi
+          if ! priv=$(gh api "repos/$GH_REPO" --jq '.private' 2>&1); then
+            echo "::error title=ティックの置き場に届かない::$GH_REPO: $(echo "$priv" | tr '\n' ' ' | head -c 200)（リポジトリが無い・PAT にそのリポジトリの権限が無い）"
+            exit 1
+          fi
+          if [ "$priv" != "true" ]; then
+            echo "::error title=ティックの置き場が公開になっている::$GH_REPO は private でない。J-Quants のデータを誰でも落とせる場所に置かないよう止める"
+            exit 1
+          fi
+          bash scripts/gh_release_ensure.sh "$MANIFEST_TAG" "J-Quants ティックの取得記録" \
+            "J-Quants のティック（/equities/trades）の取得記録（tick_manifest.json）。日ごとのファイルは data-tick-YYYY。growthstock の Update Ticks が書く。"
+          echo "置き場: $GH_REPO（private）の Release $MANIFEST_TAG と data-tick-YYYY"
+
+      # 落とすのは取得記録だけ。日ごとのファイル（2年で 13GB 超）は落とさない（書き足すだけで、書き直さない）
+      - name: Download manifest
+        id: download
+        if: steps.mode.outputs.mode != 'probe'
+        run: |
+          mkdir -p "$DATA_DIR"
+          bash scripts/gh_release_download.sh "$MANIFEST_TAG" "$DATA_DIR" 'tick_manifest.json'
+          if [ ! -f "$DATA_DIR/tick_manifest.json" ]; then
+            # 記録だけが無くて日ごとのファイルがあるなら止める（初回のつもりで進むと、全部を取り込み直す）
+            n=$(gh release list --limit 100 --json tagName --jq '[.[] | select(.tagName | test("^data-tick-[0-9]{4}$"))] | length')
+            if [ "${n:-0}" -gt 0 ]; then
+              echo "::error title=ティックの取得記録が無い::data-tick-YYYY が ${n}件あるのに tick_manifest.json が無い。手で確かめる（docs/TICKS.md）"
+              exit 1
+            fi
+            echo "初回（保存先にティックはまだ無い）"
+          fi
+
+      - name: Fetch ticks
+        env:
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+          MODE: ${{ steps.mode.outputs.mode }}
+          FORGET_FROM: ${{ inputs.forget_from || '' }}
+          REINGEST: ${{ inputs.reingest_bulk || 'no' }}
+          MAXM: ${{ inputs.max_minutes || '300' }}
+        run: |
+          [[ "$MAXM" =~ ^[0-9]{1,3}$ ]] || { echo "max_minutes が不正: $MAXM"; exit 1; }
+          mkdir -p "$DATA_DIR"
+          ARGS=(--data-dir "$DATA_DIR" --max-minutes "$MAXM" --summary-json tick_summary.json
+                --upload-cmd "bash scripts/gh_release_upload.sh"
+                --ensure-cmd "bash scripts/gh_release_ensure.sh")
+          if [ -n "$FORGET_FROM" ]; then
+            [[ "$FORGET_FROM" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || { echo "forget_from が不正: $FORGET_FROM"; exit 1; }
+            ARGS+=(--forget-from "$FORGET_FROM")
+          fi
+          [ "$REINGEST" = "yes" ] && ARGS+=(--reingest-bulk)
+          if [ "$MODE" = "probe" ]; then
+            ARGS=(--data-dir "$DATA_DIR" --summary-json tick_summary.json --probe-only)
+          fi
+          python3 -u research/ticks.py "${ARGS[@]}" 2>&1 | tee tick.log
+          exit "${PIPESTATUS[0]}"
+
+      # ログと実行の画面は公開。件数・日付・大きさだけを出す（価格・数量の値は出さない）
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## ティックの取得（置き場: \`$GH_REPO\` の Release \`$MANIFEST_TAG\` / \`data-tick-YYYY\`）"
+            if [ -f tick_summary.json ]; then
+              python3 - <<'EOF'
+          import json
+          r = json.load(open("tick_summary.json"))
+          s = r.get("store", {})
+          b = r.get("bulk", {})
+          miss = r.get("missingInWindow", [])
+          rows = [
+              ("起動（JST）", r.get("startedJst")),
+              ("一括ファイル", f"一覧 {b.get('listed', '-')}件（{b.get('listedFrom')} 〜 {b.get('listedTo')}、"
+                              f"{(b.get('listedBytes') or 0)/1e9:.2f}GB）/ 予定 {b.get('planned', 0)}件"
+                              f"（{(b.get('plannedBytes') or 0)/1e9:.2f}GB）/ 取り込み {b.get('ingested', 0)}件・"
+                              f"{b.get('days', 0)}日 / 失敗 {b.get('failed', 0)}件" if b else "-"),
+          ]
+          if r.get("mode") != "probe":
+              rows += [
+                  ("範囲の中の未取得", f"{len(miss)}日 {miss[:5]}" if miss else "なし"),
+                  ("J-Quants の範囲より前（ここにしか無い）", f"{r.get('beyondWindowDays', 0)}日"),
+                  ("保存済み", f"{s.get('days', 0)}日（{s.get('from')} 〜 {s.get('to')}）/ {s.get('rows', 0):,}行 / "
+                              f"{(s.get('bytes') or 0)/1e9:.2f}GB / Release {s.get('releases')}"),
+                  ("上げたファイル", f"{r.get('uploadedFiles', 0)}件"),
+              ]
+          rows.append(("リクエスト", f"{r.get('requests', 0)}回 / {r.get('minutes', 0)}分"))
+          print("| 項目 | 値 |\n|---|---|")
+          for k, v in rows:
+              print(f"| {k} | {v} |")
+          for title, key in (("エラー", "errors"), ("注意", "warnings")):
+              if r.get(key):
+                  print(f"\n**{title}**\n")
+                  for m in r[key][:20]:
+                      print(f"- {m}")
+          if r.get("extraColumns"):
+              print(f"\n**仕様に無い列（保存していない）**: {sorted(r['extraColumns'])}")
+          EOF
+            fi
+            echo ""
+            echo '```'
+            tail -60 tick.log 2>/dev/null || echo '(出力なし)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

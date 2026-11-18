@@ -1,0 +1,137 @@
+# ティックの蓄積（2026-11-18 から）
+
+J-Quants のアドオン「株価 分足・ティック」のティック（約定。`/equities/trades`）を、全銘柄・取れる範囲の全期間で取り、
+毎日の差分を足して蓄積する。いまは**蓄積だけ**で、予測の特徴量・画面には使っていない。分足は [MINUTE_BARS.md](MINUTE_BARS.md)。
+
+- 取得と保存: `research/ticks.py`
+- 起動: `.github/workflows/update-ticks.yml`（**Update Ticks**）
+- 取り込む前の実測: `research/bulk_probe.py` / `.github/workflows/probe-bulk.yml`（**Probe Bulk Files**。何も保存しない）
+- テスト: `tests/test_ticks.py`・`tests/test_bulk_probe.py`・`tests/test_gh_release_ensure.py`（ネットワークに出ない）
+
+運用者の依頼（2026-11-18。分足に続けてティックの仕様を貼った）と、AskUserQuestion での選択: 対象は**全銘柄**、置き場は**分足と
+同じ非公開リポジトリ**。
+
+## 仕様（運用者が貼った公式の仕様。2026-11-18）
+
+| 項目 | 内容 |
+|---|---|
+| 提供 | **CSV の一括ダウンロードだけ**（API では取れない）。`/bulk/list`・`/bulk/get`。全銘柄が1ファイルで、銘柄だけを選んでは落とせない |
+| 範囲 | ベースプランにかかわらず**過去2年間** |
+| 項目 | `Date` `Code` `Time`（HH:MM:SS.ffffff、JST）`SessionDistinction`（01 前場 / 02 後場）`Price`（円）`TradingVolume`（株）`TransactionId` |
+| キー | `Date`・`Code`・`TransactionId` で一意。同じ日・同じ銘柄の中では TransactionId の昇順が約定の順。銘柄・日をまたいでは比べられない |
+| 集約 | 同じ時刻・同じ値段の約定は1行にまとめる（1行が1約定とは限らない） |
+| 含まないもの | 気配・板・注文・取消、売買の方向、売買代金（価格 × 数量で出せる）、板寄せの印（時刻から見分ける） |
+| 価格 | **調整前**（分割・併合で割り戻していない） |
+| 訂正 | その日のデータとファイルを訂正後の中身に**差し替える**。訂正前の版は残らない |
+| 対象 | 東証の立会内の約定だけ（ToSTNeT などの立会外、地方取引所単独上場、PTS は含まない） |
+
+## 実測（2026-11-18 19:13 JST。Probe Bulk Files run 44283243735。何も保存していない）
+
+| 項目 | 結果 |
+|---|---|
+| 一覧 | **36件・計 21.0GB**（CSV.gz） |
+| 月ごと | `equities/trades/historical/YYYY/equities_trades_YYYYMM.csv.gz` 24件（2024-11〜2026-10）。1件 645MB〜1.16GB（中央値 772MB）、計 20.2GB |
+| 今月の日ごと | `equities/trades/live/equities_trades_YYYYMMDD.csv.gz` 12件（11/2〜11/18）。1件 51〜103MB（中央値 60MB）。**その日の 16:33〜17:07 JST（中央値 16:44）にできる** |
+| 1日の量 | 2026-11-02 で **5,143,884行・4,197銘柄**（CSV.gz 51MB、展開 305MB）。時刻は 09:00:00.046435〜15:30:00.000000 |
+| 形 | 見出しは仕様の7項目。区分は 01・02。価格は小数1桁まで（小数あり）、数量は整数（9桁まで）、TransactionId は12桁の数字。`(Date, Code, TransactionId)` の重なりは0 |
+| 保存の形の大きさ | 1日 約33MB（zstd 9。すべて文字列のままなら 41MB。TransactionId を整数にしても変わらない）。CSV.gz の約0.64倍 |
+
+見込み: 2年分で parquet 約13.5GB、以後 年に約7GB。月ごとのファイルは展開すると 4〜7GB・1億行を超える。
+
+## 置き場
+
+分足と同じ**非公開**リポジトリ（既定 `shunshun0904/growthstock-minute`）。理由は分足と同じ（公開の Release は誰でも
+ダウンロードでき、J-Quants の個人の利用は第三者への配信が禁止）。書き込みも分足と同じ Secret `MINUTE_DATA_TOKEN`。
+
+| Release | 中身 |
+|---|---|
+| `data-tick` | 取得記録 `tick_manifest.json` だけ |
+| `data-tick-YYYY` | その年の日ごとのファイル `tick_YYYYMMDD.parquet`（必要になったときに `scripts/gh_release_ensure.sh` が作る） |
+
+- **日ごとのファイル**にしたのは、毎日の差分で月のファイル（500MB 超）を落として書き直して上げ直さずに済むため。日のファイルは
+  一括ファイルの中身で丸ごと作り直して、同じ名前で置き換える
+- **年ごとの Release** にしたのは、1つの Release に置けるアセットが 1,000 個までのため（日ごとで年 約245ファイル。
+  [About releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)）
+
+### ファイルの形
+
+| 列 | 型 | |
+|---|---|---|
+| `Date` | date32 | |
+| `Code` | 文字列 | 5桁（`130A0` など英字入りもある） |
+| `Time` | time64[us] | HH:MM:SS.ffffff をマイクロ秒の時刻に |
+| `SessionDistinction` | 文字列 | `01` 前場 / `02` 後場（先頭の 0 を残す） |
+| `Price` | float64 | 調整前 |
+| `TradingVolume` | float64 | 株 |
+| `TransactionId` | 文字列 | 12桁（先頭の 0 を残す） |
+
+並びは `(Code, TransactionId)`（同じ銘柄の中は約定の順）。仕様に無い列が来たら保存せず、取得記録の `extraColumns` と実行の画面に残す。
+
+取得記録 `tick_manifest.json`: `days`（日 → 行数・銘柄数・大きさ・Release・元の一括ファイルの Key・時刻）、`bulk`（一括ファイルの Key →
+`LastModified`・大きさ・日数・行数・取り込んだ時刻）、`extraColumns`、`summary`。
+
+## 流れ
+
+```
+Update Data Store（平日 18:40 JST の Routine）
+      ↓ 完了で起動（成否にかかわらず。予測・分足とは別のワークフロー）
+Update Ticks
+  1. 置き場が private か確かめ、data-tick が無ければ作る
+  2. 取得記録（tick_manifest.json）だけを落とす（日ごとのファイルは落とさない）
+  3. 一覧（/bulk/list?endpoint=/equities/trades）のうち、まだ取り込んでいない・LastModified が変わったものを、
+     月の古い順・同じ月の中は作られた順に取り込む（新しく作られた側が後になり、同じ日は後の側に置き換わる）
+  4. 1ファイルずつ: 署名付きURLで落とす → gzip の終わりまで確かめる → 64MB ずつ読んで型をそろえ、日ごとの途中の
+     ファイルに書き分ける → 日ごとに (Code, TransactionId) で並べて tick_YYYYMMDD.parquet にする
+     → 年ごとの Release に上げる → 取得記録を上げる（**データ → 記録の順**）→ 手元の日のファイルを消す
+  5. 範囲の中の未取得の日を数え、実行の画面にまとめを出す（件数・日付・大きさだけ）
+```
+
+- **初回**: 月ごとの24件（20.2GB）と今月の日ごとのファイル。合成データ 1,000万行での実測（分けるのに 9.4秒、1日を並べて書くのに
+  約3秒）から、月ごとのファイル1件は3〜4分、2年分で1.5時間前後の見込み（ジョブの上限 330分。新しいファイルに手を付けるのは
+  300分まで）。終わらなければ、次の実行（毎晩の連鎖か手動）が続きを取る
+- **毎日**: その日の日ごとのファイル（16:44 JST ごろにできる。約60MB）を1件。18:40 の取り込みの後に走るので、ふつうは出ている
+- 翌月5日ごろに月ごとのファイルができたら取り込み直し、その月の日のファイルを置き換える
+- 取った日は消さない。J-Quants の範囲（今日の2年前から）より前の日は、この置き場にしか残らない
+
+## 安全策
+
+| 起こりうること | どうしたか |
+|---|---|
+| 記録だけが先に上がり、上がっていない日を取得済みと思い込む | 上げる順は必ず **日のファイル → 取得記録**。上げられなかったら記録は上げず、その一括ファイルを次の実行で取り直す |
+| 月ごとのファイル（1億行超）をまるごとメモリに載せて落ちる | 64MB ずつ読み、日ごとの途中のファイルに書き分ける。並べるのは1日ずつ |
+| ランナーのディスクがあふれる（2年分で 13GB 超） | 上げた日のファイルはすぐ消す。手元に残るのは処理中の1ファイルぶんだけ（落とした CSV.gz は分けたら消す） |
+| 1つの Release のアセットが 1,000 個を超える | 年ごとの Release に分ける |
+| 一括ファイルが訂正で作り直される | `LastModified` か大きさが変わった Key は取り込み直す |
+| キーの重なり | 同じ `(Date, Code, TransactionId)` で中身が違えば保存しない（まったく同じ行は1行にする） |
+| 時刻・列の形が変わる | 時刻が `HH:MM:SS(.ffffff)` でない行、仕様の列の欠け、キーの列の欠測があれば、そのファイルは保存しない |
+| 署名付きURL・鍵・値がログに出る（ログは公開） | 出さない（分足と同じ。テストで確かめる） |
+| 置き場が公開になっている | 何も上げずに止める |
+
+## 手で動かす
+
+Actions の **Update Ticks** → Run workflow（既定ブランチに入った後）。
+
+| 入力 | 使うとき |
+|---|---|
+| `mode=probe` | 一覧と取り込む予定だけ（何も落とさない・保存しない） |
+| `forget_from=YYYY-MM-DD` | その日以降の取得記録と、その日を含む一括ファイルの取り込みの記録を外し、取り込み直す |
+| `reingest_bulk=yes` | 一括ファイルを全部取り込み直す（2年分で 21GB を落とし直す） |
+| `max_minutes` | 新しいファイルに手を付けない分数（既定 300） |
+
+既定ブランチへ入る前は、作業ブランチ `ccr-de5c973d-d8c3zi` で `research/tick_request.txt` を書き換えて push すると走る
+（1行目が `probe` なら一覧だけ）。
+
+## 読み方（分析用）
+
+```bash
+GH_REPO=shunshun0904/growthstock-minute gh release download data-tick-2026 -p 'tick_202611*.parquet' -D research/_tick
+```
+
+```python
+import pyarrow.dataset as ds
+t = ds.dataset("research/_tick", format="parquet").to_table(filter=ds.field("Code") == "86970")
+df = t.to_pandas()          # Time は datetime.time（マイクロ秒）
+df["Value"] = df["Price"] * df["TradingVolume"]   # 売買代金は項目に無いので計算する
+```
+
+価格は調整前。分割・併合をまたいで比べるときは、日足の `AdjFactor`（`research/_data/bars_*.parquet`）で直す。
