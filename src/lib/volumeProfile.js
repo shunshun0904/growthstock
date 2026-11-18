@@ -1,5 +1,6 @@
 export const PROFILE_WINDOWS = [1, 5, 20];
-export const MAX_PROFILE_FILE_BYTES = 12 * 1024 * 1024;
+const MAX_PROFILE_BYTES = 75 * 1024 * 1024;
+export const PROFILE_REPO = import.meta.env?.VITE_VOLUME_PROFILE_REPO || 'shunshun0904/growthstock-minute';
 
 const SOURCES = ['tick', 'minute'];
 const STATUSES = new Set([
@@ -19,6 +20,18 @@ const closeTo = (a, b) => Math.abs(a - b) <= Math.max(1e-6, Math.abs(b) * 1e-8);
 export function volumeCode(value) {
   const code = String(value ?? '').trim().toUpperCase();
   return /^[0-9A-Z]{4}$/.test(code) ? `${code}0` : code;
+}
+
+export function latestVolumeTargets(predictions) {
+  if (!date(predictions?.asOf) || !Array.isArray(predictions.candidates)) return [];
+  const targets = new Map();
+  for (const row of predictions.candidates) {
+    if (row?.date !== predictions.asOf) continue;
+    const code = volumeCode(row.jqCode || row.code);
+    if (!/^[0-9A-Z]{5}$/.test(code) || targets.has(code)) continue;
+    targets.set(code, { code, name: row.name || code, rank: row.rankInDay });
+  }
+  return [...targets.values()].sort((a, b) => (a.rank ?? Infinity) - (b.rank ?? Infinity));
 }
 
 function validBand(band) {
@@ -47,10 +60,10 @@ function validSeries(series, days, asOf, close) {
 export function parseVolumeProfile(text) {
   let data;
   try { data = JSON.parse(text); }
-  catch { throw new Error('集計ファイルを読み込めません。JSON形式を確認してください。'); }
+  catch { throw new Error('価格帯別出来高の応答を読み込めませんでした。'); }
   if (data?.kind !== 'growthstock.volume-profile' || data.schemaVersion !== 1 || !date(data.asOf)
-      || !Array.isArray(data.stocks) || data.stocks.length === 0 || data.stocks.length > 250) {
-    throw new Error('価格帯別出来高の集計ファイルを選んでください。');
+      || !Array.isArray(data.stocks) || data.demo === true) {
+    throw new Error('価格帯別出来高のデータ形式が一致しません。');
   }
   const codes = new Set();
   for (const stock of data.stocks) {
@@ -64,4 +77,21 @@ export function parseVolumeProfile(text) {
     codes.add(stock.code);
   }
   return data;
+}
+
+export async function loadVolumeProfile(token, signal) {
+  if (!/^[\w.-]+\/[\w.-]+$/.test(PROFILE_REPO)) throw new Error('非公開リポジトリの設定が無効です。');
+  const endpoint = `https://api.github.com/repos/${PROFILE_REPO}/contents/dashboard/volume-profile.json`;
+  const response = await fetch(endpoint, {
+    signal, credentials: 'omit', redirect: 'error', cache: 'no-store', referrerPolicy: 'no-referrer',
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github.raw+json' },
+  });
+  if (response.status === 404) throw new Error('当日の集計がまだ保存されていないか、非公開リポジトリの閲覧権限がありません。');
+  if (response.status === 401) throw new Error('閲覧用トークンが無効です。再接続してください。');
+  if (response.status === 403 || response.status === 429) throw new Error('GitHubの閲覧権限または利用上限を確認してください。');
+  if (!response.ok) throw new Error('集計データの取得に失敗しました。時間を置いて再取得してください。');
+  if (Number(response.headers.get('content-length')) > MAX_PROFILE_BYTES) throw new Error('集計データが大きすぎます。');
+  const text = await response.text();
+  if (text.length > MAX_PROFILE_BYTES) throw new Error('集計データが大きすぎます。');
+  return parseVolumeProfile(text);
 }

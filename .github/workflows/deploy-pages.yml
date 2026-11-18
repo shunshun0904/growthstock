@@ -52,6 +52,8 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+        env:
+          VITE_VOLUME_PROFILE_REPO: ${{ vars.MINUTE_DATA_REPO || format('{0}/growthstock-minute', github.repository_owner) }}
 
       - uses: actions/setup-python@v5
         with:

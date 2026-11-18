@@ -37,11 +37,14 @@ def frames(path):
 
 def prediction_codes(path):
     data = json.loads(path.read_text(encoding="utf-8"))
+    latest = iso_date(data["asOf"])
     names = {}
     for item in data["candidates"]:
+        if item.get("date") != latest:
+            continue
         code = normalize_code(item.get("jqCode") or item["code"])
         names.setdefault(code, str(item.get("name") or code))
-    return data["asOf"], names
+    return latest, names
 
 
 def expected_window(calendar, trading, day, count):
@@ -144,10 +147,11 @@ def run(args):
     latest = args.as_of or predicted
     if args.codes:
         names = {code: names.get(code, "") for code in map(normalize_code, args.codes)}
-    if not 1 <= len(names) <= 250:
-        raise ValueError("画面用ファイルは一度に1〜250銘柄を指定してください。")
     if latest > now.date().isoformat():
         raise ValueError("将来の日付は利用できません。")
+    if not names:
+        print(json.dumps(build_dashboard(None, args.output, latest, names, {}, [], args.demo), ensure_ascii=False))
+        return 0
     calendar_start = (date.fromisoformat(latest) - timedelta(days=60)).isoformat()
     with closing(ProfileCache(args.cache_dir, demo=args.demo)) as cache:
         client = AddonClient() if args.fetch else None
