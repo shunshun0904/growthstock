@@ -752,7 +752,8 @@ def main(argv: Optional[List[str]] = None, api: Optional[Api] = None,
     flush = Flusher(store, args.upload_cmd)
     run = Run(api, store, flush, deadline, today)
     report = run.report
-    report.update({"startedJst": started.strftime("%Y-%m-%d %H:%M"), "windowFrom": start.isoformat(),
+    report.update({"mode": "probe" if args.probe_only else "update",
+                   "startedJst": started.strftime("%Y-%m-%d %H:%M"), "windowFrom": start.isoformat(),
                    "windowTo": end.isoformat()})
     code = 0
     try:

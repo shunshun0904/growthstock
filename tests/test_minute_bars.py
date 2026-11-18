@@ -623,6 +623,14 @@ class TestWorkflow(unittest.TestCase):
         step = self.text[self.text.index("name: Upload leftovers"):self.text.index("name: Summary")]
         self.assertLess(step.index('"${data[@]}"'), step.index('"$man"'))
 
+    def test_probe_does_not_touch_storage(self):
+        for name in ("name: Check storage", "name: Download manifest"):
+            i = self.text.index(name)
+            self.assertIn("if: steps.mode.outputs.mode != 'probe'", self.text[i:i + 200], name)
+        step = self.text[self.text.index("name: Fetch minute bars"):self.text.index("name: Upload leftovers")]
+        probe_args = step[step.index('if [ "$MODE" = "probe" ]'):]
+        self.assertNotIn("--upload-cmd", probe_args.split("fi", 1)[0])
+
     def test_downloads_only_the_manifest_up_front(self):
         step = self.text[self.text.index("name: Download manifest"):self.text.index("name: Fetch minute bars")]
         self.assertIn("'minute_manifest.json'", step)
