@@ -1,0 +1,47 @@
+name: Update Volume Profiles
+
+on:
+  push:
+    branches: ['codex/automatic-volume-profile-20261118']
+    paths: ['.github/workflows/update-volume-profile.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pandas==2.2.3 pyarrow==18.1.0
+      - name: Check private storage access
+        env:
+          GH_TOKEN: ${{ secrets.MINUTE_DATA_TOKEN }}
+          PROFILE_REPO: ${{ vars.MINUTE_DATA_REPO || format('{0}/growthstock-minute', github.repository_owner) }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo 'MINUTE_DATA_TOKEN is not configured.'
+          elif [ "$(gh api "repos/$PROFILE_REPO" --jq '.private' 2>/dev/null)" = true ]; then
+            echo 'The private destination is accessible.'
+          else
+            echo 'The private destination cannot be confirmed.'
+          fi
+      - name: Verify J-Quants intraday data for the latest predictions
+        env:
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+          PROFILE_TEMP: ${{ runner.temp }}/volume-profile-check
+        run: |
+          python3 research/build_volume_profile.py --fetch --lookback 1 \
+            --cache-dir "$PROFILE_TEMP/cache" --output "$PROFILE_TEMP/output"
+          python3 - "$PROFILE_TEMP/output/volume-profile.json" <<'PY'
+          import json, sys
+          with open(sys.argv[1], encoding='utf-8') as handle:
+              data = json.load(handle)
+          counts = {source: sum(stock['windows']['1'][source]['status'] == 'ok' for stock in data['stocks'])
+                    for source in ('tick', 'minute')}
+          print(json.dumps({'asOf': data['asOf'], 'targets': len(data['stocks']), 'reconciled': counts}))
+          PY
