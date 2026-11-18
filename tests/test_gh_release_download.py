@@ -175,7 +175,7 @@ class TestWorkflowsUseHelper(unittest.TestCase):
     """本番のワークフローは gh release download を直接呼ばず、確かめる手順を通す。"""
 
     WORKFLOWS = ["update-data.yml", "predict.yml", "fetch-edinetdb.yml",
-                 "fetch-jsf.yml", "retrain-weekly.yml"]
+                 "fetch-jsf.yml", "retrain-weekly.yml", "update-minute-bars.yml"]
 
     def test_no_bare_download(self):
         for w in self.WORKFLOWS:

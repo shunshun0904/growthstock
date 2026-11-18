@@ -54,6 +54,15 @@ APIキーはブラウザに置けないため、**取得はGitHub Actions、表�
 
 ブラウザ側は生成済みの JSON を読むだけなので、**APIキーがクライアントに露出しません**。
 
+### 分足の蓄積（2026-11-18）
+
+J-Quants のアドオン「株価 分足・ティック」の分足（`/equities/bars/minute`）を、全銘柄・取れる範囲（直近2年）で取り、毎日の差分を足して蓄積します。
+J-Quants の分足は毎日1日ずつ古い日が取れなくなるので、取った日は消さずに残します。いまは蓄積だけで、予測・画面には使っていません。
+
+- 置き場は**非公開**リポジトリの Release（`data-minute`。月ごとの parquet と取得記録）。このリポジトリは公開で Release は誰でもダウンロードでき、J-Quants の個人の利用はデータの第三者への配信が禁止されているため、公開の側には置きません
+- 初回は一括ダウンロード（`/bulk/list` → `/bulk/get` の月ごとの CSV.gz）、毎日は取り込み（Update Data Store）の完了に続けて **Update Minute Bars** が、まだ無い営業日を API で取ります。予測とは別のワークフローです
+- 準備（Secret `MINUTE_DATA_TOKEN` など）・ファイルの形・安全策・読み方は [docs/MINUTE_BARS.md](docs/MINUTE_BARS.md)
+
 ### 価格帯別需給（2026-11-14）
 
 2026-11-15：運用者の判断により、本番画面のタブは非表示です。画面・推計処理・データは残し、`src/App.jsx`の`hidden`で表示を制御します。
@@ -282,6 +291,7 @@ $R$ は 78週（368営業日）高値接近率。軸5 と同じ値。
 | `/equities/bars/daily` | `/prices/daily_quotes` | 株価・出来高・売買代金 |
 | `/fins/summary` | `/fins/statements` | EPS・売上・ROE・進捗率・発行済株式数 |
 | `/markets/margin-interest` | `/markets/weekly_margin_interest` | 信用倍率（8軸の信用倍率） |
+| `/equities/bars/minute` | （なし） | 分足の蓄積（アドオン。画面には使わない。[docs/MINUTE_BARS.md](docs/MINUTE_BARS.md)） |
 
 ベースURL は `https://api.jquants.com/v2`、認証は全エンドポイント共通で `x-api-key` ヘッダーです。
 

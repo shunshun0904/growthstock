@@ -1,0 +1,160 @@
+# 分足の蓄積（2026-11-18 から）
+
+J-Quants のアドオン「株価 分足・ティック」の分足（`/equities/bars/minute`）を、全銘柄・取れる範囲の全期間で取り、
+毎日の差分を足して蓄積する。いまは**蓄積だけ**で、予測の特徴量・画面には使っていない。
+
+- 取得: `research/minute_bars.py`（一括ダウンロードと API の日ごとの取得）
+- 保存の形: `research/minute_store.py`（月ごとの parquet と取得記録）
+- 起動: `.github/workflows/update-minute-bars.yml`（**Update Minute Bars**）
+- テスト: `tests/test_minute_bars.py`（偽の J-Quants と偽の保存先で、ネットワークに出ない）
+
+運用者の依頼（2026-11-18）「分足のデータを取得できるので、過去分のデータの取得、差分更新、データの蓄積を開始してほしい」。
+AskUserQuestion での選択: 保存先は**非公開リポジトリの Release**、対象は**全銘柄**、毎日の起動は**取り込みの完了に続けて**、
+進め方は**作業ブランチで先に過去分を取得し、PR も作る**。
+
+## 仕様（2026-11-18 に確認）
+
+作業環境からは公式サイト（jpx-jquants.com）を直接読めない（ネットワークの設定で遮断）。運用者が貼った仕様と、検索結果に出た
+公式ページの記述で確かめた。
+
+| 項目 | 内容 | 出典 |
+|---|---|---|
+| 項目 | `Date` `Time`（HH:mm、JST。1分間の始まり）`Code` `O` `H` `L` `C` `Vo`（株） `Va`（円）。すべて Required | [株価分足](https://jpx-jquants.com/ja/spec/eq-bars-minute) |
+| 引数 | `code` か `date` が必須。`date` だけなら**その日の全上場銘柄**。`pagination_key` でページ送り | 同上 |
+| 価格 | **調整前**（分割・併合で割り戻していない。調整済みは日足で見る） | 同上 |
+| 範囲 | アドオンのデータ格納期間は**2年**。直近2年以内に東証へ上場した銘柄は上場日から | [データ仕様](https://jpx-jquants.com/spec/data-spec) |
+| 更新 | **日次**（リアルタイムではない）。時刻の記載は見つからなかった | [FAQ（データ）](https://jpx-jquants.com/ja/help/data)・[更新タイミング](https://jpx-jquants.com/ja/spec/data-update) |
+| 取引の無い分 | 返らない（行が無い）。15:25〜15:30 の間は無く、15:24 の次が 15:30（大引け） | 株価分足 |
+| 一括取得 | 多数銘柄・長期間は API の連続取得ではなく CSV の一括取得を勧める。`/v2/bulk/list?endpoint=...` で一覧（`Key` `LastModified` `Size`）、`/v2/bulk/get?key=...` で署名付きURL（**有効5分・使い回し不可**）。gzip の CSV で、ファイル名に年月 | [一覧](https://jpx-jquants.com/ja/spec/bulk-list)・[取得](https://jpx-jquants.com/ja/spec/bulk-get) |
+| レート制限 | Standard で1分120回（`/bulk/list`・`/bulk/get` も数える）。429 に Retry-After は無く、1分以上（確実には2分程度）待つ | [レート制限](https://jpx-jquants.com/spec/rate-limits)・[ステータス](https://jpx-jquants.com/spec/response-status) |
+| 契約外 | HTTP 403「This API is not available on your subscription」（2026-09-22 の実測。`docs/DATA_FIELDS.md`） | `research/probe_endpoints.json` |
+
+**まだ実データで確かめていないこと**（初回の `mode=probe` と取得で確かめて、ここに書き足す）:
+一括ファイルの `Key` の形（記事の例は `equities/bars/minute/historical/2026/equities_bars_minute_202606.csv.gz`）と
+期間の単位、CSV の見出しの名前、1日の行数とページの数、当日ぶんが出る時刻、ファイルの大きさ。
+取得の作りは、どれが違っても止まるか、ログに出してから先へ進むようにしてある（下の「安全策」）。
+
+## 置き場
+
+**非公開**リポジトリ（既定 `shunshun0904/growthstock-minute`）の Release、タグ `data-minute`。
+
+このリポジトリは公開で、Release に置いたファイルは誰でもダウンロードできる。J-Quants の公式ヘルプでは、個人の利用は
+私的利用に限られ、データの第三者への配信は営利・非営利を問わず禁止とされている（[利用について](https://jpx-jquants.com/ja/help/usage)。
+2026-11-18 に検索結果で確認）。分足は公開の側に置かない。ワークフローは置き場が private でなければ何も上げずに止める。
+
+月ごとのファイルにしたのは、GitHub の Release が1リリースあたりアセット 1,000 個まで・1ファイル 2GiB 未満（合計の上限は無い）
+のため（[About releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)）。日ごとでは年に約245個で、4年ほどで埋まる。
+
+### 運用者の準備（1回だけ）
+
+1. private リポジトリ `growthstock-minute` を作る（**README を付ける**。空のリポジトリにはタグを打てず、Release を作れない）
+2. fine-grained PAT を作る。Repository access はそのリポジトリだけ、Permissions は **Contents: Read and write**
+3. このリポジトリの Settings › Secrets and variables › Actions に、Secret **`MINUTE_DATA_TOKEN`** として登録する
+
+置き場の名前を変えるときは、Variables に `MINUTE_DATA_REPO`（`owner/name`）を足す。PAT に有効期限を付けたときは、切れると
+「分足の置き場に届かない」で止まるので、作り直して登録し直す。
+
+## ファイル
+
+| ファイル | 中身 |
+|---|---|
+| `minute_YYYYMM.parquet` | その月の全銘柄の分足。列は上の9項目（`Date` は date32、`Time` `Code` は文字列、ほかは float64）。並びは `(Date, Code, Time)`、行グループは日ごと。zstd 9 |
+| `minute_manifest.json` | 取得記録。`days`（日 → 行数・銘柄数・取った元 `bulk` / `api` / `file`・時刻・一括ファイルの Key）、`files`（月のファイル → 行数・日数・期間・大きさ）、`bulk`（一括ファイルの Key → `LastModified`・大きさ・取り込んだ時刻）、`extraColumns`（仕様に無い列を見つけた日）、`summary` |
+
+置き換えの単位は**日**。一括の CSV も API（`date=`）も、その日の全銘柄ぶんがそろって返るので、同じ日の行は丸ごと新しい側で置き換え、
+行単位では混ぜない。同じ `(Date, Code, Time)` で中身の違う行が来たら保存しない（まったく同じ行は1行にする）。
+
+## 流れ
+
+```
+Update Data Store（平日 18:40 JST の Routine）
+      ↓ 完了で起動（成否にかかわらず。予測とは別のワークフロー）
+Update Minute Bars
+  1. 置き場が private か・Release があるかを確かめる（無ければ作る）
+  2. 取得記録（minute_manifest.json）だけを落とす
+  3. 契約の確認: 直近の営業日の JPX（86970）を1回引く。403（契約外）ならここで止める
+  4. 一括ダウンロード: 一覧のうち、まだ取り込んでいない・LastModified が変わったものを古い月から取り込む
+     （書き込む月のファイルだけを置き場から取り寄せる。1ファイルごとに 月のファイル → 取得記録 の順に上げる）
+  5. API: 営業日のうち、まだ無い日を date= で取る（全銘柄。ページ送りを最後まで）。0行の日は取得済みにしない
+  6. 範囲の中の未取得の日を数えて、実行の画面にまとめを出す（件数・日付・大きさだけ）
+```
+
+- **初回**は一括ダウンロードで取れる範囲を全部取り、一括に無い日（今月など）を API で足す
+- **毎日**は、まだ無い営業日（ふつうは当日か前日の1日）を API で取る。月のファイルを1つ取り寄せて書き直す
+- J-Quants の分足は**毎日1日ずつ古い日が取れなくなる**。取った日は消さないので、2年より前の日はこの置き場にしか残らない。
+  実行のまとめの「J-Quants の範囲より前（ここにしか無い）」がその日数
+- 予測（Predict Breakouts）とは別のワークフローなので、分足の取得が失敗しても予測は止まらない
+- 取り込みの Routine が走らなかった日は、朝の確認（月〜土 07:40）が Update Data Store を起動し直すので、それに続いて走る。
+  走らなかった日の分も、次に走ったときにまだ無い日として取る（2年の範囲の中なら欠けない）
+
+## 安全策
+
+| 起こりうること | どうしたか |
+|---|---|
+| 記録だけが先に上がり、上がっていない日を取得済みと思い込む | 上げる順は必ず **月のファイル → 取得記録**。途中で落ちたら、スクリプトが書いた上げ残し（`.pending`）を受け皿のステップが同じ順で上げる |
+| 置き場にある月のファイルが手元に無いまま書き込み、1か月ぶんを新しい日だけで上書きする | 取得記録の `files` にある月は、書く前に置き場から取り寄せる。それでも無ければ止める |
+| 記録とファイルが食い違う | 手元の月のファイルを読むたびに記録をファイルに合わせる（記録にあってファイルに無い日は外して取り直す） |
+| 公表前に叩いた日を取得済みにして、二度と取りに行かない | 0行の日は取得済みにしない。取得済みの日の中央値の 25% に満たない日も、公表の途中かもしれないので取得済みにしない |
+| 一括ファイルが訂正で作り直される（J-Quants は同じ名前で上書きし、訂正前の版は残さない） | `LastModified` か大きさが変わった Key は取り込み直し、その日を置き換える |
+| 429（レート制限） | 1分以上待つ（65・125・185秒）。既存の取得の待ち（計15秒）は使わない |
+| ページ送りが終わらない・黙って打ち切る | 既存の `get_paginated` は50ページで黙って打ち切るので使わない。上限 5,000 ページ、同じ `pagination_key` が繰り返したら止める |
+| 仕様の列が欠ける・増える | 9項目のどれかが無ければ保存しない。仕様に無い列は保存しないが、名前と見つけた日を記録し、実行の画面に注記を出す（黙って捨てない） |
+| 一括ダウンロードだけが契約に無い・一覧が引けない | 注記を出して API の日ごとの取得で続ける |
+| 署名付きURL・鍵がログに出る（ログは公開） | URL は出さない（例外の文字列も型だけ）。鍵はエラー本文から消す。署名付きURLには鍵を送らない（J-Quants 以外のホスト） |
+| 置き場が公開になっている | 何も上げずに止める |
+
+## 手で動かす
+
+Actions の **Update Minute Bars** → Run workflow（既定ブランチに入った後）。
+
+| 入力 | 使うとき |
+|---|---|
+| `mode=probe` | 契約の確認と一括ファイルの一覧に加え、いちばん小さい一括ファイルを1つ落として形（見出し・行数・日数・銘柄数・時刻の範囲）を見る。何も保存しない |
+| `forget_from=YYYY-MM-DD` | その日以降の取得記録を外して API で取り直す（月のファイルは消さない。取れなければそのまま） |
+| `reingest_bulk=yes` | 一括ファイルを全部取り込み直す |
+| `verify=yes` | 置き場の月のファイルを全部落として記録と突き合わせる（記録が失われたときは、ファイルから作り直す） |
+| `max_minutes` | 新しい取得を打ち切る分数（既定 300。ジョブの上限は 330分） |
+
+既定ブランチへ入る前は、作業ブランチ `ccr-de5c973d-d8c3zi` で `research/minute_request.txt` を書き換えて push すると走る
+（1行目が `probe` なら確認だけ）。
+
+手元では:
+
+```bash
+export JQUANTS_API='<APIキー>'
+python3 research/minute_bars.py --data-dir research/_minute --probe-only     # 確認だけ
+python3 research/minute_bars.py --data-dir research/_minute --from 2026-11-01 # 保存先に上げずに手元に貯める
+```
+
+## 読み方（分析用）
+
+置き場から月のファイルを落として（`GH_REPO=shunshun0904/growthstock-minute gh release download data-minute -p 'minute_2026*.parquet' -D research/_minute`）、
+
+```python
+import datetime as dt, sys
+sys.path.insert(0, "research")
+import minute_store as S
+t = S.read_minutes("research/_minute", dt.date(2026, 6, 1), dt.date(2026, 6, 30), ["8697"])  # 4桁でも5桁でも
+df = t.to_pandas()
+```
+
+価格は調整前。分割・併合をまたいで比べるときは、日足の `AdjFactor`（`research/_data/bars_*.parquet`）で直す。
+
+## 見積もり（合成データ。実データは初回の取得で実測して書き足す）
+
+合成データ（4,200銘柄・1日約45万行）で測った。実データの1日の行数はこれより多いかもしれない（取引の多い銘柄は1日 約330本）。
+
+| | 値 |
+|---|---|
+| 1か月（21営業日・約955万行）の parquet | 約98MB（約10バイト/行） |
+| 一括の CSV.gz（同じ1か月）の読み込みと形の統一 | 7.5秒 |
+| 月のファイルの書き出し（日ごとに並べて書く） | 5.5秒、メモリの山 1.5GB（月まるごと並べ替える形では 4.7GB だった） |
+| 日次の足し込み（1日を足して月を書き直す） | 約5秒 |
+| 1銘柄・1日の読み出し | 0.02秒 |
+
+GitHub のランナー（公開リポジトリは 4 vCPU・16GB）に収まる。2年分で数GBの見込み。
+
+## 経緯
+
+- 2026-09-22: エンドポイントの一覧の実測で、`/equities/bars/minute` は「契約が足りない」（HTTP 403）だった（`docs/DATA_FIELDS.md`）
+- 2026-11-18: 運用者がアドオンを追加。上の作りで取得と蓄積を始めた
