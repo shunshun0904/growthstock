@@ -53,7 +53,7 @@ async function checkSupplyDemandView() {
   // 運用者の指示 2026-11-15。非表示中もPages配下・PC/スマホでタブと画面が出ないことを確かめる。
   if (await page.getByRole('tab', { name: '価格帯別需給', exact: true }).count() === 0) {
     assert.deepEqual(await page.getByRole('tab').allTextContents(), [
-      'ブレイク予測', '候補銘柄のニュース', '理論株価', 'タイムマシーン',
+      'ブレイク予測', '候補銘柄のニュース', '理論株価', '価格帯別出来高', 'タイムマシーン',
     ]);
     assert.equal(await page.locator('.supply-demand-view').count(), 0);
     await page.screenshot({ path: path.join(SHOTS, 'screenshot-price-demand-hidden-desktop.png') });
@@ -70,7 +70,7 @@ async function checkSupplyDemandView() {
   await page.getByRole('tab', { name: '価格帯別需給', exact: true }).click();
   await page.waitForSelector('.sd-positions');
   // スコアと収益の分布・再学習で加わったサンプルは 2026-11-15 から隠している（src/App.jsx の hidden）
-  assert.equal(await page.getByRole('tab').count(), 5);
+  assert.equal(await page.getByRole('tab').count(), 6);
   assert.equal(await page.getByRole('tab').nth(1).textContent(), '候補銘柄のニュース');
   assert.equal(await page.getByRole('tab').last().textContent(), 'タイムマシーン');
   if (!real) {

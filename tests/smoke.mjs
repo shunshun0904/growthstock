@@ -379,9 +379,9 @@ const tabNames = (await page.getByRole('tab').allTextContents()).map((t) => t.tr
 // 「再学習で加わったサンプル、スコアと収益の分布タグを消してください。」→「隠して自動更新も止める」で隠している（src/App.jsx の
 // hidden。画面のコードとデータの作り方は残す）
 // 価格帯別需給も 2026-11-15「推定は本番運用レベルではないので非表示に」で隠している。
-check(tabNames.join(',') === 'ブレイク予測,候補銘柄のニュース,理論株価,タイムマシーン',
-      'タブは ブレイク予測 / 候補銘柄のニュース / 理論株価 / タイムマシーン'
-      + ` の4つ (実際: ${tabNames.join(',')})`);
+check(tabNames.join(',') === 'ブレイク予測,候補銘柄のニュース,理論株価,価格帯別出来高,タイムマシーン',
+      'タブは ブレイク予測 / 候補銘柄のニュース / 理論株価 / 価格帯別出来高 / タイムマシーン'
+      + ` の5つ (実際: ${tabNames.join(',')})`);
 check(!tabNames.includes('決算サンキー') && !tabNames.includes('What-If シミュレーター')
         && !tabNames.includes('8軸オクタゴン比較') && !tabNames.includes('候補の比較')
         && !tabNames.includes('リカレンス・ネットワーク') && !tabNames.includes('スコアと収益の分布')
