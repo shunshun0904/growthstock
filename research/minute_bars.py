@@ -306,7 +306,14 @@ def list_bulk(api: Api) -> List[dict]:
 
 def plan_bulk(entries: Sequence[dict], manifest: dict,
               start: Optional[dt.date] = None) -> List[dict]:
-    """取り込む一括ファイル: まだ取り込んでいない Key と、更新日時・大きさが変わった Key。"""
+    """
+    取り込む一括ファイル: まだ取り込んでいない Key と、更新日時・大きさが変わった Key。
+
+    並びは「月の古い順、同じ月の中は更新日時の古い順」。一括ファイルには月ごと
+    （historical/..._YYYYMM）と、今月の日ごと（live/..._YYYYMMDD）がある（2026-11-18 の実測）。
+    同じ日を両方が覆うときは、後から当てた側で日ごと置き換わるので、新しく作られた側を後にする
+    （月ごとのファイルは翌月5日ごろに作られ、その月の日ごとのファイルより新しい）。
+    """
     todo = []
     for e in entries:
         if e["period"] is None:
@@ -319,6 +326,7 @@ def plan_bulk(entries: Sequence[dict], manifest: dict,
             if same and (e["lastModified"] is not None or e["size"] is not None):
                 continue
         todo.append(e)
+    todo.sort(key=lambda e: (S.month_of(e["period"][0]), str(e["lastModified"] or ""), e["key"]))
     return todo
 
 
@@ -582,6 +590,31 @@ class Run:
         print(f"[bulk] 取り込む {len(todo)}件（まだ取り込んでいない・更新されたもの）")
         done = failed = 0
         tmp = os.path.join(self.store.data_dir, ".download.csv.gz")
+        # 同じ月のファイル（今月の日ごとのファイル）はまとめて1回で月のファイルに書き、1回で上げる。
+        # 1件ごとに書くと、日ごとのファイルの数だけ月のファイルを書き直して上げ直すことになる
+        buf: List[Tuple[dict, pa.Table, Dict[str, Dict[str, int]]]] = []
+        buf_month: Optional[str] = None
+        buf_days: set = set()
+
+        def commit() -> None:
+            nonlocal buf, buf_days
+            if not buf:
+                return
+            t0 = time.time()
+            table = buf[0][1] if len(buf) == 1 else pa.concat_tables([t for _, t, _ in buf])
+            self.store.write_days(table, "bulk")
+            for e, _, st in buf:
+                for d in st:
+                    self.store.manifest["days"][d]["key"] = e["key"]
+                self.store.record_bulk(e["key"], e["lastModified"], e["size"], st)
+            self.store.save()
+            self.flush()
+            days = sorted(buf_days)
+            span = f"{days[0]} 〜 {days[-1]}" if days else "なし"
+            print(f"[bulk] 月 {buf_month}: {len(buf)}ファイル → {table.num_rows:,}行 / {len(days)}日"
+                  f"（{span}）を保存して上げた / {time.time()-t0:.0f}秒", flush=True)
+            buf, buf_days = [], set()
+
         for e in todo:
             if self.out_of_time():
                 print("[bulk] 時間切れ。残りは次の実行で取る")
@@ -607,20 +640,25 @@ class Run:
                     if os.path.exists(p):
                         os.remove(p)
             self._extra(extra)
-            stats = self.store.write_days(table, "bulk", key=e["key"])
-            self.store.record_bulk(e["key"], e["lastModified"], e["size"], stats)
-            outside = [d for d in stats
+            st = S.day_stats(table)
+            outside = [d for d in st
                        if not (e["period"][0].isoformat() <= d <= e["period"][1].isoformat())]
             if outside:
                 print(f"[bulk] {name}: ファイル名の期間の外の日 {len(outside)}日が入っていた"
                       f"（そのまま保存する）: {outside[:3]}")
-            self.store.save()
-            self.flush()
+            month = S.month_of(e["period"][0])
+            # 月が変わる・同じ日を覆うファイルが来たら、先にたまった分を書く（同じ日は後の側で置き換わる）
+            if buf and (month != buf_month or buf_days & set(st)):
+                commit()
+            buf.append((e, table, st))
+            buf_month = month
+            buf_days |= set(st)
             done += 1
-            days = sorted(stats)
+            days = sorted(st)
             span = f"{days[0]} 〜 {days[-1]}" if days else "なし"
-            print(f"[bulk] {name}: {n/1e6:.1f}MB → {table.num_rows:,}行 / {len(stats)}日（{span}）"
+            print(f"[bulk] {name}: {n/1e6:.1f}MB → {table.num_rows:,}行 / {len(st)}日（{span}）"
                   f" / {time.time()-t0:.0f}秒", flush=True)
+        commit()
         self.report["bulk"] = {"listed": len(entries), "planned": len(todo),
                                "ingested": done, "failed": failed,
                                "listedFrom": dated[0]["period"][0].isoformat() if dated else None,

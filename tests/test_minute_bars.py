@@ -106,6 +106,13 @@ class FakeJQuants:
     def bulk_key(self, ym: str) -> str:
         return f"equities/bars/minute/historical/{ym[:4]}/equities_bars_minute_{ym}.csv.gz"
 
+    def live_key(self, day: dt.date) -> str:
+        """今月の日ごとのファイル（2026-11-18 の実測で live/..._YYYYMMDD.csv.gz）。"""
+        return f"equities/bars/minute/live/equities_bars_minute_{day:%Y%m%d}.csv.gz"
+
+    def set_live(self, day: dt.date, last_modified: str, codes=CODES):
+        self.bulk[self.live_key(day)] = (csv_gz(bars_for(day, codes)), last_modified)
+
     def set_bulk(self, ym: str, last_modified: str, codes=CODES):
         y, m = int(ym[:4]), int(ym[4:])
         d = dt.date(y, m, 1)
@@ -501,6 +508,41 @@ class TestRun(unittest.TestCase):
         days = S.day_stats(pq.read_table(os.path.join(self.remote.dir, "minute_202611.parquet")))
         self.assertEqual(len(days), len(nov) + 1)
         self.assertIn("取り寄せる", log)
+
+    def test_live_daily_files_are_batched_per_month(self):
+        fake = FakeJQuants(self.TODAY, bulk_months=["202610"], unpublished={self.TODAY})
+        nov = [d for d in (dt.date(2026, 11, k) for k in range(1, 18)) if is_trading(d)]
+        for d in nov:
+            fake.set_live(d, f"{d.isoformat()}T07:50:00Z")
+        code, log, rep = self.run_main(fake, "--from", "2026-10-01")     # 一括ファイルのある10月から
+        self.assertEqual(code, 0, log)
+        self.assertEqual(rep["bulk"]["ingested"], 1 + len(nov))
+        self.assertEqual(rep["api"]["added"], 0)                         # API で取る日は残らない
+        self.assertEqual(rep["api"]["held"], 1)                          # 当日（日ごとのファイルが無い）
+        ups = self.remote.uploaded()
+        self.assertEqual(ups.count("minute_202611.parquet"), 1)          # 今月はまとめて1回で書いて上げる
+        m = S.load_manifest(self.data)
+        d = dt.date(2026, 11, 17)
+        self.assertEqual(m["days"][d.isoformat()]["source"], "bulk")
+        self.assertEqual(m["days"][d.isoformat()]["key"], fake.live_key(d))
+        self.assertEqual(m["bulk"][fake.live_key(d)]["days"], 1)
+        days = S.day_stats(pq.read_table(os.path.join(self.remote.dir, "minute_202611.parquet")))
+        self.assertEqual(sorted(days), [x.isoformat() for x in nov])
+
+    def test_newer_monthly_file_wins_over_live_files(self):
+        import pyarrow.compute as pc
+        fake = FakeJQuants(self.TODAY, unpublished={self.TODAY})
+        octd = [d for d in (dt.date(2026, 10, k) for k in range(1, 32)) if is_trading(d)]
+        for d in octd[:3]:
+            fake.set_live(d, f"{d.isoformat()}T07:50:00Z")                 # 3銘柄（古い）
+        fake.set_bulk("202610", "2026-11-05T00:02:39Z", codes=CODES[:2])   # 2銘柄（翌月5日に作られた）
+        code, log, rep = self.run_main(fake, "--no-api", "--from", "2026-10-01")
+        self.assertEqual(code, 0, log)
+        t = pq.read_table(os.path.join(self.remote.dir, "minute_202610.parquet"))
+        first = t.filter(pc.equal(t["Date"], pa.scalar(octd[0], pa.date32())))
+        self.assertEqual(set(first["Code"].to_pylist()), set(CODES[:2]))
+        m = S.load_manifest(self.data)
+        self.assertEqual(m["days"][octd[0].isoformat()]["key"], fake.bulk_key("202610"))
 
     def test_bulk_update_is_reingested(self):
         fake = FakeJQuants(self.TODAY, bulk_months=["202609"], unpublished={self.TODAY})
