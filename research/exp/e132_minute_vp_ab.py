@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-実験132: 分足から作る価格帯別出来高の特徴量（research/minute_features.py の33列）を今の373列に足すと、+10% の LightGBM の
-探索（5分割 CV）・本番と同じ作りの out-of-fold・32窓がどう変わるか。検証だけ（本番の features.py・lgbm_params.json は変えない）。
+実験132: 分足から作る価格帯別出来高の特徴量（research/minute_features.py の33列から VWAP の3列を除いた30列）を今の373列に
+足すと、+10% の LightGBM の探索（5分割 CV）・本番と同じ作りの out-of-fold・32窓がどう変わるか。検証だけ（本番の features.py・
+lgbm_params.json は変えない）。
 
 運用者の依頼（2026-11-19）「他のセッションで途中まで実施した、特徴量追加の検証です。研究用のPR8があるはずです。今回の分足の
 データから作成できる新規特徴量の検証です。まずは、lgbmの+10%のモデルのみで、パラメータチューニングあり+oof検証してほしい」。
@@ -12,18 +13,22 @@
     分足の付いた行だけの両方で数える）
   - 分足の日「当日 D まで」: D の行に D の引けまでの分足を使う（日足の特徴量と同じ。本番に入れるなら予測を分足の取得の後に回す）
   - 腕「AとBだけ」: §7 の判定（対照 P・A のパラメータの C が要る）は出さない。B−A を見る
+運用者の選択（同日、33列の EDA（e132_minute_eda.py）の後）「VWAPの3列を外した30列」:
+  vp_minute_vwap_gap_{1,5,20}d は日足の売買代金 ÷ 出来高でも作れる値（EDA で D の日足と相対差 2e-16 で一致）で、20日は既存の
+  tx_vwap_gap_20 と順位相関 0.99。分足に固有の30列（価格帯の形・時間帯）だけで効果を見る。表には33列を付けて確かめは33列で行い、
+  学習に足すのは30列だけ
 
 腕（データは同じ1本。列だけが違う）
   A   今の373列（features.DEFAULT_PRESET。回した時点の既定を名前で固定）。A の列で探索
-  B   373 + 33列で探索し直し → 入れたときに週次の再学習がやること
+  B   373 + 30列で探索し直し → 入れたときに週次の再学習がやること
 
 ラベル: 本番の +10%（label_specs.for_model("lgbm")）。データセットの label が本番の定義と全行一致することを確かめてから使う。
 探索: 週次の再学習と同じ（tuning.tune・50試行・5分割・year_cap_date・ホールドアウト12か月の手前まで）。
 out-of-fold: 本番と同じ作り（36/6/6か月・エンバーゴ20営業日。E41.oof_folds）。ずらし0・種42 と、ずらし 0/2/4か月 × 種3つ（32窓）。
-評価の行: 全行と、分足の付いた行だけ（33列のどれかがある行。分足は 2024-11-01 から）。
+評価の行: 全行と、分足の付いた行だけ（30列のどれかがある行。分足は 2024-11-01 から）。
 
 出すもの（公開ログには件数・割合・日付・精度だけ。銘柄・値は出さない。分足は J-Quants のアドオンのデータで、私的利用の範囲）
-  0. 33列の付き方（欠測の割合・分位）・既存の373列との順位相関の最大  0b. 学習の寄与（gain）の割合（参考）
+  0. 30列の付き方（欠測の割合・分位）・既存の373列との順位相関の最大  0b. 学習の寄与（gain）の割合（参考）
   1. 探索の CV（A・B）  2. 本番と同じ作りの OOF（全行・付いた行だけ）  3. 窓ごとの B−A（全行）  3b. 同（付いた行だけ）
   5. 窓の中の上位2% の Precision・+10% の指値に届いた割合・1取引の平均（参考）  6. 窓ごとの値
 
@@ -76,10 +81,15 @@ SEEDS = (42, 7, 123)
 PROD_SEED = 42
 #: 比べる土台。回した時点の既定（373列）を名前で固定する
 BASE_PRESET = "all_plus_prog_listing_vol_book_shape_dd_recent_tx_financial"
-NEW_COLS = tuple(MF.COLUMNS)
+#: 表に付ける列（minute_features の33列。付けた後の確かめは33列すべてで行う）
+BUILT_COLS = tuple(MF.COLUMNS)
+#: 学習に足さない列（運用者の選択 2026-11-19「VWAPの3列を外した30列」。日足だけで作れ、20日は tx_vwap_gap_20 と ρ=0.99）
+DROPPED_COLS = tuple(MF.column("vwap_gap", n) for n in MF.WINDOWS)
+#: B で足す列（分足に固有の30列。並びは minute_features のまま）
+NEW_COLS = tuple(c for c in BUILT_COLS if c not in DROPPED_COLS)
 ARMS = ("A", "B")
 COLS_OF = {"A": "base", "B": "new"}
-LABELS = {"A": "A  今の373列（A の列で探索）", "B": "B  373 + 33列・探索し直し"}
+LABELS = {"A": "A  今の373列（A の列で探索）", "B": f"B  373 + {len(NEW_COLS)}列（VWAP の3列を除く）・探索し直し"}
 MIN_WINDOW_ROWS = 100
 #: 重なりの多い列の目安（既存の列との順位相関の絶対値）
 OVERLAP = (0.9, 0.95)
@@ -148,7 +158,7 @@ def check_label(df: pd.DataFrame) -> dict:
 def minute_checks(df: pd.DataFrame, report: dict) -> dict:
     """付けた33列の確かめ。割合が 0〜1 の外・無限・「終値との差」が −100% 以下・期間の中で11指標がそろわない行があれば止める。"""
     bad = {}
-    for c in NEW_COLS:
+    for c in BUILT_COLS:
         s = pd.to_numeric(df[c], errors="coerce").to_numpy(dtype=float)
         n = int(np.isinf(s).sum())
         if c.endswith(tuple(f"_share_{w}d" for w in MF.WINDOWS)):
@@ -167,7 +177,7 @@ def minute_checks(df: pd.DataFrame, report: dict) -> dict:
         s = df[[MF.column(f"{b}_share", w) for b in VP.BUCKETS]].sum(axis=1, min_count=1)
         sums[f"{w}d"] = int((s.notna() & (s - 1).abs().gt(1e-6)).sum())
     out = {**report, "bad": bad, "torn": torn, "bucket_sum_off": sums}
-    attached = df[list(NEW_COLS)].notna().any(axis=1)
+    attached = df[list(BUILT_COLS)].notna().any(axis=1)
     since = df["Date"] >= pd.Timestamp(report["minute_from"]) if report.get("minute_from") else attached
     out["attached_share_since_minute"] = float(attached[since].mean()) if since.any() else float("nan")
     print(f"  確かめ: 33列が付いた行 {int(attached.sum()):,} / {len(df):,}（分足の始まり {report.get('minute_from')} 以降で "
@@ -189,7 +199,7 @@ def prepare(cols: list, rebuild: bool = False):
         with open(ps, encoding="utf-8") as fh:
             stamp = json.load(fh)
         df = pd.read_parquet(pf)
-        miss = [c for c in cols + list(NEW_COLS) if c not in df.columns]
+        miss = [c for c in cols + list(BUILT_COLS) if c not in df.columns]
         if not miss and stamp.get("sources") == src:
             log(f"[data] 1回目に作った表を使う（{stamp['built_utc']} 作成・{stamp['rows']:,}行・〜{stamp['date_max']}）")
             return df, stamp
@@ -202,7 +212,7 @@ def prepare(cols: list, rebuild: bool = False):
     miss = [c for c in cols + ["ret_o1_20", "ret_o1_40", "label"] if c not in frame.columns]
     if miss:
         raise SystemExit(f"表に無い列: {miss[:8]}")
-    have = [c for c in NEW_COLS if c in frame.columns]
+    have = [c for c in BUILT_COLS if c in frame.columns]
     if have:
         raise SystemExit(f"学習データに vp_minute_* の列がある（本番に入れた後に回すなら作りを見直す）: {have[:5]}")
     log(f"[data] lab.frame {len(frame):,}行 × {frame.shape[1]}列 / {time.time()-t0:.0f}秒")
@@ -211,7 +221,7 @@ def prepare(cols: list, rebuild: bool = False):
     if len(att) != len(frame) or not (att["Code"].to_numpy() == frame["Code"].to_numpy()).all() \
             or not (pd.to_datetime(att["Date"]).to_numpy() == frame["Date"].to_numpy()).all():
         raise SystemExit("33列を付けたら行の並びが変わった")
-    df = pd.concat([frame.reset_index(drop=True), att[list(NEW_COLS)].reset_index(drop=True)], axis=1)
+    df = pd.concat([frame.reset_index(drop=True), att[list(BUILT_COLS)].reset_index(drop=True)], axis=1)
     log(f"[data] 33列を付けた / {time.time()-t0:.0f}秒（分足 {report['minute_from']} 〜 {report['minute_to']}・"
         f"{report['minute_days']}日）")
     print("\n■ 確かめ")
@@ -236,7 +246,7 @@ def prepare(cols: list, rebuild: bool = False):
     stamp = {"built_utc": time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime()), "rows": int(len(df)),
              "date_min": str(df["Date"].min().date()), "date_max": str(df["Date"].max().date()),
              "rows_by_year": {str(y): int((yr == y).sum()) for y in sorted(yr.unique())}, "checks": checks,
-             "missing": {c: int(df[c].isna().sum()) for c in NEW_COLS}, "sources": src}
+             "missing": {c: int(df[c].isna().sum()) for c in BUILT_COLS}, "sources": src}
     df.to_parquet(pf, index=False)
     with open(ps, "w", encoding="utf-8") as fh:
         json.dump(stamp, fh, ensure_ascii=False, indent=1, default=str)
@@ -248,10 +258,12 @@ def attached_mask(df: pd.DataFrame) -> pd.Series:
 
 
 def coverage_report(df: pd.DataFrame, base: list) -> dict:
-    """33列の欠測の割合と分位、既存の373列との順位相関の最大（件数と割合・相関だけ）。"""
+    """足す30列の欠測の割合と分位、既存の373列との順位相関の最大（件数と割合・相関だけ）。"""
     out = {"columns": {}, "overlap": {}}
     att = df[attached_mask(df)]
-    print(f"\n■ 0. 33列の付き方（{len(df):,}行のうち付いた行 {len(att):,}。分位は付いた行の 5% / 50% / 95%）")
+    k = len(NEW_COLS)
+    print(f"\n■ 0. {k}列の付き方（{len(df):,}行のうち付いた行 {len(att):,}。分位は付いた行の 5% / 50% / 95%。"
+          f"学習に足さない列: {' / '.join(DROPPED_COLS)}）")
     for c in NEW_COLS:
         v = pd.to_numeric(att[c], errors="coerce")
         qs = v.quantile([0.05, 0.5, 0.95]) if v.notna().any() else pd.Series([np.nan] * 3, index=[0.05, 0.5, 0.95])
@@ -276,14 +288,14 @@ def coverage_report(df: pd.DataFrame, base: list) -> dict:
         n_base = sum(1 for c in NEW_COLS if best[c][1] >= th)
         n_pair = int(np.nansum(pairs >= th))
         out["overlap"][str(th)] = {"vs_base": n_base, "pairs_within": n_pair}
-        print(f"  既存の373列のどれかと順位相関の絶対値が {th} 以上の列 {n_base} / {len(NEW_COLS)}・33列どうしで {th} 以上の組 {n_pair}")
+        print(f"  既存の373列のどれかと順位相関の絶対値が {th} 以上の列 {n_base} / {k}・{k}列どうしで {th} 以上の組 {n_pair}")
     print("  既存の列といちばん重なる列: " + " / ".join(f"{c}↔{best[c][0]} {best[c][1]:.2f}" for c in NEW_COLS))
     out["max_abs_rho_vs_base"] = {c: {"col": best[c][0], "rho": best[c][1]} for c in NEW_COLS}
     return out
 
 
 def gain_report(df: pd.DataFrame, base: list, params: dict, cutoff) -> dict:
-    """探索の期間の全行で B（373 + 33列・B のパラメータ）を1本学習し、寄与（gain）の割合と上位の列（参考）。"""
+    """探索の期間の全行で B（373 + 30列・B のパラメータ）を1本学習し、寄与（gain）の割合と上位の列（参考）。"""
     import lightgbm as lgb
 
     cols = base + list(NEW_COLS)
@@ -293,12 +305,12 @@ def gain_report(df: pd.DataFrame, base: list, params: dict, cutoff) -> dict:
     m.fit(sub[cols].to_numpy(dtype=float), y)
     gain = pd.Series(m.booster_.feature_importance(importance_type="gain"), index=cols)
     tot = float(gain.sum()) or 1.0
-    share = {"既存の373列": float(gain[base].sum() / tot), "分足の33列": float(gain[list(NEW_COLS)].sum() / tot)}
+    share = {"既存の373列": float(gain[base].sum() / tot), f"分足の{len(NEW_COLS)}列": float(gain[list(NEW_COLS)].sum() / tot)}
     print(f"\n■ 0b. 学習の寄与（gain）の割合（探索の期間 〜{cutoff.date()} の {len(sub):,}行で B を1本。参考）: "
           + " / ".join(f"{k} {v*100:.1f}%" for k, v in share.items()))
     all_rank = gain.rank(ascending=False)
     new_rank = gain[list(NEW_COLS)].sort_values(ascending=False)
-    print(f"  33列の寄与（全{len(cols)}列の中の順位。上位10列）: "
+    print(f"  {len(NEW_COLS)}列の寄与（全{len(cols)}列の中の順位。上位10列）: "
           + " / ".join(f"{c} {int(all_rank[c])}位" for c in new_rank.index[:10]))
     return {"share": share, "new": {c: {"gain_share": float(gain[c] / tot), "rank": int(all_rank[c])} for c in new_rank.index}}
 
@@ -341,7 +353,8 @@ def tune(arm: str, frame: pd.DataFrame, cols: list, cutoff, n_trials: int, stamp
 def oof(arm: str, frame: pd.DataFrame, cols: list, params: dict, shift: int, seeds):
     """腕 × パラメータ × ずらし × 種の out-of-fold（種の平均）。保存済みなら読む。"""
     ph = params_hash(params) + "_d" + hashlib.sha1(str(frame.attrs.get("built_utc", "")).encode()).hexdigest()[:6]
-    files = [path(f"{ALGO}_c{COLS_OF[arm]}_{ph}_sh{shift}_s{sd}.parquet") for sd in seeds]
+    # 列の指紋も名前に入れる（探索の最良がはじめの無作為な試行だと、列が違っても同じパラメータになり得るため）
+    files = [path(f"{ALGO}_c{COLS_OF[arm]}{F.signature(cols)}_{ph}_sh{shift}_s{sd}.parquet") for sd in seeds]
     missing = [f for f in files if not os.path.exists(f)]
     if missing and not time_left():
         return None
@@ -554,14 +567,14 @@ def report(res: dict, shifts: list, stamp: dict, extra: dict) -> dict:
 
 def main(argv=None) -> int:
     global TAG, RUN, DEADLINE
-    ap = argparse.ArgumentParser(description="実験132: 分足の価格帯別出来高の33列を373列に足す前後（lgbm +10%・検証だけ）")
+    ap = argparse.ArgumentParser(description="実験132: 分足の価格帯別出来高の30列を373列に足す前後（lgbm +10%・検証だけ）")
     ap.add_argument("--arms", default=",".join(ARMS), help="この回に計算する腕（A は必ず含める）")
     ap.add_argument("--n-trials", type=int, default=50)
     ap.add_argument("--shifts", default="0,2,4")
     ap.add_argument("--tag", default=TAG, help="保存するファイルの頭（試運転は本番の回と分ける）")
     ap.add_argument("--rebuild", action="store_true", help="表を作り直す（以前の結果は使えなくなる）")
     ap.add_argument("--budget-min", type=float, default=290.0, help="この分数を過ぎたら新しい計算を始めない（0 で無制限）")
-    ap.add_argument("--dry", action="store_true", help="33列の付き方だけ出して終わる")
+    ap.add_argument("--dry", action="store_true", help="列の付き方だけ出して終わる")
     args = ap.parse_args(argv)
     TAG = args.tag
     RUN = TAG
@@ -582,10 +595,11 @@ def main(argv=None) -> int:
     colsets = {"base": base, "new": base + new}
 
     print("=" * 78)
-    print("実験132 分足の価格帯別出来高の33列を今の373列に足す前後（lgbm +10%・5分割 CV の探索 + OOF + 32窓）")
+    print(f"実験132 分足の価格帯別出来高の{len(new)}列を今の373列に足す前後（lgbm +10%・5分割 CV の探索 + OOF + 32窓）")
     print(f"  列: {BASE_PRESET} {len(base)}列 指紋 {F.signature(base)}"
-          f"{'' if BASE_PRESET == F.DEFAULT_PRESET else '（いまの既定とは違う）'} / + 33列 → {len(base) + len(new)}列 "
+          f"{'' if BASE_PRESET == F.DEFAULT_PRESET else '（いまの既定とは違う）'} / + {len(new)}列 → {len(base) + len(new)}列 "
           f"指紋 {F.signature(base + new)}")
+    print(f"  足さない列: {' / '.join(DROPPED_COLS)}（日足だけで作れる。EDA の後の運用者の選択。表には付けて確かめる）")
     print("  分足: 予測日 D の当日の引けまで（1・5・20営業日）。2024-11-01 より前の行は欠測")
     for a in ARMS:
         print(f"  {LABELS[a]}{'' if a in arms else '（この回は計算しない）'}")

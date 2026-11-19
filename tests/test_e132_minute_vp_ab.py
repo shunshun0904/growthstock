@@ -2,11 +2,13 @@
 """
 実験132（research/exp/e132_minute_vp_ab.py）の部品。データには触らない（作りものの表で確かめる）。
 
-- 列: 比べる土台は回した時点の既定 373列（名前で固定）。足すのは research/minute_features.py の33列で、土台と重ならない
+- 列: 比べる土台は回した時点の既定 373列（名前で固定）。表には research/minute_features.py の33列を付け、学習に足すのは
+  VWAP の3列を除いた30列（運用者の選択「VWAPの3列を外した30列」）。土台と重ならない
 - 腕は A・B だけ（運用者の選択「AとBだけ」）。A は必ず含める
 - ラベル: データセットの label が本番の +10% の定義（label_specs）と全行一致しなければ止める
 - 付けた33列の確かめ: 割合が 0〜1 の外・無限・終値との差が −100% 以下・期間の中で欠けのある行・時間帯の割合の合計が1でない行があれば止める
-- 評価の行: 全行と、分足の付いた行だけ（33列のどれかがある行）。窓は行が100件以上で正例・負例がそろうもの
+- 評価の行: 全行と、分足の付いた行だけ（30列のどれかがある行）。窓は行が100件以上で正例・負例がそろうもの
+- 表に付いている VWAP の3列は、B の学習・寄与・付き方の報告に入らない
 - 報告の一通り: 保存済みの探索（A・B）から、out-of-fold・寄与・報告が最後まで通る（種1つ・ずらし0 と 2）。§7 の判定は出さない
 
   python3 -m unittest tests.test_e132_minute_vp_ab
@@ -40,9 +42,11 @@ class TestColumns(unittest.TestCase):
         base = F.columns(E.BASE_PRESET)
         self.assertEqual(len(base), 373)
         self.assertEqual(E.BASE_PRESET, F.DEFAULT_PRESET)              # 回す時点の既定（変わったら見直す）
-        self.assertEqual(list(E.NEW_COLS), MF.COLUMNS)
-        self.assertEqual(len(E.NEW_COLS), 33)
-        self.assertFalse(set(base) & set(E.NEW_COLS))
+        self.assertEqual(list(E.BUILT_COLS), MF.COLUMNS)
+        self.assertEqual(E.DROPPED_COLS, ("vp_minute_vwap_gap_1d", "vp_minute_vwap_gap_5d", "vp_minute_vwap_gap_20d"))
+        self.assertEqual(list(E.NEW_COLS), [c for c in MF.COLUMNS if "_vwap_gap_" not in c])   # 並びは minute_features のまま
+        self.assertEqual(len(E.NEW_COLS), 30)
+        self.assertFalse(set(base) & set(E.BUILT_COLS))
         self.assertEqual(E.ARMS, ("A", "B"))
         for d in (E.COLS_OF, E.LABELS):
             self.assertEqual(set(d), set(E.ARMS))
@@ -149,11 +153,12 @@ def make_frame(seed=0, per_day=3):
     n = len(dates) * per_day
     cols = {"Code": [f"{1000 + i % 50}" for i in range(n)], "Date": np.repeat(dates, per_day)}
     cols.update({f"b{j}": rng.normal(size=n) for j in range(4)})
-    cols.update({c: rng.normal(size=n) for c in E.NEW_COLS})
+    cols.update({c: rng.normal(size=n) for c in E.BUILT_COLS})          # 表には33列が付いている
     df = pd.DataFrame(cols)
     before = df["Date"] < "2019-01-01"
-    df.loc[before, list(E.NEW_COLS)] = np.nan                           # 分足は途中の年から
-    df["label"] = (df["b1"] + 0.5 * df[MF.column("vwap_gap", 20)].fillna(0) + rng.normal(0, 1.0, n) > 1.0).astype(float)
+    df.loc[before, list(E.BUILT_COLS)] = np.nan                         # 分足は途中の年から
+    df["label"] = (df["b1"] + 0.5 * df[MF.column("poc_gap", 20)].fillna(0)
+                   + 0.8 * df[MF.column("vwap_gap", 20)].fillna(0) + rng.normal(0, 1.0, n) > 1.0).astype(float)
     df["ret_o1_20"] = rng.normal(0.01, 0.1, n)
     df["ret_o1_40"] = rng.normal(0.01, 0.15, n)
     df["hit10"] = (rng.random(n) < 0.3).astype(float)
@@ -189,6 +194,7 @@ class TestRunAndReport(unittest.TestCase):
                 extra["gain"] = E.gain_report(df, base, PARAMS, cutoff)
                 summary = E.report(res, [0, 2], stamp, extra)
             out = buf.getvalue()
+            names = sorted(os.listdir(tmp))
         finally:
             E.OOF_DIR, E.SEEDS, E.RUN, E.DEADLINE = old
             shutil.rmtree(tmp)
@@ -198,9 +204,12 @@ class TestRunAndReport(unittest.TestCase):
         self.assertIn("minute_pr_B-A", summary["windows"])
         self.assertIn("minute_B", summary["production_oof"])
         self.assertNotIn("judge7", summary)
-        self.assertEqual(set(extra["gain"]["share"]), {"既存の373列", "分足の33列"})
+        self.assertEqual(set(extra["gain"]["share"]), {"既存の373列", "分足の30列"})
         self.assertAlmostEqual(sum(extra["gain"]["share"].values()), 1.0, places=6)
-        self.assertEqual(len(extra["coverage"]["columns"]), 33)
+        self.assertEqual(set(extra["gain"]["new"]), set(E.NEW_COLS))     # 表にある VWAP の3列は学習に入らない
+        self.assertEqual(set(extra["coverage"]["columns"]), set(E.NEW_COLS))
+        self.assertNotIn("vp_minute_vwap_gap_20d↔", out)
+        self.assertIn(f"lgbm_cnew{F.signature(base + new)}_", "\n".join(names))     # out-of-fold の名前に列の指紋
         self.assertIn("§7 の判定は出さない", out)
         self.assertIn("分足の付いた行だけ", out)
         # 付いた行だけの窓は、分足が始まる前の窓を含まない
