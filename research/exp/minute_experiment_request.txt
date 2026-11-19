@@ -1,0 +1,2 @@
+exp=e132_minute_vp_ab.py
+args=--tag e132smoke --n-trials 2 --shifts 0 --budget-min 200
