@@ -125,9 +125,6 @@
 .volume-list th, .volume-list td { white-space: nowrap; }
 .volume-list .volume-stock[aria-pressed='true'] { background: var(--bg-raised); color: var(--text); border-color: var(--accent-dim); }
 .volume-stock-heading { margin-top: 18px; font-size: 14px; }
-.volume-remember { display: flex !important; align-items: center; gap: 6px; padding-bottom: 8px; }
-.volume-connect .volume-remember input { width: auto; min-height: 0; margin: 0; padding: 0; accent-color: var(--accent); }
-.volume-connect label:first-child { flex: 1 1 260px; }
 .volume-candidates { margin-left: 10px; font-weight: normal; font-size: 12px; color: var(--text-dim); }
 .volume-list td.num, .volume-list th:nth-child(3), .volume-list th:nth-child(4) { text-align: right; }
 .volume-list td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }

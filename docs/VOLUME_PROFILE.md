@@ -7,23 +7,16 @@
 - **時間帯別の出来高**（寄り・前場・後場・引け。株数の割合）
 - **約定代金の大きさ別の割合**（小口・中口・大口。ティックのザラバの約定から）
 
-集計は J-Quants のアドオン（分足・ティック）から作るため、**暗号化して**載せます。画面で J-Quants の API キーを
-入れた人のブラウザの中だけで開きます。キーはどこにも送りません。新しい鍵や Secret の登録は要りません。
+タブを開くと、キーの入力なしで集計が出ます。集計は**誰でも見られる**形で公開サイトに置いています（下の「公開について」）。
 
 ## 見かた
 
-1. 「価格帯別出来高」タブを開き、**各端末で最初の1回だけ**、「J-Quants の API キー」に Actions Secret `JQUANTS_API` に
-   登録してあるのと同じキーを入れて「開く」を押します。次からは入力なしで開きます。 [ダッシュボード](https://shunshun0904.github.io/growthstock/)
-   - キーは、この端末の中で復号の鍵を作るのに使うだけです。どこにも送りません
-   - 覚えるのはキーから作った鍵だけで、キーそのものは保存しません。既定でこの端末に覚えます
-     （運用者の選択 2026-11-19「最初の1回だけ入力」）。共用の端末では「この端末に記憶する」を外すと、タブを閉じるまでだけ覚えます。
-     「鍵を消す」で消えます
-   - J-Quants のキーを作り直したら、Secret `JQUANTS_API` も新しいキーに替えてください。次の集計（毎晩）から新しいキーで開けます
+1. 「価格帯別出来高」タブを開きます。キーの入力は要りません。 [ダッシュボード](https://shunshun0904.github.io/growthstock/)
 2. 銘柄は「銘柄」のプルダウンで選びます（コードを打つ必要はありません）。一覧の表には、直近5つの予測日の候補が銘柄ごとに
    1行で並びます（候補になった日と、その日の順位）。表の行を押しても選べます。
 3. 集計期間（1・5・20営業日）、データ種別（ティック・分足）、横軸（株数・売買代金）を切り替えられます。
    一覧の「終値とVWAPの差」「大口」は、選んだ期間の値です。
-4. 揃わない期間・種別は、値を作らずに理由を出します（下の「欠損の理由」）。
+4. 揃わない期間・種別は、値を作らずに理由を出します（下の「欠損の理由」）。「再読み込み」で集計を読み直します。
 
 ## 更新の流れ
 
@@ -34,9 +27,9 @@ Update Data Store（毎晩の取り込み）
   └─ Update Ticks        ティックを下書きの Release data-tick-YYYY に足す
         │ それぞれが終わるたびに
         ▼
-Update Volume Profiles   集計して暗号化し、Release data-volume-profile の volume-profile.enc.json に上げる
+Update Volume Profiles   集計し、画面の確かめを通してから Release data-volume-profile の volume-profile.json に上げる
         ▼
-Deploy to GitHub Pages   volume-profile.enc.json を画面の data/ に置く
+Deploy to GitHub Pages   画面の確かめを通してから volume-profile.json を画面の data/ に置く
 ```
 
 - ワークフローは `.github/workflows/update-volume-profile.yml`、集計は `research/build_volume_profile.py`
@@ -44,30 +37,25 @@ Deploy to GitHub Pages   volume-profile.enc.json を画面の data/ に置く
   照合用の日足（Release `data-raw` の `bars_YYYY.parquet`）、J-Quants の取引カレンダー
 - 予測・分足・ティックの3つは並んで走り、終わる順は日によって違います。最後に終わったものの後の集計が、全部そろったものです。
   そろう前の集計では、まだ置き場に無い日の種別が「欠損」と出ます
-- 使う Secret は `JQUANTS_API` だけです。置き場の読み書きは Actions の鍵（`github.token`）です
+- 使う Secret は `JQUANTS_API` だけで、取引カレンダーを取るためにワークフローの中だけで使います（画面には出しません）。
+  置き場の読み書きは Actions の鍵（`github.token`）です
+- 上げる前（Update Volume Profiles）と載せる前（Deploy to GitHub Pages）に、集計が画面の確かめ
+  （`src/lib/volumeProfile.js` の `parseVolumeProfile`）を通ることを `node scripts/check_volume_profile.mjs` で見ます。
+  通らなければ上げません・載せません（画面が「形式を確認してください」と出して何も表示できない集計を載せないため）
+- 集計は Git に積みません（毎日変わるため）。`--output` は `public/`・`dist/` の下を拒みます
 - 手で作り直すときは Actions の **Update Volume Profiles** を Run workflow で起動します。 [実行履歴](https://github.com/shunshun0904/growthstock/actions/workflows/update-volume-profile.yml)
 
-## 暗号化
+## 公開について
 
-`research/volume_profile_crypto.py` が暗号化し、画面（`src/lib/volumeProfile.js`）が同じ手順で開きます。
-
-| 項目 | 中身 |
-|---|---|
-| 鍵 | J-Quants の API キー（前後の空白を除く）から、PBKDF2-HMAC-SHA256（60万回・固定の塩）で 256 ビット |
-| 暗号 | AES-256-GCM。IV は毎回ランダムな 12 バイト。見出し（基準日・作った時刻・方式）を追加認証データに入れるので、見出しを書き換えると開けない |
-| 中身 | 集計の JSON を gzip で縮めたもの |
-| 公開されるもの | 暗号文と見出し（基準日・作った時刻・方式）だけ。銘柄ごとの値は暗号文の中。対象の銘柄の一覧は、予測（`public/data/predictions.json`）として元から公開 |
-
-- Release `data-volume-profile` は公開の Release です。デプロイは読み取り専用の鍵で動くため、下書きにすると読めません。中身は暗号文だけです
-- 上げる前（Update Volume Profiles）と載せる前（Deploy to GitHub Pages）に、暗号文の形であること（平文でないこと）を
-  `python3 research/volume_profile_crypto.py check FILE` で確かめます。形が違えば上げません・載せません
-- 上げる前に、集計が画面の確かめ（`src/lib/volumeProfile.js` の `parseVolumeProfile`）を通ることも
-  `node scripts/check_volume_profile.mjs` で見ます。通らなければ上げません（画面でキーを入れても表示できない集計を載せないため）。
-  確かめに使う平文はランナーの中だけに置き、確かめたら消します
-- 開けるのは J-Quants の API キーを持つ人だけです。キーが漏れていなければ、暗号文から中身は分かりません。
-  キーが漏れたときは J-Quants でキーを作り直し、Secret `JQUANTS_API` を替えてください（古い集計は次の更新で置き換わります）
-- 集計の中身は J-Quants のデータから作った値なので、平文では公開の場所（`public/`・`dist/`・公開の Release）に置きません。
-  平文の書き出し（`--output`）は `public/`・`dist/` の下を拒みます。 [J-Quants 利用規約](https://jpx-jquants.com/ja/termsofservice?lang=ja)
+- 集計（`volume-profile.json`）は、公開サイト（GitHub Pages）と公開の Release `data-volume-profile` に置くので、**誰でも見られます**
+- 2026-11-19 の運用者の選択「暗号化をやめて公開する」によります。それまで（#11）は J-Quants の API キーから作った鍵で暗号化し、
+  画面でキーを入れて開いていました。リポジトリの Secret は GitHub Actions の中でしか読めず、ブラウザからは使えないため、
+  キーの入力をなくすには集計を公開するしかありません（Secret を画面に埋め込むと API キー自体が公開されます）
+- 集計の元は J-Quants のアドオン（分足・ティック）です。J-Quants の公式ヘルプでは、個人の利用は私的利用に限られ、データの第三者への
+  配信は営利・非営利を問わず禁止とされています（[利用について](https://jpx-jquants.com/ja/help/usage)。2026-11-18 に確認）。
+  これを伝えたうえでの選択です。分足・ティックそのもの（置き場）は、これまでどおり下書きの Release に置き、公開しません
+- 暗号化していたころのアセット `volume-profile.enc.json` は、Update Volume Profiles が上げるときに消します。
+  画面は、そのころ端末に覚えた復号の鍵を開いたときに消します
 
 ## 計算
 
@@ -122,19 +110,22 @@ Update Volume Profiles の実行の画面（公開）には、件数だけを出
 ```bash
 python3 -m pip install -r research/requirements.txt
 python3 tests/fixtures/volume_profile_inputs.py /tmp/vp /tmp/vp/predictions.json
-JQUANTS_API=test-key python3 research/build_volume_profile.py --predictions /tmp/vp/predictions.json \
-  --work-dir /tmp/vp --calendar /tmp/vp/calendar.csv --encrypt-to /tmp/vp/volume-profile.enc.json \
-  --output /tmp/vp/plain.json
-npm run build && node tests/volume-profile-browser.mjs   # 画面で開く・違うキー・欠損・スマホの幅
+python3 research/build_volume_profile.py --predictions /tmp/vp/predictions.json \
+  --work-dir /tmp/vp --calendar /tmp/vp/calendar.csv --output /tmp/vp/volume-profile.json
+node scripts/check_volume_profile.mjs /tmp/vp/volume-profile.json   # 画面が読めるか
+npm run build && node tests/volume-profile-browser.mjs             # 画面で開く・プルダウン・欠損・スマホの幅
 ```
 
 実データで確かめるには、置き場（下書きの Release）を読める鍵（このリポジトリへの書き込み権限）が要ります。
 `GH_TOKEN` を渡して `--download-cmd "bash scripts/gh_release_download.sh"` を付けると、必要なファイルだけを
-`--work-dir`（既定 `research/_data/volume_profile`。Git の対象外）に取り出します。平文の `--output` は公開の場所に置かないでください。
+`--work-dir`（既定 `research/_data/volume_profile`。Git の対象外）に取り出します。`--output` は `public/`・`dist/` の外に書きます。
 
-## 以前の作り（2026-11-18 まで）
+## これまでの作り
 
-非公開リポジトリ `growthstock-minute` に平文の集計を置き、GitHub の fine-grained PAT（Secret `MINUTE_DATA_TOKEN` と閲覧用トークン）で
-読み書きする作りでした（`research/publish_volume_profile.py`）。2026-11-19、運用者の選択「暗号化し J-Quants のキーで開く」
-「既存のタブを作り替える」で、いまの作りに替えました。対象も「最新の予測日の候補」から「直近5営業日の候補すべて」に広げました。
+| 時期 | 作り |
+|---|---|
+| 2026-11-18 まで（#10） | 非公開リポジトリ `growthstock-minute` に集計を置き、GitHub の fine-grained PAT（Secret `MINUTE_DATA_TOKEN` と閲覧用トークン）で読み書きした（`research/publish_volume_profile.py`）。対象は最新の予測日の候補だけ |
+| 2026-11-19（#11） | 運用者の選択「暗号化し J-Quants のキーで開く」「既存のタブを作り替える」。蓄積した分足・ティックから直近5営業日の候補すべてを集計し、J-Quants の API キーから作った鍵で暗号化して載せた。画面でキーを入れて開いた |
+| 2026-11-19（#12）から | 運用者の依頼「APIキーの入力自体なくしてください」と選択「暗号化をやめて公開する」。キーの入力なしで開く。銘柄はプルダウンで選ぶ |
+
 作っていた非公開リポジトリ・PAT・Secret `MINUTE_DATA_TOKEN`・Variable `MINUTE_DATA_REPO` は使いません（消してかまいません）。

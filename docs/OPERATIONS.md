@@ -55,7 +55,7 @@
 | 生データ | 日次バー・財務・信用残ほか | GitHub Release（`data-raw`） | 平日 18:40 JST に Routine が起動（10/7 までは 16:10） | 全期間の取得に2.5時間かかるため、差分だけ取って書き戻す |
 | ティック（約定） | `tick_YYYYMMDD.parquet`（日ごと・全銘柄。Release `data-tick-YYYY`）/ `tick_manifest.json`（取得記録。Release `data-tick`） | このリポジトリの**下書き**の GitHub Release（公開しない） | 平日。Update Data Store の完了に続けて `Update Ticks` が workflow_run で走る（2026-11-18 から） | J-Quants のティックは CSV の一括ダウンロードだけで提供され、直近2年分（2年で CSV.gz 21GB・parquet 約13.5GB）。年ごとの Release に分けるのは、1 Release のアセットが 1,000 個までのため。予測には使わず、「価格帯別出来高」タブの集計（暗号化）に使う（`docs/TICKS.md`・`docs/VOLUME_PROFILE.md`） |
 | 分足 | `minute_YYYYMM.parquet`（月ごと・全銘柄）/ `minute_manifest.json`（取得記録） | このリポジトリの**下書き**の GitHub Release（`data-minute`。公開しない） | 平日。Update Data Store の完了に続けて `Update Minute Bars` が workflow_run で走る（2026-11-18 から） | J-Quants の分足（アドオン）は直近2年分だけで、毎日1日ずつ取れなくなるので、取った日を消さずに貯める。公開した Release は誰でも落とせ、J-Quants の個人の利用は第三者への配信が禁止なので、書き込み権限のある人にしか見えない下書きに置く（運用者の選択 2026-11-18「非公開」、2026-11-19「新しい鍵を作らずに」。鍵なしでは見えないことを確かめた）。書き込みは Actions の鍵。予測には使わず、「価格帯別出来高」タブの集計（暗号化）に使う（`docs/MINUTE_BARS.md`・`docs/VOLUME_PROFILE.md`） |
-| 価格帯別出来高（暗号化済み） | `volume-profile.enc.json`（直近5営業日の候補すべての 1・5・20営業日の集計。J-Quants の API キーから作った鍵で AES-GCM で暗号化） | GitHub Release（`data-volume-profile`。公開。中身は暗号文だけ）→ GitHub Pages | 平日。予測・分足・ティックのそれぞれが終わるたびに `Update Volume Profiles` が作り直す（2026-11-19 から） | 集計は J-Quants のアドオンのデータから作るので平文では公開しない。画面でキーを入れた人のブラウザの中だけで開く（キーはどこにも送らない）。デプロイが読み取り専用の鍵で読めるよう、公開の Release に暗号文だけを置く（`docs/VOLUME_PROFILE.md`） |
+| 価格帯別出来高 | `volume-profile.json`（直近5営業日の候補すべての 1・5・20営業日の集計） | GitHub Release（`data-volume-profile`。公開）→ GitHub Pages | 平日。予測・分足・ティックのそれぞれが終わるたびに `Update Volume Profiles` が作り直す（2026-11-19 から） | 画面はキーの入力なしで開く。**集計は誰でも見られる**（運用者の選択 2026-11-19「暗号化をやめて公開する」。J-Quants の公式ヘルプが個人の利用での第三者への配信を禁止としていることを伝えたうえで）。分足・ティックそのものは下書きの Release のまま（`docs/VOLUME_PROFILE.md`） |
 | 有報の年次財務 | `edinet_fin.parquet` / `edinet_companies.parquet` / `edinet_manifest.json` | GitHub Release（`data-raw`） | 毎日 10:10 JST に Routine が起動 | EDINET DB は 100/日・900/月の枠しか無いので、毎日 85社ずつ差分で貯める（`docs/DATA_EDINETDB.md`）。**まだ研究用で、本番の特徴量には入っていない** |
 | 有報・半期報告書の損益（画面） | `public/data/filings.json`（git）/ 索引・控え `edinet_filings_index.json` / `edinet_filings_cache.json`（Release `data-raw`） | git / Release | 毎晩の予測の後に `Fetch Filings` が workflow_run で続けて走る | 金融庁 EDINET の公式 API から候補銘柄の最新の有報・半期報告書を取り、売上原価・販管費まで分けた損益を「決算サンキー」のタブに出す（`docs/DATA_EDINET_API.md`）。鍵は Secrets `EDINET_FSA_API_KEY`。**2026-10-13 からタブは画面に出していない**（運用者の指示「表示から消してくれるだけで良いです」。取り込みは続けている。`src/App.jsx` の `TABS` の `hidden` を外せば戻る） |
 
@@ -102,8 +102,8 @@
                                      （2026-11-18 から。予測・分足とは別。docs/TICKS.md）
       ↓ 予測・分足・ティックのそれぞれの完了で起動
                 Update Volume Profiles  直近5営業日の候補すべての価格帯別出来高を、置き場の分足・
-                                     ティックと日足から集計し、J-Quants のキーから作った鍵で暗号化して
-                                     Release（data-volume-profile）に上げる → Pages 再デプロイ
+                                     ティックと日足から集計し、Release（data-volume-profile）に
+                                     上げる → Pages 再デプロイ（画面はキーの入力なしで開く）
                                      （2026-11-19 から。docs/VOLUME_PROFILE.md）
 
 平日 13:10 JST  Fetch JSF            日証金の前営業日の確報（daily）と、銘柄ごとの

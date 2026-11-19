@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-直近5営業日の予測対象の価格帯別出来高を、蓄積した分足・ティックから集計し、暗号化して書き出す。
+直近5営業日の予測対象の価格帯別出来高を、蓄積した分足・ティックから集計して書き出す。
 
   python3 research/build_volume_profile.py --download-cmd "bash scripts/gh_release_download.sh" \\
-      --encrypt-to out/volume-profile.enc.json --summary-json out/summary.json
+      --output out/volume-profile.json --summary-json out/summary.json
 
 - 対象: public/data/predictions.json の直近5つの予測日（dates）の候補すべて。銘柄の重複は除く
 - 基準日: 予測の基準日（asOf）。どの銘柄も、基準日までの 1・5・20 営業日で集計する
 - 入力: 置き場の分足・ティックと、data-raw の日足（照合用）。取引カレンダーは J-Quants（--calendar で手元のファイル）
-- 出力: --encrypt-to は J-Quants の API キー（環境変数 JQUANTS_API_KEY か JQUANTS_API）から作った鍵で暗号化した
-  集計（research/volume_profile_crypto.py）。--output は平文（手元の確認用。public/・dist/ の下には書かない）
+- 出力: --output に集計の JSON。画面には Release data-volume-profile 経由でデプロイが載せる
+  （運用者の選択 2026-11-19「暗号化をやめて公開する」）。毎日の集計を Git に積まないよう、public/・dist/ の下には書かない
 
 ログと --summary-json に出すのは、件数・日付・ファイル名だけ（価格・数量の値は出さない。ワークフローのログは公開）。
 """
@@ -33,7 +33,6 @@ for extra in (ROOT / "research", ROOT / "scripts"):
     if str(extra) not in sys.path:
         sys.path.insert(0, str(extra))
 
-import volume_profile_crypto as crypto  # noqa: E402
 import volume_profile_data as data  # noqa: E402
 from volume_profile import (  # noqa: E402
     BUCKETS, SIZE_EDGES, SOURCES, WINDOWS, lookback, normalize_code, reconcile, window_profiles,
@@ -93,7 +92,7 @@ def calendar_from_api(start: dt.date, end: dt.date) -> List[str]:
 def outside_public(path: Path) -> Path:
     path = Path(path).expanduser().resolve()
     if any(p.name in ("public", "dist") for p in (path, *path.parents)):
-        raise ValueError("平文の集計は public/・dist/ の外に書いてください（公開しない）。")
+        raise ValueError("集計は public/・dist/ の外に書いてください（Git に積まず、Release 経由でデプロイが載せる）。")
     return path
 
 
@@ -152,16 +151,10 @@ class Build:
                    "definitions": {"windows": list(WINDOWS), "buckets": list(BUCKETS), "sizeEdges": list(SIZE_EDGES)},
                    "stocks": rows}
         summary["generatedAt"] = generated
-        summary["bytes"] = {}
         plain = json.dumps(payload, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
-        summary["bytes"]["plain"] = len(plain)
+        summary["bytes"] = len(plain)
         if args.output:
-            write_json(outside_public(Path(args.output)), payload, 0o600)
-        if args.encrypt_to:
-            from jquants_data_fetcher import resolve_api_key
-
-            doc = crypto.encrypt(plain, resolve_api_key(), as_of, generated)
-            summary["bytes"]["encrypted"] = write_json(Path(args.encrypt_to), doc)
+            write_json(outside_public(Path(args.output)), payload)
         summary["seconds"] = round(time.time() - started, 1)
         summary["fetchedFiles"] = self.fetch.fetched
         return payload, summary
@@ -249,8 +242,7 @@ def print_summary(summary: dict) -> None:
         print(f"{n}営業日: " + " / ".join(f"{s} {dict(c)}" for s, c in by.items()))
     for message in summary["warnings"]:
         print(f"::warning title=価格帯別出来高::{message}")
-    print(f"大きさ: 平文 {summary['bytes'].get('plain', 0):,} バイト / 暗号文 {summary['bytes'].get('encrypted', 0):,} バイト"
-          f" / {summary.get('seconds')}秒")
+    print(f"大きさ: {summary.get('bytes', 0):,} バイト / {summary.get('seconds')}秒")
 
 
 def main(argv=None) -> int:
@@ -261,8 +253,7 @@ def main(argv=None) -> int:
     parser.add_argument("--work-dir", type=Path, default=WORK, help="置き場から取り出したファイルを置く場所")
     parser.add_argument("--download-cmd", help="置き場から取り出すコマンド（TAG DIR NAME を後ろに付けて呼ぶ）")
     parser.add_argument("--calendar", type=Path, help="取引カレンダーの CSV/JSON（Date, HolDiv）。無ければ J-Quants から")
-    parser.add_argument("--output", type=Path, help="平文の集計（手元の確認用。public/・dist/ の外）")
-    parser.add_argument("--encrypt-to", type=Path, help="暗号化した集計の書き出し先")
+    parser.add_argument("--output", type=Path, help="集計の JSON の書き出し先（public/・dist/ の外）")
     parser.add_argument("--summary-json", type=Path, help="件数だけのまとめ")
     parser.add_argument("--remove-after-read", action="store_true", help="読み終えたティックのファイルを消す（容量の節約）")
     parser.add_argument("--demo", action="store_true", help="合成データで作ったことを集計に記す")

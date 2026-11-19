@@ -1,7 +1,7 @@
 # ティックの蓄積（2026-11-18 から）
 
 J-Quants のアドオン「株価 分足・ティック」のティック（約定。`/equities/trades`）を、全銘柄・取れる範囲の全期間で取り、
-毎日の差分を足して蓄積する。予測の特徴量には使っていない。画面では「価格帯別出来高」タブの集計（暗号化して載せる。[VOLUME_PROFILE.md](VOLUME_PROFILE.md)）に使う。分足は [MINUTE_BARS.md](MINUTE_BARS.md)。
+毎日の差分を足して蓄積する。予測の特徴量には使っていない。画面では「価格帯別出来高」タブの集計（[VOLUME_PROFILE.md](VOLUME_PROFILE.md)）に使う。ここにあるデータそのものは公開しない。分足は [MINUTE_BARS.md](MINUTE_BARS.md)。
 
 - 取得と保存: `research/ticks.py`
 - 起動: `.github/workflows/update-ticks.yml`（**Update Ticks**）

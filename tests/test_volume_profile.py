@@ -4,7 +4,7 @@
 - 対象は直近5つの予測日の候補すべて（銘柄の重複は除く）
 - 寄り・前場・後場・引けの分け方と、ザラバだけで数える約定代金の大きさ別の割合
 - 日足と照合できない日・置き場に無い日があれば、その期間・種別は欠損（値を作らない）
-- 書き出すのは暗号文だけで、J-Quants のキーが無ければ開けない。見出しを書き換えても開けない
+- 集計は Git に積まない（public/・dist/ の下に書かない。Release 経由でデプロイが載せる）
 - ログ用のまとめに出すのは件数・日付・ファイル名だけ
 """
 
@@ -27,7 +27,6 @@ for extra in (ROOT / "research", ROOT / "scripts", ROOT / "tests/fixtures"):
 
 import build_volume_profile as B  # noqa: E402
 import volume_profile as V  # noqa: E402
-import volume_profile_crypto as C  # noqa: E402
 import volume_profile_data as D  # noqa: E402
 from volume_profile_inputs import write_inputs, write_predictions  # noqa: E402
 
@@ -187,34 +186,6 @@ class WindowTest(unittest.TestCase):
         self.assertEqual(V.reconcile(ok, V.Quote(None, None, None, 0, 0, 1.)), "traded")
 
 
-class CryptoTest(unittest.TestCase):
-    def test_round_trip_binds_the_header_and_needs_the_key(self):
-        plain = json.dumps({"kind": "growthstock.volume-profile", "stocks": []}).encode()
-        doc = C.encrypt(plain, f"  {KEY}\n", DAY, "2025-11-18T09:00:00+00:00", iterations=100_000)
-        self.assertEqual(C.decrypt(doc, KEY), plain)
-        with self.assertRaisesRegex(ValueError, "鍵が違う"):
-            C.decrypt(doc, KEY + "x")
-        with self.assertRaisesRegex(ValueError, "鍵が違う"):
-            C.decrypt({**doc, "asOf": "2025-11-19"}, KEY)
-        self.assertNotIn(b"growthstock.volume-profile\"", json.dumps(doc).encode())
-        self.assertNotEqual(C.encrypt(plain, KEY, DAY, "x", iterations=100_000)["cipher"]["iv"], doc["cipher"]["iv"])
-
-    def test_check_rejects_anything_but_the_envelope(self):
-        doc = C.encrypt(b"{}", KEY, DAY, "now", iterations=100_000)
-        for bad in ({"kind": "growthstock.volume-profile", "stocks": []}, {**doc, "stocks": []},
-                    {**doc, "kind": "x"}, {**doc, "kdf": {**doc["kdf"], "iterations": 10}},
-                    {**doc, "cipher": {**doc["cipher"], "iv": "AAAA"}}, {**doc, "data": "not base64!"}):
-            with self.assertRaises(ValueError):
-                C.check_envelope(bad)
-        with tempfile.TemporaryDirectory() as temp:
-            good, bad = Path(temp) / "good.json", Path(temp) / "bad.json"
-            good.write_text(json.dumps(doc))
-            bad.write_text(json.dumps({"kind": "growthstock.volume-profile", "stocks": []}))
-            with redirect_stdout(StringIO()), redirect_stderr(StringIO()):
-                self.assertEqual(C.main(["check", str(good)]), 0)
-                self.assertEqual(C.main(["check", str(bad)]), 1)
-
-
 class BuildTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -233,6 +204,9 @@ class BuildTest(unittest.TestCase):
                 os.environ[k] = v
         self.temp.cleanup()
 
+    def load(self, path):
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+
     def run_build(self, *extra):
         args = ["--predictions", str(self.root / "predictions.json"), "--work-dir", str(self.root),
                 "--calendar", str(self.root / "calendar.csv"), *extra]
@@ -241,13 +215,11 @@ class BuildTest(unittest.TestCase):
             code = B.main(args)
         return code, out.getvalue(), err.getvalue()
 
-    def test_store_files_become_an_encrypted_profile_and_a_counts_only_summary(self):
-        enc, summary = self.root / "out/enc.json", self.root / "out/summary.json"
-        code, out, err = self.run_build("--encrypt-to", str(enc), "--summary-json", str(summary))
+    def test_store_files_become_a_profile_and_a_counts_only_summary(self):
+        output, summary = self.root / "out/volume-profile.json", self.root / "out/summary.json"
+        code, out, err = self.run_build("--output", str(output), "--summary-json", str(summary))
         self.assertEqual(code, 0, err)
-        doc = json.loads(enc.read_text())
-        C.check_envelope(doc)
-        data = json.loads(C.decrypt(doc, KEY))
+        data = self.load(output)
         self.assertEqual((data["kind"], data["schemaVersion"], data["asOf"], data["demo"]),
                          ("growthstock.volume-profile", 2, DAY, False))
         stocks = {s["code"]: s for s in data["stocks"]}
@@ -271,8 +243,9 @@ class BuildTest(unittest.TestCase):
             self.assertNotIn("bands", text)
             self.assertIsNone(close.search(text))
             self.assertNotIn(KEY, text)
+        self.assertEqual(report["bytes"], output.stat().st_size)
 
-    def test_plaintext_output_stays_out_of_public_and_dist(self):
+    def test_output_stays_out_of_public_and_dist(self):
         code, _, err = self.run_build("--output", str(ROOT / "public/data/volume-profile.json"))
         self.assertEqual(code, 1)
         self.assertIn("public/・dist/ の外", err)
@@ -280,10 +253,10 @@ class BuildTest(unittest.TestCase):
 
     def test_missing_store_day_is_reported_not_invented(self):
         (self.root / "tick" / "tick_20251118.parquet").unlink()
-        enc, summary = self.root / "enc.json", self.root / "summary.json"
-        code, _, err = self.run_build("--encrypt-to", str(enc), "--summary-json", str(summary))
+        output, summary = self.root / "volume-profile.json", self.root / "summary.json"
+        code, _, err = self.run_build("--output", str(output), "--summary-json", str(summary))
         self.assertEqual(code, 0, err)
-        stocks = {s["code"]: s for s in json.loads(C.decrypt(json.loads(enc.read_text()), KEY))["stocks"]}
+        stocks = {s["code"]: s for s in self.load(output)["stocks"]}
         self.assertEqual(stocks["123A0"]["windows"]["1"]["tick"]["status"], "intraday_missing")
         self.assertEqual(stocks["123A0"]["windows"]["1"]["minute"]["status"], "ok")
         report = json.loads(summary.read_text())
@@ -302,8 +275,8 @@ class BuildTest(unittest.TestCase):
             "log.open('a').write(f'{tag} {name}\\n')\n"
             "src = remote / name\n"
             "if src.exists():\n    pathlib.Path(folder).mkdir(parents=True, exist_ok=True); shutil.copy(src, folder)\n")
-        enc = self.root / "enc.json"
-        code, _, err = self.run_build("--encrypt-to", str(enc), "--download-cmd", f"{sys.executable} {script}",
+        output = self.root / "volume-profile.json"
+        code, _, err = self.run_build("--output", str(output), "--download-cmd", f"{sys.executable} {script}",
                                       "--remove-after-read")
         self.assertEqual(code, 0, err)
         calls = log.read_text().splitlines()
@@ -318,10 +291,10 @@ class BuildTest(unittest.TestCase):
         bars = pd.read_parquet(self.root / "raw/bars_2025.parquet")
         clash = bars[(bars.Code == "123A0") & (bars.Date == "2025-11-17")].assign(Vo=1.0)
         pd.concat([bars, clash, bars.iloc[:1]], ignore_index=True).to_parquet(self.root / "raw/bars_2025.parquet")
-        enc, summary = self.root / "enc.json", self.root / "summary.json"
-        code, _, err = self.run_build("--encrypt-to", str(enc), "--summary-json", str(summary))
+        output, summary = self.root / "volume-profile.json", self.root / "summary.json"
+        code, _, err = self.run_build("--output", str(output), "--summary-json", str(summary))
         self.assertEqual(code, 0, err)
-        windows = {s["code"]: s for s in json.loads(C.decrypt(json.loads(enc.read_text()), KEY))["stocks"]}["123A0"]["windows"]
+        windows = {s["code"]: s for s in self.load(output)["stocks"]}["123A0"]["windows"]
         self.assertEqual(windows["1"]["tick"]["status"], "ok")
         self.assertEqual(windows["5"]["tick"]["status"], "daily_missing")
         self.assertTrue(any("違う行が 1件" in w for w in json.loads(summary.read_text())["warnings"]))
@@ -335,12 +308,12 @@ class BuildTest(unittest.TestCase):
         self.assertEqual(plan["minute"], [("data-minute", "minute_202512.parquet"), ("data-minute", "minute_202601.parquet")])
         self.assertEqual(plan["bars"], [("data-raw", "bars_2025.parquet"), ("data-raw", "bars_2026.parquet")])
 
-    def test_no_targets_still_writes_an_empty_encrypted_profile(self):
+    def test_no_targets_still_writes_an_empty_profile(self):
         (self.root / "predictions.json").write_text(json.dumps({"asOf": DAY, "dates": [DAY], "candidates": []}))
-        enc = self.root / "enc.json"
-        code, _, err = self.run_build("--encrypt-to", str(enc))
+        output = self.root / "volume-profile.json"
+        code, _, err = self.run_build("--output", str(output))
         self.assertEqual(code, 0, err)
-        self.assertEqual(json.loads(C.decrypt(json.loads(enc.read_text()), KEY))["stocks"], [])
+        self.assertEqual(self.load(output)["stocks"], [])
 
 
 class WorkflowTest(unittest.TestCase):
@@ -355,19 +328,21 @@ class WorkflowTest(unittest.TestCase):
         self.assertNotIn("PROFILE_REPO", text)
         for workflow in ("Predict Breakouts", "Update Minute Bars", "Update Ticks"):
             self.assertIn(f"'{workflow}'", text)
-        check = text.index("volume_profile_crypto.py check")
-        self.assertLess(check, text.index("scripts/gh_release_upload.sh"))
-        # 画面と同じ確かめを通してから上げる。平文は確かめたら消す
+        # 画面と同じ確かめを通してから上げる。暗号化はしない（運用者の選択 2026-11-19）
         screen = text.index("node scripts/check_volume_profile.mjs")
         self.assertLess(screen, text.index("scripts/gh_release_upload.sh"))
-        self.assertIn('rm -f "$RUNNER_TEMP/vp/plain.json"', text)
+        self.assertNotIn("volume_profile_crypto", text)
+        self.assertNotIn("--encrypt-to", text)
+        self.assertIn("OUT_FILE: volume-profile.json", text)
+        self.assertIn('gh release delete-asset "$OUT_TAG" "$OLD_FILE"', text)  # 暗号化していたころのアセットを片づける
         self.assertNotIn("public/", text.split("--output", 1)[1].split("\n", 1)[0])
         self.assertNotIn("GH_ENSURE_DRAFT", text)  # デプロイの読み取り専用の鍵で読める公開の Release
 
-    def test_deploy_places_only_a_checked_envelope(self):
+    def test_deploy_places_only_a_checked_profile(self):
         text = self.read("deploy-pages.yml")
         self.assertIn("'Update Volume Profiles'", text)
-        self.assertLess(text.index("volume_profile_crypto.py check"), text.index("dist/data/volume-profile.enc.json"))
+        self.assertLess(text.index('node scripts/check_volume_profile.mjs "$f"'), text.index("cp \"$f\" dist/data/volume-profile.json"))
+        self.assertNotIn("volume_profile_crypto", text)
         self.assertNotIn("VITE_VOLUME_PROFILE_REPO", text)
         self.assertNotIn("MINUTE_DATA", text)
 
