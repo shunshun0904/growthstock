@@ -1,0 +1,66 @@
+name: Probe Bulk Files
+
+# J-Quants の一括ダウンロード（/bulk/list・/bulk/get）のファイルを、取り込む前に測る（research/bulk_probe.py）。
+# 何も保存しない。一覧の件数・期間・大きさ・作られた時刻と、1ファイルの形（見出し・行数・日数・銘柄数・
+# 列の形・キーの一意性）・保存の形にしたときの大きさの見積もりを出す。値そのものは出さない（ログは公開）。
+#
+# 2026-11-18: ティック（/equities/trades。CSV でしか提供されない）の取り込みを決める前に、ファイルの数・
+# 大きさ・1日の行数を実測するために作った。
+on:
+  workflow_dispatch:
+    inputs:
+      endpoints:
+        description: '測るエンドポイント（スペース区切り）'
+        required: false
+        default: '/equities/trades'
+      sample:
+        description: '落として測る1ファイルの選び方'
+        required: false
+        type: choice
+        options: ['smallest', 'latest', 'largest']
+        default: 'smallest'
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pyarrow==18.1.0 numpy==2.1.3
+
+      - name: Probe
+        env:
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+          EPS_IN: ${{ inputs.endpoints || '' }}
+          SAMPLE: ${{ inputs.sample || 'smallest' }}
+        run: |
+          EPS="$EPS_IN"
+          [ -n "$EPS" ] || EPS="/equities/trades"
+          [[ "$SAMPLE" =~ ^(smallest|latest|largest)$ ]] || { echo "sample が不正: $SAMPLE"; exit 1; }
+          ARGS=(--summary-json bulk_probe.json --sample "$SAMPLE")
+          for e in $EPS; do
+            [[ "$e" =~ ^/[a-z0-9/_-]+$ ]] || { echo "エンドポイントが不正: $e"; exit 1; }
+            ARGS+=(--endpoint "$e")
+          done
+          python3 -u research/bulk_probe.py "${ARGS[@]}" 2>&1 | tee bulk_probe.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo '## 一括ファイルの実測（何も保存していない）'
+            echo '```'
+            tail -150 bulk_probe.log 2>/dev/null || echo '(出力なし)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

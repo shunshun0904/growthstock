@@ -54,6 +54,17 @@ APIキーはブラウザに置けないため、**取得はGitHub Actions、表�
 
 ブラウザ側は生成済みの JSON を読むだけなので、**APIキーがクライアントに露出しません**。
 
+### 分足・ティックの蓄積（2026-11-18）
+
+J-Quants のアドオン「株価 分足・ティック」の分足（`/equities/bars/minute`）とティック（約定。`/equities/trades`）を、全銘柄・取れる範囲（直近2年）で取り、毎日の差分を足して蓄積します。
+J-Quants はどちらも毎日1日ずつ古い日が取れなくなるので、取った日は消さずに残します。いまは蓄積だけで、予測・画面には使っていません。
+
+- 置き場は、このリポジトリの**下書き（draft）の Release**（書き込み権限のある人にしか見えない。**公開しない**）。公開した Release は誰でもダウンロードでき、J-Quants の個人の利用はデータの第三者への配信が禁止されているため、公開の Release には置きません。書き込みは Actions の鍵なので、新しい鍵の登録は要りません
+  - 分足: `data-minute`（月ごとの parquet と取得記録）
+  - ティック: `data-tick-YYYY`（日ごとの parquet。2年で約13.5GB）と `data-tick`（取得記録）
+- 初回は一括ダウンロード（`/bulk/list` → `/bulk/get` の CSV.gz）で2年分を取ります。毎日は取り込み（Update Data Store）の完了に続けて、**Update Minute Bars**・**Update Ticks** がその日の分を足します。予測とは別のワークフローです
+- 置き場の確かめ・ファイルの形・安全策・読み方は [docs/MINUTE_BARS.md](docs/MINUTE_BARS.md)・[docs/TICKS.md](docs/TICKS.md)
+
 ### 価格帯別出来高
 
 「価格帯別出来高」タブに、最新の予測基準日の対象全銘柄と、J-Quantsの分足・ティックで作った1・5・20営業日の出来高分布を表示します。日次予測後に非公開リポジトリへ更新し、閲覧用トークンで接続したブラウザで自動表示します。 [接続と自動更新の設定](docs/VOLUME_PROFILE.md)
@@ -286,6 +297,8 @@ $R$ は 78週（368営業日）高値接近率。軸5 と同じ値。
 | `/equities/bars/daily` | `/prices/daily_quotes` | 株価・出来高・売買代金 |
 | `/fins/summary` | `/fins/statements` | EPS・売上・ROE・進捗率・発行済株式数 |
 | `/markets/margin-interest` | `/markets/weekly_margin_interest` | 信用倍率（8軸の信用倍率） |
+| `/equities/bars/minute` | （なし） | 分足の蓄積（アドオン。画面には使わない。[docs/MINUTE_BARS.md](docs/MINUTE_BARS.md)） |
+| `/equities/trades` | （なし） | ティックの蓄積（アドオン。CSV の一括ダウンロード `/bulk/list`・`/bulk/get` だけで提供。[docs/TICKS.md](docs/TICKS.md)） |
 
 ベースURL は `https://api.jquants.com/v2`、認証は全エンドポイント共通で `x-api-key` ヘッダーです。
 

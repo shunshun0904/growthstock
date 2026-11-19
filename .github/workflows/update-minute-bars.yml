@@ -1,0 +1,245 @@
+name: Update Minute Bars
+
+# J-Quants の分足（/equities/bars/minute。アドオン「株価 分足・ティック」）を取得して蓄積する。
+# 中身は research/minute_bars.py、置き場の形は research/minute_store.py、経緯は docs/MINUTE_BARS.md。
+#
+# 置き場は、このリポジトリの**下書き（draft）の Release**（タグ data-minute）。このリポジトリは公開で、公開した
+# Release は誰でもダウンロードできる。J-Quants の個人の利用は私的利用に限られ、データの第三者への配信は禁止と
+# されているので、分足は公開の Release に置かない（運用者の選択 2026-11-18「非公開」）。下書きは書き込み権限の
+# ある人にしか見えない（2026-11-19 に Probe Draft Release で確かめた: 鍵なしでは一覧に出ず、Release・ファイル・
+# ページとも 404）。書き込みは Actions の鍵（GITHUB_TOKEN）なので、新しい鍵は要らない（運用者の依頼 2026-11-19
+# 「GitHub の鍵を新しく作らずに済ませる方法で」）。**この Release を公開（Publish）しない。** 公開になっていたら、
+# 何も上げずに止める（scripts/gh_release_ensure.sh の GH_ENSURE_DRAFT）。
+#
+# J-Quants の分足は直近2年分だけで、毎日1日ずつ古い日が取れなくなる。取った日は消さない。
+#   初回: 一括ダウンロード（/bulk/list → /bulk/get。月ごとの CSV.gz）で取れる範囲を全部
+#   毎日: 取り込み（Update Data Store。平日 18:40 JST の Routine）が終わったら続けて走り、
+#         まだ無い営業日を API（date= の指定。全銘柄）で取る。公表前の日（0行）は取得済みに
+#         しないので、次の実行で入る
+#
+# 予測（Predict Breakouts）とは別のワークフローにしてある。分足の取得が失敗しても予測は止まらない。
+on:
+  workflow_run:
+    workflows: ['Update Data Store']
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'update = 取得して蓄積 / probe = 契約の確認・一括ファイルの一覧と1ファイルの形を見るだけ（何も保存しない）'
+        required: false
+        type: choice
+        options: ['update', 'probe']
+        default: 'update'
+      forget_from:
+        description: 'この日（YYYY-MM-DD）以降の取得記録を外して API で取り直す（月のファイルは消さない）'
+        required: false
+        default: ''
+      reingest_bulk:
+        description: '一括ファイルを全部取り込み直す'
+        required: false
+        type: choice
+        options: ['no', 'yes']
+        default: 'no'
+      verify:
+        description: '保存先の月のファイルを全部落として、取得記録と突き合わせる'
+        required: false
+        type: choice
+        options: ['no', 'yes']
+        default: 'no'
+      max_minutes:
+        description: '新しい取得を打ち切る分数（ジョブの上限 330分より短く）'
+        required: false
+        default: '300'
+  # 過去2年分の初回の取得は、既定ブランチへ入る前に作業ブランチから起動した（2026-11-19。push の起動と
+  # 要求ファイルは、取得が終わってから外した。docs/MINUTE_BARS.md・docs/TICKS.md の「初回の取得の実測」）
+
+# 下書きの Release を作って上げる（git にはコミットしない）
+permissions:
+  contents: write
+
+concurrency:
+  group: update-minute-bars
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  RELEASE_TAG: data-minute
+  DATA_DIR: research/_minute
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      # 分足のスクリプトは pyarrow だけで動く（学習の重い依存は要らない）。版は research/requirements.txt に合わせる
+      - run: pip install pyarrow==18.1.0 numpy==2.1.3
+
+      # probe は何も保存しないので置き場を使わない（置き場の準備の前でも J-Quants 側を確かめられる）
+      - name: Mode
+        id: mode
+        env:
+          MODE_IN: ${{ inputs.mode || 'update' }}
+        run: |
+          MODE="$MODE_IN"
+          [ "$MODE" = "probe" ] || MODE=update
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "モード: $MODE / 起動: ${{ github.event_name }}"
+
+      # 置き場の下書きの Release が無ければ下書きで作る。公開になっていたら止める（exit 3）
+      - name: Check storage
+        if: steps.mode.outputs.mode != 'probe'
+        env:
+          GH_ENSURE_DRAFT: '1'
+        run: |
+          bash scripts/gh_release_ensure.sh "$RELEASE_TAG" "J-Quants 分足（下書きのまま。公開しない）" \
+            "J-Quants API V2 の分足（/equities/bars/minute）。月ごとの parquet（minute_YYYYMM.parquet）と取得記録（minute_manifest.json）。J-Quants のデータは第三者に配信できないので、この Release は下書きのまま使う（公開しない）。growthstock の Update Minute Bars が書く（docs/MINUTE_BARS.md）。"
+          echo "置き場: $GH_REPO の下書きの Release $RELEASE_TAG"
+
+      # 落とすのは取得記録だけ。月のファイルは、書き込む月だけをスクリプトが取り寄せる
+      # （全部を毎日落とすと、年に数GBずつ増える）
+      - name: Download manifest
+        id: download
+        if: steps.mode.outputs.mode != 'probe'
+        env:
+          VERIFY: ${{ inputs.verify || 'no' }}
+        run: |
+          mkdir -p "$DATA_DIR"
+          bash scripts/gh_release_download.sh "$RELEASE_TAG" "$DATA_DIR" 'minute_manifest.json'
+          if [ ! -f "$DATA_DIR/minute_manifest.json" ]; then
+            # 記録だけが無くて月のファイルがあるなら止める。初回のつもりで進むと、一括ファイルの
+            # 無い月（2年の範囲の外に出た月）を記録から見失う
+            n=$(gh release view "$RELEASE_TAG" --json assets \
+                  --jq '[.assets[].name | select(test("^minute_[0-9]{6}\\.parquet$"))] | length')
+            if [ "${n:-0}" -gt 0 ]; then
+              echo "::error title=取得記録が無い::$RELEASE_TAG に月のファイルが ${n}件あるのに minute_manifest.json が無い。verify=yes で起動し直すと、ファイルから記録を作り直す"
+              [ "$VERIFY" = "yes" ] || exit 1
+            else
+              echo "初回（保存先に分足はまだ無い）"
+            fi
+          fi
+          if [ "$VERIFY" = "yes" ]; then
+            bash scripts/gh_release_download.sh "$RELEASE_TAG" "$DATA_DIR" 'minute_*.parquet'
+          fi
+          ls -la "$DATA_DIR"
+
+      - name: Fetch minute bars
+        env:
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+          MODE: ${{ steps.mode.outputs.mode }}
+          FORGET_FROM: ${{ inputs.forget_from || '' }}
+          REINGEST: ${{ inputs.reingest_bulk || 'no' }}
+          MAXM: ${{ inputs.max_minutes || '300' }}
+        run: |
+          [[ "$MAXM" =~ ^[0-9]{1,3}$ ]] || { echo "max_minutes が不正: $MAXM"; exit 1; }
+          ARGS=(--data-dir "$DATA_DIR" --max-minutes "$MAXM" --summary-json minute_summary.json
+                --fetch-cmd "bash scripts/gh_release_download.sh $RELEASE_TAG $DATA_DIR"
+                --upload-cmd "bash scripts/gh_release_upload.sh $RELEASE_TAG")
+          if [ -n "$FORGET_FROM" ]; then
+            [[ "$FORGET_FROM" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || { echo "forget_from が不正: $FORGET_FROM"; exit 1; }
+            ARGS+=(--forget-from "$FORGET_FROM")
+          fi
+          [ "$REINGEST" = "yes" ] && ARGS+=(--reingest-bulk)
+          if [ "$MODE" = "probe" ]; then
+            # 確認だけ。置き場とのやり取りの指定を外す（何も取り寄せず、何も上げない）
+            ARGS=(--data-dir "$DATA_DIR" --summary-json minute_summary.json --probe-only)
+          fi
+          mkdir -p "$DATA_DIR"
+          python3 -u research/minute_bars.py "${ARGS[@]}" 2>&1 | tee minute.log
+          exit "${PIPESTATUS[0]}"
+
+      # 取得のステップが途中で落ちたときの受け皿。スクリプトが書いた上げ残し（.pending）を、
+      # 月のファイル → 取得記録の順に上げる（記録だけが先に上がると、上がっていない日を
+      # 取得済みと思い込む）。取り出しが失敗した回は上げない
+      - name: Upload leftovers
+        if: always() && steps.download.outcome == 'success'
+        run: |
+          P="$DATA_DIR/.pending"
+          if [ ! -s "$P" ]; then echo "上げ残しなし"; exit 0; fi
+          data=(); man=""
+          while IFS= read -r n; do
+            case "$n" in
+              minute_manifest.json) man="$DATA_DIR/$n" ;;
+              minute_[0-9]*.parquet) [ -f "$DATA_DIR/$n" ] && data+=("$DATA_DIR/$n") ;;
+            esac
+          done < "$P"
+          if [ ${#data[@]} -gt 0 ]; then
+            bash scripts/gh_release_upload.sh "$RELEASE_TAG" "${data[@]}"
+            echo "月のファイル ${#data[@]}件を上げた"
+          fi
+          if [ -n "$man" ] && [ -f "$man" ]; then
+            bash scripts/gh_release_upload.sh "$RELEASE_TAG" "$man"
+            echo "取得記録を上げた"
+          fi
+
+      # ログと実行の画面は公開。件数・日付・大きさだけを出す（株価・出来高の値は出さない）
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## 分足の取得（置き場: 下書きの Release \`$RELEASE_TAG\`）"
+            if [ -f minute_summary.json ]; then
+              python3 - <<'EOF'
+          import json
+          r = json.load(open("minute_summary.json"))
+          s = r.get("store", {})
+          b = r.get("bulk", {})
+          a = r.get("api", {})
+          p = r.get("probe", {})
+          miss = r.get("missingInWindow", [])
+          rows = [
+              ("起動（JST）", r.get("startedJst")),
+              ("範囲", f"{r.get('windowFrom')} 〜 {r.get('windowTo')}（営業日 {r.get('tradingDays', '-')}日）"),
+              ("契約の確認", f"{p.get('day')} {p.get('code')}: {p.get('rows')}行" if p else "-"),
+              ("一括ファイル", f"一覧 {b.get('listed', '-')}件（{b.get('listedFrom')} 〜 {b.get('listedTo')}、"
+                              f"{(b.get('listedBytes') or 0)/1e9:.2f}GB）/ 取り込み {b.get('ingested', 0)}件 / 失敗 {b.get('failed', 0)}件"
+                              if b else "-"),
+              ("API の日ごと", f"未取得 {a.get('missing', '-')}日 / 追加 {a.get('added', 0)}日 / "
+                              f"見送り {a.get('held', 0)}日 / 失敗 {a.get('failed', 0)}日" if a else "-"),
+              ("範囲の中の未取得", f"{len(miss)}日 {miss[:5]}" if miss else "なし"),
+              ("J-Quants の範囲より前（ここにしか無い）", f"{r.get('beyondWindowDays', 0)}日"),
+              ("保存済み", f"{s.get('days', 0)}日（{s.get('from')} 〜 {s.get('to')}）/ {s.get('rows', 0):,}行 / "
+                          f"{s.get('files', 0)}ファイル / {(s.get('bytes') or 0)/1e9:.2f}GB"),
+              ("リクエスト", f"{r.get('requests', 0)}回 / {r.get('minutes', 0)}分"),
+          ]
+          if r.get("mode") == "probe":
+              # 確認だけの回は何も保存していないので、取得・保存の行は出さない
+              keep = ("起動（JST）", "範囲", "契約の確認", "リクエスト")
+              rows = [(k, v) for k, v in rows if k in keep]
+              rows.insert(3, ("一括ファイルの一覧", f"{b.get('listed', '-')}件（{b.get('listedFrom')} 〜 "
+                                                   f"{b.get('listedTo')}、{(b.get('listedBytes') or 0)/1e9:.2f}GB）"
+                                                   if b else "-"))
+          smp = r.get("bulkSample")
+          if smp:
+              rows.append(("一括ファイルの形（確認）",
+                           f"{smp.get('key')}: " + (smp["error"] if smp.get("error") else
+                           f"見出し {smp.get('header')} / {smp.get('rows', 0):,}行 / {smp.get('days')}日"
+                           f"（{smp.get('from')} 〜 {smp.get('to')}）/ 1日の行数の中央値 {smp.get('rowsPerDayMedian', 0):,} / "
+                           f"銘柄数の最大 {smp.get('codesPerDayMax')} / 時刻 {smp.get('timeFirst')} 〜 {smp.get('timeLast')}"
+                           f"（{smp.get('distinctTimes')}通り）/ {(smp.get('bytes') or 0)/1e6:.1f}MB")))
+          print("| 項目 | 値 |\n|---|---|")
+          for k, v in rows:
+              print(f"| {k} | {v} |")
+          for title, key in (("エラー", "errors"), ("注意", "warnings")):
+              if r.get(key):
+                  print(f"\n**{title}**\n")
+                  for m in r[key][:20]:
+                      print(f"- {m}")
+          if r.get("extraColumns"):
+              print(f"\n**仕様に無い列（保存していない）**: {sorted(r['extraColumns'])}")
+          EOF
+            fi
+            echo ""
+            echo '```'
+            tail -60 minute.log 2>/dev/null || echo '(出力なし)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
