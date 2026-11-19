@@ -7,6 +7,7 @@ scripts/gh_release_ensure.sh（Release が無ければ作る）のテスト。�
 - 作るのが一時的に失敗しても、待って試し直す
 - 試し直しても作れなければ exit 1
 - タグが無ければ exit 2
+- GH_ENSURE_DRAFT=1: 下書きで作る。既にあるものが下書きでなければ（公開されていれば）exit 3 で止める
 
   python3 -m unittest tests/test_gh_release_ensure.py
 """
@@ -25,13 +26,18 @@ set -u
 state="$STUB_STATE"
 cmd="$1 $2"; tag="$3"; shift 3
 if [ "$cmd" = "release view" ]; then
-  [ -d "$state/$tag" ] && exit 0
+  if [ -d "$state/$tag" ]; then
+    if [ -f "$state/$tag/draft" ]; then echo true; else echo false; fi
+    exit 0
+  fi
   echo "release not found" >&2; exit 1
 fi
 if [ "$cmd" = "release create" ]; then
   n=$(( $(cat "$state/creates" 2>/dev/null || echo 0) + 1 )); echo "$n" > "$state/creates"
   if [ "$n" -le "${STUB_CREATE_FAILS:-0}" ]; then echo "HTTP 502" >&2; exit 1; fi
-  mkdir -p "$state/$tag"; printf '%s\n' "$@" > "$state/$tag/args"; exit 0
+  mkdir -p "$state/$tag"; printf '%s\n' "$@" > "$state/$tag/args"
+  for a in "$@"; do [ "$a" = "--draft" ] && touch "$state/$tag/draft"; done
+  exit 0
 fi
 echo "fake gh: unknown $cmd" >&2; exit 3
 """
@@ -89,6 +95,24 @@ class TestEnsure(unittest.TestCase):
         r = self.run_script("data-tick-2026", STUB_CREATE_FAILS="99", GH_ENSURE_TRIES="3")
         self.assertEqual(r.returncode, 1)
         self.assertEqual(self.creates(), 3)
+
+    def test_draft_is_created_as_draft(self):
+        r = self.run_script("data-minute", "題", "説明", GH_ENSURE_DRAFT="1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(os.path.exists(os.path.join(self.state, "data-minute", "draft")))
+        # 2回目は作らない（下書きのまま見つかる）
+        r = self.run_script("data-minute", GH_ENSURE_DRAFT="1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.creates(), 1)
+
+    def test_published_release_is_refused_when_draft_is_required(self):
+        os.makedirs(os.path.join(self.state, "data-minute"))           # 公開（下書きの印が無い）
+        r = self.run_script("data-minute", GH_ENSURE_DRAFT="1")
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("公開になっている", r.stderr)
+        self.assertEqual(self.creates(), 0)
+        # 下書きを求めないなら、公開でもそのまま
+        self.assertEqual(self.run_script("data-minute").returncode, 0)
 
     def test_usage(self):
         self.assertEqual(self.run_script().returncode, 2)

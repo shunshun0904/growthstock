@@ -3,12 +3,13 @@ name: Update Minute Bars
 # J-Quants の分足（/equities/bars/minute。アドオン「株価 分足・ティック」）を取得して蓄積する。
 # 中身は research/minute_bars.py、置き場の形は research/minute_store.py、経緯は docs/MINUTE_BARS.md。
 #
-# 置き場は**非公開**リポジトリの Release（既定 <owner>/growthstock-minute のタグ data-minute）。
-# このリポジトリは公開で、Release に置いたファイルは誰でもダウンロードできる。J-Quants の個人の
-# 利用は私的利用に限られ、データの第三者への配信は禁止とされているので、分足は公開の側に置かない
-# （運用者の選択 2026-11-18）。置き場が公開になっていたら、何も上げずに止める。
-#   Secret    MINUTE_DATA_TOKEN  置き場のリポジトリだけに Contents の読み書きを持つ fine-grained PAT
-#   Variable  MINUTE_DATA_REPO   置き場を変えるときだけ（owner/name）
+# 置き場は、このリポジトリの**下書き（draft）の Release**（タグ data-minute）。このリポジトリは公開で、公開した
+# Release は誰でもダウンロードできる。J-Quants の個人の利用は私的利用に限られ、データの第三者への配信は禁止と
+# されているので、分足は公開の Release に置かない（運用者の選択 2026-11-18「非公開」）。下書きは書き込み権限の
+# ある人にしか見えない（2026-11-19 に Probe Draft Release で確かめた: 鍵なしでは一覧に出ず、Release・ファイル・
+# ページとも 404）。書き込みは Actions の鍵（GITHUB_TOKEN）なので、新しい鍵は要らない（運用者の依頼 2026-11-19
+# 「GitHub の鍵を新しく作らずに済ませる方法で」）。**この Release を公開（Publish）しない。** 公開になっていたら、
+# 何も上げずに止める（scripts/gh_release_ensure.sh の GH_ENSURE_DRAFT）。
 #
 # J-Quants の分足は直近2年分だけで、毎日1日ずつ古い日が取れなくなる。取った日は消さない。
 #   初回: 一括ダウンロード（/bulk/list → /bulk/get。月ごとの CSV.gz）で取れる範囲を全部
@@ -55,9 +56,9 @@ on:
     branches: ['ccr-de5c973d-d8c3zi']
     paths: ['research/minute_request.txt']
 
-# このリポジトリには書かない（置き場は別のリポジトリ）
+# 下書きの Release を作って上げる（git にはコミットしない）
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: update-minute-bars
@@ -76,8 +77,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 330
     env:
-      GH_REPO: ${{ vars.MINUTE_DATA_REPO || format('{0}/growthstock-minute', github.repository_owner) }}
-      GH_TOKEN: ${{ secrets.MINUTE_DATA_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -102,30 +103,15 @@ jobs:
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
           echo "モード: $MODE / 起動: ${{ github.event_name }}"
 
+      # 置き場の下書きの Release が無ければ下書きで作る。公開になっていたら止める（exit 3）
       - name: Check storage
         if: steps.mode.outputs.mode != 'probe'
+        env:
+          GH_ENSURE_DRAFT: '1'
         run: |
-          if [ -z "${GH_TOKEN:-}" ]; then
-            echo "::error title=MINUTE_DATA_TOKEN が無い::Settings > Secrets and variables > Actions に、分足の置き場（$GH_REPO）だけに Contents の読み書きを持つ fine-grained PAT を MINUTE_DATA_TOKEN として登録する（docs/MINUTE_BARS.md）"
-            exit 1
-          fi
-          if ! priv=$(gh api "repos/$GH_REPO" --jq '.private' 2>&1); then
-            echo "::error title=分足の置き場に届かない::$GH_REPO: $(echo "$priv" | tr '\n' ' ' | head -c 200)（リポジトリが無い・PAT にそのリポジトリの権限が無い）"
-            exit 1
-          fi
-          if [ "$priv" != "true" ]; then
-            echo "::error title=分足の置き場が公開になっている::$GH_REPO は private でない。J-Quants のデータを誰でも落とせる場所に置かないよう止める"
-            exit 1
-          fi
-          if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            if ! gh release create "$RELEASE_TAG" --title "J-Quants 分足" --latest=false \
-                 --notes "J-Quants API V2 の分足（/equities/bars/minute）。月ごとの parquet（minute_YYYYMM.parquet）と取得記録（minute_manifest.json）。growthstock の Update Minute Bars が書く。"; then
-              echo "::error title=Release を作れない::$GH_REPO に $RELEASE_TAG を作れなかった（リポジトリが空だとタグを打てない。README を1つ置く）"
-              exit 1
-            fi
-            echo "$GH_REPO に Release $RELEASE_TAG を作った"
-          fi
-          echo "置き場: $GH_REPO（private）の Release $RELEASE_TAG"
+          bash scripts/gh_release_ensure.sh "$RELEASE_TAG" "J-Quants 分足（下書きのまま。公開しない）" \
+            "J-Quants API V2 の分足（/equities/bars/minute）。月ごとの parquet（minute_YYYYMM.parquet）と取得記録（minute_manifest.json）。J-Quants のデータは第三者に配信できないので、この Release は下書きのまま使う（公開しない）。growthstock の Update Minute Bars が書く（docs/MINUTE_BARS.md）。"
+          echo "置き場: $GH_REPO の下書きの Release $RELEASE_TAG"
 
       # 落とすのは取得記録だけ。月のファイルは、書き込む月だけをスクリプトが取り寄せる
       # （全部を毎日落とすと、年に数GBずつ増える）
@@ -208,7 +194,7 @@ jobs:
         if: always()
         run: |
           {
-            echo "## 分足の取得（置き場: \`$GH_REPO\` の Release \`$RELEASE_TAG\`）"
+            echo "## 分足の取得（置き場: 下書きの Release \`$RELEASE_TAG\`）"
             if [ -f minute_summary.json ]; then
               python3 - <<'EOF'
           import json

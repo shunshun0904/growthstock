@@ -3,9 +3,13 @@
 #
 #   bash scripts/gh_release_ensure.sh TAG [TITLE] [NOTES]
 #
-# 置き場のリポジトリは gh の流儀どおり GH_REPO（owner/name）で決まる。GH_TOKEN は呼び出し側の env で渡す。
-# ティック（research/ticks.py）が年ごとの Release（data-tick-YYYY）を、初めてその年のファイルを
-# 上げる前に作るのに使う（1つの Release に置けるアセットは 1,000 個まで。ティックは日ごとに年 約245ファイル）。
+# GH_ENSURE_DRAFT=1 のときは**下書き（draft）**で作り、既にあるものが下書きでなければ（公開されていれば）
+# exit 3 で止める。分足・ティック（J-Quants のアドオンのデータ）は、このリポジトリの下書きの Release に置く。
+# 下書きは書き込み権限のある人にしか見えない（2026-11-19 に Probe Draft Release で確かめた。docs/MINUTE_BARS.md）。
+# 公開された Release は誰でもダウンロードでき、J-Quants の個人の利用は第三者への配信が禁止なので、
+# 公開されていたら上げない。
+#
+# 置き場のリポジトリは gh の流儀どおり GH_REPO（owner/name）か、手元のリポジトリで決まる。GH_TOKEN は呼び出し側の env で渡す。
 set -uo pipefail
 
 tag="${1:-}"
@@ -17,13 +21,20 @@ title="${2:-$tag}"
 notes="${3:-$tag}"
 tries="${GH_ENSURE_TRIES:-5}"
 wait_s="${GH_ENSURE_WAIT:-5}"
+draft="${GH_ENSURE_DRAFT:-0}"
 
 for ((i = 1; i <= tries; i++)); do
-  if gh release view "$tag" >/dev/null 2>&1; then
+  if is_draft=$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null); then
+    if [ "$draft" = "1" ] && [ "$is_draft" != "true" ]; then
+      echo "::error title=Release が公開になっている::$tag は下書きでない（誰でもダウンロードできる）。J-Quants のデータを上げないよう止める。下書きに戻すか、消して作り直す（docs/MINUTE_BARS.md）" >&2
+      exit 3
+    fi
     exit 0
   fi
-  if gh release create "$tag" --title "$title" --notes "$notes" --latest=false >/dev/null 2>&1; then
-    echo "[ensure] Release $tag を作った"
+  args=(--title "$title" --notes "$notes" --latest=false)
+  [ "$draft" = "1" ] && args+=(--draft)
+  if gh release create "$tag" "${args[@]}" >/dev/null 2>&1; then
+    echo "[ensure] Release $tag を作った$([ "$draft" = "1" ] && echo "（下書き）")"
     exit 0
   fi
   # 同時に作られた・一時的なエラー。待って、あるかどうかから見直す

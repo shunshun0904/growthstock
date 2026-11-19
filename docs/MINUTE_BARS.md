@@ -2,7 +2,7 @@
 
 J-Quants のアドオン「株価 分足・ティック」の分足（`/equities/bars/minute`）を、全銘柄・取れる範囲の全期間で取り、
 毎日の差分を足して蓄積する。いまは**蓄積だけ**で、予測の特徴量・画面には使っていない。ティック（約定）は [TICKS.md](TICKS.md)
-（同じ非公開リポジトリ・同じ Secret を使う）。
+（同じく、このリポジトリの下書きの Release に置く）。
 
 - 取得: `research/minute_bars.py`（一括ダウンロードと API の日ごとの取得）
 - 保存の形: `research/minute_store.py`（月ごとの parquet と取得記録）
@@ -11,7 +11,8 @@ J-Quants のアドオン「株価 分足・ティック」の分足（`/equities
 
 運用者の依頼（2026-11-18）「分足のデータを取得できるので、過去分のデータの取得、差分更新、データの蓄積を開始してほしい」。
 AskUserQuestion での選択: 保存先は**非公開リポジトリの Release**、対象は**全銘柄**、毎日の起動は**取り込みの完了に続けて**、
-進め方は**作業ブランチで先に過去分を取得し、PR も作る**。
+進め方は**作業ブランチで先に過去分を取得し、PR も作る**。2026-11-19 に、置き場を「非公開リポジトリ ＋ GitHub のトークン」から
+**このリポジトリの下書きの Release** に替えた（運用者の依頼「GitHub の鍵を新しく作らずに済ませる方法で」。下の「置き場」）。
 
 ## 仕様（2026-11-18 に確認）
 
@@ -50,23 +51,34 @@ parquet にしたときの大きさ（同上）。
 
 ## 置き場
 
-**非公開**リポジトリ（既定 `shunshun0904/growthstock-minute`）の Release、タグ `data-minute`。
+このリポジトリの**下書き（draft）の Release**、タグ `data-minute`。**この Release を公開（Publish）しない。**
 
-このリポジトリは公開で、Release に置いたファイルは誰でもダウンロードできる。J-Quants の公式ヘルプでは、個人の利用は
+このリポジトリは公開で、公開した Release は誰でもダウンロードできる。J-Quants の公式ヘルプでは、個人の利用は
 私的利用に限られ、データの第三者への配信は営利・非営利を問わず禁止とされている（[利用について](https://jpx-jquants.com/ja/help/usage)。
-2026-11-18 に検索結果で確認）。分足は公開の側に置かない。ワークフローは置き場が private でなければ何も上げずに止める。
+2026-11-18 に検索結果で確認）。そのため分足は公開の Release に置かない。
+
+下書きの Release は、リポジトリに書き込み権限のある人（運用者）にしか見えない。2026-11-19 に **Probe Draft Release**
+（`.github/workflows/probe-draft-release.yml`、run 44433666381）で、次の12項目がすべて合格した（gh 2.103.3）:
+
+| 確かめたこと | 結果 |
+|---|---|
+| Actions の鍵（GITHUB_TOKEN）で下書きを作り、タグ名で見つける・上げる・上書きで上げる・一覧に出る・取り出した中身が同じ（sha256） | すべて可 |
+| 同じタグの下書きが二重にできない | 1つ |
+| 鍵なしの問い合わせ: Release の一覧 | 出ない |
+| 鍵なしの問い合わせ: Release（API）・ファイル（API）・ダウンロードの URL・Release のページ | すべて 404 |
+| 確かめの下書きを消す | 残り0 |
+
+書き込みは Actions に最初から付いている鍵なので、**新しい鍵の登録も、別のリポジトリも要らない**。ワークフローは、置き場の
+Release が下書きでなければ（公開されていれば）何も上げずに止まる（`scripts/gh_release_ensure.sh` の `GH_ENSURE_DRAFT=1`。exit 3）。
+誤って公開した場合は、すぐ下書きに戻す（Release の編集画面で「Set as a draft」相当）か消して、次の実行で作り直させる。
 
 月ごとのファイルにしたのは、GitHub の Release が1リリースあたりアセット 1,000 個まで・1ファイル 2GiB 未満（合計の上限は無い）
 のため（[About releases](https://docs.github.com/en/repositories/releasing-projects-on-github/about-releases)）。日ごとでは年に約245個で、4年ほどで埋まる。
 
-### 運用者の準備（1回だけ）
+### 運用者の準備
 
-1. private リポジトリ `growthstock-minute` を作る（**README を付ける**。空のリポジトリにはタグを打てず、Release を作れない）
-2. fine-grained PAT を作る。Repository access はそのリポジトリだけ、Permissions は **Contents: Read and write**
-3. このリポジトリの Settings › Secrets and variables › Actions に、Secret **`MINUTE_DATA_TOKEN`** として登録する
-
-置き場の名前を変えるときは、Variables に `MINUTE_DATA_REPO`（`owner/name`）を足す。PAT に有効期限を付けたときは、切れると
-「分足の置き場に届かない」で止まるので、作り直して登録し直す。
+要らない（J-Quants の取得は登録済みの `JQUANTS_API`、置き場への書き込みは Actions の鍵）。2026-11-18 に案内した
+非公開リポジトリ `growthstock-minute` と Secret `MINUTE_DATA_TOKEN` は使わない（作っていれば消してよい）。
 
 ## ファイル
 
@@ -84,7 +96,7 @@ parquet にしたときの大きさ（同上）。
 Update Data Store（平日 18:40 JST の Routine）
       ↓ 完了で起動（成否にかかわらず。予測とは別のワークフロー）
 Update Minute Bars
-  1. 置き場が private か・Release があるかを確かめる（無ければ作る）
+  1. 置き場の Release が下書きかを確かめる（無ければ下書きで作る。公開されていれば止める）
   2. 取得記録（minute_manifest.json）だけを落とす
   3. 契約の確認: 直近の営業日の JPX（86970）を1回引く。403（契約外）ならここで止める
   4. 一括ダウンロード: 一覧のうち、まだ取り込んでいない・LastModified が変わったものを古い月から取り込む
@@ -146,7 +158,8 @@ python3 research/minute_bars.py --data-dir research/_minute --from 2026-11-01 # 
 
 ## 読み方（分析用）
 
-置き場から月のファイルを落として（`GH_REPO=shunshun0904/growthstock-minute gh release download data-minute -p 'minute_2026*.parquet' -D research/_minute`）、
+置き場から月のファイルを落として（`gh release download data-minute -p 'minute_2026*.parquet' -D research/_minute`。下書きなので
+書き込み権限のある鍵が要る。ブラウザなら、ログインした状態で Releases の下書きから落とせる）、
 
 ```python
 import datetime as dt, sys

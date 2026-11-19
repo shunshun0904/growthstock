@@ -9,7 +9,7 @@ J-Quants のティック（約定。/equities/trades。アドオン「株価 分
 ティックは CSV の一括ダウンロードでしか提供されない（API では取れない）。全銘柄が1ファイルに入っていて、
 銘柄だけを選んでは落とせない。J-Quants が持つのは直近2年分で、毎日1日ずつ古い日が取れなくなる。
 取った日は消さない（運用者の依頼 2026-11-18「過去分のデータの取得、差分更新、データの蓄積」と、
-選択「全銘柄」「分足と同じ非公開リポジトリ」）。
+選択「全銘柄」「分足と同じ置き場」）。
 
 実測（2026-11-18、Probe Bulk Files run 44283243735。docs/TICKS.md）
   一覧 36件・計 21.0GB（CSV.gz）
@@ -17,9 +17,10 @@ J-Quants のティック（約定。/equities/trades。アドオン「株価 分
     live/equities_trades_YYYYMMDD.csv.gz            今月の日ごと、1件 51〜103MB、その日の 16:44 JST ごろにできる
   1日 約514万行・4,197銘柄（2026-11-02）。parquet にすると1日 約33MB
 
-置き場（分足と同じ非公開リポジトリ。既定 <owner>/growthstock-minute）
+置き場（分足と同じく、このリポジトリの**下書き（draft）の Release**。書き込み権限のある人にしか見えない。
+公開しない。2026-11-19 に確かめた。docs/MINUTE_BARS.md「置き場」）
   Release data-tick        取得記録 tick_manifest.json だけ
-  Release data-tick-YYYY   その年の日ごとのファイル tick_YYYYMMDD.parquet
+  Release data-tick-YYYY   その年の日ごとのファイル tick_YYYYMMDD.parquet（ensure_cmd が下書きで作る）
 1つの Release に置けるアセットは 1,000 個までなので、年ごとに分ける（日ごとで年 約245ファイル）。
 月ごとの1ファイルにしないのは、毎日の差分で月のファイル（500MB 超）を落として書き直して上げ直さずに済むため。
 
@@ -360,7 +361,9 @@ class Store:
             return
         notes = ("J-Quants API V2 のティック（/equities/trades）の日ごとのファイル（tick_YYYYMMDD.parquet）。"
                  if tag != MANIFEST_TAG else "J-Quants のティックの取得記録（tick_manifest.json）。")
-        subprocess.run(self.ensure + [tag, f"J-Quants ティック {tag}", notes + " growthstock の Update Ticks が書く。"],
+        subprocess.run(self.ensure + [tag, f"J-Quants ティック {tag}（下書きのまま。公開しない）",
+                                      notes + " J-Quants のデータは第三者に配信できないので、下書きのまま使う（公開しない）。"
+                                      "growthstock の Update Ticks が書く（docs/TICKS.md）。"],
                        check=True)
         self.ensured.add(tag)
 

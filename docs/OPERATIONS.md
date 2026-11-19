@@ -53,8 +53,8 @@
 | モデル本体（追加4つ） | `<algo>_model.joblib` / `<algo>_oof.parquet` | **GitHub Release（`data-raw`）** | 土曜の夜（2026-11-14 まで日曜の朝） | 同上。合計2.7MB。meta.json だけ git に残す |
 | モデルの素性 | `research/model/meta.json`（9KB） | git | 土曜の夜（2026-11-14 まで日曜の朝） | 過去のモデルが「どういうものだったか」を追えるようにする |
 | 生データ | 日次バー・財務・信用残ほか | GitHub Release（`data-raw`） | 平日 18:40 JST に Routine が起動（10/7 までは 16:10） | 全期間の取得に2.5時間かかるため、差分だけ取って書き戻す |
-| ティック（約定） | `tick_YYYYMMDD.parquet`（日ごと・全銘柄。Release `data-tick-YYYY`）/ `tick_manifest.json`（取得記録。Release `data-tick`） | 分足と同じ**非公開**リポジトリの GitHub Release | 平日。Update Data Store の完了に続けて `Update Ticks` が workflow_run で走る（2026-11-18 から） | J-Quants のティックは CSV の一括ダウンロードだけで提供され、直近2年分（2年で CSV.gz 21GB・parquet 約13.5GB）。年ごとの Release に分けるのは、1 Release のアセットが 1,000 個までのため。**まだ蓄積だけ**（`docs/TICKS.md`） |
-| 分足 | `minute_YYYYMM.parquet`（月ごと・全銘柄）/ `minute_manifest.json`（取得記録） | **非公開**リポジトリ（既定 `growthstock-minute`）の GitHub Release（`data-minute`） | 平日。Update Data Store の完了に続けて `Update Minute Bars` が workflow_run で走る（2026-11-18 から） | J-Quants の分足（アドオン）は直近2年分だけで、毎日1日ずつ取れなくなるので、取った日を消さずに貯める。このリポジトリの Release は誰でも落とせ、J-Quants の個人の利用は第三者への配信が禁止なので、公開の側に置かない（運用者の選択 2026-11-18）。書き込みは Secret `MINUTE_DATA_TOKEN`。**まだ蓄積だけで、予測・画面には使っていない**（`docs/MINUTE_BARS.md`） |
+| ティック（約定） | `tick_YYYYMMDD.parquet`（日ごと・全銘柄。Release `data-tick-YYYY`）/ `tick_manifest.json`（取得記録。Release `data-tick`） | このリポジトリの**下書き**の GitHub Release（公開しない） | 平日。Update Data Store の完了に続けて `Update Ticks` が workflow_run で走る（2026-11-18 から） | J-Quants のティックは CSV の一括ダウンロードだけで提供され、直近2年分（2年で CSV.gz 21GB・parquet 約13.5GB）。年ごとの Release に分けるのは、1 Release のアセットが 1,000 個までのため。**まだ蓄積だけ**（`docs/TICKS.md`） |
+| 分足 | `minute_YYYYMM.parquet`（月ごと・全銘柄）/ `minute_manifest.json`（取得記録） | このリポジトリの**下書き**の GitHub Release（`data-minute`。公開しない） | 平日。Update Data Store の完了に続けて `Update Minute Bars` が workflow_run で走る（2026-11-18 から） | J-Quants の分足（アドオン）は直近2年分だけで、毎日1日ずつ取れなくなるので、取った日を消さずに貯める。公開した Release は誰でも落とせ、J-Quants の個人の利用は第三者への配信が禁止なので、書き込み権限のある人にしか見えない下書きに置く（運用者の選択 2026-11-18「非公開」、2026-11-19「新しい鍵を作らずに」。鍵なしでは見えないことを確かめた）。書き込みは Actions の鍵。**まだ蓄積だけで、予測・画面には使っていない**（`docs/MINUTE_BARS.md`） |
 | 有報の年次財務 | `edinet_fin.parquet` / `edinet_companies.parquet` / `edinet_manifest.json` | GitHub Release（`data-raw`） | 毎日 10:10 JST に Routine が起動 | EDINET DB は 100/日・900/月の枠しか無いので、毎日 85社ずつ差分で貯める（`docs/DATA_EDINETDB.md`）。**まだ研究用で、本番の特徴量には入っていない** |
 | 有報・半期報告書の損益（画面） | `public/data/filings.json`（git）/ 索引・控え `edinet_filings_index.json` / `edinet_filings_cache.json`（Release `data-raw`） | git / Release | 毎晩の予測の後に `Fetch Filings` が workflow_run で続けて走る | 金融庁 EDINET の公式 API から候補銘柄の最新の有報・半期報告書を取り、売上原価・販管費まで分けた損益を「決算サンキー」のタブに出す（`docs/DATA_EDINET_API.md`）。鍵は Secrets `EDINET_FSA_API_KEY`。**2026-10-13 からタブは画面に出していない**（運用者の指示「表示から消してくれるだけで良いです」。取り込みは続けている。`src/App.jsx` の `TABS` の `hidden` を外せば戻る） |
 
@@ -93,11 +93,11 @@
                                      → news_links.json をコミット → Pages 再デプロイ
 
       ↓ Update Data Store の完了で起動（予測と並んで。成否にかかわらず）
-                Update Minute Bars   分足のまだ無い営業日を J-Quants から取り、非公開リポジトリの
+                Update Minute Bars   分足のまだ無い営業日を J-Quants から取り、下書きの
                                      Release（data-minute）の月のファイルに足す（2026-11-18 から。
                                      予測とは別なので、失敗しても予測は止まらない。docs/MINUTE_BARS.md）
                 Update Ticks         ティックの一括ファイルのうち、まだ取り込んでいないものを日ごとの
-                                     ファイルにして、非公開リポジトリの Release（data-tick-YYYY）に足す
+                                     ファイルにして、下書きの Release（data-tick-YYYY）に足す
                                      （2026-11-18 から。予測・分足とは別。docs/TICKS.md）
 
 平日 13:10 JST  Fetch JSF            日証金の前営業日の確報（daily）と、銘柄ごとの

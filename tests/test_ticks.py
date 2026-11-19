@@ -21,6 +21,7 @@ import gzip
 import io
 import json
 import os
+import re
 import shlex
 import sys
 import tempfile
@@ -380,12 +381,17 @@ class TestWorkflow(unittest.TestCase):
 
     def test_safety(self):
         self.assertRegex(self.text, r"workflow_run:\s*\n\s*workflows: \['Update Data Store'\]")
-        self.assertIn("--jq '.private'", self.text)
-        self.assertRegex(self.text, r"\npermissions:\s*\n\s*contents: read")
-        self.assertIn("secrets.MINUTE_DATA_TOKEN", self.text)
+        # 置き場は下書きの Release（取得記録の data-tick も、年ごとの data-tick-YYYY も下書きで作り、公開なら止める）
+        self.assertIn("GH_ENSURE_DRAFT: '1'", self.text)
         self.assertIn("scripts/gh_release_upload.sh", self.text)
         self.assertIn("scripts/gh_release_ensure.sh", self.text)
         self.assertNotIn("gh release upload ", self.text.replace("# ", ""))
+        # 新しい鍵は要らない（Actions の鍵）。git にはコミットしない
+        self.assertRegex(self.text, r"\npermissions:\s*\n\s*contents: write")
+        self.assertIn("GH_TOKEN: ${{ github.token }}", self.text)
+        self.assertNotIn("MINUTE_DATA_TOKEN", self.text)
+        self.assertNotIn("git push", self.text)
+        self.assertEqual(sorted(set(re.findall(r"secrets\.([A-Z_]+)", self.text))), ["JQUANTS_API"])
 
 
 if __name__ == "__main__":

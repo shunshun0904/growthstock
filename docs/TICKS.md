@@ -9,7 +9,7 @@ J-Quants のアドオン「株価 分足・ティック」のティック（約�
 - テスト: `tests/test_ticks.py`・`tests/test_bulk_probe.py`・`tests/test_gh_release_ensure.py`（ネットワークに出ない）
 
 運用者の依頼（2026-11-18。分足に続けてティックの仕様を貼った）と、AskUserQuestion での選択: 対象は**全銘柄**、置き場は**分足と
-同じ非公開リポジトリ**。
+同じ置き場**（2026-11-19 から、このリポジトリの下書きの Release。[MINUTE_BARS.md](MINUTE_BARS.md)「置き場」）。
 
 ## 仕様（運用者が貼った公式の仕様。2026-11-18）
 
@@ -40,8 +40,10 @@ J-Quants のアドオン「株価 分足・ティック」のティック（約�
 
 ## 置き場
 
-分足と同じ**非公開**リポジトリ（既定 `shunshun0904/growthstock-minute`）。理由は分足と同じ（公開の Release は誰でも
-ダウンロードでき、J-Quants の個人の利用は第三者への配信が禁止）。書き込みも分足と同じ Secret `MINUTE_DATA_TOKEN`。
+分足と同じく、このリポジトリの**下書き（draft）の Release**。**公開（Publish）しない。** 理由は分足と同じ（公開の Release は
+誰でもダウンロードでき、J-Quants の個人の利用は第三者への配信が禁止）。下書きは書き込み権限のある人にしか見えないことを
+2026-11-19 に確かめた（[MINUTE_BARS.md](MINUTE_BARS.md)「置き場」）。書き込みは Actions の鍵で、新しい鍵は要らない。
+年ごとの Release も下書きで作り、公開されていれば止める（`GH_ENSURE_DRAFT=1`）。
 
 | Release | 中身 |
 |---|---|
@@ -76,7 +78,7 @@ J-Quants のアドオン「株価 分足・ティック」のティック（約�
 Update Data Store（平日 18:40 JST の Routine）
       ↓ 完了で起動（成否にかかわらず。予測・分足とは別のワークフロー）
 Update Ticks
-  1. 置き場が private か確かめ、data-tick が無ければ作る
+  1. 取得記録の Release（data-tick）が下書きかを確かめる（無ければ下書きで作る。公開されていれば止める）
   2. 取得記録（tick_manifest.json）だけを落とす（日ごとのファイルは落とさない）
   3. 一覧（/bulk/list?endpoint=/equities/trades）のうち、まだ取り込んでいない・LastModified が変わったものを、
      月の古い順・同じ月の中は作られた順に取り込む（新しく作られた側が後になり、同じ日は後の側に置き換わる）
@@ -124,7 +126,7 @@ Actions の **Update Ticks** → Run workflow（既定ブランチに入った�
 ## 読み方（分析用）
 
 ```bash
-GH_REPO=shunshun0904/growthstock-minute gh release download data-tick-2026 -p 'tick_202611*.parquet' -D research/_tick
+gh release download data-tick-2026 -p 'tick_202611*.parquet' -D research/_tick   # 下書きなので書き込み権限のある鍵が要る
 ```
 
 ```python

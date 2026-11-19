@@ -21,6 +21,7 @@ import gzip
 import io
 import json
 import os
+import re
 import shlex
 import sys
 import tempfile
@@ -652,14 +653,21 @@ class TestWorkflow(unittest.TestCase):
     def test_runs_after_the_daily_ingest(self):
         self.assertRegex(self.text, r"workflow_run:\s*\n\s*workflows: \['Update Data Store'\]")
 
-    def test_refuses_public_storage(self):
-        self.assertIn("--jq '.private'", self.text)
-        self.assertIn('if [ "$priv" != "true" ]', self.text)
+    def test_storage_is_a_draft_release(self):
+        # 置き場は下書きの Release。無ければ下書きで作り、公開になっていたら止める（gh_release_ensure.sh）
+        step = self.text[self.text.index("name: Check storage"):self.text.index("name: Download manifest")]
+        self.assertIn("GH_ENSURE_DRAFT: '1'", step)
+        self.assertIn("scripts/gh_release_ensure.sh", step)
 
-    def test_does_not_write_this_repository(self):
-        self.assertRegex(self.text, r"\npermissions:\s*\n\s*contents: read")
+    def test_uses_only_the_actions_key(self):
+        # 新しい鍵は要らない（Actions の鍵で下書きの Release に書く）。git にはコミットしない
+        self.assertRegex(self.text, r"\npermissions:\s*\n\s*contents: write")
+        self.assertIn("GH_TOKEN: ${{ github.token }}", self.text)
+        self.assertNotIn("MINUTE_DATA_TOKEN", self.text)
         self.assertNotIn("git push", self.text)
-        self.assertIn("secrets.MINUTE_DATA_TOKEN", self.text)
+        self.assertNotIn("git commit", self.text)
+        secrets = sorted(set(re.findall(r"secrets\.([A-Z_]+)", self.text)))
+        self.assertEqual(secrets, ["JQUANTS_API"])
 
     def test_leftovers_go_data_first(self):
         step = self.text[self.text.index("name: Upload leftovers"):self.text.index("name: Summary")]

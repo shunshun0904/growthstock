@@ -59,11 +59,11 @@ APIキーはブラウザに置けないため、**取得はGitHub Actions、表�
 J-Quants のアドオン「株価 分足・ティック」の分足（`/equities/bars/minute`）とティック（約定。`/equities/trades`）を、全銘柄・取れる範囲（直近2年）で取り、毎日の差分を足して蓄積します。
 J-Quants はどちらも毎日1日ずつ古い日が取れなくなるので、取った日は消さずに残します。いまは蓄積だけで、予測・画面には使っていません。
 
-- 置き場は**非公開**リポジトリの Release。このリポジトリは公開で Release は誰でもダウンロードでき、J-Quants の個人の利用はデータの第三者への配信が禁止されているため、公開の側には置きません
+- 置き場は、このリポジトリの**下書き（draft）の Release**（書き込み権限のある人にしか見えない。**公開しない**）。公開した Release は誰でもダウンロードでき、J-Quants の個人の利用はデータの第三者への配信が禁止されているため、公開の Release には置きません。書き込みは Actions の鍵なので、新しい鍵の登録は要りません
   - 分足: `data-minute`（月ごとの parquet と取得記録）
   - ティック: `data-tick-YYYY`（日ごとの parquet。2年で約13.5GB）と `data-tick`（取得記録）
 - 初回は一括ダウンロード（`/bulk/list` → `/bulk/get` の CSV.gz）で2年分を取ります。毎日は取り込み（Update Data Store）の完了に続けて、**Update Minute Bars**・**Update Ticks** がその日の分を足します。予測とは別のワークフローです
-- 準備（Secret `MINUTE_DATA_TOKEN` など）・ファイルの形・安全策・読み方は [docs/MINUTE_BARS.md](docs/MINUTE_BARS.md)・[docs/TICKS.md](docs/TICKS.md)
+- 置き場の確かめ・ファイルの形・安全策・読み方は [docs/MINUTE_BARS.md](docs/MINUTE_BARS.md)・[docs/TICKS.md](docs/TICKS.md)
 
 ### 価格帯別需給（2026-11-14）
 
