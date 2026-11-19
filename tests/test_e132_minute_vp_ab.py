@@ -9,7 +9,8 @@
 - 付けた33列の確かめ: 割合が 0〜1 の外・無限・終値との差が −100% 以下・期間の中で欠けのある行・時間帯の割合の合計が1でない行があれば止める
 - 評価の行: 全行と、分足の付いた行だけ（30列のどれかがある行）。窓は行が100件以上で正例・負例がそろうもの
 - 表に付いている VWAP の3列は、B の学習・寄与・付き方の報告に入らない
-- 訓練に分足の付いた行が無い窓は B = A（30列が訓練で全行欠測）。「訓練に分足の付いた行がある窓だけ」の集計はその窓を除く
+- 訓練に分足の付いた行が無い窓では30列が訓練で全行欠測で、A と B のパラメータが同じなら B = A。「訓練に分足の付いた行がある
+  窓だけ」と「無い窓だけ」の集計に分ける
 - 報告の一通り: 保存済みの探索（A・B）から、out-of-fold・寄与・報告が最後まで通る（種1つ・ずらし0 と 2）。§7 の判定は出さない
 
   python3 -m unittest tests.test_e132_minute_vp_ab
@@ -225,6 +226,8 @@ class TestRunAndReport(unittest.TestCase):
         trained = summary["windows"]["all_pr_B-A_trained"]
         self.assertEqual(trained["n"], int((every["train_minute"] > 0).sum()))
         self.assertEqual(trained["n"] + len(none), summary["windows"]["all_pr_B-A"]["n"])
+        self.assertEqual(summary["windows"]["all_pr_B-A_untrained"]["n"], len(none))
+        self.assertEqual(summary["windows"]["all_pr_B-A_untrained"]["ties"], len(none))    # パラメータが同じなのでちょうど同じ
         self.assertIn("うち訓練に分足の付いた行がある窓", out)
         # 訓練の分足の行数は、窓の訓練の終わりまでの付いた行（ラベルあり）の数
         folds = {f.index: f for f in E.E41.folds_for(df["Date"], 0)}

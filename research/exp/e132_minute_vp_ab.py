@@ -32,7 +32,8 @@ out-of-fold: 本番と同じ作り（36/6/6か月・エンバーゴ20営業日�
   1. 探索の CV（A・B）  2. 本番と同じ作りの OOF（全行・付いた行だけ）  3. 窓ごとの B−A（全行）  3b. 同（付いた行だけ）
   5. 窓の中の上位2% の Precision・+10% の指値に届いた割合・1取引の平均（参考）  6. 窓ごとの値
   3・3b には「訓練に分足の付いた行がある窓だけ」の行も出す（試運転 run 44519658877 の後、本番の回の前に足した）。訓練に分足の
-  行が無い窓では30列が訓練の全行で欠測になり、LightGBM はその列を使わないので、B は A と同じ予測になる（差がちょうど 0 の窓）
+  行が無い窓では30列が訓練の全行で欠測になり、LightGBM はその列を使わない。そこでの B−A はパラメータの違いだけを表す
+  （A と B のパラメータが同じなら差はちょうど 0。試運転はそうだった）。「訓練に分足の無い窓」の行も出す（本番の回の後に足した）
 
 置き場の分足（下書きの Release data-minute）は research/_data/minute/ に置く（Run Minute Experiment が落とす）。
     exp=e132_minute_vp_ab.py
@@ -539,13 +540,16 @@ def report(res: dict, shifts: list, stamp: dict, extra: dict) -> dict:
             print(line)
             summary["windows"][f"{rows}_{met}_B-A"] = st
         t = s[s["train_minute"] > 0]
-        print(f"  うち訓練に分足の付いた行がある窓（{len(t)}窓。ほかの {len(s) - len(t)}窓は30列が訓練で全行欠測のため B = A）")
-        for met, nm in (("pr", "PR"), ("roc", "ROC")):
-            if not len(t):
-                break
-            line, st = pair(f"{nm} B−A（訓練に分足）", t[f"{met}_A"].to_numpy(), t[f"{met}_B"].to_numpy())
-            print(line)
-            summary["windows"][f"{rows}_{met}_B-A_trained"] = st
+        u = s[s["train_minute"] == 0]
+        print(f"  うち訓練に分足の付いた行がある窓（{len(t)}窓）と無い窓（{len(u)}窓。30列が訓練で全行欠測で B は30列を使えない。"
+              "差はパラメータの違いだけ）")
+        for part, key, nm2 in ((t, "trained", "訓練に分足"), (u, "untrained", "訓練に分足なし")):
+            for met, nm in (("pr", "PR"), ("roc", "ROC")):
+                if not len(part):
+                    break
+                line, st = pair(f"{nm} B−A（{nm2}）", part[f"{met}_A"].to_numpy(), part[f"{met}_B"].to_numpy())
+                print(line)
+                summary["windows"][f"{rows}_{met}_B-A_{key}"] = st
     print("\n■ 4. §7 の判定は出さない（運用者の選択「AとBだけ」。対照 P と A のパラメータの C が要る）")
 
     tt = top_table(res, arms, shifts)
