@@ -253,6 +253,15 @@ class TestShape(unittest.TestCase):
         self.assertEqual(sum(r["n_first"] + r["n_second"] for r in w["types"]), w["rows"])
         self.assertIn("分布の形", buf.getvalue())
 
+    def test_terciles_do_not_follow_row_order_when_values_tie(self):
+        rows = shape_frame(seed=6)
+        for c in MF.shape_columns(1):                                         # 0 が多い帯（行の半分以上が 0）
+            rows.loc[rows.index % 3 != 0, c] = 0.0
+        with redirect_stdout(io.StringIO()):
+            out = E.shape_report(rows, windows=[1], n_perm=19, seed=3)
+        for r in out["windows"]["1"]["bins"]:
+            self.assertTrue(all(np.isfinite(v) for v in r["resid_spread_halves_pt"]), r["label"])
+
     def test_nothing_when_label_ignores_shape(self):
         rows = shape_frame(seed=4, effect=0.0)
         with redirect_stdout(io.StringIO()):

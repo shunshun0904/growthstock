@@ -808,7 +808,11 @@ def shape_report(rows: pd.DataFrame, windows=None, n_types: int = N_TYPES, n_per
             d = added_ll(X0, y, r, b0, ll0)
             nl = np.array([added_ll(X0, y, r[perm()], b0, ll0) for _ in range(n_perm)])
             b1, _ = logit_fit(np.column_stack([X0, r]), y, beta=np.append(b0, 0.0))
-            ter = pd.qcut(pd.Series(S[:, j]).rank(method="first"), 3, labels=False).to_numpy()
+            # 3分位の同じ値は無作為に分ける（0 が多い帯で、行の順＝日付の順に分かれないように。run 44614546003 の後に直した）
+            shuffled = rng.permutation(len(S))
+            rk = np.empty(len(S))
+            rk[shuffled] = pd.Series(S[shuffled, j]).rank(method="first").to_numpy()
+            ter = np.minimum((3 * (rk - 0.5) / len(rk)).astype(int), 2)
             spread = [float(np.mean(resid[(ter == 2) & h]) - np.mean(resid[(ter == 0) & h])) * 100 for h in (first, ~first)]
             rec = {"window": n, "bin": j, "label": MF.SHAPE_LABELS[j], "pos_mean": float(S[pos, j].mean()),
                    "neg_mean": float(S[~pos, j].mean()), "diff": float(diff[j]), "p_raw": float(p_raw[j]),
