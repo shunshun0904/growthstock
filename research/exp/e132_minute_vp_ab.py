@@ -21,6 +21,9 @@ lgbm_params.json は変えない）。
 腕（データは同じ1本。列だけが違う）
   A   今の373列（features.DEFAULT_PRESET。回した時点の既定を名前で固定）。A の列で探索
   B   373 + 30列で探索し直し → 入れたときに週次の再学習がやること
+  C   373 + 30列・A のパラメータ（探索しない）→ パラメータの違いを除いた、列だけの効果。運用者の選択（同日、A・B の結果の後）
+      「C の腕で列の効果を切り分ける」。A・B の探索と out-of-fold は保存済みのものを使い、C だけを計算する（--keep-frame で
+      A・B と同じ表を使う）。対照 P は回さないので §7 の判定は出さない
 
 ラベル: 本番の +10%（label_specs.for_model("lgbm")）。データセットの label が本番の定義と全行一致することを確かめてから使う。
 探索: 週次の再学習と同じ（tuning.tune・50試行・5分割・year_cap_date・ホールドアウト12か月の手前まで）。
@@ -39,6 +42,7 @@ out-of-fold: 本番と同じ作り（36/6/6か月・エンバーゴ20営業日�
     exp=e132_minute_vp_ab.py
 列の付き方だけ見る: args="--dry"
 試運転:             args="--tag e132smoke --n-trials 2 --shifts 0"
+C を足す回:         args="--keep-frame"（A・B は保存済みの探索・out-of-fold を読む。C の out-of-fold だけ計算する）
 
 表（33列を付けた frame）は1回目に作って research/_data/oof/<tag>_* に置き、以降の回は actions/cache で引き継いだそれを使う
 （分足の取得記録・作りの台本が変わったら作り直す）。--budget-min（既定 290分）を過ぎたら新しい計算を始めずに終わる
@@ -90,9 +94,14 @@ BUILT_COLS = tuple(MF.COLUMNS)
 DROPPED_COLS = tuple(MF.column("vwap_gap", n) for n in MF.WINDOWS)
 #: B で足す列（分足に固有の30列。並びは minute_features のまま）
 NEW_COLS = tuple(c for c in BUILT_COLS if c not in DROPPED_COLS)
-ARMS = ("A", "B")
-COLS_OF = {"A": "base", "B": "new"}
-LABELS = {"A": "A  今の373列（A の列で探索）", "B": f"B  373 + {len(NEW_COLS)}列（VWAP の3列を除く）・探索し直し"}
+ARMS = ("A", "B", "C")
+COLS_OF = {"A": "base", "B": "new", "C": "new"}
+#: パラメータをどの腕の探索から取るか（C は A のパラメータのまま列だけ足す）
+PARAMS_OF = {"A": "A", "B": "B", "C": "A"}
+LABELS = {"A": "A  今の373列（A の列で探索）", "B": f"B  373 + {len(NEW_COLS)}列（VWAP の3列を除く）・探索し直し",
+          "C": f"C  373 + {len(NEW_COLS)}列・A のパラメータ（探索しない。列だけの効果）"}
+#: 比べる組（後 − 前）
+PAIRS = (("A", "B"), ("A", "C"))
 MIN_WINDOW_ROWS = 100
 #: 重なりの多い列の目安（既存の列との順位相関の絶対値）
 OVERLAP = (0.9, 0.95)
@@ -192,8 +201,13 @@ def minute_checks(df: pd.DataFrame, report: dict) -> dict:
     return out
 
 
-def prepare(cols: list, rebuild: bool = False):
-    """lab.frame に33列と出口（+10% の指値）を付けた表（全行）と記録。"""
+def prepare(cols: list, rebuild: bool = False, keep: bool = False):
+    """
+    lab.frame に33列と出口（+10% の指値）を付けた表（全行）と記録。
+
+    keep: 保存済みの表があれば、分足の取得記録・台本が変わっていてもそのまま使う（腕を足す回で、前の回の腕と同じ表で比べる
+    ため。毎晩の分足の取得で取得記録は変わるが、学習データの行はラベルの決まる日までなので、付けた列は変わらない）。
+    """
     pf, ps = path("frame.parquet"), path("stamp.json")
     src = source_stamp()
     if src["minute_manifest"] == "none":
@@ -203,9 +217,13 @@ def prepare(cols: list, rebuild: bool = False):
             stamp = json.load(fh)
         df = pd.read_parquet(pf)
         miss = [c for c in cols + list(BUILT_COLS) if c not in df.columns]
-        if not miss and stamp.get("sources") == src:
-            log(f"[data] 1回目に作った表を使う（{stamp['built_utc']} 作成・{stamp['rows']:,}行・〜{stamp['date_max']}）")
+        if not miss and (stamp.get("sources") == src or keep):
+            changed = sorted(k for k in src if (stamp.get("sources") or {}).get(k) != src[k])
+            log(f"[data] 1回目に作った表を使う（{stamp['built_utc']} 作成・{stamp['rows']:,}行・〜{stamp['date_max']}）"
+                + (f"。--keep-frame: 作ったときから変わったもの {changed}（表は作り直さない）" if changed else ""))
             return df, stamp
+        if keep:
+            log("[data] --keep-frame だが、保存済みの表に無い列があるので作り直す")
         log(f"[data] 保存済みの表を作り直す（無い列 {miss[:5]}・分足の記録か台本が変わった {stamp.get('sources') != src}）")
     os.makedirs(OOF_DIR, exist_ok=True)
     t0 = time.time()
@@ -297,8 +315,8 @@ def coverage_report(df: pd.DataFrame, base: list) -> dict:
     return out
 
 
-def gain_report(df: pd.DataFrame, base: list, params: dict, cutoff) -> dict:
-    """探索の期間の全行で B（373 + 30列・B のパラメータ）を1本学習し、寄与（gain）の割合と上位の列（参考）。"""
+def gain_report(df: pd.DataFrame, base: list, params: dict, cutoff, arm: str = "B") -> dict:
+    """探索の期間の全行で B か C（373 + 30列・その腕のパラメータ）を1本学習し、寄与（gain）の割合と上位の列（参考）。"""
     import lightgbm as lgb
 
     cols = base + list(NEW_COLS)
@@ -309,7 +327,7 @@ def gain_report(df: pd.DataFrame, base: list, params: dict, cutoff) -> dict:
     gain = pd.Series(m.booster_.feature_importance(importance_type="gain"), index=cols)
     tot = float(gain.sum()) or 1.0
     share = {"既存の373列": float(gain[base].sum() / tot), f"分足の{len(NEW_COLS)}列": float(gain[list(NEW_COLS)].sum() / tot)}
-    print(f"\n■ 0b. 学習の寄与（gain）の割合（探索の期間 〜{cutoff.date()} の {len(sub):,}行で B を1本。参考）: "
+    print(f"\n■ 0b. 学習の寄与（gain）の割合（探索の期間 〜{cutoff.date()} の {len(sub):,}行で {arm} を1本。参考）: "
           + " / ".join(f"{k} {v*100:.1f}%" for k, v in share.items()))
     all_rank = gain.rank(ascending=False)
     new_rank = gain[list(NEW_COLS)].sort_values(ascending=False)
@@ -426,14 +444,17 @@ def train_minute_rows(frame: pd.DataFrame, shifts) -> dict:
 
 
 def run(arms: list, frames: dict, colsets: dict, cutoff, n_trials: int, stamp: dict, shifts: list) -> dict:
-    """A を先に、B を後に計算する。時間切れの腕は結果に入らない。"""
+    """ARMS の順（A・B・C）に計算する。C は A の探索のパラメータを使う。時間切れの腕は結果に入らない。"""
     res = {"recs": {}, "params": {}, "prod": {}, "oofs": {}, "train_minute": train_minute_rows(frames["new"], shifts)}
-    for arm in arms:
+    for arm in [a for a in ARMS if a in arms]:
         cs = COLS_OF[arm]
-        rec = tune(arm, frames[cs], colsets[cs], cutoff, n_trials, stamp)
-        if rec is None:
-            continue
-        res["recs"][arm] = rec
+        src = PARAMS_OF[arm]
+        if src not in res["recs"]:
+            rec = tune(src, frames[COLS_OF[src]], colsets[COLS_OF[src]], cutoff, n_trials, stamp)
+            if rec is None:
+                continue
+            res["recs"][src] = rec
+        rec = res["recs"][src]
         res["params"][arm] = rec["params"]
         o = oof(arm, frames[cs], colsets[cs], rec["params"], 0, (PROD_SEED,))
         if o is not None:
@@ -499,6 +520,8 @@ def report(res: dict, shifts: list, stamp: dict, extra: dict) -> dict:
               f"分割ごと " + " / ".join(f"{v:.4f}" for v in fs))
         print(f"      パラメータ {short(rec['params'])}")
         summary["tuning"][arm] = {k: cv.get(k) for k in ("mean_pr_auc", "std", "mean_roc_auc", "fold_scores")}
+    if "C" in res["params"]:
+        print("  C   探索しない（A のパラメータのまま30列を足す）")
     if "A" not in arms:
         print("  基準 A の out-of-fold がまだそろっていない（続きは次の回）")
         with open(path("summary.json"), "w", encoding="utf-8") as fh:
@@ -520,10 +543,11 @@ def report(res: dict, shifts: list, stamp: dict, extra: dict) -> dict:
             print(f"  {arm:<14}{m['pr_auc']:>8.4f}{m['lift']:>6.2f}x{m['roc_auc']:>8.4f}{m['day_auc']:>8.4f}"
                   f"{m['ret_o1_20_mean']:>+10.2f}pt{int(m['ret_o1_20_won']):>4}/{int(m['ret_o1_20_n']):<2}"
                   f"{m['ret_o1_20_worst']:>+8.2f}pt{len(o):>8,}")
-        if "A" in ms and "B" in ms:
-            a, b = ms["A"], ms["B"]
-            print(f"  {'B−A':<14}{b['pr_auc'] - a['pr_auc']:>+8.4f}{'':>7}{b['roc_auc'] - a['roc_auc']:>+8.4f}"
-                  f"{b['day_auc'] - a['day_auc']:>+8.4f}{b['ret_o1_20_mean'] - a['ret_o1_20_mean']:>+10.2f}pt")
+        for lo, hi in PAIRS:
+            if lo in ms and hi in ms:
+                a, b = ms[lo], ms[hi]
+                print(f"  {hi + '−' + lo:<14}{b['pr_auc'] - a['pr_auc']:>+8.4f}{'':>7}{b['roc_auc'] - a['roc_auc']:>+8.4f}"
+                      f"{b['day_auc'] - a['day_auc']:>+8.4f}{b['ret_o1_20_mean'] - a['ret_o1_20_mean']:>+10.2f}pt")
 
     tables = {}
     for rows in ROWSETS:
@@ -533,24 +557,27 @@ def report(res: dict, shifts: list, stamp: dict, extra: dict) -> dict:
         print(f"\n■ 3{'b' if rows == 'minute' else ''}. 窓ごと（{ROWSET_JA[rows]}。境界を {'/'.join(map(str, shifts))}か月ずらした"
               f"{len(shifts)}通り × 種3つの平均。窓は{ROWSET_JA[rows]}が {MIN_WINDOW_ROWS}件以上で正例・負例がそろうもの）: {len(s)}窓")
         print(f"  {'':<24}{'前':>9}{'後':>9}{'差の平均':>10}{'SE':>9}{'上の窓':>9}{'同じ':>6}")
-        if not len(s) or "B" not in arms:
+        pairs = [(lo, hi) for lo, hi in PAIRS if lo in arms and hi in arms]
+        if not len(s) or not pairs:
             continue
-        for met, nm in (("pr", "PR"), ("roc", "ROC")):
-            line, st = pair(f"{nm} B−A", s[f"{met}_A"].to_numpy(), s[f"{met}_B"].to_numpy())
-            print(line)
-            summary["windows"][f"{rows}_{met}_B-A"] = st
+        for lo, hi in pairs:
+            for met, nm in (("pr", "PR"), ("roc", "ROC")):
+                line, st = pair(f"{nm} {hi}−{lo}", s[f"{met}_{lo}"].to_numpy(), s[f"{met}_{hi}"].to_numpy())
+                print(line)
+                summary["windows"][f"{rows}_{met}_{hi}-{lo}"] = st
         t = s[s["train_minute"] > 0]
         u = s[s["train_minute"] == 0]
-        print(f"  うち訓練に分足の付いた行がある窓（{len(t)}窓）と無い窓（{len(u)}窓。30列が訓練で全行欠測で B は30列を使えない。"
-              "差はパラメータの違いだけ）")
-        for part, key, nm2 in ((t, "trained", "訓練に分足"), (u, "untrained", "訓練に分足なし")):
-            for met, nm in (("pr", "PR"), ("roc", "ROC")):
-                if not len(part):
-                    break
-                line, st = pair(f"{nm} B−A（{nm2}）", part[f"{met}_A"].to_numpy(), part[f"{met}_B"].to_numpy())
-                print(line)
-                summary["windows"][f"{rows}_{met}_B-A_{key}"] = st
-    print("\n■ 4. §7 の判定は出さない（運用者の選択「AとBだけ」。対照 P と A のパラメータの C が要る）")
+        print(f"  うち訓練に分足の付いた行がある窓（{len(t)}窓）と無い窓（{len(u)}窓。30列が訓練で全行欠測で B・C は30列を使えない。"
+              "そこでの差はパラメータの違いだけで、C は A とちょうど同じになる）")
+        for lo, hi in pairs:
+            for part, key, nm2 in ((t, "trained", "訓練に分足"), (u, "untrained", "訓練に分足なし")):
+                for met, nm in (("pr", "PR"), ("roc", "ROC")):
+                    if not len(part):
+                        break
+                    line, st = pair(f"{nm} {hi}−{lo}（{nm2}）", part[f"{met}_{lo}"].to_numpy(), part[f"{met}_{hi}"].to_numpy())
+                    print(line)
+                    summary["windows"][f"{rows}_{met}_{hi}-{lo}_{key}"] = st
+    print("\n■ 4. §7 の判定は出さない（運用者の選択。対照 P は回していない）")
 
     tt = top_table(res, arms, shifts)
     if len(tt):
@@ -576,19 +603,20 @@ def report(res: dict, shifts: list, stamp: dict, extra: dict) -> dict:
 
     for rows in ROWSETS:
         s = tables[rows]
-        print(f"\n■ 6{'b' if rows == 'minute' else ''}. 窓ごとの値（PR-AUC。{ROWSET_JA[rows]}。差は「B − A」）")
+        print(f"\n■ 6{'b' if rows == 'minute' else ''}. 窓ごとの値（PR-AUC。{ROWSET_JA[rows]}。差は「B − A」「C − A」）")
         for sh in shifts:
             g = s[s["shift"] == sh].sort_values("fold") if len(s) else s
             if not len(g):
                 continue
             print(f"  ずらし{sh}か月（{len(g)}窓）")
+            diffs = [(lo, hi) for lo, hi in PAIRS if lo in arms and hi in arms]
             print(f"    {'窓':>2}  {'期間':<23}{'件数':>7}{'正例率':>7}{'訓練の分足':>9}" + "".join(f"{a:>9}" for a in arms)
-                  + (f"{'B−A':>9}" if "B" in arms else ""))
+                  + "".join(f"{hi + '−' + lo:>9}" for lo, hi in diffs))
             for _, r in g.iterrows():
                 print(f"    {int(r['fold']):>2}  {pd.Timestamp(r['start']).date()}〜{pd.Timestamp(r['end']).date()}"
                       f"{int(r['n']):>7,}{r['pos']*100:>6.1f}%{int(r['train_minute']):>11,}"
                       + "".join(f"{r[f'pr_{a}']:>9.4f}" for a in arms)
-                      + (f"{r['pr_B'] - r['pr_A']:>+9.4f}" if "B" in arms else ""))
+                      + "".join(f"{r[f'pr_{hi}'] - r[f'pr_{lo}']:>+9.4f}" for lo, hi in diffs))
         summary["per_window"][rows] = (s.assign(start=s["start"].astype(str), end=s["end"].astype(str)).to_dict("records")
                                        if len(s) else [])
     with open(path("summary.json"), "w", encoding="utf-8") as fh:
@@ -604,6 +632,8 @@ def main(argv=None) -> int:
     ap.add_argument("--shifts", default="0,2,4")
     ap.add_argument("--tag", default=TAG, help="保存するファイルの頭（試運転は本番の回と分ける）")
     ap.add_argument("--rebuild", action="store_true", help="表を作り直す（以前の結果は使えなくなる）")
+    ap.add_argument("--keep-frame", action="store_true",
+                    help="保存済みの表を、分足の取得記録が変わっていてもそのまま使う（腕を足す回で前の回と同じ表で比べる）")
     ap.add_argument("--budget-min", type=float, default=290.0, help="この分数を過ぎたら新しい計算を始めない（0 で無制限）")
     ap.add_argument("--dry", action="store_true", help="列の付き方だけ出して終わる")
     args = ap.parse_args(argv)
@@ -617,6 +647,8 @@ def main(argv=None) -> int:
         raise SystemExit(f"知らない腕: {bad}（使えるもの {ARMS}）")
     if "A" not in arms:
         raise SystemExit("基準 A は外せません")
+    if args.rebuild and args.keep_frame:
+        raise SystemExit("--rebuild と --keep-frame は一緒に使えません")
     shifts = [int(x) for x in args.shifts.split(",") if x.strip()]
     base = F.columns(BASE_PRESET)
     new = list(NEW_COLS)
@@ -638,7 +670,7 @@ def main(argv=None) -> int:
           f"種 {SEEDS} / 上限 {args.budget_min:g}分 / 保存 {RUN}_*")
     print("=" * 78)
 
-    full, stamp = prepare(base, args.rebuild)
+    full, stamp = prepare(base, args.rebuild, args.keep_frame)
     full["Date"] = pd.to_datetime(full["Date"])
     full["Code"] = full["Code"].astype(str)
     label_check = check_label(full)
@@ -656,8 +688,10 @@ def main(argv=None) -> int:
     t0 = time.time()
     res = run(arms, frames, colsets, cutoff, args.n_trials, stamp, shifts)
     log(f"[{ALGO}] 計算 {time.time()-t0:.0f}秒 / そろった腕 {', '.join(complete_arms(res, shifts)) or 'なし'}")
-    if res["recs"].get("B"):
-        extra["gain"] = gain_report(df, base, res["recs"]["B"]["params"], cutoff)
+    if res["recs"].get("B") and "B" in res["params"]:
+        extra["gain"] = gain_report(df, base, res["params"]["B"], cutoff, "B")
+    if "C" in res["params"]:
+        extra["gain_C"] = gain_report(df, base, res["params"]["C"], cutoff, "C")
     report(res, shifts, stamp, extra)
     if TIMED_OUT:
         log("時間の上限で止めた。同じ引数でもう1回回すと、保存済みの探索・out-of-fold の続きから")

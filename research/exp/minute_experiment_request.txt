@@ -1,2 +1,2 @@
 exp=e132_minute_vp_ab.py
-args=
+args=--keep-frame

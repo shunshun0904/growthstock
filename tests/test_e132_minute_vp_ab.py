@@ -4,7 +4,9 @@
 
 - 列: 比べる土台は回した時点の既定 373列（名前で固定）。表には research/minute_features.py の33列を付け、学習に足すのは
   VWAP の3列を除いた30列（運用者の選択「VWAPの3列を外した30列」）。土台と重ならない
-- 腕は A・B だけ（運用者の選択「AとBだけ」）。A は必ず含める
+- 腕は A・B・C（運用者の選択「AとBだけ」の後、結果を見て「C の腕で列の効果を切り分ける」）。A は必ず含める。C は A の
+  パラメータのまま30列を足す（探索しない）。訓練に分足の無い窓では C は A とちょうど同じ
+- --keep-frame: 保存済みの表を、分足の取得記録が変わっていてもそのまま使う（前の回の A・B と同じ表で C を比べる）
 - ラベル: データセットの label が本番の +10% の定義（label_specs）と全行一致しなければ止める
 - 付けた33列の確かめ: 割合が 0〜1 の外・無限・終値との差が −100% 以下・期間の中で欠けのある行・時間帯の割合の合計が1でない行があれば止める
 - 評価の行: 全行と、分足の付いた行だけ（30列のどれかがある行）。窓は行が100件以上で正例・負例がそろうもの
@@ -49,9 +51,11 @@ class TestColumns(unittest.TestCase):
         self.assertEqual(list(E.NEW_COLS), [c for c in MF.COLUMNS if "_vwap_gap_" not in c])   # 並びは minute_features のまま
         self.assertEqual(len(E.NEW_COLS), 30)
         self.assertFalse(set(base) & set(E.BUILT_COLS))
-        self.assertEqual(E.ARMS, ("A", "B"))
-        for d in (E.COLS_OF, E.LABELS):
+        self.assertEqual(E.ARMS, ("A", "B", "C"))
+        for d in (E.COLS_OF, E.LABELS, E.PARAMS_OF):
             self.assertEqual(set(d), set(E.ARMS))
+        self.assertEqual(E.PARAMS_OF, {"A": "A", "B": "B", "C": "A"})
+        self.assertEqual(E.COLS_OF["C"], E.COLS_OF["B"])
         self.assertEqual(E.SEEDS, (42, 7, 123))
         self.assertEqual(E.ROWSETS, ("all", "minute"))
 
@@ -65,7 +69,9 @@ class TestColumns(unittest.TestCase):
             with redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
                 E.main(["--arms", "B"])                                  # 基準 A は外せない
             with redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
-                E.main(["--arms", "A,C"])                                # 腕は A・B だけ
+                E.main(["--arms", "A,D"])                                # 腕は A・B・C だけ
+            with redirect_stdout(io.StringIO()), self.assertRaises(SystemExit):
+                E.main(["--rebuild", "--keep-frame"])                    # 一緒には使えない
         finally:
             E.RUN, E.TAG, E.DEADLINE = old
 
@@ -147,6 +153,7 @@ class TestRows(unittest.TestCase):
 
 
 PARAMS = {"n_estimators": 20, "num_leaves": 7, "learning_rate": 0.1, "min_child_samples": 20, "verbose": -1, "n_jobs": 1}
+PARAMS_B = {**PARAMS, "num_leaves": 5, "learning_rate": 0.08}           # B は探索し直しで別のパラメータになる
 
 
 def make_frame(seed=0, per_day=3, minute_from="2019-01-01"):
@@ -183,8 +190,8 @@ class TestRunAndReport(unittest.TestCase):
         old = (E.OOF_DIR, E.SEEDS, E.RUN, E.DEADLINE)
         try:
             E.OOF_DIR, E.SEEDS, E.RUN, E.DEADLINE = tmp, (42,), "e132test", None
-            for arm, cols in (("A", base), ("B", base + new)):
-                rec = {"params": PARAMS, "_cv": {"mean_pr_auc": 0.3, "std": 0.01, "mean_roc_auc": 0.6,
+            for arm, cols, prm in (("A", base, PARAMS), ("B", base + new, PARAMS_B)):
+                rec = {"params": prm, "_cv": {"mean_pr_auc": 0.3, "std": 0.01, "mean_roc_auc": 0.6,
                                                  "fold_scores": [0.3, 0.31]},
                        "_n_trials": 2, "_cutoff": str(cutoff.date()), "_data": "test", "_sig": F.signature(cols)}
                 with open(E.path(f"params_{arm}.json"), "w", encoding="utf-8") as fh:
@@ -193,7 +200,8 @@ class TestRunAndReport(unittest.TestCase):
             with redirect_stdout(buf):
                 extra = {"coverage": E.coverage_report(df, base)}
                 res = E.run(list(E.ARMS), frames, colsets, cutoff, 2, stamp, [0, 2])
-                extra["gain"] = E.gain_report(df, base, PARAMS, cutoff)
+                extra["gain"] = E.gain_report(df, base, PARAMS_B, cutoff, "B")
+                extra["gain_C"] = E.gain_report(df, base, res["params"]["C"], cutoff, "C")
                 summary = E.report(res, [0, 2], stamp, extra)
             out = buf.getvalue()
             names = sorted(os.listdir(tmp))
@@ -205,6 +213,12 @@ class TestRunAndReport(unittest.TestCase):
         self.assertIn("all_pr_B-A", summary["windows"])
         self.assertIn("minute_pr_B-A", summary["windows"])
         self.assertIn("minute_B", summary["production_oof"])
+        self.assertIn("all_pr_C-A", summary["windows"])
+        self.assertIn("minute_C", summary["production_oof"])
+        self.assertEqual(res["params"]["C"], PARAMS)                     # C は A のパラメータ
+        self.assertEqual(res["params"]["B"], PARAMS_B)
+        self.assertEqual(set(extra["gain_C"]["new"]), set(E.NEW_COLS))
+        self.assertIn("C−A", out)
         self.assertNotIn("judge7", summary)
         self.assertEqual(set(extra["gain"]["share"]), {"既存の373列", "分足の30列"})
         self.assertAlmostEqual(sum(extra["gain"]["share"].values()), 1.0, places=6)
@@ -212,22 +226,29 @@ class TestRunAndReport(unittest.TestCase):
         self.assertEqual(set(extra["coverage"]["columns"]), set(E.NEW_COLS))
         self.assertNotIn("vp_minute_vwap_gap_20d↔", out)
         self.assertIn(f"lgbm_cnew{F.signature(base + new)}_", "\n".join(names))     # out-of-fold の名前に列の指紋
+        b_files = {n for n in names if n.startswith(f"e132test_lgbm_cnew{F.signature(base + new)}_")}
+        self.assertEqual(len(b_files), 2 * 2)                            # B と C（パラメータが違う）× ずらし 0・2（本番はずらし0と同じファイル）
         self.assertIn("§7 の判定は出さない", out)
         self.assertIn("分足の付いた行だけ", out)
         # 付いた行だけの窓は、分足が始まる前の窓を含まない
         windows = pd.DataFrame(summary["per_window"]["minute"])
         self.assertTrue((pd.to_datetime(windows["start"]) >= pd.Timestamp("2020-03-02")).all())
-        # 訓練に分足が無い窓は B = A（ちょうど同じ）。訓練に分足がある窓だけの集計はその窓を除く
+        # 訓練に分足が無い窓は C = A（ちょうど同じ。A のパラメータで、30列は訓練で全行欠測）。B はパラメータが違うので違う
         every = pd.DataFrame(summary["per_window"]["all"])
         none = every[every["train_minute"] == 0]
         self.assertGreater(len(none), 0)
-        np.testing.assert_array_equal(none["pr_A"].to_numpy(), none["pr_B"].to_numpy())
-        np.testing.assert_array_equal(none["roc_A"].to_numpy(), none["roc_B"].to_numpy())
-        trained = summary["windows"]["all_pr_B-A_trained"]
-        self.assertEqual(trained["n"], int((every["train_minute"] > 0).sum()))
-        self.assertEqual(trained["n"] + len(none), summary["windows"]["all_pr_B-A"]["n"])
-        self.assertEqual(summary["windows"]["all_pr_B-A_untrained"]["n"], len(none))
-        self.assertEqual(summary["windows"]["all_pr_B-A_untrained"]["ties"], len(none))    # パラメータが同じなのでちょうど同じ
+        np.testing.assert_array_equal(none["pr_A"].to_numpy(), none["pr_C"].to_numpy())
+        np.testing.assert_array_equal(none["roc_A"].to_numpy(), none["roc_C"].to_numpy())
+        self.assertGreater(np.abs(none["pr_A"].to_numpy() - none["pr_B"].to_numpy()).max(), 0)
+        for arm in ("B", "C"):
+            trained = summary["windows"][f"all_pr_{arm}-A_trained"]
+            self.assertEqual(trained["n"], int((every["train_minute"] > 0).sum()))
+            self.assertEqual(trained["n"] + len(none), summary["windows"][f"all_pr_{arm}-A"]["n"])
+            self.assertEqual(summary["windows"][f"all_pr_{arm}-A_untrained"]["n"], len(none))
+        self.assertEqual(summary["windows"]["all_pr_C-A_untrained"]["ties"], len(none))
+        # 訓練に分足がある窓では、C は A と違う（30列を使う）
+        some = every[every["train_minute"] > 0]
+        self.assertGreater(np.abs(some["pr_A"].to_numpy() - some["pr_C"].to_numpy()).max(), 0)
         self.assertIn("うち訓練に分足の付いた行がある窓", out)
         # 訓練の分足の行数は、窓の訓練の終わりまでの付いた行（ラベルあり）の数
         folds = {f.index: f for f in E.E41.folds_for(df["Date"], 0)}
@@ -255,6 +276,31 @@ class TestRunAndReport(unittest.TestCase):
                     E.tune("A", make_frame(2), ["b0", "b1"], cutoff, 2, {"built_utc": "test"})
         finally:
             E.OOF_DIR, E.RUN, E.DEADLINE = old
+            shutil.rmtree(tmp)
+
+    def test_keep_frame_reuses_the_saved_table(self):
+        tmp = tempfile.mkdtemp()
+        old = (E.OOF_DIR, E.MINUTE_DIR, E.RUN)
+        try:
+            E.OOF_DIR, E.MINUTE_DIR, E.RUN = tmp, os.path.join(tmp, "minute"), "e132keep"
+            os.makedirs(E.MINUTE_DIR)
+            with open(os.path.join(E.MINUTE_DIR, "minute_manifest.json"), "w") as fh:
+                fh.write('{"schema": 1, "days": {"2026-11-19": {}}}')       # 毎晩の取得で変わった記録
+            saved = make_frame(3).head(50)
+            saved.to_parquet(E.path("frame.parquet"), index=False)
+            stamp = {"built_utc": "2026-11-19 12:58 UTC", "rows": 50, "date_max": "2017-01-17",
+                     "sources": {**E.source_stamp(), "minute_manifest": "older"}}
+            with open(E.path("stamp.json"), "w", encoding="utf-8") as fh:
+                json.dump(stamp, fh)
+            with mock.patch.object(E.lab, "frame", side_effect=RuntimeError("rebuilt")):
+                with redirect_stdout(io.StringIO()):
+                    df, got = E.prepare(["b0"], keep=True)
+                self.assertEqual(got["built_utc"], stamp["built_utc"])   # 同じ表・同じ版（A・B の保存済みの結果が使える）
+                self.assertEqual(len(df), 50)
+                with redirect_stdout(io.StringIO()), self.assertRaises(RuntimeError):
+                    E.prepare(["b0"])                                   # 既定では、取得記録が変われば作り直す
+        finally:
+            E.OOF_DIR, E.MINUTE_DIR, E.RUN = old
             shutil.rmtree(tmp)
 
     def test_prepare_needs_the_minute_store(self):
