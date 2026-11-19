@@ -75,16 +75,50 @@ def trading_days(bars_paths: Iterable[str], start: str) -> List[str]:
     return sorted(days)
 
 
+#: 分布の形（実験132の --shape。運用者の問い 2026-11-19「正例になりやすい、価格帯別出来高の分布などないでしょうか？」）:
+#: 期間の株数を、D の終値からの距離の帯に分けた割合（合計1）。帯は次の8つ
+SHAPE_EDGES = (-np.inf, -0.20, -0.10, -0.05, -0.02, 0.0, 0.02, 0.05, np.inf)
+SHAPE_LABELS = ("−20%以下", "−20〜−10%", "−10〜−5%", "−5〜−2%", "−2〜0%", "0〜+2%", "+2〜+5%", "+5%超")
+
+
+def shape_columns(n: int) -> List[str]:
+    return [f"vp_shape_{n}d_b{i}" for i in range(len(SHAPE_EDGES) - 1)]
+
+
+SHAPE_COLUMNS = [c for n in WINDOWS for c in shape_columns(n)]
+
+
+def shape_of(bands, close: float, edges=SHAPE_EDGES) -> np.ndarray:
+    """
+    window_profiles の bands（[下限, 上限, 株数, 売買代金]。D の値の基準）の株数を、終値からの距離（価格 ÷ 終値 − 1）の帯に、
+    重なる長さで按分した割合（合計1）。帯の中では株数が一様にあるとみなす。
+    """
+    b = np.asarray(bands, dtype=float)
+    if not len(b) or close is None or close <= 0:
+        return np.full(len(edges) - 1, np.nan)
+    lo, hi, qty = b[:, 0] / close - 1.0, b[:, 1] / close - 1.0, b[:, 2]
+    span = np.where(hi > lo, hi - lo, 1.0)
+    out = []
+    for a, z in zip(edges[:-1], edges[1:]):
+        overlap = np.minimum(hi, z) - np.maximum(lo, a)
+        overlap = np.where(overlap > 1e-12, overlap, 0.0)          # 境目の浮動小数点の誤差は重なりにしない
+        out.append(float(np.sum(qty * overlap / span)))
+    out = np.array(out)
+    total = float(qty.sum())
+    return out / total if total > 0 else np.full(len(edges) - 1, np.nan)
+
+
 STATUS_COLUMNS = [f"vp_minute_status_{n}d" for n in WINDOWS]
 #: 分足の始まりより前の行の状態（集計しない）
 BEFORE_MINUTE = "before_minute"
 
 
 def build(keys: pd.DataFrame, minute_dir: str, data_dir: str,
-          with_status: bool = False) -> Tuple[pd.DataFrame, dict]:
+          with_status: bool = False, with_shape: bool = False) -> Tuple[pd.DataFrame, dict]:
     """
     keys（Code, Date の行）に33列を付けた表（keys と同じ行・同じ並び）と、件数だけの記録を返す。
     with_status なら、期間ごとの集計の状態（volume_profile.STATUSES か BEFORE_MINUTE）の列も付ける（EDA 用）。
+    with_shape なら、分布の形の列（SHAPE_COLUMNS。終値からの距離の帯ごとの株数の割合）も付ける（実験132の --shape 用）。
 
     minute_dir: minute_manifest.json と minute_YYYYMM.parquet の置き場（Release data-minute を落とした場所）
     data_dir:   bars_YYYY.parquet（Release data-raw）の置き場
@@ -97,6 +131,9 @@ def build(keys: pd.DataFrame, minute_dir: str, data_dir: str,
     if with_status:
         for col in STATUS_COLUMNS:
             out[col] = BEFORE_MINUTE
+    if with_shape:
+        for col in SHAPE_COLUMNS:
+            out[col] = np.nan
     report = {"rows": int(len(out)), "minute_days": len(stored),
               "minute_from": stored[0] if stored else None, "minute_to": stored[-1] if stored else None}
     if not stored:
@@ -147,6 +184,9 @@ def build(keys: pd.DataFrame, minute_dir: str, data_dir: str,
                 continue
             for metric, value in values(result, close).items():
                 out.iat[i, out.columns.get_loc(column(metric, n))] = value
+            if with_shape:
+                for col, value in zip(shape_columns(n), shape_of(result["bands"], close)):
+                    out.iat[i, out.columns.get_loc(col)] = value
     report["target_rows"] = int(len(target))
     report["attached"] = int(out[COLUMNS].notna().any(axis=1).sum())
     report["attached_by_window"] = {f"{n}d": int(out[column("vwap_gap", n)].notna().sum()) for n in WINDOWS}

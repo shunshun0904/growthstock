@@ -108,6 +108,28 @@ class MinuteFeaturesTest(unittest.TestCase):
         self.assertFalse(set(MF.STATUS_COLUMNS) & set(plain.columns))              # 既定では付けない
         pd.testing.assert_frame_equal(plain, out.drop(columns=MF.STATUS_COLUMNS))
 
+    def test_shape_of_splits_bands_by_overlap(self):
+        got = MF.shape_of([[95, 105, 10, 1000]], 100.0)                # −5%〜+5% に一様
+        np.testing.assert_allclose(got, [0, 0, 0, .3, .2, .2, .3, 0], atol=1e-12)
+        got = MF.shape_of([[70, 80, 5, 0], [99, 100, 5, 0]], 100.0)
+        np.testing.assert_allclose(got, [.5, 0, 0, 0, .5, 0, 0, 0], atol=1e-12)
+        self.assertTrue(np.isnan(MF.shape_of([], 100.0)).all())
+
+    def test_shape_columns_sum_to_one_and_do_not_change_the_rest(self):
+        rows = [("123A0", "2025-11-18"), ("99990", "2025-11-18"), ("77770", "2025-11-18"), ("123A0", "2025-10-02")]
+        keys = pd.DataFrame(rows, columns=["Code", "Date"])
+        shaped, _ = MF.build(keys, str(self.root / "minute"), str(self.root / "raw"), with_shape=True)
+        plain, _ = MF.build(keys, str(self.root / "minute"), str(self.root / "raw"))
+        pd.testing.assert_frame_equal(plain, shaped.drop(columns=MF.SHAPE_COLUMNS))
+        self.assertEqual(len(MF.SHAPE_COLUMNS), 3 * 8)
+        for n in MF.WINDOWS:
+            cols = MF.shape_columns(n)
+            ok = plain[MF.column("poc_gap", n)].notna()
+            np.testing.assert_allclose(shaped.loc[ok, cols].sum(axis=1), 1.0)
+            self.assertTrue(shaped.loc[~ok, cols].isna().all().all())         # 集計できない期間は欠測
+            above = shaped.loc[ok, cols[5:]].sum(axis=1)                       # 終値より上の帯の合計は、終値より上の割合に近い
+            self.assertLess((above - plain.loc[ok, MF.column("above_close_share", n)]).abs().max(), 0.15)
+
     def test_store_without_days_leaves_everything_missing(self):
         empty = Path(self.temp.name) / "empty"
         empty.mkdir(exist_ok=True)

@@ -7,6 +7,8 @@
 - 腕は A・B・C（運用者の選択「AとBだけ」の後、結果を見て「C の腕で列の効果を切り分ける」）。A は必ず含める。C は A の
   パラメータのまま30列を足す（探索しない）。訓練に分足の無い窓では C は A とちょうど同じ
 - --keep-frame: 保存済みの表を、分足の取得記録が変わっていてもそのまま使う（前の回の A・B と同じ表で C を比べる）
+- --shape: 正例になりやすい分布の形。正例に多い帯は素でも A の見込みを超えても見つかり、型は前半で作って後半で確かめる。
+  ラベルが分布と無関係なら何も見つからない
 - --short: 短い期間の値動き（gap・r1・r3・r5。日足の並びで数える）。日付の中の順位相関（日付を1件として t）。今の列の予測を
   引いた偏相関で、予測と同じ情報の列は消え、別の情報の列は残る。30列まとめた信号は日付の前半・後半で作って測る
 - --residual: A の out-of-fold で説明しきれない部分を列が説明するか。A が使っていない情報を持つ列は見つかり、雑音の列・
@@ -214,6 +216,50 @@ def short_frame(seed=0, n_dates=160, per_day=12):
     return pd.DataFrame({"Code": [f"{1000 + i % per_day}" for i in range(n)], "Date": dates, "r1": r1, "r3": r3,
                          "pred_r1": sig, "pred_r3": rng.normal(size=n), "f_new": new, "f_same": sig + 0.01 * noise,
                          "f_noise": noise})
+
+
+def shape_frame(seed=0, n_dates=200, per_day=15, effect=1.0):
+    """型 0（終値のすぐ下 −2〜0% に株数が集まる）は正例になりやすい。A の予測（score）はそれを知らない。"""
+    rng = np.random.default_rng(seed)
+    dates = np.repeat(pd.bdate_range("2025-01-06", periods=n_dates), per_day)
+    n = len(dates)
+    z = rng.choice(5, size=n, p=[.2, .2, .2, .2, .2])
+    alphas = np.array([[1, 1, 2, 3, 20, 2, 1, 1], [8, 6, 3, 2, 2, 1, 1, 1], [1, 2, 8, 6, 3, 1, 1, 1],
+                       [1, 1, 2, 3, 3, 6, 6, 3], [3, 3, 3, 3, 3, 3, 3, 3]], dtype=float)
+    signal = rng.normal(size=n)
+    y = (rng.random(n) < 1 / (1 + np.exp(-(-1.6 + signal + effect * (z == 0))))).astype(float)
+    rows = {"Code": [f"{1000 + i % per_day}" for i in range(n)], "Date": dates, "label": y,
+            "score": 1 / (1 + np.exp(-(-1.6 + signal))), "n_scores": 3}
+    for w in MF.WINDOWS:
+        shares = np.vstack([rng.dirichlet(alphas[k]) for k in z])
+        for j, c in enumerate(MF.shape_columns(w)):
+            rows[c] = shares[:, j]
+    return pd.DataFrame(rows)
+
+
+class TestShape(unittest.TestCase):
+    def test_finds_the_shape_that_is_more_often_positive(self):
+        rows = shape_frame()
+        with redirect_stdout(io.StringIO()) as buf:
+            out = E.shape_report(rows, n_perm=199, seed=1)
+        read = out["reading"]
+        self.assertIn("20日 −2〜0%（＋）", read["bins_raw"])
+        self.assertIn("20日 −2〜0%（＋）", read["bins_model"])                  # A の見込みを超えて
+        w = out["windows"]["20"]
+        top = w["types"][0]                                                  # 前半の正例率がいちばん高い型
+        self.assertEqual(int(np.argmax(top["centroid"])), 4)                 # 終値のすぐ下に集まる型
+        self.assertIn("20日 T1", read["types_up"])
+        self.assertIn("20日 T1", read["types_model_up"])
+        self.assertEqual(sum(r["n_first"] + r["n_second"] for r in w["types"]), w["rows"])
+        self.assertIn("分布の形", buf.getvalue())
+
+    def test_nothing_when_label_ignores_shape(self):
+        rows = shape_frame(seed=4, effect=0.0)
+        with redirect_stdout(io.StringIO()):
+            out = E.shape_report(rows, n_perm=199, seed=2)
+        self.assertEqual(out["reading"]["bins_model"], [])
+        self.assertEqual(out["reading"]["types_up"], [])
+        self.assertEqual(out["reading"]["types_model_up"], [])
 
 
 class TestShort(unittest.TestCase):

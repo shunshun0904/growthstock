@@ -43,6 +43,9 @@ out-of-fold: 本番と同じ作り（36/6/6か月・エンバーゴ20営業日�
 列の付き方だけ見る: args="--dry"
 試運転:             args="--tag e132smoke --n-trials 2 --shifts 0"
 C を足す回:         args="--keep-frame"（A・B は保存済みの探索・out-of-fold を読む。C の out-of-fold だけ計算する）
+分布の形:           args="--keep-frame --shape"（終値からの距離の帯ごとの株数の割合で、正例になりやすい分布の形を探す。平均の形の
+                    比較と型（k-means）。素の正例率と、A の見込みとの差の両方。運用者の問い 2026-11-19「正例になりやすい、
+                    価格帯別出来高の分布などないでしょうか？」。docs の 97-12）
 短い期間の値動き:   args="--keep-frame --short"（分足の30列が、高値更新の翌日から数営業日の値動きを当てるか。今の373列の予測を
                     超えて当たりが残るか。運用者の選択 2026-11-19「短い期間の値動きで見る」。docs の 97-11）
 残差で確かめる:     args="--keep-frame --residual"（保存済みの A の out-of-fold で説明しきれない部分を、分足の30列が説明するか。
@@ -728,6 +731,180 @@ def residual_report(rows: pd.DataFrame, cols: list, n_perm: int = N_PERM, n_perm
 
 
 # --------------------------------------------------------------------------- #
+# 分布の形（--shape）
+# --------------------------------------------------------------------------- #
+#: 型の数（k-means。期間の前半で作り、後半で確かめる）
+N_TYPES = 5
+#: 並べ替え検定の回数
+SHAPE_PERM = 1000
+
+
+def shape_rows(df: pd.DataFrame, base: list, params_a: dict, shifts) -> tuple:
+    """分足の付いた行に、分布の形の列（minute_features.SHAPE_COLUMNS）と A の予測（residual_rows と同じ）を付けた表と確かめ。"""
+    rows = residual_rows(df, base, params_a, shifts)
+    t0 = time.time()
+    att, report = MF.build(rows[["Code", "Date"]], MINUTE_DIR, lab.DATA_DIR, with_shape=True)
+    if len(att) != len(rows) or not (att["Code"].to_numpy() == rows["Code"].to_numpy()).all():
+        raise SystemExit("分布の形を付けたら行の並びが変わった")
+    diff = float(np.nanmax(np.abs(att[list(NEW_COLS)].to_numpy(dtype=float) - rows[list(NEW_COLS)].to_numpy(dtype=float))))
+    sums = att[MF.SHAPE_COLUMNS].to_numpy(dtype=float).reshape(len(att), len(MF.WINDOWS), -1).sum(axis=2)
+    dev = float(np.nanmax(np.abs(sums - 1.0)))
+    check = {"summary_max_abs_diff": diff, "shape_sum_max_dev": dev, "seconds": round(time.time() - t0)}
+    print(f"  確かめ: 作り直した30列と表の30列の差の最大 {diff:.2e}・分布の形の割合の合計と1の差の最大 {dev:.2e}"
+          f"（{check['seconds']}秒）")
+    if diff > 1e-9 or dev > 1e-6:
+        raise SystemExit("分布の形の作り直しが表と合わない")
+    for c in MF.SHAPE_COLUMNS:
+        rows[c] = att[c].to_numpy()
+    return rows, check
+
+
+def shape_report(rows: pd.DataFrame, windows=None, n_types: int = N_TYPES, n_perm: int = SHAPE_PERM, seed: int = 0) -> dict:
+    """
+    正例になりやすい分布の形（分足の付いた行。期間ごと）。
+    A. 平均の形: 正例と負例の、帯ごとの株数の割合の平均と差。素の差は同じ日付の中でラベルを入れ替える並べ替え検定。
+       A の見込みとの差は、基準（A の予測の logit とその2乗）に帯の割合（順位を標準正規に直した値）を足した対数尤度の伸びと、
+       同じ日付の中で割合を入れ替える並べ替え検定。日付の前半・後半それぞれの差（向きがそろうか）も出す
+    B. 型: 帯の割合の平方根で k-means（前半の日付だけで作る）。型ごとの件数・正例率・A の見込みとの差を前半・後半で出し、
+       後半だけで検定する（前半で見つけて後半で確かめる）
+    q は Benjamini–Hochberg（A は 期間 × 帯、B は 期間 × 型 でそれぞれまとめて）
+    """
+    from sklearn.cluster import KMeans
+
+    rng = np.random.default_rng(seed)
+    windows = list(windows or MF.WINDOWS)
+    rows = rows.sort_values(["Date", "Code"], kind="mergesort").reset_index(drop=True)
+    dates = np.sort(rows["Date"].unique())
+    cut = dates[len(dates) // 2]
+    out = {"rows": int(len(rows)), "pos": int(rows["label"].sum()), "cut": str(pd.Timestamp(cut).date()),
+           "labels": list(MF.SHAPE_LABELS), "windows": {}}
+    print(f"\n■ 分布の形: 分足の付いた行 {len(rows):,}（正例 {out['pos']:,}・正例率 {rows['label'].mean() * 100:.1f}%）。"
+          f"帯は D の終値からの距離（{' / '.join(MF.SHAPE_LABELS)}）。前半・後半の分かれ目 {out['cut']}")
+    bin_tests, type_tests = [], []
+    for n in windows:
+        cols = MF.shape_columns(n)
+        sub = rows.dropna(subset=cols).reset_index(drop=True)
+        y = sub["label"].to_numpy(dtype=float)
+        codes = pd.factorize(sub["Date"])[0]
+        first = (sub["Date"] < cut).to_numpy()
+        X0 = base_design(sub["score"].to_numpy())
+        b0, ll0 = logit_fit(X0, y)
+        p0 = 1.0 / (1.0 + np.exp(-(X0 @ b0)))
+        resid = y - p0
+        S = sub[cols].to_numpy(dtype=float)
+        perm = date_permuter(codes, rng)
+        pos = y == 1
+        # A. 平均の形
+        diff = S[pos].mean(axis=0) - S[~pos].mean(axis=0)
+        null = np.empty((n_perm, S.shape[1]))
+        for k in range(n_perm):
+            pp = y[perm()] == 1
+            null[k] = S[pp].mean(axis=0) - S[~pp].mean(axis=0)
+        p_raw = (1 + (np.abs(null) >= np.abs(diff)).sum(axis=0)) / (n_perm + 1)
+        halves = [S[h & pos].mean(axis=0) - S[h & ~pos].mean(axis=0) for h in (first, ~first)]
+        bins = []
+        for j, c in enumerate(cols):
+            r = normal_scores(S[:, j])
+            d = added_ll(X0, y, r, b0, ll0)
+            nl = np.array([added_ll(X0, y, r[perm()], b0, ll0) for _ in range(n_perm)])
+            b1, _ = logit_fit(np.column_stack([X0, r]), y, beta=np.append(b0, 0.0))
+            ter = pd.qcut(pd.Series(S[:, j]).rank(method="first"), 3, labels=False).to_numpy()
+            spread = [float(np.mean(resid[(ter == 2) & h]) - np.mean(resid[(ter == 0) & h])) * 100 for h in (first, ~first)]
+            rec = {"window": n, "bin": j, "label": MF.SHAPE_LABELS[j], "pos_mean": float(S[pos, j].mean()),
+                   "neg_mean": float(S[~pos, j].mean()), "diff": float(diff[j]), "p_raw": float(p_raw[j]),
+                   "diff_halves": [float(h[j]) for h in halves], "dll": float(d),
+                   "p_model": float((1 + np.sum(nl >= d)) / (n_perm + 1)), "coef": float(b1[-1]),
+                   "resid_spread_halves_pt": spread,
+                   "resid_spread_pt": float(np.mean(resid[ter == 2]) - np.mean(resid[ter == 0])) * 100}
+            bins.append(rec)
+            bin_tests.append(rec)
+        # B. 型
+        km = KMeans(n_clusters=n_types, n_init=10, random_state=0).fit(np.sqrt(S[first]))
+        t = km.predict(np.sqrt(S))
+        cent = km.cluster_centers_ ** 2
+        cent = cent / cent.sum(axis=1, keepdims=True)
+        sec = ~first
+        y2, codes2 = y[sec], pd.factorize(sub.loc[sec, "Date"])[0]
+        perm2 = date_permuter(codes2, rng)
+        X02 = base_design(sub.loc[sec, "score"].to_numpy())
+        b02, ll02 = logit_fit(X02, y2)
+        order = sorted(range(n_types), key=lambda k: -float(np.mean(y[first & (t == k)])) if (first & (t == k)).any() else 0)
+        types = []
+        for rank, k in enumerate(order, 1):
+            m1, m2 = first & (t == k), sec & (t == k)
+            ind2 = (t[sec] == k).astype(float)
+            obs = float(y2[ind2 == 1].mean() - y2[ind2 == 0].mean()) if 0 < ind2.sum() < len(ind2) else float("nan")
+            nul = []
+            for _ in range(n_perm):
+                yp = y2[perm2()]
+                nul.append(yp[ind2 == 1].mean() - yp[ind2 == 0].mean())
+            nul = np.array(nul)
+            p_r = float((1 + np.sum(np.abs(nul) >= abs(obs))) / (n_perm + 1)) if np.isfinite(obs) else float("nan")
+            d2 = added_ll(X02, y2, ind2, b02, ll02) if 0 < ind2.sum() < len(ind2) else float("nan")
+            nl2 = np.array([added_ll(X02, y2, ind2[perm2()], b02, ll02) for _ in range(n_perm)]) if np.isfinite(d2) else None
+            p_m = float((1 + np.sum(nl2 >= d2)) / (n_perm + 1)) if nl2 is not None else float("nan")
+            rec = {"window": n, "type": f"T{rank}", "centroid": [float(v) for v in cent[k]],
+                   "n_first": int(m1.sum()), "n_second": int(m2.sum()),
+                   "pos_first": float(y[m1].mean()) if m1.any() else float("nan"),
+                   "pos_second": float(y[m2].mean()) if m2.any() else float("nan"),
+                   "base_first": float(y[first].mean()), "base_second": float(y[sec].mean()),
+                   "resid_first_pt": float(resid[m1].mean() * 100) if m1.any() else float("nan"),
+                   "resid_second_pt": float(resid[m2].mean() * 100) if m2.any() else float("nan"),
+                   "p_raw": p_r, "p_model": p_m}
+            types.append(rec)
+            type_tests.append(rec)
+        out["windows"][str(n)] = {"rows": int(len(sub)), "pos": int(pos.sum()), "bins": bins, "types": types}
+    for key in ("p_raw", "p_model"):
+        for group in (bin_tests, type_tests):
+            qs = bh_qvalues([r[key] if np.isfinite(r[key]) else 1.0 for r in group])
+            for r, q in zip(group, qs):
+                r["q" + key[1:]] = float(q)
+    for n in windows:
+        w = out["windows"][str(n)]
+        print(f"\n  {n}日（{w['rows']:,}行・正例 {w['pos']:,}）")
+        print("    A. 平均の形（帯ごとの株数の割合の平均。差は正例 − 負例のポイント。前半・後半の差で向きがそろうか。"
+              "モデルとの差は A の見込みとの差の上位3分の1 − 下位3分の1（ポイント））")
+        print(f"      {'帯':<11}{'正例':>7}{'負例':>7}{'差':>7}{'p':>7}{'q':>6}{'前半':>7}{'後半':>7}  "
+              f"{'モデルとの差':>9}{'前半':>7}{'後半':>7}{'p':>7}{'q':>6}")
+        for r in w["bins"]:
+            print(f"      {r['label']:<11}{r['pos_mean'] * 100:>6.1f}%{r['neg_mean'] * 100:>6.1f}%{r['diff'] * 100:>+7.2f}"
+                  f"{r['p_raw']:>7.3f}{r['q_raw']:>6.2f}{r['diff_halves'][0] * 100:>+7.2f}{r['diff_halves'][1] * 100:>+7.2f}  "
+                  f"{r['resid_spread_pt']:>+9.2f}{r['resid_spread_halves_pt'][0]:>+7.2f}{r['resid_spread_halves_pt'][1]:>+7.2f}"
+                  f"{r['p_model']:>7.3f}{r['q_model']:>6.2f}")
+        print(f"    B. 型（前半の日付で k-means・{n_types}つ。前半の正例率の高い順に T1〜。帯の割合は型の中心。検定は後半だけ）")
+        print(f"      {'型':<4}" + "".join(f"{lab:>10}" for lab in MF.SHAPE_LABELS)
+              + f"{'件数(前/後)':>12}{'正例率(前/後)':>15}{'モデルとの差(前/後)':>18}{'p':>7}{'q':>6}{'p(モデル)':>10}{'q':>6}")
+        for r in w["types"]:
+            print(f"      {r['type']:<4}" + "".join(f"{v * 100:>9.1f}%" for v in r["centroid"])
+                  + f"{r['n_first']:>6,}/{r['n_second']:<5,}{r['pos_first'] * 100:>8.1f}/{r['pos_second'] * 100:<5.1f}%"
+                  f"{r['resid_first_pt']:>+9.2f}/{r['resid_second_pt']:<+7.2f}{r['p_raw']:>7.3f}{r['q_raw']:>6.2f}"
+                  f"{r['p_model']:>10.3f}{r['q_model']:>6.2f}")
+        print(f"      正例率の全体（前半 / 後半）: {w['types'][0]['base_first'] * 100:.1f}% / {w['types'][0]['base_second'] * 100:.1f}%")
+    same = lambda a, b: (a > 0 and b > 0) or (a < 0 and b < 0)
+    read = {
+        "bins_raw": [f"{r['window']}日 {r['label']}（{'＋' if r['diff'] > 0 else '−'}）" for r in bin_tests
+                     if r["q_raw"] < BH_Q and same(*r["diff_halves"])],
+        "bins_model": [f"{r['window']}日 {r['label']}（{'＋' if r['coef'] > 0 else '−'}）" for r in bin_tests
+                       if r["q_model"] < BH_Q and same(*r["resid_spread_halves_pt"])],
+        "types_up": [f"{r['window']}日 {r['type']}" for r in type_tests
+                     if r["q_raw"] < BH_Q and r["pos_first"] > r["base_first"] and r["pos_second"] > r["base_second"]],
+        "types_down": [f"{r['window']}日 {r['type']}" for r in type_tests
+                       if r["q_raw"] < BH_Q and r["pos_first"] < r["base_first"] and r["pos_second"] < r["base_second"]],
+        "types_model_up": [f"{r['window']}日 {r['type']}" for r in type_tests
+                           if r["q_model"] < BH_Q and r["resid_first_pt"] > 0 and r["resid_second_pt"] > 0],
+        "types_model_down": [f"{r['window']}日 {r['type']}" for r in type_tests
+                             if r["q_model"] < BH_Q and r["resid_first_pt"] < 0 and r["resid_second_pt"] < 0],
+    }
+    print(f"\n  読み（回す前に決めたもの。q < {BH_Q} で、前半・後半の向きがそろうもの。型は前半で作り後半で確かめる）")
+    for key, title in (("bins_raw", "正例と負例で割合が違う帯（素）"), ("bins_model", "A の見込みを超えて効く帯"),
+                       ("types_up", "正例になりやすい型（素）"), ("types_down", "正例になりにくい型（素）"),
+                       ("types_model_up", "A の見込みより正例が多い型"), ("types_model_down", "A の見込みより正例が少ない型")):
+        print(f"    {title}: " + (" / ".join(read[key]) if read[key] else "なし"))
+    out["reading"] = read
+    return out
+
+
+# --------------------------------------------------------------------------- #
 # 短い期間の値動き（--short）
 # --------------------------------------------------------------------------- #
 #: 当てる値動き（株価は分割調整後。買いは本番と同じ D+1 の寄り。gap だけは買う前の窓）
@@ -1277,6 +1454,8 @@ def main(argv=None) -> int:
                     help="保存済みの表を、分足の取得記録が変わっていてもそのまま使う（腕を足す回で前の回と同じ表で比べる）")
     ap.add_argument("--budget-min", type=float, default=290.0, help="この分数を過ぎたら新しい計算を始めない（0 で無制限）")
     ap.add_argument("--dry", action="store_true", help="列の付き方だけ出して終わる")
+    ap.add_argument("--shape", action="store_true",
+                    help="終値からの距離の帯ごとの株数の割合で、正例になりやすい分布の形を探して終わる（平均の形と型）")
     ap.add_argument("--short", action="store_true",
                     help="分足の30列が、高値更新の翌日から数営業日の値動きを当てるか（今の列の予測を超えて残るか）を調べて終わる")
     ap.add_argument("--residual", action="store_true",
@@ -1330,6 +1509,17 @@ def main(argv=None) -> int:
           f"{df['Date'].max().date()}）。探索の期間（〜{cutoff.date()}）では {(df['Date'] <= cutoff).sum():,}行・"
           f"うち分足の付いた行 {int((att & (df['Date'] <= cutoff)).sum()):,}（全体では {int(att.sum()):,}）")
     if args.dry:
+        return 0
+    if args.shape:
+        rec = load_tuned("A", colsets["base"], cutoff, args.n_trials, stamp)
+        if rec is None:
+            raise SystemExit("A の保存済みの探索の結果が無い（--shape は探索し直さない。--keep-frame で前の回の表を使う）")
+        rows, check = shape_rows(df, base, rec["params"], shifts)
+        out = shape_report(rows)
+        out["check"] = check
+        with open(path("shape.json"), "w", encoding="utf-8") as fh:
+            json.dump(out, fh, ensure_ascii=False, indent=1, default=str)
+        log(f"記録: {path('shape.json')}（公開しない）")
         return 0
     if args.short:
         rec = load_tuned("A", colsets["base"], cutoff, args.n_trials, stamp)
