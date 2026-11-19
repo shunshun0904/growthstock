@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import {
-  BUCKETS, PROFILE_WINDOWS, SIZE_LABELS, clearUnlock, decryptEnvelope, deriveKeyBits, loadEnvelope,
-  parseVolumeProfile, saveUnlock, savedUnlock, volumeTargets,
+  BUCKETS, PROFILE_WINDOWS, SIZE_LABELS, forgetOldUnlock, loadVolumeProfile, volumeTargets,
 } from '../lib/volumeProfile.js';
 
 const SOURCE_LABEL = { tick: 'ティック（約定価格）', minute: '分足（VWAP近似）' };
@@ -99,69 +98,33 @@ function VolumeChart({ series, close, unit }) {
 
 export default function VolumeProfileView({ predictions, predictionError }) {
   const { asOf, dates, targets } = useMemo(() => volumeTargets(predictions), [predictions]);
-  const [envelope, setEnvelope] = useState({ status: 'loading' });
-  const [profile, setProfile] = useState(null);
-  const [unlock, setUnlock] = useState({ status: 'idle' });
-  const [entry, setEntry] = useState('');
-  const [remember, setRemember] = useState(false);
+  // 集計はキーの入力なしで開く（運用者の選択 2026-11-19「暗号化をやめて公開する」）
+  const [request, setRequest] = useState({ status: 'loading' });
   const [reload, setReload] = useState(0);
   const [selected, setSelected] = useState('');
-  const [query, setQuery] = useState('');
   const [periodChoice, setPeriodChoice] = useState(null);
   const [source, setSource] = useState(null);
   const [unit, setUnit] = useState('shares');
 
+  useEffect(() => { forgetOldUnlock(); }, []);
+
   useEffect(() => {
     const abort = new AbortController();
-    setEnvelope({ status: 'loading' });
-    loadEnvelope(abort.signal).then(async (doc) => {
-      if (abort.signal.aborted) return;
-      if (!doc) { setEnvelope({ status: 'missing' }); setProfile(null); return; }
-      setEnvelope({ status: 'loaded', doc });
-      const bits = savedUnlock(doc);
-      if (!bits) { setProfile(null); return; }
-      try {
-        const data = parseVolumeProfile(await decryptEnvelope(doc, bits));
-        if (!abort.signal.aborted) setProfile(data);
-      } catch {
-        // 覚えた鍵で開けない（キーを変えた等）。覚えた鍵を消して、キーの入力に戻す
-        clearUnlock();
-        if (!abort.signal.aborted) setProfile(null);
-      }
+    setRequest((current) => ({ ...current, status: 'loading' }));
+    loadVolumeProfile(abort.signal).then((data) => {
+      if (!abort.signal.aborted) setRequest(data ? { status: 'loaded', data } : { status: 'missing' });
     }).catch((error) => {
-      if (!abort.signal.aborted) setEnvelope({ status: 'error', message: error instanceof TypeError
-        ? '集計のファイルに接続できませんでした。時間を置いて再読み込みしてください。' : error.message });
+      // 読み直しに失敗したときは、前に読めた集計を残して知らせる
+      if (!abort.signal.aborted) setRequest((current) => ({ ...current, status: 'error', message: error instanceof TypeError
+        ? '集計に接続できませんでした。時間を置いて再読み込みしてください。' : error.message }));
     });
     return () => abort.abort();
   }, [reload]);
 
-  async function open(event) {
-    event.preventDefault();
-    if (envelope.status !== 'loaded') return;
-    setUnlock({ status: 'working' });
-    try {
-      const bits = await deriveKeyBits(entry, envelope.doc);
-      const data = parseVolumeProfile(await decryptEnvelope(envelope.doc, bits));
-      saveUnlock(envelope.doc, bits, remember);
-      setEntry('');
-      setProfile(data);
-      setUnlock({ status: 'idle' });
-    } catch (error) {
-      setUnlock({ status: 'error', message: error.message });
-    }
-  }
-
-  function lock() {
-    clearUnlock();
-    setProfile(null);
-    setUnlock({ status: 'idle' });
-  }
-
+  const profile = request.data ?? null;
   const byCode = useMemo(() => new Map((profile?.stocks ?? []).map((stock) => [stock.code, stock])), [profile]);
   const list = targets.length ? targets : (profile?.stocks ?? []).map(({ code, name, candidates }) => ({ code, name, candidates }));
-  const search = query.trim().toUpperCase();
-  const matching = list.filter((stock) => `${displayCode(stock.code)} ${stock.code} ${stock.name}`.toUpperCase().includes(search));
-  const target = matching.find((candidate) => candidate.code === selected) ?? matching[0];
+  const target = list.find((candidate) => candidate.code === selected) ?? list[0];
   const stock = byCode.get(target?.code);
   const suggestedPeriod = [...PROFILE_WINDOWS].reverse().find((count) => stock?.windows[count].tick.status === 'ok'
     || stock?.windows[count].minute.status === 'ok');
@@ -196,33 +159,23 @@ export default function VolumeProfileView({ predictions, predictionError }) {
       {opened && ` ／ ${days}営業日の${activeSource === 'tick' ? 'ティック' : '分足'}で表示できる銘柄 ${available}/${list.length}`}</p>}
     {asOf && !targets.length && <p>直近の予測対象の銘柄はありません。</p>}
 
-    {envelope.status === 'loading' && <p role="status">集計を読み込み中です…</p>}
-    {envelope.status === 'error' && <p className="banner warn" role="alert">{envelope.message}</p>}
-    {envelope.status === 'missing' && <p className="volume-note" role="status">まだ集計がありません。毎晩の分足・ティックの取得と予測のあとに作られます。</p>}
-    {envelope.status === 'loaded' && !opened && <>
-      <form className="volume-connect" onSubmit={open}>
-        <label>J-Quants の API キー<input type="password" autoComplete="off" spellCheck={false} value={entry}
-          onChange={(event) => setEntry(event.target.value)} /></label>
-        <label className="volume-remember"><input type="checkbox" checked={remember}
-          onChange={(event) => setRemember(event.target.checked)} />この端末に記憶する</label>
-        <button className="btn btn-primary" type="submit" disabled={unlock.status === 'working'}>
-          {unlock.status === 'working' ? '開いています…' : '開く'}</button>
-      </form>
-      <p className="volume-note">集計は J-Quants の API キーから作った鍵で暗号化してあります。キーはこの端末の中で鍵を作るのに使うだけで、どこにも送りません。
-        記憶するのはキーから作った鍵だけです（キーそのものは保存しません）。集計の基準日 {envelope.doc.asOf}。</p>
-      {unlock.status === 'error' && <p className="banner warn" role="alert">{unlock.message}</p>}
-    </>}
-    {opened && <div className="volume-connect">
-      <button className="btn" type="button" disabled={envelope.status === 'loading'}
+    {request.status === 'loading' && !profile && <p role="status">集計を読み込み中です…</p>}
+    {request.status === 'error' && <p className="banner warn" role="alert">{request.message}</p>}
+    {request.status === 'missing' && <p className="volume-note" role="status">まだ集計がありません。毎晩の分足・ティックの取得と予測のあとに作られます。</p>}
+    {(opened || request.status === 'error') && <div className="volume-connect">
+      <button className="btn" type="button" disabled={request.status === 'loading'}
         onClick={() => setReload((value) => value + 1)}>再読み込み</button>
-      <button className="btn btn-ghost" type="button" onClick={lock}>鍵を消す</button>
     </div>}
     {opened && asOf && profile.asOf !== asOf && <p className="volume-note" role="status">
-      開いた集計の基準日は {profile.asOf} です（予測の基準日 {asOf} の集計は更新待ち）。</p>}
+      集計の基準日は {profile.asOf} です（予測の基準日 {asOf} の集計は更新待ち）。</p>}
 
     {list.length > 0 && <>
       <div className="volume-controls">
-        <label>銘柄検索<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="銘柄名・コード" /></label>
+        <label>銘柄<select aria-label="銘柄" value={target?.code ?? ''}
+          onChange={(event) => { setSelected(event.target.value); setSource(null); }}>
+          {list.map((item) => <option key={item.code} value={item.code}>
+            {displayCode(item.code)} {item.name}（{item.candidates.map(candidateText).join('・')}）</option>)}
+        </select></label>
         <label>集計期間<select value={days} onChange={(event) => setPeriodChoice(Number(event.target.value))}>
           {PROFILE_WINDOWS.map((count) => <option key={count} value={count}>{count}営業日</option>)}
         </select></label>
@@ -237,7 +190,7 @@ export default function VolumeProfileView({ predictions, predictionError }) {
         <table aria-label="直近5営業日の予測対象銘柄">
           <thead><tr><th scope="col">銘柄</th><th scope="col">候補日</th><th scope="col">終値とVWAPの差</th>
             <th scope="col">大口</th><th scope="col">ティック</th><th scope="col">分足</th></tr></thead>
-          <tbody>{matching.map((item) => {
+          <tbody>{list.map((item) => {
             const value = rowValue(item.code);
             return <tr key={item.code}>
               <td><button className="btn btn-ghost volume-stock" type="button" aria-pressed={item.code === target?.code}
@@ -248,7 +201,6 @@ export default function VolumeProfileView({ predictions, predictionError }) {
             </tr>;
           })}</tbody>
         </table>
-        {!matching.length && <p>検索条件に一致する銘柄はありません。</p>}
       </div>
     </>}
 

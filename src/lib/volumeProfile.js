@@ -1,10 +1,8 @@
 /**
  * 「価格帯別出来高」タブのデータ（docs/VOLUME_PROFILE.md）。
  *
- * 集計は J-Quants のアドオン（分足・ティック）から作るので、Pages には暗号文
- * （data/volume-profile.enc.json。research/volume_profile_crypto.py が書く）だけを載せる。利用者が J-Quants の
- * API キーを入れると、ブラウザの中で同じ鍵（PBKDF2-HMAC-SHA256）を作り、AES-GCM で開く。キーはどこにも送らない。
- * 端末に覚えるのはキーから作った鍵だけ（キーそのものは保存しない）。
+ * 集計（data/volume-profile.json）は Update Volume Profiles が蓄積した分足・ティックから作り、デプロイで画面に載せる。
+ * 運用者の選択（2026-11-19「暗号化をやめて公開する」）で、暗号化せずに載せ、キーの入力なしで開く。
  */
 export const PROFILE_WINDOWS = [1, 5, 20];
 export const SOURCES = ['tick', 'minute'];
@@ -12,11 +10,10 @@ export const BUCKETS = ['open', 'morning', 'afternoon', 'close'];
 export const SIZE_LABELS = ['small', 'medium', 'large'];
 export const TARGET_DAYS = 5;
 
-const ENVELOPE_KIND = 'growthstock.volume-profile.encrypted';
-const ENVELOPE_KEYS = ['asOf', 'cipher', 'compression', 'data', 'generatedAt', 'kdf', 'kind', 'version'];
 const PROFILE_KIND = 'growthstock.volume-profile';
 const MAX_BYTES = 20 * 1024 * 1024;
-const UNLOCK_KEY = 'growthstock.volume-profile.unlock.v1';
+/** 暗号化していたころ（2026-11-19 の #11・#12 の途中）に端末へ覚えた復号の鍵。もう使わないので消す */
+const OLD_UNLOCK_KEY = 'growthstock.volume-profile.unlock.v1';
 const STATUSES = new Set([
   'ok', 'calendar_history_missing', 'daily_missing', 'invalid_daily', 'close_missing',
   'share_basis_unknown', 'intraday_missing', 'intraday_invalid', 'daily_totals_mismatch',
@@ -33,14 +30,7 @@ const range = (value) => Array.isArray(value) && value.length === 2
 const closeTo = (a, b, tolerance = 1e-8) => Math.abs(a - b) <= Math.max(1e-6, Math.abs(b) * tolerance);
 const sumsToOne = (values) => Math.abs(values.reduce((t, v) => t + v, 0) - 1) <= 1e-6;
 
-export class KeyMismatchError extends Error {
-  constructor() {
-    super('キーが一致しません。J-Quants の API キーを確かめてください（キーを変えた場合は、次の集計（毎晩）から新しいキーで開けます）。');
-    this.name = 'KeyMismatchError';
-  }
-}
-
-export const profileUrl = () => `${import.meta.env?.BASE_URL ?? '/'}data/volume-profile.enc.json`;
+export const profileUrl = () => `${import.meta.env?.BASE_URL ?? '/'}data/volume-profile.json`;
 
 export function volumeCode(value) {
   const code = String(value ?? '').trim().toUpperCase();
@@ -70,81 +60,6 @@ export function volumeTargets(predictions, days = TARGET_DAYS) {
   targets.sort((a, b) => b.candidates[0].date.localeCompare(a.candidates[0].date)
     || (a.candidates[0].rank ?? Infinity) - (b.candidates[0].rank ?? Infinity) || a.code.localeCompare(b.code));
   return { asOf, dates, targets };
-}
-
-function fromBase64(text) {
-  if (typeof text !== 'string' || !/^[A-Za-z0-9+/]*={0,2}$/.test(text) || text.length % 4) throw new Error('base64');
-  const raw = atob(text);
-  const out = new Uint8Array(raw.length);
-  for (let i = 0; i < raw.length; i += 1) out[i] = raw.charCodeAt(i);
-  return out;
-}
-
-function toBase64(bytes) {
-  let raw = '';
-  for (const b of bytes) raw += String.fromCharCode(b);
-  return btoa(raw);
-}
-
-/** 暗号文の見出しを確かめる（research/volume_profile_crypto.py の check_envelope と同じ条件）。 */
-export function parseEnvelope(text) {
-  let doc;
-  try { doc = JSON.parse(text); }
-  catch { throw new Error('集計のファイルを読み込めませんでした。'); }
-  const bad = () => new Error('集計のファイルの形式が一致しません。');
-  if (!doc || typeof doc !== 'object' || Object.keys(doc).sort().join() !== ENVELOPE_KEYS.join()
-      || doc.kind !== ENVELOPE_KIND || doc.version !== 1 || doc.compression !== 'gzip' || !isDate(doc.asOf)
-      || typeof doc.generatedAt !== 'string' || !doc.generatedAt
-      || Object.keys(doc.kdf ?? {}).sort().join() !== 'hash,iterations,name,salt' || doc.kdf.name !== 'PBKDF2'
-      || doc.kdf.hash !== 'SHA-256' || !Number.isInteger(doc.kdf.iterations)
-      || doc.kdf.iterations < 100_000 || doc.kdf.iterations > 10_000_000
-      || Object.keys(doc.cipher ?? {}).sort().join() !== 'iv,name,tagLength' || doc.cipher.name !== 'AES-GCM'
-      || doc.cipher.tagLength !== 128) throw bad();
-  let bytes;
-  try { bytes = { salt: fromBase64(doc.kdf.salt), iv: fromBase64(doc.cipher.iv), data: fromBase64(doc.data) }; }
-  catch { throw bad(); }
-  if (bytes.salt.length !== 16 || bytes.iv.length !== 12 || bytes.data.length < 36) throw bad();
-  return { ...doc, bytes };
-}
-
-/** 追加認証データ（research/volume_profile_crypto.py の aad と同じ並び）。 */
-export function envelopeAad(doc) {
-  const { kdf, cipher } = doc;
-  return new TextEncoder().encode([doc.kind, doc.version, doc.asOf, doc.generatedAt, kdf.name, kdf.hash,
-    kdf.iterations, kdf.salt, cipher.name, cipher.iv, cipher.tagLength, doc.compression].join('\n'));
-}
-
-function subtleCrypto() {
-  const subtle = globalThis.crypto?.subtle;
-  if (!subtle) throw new Error('このブラウザでは集計を開けません（Web Crypto が使えません）。');
-  return subtle;
-}
-
-/** J-Quants の API キーから復号の鍵（256 ビット）を作る。キーはこの関数の外に出さない。 */
-export async function deriveKeyBits(secret, envelope) {
-  const value = String(secret ?? '').trim();
-  if (!value) throw new Error('J-Quants の API キーを入力してください。');
-  const subtle = subtleCrypto();
-  const material = await subtle.importKey('raw', new TextEncoder().encode(value), 'PBKDF2', false, ['deriveBits']);
-  const bits = await subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt: envelope.bytes.salt,
-    iterations: envelope.kdf.iterations }, material, 256);
-  return new Uint8Array(bits);
-}
-
-export async function decryptEnvelope(envelope, keyBits) {
-  const subtle = subtleCrypto();
-  const key = await subtle.importKey('raw', keyBits, { name: 'AES-GCM' }, false, ['decrypt']);
-  let plain;
-  try {
-    plain = await subtle.decrypt({ name: 'AES-GCM', iv: envelope.bytes.iv, additionalData: envelopeAad(envelope),
-      tagLength: 128 }, key, envelope.bytes.data);
-  } catch {
-    throw new KeyMismatchError();
-  }
-  const stream = new Blob([plain]).stream().pipeThrough(new DecompressionStream('gzip'));
-  const text = await new Response(stream).text();
-  if (text.length > MAX_BYTES * 4) throw new Error('集計が大きすぎます。');
-  return text;
 }
 
 function validSessions(sessions) {
@@ -211,55 +126,21 @@ export function parseVolumeProfile(text) {
   return data;
 }
 
-/** 暗号文を取る。まだ無ければ null。 */
-export async function loadEnvelope(signal) {
+/** 集計を取る。まだ無ければ null。 */
+export async function loadVolumeProfile(signal) {
   const response = await fetch(profileUrl(), { signal, cache: 'no-store', credentials: 'same-origin' });
   if (response.status === 404) return null;
-  if (!response.ok) throw new Error('集計のファイルを取得できませんでした。時間を置いて再読み込みしてください。');
-  if (Number(response.headers.get('content-length')) > MAX_BYTES) throw new Error('集計のファイルが大きすぎます。');
+  if (!response.ok) throw new Error('集計を取得できませんでした。時間を置いて再読み込みしてください。');
+  if (Number(response.headers.get('content-length')) > MAX_BYTES) throw new Error('集計が大きすぎます。');
   const text = await response.text();
-  if (text.length > MAX_BYTES) throw new Error('集計のファイルが大きすぎます。');
-  return parseEnvelope(text);
+  if (text.length > MAX_BYTES) throw new Error('集計が大きすぎます。');
+  return parseVolumeProfile(text);
 }
 
-function storages() {
-  const out = [];
+/** 暗号化していたころに端末へ覚えた復号の鍵を消す（もう使わない）。 */
+export function forgetOldUnlock() {
   for (const name of ['sessionStorage', 'localStorage']) {
-    try { if (globalThis[name]) out.push(globalThis[name]); }
+    try { globalThis[name]?.removeItem(OLD_UNLOCK_KEY); }
     catch { /* 保存が使えなくても画面は動く */ }
-  }
-  return out;
-}
-
-/** 覚えた復号の鍵（同じ塩・回数で作ったものだけ）。 */
-export function savedUnlock(envelope) {
-  for (const store of storages()) {
-    try {
-      const saved = JSON.parse(store.getItem(UNLOCK_KEY) || 'null');
-      if (saved?.salt === envelope.kdf.salt && saved.iterations === envelope.kdf.iterations) {
-        const bits = fromBase64(saved.key);
-        if (bits.length === 32) return bits;
-      }
-    } catch { /* 壊れた保存は無視する */ }
-  }
-  return null;
-}
-
-/** 復号の鍵を覚える。既定はこのタブを閉じるまで（sessionStorage）、remember なら端末に（localStorage）。 */
-export function saveUnlock(envelope, bits, remember) {
-  const value = JSON.stringify({ salt: envelope.kdf.salt, iterations: envelope.kdf.iterations, key: toBase64(bits) });
-  clearUnlock();
-  for (const store of storages()) {
-    const isLocal = store === globalThis.localStorage;
-    if (isLocal && !remember) continue;
-    try { store.setItem(UNLOCK_KEY, value); }
-    catch { /* 保存できなくても開いた集計は表示する */ }
-  }
-}
-
-export function clearUnlock() {
-  for (const store of storages()) {
-    try { store.removeItem(UNLOCK_KEY); }
-    catch { /* 何もしない */ }
   }
 }

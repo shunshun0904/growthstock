@@ -90,24 +90,25 @@ jobs:
           tar -xzf "$a" -C dist/data
           echo "展開した: $(ls dist/data/recurrence | wc -l) ファイル・$(du -sh dist/data/recurrence | cut -f1)"
 
-      # 価格帯別出来高（Update Volume Profiles が Release data-volume-profile に上げた volume-profile.enc.json）を
-      # dist/data/ に置く。中身は J-Quants の API キーから作った鍵で暗号化してあり、画面でキーを入れた人の
-      # ブラウザの中だけで開く（docs/VOLUME_PROFILE.md）。暗号文の形でなければ載せない。無い・取れなくても
-      # デプロイは止めない（タブが「まだ集計がありません」と出す）
-      - name: Volume profiles (encrypted, release)
+      # 価格帯別出来高（Update Volume Profiles が Release data-volume-profile に上げた volume-profile.json）を
+      # dist/data/ に置く。画面はキーの入力なしで開く（運用者の選択 2026-11-19「暗号化をやめて公開する」。
+      # docs/VOLUME_PROFILE.md）。画面の確かめ（scripts/check_volume_profile.mjs）を通らなければ載せない。
+      # 無い・取れなくてもデプロイは止めない（タブが「まだ集計がありません」と出す）
+      - name: Volume profiles (release)
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p "$RUNNER_TEMP/vp"
-          bash scripts/gh_release_download.sh data-volume-profile "$RUNNER_TEMP/vp" 'volume-profile.enc.json'
-          f="$RUNNER_TEMP/vp/volume-profile.enc.json"
+          bash scripts/gh_release_download.sh data-volume-profile "$RUNNER_TEMP/vp" 'volume-profile.json'
+          f="$RUNNER_TEMP/vp/volume-profile.json"
           if [ ! -f "$f" ]; then
-            echo "Release に volume-profile.enc.json が無い（タブは集計待ちと出す）"; exit 0
+            echo "Release に volume-profile.json が無い（タブは集計待ちと出す）"; exit 0
           fi
-          python3 research/volume_profile_crypto.py check "$f"
+          node scripts/check_volume_profile.mjs "$f"
           mkdir -p dist/data
-          cp "$f" dist/data/volume-profile.enc.json
+          cp "$f" dist/data/volume-profile.json
+          echo "置いた: dist/data/volume-profile.json"
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
