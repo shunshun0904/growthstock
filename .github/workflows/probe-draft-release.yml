@@ -1,0 +1,87 @@
+name: Probe Draft Release
+
+# 下書き（draft）の Release を、公開しない置き場として使えるかを確かめる（2026-11-19）。
+#
+# 分足・ティックの置き場を「非公開リポジトリ ＋ GitHub のトークン」から、このリポジトリの**下書きの Release**
+# に替えるため（運用者の依頼「GitHub の鍵を新しく作らずに済ませる方法でお願いします」）。下書きは書き込み権限の
+# ある人にしか見えない（API の仕様: published のものだけが誰にでも見え、draft の一覧は push 権限のある人だけ）。
+# それを実際に確かめる:
+#   1. Actions の鍵（GITHUB_TOKEN）で下書きを作り、タグ名で見つけ、上書きで上げ、取り出せる（gh が下書きを扱える）
+#   2. ログインしていない問い合わせ（鍵なしの curl）からは、一覧にも出ず、Release も中身のファイルも取れない
+#   3. 終わったら下書きを消す（必ず）
+on:
+  workflow_dispatch:
+  push:
+    branches: ['ccr-de5c973d-d8c3zi']
+    paths: ['research/draft_probe_request.txt']
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: probe-draft-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Probe
+        run: |
+          set -u
+          gh --version | head -1
+          ok=(); ng=()
+          check() { if [ "$2" = "$3" ]; then ok+=("$1"); echo "PASS $1（$2）"; else ng+=("$1"); echo "FAIL $1（期待 $3 / 実際 $2）"; fi; }
+          mkdir -p probe_in probe_out
+          head -c 300000 /dev/urandom > probe_in/sample.bin
+          want=$(sha256sum probe_in/sample.bin | cut -d' ' -f1)
+
+          # 1. 作る・見つける・上げる・上書き・取り出す（Actions の鍵で）
+          gh release create "$TAG" --draft --title "下書きの確かめ（すぐ消す）" --notes "Probe Draft Release が作って消す" >/dev/null
+          check "下書きをタグ名で見つける" "$(gh release view "$TAG" --json isDraft --jq .isDraft 2>&1)" "true"
+          gh release upload "$TAG" probe_in/sample.bin >/dev/null && check "上げる" ok ok || check "上げる" ng ok
+          head -c 300000 /dev/urandom > probe_in/sample.bin
+          want=$(sha256sum probe_in/sample.bin | cut -d' ' -f1)
+          gh release upload "$TAG" probe_in/sample.bin --clobber >/dev/null && check "上書きで上げる" ok ok || check "上書きで上げる" ng ok
+          check "アセットの一覧" "$(gh release view "$TAG" --json assets --jq '[.assets[] | select(.state == "uploaded") | .name] | join(",")')" "sample.bin"
+          gh release download "$TAG" --pattern sample.bin --dir probe_out --clobber >/dev/null 2>&1 || true
+          got=$(sha256sum probe_out/sample.bin 2>/dev/null | cut -d' ' -f1)
+          check "取り出した中身が同じ" "${got:-none}" "$want"
+          check "一覧（gh release list）に出る" "$(gh release list --limit 100 --json tagName,isDraft --jq "[.[] | select(.tagName == \"$TAG\" and .isDraft)] | length")" "1"
+          # 同じタグで二重に作らない（ensure の前提: view で見つかるので create に進まない）
+          check "同じタグの下書きは1つ" "$(gh api "repos/$GH_REPO/releases?per_page=100" --jq "[.[] | select(.tag_name == \"$TAG\")] | length")" "1"
+
+          # 2. ログインしていない問い合わせ（鍵を付けない curl）
+          rid=$(gh api "repos/$GH_REPO/releases?per_page=100" --jq ".[] | select(.tag_name == \"$TAG\") | .id")
+          aid=$(gh api "repos/$GH_REPO/releases/$rid/assets" --jq '.[0].id')
+          dl=$(gh api "repos/$GH_REPO/releases/$rid/assets" --jq '.[0].browser_download_url')
+          html=$(gh api "repos/$GH_REPO/releases/$rid" --jq '.html_url')
+          code() { curl -s -o /dev/null -w '%{http_code}' -L "$@"; }
+          anon_list=$(curl -s "https://api.github.com/repos/$GH_REPO/releases?per_page=100" | python3 -c "import json,sys; d=json.load(sys.stdin); print(sum(1 for r in d if r.get('tag_name') == '$TAG') if isinstance(d, list) else 'error')")
+          check "鍵なし: Release の一覧に出ない" "$anon_list" "0"
+          check "鍵なし: Release を取れない" "$(code "https://api.github.com/repos/$GH_REPO/releases/$rid")" "404"
+          check "鍵なし: アセット（API）を取れない" "$(code -H 'Accept: application/octet-stream' "https://api.github.com/repos/$GH_REPO/releases/assets/$aid")" "404"
+          check "鍵なし: ダウンロードの URL で取れない" "$(code "$dl")" "404"
+          check "鍵なし: Release のページを開けない" "$(code "$html")" "404"
+
+          echo ""
+          echo "PASS ${#ok[@]} / FAIL ${#ng[@]}"
+          { echo "## 下書きの Release の確かめ"; echo ""; echo "gh: $(gh --version | head -1)"; echo "";
+            for x in "${ok[@]}"; do echo "- PASS $x"; done; for x in "${ng[@]}"; do echo "- **FAIL** $x"; done; } >> "$GITHUB_STEP_SUMMARY"
+          [ "${#ng[@]}" -eq 0 ]
+
+      # 3. 何があっても消す
+      - name: Delete the draft
+        if: always()
+        run: |
+          gh release delete "$TAG" --yes 2>/dev/null && echo "下書き $TAG を消した" || echo "（消す下書きは無い）"
+          left=$(gh api "repos/$GH_REPO/releases?per_page=100" --jq "[.[] | select(.tag_name | startswith(\"probe-draft-\"))] | length")
+          echo "残った確かめの下書き: $left"
+          [ "$left" = "0" ]
