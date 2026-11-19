@@ -171,6 +171,11 @@ df = t.to_pandas()
 
 価格は調整前。分割・併合をまたいで比べるときは、日足の `AdjFactor`（`research/_data/bars_*.parquet`）で直す。
 
+モデルの実験で使うときは **Run Minute Experiment**（`.github/workflows/run-minute-experiment.yml`。手で起動し、`exp` に
+`research/exp/` の中の分足を使う台本を指定する）。分足を `research/_data/minute/` に落としてから台本を回す。下書きを読むため、
+このワークフローだけ contents: write（書き込むものは無い）。公開のログには件数・割合・精度だけを出し、成果物はログだけ。
+特徴量の作りは `research/minute_features.py`（実験132。[MODEL_ADOPTION_RULES.md](MODEL_ADOPTION_RULES.md) の97節）。
+
 ## 初回の取得の実測（2026-11-19 10:05 JST。Update Minute Bars run 44434155233、作業ブランチから）
 
 | 項目 | 結果 |

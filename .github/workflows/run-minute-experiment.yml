@@ -20,10 +20,8 @@ on:
         description: 'スクリプトに渡す引数（省略可）'
         required: false
         default: ''
-  # 既定ブランチに入る前に作業ブランチから回すため（2026-11-19、実験132）。要求ファイルの1行目が exp=…、2行目が args=…。
-  # 実験が終わったら、この push の起動と要求ファイルは外す
-  push:
-    paths: ['research/exp/minute_experiment_request.txt']
+  # 実験132（2026-11-19）は既定ブランチに入る前に作業ブランチから回すため、要求ファイルの push でも起動していた。
+  # 実験が終わったので、その起動と要求ファイルは外した（以降は workflow_dispatch だけ）
 
 defaults:
   run:
@@ -54,13 +52,7 @@ jobs:
         env:
           EXP_IN: ${{ inputs.exp }}
           ARGS_IN: ${{ inputs.args }}
-          EVENT: ${{ github.event_name }}
         run: |
-          if [ "$EVENT" = "push" ]; then
-            req=research/exp/minute_experiment_request.txt
-            EXP_IN=$(sed -n 's/^exp=//p' "$req" | head -1)
-            ARGS_IN=$(sed -n 's/^args=//p' "$req" | head -1)
-          fi
           if ! [[ "$EXP_IN" =~ ^[a-z0-9_]+\.py$ ]] || [ ! -f "research/exp/$EXP_IN" ]; then
             echo "そんな実験はありません: $EXP_IN"; exit 1
           fi
@@ -69,7 +61,7 @@ jobs:
           fi
           echo "name=$EXP_IN" >> "$GITHUB_OUTPUT"
           { echo "args<<EOF_ARGS"; echo "$ARGS_IN"; echo "EOF_ARGS"; } >> "$GITHUB_OUTPUT"
-          echo "実験: research/exp/$EXP_IN / 引数: ${ARGS_IN:-（なし）} / 起動: $EVENT"
+          echo "実験: research/exp/$EXP_IN / 引数: ${ARGS_IN:-（なし）}"
 
       - name: Download raw data
         env:
