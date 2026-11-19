@@ -357,6 +357,11 @@ class WorkflowTest(unittest.TestCase):
             self.assertIn(f"'{workflow}'", text)
         check = text.index("volume_profile_crypto.py check")
         self.assertLess(check, text.index("scripts/gh_release_upload.sh"))
+        # 画面と同じ確かめを通してから上げる。平文は確かめたら消す
+        screen = text.index("node scripts/check_volume_profile.mjs")
+        self.assertLess(screen, text.index("scripts/gh_release_upload.sh"))
+        self.assertIn('rm -f "$RUNNER_TEMP/vp/plain.json"', text)
+        self.assertNotIn("public/", text.split("--output", 1)[1].split("\n", 1)[0])
         self.assertNotIn("GH_ENSURE_DRAFT", text)  # デプロイの読み取り専用の鍵で読める公開の Release
 
     def test_deploy_places_only_a_checked_envelope(self):

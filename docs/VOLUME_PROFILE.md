@@ -59,6 +59,9 @@ Deploy to GitHub Pages   volume-profile.enc.json を画面の data/ に置く
 - Release `data-volume-profile` は公開の Release です。デプロイは読み取り専用の鍵で動くため、下書きにすると読めません。中身は暗号文だけです
 - 上げる前（Update Volume Profiles）と載せる前（Deploy to GitHub Pages）に、暗号文の形であること（平文でないこと）を
   `python3 research/volume_profile_crypto.py check FILE` で確かめます。形が違えば上げません・載せません
+- 上げる前に、集計が画面の確かめ（`src/lib/volumeProfile.js` の `parseVolumeProfile`）を通ることも
+  `node scripts/check_volume_profile.mjs` で見ます。通らなければ上げません（画面でキーを入れても表示できない集計を載せないため）。
+  確かめに使う平文はランナーの中だけに置き、確かめたら消します
 - 開けるのは J-Quants の API キーを持つ人だけです。キーが漏れていなければ、暗号文から中身は分かりません。
   キーが漏れたときは J-Quants でキーを作り直し、Secret `JQUANTS_API` を替えてください（古い集計は次の更新で置き換わります）
 - 集計の中身は J-Quants のデータから作った値なので、平文では公開の場所（`public/`・`dist/`・公開の Release）に置きません。

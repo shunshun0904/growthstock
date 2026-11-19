@@ -55,6 +55,10 @@ jobs:
           python-version: '3.12'
       # 版は research/requirements.txt に合わせる
       - run: pip install pandas==2.2.3 pyarrow==18.1.0 numpy==2.1.3 cryptography==50.0.2
+      # 画面と同じ確かめ（scripts/check_volume_profile.mjs）に使う
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
 
       # ティックの日ごとのファイル（1日 約27MB）は読み終えたら消す（20日ぶんで 約540MB）
       - name: Build and encrypt
@@ -66,9 +70,17 @@ jobs:
             --work-dir "$RUNNER_TEMP/vp/work" \
             --download-cmd "bash scripts/gh_release_download.sh" \
             --encrypt-to "$RUNNER_TEMP/vp/out/$OUT_FILE" \
+            --output "$RUNNER_TEMP/vp/plain.json" \
             --summary-json "$RUNNER_TEMP/vp/summary.json" \
             --remove-after-read 2>&1 | tee vp.log
           exit "${PIPESTATUS[0]}"
+
+      # 画面でキーを入れたときに読める集計か（src/lib/volumeProfile.js の確かめ）を、上げる前に見る。
+      # 平文はこのランナーの中だけに置き、確かめたら消す（上げない）
+      - name: Check with the screen's rules
+        run: |
+          trap 'rm -f "$RUNNER_TEMP/vp/plain.json"' EXIT
+          node scripts/check_volume_profile.mjs "$RUNNER_TEMP/vp/plain.json"
 
       # 平文を誤って上げないよう、暗号文の形（見出しの項目・方式・長さ）を確かめてから上げる
       - name: Upload
