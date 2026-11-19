@@ -43,6 +43,8 @@ out-of-fold: 本番と同じ作り（36/6/6か月・エンバーゴ20営業日�
 列の付き方だけ見る: args="--dry"
 試運転:             args="--tag e132smoke --n-trials 2 --shifts 0"
 C を足す回:         args="--keep-frame"（A・B は保存済みの探索・out-of-fold を読む。C の out-of-fold だけ計算する）
+残差で確かめる:     args="--keep-frame --residual"（保存済みの A の out-of-fold で説明しきれない部分を、分足の30列が説明するか。
+                    運用者の選択 2026-11-19「残差で確かめる」。docs の 97-9）
 重要度の顔ぶれ:     args="--keep-frame --importance"（A・C・B を同じ行・種で学習し直し、gain の割合の上位を比べる。
                     運用者の依頼 2026-11-19「腕Cにおいて、重要度の高い特徴量の中に今回追加した特徴量は含まれてますか？
                     重要度の高い上位の特徴量の顔ぶれがどれくらい変わったのか見たいです」）
@@ -491,6 +493,239 @@ def importance_report(df: pd.DataFrame, base: list, params_of: dict, cutoff, see
 
 
 # --------------------------------------------------------------------------- #
+# 残差で確かめる（--residual）
+# --------------------------------------------------------------------------- #
+#: 並べ替え検定の回数（列ごと・30列まとめて）
+N_PERM = 1000
+N_PERM_JOINT = 500
+#: 時間で分けた検証で、30列の係数に掛ける L2 の重さ
+RIDGE = 1.0
+#: 列ごとの判定の FDR（Benjamini–Hochberg）
+BH_Q = 0.10
+#: 30列まとめての判定の有意水準
+ALPHA = 0.05
+
+
+def logit_fit(X: np.ndarray, y: np.ndarray, beta=None, ridge=None, iters: int = 50, tol: float = 1e-9):
+    """ロジスティック回帰（ニュートン法）。ridge は係数ごとの L2 の重さ（None なら無し）。(係数, 対数尤度) を返す。"""
+    k = X.shape[1]
+    b = np.zeros(k) if beta is None else np.asarray(beta, dtype=float).copy()
+    lam = np.zeros(k) if ridge is None else np.asarray(ridge, dtype=float)
+    for _ in range(iters):
+        eta = np.clip(X @ b, -35, 35)
+        p = 1.0 / (1.0 + np.exp(-eta))
+        w = p * (1.0 - p)
+        g = X.T @ (y - p) - lam * b
+        H = (X * w[:, None]).T @ X + np.diag(lam) + 1e-10 * np.eye(k)
+        step = np.linalg.solve(H, g)
+        b = b + step
+        if np.max(np.abs(step)) < tol:
+            break
+    eta = X @ b
+    return b, float(np.sum(y * eta - np.logaddexp(0.0, eta)))
+
+
+def normal_scores(v) -> np.ndarray:
+    """順位を標準正規の分位に直した値（外れ値に引っ張られない）。"""
+    from scipy.special import ndtri
+
+    r = pd.Series(np.asarray(v, dtype=float)).rank(method="average").to_numpy()
+    return ndtri((r - 0.5) / len(r))
+
+
+def within_date(v: np.ndarray, codes: np.ndarray) -> np.ndarray:
+    """日付ごとの平均を引いた値（同じ日の候補どうしの違いだけを残す）。"""
+    mean = pd.Series(v).groupby(codes).transform("mean").to_numpy()
+    return v - mean
+
+
+def date_permuter(codes: np.ndarray, rng):
+    """同じ日付の行の中だけで並べ替える添字を返す関数（日付ごとの分布を保ったまま、ラベルとの結びつきを切る）。"""
+    n = len(codes)
+    base = np.lexsort((np.arange(n), codes))
+
+    def perm() -> np.ndarray:
+        shuffled = np.lexsort((rng.random(n), codes))
+        out = np.empty(n, dtype=int)
+        out[base] = shuffled
+        return out
+    return perm
+
+
+def bh_qvalues(p) -> np.ndarray:
+    p = np.asarray(p, dtype=float)
+    n = len(p)
+    order = np.argsort(p)
+    q = np.empty(n)
+    run = 1.0
+    for rank, i in zip(range(n, 0, -1), order[::-1]):
+        run = min(run, p[i] * n / rank)
+        q[i] = run
+    return q
+
+
+def base_design(score: np.ndarray) -> np.ndarray:
+    """A の予測の logit（標準化）とその2乗（A の予測の目盛りのずれを吸収する）。"""
+    s = np.clip(np.asarray(score, dtype=float), 1e-6, 1 - 1e-6)
+    z = np.log(s / (1 - s))
+    z = (z - z.mean()) / (z.std() or 1.0)
+    return np.column_stack([np.ones(len(z)), z, z * z])
+
+
+def added_ll(X0: np.ndarray, y: np.ndarray, extra: np.ndarray, b0: np.ndarray, ll0: float) -> float:
+    if extra.ndim == 1:
+        extra = extra[:, None]
+    _, ll1 = logit_fit(np.column_stack([X0, extra]), y, beta=np.concatenate([b0, np.zeros(extra.shape[1])]))
+    return ll1 - ll0
+
+
+def residual_rows(df: pd.DataFrame, base: list, params_a: dict, shifts) -> pd.DataFrame:
+    """
+    A の out-of-fold（保存済み。ずらし × 種3つ）を行ごとに平均した予測と、分足の30列・ラベル・日付の表（分足の付いた行だけ）。
+    どの予測も、その行を学習に使っていないモデルが出したもの。
+    """
+    parts = []
+    for sh in shifts:
+        o = oof("A", df, base, params_a, sh, SEEDS)
+        if o is None:
+            raise SystemExit(f"A の out-of-fold（ずらし{sh}）が無い")
+        parts.append(o[["Code", "Date", "score"]].rename(columns={"score": f"s{sh}"}))
+    m = parts[0]
+    for x in parts[1:]:
+        m = m.merge(x, on=["Code", "Date"], how="outer")
+    sc = [c for c in m.columns if c.startswith("s") and c[1:].isdigit()]
+    m["score"] = m[sc].mean(axis=1)
+    m["n_scores"] = m[sc].notna().sum(axis=1)
+    keep = df.loc[attached_mask(df), ["Code", "Date", "label"] + list(NEW_COLS)]
+    out = keep.merge(m[["Code", "Date", "score", "n_scores"]], on=["Code", "Date"], how="inner")
+    return out[out["label"].notna() & out["score"].notna()].reset_index(drop=True)
+
+
+def residual_report(rows: pd.DataFrame, cols: list, n_perm: int = N_PERM, n_perm_joint: int = N_PERM_JOINT,
+                    seed: int = 0) -> dict:
+    """
+    A の予測で説明しきれない部分を、列が説明するか（分足の付いた行で）。
+
+    基準: ラベル ~ A の予測の logit（標準化）＋ その2乗 のロジスティック回帰。
+    列ごと: 基準に列（順位を標準正規に直した値）を足したときの対数尤度の伸び（ΔLL）。並べ替え検定は、同じ日付の行の中で
+            列の値を入れ替えて n_perm 回（日付ごとの偏りでは有意にならない）。「日付の中」は列から日付ごとの平均を引いた値で
+            同じことをする（同じ日の候補の並べ方に効くか）。q は Benjamini–Hochberg
+    まとめて: 30列（すべてそろう行）を一度に足した ΔLL と、行ごとに30列まとめて日付の中で入れ替えた並べ替え検定。
+              日付で前半・後半に分け、片方で学習してもう片方で A だけ と A＋30列 を比べる（両方向）
+    """
+    from sklearn.metrics import average_precision_score, roc_auc_score
+
+    rng = np.random.default_rng(seed)
+    rows = rows.sort_values(["Date", "Code"], kind="mergesort").reset_index(drop=True)
+    y_all = rows["label"].to_numpy(dtype=float)
+    out = {"rows": int(len(rows)), "pos": int(y_all.sum()), "dates": int(rows["Date"].nunique()),
+           "a_auc": float(roc_auc_score(y_all, rows["score"])), "a_pr_auc": float(average_precision_score(y_all, rows["score"])),
+           "columns": {}}
+    print(f"\n■ 残差で確かめる: 分足の付いた行 {len(rows):,}（正例 {out['pos']:,}・{out['dates']}日）。A の予測は保存済みの "
+          f"out-of-fold（行ごとに {int(rows['n_scores'].min())}〜{int(rows['n_scores'].max())}本の平均）で、この行での "
+          f"ROC {out['a_auc']:.4f}・PR-AUC {out['a_pr_auc']:.4f}")
+    print(f"  列ごと（並べ替え {n_perm}回・同じ日付の中で入れ替え。q は BH。ΔLL は対数尤度の伸び。"
+          "残差は「実際の正例率 − A から見込む正例率」を列の5分位ごとに（ポイント。低い → 高い））")
+    print(f"    {'列':<34}{'行':>6}{'単独AUC':>8}{'向き':>4}{'ΔLL':>7}{'p':>7}{'q':>6}  {'日付の中 ΔLL':>10}{'p':>7}{'q':>6}"
+          f"  5分位の残差")
+    res = []
+    for c in cols:
+        m = rows[c].notna().to_numpy()
+        sub = rows[m]
+        y = sub["label"].to_numpy(dtype=float)
+        codes = pd.factorize(sub["Date"])[0]
+        X0 = base_design(sub["score"].to_numpy())
+        b0, ll0 = logit_fit(X0, y)
+        p0 = 1.0 / (1.0 + np.exp(-(X0 @ b0)))
+        r = normal_scores(sub[c].to_numpy())
+        rw = within_date(r, codes)
+        perm = date_permuter(codes, rng)
+        stats = {}
+        for key, v in (("pooled", r), ("within", rw)):
+            d = added_ll(X0, y, v, b0, ll0)
+            null = np.array([added_ll(X0, y, v[perm()], b0, ll0) for _ in range(n_perm)])
+            b1, _ = logit_fit(np.column_stack([X0, v]), y, beta=np.append(b0, 0.0))
+            stats[key] = {"dll": float(d), "p": float((1 + np.sum(null >= d)) / (n_perm + 1)), "coef": float(b1[-1])}
+        bins = pd.qcut(pd.Series(r).rank(method="first"), 5, labels=False).to_numpy()
+        quint = [float(np.mean((y - p0)[bins == k]) * 100) for k in range(5)]
+        auc = float(roc_auc_score(y, sub[c].to_numpy(dtype=float))) if 0 < y.sum() < len(y) else float("nan")
+        res.append({"col": c, "n": int(m.sum()), "auc": auc, "pooled": stats["pooled"], "within": stats["within"],
+                    "quintile_resid_pt": quint})
+    for key in ("pooled", "within"):
+        q = bh_qvalues([r_[key]["p"] for r_ in res])
+        for r_, qq in zip(res, q):
+            r_[key]["q"] = float(qq)
+    for r_ in sorted(res, key=lambda x: -x["pooled"]["dll"]):
+        po, wi = r_["pooled"], r_["within"]
+        print(f"    {r_['col']:<34}{r_['n']:>6,}{r_['auc']:>8.3f}{'+' if po['coef'] > 0 else '−':>4}{po['dll']:>7.2f}"
+              f"{po['p']:>7.3f}{po['q']:>6.2f}  {wi['dll']:>10.2f}{wi['p']:>7.3f}{wi['q']:>6.2f}  "
+              + " / ".join(f"{v:+.1f}" for v in r_["quintile_resid_pt"]))
+        out["columns"][r_["col"]] = r_
+    hit = {key: [r_["col"] for r_ in res if r_[key]["q"] < BH_Q] for key in ("pooled", "within")}
+    print(f"  q < {BH_Q} の列: 全体 {len(hit['pooled'])}列{('（' + ' / '.join(hit['pooled']) + '）') if hit['pooled'] else ''}・"
+          f"日付の中 {len(hit['within'])}列{('（' + ' / '.join(hit['within']) + '）') if hit['within'] else ''}")
+    out["hits"] = hit
+
+    # 30列まとめて
+    full = rows.dropna(subset=list(cols)).reset_index(drop=True)
+    y = full["label"].to_numpy(dtype=float)
+    codes = pd.factorize(full["Date"])[0]
+    X0 = base_design(full["score"].to_numpy())
+    b0, ll0 = logit_fit(X0, y)
+    R = np.column_stack([normal_scores(full[c].to_numpy()) for c in cols])
+    d = added_ll(X0, y, R, b0, ll0)
+    perm = date_permuter(codes, rng)
+    null = np.array([added_ll(X0, y, R[perm()], b0, ll0) for _ in range(n_perm_joint)])
+    p_joint = float((1 + np.sum(null >= d)) / (n_perm_joint + 1))
+    print(f"  {len(cols)}列まとめて（{len(full):,}行。並べ替え {n_perm_joint}回）: ΔLL {d:.2f}・並べ替えの 95% 点 "
+          f"{np.quantile(null, 0.95):.2f}・p {p_joint:.3f}")
+    dates = np.sort(full["Date"].unique())
+    cut = dates[len(dates) // 2]
+    halves = {"前半で学習 → 後半で評価": (full["Date"] < cut, full["Date"] >= cut),
+              "後半で学習 → 前半で評価": (full["Date"] >= cut, full["Date"] < cut)}
+    split = {}
+    for name, (tr, te) in halves.items():
+        tr, te = tr.to_numpy(), te.to_numpy()
+        Xb = base_design(full["score"].to_numpy())
+        # 標準化は学習側の値で決める（評価側の分布を使わない）
+        Rtr = R[tr]
+        mu, sd = Rtr.mean(axis=0), Rtr.std(axis=0)
+        sd[sd == 0] = 1.0
+        Rz = (R - mu) / sd
+        bb, _ = logit_fit(Xb[tr], y[tr])
+        lam = np.concatenate([np.zeros(Xb.shape[1]), np.full(len(cols), RIDGE)])
+        bf, _ = logit_fit(np.column_stack([Xb, Rz])[tr], y[tr], ridge=lam)
+        pb = 1 / (1 + np.exp(-(Xb[te] @ bb)))
+        pf = 1 / (1 + np.exp(-(np.column_stack([Xb, Rz])[te] @ bf)))
+        yt = y[te]
+
+        def ll(pp):
+            pp = np.clip(pp, 1e-9, 1 - 1e-9)
+            return float(-np.mean(yt * np.log(pp) + (1 - yt) * np.log(1 - pp)))
+        rec = {"n_train": int(tr.sum()), "n_test": int(te.sum()),
+               "auc_a": float(roc_auc_score(yt, pb)), "auc_full": float(roc_auc_score(yt, pf)),
+               "pr_a": float(average_precision_score(yt, pb)), "pr_full": float(average_precision_score(yt, pf)),
+               "logloss_a": ll(pb), "logloss_full": ll(pf)}
+        split[name] = rec
+        print(f"  {name}（学習 {rec['n_train']:,}行・評価 {rec['n_test']:,}行。分かれ目 {pd.Timestamp(cut).date()}）: "
+              f"ROC A だけ {rec['auc_a']:.4f} → A＋{len(cols)}列 {rec['auc_full']:.4f}（{rec['auc_full'] - rec['auc_a']:+.4f}）・"
+              f"PR-AUC {rec['pr_a']:.4f} → {rec['pr_full']:.4f}（{rec['pr_full'] - rec['pr_a']:+.4f}）・"
+              f"対数損失 {rec['logloss_a']:.4f} → {rec['logloss_full']:.4f}")
+    both_up = all(v["auc_full"] > v["auc_a"] for v in split.values())
+    if p_joint < ALPHA and both_up:
+        reading = "情報が残っている（A が使い切れていない情報が30列にある）"
+    elif p_joint >= ALPHA:
+        reading = "残っていない（A の予測で説明できない部分を、30列はまとめても説明しない）"
+    else:
+        reading = "はっきりしない（まとめての検定は有意だが、時間で分けた検証の両方では上がらない）"
+    print(f"  読み（回す前に決めたもの。まとめての p < {ALPHA} かつ 時間で分けた両方向で ROC が上がれば「残っている」、"
+          f"p ≥ {ALPHA} なら「残っていない」）: {reading}")
+    out["joint"] = {"rows": int(len(full)), "dll": float(d), "p": p_joint, "null_q95": float(np.quantile(null, 0.95)),
+                    "split": split, "reading": reading}
+    return out
+
+
+# --------------------------------------------------------------------------- #
 # 探索（週次の再学習と同じ関数・条件）
 # --------------------------------------------------------------------------- #
 def load_tuned(arm: str, cols: list, cutoff, n_trials: int, stamp: dict):
@@ -799,6 +1034,8 @@ def main(argv=None) -> int:
                     help="保存済みの表を、分足の取得記録が変わっていてもそのまま使う（腕を足す回で前の回と同じ表で比べる）")
     ap.add_argument("--budget-min", type=float, default=290.0, help="この分数を過ぎたら新しい計算を始めない（0 で無制限）")
     ap.add_argument("--dry", action="store_true", help="列の付き方だけ出して終わる")
+    ap.add_argument("--residual", action="store_true",
+                    help="保存済みの A の out-of-fold で説明しきれない部分を、分足の30列が説明するかを調べて終わる")
     ap.add_argument("--importance", action="store_true",
                     help="保存済みの探索のパラメータで A・C・B を学習し直し、重要度（gain の割合）の上位の顔ぶれを比べて終わる")
     args = ap.parse_args(argv)
@@ -848,6 +1085,16 @@ def main(argv=None) -> int:
           f"{df['Date'].max().date()}）。探索の期間（〜{cutoff.date()}）では {(df['Date'] <= cutoff).sum():,}行・"
           f"うち分足の付いた行 {int((att & (df['Date'] <= cutoff)).sum()):,}（全体では {int(att.sum()):,}）")
     if args.dry:
+        return 0
+    if args.residual:
+        rec = load_tuned("A", colsets["base"], cutoff, args.n_trials, stamp)
+        if rec is None:
+            raise SystemExit("A の保存済みの探索の結果が無い（--residual は探索し直さない。--keep-frame で前の回の表を使う）")
+        rows = residual_rows(df, base, rec["params"], shifts)
+        out = residual_report(rows, list(NEW_COLS))
+        with open(path("residual.json"), "w", encoding="utf-8") as fh:
+            json.dump(out, fh, ensure_ascii=False, indent=1, default=str)
+        log(f"記録: {path('residual.json')}（公開しない）")
         return 0
     if args.importance:
         recs = {}

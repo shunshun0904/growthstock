@@ -7,6 +7,8 @@
 - 腕は A・B・C（運用者の選択「AとBだけ」の後、結果を見て「C の腕で列の効果を切り分ける」）。A は必ず含める。C は A の
   パラメータのまま30列を足す（探索しない）。訓練に分足の無い窓では C は A とちょうど同じ
 - --keep-frame: 保存済みの表を、分足の取得記録が変わっていてもそのまま使う（前の回の A・B と同じ表で C を比べる）
+- --residual: A の out-of-fold で説明しきれない部分を列が説明するか。A が使っていない情報を持つ列は見つかり、雑音の列・
+  A が使い切っている列は見つからない（並べ替えは同じ日付の中だけ）
 - --importance: 保存済みの探索のパラメータで A・C・B を同じ行・種で学習し直し、gain の割合の上位の顔ぶれを比べる
   （分足の30列の割合と順位・上位 N 列の重なりと種だけ変えたときの重なり・順位相関・上位の表）。探索し直さない
 - ラベル: データセットの label が本番の +10% の定義（label_specs）と全行一致しなければ止める
@@ -140,6 +142,65 @@ class TestMinuteChecks(unittest.TestCase):
             E.minute_checks(off, REPORT)
 
 
+def residual_frame(seed=0, n_dates=120, per_day=30):
+    """A の予測は signal だけを使う。ラベルは signal と info で決まる。noise は無関係。"""
+    rng = np.random.default_rng(seed)
+    dates = np.repeat(pd.bdate_range("2025-01-06", periods=n_dates), per_day)
+    n = len(dates)
+    signal, info, noise = rng.normal(size=n), rng.normal(size=n), rng.normal(size=n)
+    y = (rng.random(n) < 1 / (1 + np.exp(-(-1.5 + signal + 0.8 * info)))).astype(float)
+    score = 1 / (1 + np.exp(-(-1.5 + signal)))
+    return pd.DataFrame({"Code": [f"{1000 + i % per_day}" for i in range(n)], "Date": dates, "label": y,
+                         "score": score, "n_scores": 9, "f_info": info, "f_noise": noise, "f_in_a": signal})
+
+
+class TestResidual(unittest.TestCase):
+    def test_finds_only_information_that_a_does_not_use(self):
+        rows = residual_frame()
+        with redirect_stdout(io.StringIO()) as buf:
+            out = E.residual_report(rows, ["f_info", "f_noise", "f_in_a"], n_perm=199, n_perm_joint=99, seed=1)
+        cols = out["columns"]
+        self.assertLess(cols["f_info"]["pooled"]["p"], 0.01)
+        self.assertLess(cols["f_info"]["pooled"]["q"], E.BH_Q)
+        self.assertGreater(cols["f_info"]["pooled"]["coef"], 0)
+        self.assertLess(cols["f_info"]["within"]["p"], 0.01)
+        self.assertGreater(cols["f_noise"]["pooled"]["p"], 0.05)
+        self.assertGreater(cols["f_in_a"]["pooled"]["p"], 0.05)                # A が使い切っている
+        self.assertEqual(out["hits"]["pooled"], ["f_info"])
+        q = cols["f_info"]["quintile_resid_pt"]
+        self.assertLess(q[0], 0)
+        self.assertGreater(q[-1], 0)                                         # 列が高いほど A の見込みより正例が多い
+        self.assertLess(out["joint"]["p"], 0.05)
+        self.assertTrue(all(v["auc_full"] > v["auc_a"] for v in out["joint"]["split"].values()))
+        self.assertTrue(out["joint"]["reading"].startswith("情報が残っている"))
+        self.assertIn("残差で確かめる", buf.getvalue())
+
+    def test_nothing_left_when_columns_carry_no_new_information(self):
+        rows = residual_frame(seed=3)
+        with redirect_stdout(io.StringIO()):
+            out = E.residual_report(rows, ["f_noise", "f_in_a"], n_perm=199, n_perm_joint=99, seed=2)
+        self.assertGreater(out["joint"]["p"], 0.05)
+        self.assertTrue(out["joint"]["reading"].startswith("残っていない"))
+        self.assertEqual(out["hits"]["pooled"], [])
+
+    def test_parts(self):
+        np.testing.assert_allclose(E.bh_qvalues([0.01, 0.04, 0.03, 0.5]), [0.04, 0.04 * 4 / 3, 0.04 * 4 / 3, 0.5])
+        codes = np.array([0, 0, 0, 1, 1, 2, 3, 3, 3, 3])
+        perm = E.date_permuter(codes, np.random.default_rng(0))
+        for _ in range(20):
+            idx = perm()
+            self.assertEqual(sorted(idx), list(range(len(codes))))
+            np.testing.assert_array_equal(codes[idx], codes)                  # 同じ日付の中だけで入れ替わる
+        v = np.array([1.0, 2.0, 3.0, 10.0, 20.0, 5.0])
+        np.testing.assert_allclose(E.within_date(v, np.array([0, 0, 0, 1, 1, 2])), [-1, 0, 1, -5, 5, 0])
+        X = np.column_stack([np.ones(200), np.linspace(-2, 2, 200)])
+        y = (np.linspace(-2, 2, 200) + np.random.default_rng(1).normal(0, 1, 200) > 0).astype(float)
+        b, ll = E.logit_fit(X, y)
+        from sklearn.linear_model import LogisticRegression
+        sk = LogisticRegression(C=1e9, max_iter=1000).fit(X[:, 1:], y)
+        self.assertAlmostEqual(b[1], sk.coef_[0][0], places=3)
+
+
 class TestRows(unittest.TestCase):
     def test_rows_and_windows(self):
         rng = np.random.default_rng(2)
@@ -207,6 +268,9 @@ class TestRunAndReport(unittest.TestCase):
                 summary = E.report(res, [0, 2], stamp, extra)
             out = buf.getvalue()
             names = sorted(os.listdir(tmp))
+            tmp2 = tempfile.mkdtemp()
+            shutil.copytree(tmp, tmp2, dirs_exist_ok=True)
+            self.addCleanup(shutil.rmtree, tmp2)
         finally:
             E.OOF_DIR, E.SEEDS, E.RUN, E.DEADLINE = old
             shutil.rmtree(tmp)
@@ -221,6 +285,17 @@ class TestRunAndReport(unittest.TestCase):
         self.assertEqual(res["params"]["B"], PARAMS_B)
         self.assertEqual(set(extra["gain_C"]["new"]), set(E.NEW_COLS))
         self.assertIn("C−A", out)
+        # 残差: A の保存済みの out-of-fold（ずらし 0・2）を行ごとに平均し、分足の付いた行だけ
+        old_run = (E.OOF_DIR, E.SEEDS, E.RUN, E.DEADLINE)
+        try:
+            E.OOF_DIR, E.SEEDS, E.RUN, E.DEADLINE = tmp2, (42,), "e132test", None
+            rows = E.residual_rows(df, base, PARAMS, [0, 2])
+        finally:
+            E.OOF_DIR, E.SEEDS, E.RUN, E.DEADLINE = old_run
+        self.assertTrue(E.attached_mask(rows).all())
+        self.assertTrue(rows["score"].between(0, 1).all())
+        self.assertTrue(set(rows["n_scores"].unique()) <= {1, 2})
+        self.assertEqual(len(rows), len(rows.drop_duplicates(["Code", "Date"])))
         self.assertNotIn("judge7", summary)
         self.assertEqual(set(extra["gain"]["share"]), {"既存の373列", "分足の30列"})
         self.assertAlmostEqual(sum(extra["gain"]["share"].values()), 1.0, places=6)
