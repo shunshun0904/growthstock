@@ -81,13 +81,24 @@ jobs:
           ls -lh research/_data | tail -5
           echo "ファイル数: $(ls research/_data | wc -l)"
 
-      # 分足の置き場（下書き）。取得記録と月ごとのファイル（2年で 約2.6GB）
+      # 分足の置き場（下書き）。取得記録と月ごとのファイル（2年で 約2.6GB）。
+      # 毎晩の Update Minute Bars が今月のファイルを差し替えている最中だと、取り出しの途中で一覧と大きさが合わなくなる
+      # （2026-11-19 run 44509967214。差し替えは1分ほど）。失敗したら90秒待って一覧から取り直す（3回まで）
       - name: Download minute bars
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p research/_data/minute
-          bash scripts/gh_release_download.sh data-minute research/_data/minute 'minute_*'
+          for attempt in 1 2 3; do
+            if bash scripts/gh_release_download.sh data-minute research/_data/minute 'minute_*'; then
+              break
+            fi
+            if [ "$attempt" = 3 ]; then
+              echo "分足を取り出せなかった（3回）"; exit 1
+            fi
+            echo "分足の取り出しに失敗（毎晩の取得がファイルを差し替えている途中かもしれない）。90秒待って一覧から取り直す"
+            sleep 90
+          done
           if [ ! -f research/_data/minute/minute_manifest.json ]; then
             echo "分足の取得記録（minute_manifest.json）が無い"; exit 1
           fi
