@@ -9,6 +9,7 @@
 - 付けた33列の確かめ: 割合が 0〜1 の外・無限・終値との差が −100% 以下・期間の中で欠けのある行・時間帯の割合の合計が1でない行があれば止める
 - 評価の行: 全行と、分足の付いた行だけ（30列のどれかがある行）。窓は行が100件以上で正例・負例がそろうもの
 - 表に付いている VWAP の3列は、B の学習・寄与・付き方の報告に入らない
+- 訓練に分足の付いた行が無い窓は B = A（30列が訓練で全行欠測）。「訓練に分足の付いた行がある窓だけ」の集計はその窓を除く
 - 報告の一通り: 保存済みの探索（A・B）から、out-of-fold・寄与・報告が最後まで通る（種1つ・ずらし0 と 2）。§7 の判定は出さない
 
   python3 -m unittest tests.test_e132_minute_vp_ab
@@ -147,7 +148,7 @@ class TestRows(unittest.TestCase):
 PARAMS = {"n_estimators": 20, "num_leaves": 7, "learning_rate": 0.1, "min_child_samples": 20, "verbose": -1, "n_jobs": 1}
 
 
-def make_frame(seed=0, per_day=3):
+def make_frame(seed=0, per_day=3, minute_from="2019-01-01"):
     rng = np.random.default_rng(seed)
     dates = pd.bdate_range("2017-01-02", "2022-12-30")
     n = len(dates) * per_day
@@ -155,7 +156,7 @@ def make_frame(seed=0, per_day=3):
     cols.update({f"b{j}": rng.normal(size=n) for j in range(4)})
     cols.update({c: rng.normal(size=n) for c in E.BUILT_COLS})          # 表には33列が付いている
     df = pd.DataFrame(cols)
-    before = df["Date"] < "2019-01-01"
+    before = df["Date"] < minute_from
     df.loc[before, list(E.BUILT_COLS)] = np.nan                         # 分足は途中の年から
     df["label"] = (df["b1"] + 0.5 * df[MF.column("poc_gap", 20)].fillna(0)
                    + 0.8 * df[MF.column("vwap_gap", 20)].fillna(0) + rng.normal(0, 1.0, n) > 1.0).astype(float)
@@ -169,7 +170,7 @@ def make_frame(seed=0, per_day=3):
 
 class TestRunAndReport(unittest.TestCase):
     def test_end_to_end(self):
-        df = make_frame(1)
+        df = make_frame(1, minute_from="2020-03-02")                    # 最初の窓（訓練の終わり 2020-01-02）は訓練に分足が無い
         df.attrs["built_utc"] = "test"
         base = ["b0", "b1", "b2", "b3"]
         new = list(E.NEW_COLS)
@@ -214,7 +215,23 @@ class TestRunAndReport(unittest.TestCase):
         self.assertIn("分足の付いた行だけ", out)
         # 付いた行だけの窓は、分足が始まる前の窓を含まない
         windows = pd.DataFrame(summary["per_window"]["minute"])
-        self.assertTrue((pd.to_datetime(windows["start"]) >= pd.Timestamp("2019-01-01")).all())
+        self.assertTrue((pd.to_datetime(windows["start"]) >= pd.Timestamp("2020-03-02")).all())
+        # 訓練に分足が無い窓は B = A（ちょうど同じ）。訓練に分足がある窓だけの集計はその窓を除く
+        every = pd.DataFrame(summary["per_window"]["all"])
+        none = every[every["train_minute"] == 0]
+        self.assertGreater(len(none), 0)
+        np.testing.assert_array_equal(none["pr_A"].to_numpy(), none["pr_B"].to_numpy())
+        np.testing.assert_array_equal(none["roc_A"].to_numpy(), none["roc_B"].to_numpy())
+        trained = summary["windows"]["all_pr_B-A_trained"]
+        self.assertEqual(trained["n"], int((every["train_minute"] > 0).sum()))
+        self.assertEqual(trained["n"] + len(none), summary["windows"]["all_pr_B-A"]["n"])
+        self.assertIn("うち訓練に分足の付いた行がある窓", out)
+        # 訓練の分足の行数は、窓の訓練の終わりまでの付いた行（ラベルあり）の数
+        folds = {f.index: f for f in E.E41.folds_for(df["Date"], 0)}
+        att = E.attached_mask(df) & df["label"].notna()
+        for _, r in every[every["shift"] == 0].iterrows():
+            want = int((att & (df["Date"] <= pd.Timestamp(folds[int(r["fold"])].train_end))).sum())
+            self.assertEqual(int(r["train_minute"]), want)
         # A と B は列が違うので out-of-fold も違う
         self.assertGreater(np.abs(res["prod"]["A"]["score"].to_numpy() - res["prod"]["B"]["score"].to_numpy()).max(), 1e-9)
 

@@ -31,6 +31,8 @@ out-of-fold: 本番と同じ作り（36/6/6か月・エンバーゴ20営業日�
   0. 30列の付き方（欠測の割合・分位）・既存の373列との順位相関の最大  0b. 学習の寄与（gain）の割合（参考）
   1. 探索の CV（A・B）  2. 本番と同じ作りの OOF（全行・付いた行だけ）  3. 窓ごとの B−A（全行）  3b. 同（付いた行だけ）
   5. 窓の中の上位2% の Precision・+10% の指値に届いた割合・1取引の平均（参考）  6. 窓ごとの値
+  3・3b には「訓練に分足の付いた行がある窓だけ」の行も出す（試運転 run 44519658877 の後、本番の回の前に足した）。訓練に分足の
+  行が無い窓では30列が訓練の全行で欠測になり、LightGBM はその列を使わないので、B は A と同じ予測になる（差がちょうど 0 の窓）
 
 置き場の分足（下書きの Release data-minute）は research/_data/minute/ に置く（Run Minute Experiment が落とす）。
     exp=e132_minute_vp_ab.py
@@ -408,9 +410,23 @@ def windows_on(o: pd.DataFrame, rows: str = "all") -> pd.DataFrame:
     return w.merge(info, on="fold", how="left")[cols]
 
 
+def train_minute_rows(frame: pd.DataFrame, shifts) -> dict:
+    """
+    窓（ずらし・窓の番号）ごとの、訓練に入る分足の付いた行の数。訓練は E41.oof_folds と同じく窓の train_end までの
+    ラベルのある行（窓は oof と同じ E41.folds_for）。0 の窓では B の30列は訓練の全行で欠測になる。
+    """
+    d = pd.to_datetime(frame["Date"])
+    att = attached_mask(frame) & frame["label"].notna()
+    out = {}
+    for sh in sorted(set(shifts) | {0}):
+        for f in E41.folds_for(frame["Date"], sh):
+            out[(sh, int(f.index))] = int((att & (d <= pd.Timestamp(f.train_end))).sum())
+    return out
+
+
 def run(arms: list, frames: dict, colsets: dict, cutoff, n_trials: int, stamp: dict, shifts: list) -> dict:
     """A を先に、B を後に計算する。時間切れの腕は結果に入らない。"""
-    res = {"recs": {}, "params": {}, "prod": {}, "oofs": {}}
+    res = {"recs": {}, "params": {}, "prod": {}, "oofs": {}, "train_minute": train_minute_rows(frames["new"], shifts)}
     for arm in arms:
         cs = COLS_OF[arm]
         rec = tune(arm, frames[cs], colsets[cs], cutoff, n_trials, stamp)
@@ -445,7 +461,9 @@ def window_table(res: dict, arms: list, shifts: list, rows: str = "all") -> pd.D
             continue
         for _, r in w.iterrows():
             out.append({"shift": sh, "fold": int(r["fold"]), "start": r["start"], "end": r["end"], "n": int(r["n"]),
-                        "pos": float(r["pos"]), **{f"{m}_{a}": float(r[f"{m}_{a}"]) for m in ("pr", "roc") for a in arms}})
+                        "pos": float(r["pos"]),
+                        "train_minute": int(res.get("train_minute", {}).get((sh, int(r["fold"])), -1)),
+                        **{f"{m}_{a}": float(r[f"{m}_{a}"]) for m in ("pr", "roc") for a in arms}})
     return pd.DataFrame(out)
 
 
@@ -520,6 +538,14 @@ def report(res: dict, shifts: list, stamp: dict, extra: dict) -> dict:
             line, st = pair(f"{nm} B−A", s[f"{met}_A"].to_numpy(), s[f"{met}_B"].to_numpy())
             print(line)
             summary["windows"][f"{rows}_{met}_B-A"] = st
+        t = s[s["train_minute"] > 0]
+        print(f"  うち訓練に分足の付いた行がある窓（{len(t)}窓。ほかの {len(s) - len(t)}窓は30列が訓練で全行欠測のため B = A）")
+        for met, nm in (("pr", "PR"), ("roc", "ROC")):
+            if not len(t):
+                break
+            line, st = pair(f"{nm} B−A（訓練に分足）", t[f"{met}_A"].to_numpy(), t[f"{met}_B"].to_numpy())
+            print(line)
+            summary["windows"][f"{rows}_{met}_B-A_trained"] = st
     print("\n■ 4. §7 の判定は出さない（運用者の選択「AとBだけ」。対照 P と A のパラメータの C が要る）")
 
     tt = top_table(res, arms, shifts)
@@ -552,11 +578,12 @@ def report(res: dict, shifts: list, stamp: dict, extra: dict) -> dict:
             if not len(g):
                 continue
             print(f"  ずらし{sh}か月（{len(g)}窓）")
-            print(f"    {'窓':>2}  {'期間':<23}{'件数':>7}{'正例率':>7}" + "".join(f"{a:>9}" for a in arms)
+            print(f"    {'窓':>2}  {'期間':<23}{'件数':>7}{'正例率':>7}{'訓練の分足':>9}" + "".join(f"{a:>9}" for a in arms)
                   + (f"{'B−A':>9}" if "B" in arms else ""))
             for _, r in g.iterrows():
                 print(f"    {int(r['fold']):>2}  {pd.Timestamp(r['start']).date()}〜{pd.Timestamp(r['end']).date()}"
-                      f"{int(r['n']):>7,}{r['pos']*100:>6.1f}%" + "".join(f"{r[f'pr_{a}']:>9.4f}" for a in arms)
+                      f"{int(r['n']):>7,}{r['pos']*100:>6.1f}%{int(r['train_minute']):>11,}"
+                      + "".join(f"{r[f'pr_{a}']:>9.4f}" for a in arms)
                       + (f"{r['pr_B'] - r['pr_A']:>+9.4f}" if "B" in arms else ""))
         summary["per_window"][rows] = (s.assign(start=s["start"].astype(str), end=s["end"].astype(str)).to_dict("records")
                                        if len(s) else [])
