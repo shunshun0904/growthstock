@@ -103,10 +103,10 @@ export default function VolumeProfileView({ predictions, predictionError }) {
   const [profile, setProfile] = useState(null);
   const [unlock, setUnlock] = useState({ status: 'idle' });
   const [entry, setEntry] = useState('');
-  const [remember, setRemember] = useState(false);
+  // 既定で端末に覚える（運用者の選択 2026-11-19「最初の1回だけ入力」）。共用の端末では外せる
+  const [remember, setRemember] = useState(true);
   const [reload, setReload] = useState(0);
   const [selected, setSelected] = useState('');
-  const [query, setQuery] = useState('');
   const [periodChoice, setPeriodChoice] = useState(null);
   const [source, setSource] = useState(null);
   const [unit, setUnit] = useState('shares');
@@ -159,9 +159,7 @@ export default function VolumeProfileView({ predictions, predictionError }) {
 
   const byCode = useMemo(() => new Map((profile?.stocks ?? []).map((stock) => [stock.code, stock])), [profile]);
   const list = targets.length ? targets : (profile?.stocks ?? []).map(({ code, name, candidates }) => ({ code, name, candidates }));
-  const search = query.trim().toUpperCase();
-  const matching = list.filter((stock) => `${displayCode(stock.code)} ${stock.code} ${stock.name}`.toUpperCase().includes(search));
-  const target = matching.find((candidate) => candidate.code === selected) ?? matching[0];
+  const target = list.find((candidate) => candidate.code === selected) ?? list[0];
   const stock = byCode.get(target?.code);
   const suggestedPeriod = [...PROFILE_WINDOWS].reverse().find((count) => stock?.windows[count].tick.status === 'ok'
     || stock?.windows[count].minute.status === 'ok');
@@ -208,8 +206,9 @@ export default function VolumeProfileView({ predictions, predictionError }) {
         <button className="btn btn-primary" type="submit" disabled={unlock.status === 'working'}>
           {unlock.status === 'working' ? '開いています…' : '開く'}</button>
       </form>
-      <p className="volume-note">集計は J-Quants の API キーから作った鍵で暗号化してあります。キーはこの端末の中で鍵を作るのに使うだけで、どこにも送りません。
-        記憶するのはキーから作った鍵だけです（キーそのものは保存しません）。集計の基準日 {envelope.doc.asOf}。</p>
+      <p className="volume-note">集計は J-Quants の API キーから作った鍵で暗号化してあります。この端末で最初の1回だけキーを入れれば、
+        「この端末に記憶する」を選んだままなら次からは入力なしで開きます。キーは鍵を作るのに使うだけで、どこにも送りません。
+        覚えるのはキーから作った鍵だけです（キーそのものは保存しません）。集計の基準日 {envelope.doc.asOf}。</p>
       {unlock.status === 'error' && <p className="banner warn" role="alert">{unlock.message}</p>}
     </>}
     {opened && <div className="volume-connect">
@@ -222,7 +221,11 @@ export default function VolumeProfileView({ predictions, predictionError }) {
 
     {list.length > 0 && <>
       <div className="volume-controls">
-        <label>銘柄検索<input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="銘柄名・コード" /></label>
+        <label>銘柄<select aria-label="銘柄" value={target?.code ?? ''}
+          onChange={(event) => { setSelected(event.target.value); setSource(null); }}>
+          {list.map((item) => <option key={item.code} value={item.code}>
+            {displayCode(item.code)} {item.name}（{item.candidates.map(candidateText).join('・')}）</option>)}
+        </select></label>
         <label>集計期間<select value={days} onChange={(event) => setPeriodChoice(Number(event.target.value))}>
           {PROFILE_WINDOWS.map((count) => <option key={count} value={count}>{count}営業日</option>)}
         </select></label>
@@ -237,7 +240,7 @@ export default function VolumeProfileView({ predictions, predictionError }) {
         <table aria-label="直近5営業日の予測対象銘柄">
           <thead><tr><th scope="col">銘柄</th><th scope="col">候補日</th><th scope="col">終値とVWAPの差</th>
             <th scope="col">大口</th><th scope="col">ティック</th><th scope="col">分足</th></tr></thead>
-          <tbody>{matching.map((item) => {
+          <tbody>{list.map((item) => {
             const value = rowValue(item.code);
             return <tr key={item.code}>
               <td><button className="btn btn-ghost volume-stock" type="button" aria-pressed={item.code === target?.code}
@@ -248,7 +251,6 @@ export default function VolumeProfileView({ predictions, predictionError }) {
             </tr>;
           })}</tbody>
         </table>
-        {!matching.length && <p>検索条件に一致する銘柄はありません。</p>}
       </div>
     </>}
 

@@ -51,7 +51,7 @@ try {
   const base = `http://127.0.0.1:${server.address().port}/growthstock/`;
   const executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH || '/usr/bin/chromium';
   browser = await chromium.launch(fs.existsSync(executablePath) ? { executablePath } : {});
-  const page = await browser.newPage({ viewport: { width: 1440, height: 1050 } });
+  const page = await (await browser.newContext({ viewport: { width: 1440, height: 1050 } })).newPage();
   const errors = [], requests = [];
   let serve = 'current';
   page.on('pageerror', (error) => errors.push(error.message));
@@ -73,9 +73,17 @@ try {
   assert.match(await panel.innerText(), /候補 3銘柄/);
   assert.doesNotMatch(await list.innerText(), /7777/);
   assert.match(await list.locator('tbody tr').first().innerText(), /123A サンプル甲[\s\S]*11\/18（1位）・11\/14（2位）/);
+  // 銘柄はプルダウンで選ぶ（コード・名前を打つ検索欄は無い）。キーを入れる前から一覧と同じ並びで選べる
+  const stockSelect = panel.getByLabel('銘柄', { exact: true });
+  assert.deepEqual(await stockSelect.locator('option').evaluateAll((options) => options.map((o) => o.value)),
+    ['123A0', '99990', '88990']);
+  assert.match(await stockSelect.locator('option').first().innerText(), /123A サンプル甲（11\/18（1位）・11\/14（2位））/);
+  assert.equal(await panel.getByLabel('銘柄検索').count(), 0);
+  assert.equal(await panel.getByPlaceholder('銘柄名・コード').count(), 0);
   const keyInput = page.getByLabel('J-Quants の API キー');
   await keyInput.waitFor();
   assert.equal(await keyInput.getAttribute('type'), 'password');
+  assert.ok(await panel.getByLabel('この端末に記憶する').isChecked(), '既定で端末に覚える（最初の1回だけ入力）');
 
   await keyInput.fill(`${KEY}-wrong`);
   await panel.getByRole('button', { name: '開く', exact: true }).click();
@@ -113,24 +121,36 @@ try {
   await page.locator('.volume-table summary').click();
   assert.match(await panel.innerText(), /売買代金（円）/);
 
-  await page.getByRole('button', { name: '9999 サンプル乙' }).click();
+  await stockSelect.selectOption('99990');
+  assert.equal(await panel.getByRole('button', { name: '9999 サンプル乙' }).getAttribute('aria-pressed'), 'true');
+  assert.match(await panel.locator('.volume-stock-heading').innerText(), /9999 サンプル乙/);
   assert.equal(await source.inputValue(), 'minute', 'ティックが無ければ分足を選ぶ');
   assert.match(await panel.innerText(), /この期間のティックが揃っていません/);
   await source.selectOption('tick');
   text = await panel.innerText();
   assert.match(text, /置き場にまだ無いか、足りません/);
   assert.match(text, /照合済み 0\/5営業日/);
+  // 表の行を押しても選べ、プルダウンも合わせて変わる
   await page.getByRole('button', { name: '8899 集計できない銘柄' }).click();
+  assert.equal(await stockSelect.inputValue(), '88990');
   assert.match(await panel.innerText(), /日足が揃っていません/);
-  await page.getByLabel('銘柄検索').fill('123A');
-  assert.equal(await list.locator('tbody tr').count(), 1);
-  await page.getByLabel('銘柄検索').fill('');
+  assert.equal(await list.locator('tbody tr').count(), 3);
 
-  // 同じタブを開き直すと、覚えた鍵で自動で開く（キーそのものは保存しない）
+  // 既定で端末に覚えるので、新しいタブで開き直しても入力なしで開く（キーそのものは保存しない）
   const stored = await page.evaluate(() => JSON.stringify({ ...sessionStorage, ...localStorage }));
   assert.ok(!stored.includes(KEY), 'キーそのものは保存しない');
-  assert.equal(await page.evaluate((k) => localStorage.getItem(k), UNLOCK), null, '既定ではこの端末に記憶しない');
-  assert.notEqual(await page.evaluate((k) => sessionStorage.getItem(k), UNLOCK), null);
+  assert.notEqual(await page.evaluate((k) => localStorage.getItem(k), UNLOCK), null, '既定でこの端末に覚える');
+  const later = await page.context().newPage();
+  await later.route('**/data/predictions.json*', (route) => route.fulfill({ json: { ...published, asOf: fixture.asOf,
+    dates: fixture.dates, candidates } }));
+  await later.route('**/data/volume-profile.enc.json*', (route) => route.fulfill({ contentType: 'application/json',
+    body: envelopes.current }));
+  later.on('request', (req) => requests.push({ method: req.method(), url: req.url(), body: req.postData() || '' }));
+  await later.goto(base, { waitUntil: 'networkidle' });
+  await later.getByRole('tab', { name: '価格帯別出来高', exact: true }).click();
+  await later.locator('.volume-view .recharts-bar-rectangle').first().waitFor();
+  assert.equal(await later.getByLabel('J-Quants の API キー').count(), 0, '2回目からは入力なし');
+  await later.close();
   await page.reload({ waitUntil: 'networkidle' });
   await tab.click();
   await volumeBar.first().waitFor();
@@ -159,10 +179,11 @@ try {
   await page.reload({ waitUntil: 'networkidle' });
   await tab.click();
   await keyInput.fill(KEY);
-  await panel.getByLabel('この端末に記憶する').check();
+  await panel.getByLabel('この端末に記憶する').uncheck();
   await panel.getByRole('button', { name: '開く', exact: true }).click();
   await volumeBar.first().waitFor();
-  assert.notEqual(await page.evaluate((k) => localStorage.getItem(k), UNLOCK), null, '記憶するを選んだときだけ端末に覚える');
+  assert.equal(await page.evaluate((k) => localStorage.getItem(k), UNLOCK), null, '外したときは端末に覚えない');
+  assert.notEqual(await page.evaluate((k) => sessionStorage.getItem(k), UNLOCK), null, 'タブを閉じるまでは覚える');
   await page.screenshot({ path: path.join(shots, 'screenshot-volume-profile-mobile.png'), fullPage: true });
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'スマホの幅で横にはみ出さない');
 
@@ -170,7 +191,7 @@ try {
   assert.ok(requests.every((req) => !req.url.includes(KEY) && !req.body.includes(KEY)), 'キーはどこにも送らない');
   assert.ok(requests.every((req) => req.url.startsWith(base) || !/volume-profile|predictions/.test(req.url)));
   assert.ok(requests.filter((req) => /volume-profile/.test(req.url)).every((req) => req.method === 'GET'));
-  console.log('PASS: 直近5営業日の候補・ブラウザの中での復号・違うキー・欠損・古い集計・集計待ち・記憶・スマホの幅');
+  console.log('PASS: 直近5営業日の候補・プルダウンで選ぶ・ブラウザの中での復号・違うキー・欠損・古い集計・集計待ち・2回目から入力なし・スマホの幅');
 } finally {
   await browser?.close();
   if (server.listening) await new Promise((resolve) => server.close(resolve));
