@@ -1,3 +1,0 @@
-# Probe Draft Release（.github/workflows/probe-draft-release.yml）を作業ブランチから起動するための要求。
-# 書き換えて push すると走る。下書きの Release を作って確かめ、最後に消す（何も残さない）。
-run 1

@@ -19,10 +19,6 @@ on:
         type: choice
         options: ['smallest', 'latest', 'largest']
         default: 'smallest'
-  # 既定ブランチへ入る前に、作業ブランチから起動するため（要求ファイルの1行目がエンドポイント）
-  push:
-    branches: ['ccr-de5c973d-d8c3zi']
-    paths: ['research/bulk_probe_request.txt']
 
 permissions:
   contents: read
@@ -49,9 +45,6 @@ jobs:
           SAMPLE: ${{ inputs.sample || 'smallest' }}
         run: |
           EPS="$EPS_IN"
-          if [ -z "$EPS" ] && [ -f research/bulk_probe_request.txt ]; then
-            EPS=$(grep -v '^#' research/bulk_probe_request.txt | head -1 | tr -d '\r' || true)
-          fi
           [ -n "$EPS" ] || EPS="/equities/trades"
           [[ "$SAMPLE" =~ ^(smallest|latest|largest)$ ]] || { echo "sample が不正: $SAMPLE"; exit 1; }
           ARGS=(--summary-json bulk_probe.json --sample "$SAMPLE")

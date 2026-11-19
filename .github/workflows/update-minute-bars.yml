@@ -50,11 +50,8 @@ on:
         description: '新しい取得を打ち切る分数（ジョブの上限 330分より短く）'
         required: false
         default: '300'
-  # 既定ブランチへ入る前に、作業ブランチから過去分の取得を始めるための起動（2026-11-18）。
-  # 要求ファイルの1行目が probe なら確認だけ、それ以外は取得して蓄積
-  push:
-    branches: ['ccr-de5c973d-d8c3zi']
-    paths: ['research/minute_request.txt']
+  # 過去2年分の初回の取得は、既定ブランチへ入る前に作業ブランチから起動した（2026-11-19。push の起動と
+  # 要求ファイルは、取得が終わってから外した。docs/MINUTE_BARS.md・docs/TICKS.md の「初回の取得の実測」）
 
 # 下書きの Release を作って上げる（git にはコミットしない）
 permissions:
@@ -94,11 +91,6 @@ jobs:
           MODE_IN: ${{ inputs.mode || 'update' }}
         run: |
           MODE="$MODE_IN"
-          if [ "${{ github.event_name }}" = "push" ] && [ -f research/minute_request.txt ]; then
-            # 空・コメントだけのときに grep が 1 を返して（pipefail）止まらないよう || true
-            REQ=$(grep -v '^#' research/minute_request.txt | head -1 | tr -d '\r' | awk '{print $1}' || true)
-            [ "$REQ" = "probe" ] && MODE=probe
-          fi
           [ "$MODE" = "probe" ] || MODE=update
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
           echo "モード: $MODE / 起動: ${{ github.event_name }}"

@@ -1,4 +1,0 @@
-# Probe Bulk Files（.github/workflows/probe-bulk.yml）を作業ブランチから起動するための要求。
-# 1行目（# で始まらない最初の行）に、測るエンドポイントをスペース区切りで書く。書き換えて push すると走る。
-# 何も保存しない（一覧と1ファイルの形・大きさの見積もりだけ）。
-/equities/trades

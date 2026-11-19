@@ -11,9 +11,6 @@ name: Probe Draft Release
 #   3. 終わったら下書きを消す（必ず）
 on:
   workflow_dispatch:
-  push:
-    branches: ['ccr-de5c973d-d8c3zi']
-    paths: ['research/draft_probe_request.txt']
 
 permissions:
   contents: write
