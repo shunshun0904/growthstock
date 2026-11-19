@@ -7,6 +7,8 @@
 - 腕は A・B・C（運用者の選択「AとBだけ」の後、結果を見て「C の腕で列の効果を切り分ける」）。A は必ず含める。C は A の
   パラメータのまま30列を足す（探索しない）。訓練に分足の無い窓では C は A とちょうど同じ
 - --keep-frame: 保存済みの表を、分足の取得記録が変わっていてもそのまま使う（前の回の A・B と同じ表で C を比べる）
+- --short: 短い期間の値動き（gap・r1・r3・r5。日足の並びで数える）。日付の中の順位相関（日付を1件として t）。今の列の予測を
+  引いた偏相関で、予測と同じ情報の列は消え、別の情報の列は残る。30列まとめた信号は日付の前半・後半で作って測る
 - --residual: A の out-of-fold で説明しきれない部分を列が説明するか。A が使っていない情報を持つ列は見つかり、雑音の列・
   A が使い切っている列は見つからない（並べ替えは同じ日付の中だけ）
 - --importance: 保存済みの探索のパラメータで A・C・B を同じ行・種で学習し直し、gain の割合の上位の顔ぶれを比べる
@@ -199,6 +201,106 @@ class TestResidual(unittest.TestCase):
         from sklearn.linear_model import LogisticRegression
         sk = LogisticRegression(C=1e9, max_iter=1000).fit(X[:, 1:], y)
         self.assertAlmostEqual(b[1], sk.coef_[0][0], places=3)
+
+
+def short_frame(seed=0, n_dates=160, per_day=12):
+    """r1 は今の列の予測（pred）と f_new の両方で決まる。f_same は pred と同じ情報。f_noise は無関係。"""
+    rng = np.random.default_rng(seed)
+    dates = np.repeat(pd.bdate_range("2025-01-06", periods=n_dates), per_day)
+    n = len(dates)
+    sig, new, noise = rng.normal(size=n), rng.normal(size=n), rng.normal(size=n)
+    r1 = 0.01 * (sig + 0.6 * new) + 0.02 * rng.normal(size=n)
+    r3 = 0.03 * rng.normal(size=n)
+    return pd.DataFrame({"Code": [f"{1000 + i % per_day}" for i in range(n)], "Date": dates, "r1": r1, "r3": r3,
+                         "pred_r1": sig, "pred_r3": rng.normal(size=n), "f_new": new, "f_same": sig + 0.01 * noise,
+                         "f_noise": noise})
+
+
+class TestShort(unittest.TestCase):
+    TARGETS = (("r1", "1日目"), ("r3", "3日目まで"))
+
+    def test_raw_partial_and_joint(self):
+        rows = short_frame()
+        with redirect_stdout(io.StringIO()) as buf:
+            out = E.short_report(rows, ["f_new", "f_same", "f_noise"], targets=self.TARGETS,
+                                 pred_cols={"r1": "pred_r1", "r3": "pred_r3"})
+        cols = out["columns"]
+        self.assertGreater(cols["f_new"]["raw"]["r1"]["t"], 4)
+        self.assertLess(cols["f_new"]["raw"]["r1"]["q"], E.BH_Q)
+        self.assertGreater(cols["f_same"]["raw"]["r1"]["t"], 4)                 # 単独では効いて見える
+        self.assertGreater(cols["f_new"]["partial"]["r1"]["t"], 4)              # 今の列を超えて残る
+        self.assertLess(abs(cols["f_same"]["partial"]["r1"]["t"]), 3)           # 予測と同じ情報は消える
+        self.assertGreater(cols["f_noise"]["raw"]["r1"]["q"], E.BH_Q)
+        self.assertIn("r1", out["reading"]["works"])
+        self.assertIn("r1", out["reading"]["beyond"])
+        self.assertNotIn("r3", out["reading"]["works"])
+        for r in out["joint"]["r1"].values():
+            self.assertGreater(r["added"]["diff"], 0)
+        self.assertIn("短い期間の値動き", buf.getvalue())
+
+    def test_date_ic_counts_dates(self):
+        rows = short_frame(seed=1, n_dates=40, per_day=6)
+        codes = pd.factorize(rows["Date"])[0]
+        r = E.date_ic(rows["f_noise"].to_numpy(), rows["r3"].to_numpy(), codes)
+        self.assertEqual(r["dates"], 40)
+        self.assertLess(abs(r["t"]), 3)
+        few = E.date_ic(rows["f_noise"].to_numpy(), rows["r3"].to_numpy(), codes, min_rows=7)
+        self.assertEqual(few["dates"], 0)                                     # 1日6行なので数えない
+        self.assertTrue(np.isnan(few["ic"]))
+
+    def test_short_rows_wiring(self):
+        df = make_frame(6, per_day=2)
+        df["entry_gap"] = np.nan
+        tmp = tempfile.mkdtemp()
+        try:
+            rng = np.random.default_rng(0)
+            days = pd.bdate_range("2016-12-01", "2023-01-31")
+            bars = []
+            for code in sorted(df["Code"].unique()):
+                px = 100 * np.exp(np.cumsum(rng.normal(0, 0.02, len(days))))
+                bars.append(pd.DataFrame({"Date": days, "Code": code, "AdjO": px * (1 + rng.normal(0, 0.005, len(days))),
+                                          "AdjH": px * 1.02, "AdjC": px}))
+            b = pd.concat(bars, ignore_index=True)
+            for y in sorted(b["Date"].dt.year.unique()):
+                b[b["Date"].dt.year == y].to_parquet(os.path.join(tmp, f"bars_{y}.parquet"), index=False)
+            with mock.patch.object(E.lab, "DATA_DIR", tmp), redirect_stdout(io.StringIO()):
+                rows, pred_cols, check = E.short_rows(df, ["b0", "b1", "b2", "b3"], PARAMS)
+        finally:
+            shutil.rmtree(tmp)
+        self.assertTrue(E.attached_mask(rows).all())
+        self.assertEqual(set(pred_cols), {k for k, _ in E.SHORT_TARGETS})
+        first_test = pd.Timestamp(E.E41.folds_for(df["Date"], 0)[0].test_start)
+        late = rows["Date"] >= max(first_test, pd.Timestamp("2019-01-01"))
+        for key in pred_cols:
+            self.assertTrue(rows.loc[late, f"pred_{key}"].notna().all())
+            self.assertTrue(rows[key].notna().mean() > 0.95)
+        self.assertEqual(check["rows"], 0)                                   # entry_gap が無い作りもの
+
+    def test_short_returns_from_bars(self):
+        tmp = tempfile.mkdtemp()
+        try:
+            days = pd.bdate_range("2025-03-03", periods=10)
+            rows = []
+            for code, base_px in (("11110", 100.0), ("22220", 50.0)):
+                for i, d in enumerate(days):
+                    if code == "22220" and i == 3:
+                        continue                                              # 売買の無い日（日足が無い）
+                    rows.append({"Date": d, "Code": code, "AdjO": base_px + i, "AdjH": base_px + i + 2,
+                                 "AdjC": base_px + i + 1})
+            pd.DataFrame(rows).to_parquet(os.path.join(tmp, "bars_2025.parquet"), index=False)
+            keys = pd.DataFrame({"Code": ["11110", "22220"], "Date": [days[1], days[1]]})
+            got = E.short_returns(keys, tmp)
+        finally:
+            shutil.rmtree(tmp)
+        a = got.iloc[0]
+        self.assertAlmostEqual(a["gap"], 102 / 102 - 1)                       # D の終値 102 → D+1 の寄り 102
+        self.assertAlmostEqual(a["r1"], 103 / 102 - 1)
+        self.assertAlmostEqual(a["r3"], 105 / 102 - 1)
+        self.assertAlmostEqual(a["r5"], 107 / 102 - 1)
+        b = got.iloc[1]                                                       # 3日目が無いので日足の並びで数える
+        self.assertAlmostEqual(b["gap"], 52 / 52 - 1)
+        self.assertAlmostEqual(b["r1"], 53 / 52 - 1)
+        self.assertAlmostEqual(b["r3"], 56 / 52 - 1)
 
 
 class TestRows(unittest.TestCase):

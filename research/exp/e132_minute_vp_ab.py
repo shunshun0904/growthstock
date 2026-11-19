@@ -43,6 +43,8 @@ out-of-fold: 本番と同じ作り（36/6/6か月・エンバーゴ20営業日�
 列の付き方だけ見る: args="--dry"
 試運転:             args="--tag e132smoke --n-trials 2 --shifts 0"
 C を足す回:         args="--keep-frame"（A・B は保存済みの探索・out-of-fold を読む。C の out-of-fold だけ計算する）
+短い期間の値動き:   args="--keep-frame --short"（分足の30列が、高値更新の翌日から数営業日の値動きを当てるか。今の373列の予測を
+                    超えて当たりが残るか。運用者の選択 2026-11-19「短い期間の値動きで見る」。docs の 97-11）
 残差で確かめる:     args="--keep-frame --residual"（保存済みの A の out-of-fold で説明しきれない部分を、分足の30列が説明するか。
                     運用者の選択 2026-11-19「残差で確かめる」。docs の 97-9）
 重要度の顔ぶれ:     args="--keep-frame --importance"（A・C・B を同じ行・種で学習し直し、gain の割合の上位を比べる。
@@ -726,6 +728,247 @@ def residual_report(rows: pd.DataFrame, cols: list, n_perm: int = N_PERM, n_perm
 
 
 # --------------------------------------------------------------------------- #
+# 短い期間の値動き（--short）
+# --------------------------------------------------------------------------- #
+#: 当てる値動き（株価は分割調整後。買いは本番と同じ D+1 の寄り。gap だけは買う前の窓）
+SHORT_TARGETS = (("gap", "翌日の寄りの窓（D の終値 → D+1 の寄り）"),
+                 ("r1", "1日目（D+1 の寄り → D+1 の引け）"),
+                 ("r3", "3日目まで（D+1 の寄り → D+3 の引け）"),
+                 ("r5", "5日目まで（D+1 の寄り → D+5 の引け）"))
+#: 日付ごとの相関を取る最少の行数
+MIN_DATE_ROWS = 5
+#: 30列まとめた信号の判定に使う t（4つの値動きを見るので 2.5）
+SHORT_T = 2.5
+#: 30列まとめた信号のリッジの重さ
+SHORT_RIDGE = 10.0
+
+
+def short_returns(keys: pd.DataFrame, data_dir: str) -> pd.DataFrame:
+    """keys（Code, Date）ごとの短い期間の値動き（gap・r1・r3・r5）。日足の並び（取引のあった日）で数える。"""
+    bars = LT.load_bars(data_dir, start=pd.to_datetime(keys["Date"]).min() - pd.Timedelta(days=10))
+    b = bars.sort_values(["Code", "Date"], kind="mergesort").reset_index(drop=True)
+    g = b.groupby("Code", sort=False)
+    o1 = g["AdjO"].shift(-1)
+    out = b[["Code", "Date"]].copy()
+    out["gap"] = o1 / b["AdjC"] - 1.0
+    for h in (1, 3, 5):
+        out[f"r{h}"] = g["AdjC"].shift(-h) / o1 - 1.0
+    k = keys[["Code", "Date"]].copy()
+    k["Date"] = pd.to_datetime(k["Date"])
+    k["Code"] = k["Code"].astype(str)
+    return k.merge(out, on=["Code", "Date"], how="left")
+
+
+def date_scores(v, codes: np.ndarray) -> np.ndarray:
+    """日付ごとの順位を標準正規の分位に直した値（欠測は欠測のまま。その日に1行だけなら 0）。"""
+    from scipy.special import ndtri
+
+    x = pd.Series(np.asarray(v, dtype=float))
+    g = x.groupby(codes)
+    r = g.rank(method="average")
+    n = g.transform("count")
+    return ndtri(((r - 0.5) / n).to_numpy())
+
+
+def date_ic(x, y, codes: np.ndarray, min_rows: int = MIN_DATE_ROWS, control=None) -> dict:
+    """
+    日付ごとの順位相関（日付の中で順位を標準正規に直した値どうしの相関）の平均・SE・t・p（日付を1件として数える）。
+    control を渡すと、x と y からそれぞれ control（同じく日付の中の順位）で説明できる分を引いた残りどうしの相関（偏相関）。
+    """
+    from scipy import stats
+
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    m = np.isfinite(x) & np.isfinite(y)
+    if control is not None:
+        m &= np.isfinite(np.asarray(control, dtype=float))
+    c = codes[m]
+    xs, ys = date_scores(x[m], c), date_scores(y[m], c)
+    if control is not None:
+        zs = date_scores(np.asarray(control, dtype=float)[m], c)
+        zz = float(zs @ zs) or 1.0
+        xs, ys = xs - (xs @ zs) / zz * zs, ys - (ys @ zs) / zz * zs
+    d = pd.DataFrame({"c": c, "x": xs, "y": ys})
+    d["x"] -= d.groupby("c")["x"].transform("mean")
+    d["y"] -= d.groupby("c")["y"].transform("mean")
+    d["xy"], d["xx"], d["yy"] = d["x"] * d["y"], d["x"] ** 2, d["y"] ** 2
+    a = d.groupby("c").agg(n=("x", "size"), xy=("xy", "sum"), xx=("xx", "sum"), yy=("yy", "sum"))
+    a = a[(a["n"] >= min_rows) & (a["xx"] > 0) & (a["yy"] > 0)]
+    ic = (a["xy"] / np.sqrt(a["xx"] * a["yy"])).to_numpy()
+    if len(ic) < 3:
+        return {"ic": float("nan"), "se": float("nan"), "t": float("nan"), "p": float("nan"), "dates": int(len(ic)),
+                "by_date": ic}
+    se = float(ic.std(ddof=1) / np.sqrt(len(ic)))
+    t = float(ic.mean() / se) if se > 0 else float("nan")
+    return {"ic": float(ic.mean()), "se": se, "t": t, "p": float(2 * stats.t.sf(abs(t), len(ic) - 1)),
+            "dates": int(len(ic)), "by_date": ic, "dates_index": a.index.to_numpy()}
+
+
+def short_oof(df: pd.DataFrame, base: list, params: dict, target: np.ndarray, rows_mask: np.ndarray) -> np.ndarray:
+    """
+    今の列（base）で target（日付の中の順位を標準正規に直した値）を当てる LightGBM の回帰の out-of-fold。
+    窓は本番と同じ作り（E41.folds_for のずらし0）。rows_mask の行がテストに入る窓だけ学習する。パラメータは A の探索のもの
+    （+10% の分類で探したものを流用。この目的では探索しない）。
+    """
+    import lightgbm as lgb
+
+    d = pd.to_datetime(df["Date"])
+    pred = np.full(len(df), np.nan)
+    ok = np.isfinite(target)
+    X = df[base].to_numpy(dtype=float)
+    for f in E41.folds_for(df["Date"], 0):
+        te = ((d >= pd.Timestamp(f.test_start)) & (d <= pd.Timestamp(f.test_end))).to_numpy()
+        if not (te & rows_mask).any():
+            continue
+        tr = (d <= pd.Timestamp(f.train_end)).to_numpy() & ok
+        m = lgb.LGBMRegressor(**{**params, "random_state": PROD_SEED})
+        m.fit(X[tr], target[tr])
+        pred[te] = m.predict(X[te])
+    return pred
+
+
+def short_report(rows: pd.DataFrame, cols: list, targets=SHORT_TARGETS, pred_cols: dict | None = None) -> dict:
+    """
+    rows: Date・値動き（targets の列）・列（cols）・今の列の予測（pred_cols[値動き] の列。無ければ偏相関は出さない）。
+    1. 列ごと・値動きごとの日付の中の順位相関（IC。日付を1件として t）。q は全部（列 × 値動き）で BH
+    2. 今の列の予測で説明できる分を引いた偏相関（今の列を超えて当たりが残るか）
+    3. 30列まとめた信号（リッジ）を日付の前半で作って後半で測る（両方向）。偏相関の側は、今の列の予測に30列を足した信号と
+       予測だけの IC の差（日付ごとの差の平均と t）
+    """
+    rows = rows.sort_values(["Date"], kind="mergesort").reset_index(drop=True)
+    codes = pd.factorize(rows["Date"])[0]
+    pred_cols = pred_cols or {}
+    out = {"rows": int(len(rows)), "dates": int(rows["Date"].nunique()), "targets": {}, "columns": {}, "joint": {}}
+    print(f"\n■ 短い期間の値動き: 分足の付いた行 {len(rows):,}・{out['dates']}日（相関は日付ごとに {MIN_DATE_ROWS}行以上の日で取り、"
+          "日付を1件として t を出す。順位相関は日付の中の順位どうし）")
+    for key, title in targets:
+        v = rows[key].to_numpy(dtype=float)
+        q = np.nanquantile(v, [0.05, 0.5, 0.95])
+        rec = {"title": title, "n": int(np.isfinite(v).sum()), "q05": float(q[0]), "q50": float(q[1]), "q95": float(q[2])}
+        if key in pred_cols:
+            r = date_ic(rows[pred_cols[key]].to_numpy(dtype=float), v, codes)
+            rec["pred_ic"] = {k: r[k] for k in ("ic", "se", "t", "dates")}
+        out["targets"][key] = rec
+        print(f"  {key}: {title}。{rec['n']:,}行・中央 {q[1] * 100:+.2f}%（5% {q[0] * 100:+.2f}% / 95% {q[2] * 100:+.2f}%）"
+              + (f"・今の373列の予測の IC {rec['pred_ic']['ic']:+.4f}（t {rec['pred_ic']['t']:+.2f}・{rec['pred_ic']['dates']}日）"
+                 if "pred_ic" in rec else ""))
+
+    # 1・2. 列ごと
+    raw, part = {}, {}
+    for c in cols:
+        for key, _ in targets:
+            raw[(c, key)] = date_ic(rows[c].to_numpy(dtype=float), rows[key].to_numpy(dtype=float), codes)
+            if key in pred_cols:
+                part[(c, key)] = date_ic(rows[c].to_numpy(dtype=float), rows[key].to_numpy(dtype=float), codes,
+                                         control=rows[pred_cols[key]].to_numpy(dtype=float))
+    for name, dct in (("raw", raw), ("partial", part)):
+        if not dct:
+            continue
+        ks = list(dct)
+        qs = bh_qvalues([dct[k]["p"] if np.isfinite(dct[k]["p"]) else 1.0 for k in ks])
+        for k, qq in zip(ks, qs):
+            dct[k]["q"] = float(qq)
+    for name, dct, title in (("raw", raw, "1. 列ごとの IC（分足の列だけ。セルは IC と t。* は q < 0.10）"),
+                             ("partial", part, "2. 今の373列の予測を引いた偏相関（今の列を超えて残るか。セルは IC と t。* は q < 0.10）")):
+        if not dct:
+            continue
+        print(f"  {title}")
+        print(f"    {'列':<34}" + "".join(f"{key:>16}" for key, _ in targets))
+        order = sorted(cols, key=lambda c: -max(abs(dct[(c, k)]["t"]) if np.isfinite(dct[(c, k)]["t"]) else 0
+                                                  for k, _ in targets))
+        for c in order:
+            cells = []
+            for key, _ in targets:
+                r = dct[(c, key)]
+                star = "*" if r.get("q", 1.0) < BH_Q else " "
+                cells.append(f"{r['ic']:+.3f}({r['t']:+.1f}){star}" if np.isfinite(r["ic"]) else "—")
+            print(f"    {c:<34}" + "".join(f"{x:>16}" for x in cells))
+        hits = [(c, k) for (c, k) in dct if dct[(c, k)].get("q", 1.0) < BH_Q]
+        print(f"    q < {BH_Q}: {len(hits)}組" + (("（" + " / ".join(f"{c}×{k}" for c, k in hits) + "）") if hits else ""))
+        for (c, k), r in dct.items():
+            out["columns"].setdefault(c, {}).setdefault(name, {})[k] = {kk: r[kk] for kk in ("ic", "se", "t", "p", "q", "dates")}
+
+    # 3. 30列まとめた信号
+    X = np.column_stack([np.nan_to_num(date_scores(rows[c].to_numpy(dtype=float), codes)) for c in cols])
+    dates = np.sort(rows["Date"].unique())
+    cut = dates[len(dates) // 2]
+    first = (rows["Date"] < cut).to_numpy()
+    print(f"  3. {len(cols)}列まとめた信号（リッジ・重さ {SHORT_RIDGE:g}）。日付で前半・後半に分け、片方で作ってもう片方で測る"
+          f"（分かれ目 {pd.Timestamp(cut).date()}）")
+    for key, _ in targets:
+        y = date_scores(rows[key].to_numpy(dtype=float), codes)
+        has_pred = key in pred_cols
+        P = date_scores(rows[pred_cols[key]].to_numpy(dtype=float), codes) if has_pred else None
+        res = {}
+        for name, tr in (("前半 → 後半", first), ("後半 → 前半", ~first)):
+            te = ~tr
+            ok_tr = tr & np.isfinite(y)
+            beta = np.linalg.solve(X[ok_tr].T @ X[ok_tr] + SHORT_RIDGE * np.eye(X.shape[1]), X[ok_tr].T @ y[ok_tr])
+            sig = X @ beta
+            r_raw = date_ic(np.where(te, sig, np.nan), np.where(te, rows[key].to_numpy(dtype=float), np.nan), codes)
+            rec = {"raw": {k: r_raw[k] for k in ("ic", "se", "t", "dates")}}
+            if has_pred:
+                ok2 = ok_tr & np.isfinite(P)
+                Z = np.column_stack([P, X])
+                b2 = np.linalg.solve(Z[ok2].T @ Z[ok2] + np.diag([0.0] + [SHORT_RIDGE] * X.shape[1]), Z[ok2].T @ y[ok2])
+                sig2 = np.column_stack([np.nan_to_num(P), X]) @ b2
+                yy = np.where(te & np.isfinite(P), rows[key].to_numpy(dtype=float), np.nan)
+                a = date_ic(np.where(te, rows[pred_cols[key]].to_numpy(dtype=float), np.nan), yy, codes)
+                b = date_ic(np.where(te & np.isfinite(P), sig2, np.nan), yy, codes)
+                both = np.intersect1d(a.get("dates_index", []), b.get("dates_index", []))
+                da = pd.Series(a["by_date"], index=a.get("dates_index", [])).reindex(both)
+                db = pd.Series(b["by_date"], index=b.get("dates_index", [])).reindex(both)
+                diff = (db - da).to_numpy()
+                se = float(diff.std(ddof=1) / np.sqrt(len(diff))) if len(diff) > 2 else float("nan")
+                rec["added"] = {"ic_pred": a["ic"], "ic_pred_plus": b["ic"], "diff": float(diff.mean()) if len(diff) else float("nan"),
+                                "se": se, "t": float(diff.mean() / se) if se and np.isfinite(se) and se > 0 else float("nan"),
+                                "dates": int(len(diff))}
+            res[name] = rec
+        out["joint"][key] = res
+        line = f"    {key}: 分足だけ " + " / ".join(f"{n} IC {r['raw']['ic']:+.4f}（t {r['raw']['t']:+.2f}）" for n, r in res.items())
+        if has_pred:
+            line += "｜今の列に足した差 " + " / ".join(
+                f"{n} {r['added']['ic_pred']:+.4f} → {r['added']['ic_pred_plus']:+.4f}（差 {r['added']['diff']:+.4f}・t {r['added']['t']:+.2f}）"
+                for n, r in res.items())
+        print(line)
+    works = [k for k, _ in targets if all(r["raw"]["t"] >= SHORT_T for r in out["joint"][k].values())]
+    beyond = [k for k, _ in targets if k in pred_cols and all(r["added"]["t"] >= SHORT_T for r in out["joint"][k].values())]
+    reading = ("分足の列は短い期間の値動きに効く（" + "・".join(works) + "）" if works else "分足の列だけで短い期間の値動きを当てるとは言えない")
+    reading += "。" + ("今の列を超えて効く（" + "・".join(beyond) + "）" if beyond else "今の列を超えて効くとは言えない")
+    print(f"  読み（回す前に決めたもの。30列まとめた信号の IC が両方向で t ≥ {SHORT_T} なら「効く」、今の列の予測に足した差が"
+          f"両方向で t ≥ {SHORT_T} なら「今の列を超えて効く」）: {reading}")
+    out["reading"] = {"works": works, "beyond": beyond, "text": reading}
+    return out
+
+
+def short_rows(df: pd.DataFrame, base: list, params_a: dict) -> tuple:
+    """分足の付いた行に、短い期間の値動きと、今の列で当てた予測（値動きごと）を付けた表。"""
+    ret = short_returns(df[["Code", "Date"]], lab.DATA_DIR)
+    if not (ret["Code"].to_numpy() == df["Code"].astype(str).to_numpy()).all():
+        raise SystemExit("短い期間の値動きを付けたら行の並びが変わった")
+    full = df.reset_index(drop=True).copy()
+    for key, _ in SHORT_TARGETS:
+        full[key] = ret[key].to_numpy()
+    check = None
+    if "entry_gap" in full.columns:
+        both = full[["gap", "entry_gap"]].dropna()
+        check = {"rows": int(len(both)), "max_abs_diff": float((both["gap"] - both["entry_gap"]).abs().max()) if len(both) else None}
+        diff = "—" if check["max_abs_diff"] is None else f"{check['max_abs_diff']:.2e}"
+        print(f"  確かめ: gap と学習データの entry_gap の差の最大 {diff}（{check['rows']:,}行）")
+    codes_all = pd.factorize(full["Date"])[0]
+    att = attached_mask(full).to_numpy()
+    pred_cols = {}
+    t0 = time.time()
+    for key, _ in SHORT_TARGETS:
+        target = date_scores(full[key].to_numpy(dtype=float), codes_all)
+        full[f"pred_{key}"] = short_oof(full, base, params_a, target, att)
+        pred_cols[key] = f"pred_{key}"
+    log(f"[short] 今の373列の回帰（値動き {len(SHORT_TARGETS)}つ・本番と同じ窓）/ {time.time() - t0:.0f}秒")
+    rows = full[att].reset_index(drop=True)
+    return rows, pred_cols, check
+
+
+# --------------------------------------------------------------------------- #
 # 探索（週次の再学習と同じ関数・条件）
 # --------------------------------------------------------------------------- #
 def load_tuned(arm: str, cols: list, cutoff, n_trials: int, stamp: dict):
@@ -1034,6 +1277,8 @@ def main(argv=None) -> int:
                     help="保存済みの表を、分足の取得記録が変わっていてもそのまま使う（腕を足す回で前の回と同じ表で比べる）")
     ap.add_argument("--budget-min", type=float, default=290.0, help="この分数を過ぎたら新しい計算を始めない（0 で無制限）")
     ap.add_argument("--dry", action="store_true", help="列の付き方だけ出して終わる")
+    ap.add_argument("--short", action="store_true",
+                    help="分足の30列が、高値更新の翌日から数営業日の値動きを当てるか（今の列の予測を超えて残るか）を調べて終わる")
     ap.add_argument("--residual", action="store_true",
                     help="保存済みの A の out-of-fold で説明しきれない部分を、分足の30列が説明するかを調べて終わる")
     ap.add_argument("--importance", action="store_true",
@@ -1085,6 +1330,17 @@ def main(argv=None) -> int:
           f"{df['Date'].max().date()}）。探索の期間（〜{cutoff.date()}）では {(df['Date'] <= cutoff).sum():,}行・"
           f"うち分足の付いた行 {int((att & (df['Date'] <= cutoff)).sum()):,}（全体では {int(att.sum()):,}）")
     if args.dry:
+        return 0
+    if args.short:
+        rec = load_tuned("A", colsets["base"], cutoff, args.n_trials, stamp)
+        if rec is None:
+            raise SystemExit("A の保存済みの探索の結果が無い（--short は探索し直さない。--keep-frame で前の回の表を使う）")
+        rows, pred_cols, check = short_rows(df, base, rec["params"])
+        out = short_report(rows, list(NEW_COLS), pred_cols=pred_cols)
+        out["gap_check"] = check
+        with open(path("short.json"), "w", encoding="utf-8") as fh:
+            json.dump(out, fh, ensure_ascii=False, indent=1, default=lambda o: o.tolist() if hasattr(o, "tolist") else str(o))
+        log(f"記録: {path('short.json')}（公開しない）")
         return 0
     if args.residual:
         rec = load_tuned("A", colsets["base"], cutoff, args.n_trials, stamp)
