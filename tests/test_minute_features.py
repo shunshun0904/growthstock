@@ -96,6 +96,18 @@ class MinuteFeaturesTest(unittest.TestCase):
         early, _ = self.build([("123A0", "2025-11-14"), ("99990", "2025-11-14")], cut)
         pd.testing.assert_frame_equal(full, early)
 
+    def test_status_columns_explain_each_window(self):
+        rows = [("123A0", "2025-11-18"), ("77770", "2025-11-18"), ("123A0", "2025-09-30"), ("123A0", "2025-10-02")]
+        keys = pd.DataFrame(rows, columns=["Code", "Date"])
+        out, _ = MF.build(keys, str(self.root / "minute"), str(self.root / "raw"), with_status=True)
+        self.assertEqual(list(out[MF.STATUS_COLUMNS].iloc[0]), ["ok", "ok", "ok"])
+        self.assertEqual(out.loc[1, "vp_minute_status_1d"], "daily_missing")       # 日足の無い銘柄
+        self.assertEqual(list(out[MF.STATUS_COLUMNS].iloc[2]), [MF.BEFORE_MINUTE] * 3)
+        self.assertEqual(list(out[MF.STATUS_COLUMNS].iloc[3]), ["ok", "calendar_history_missing", "calendar_history_missing"])
+        plain, _ = MF.build(keys, str(self.root / "minute"), str(self.root / "raw"))
+        self.assertFalse(set(MF.STATUS_COLUMNS) & set(plain.columns))              # 既定では付けない
+        pd.testing.assert_frame_equal(plain, out.drop(columns=MF.STATUS_COLUMNS))
+
     def test_store_without_days_leaves_everything_missing(self):
         empty = Path(self.temp.name) / "empty"
         empty.mkdir(exist_ok=True)

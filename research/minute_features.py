@@ -75,9 +75,16 @@ def trading_days(bars_paths: Iterable[str], start: str) -> List[str]:
     return sorted(days)
 
 
-def build(keys: pd.DataFrame, minute_dir: str, data_dir: str) -> Tuple[pd.DataFrame, dict]:
+STATUS_COLUMNS = [f"vp_minute_status_{n}d" for n in WINDOWS]
+#: 分足の始まりより前の行の状態（集計しない）
+BEFORE_MINUTE = "before_minute"
+
+
+def build(keys: pd.DataFrame, minute_dir: str, data_dir: str,
+          with_status: bool = False) -> Tuple[pd.DataFrame, dict]:
     """
     keys（Code, Date の行）に33列を付けた表（keys と同じ行・同じ並び）と、件数だけの記録を返す。
+    with_status なら、期間ごとの集計の状態（volume_profile.STATUSES か BEFORE_MINUTE）の列も付ける（EDA 用）。
 
     minute_dir: minute_manifest.json と minute_YYYYMM.parquet の置き場（Release data-minute を落とした場所）
     data_dir:   bars_YYYY.parquet（Release data-raw）の置き場
@@ -87,6 +94,9 @@ def build(keys: pd.DataFrame, minute_dir: str, data_dir: str) -> Tuple[pd.DataFr
     out = pd.DataFrame({"Code": keys["Code"].to_numpy(), "Date": pd.to_datetime(keys["Date"]).to_numpy()})
     for col in COLUMNS:
         out[col] = np.nan
+    if with_status:
+        for col in STATUS_COLUMNS:
+            out[col] = BEFORE_MINUTE
     report = {"rows": int(len(out)), "minute_days": len(stored),
               "minute_from": stored[0] if stored else None, "minute_to": stored[-1] if stored else None}
     if not stored:
@@ -131,6 +141,8 @@ def build(keys: pd.DataFrame, minute_dir: str, data_dir: str) -> Tuple[pd.DataFr
         for n in WINDOWS:
             result = VP.window_profiles(VP.lookback(sessions, day, n), n, daily, series)["minute"]
             status[f"{n}d/{result['status']}"] += 1
+            if with_status:
+                out.iat[i, out.columns.get_loc(f"vp_minute_status_{n}d")] = result["status"]
             if result["status"] != "ok" or close is None:
                 continue
             for metric, value in values(result, close).items():
