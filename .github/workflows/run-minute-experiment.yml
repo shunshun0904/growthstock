@@ -1,0 +1,137 @@
+name: Run Minute Experiment
+
+# 分足の置き場（下書きの Release data-minute）を使う実験を Actions で回す（実験132〜。research/exp/ の中で
+# research/minute_features.py を使うものだけ）。手順は Run Experiment（run-experiment.yml）と同じで、分足を
+# research/_data/minute/ に落とす段が増える。
+#
+# 下書きの Release は書き込み権限のある鍵でしか見えないので、このワークフローだけ contents: write にする
+# （Run Experiment は読み取りのまま）。書き込むものは無い（git にも Release にも何も上げない）。
+#
+# 分足は J-Quants のアドオンのデータ（私的利用の範囲）。実験のログ（公開）には件数・割合・日付・精度だけを出し、
+# 成果物はログだけにする（Run Experiment と同じ）。途中結果（分足から作った列の付いた表・探索・out-of-fold）は
+# actions/cache で次の回に引き継ぐ。
+on:
+  workflow_dispatch:
+    inputs:
+      exp:
+        description: '実験スクリプト名（research/exp/ の中。分足を使うもの。例: e132_minute_vp_ab.py）'
+        required: true
+      args:
+        description: 'スクリプトに渡す引数（省略可）'
+        required: false
+        default: ''
+  # 実験132（2026-11-19）は既定ブランチに入る前に作業ブランチから回すため、要求ファイルの push でも起動していた。
+  # 実験が終わったので、その起動と要求ファイルは外した（以降は workflow_dispatch だけ）
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: write
+
+concurrency:
+  group: run-minute-experiment
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r research/requirements.txt
+
+      # **入力をそのままシェルに展開しない。** env で渡し、実在して分足を使う実験だけを受け付ける
+      - name: Resolve experiment
+        id: exp
+        env:
+          EXP_IN: ${{ inputs.exp }}
+          ARGS_IN: ${{ inputs.args }}
+        run: |
+          if ! [[ "$EXP_IN" =~ ^[a-z0-9_]+\.py$ ]] || [ ! -f "research/exp/$EXP_IN" ]; then
+            echo "そんな実験はありません: $EXP_IN"; exit 1
+          fi
+          if ! grep -q "minute_features" "research/exp/$EXP_IN"; then
+            echo "分足を使う実験ではありません（research/minute_features.py を使うものだけ）: $EXP_IN"; exit 1
+          fi
+          echo "name=$EXP_IN" >> "$GITHUB_OUTPUT"
+          { echo "args<<EOF_ARGS"; echo "$ARGS_IN"; echo "EOF_ARGS"; } >> "$GITHUB_OUTPUT"
+          echo "実験: research/exp/$EXP_IN / 引数: ${ARGS_IN:-（なし）}"
+
+      - name: Download raw data
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p research/_data
+          bash scripts/gh_release_download.sh data-raw research/_data
+          bash scripts/gh_release_download.sh data-jsf research/_data 'jsf_*' 'backup_jsf_*'
+          ls -lh research/_data | tail -5
+          echo "ファイル数: $(ls research/_data | wc -l)"
+
+      # 分足の置き場（下書き）。取得記録と月ごとのファイル（2年で 約2.6GB）。
+      # 毎晩の Update Minute Bars が今月のファイルを差し替えている最中だと、取り出しの途中で一覧と大きさが合わなくなる
+      # （2026-11-19 run 44509967214。差し替えは1分ほど）。失敗したら90秒待って一覧から取り直す（3回まで）
+      - name: Download minute bars
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p research/_data/minute
+          for attempt in 1 2 3; do
+            if bash scripts/gh_release_download.sh data-minute research/_data/minute 'minute_*'; then
+              break
+            fi
+            if [ "$attempt" = 3 ]; then
+              echo "分足を取り出せなかった（3回）"; exit 1
+            fi
+            echo "分足の取り出しに失敗（毎晩の取得がファイルを差し替えている途中かもしれない）。90秒待って一覧から取り直す"
+            sleep 90
+          done
+          if [ ! -f research/_data/minute/minute_manifest.json ]; then
+            echo "分足の取得記録（minute_manifest.json）が無い"; exit 1
+          fi
+          echo "分足: $(ls research/_data/minute/minute_2*.parquet | wc -l) ファイル・$(du -sh research/_data/minute | cut -f1)"
+
+      - name: Restore study database
+        uses: actions/cache@v4
+        with:
+          path: research/_data/oof
+          key: exp-oof-${{ steps.exp.outputs.name }}-${{ github.run_id }}
+          restore-keys: |
+            exp-oof-${{ steps.exp.outputs.name }}-
+
+      - name: Build dataset
+        run: |
+          mkdir -p research/_data/oof
+          python3 research/build_dataset.py 2>&1 | tail -30
+
+      - name: Run experiment
+        env:
+          EXP: ${{ steps.exp.outputs.name }}
+          EXP_ARGS: ${{ steps.exp.outputs.args }}
+        run: |
+          read -r -a ARGV <<< "$EXP_ARGS"
+          python3 "research/exp/$EXP" "${ARGV[@]}" 2>&1 | tee exp.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## ${{ steps.exp.outputs.name }}"
+            echo '```'
+            tail -200 exp.log 2>/dev/null || echo '(出力なし)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # 成果物はログだけ（Run Experiment と同じ。分足から作った値は上げない）
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: exp-${{ steps.exp.outputs.name }}
+          path: exp.log
+          retention-days: 30
