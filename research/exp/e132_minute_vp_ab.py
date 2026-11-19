@@ -43,6 +43,9 @@ out-of-fold: 本番と同じ作り（36/6/6か月・エンバーゴ20営業日�
 列の付き方だけ見る: args="--dry"
 試運転:             args="--tag e132smoke --n-trials 2 --shifts 0"
 C を足す回:         args="--keep-frame"（A・B は保存済みの探索・out-of-fold を読む。C の out-of-fold だけ計算する）
+重要度の顔ぶれ:     args="--keep-frame --importance"（A・C・B を同じ行・種で学習し直し、gain の割合の上位を比べる。
+                    運用者の依頼 2026-11-19「腕Cにおいて、重要度の高い特徴量の中に今回追加した特徴量は含まれてますか？
+                    重要度の高い上位の特徴量の顔ぶれがどれくらい変わったのか見たいです」）
 
 表（33列を付けた frame）は1回目に作って research/_data/oof/<tag>_* に置き、以降の回は actions/cache で引き継いだそれを使う
 （分足の取得記録・作りの台本が変わったら作り直す）。--budget-min（既定 290分）を過ぎたら新しい計算を始めずに終わる
@@ -337,9 +340,161 @@ def gain_report(df: pd.DataFrame, base: list, params: dict, cutoff, arm: str = "
 
 
 # --------------------------------------------------------------------------- #
+# 重要度の顔ぶれ（--importance）
+# --------------------------------------------------------------------------- #
+#: 顔ぶれを比べる上位の列数
+TOP_NS = (10, 20, 30, 50)
+#: 表に並べる上位の列数
+SHOW_TOP = 20
+
+
+def importance_shares(df: pd.DataFrame, cols: list, params: dict, seed: int):
+    """df（ラベルのある行）で1本学習し、列ごとの gain と split の割合（合計1）を返す。学習器は gain_report と同じ。"""
+    import lightgbm as lgb
+
+    y = df["label"].to_numpy(dtype=int)
+    m = lgb.LGBMClassifier(**{**params, "random_state": seed}, scale_pos_weight=tuning.scale_pos_weight(y))
+    m.fit(df[cols].to_numpy(dtype=float), y)
+    out = []
+    for kind in ("gain", "split"):
+        v = pd.Series(m.booster_.feature_importance(importance_type=kind), index=cols, dtype=float)
+        out.append(v / (float(v.sum()) or 1.0))
+    return out[0], out[1]
+
+
+def top_cols(share: pd.Series, n: int) -> list:
+    """割合の大きい順の上位 n 列（同じ値は列名の順）。"""
+    order = sorted(share.index, key=lambda c: (-float(share[c]), c))
+    return order[:n]
+
+
+def ranks_of(share: pd.Series) -> pd.Series:
+    """割合の大きい順の順位（1 が最上位。同じ値は同じ順位）。"""
+    return share.rank(ascending=False, method="min").astype(int)
+
+
+def overlap(a: pd.Series, b: pd.Series, n: int) -> int:
+    return len(set(top_cols(a, n)) & set(top_cols(b, n)))
+
+
+def importance_report(df: pd.DataFrame, base: list, params_of: dict, cutoff, seeds=None) -> dict:
+    """
+    A（373列・A のパラメータ）・C（403列・A のパラメータ）・B（403列・B のパラメータ）を、同じ行と種で学習し直して
+    gain の割合を比べる。期間は探索の期間（〜cutoff）と全期間（ラベルのある全行。本番の全期間の学習に近い）。
+
+    - 分足の30列が上位に入るか（割合・いちばん上の順位・上位 20/50/100 に入る列の数）
+    - 上位 N 列の顔ぶれの重なり（A と C）。偶然の入れ替わりの目安として、同じ腕で種だけ変えたときの重なりも出す
+      （列の抜き取り colsample があるので、種や列の数が変わるだけでも木は変わる）
+    - 既存の373列の割合の順位相関（A と C）と、同じ腕の種どうしの順位相関
+    - 種3つの平均の割合で並べた上位 SHOW_TOP 列（A・C の順位を並べる）
+    """
+    seeds = tuple(seeds or SEEDS)
+    new = list(NEW_COLS)
+    groups = F.column_groups()
+    arms = {"A": (list(base), params_of["A"]), "C": (list(base) + new, params_of["A"])}
+    if params_of.get("B") is not None:
+        arms["B"] = (list(base) + new, params_of["B"])
+    periods = (("tuning", f"探索の期間（〜{pd.Timestamp(cutoff).date()}）", df[df["Date"] <= cutoff]),
+               ("all", f"全期間（〜{df['Date'].max().date()}。本番の全期間の学習に近い）", df))
+    out = {"seeds": list(seeds), "periods": {}}
+    for key, title, sub in periods:
+        sub = sub[sub["label"].notna()]
+        att = attached_mask(sub)
+        print(f"\n■ 重要度（gain の割合）: {title} {len(sub):,}行・うち分足の付いた行 {int(att.sum()):,}"
+              f"（{att.mean() * 100:.0f}%）・種 {list(seeds)}。A・C は A のパラメータ、B は B のパラメータ")
+        gain, split = {}, {}
+        for arm, (cols, prm) in arms.items():
+            for sd in seeds:
+                gain[(arm, sd)], split[(arm, sd)] = importance_shares(sub, cols, prm, sd)
+        mean = {arm: pd.concat([gain[(arm, sd)] for sd in seeds], axis=1).mean(axis=1) for arm in arms}
+        rank = {arm: ranks_of(mean[arm]) for arm in arms}
+        rec = {"rows": int(len(sub)), "minute_rows": int(att.sum()), "arms": {}}
+
+        # 1. 分足の30列は上位に入るか
+        print("  1. 分足の30列（種3つの平均の割合で順位を付ける。括弧は種ごとの値の幅）")
+        for arm in [a for a in ("C", "B") if a in arms]:
+            per_seed = [float(gain[(arm, sd)][new].sum()) for sd in seeds]
+            per_seed_best = [int(ranks_of(gain[(arm, sd)])[new].min()) for sd in seeds]
+            sp_share = float(np.mean([split[(arm, sd)][new].sum() for sd in seeds]))
+            r = rank[arm][new]
+            best = r.sort_values(kind="mergesort").index[0]
+            cnt = {n: int((r <= n).sum()) for n in (20, 50, 100)}
+            print(f"    {arm}: gain の割合 {np.mean(per_seed) * 100:.2f}%（{min(per_seed) * 100:.2f}〜{max(per_seed) * 100:.2f}%）・"
+                  f"split の割合 {sp_share * 100:.2f}%・いちばん上 {best} {int(r[best])}位 / {len(arms[arm][0])}列"
+                  f"（種ごと {'・'.join(str(b) for b in per_seed_best)}位）・上位20に {cnt[20]}列・50に {cnt[50]}列・"
+                  f"100に {cnt[100]}列")
+            rec["arms"][arm] = {"minute_gain_share": float(np.mean(per_seed)), "minute_gain_share_by_seed": per_seed,
+                                "minute_split_share": sp_share, "best_col": best, "best_rank": int(r[best]),
+                                "best_rank_by_seed": per_seed_best, "in_top": {str(n): v for n, v in cnt.items()},
+                                "minute_ranks": {c: int(r[c]) for c in new}}
+
+        # 2. 上位 N 列の顔ぶれの重なり
+        print("  2. 上位 N 列の顔ぶれの重なり（同じ列の数 / N）")
+        print(f"    {'':<34}" + "".join(f"{'上位' + str(n):>8}" for n in TOP_NS))
+        lines = [("A と C（種3つの平均で並べた順位）", [overlap(mean["A"], mean["C"], n) for n in TOP_NS])]
+        same = [[overlap(gain[("A", sd)], gain[("C", sd)], n) for sd in seeds] for n in TOP_NS]
+        lines.append(("A と C（同じ種どうし・3組の平均）", [float(np.mean(v)) for v in same]))
+        pairs = [(seeds[i], seeds[j]) for i in range(len(seeds)) for j in range(i + 1, len(seeds))]
+        for arm in ("A", "C"):
+            v = [float(np.mean([overlap(gain[(arm, s1)], gain[(arm, s2)], n) for s1, s2 in pairs])) for n in TOP_NS]
+            lines.append((f"{arm} の種どうし（{len(pairs)}組の平均。偶然の目安）", v))
+        if "B" in arms:
+            lines.append(("A と B（種3つの平均で並べた順位）", [overlap(mean["A"], mean["B"], n) for n in TOP_NS]))
+        for name, vals in lines:
+            print(f"    {name:<34}" + "".join(f"{v:>6.1f}/{n:<2}" if isinstance(v, float) else f"{v:>6}/{n:<2}"
+                                             for v, n in zip(vals, TOP_NS)))
+        rec["overlap"] = {name: {str(n): v for n, v in zip(TOP_NS, vals)} for name, vals in lines}
+
+        # 3. 既存の373列の順位相関
+        b = list(base)
+        rho_ac = float(mean["A"][b].corr(mean["C"][b], method="spearman"))
+        rho_same = float(np.mean([gain[("A", sd)][b].corr(gain[("C", sd)][b], method="spearman") for sd in seeds]))
+        rho_seed = {arm: float(np.mean([gain[(arm, s1)][b].corr(gain[(arm, s2)][b], method="spearman")
+                                        for s1, s2 in pairs])) for arm in ("A", "C")}
+        print(f"  3. 既存の{len(b)}列の gain の割合の順位相関（スピアマン）: A と C（平均どうし）{rho_ac:.3f}・"
+              f"A と C（同じ種どうし）{rho_same:.3f}・A の種どうし {rho_seed['A']:.3f}・C の種どうし {rho_seed['C']:.3f}")
+        rec["spearman"] = {"A_C_mean": rho_ac, "A_C_same_seed": rho_same, "A_seeds": rho_seed["A"],
+                           "C_seeds": rho_seed["C"]}
+
+        # 4. 上位の列の表
+        print(f"  4. 上位{SHOW_TOP}列（種3つの平均の gain の割合。順位の「→」は A → C）")
+        print(f"    {'順位':>4}  {'A の上位':<34}{'割合':>7}{'C での順位':>9}   {'C の上位':<34}{'割合':>7}{'A での順位':>9}")
+        ta, tc = top_cols(mean["A"], SHOW_TOP), top_cols(mean["C"], SHOW_TOP)
+        for i in range(SHOW_TOP):
+            ca, cc = ta[i], tc[i]
+            ra_c = f"{int(rank['C'][ca])}位"
+            rc_a = f"{int(rank['A'][cc])}位" if cc in rank["A"].index else "（新）"
+            print(f"    {i + 1:>4}  {ca:<34}{mean['A'][ca] * 100:>6.2f}%{ra_c:>9}   {cc:<34}{mean['C'][cc] * 100:>6.2f}%"
+                  f"{rc_a:>9}")
+        left = [c for c in ta if c not in tc]
+        came = [c for c in tc if c not in ta]
+        print(f"    上位{SHOW_TOP}から外れた列: " + (" / ".join(f"{c}（{int(rank['A'][c])} → {int(rank['C'][c])}位）"
+                                                    for c in left) or "なし"))
+        print(f"    上位{SHOW_TOP}に入った列: " + (" / ".join(f"{c}（{int(rank['A'][c]) if c in rank['A'].index else '新'} → "
+                                                    f"{int(rank['C'][c])}位）" for c in came) or "なし"))
+        grp = {arm: mean[arm].groupby(lambda c: groups.get(c) or ("vp_minute" if c in new else "?")).sum()
+               for arm in ("A", "C")}
+        topg = grp["A"].sort_values(ascending=False).index[:8]
+        print("    グループごとの割合（A → C。上位8グループ）: "
+              + " / ".join(f"{g} {grp['A'][g] * 100:.1f} → {grp['C'].get(g, 0.0) * 100:.1f}%" for g in topg)
+              + f" / vp_minute 0.0 → {grp['C'].get('vp_minute', 0.0) * 100:.1f}%")
+        rec["top"] = {arm: [{"col": c, "group": groups.get(c) or ("vp_minute" if c in new else "?"),
+                             "share": float(mean[arm][c]), "rank": int(rank[arm][c])}
+                            for c in top_cols(mean[arm], max(TOP_NS))] for arm in arms}
+        rec["ranks_in_other"] = {"A_top_in_C": {c: int(rank["C"][c]) for c in ta},
+                                 "C_top_in_A": {c: (int(rank["A"][c]) if c in rank["A"].index else None) for c in tc}}
+        rec["groups"] = {arm: {g: float(v) for g, v in grp[arm].items()} for arm in grp}
+        out["periods"][key] = rec
+    with open(path("importance.json"), "w", encoding="utf-8") as fh:
+        json.dump(out, fh, ensure_ascii=False, indent=1, default=str)
+    return out
+
+
+# --------------------------------------------------------------------------- #
 # 探索（週次の再学習と同じ関数・条件）
 # --------------------------------------------------------------------------- #
-def tune(arm: str, frame: pd.DataFrame, cols: list, cutoff, n_trials: int, stamp: dict):
+def load_tuned(arm: str, cols: list, cutoff, n_trials: int, stamp: dict):
+    """保存済みの探索の結果（試行の数・探索の期間・表の版・列の指紋がそろうものだけ）。無ければ None。"""
     p = path(f"params_{arm}.json")
     if os.path.exists(p):
         with open(p, encoding="utf-8") as fh:
@@ -347,6 +502,14 @@ def tune(arm: str, frame: pd.DataFrame, cols: list, cutoff, n_trials: int, stamp
         if (rec.get("_n_trials") == n_trials and rec.get("_cutoff") == str(cutoff.date())
                 and rec.get("_data") == stamp["built_utc"] and rec.get("_sig") == F.signature(cols)):
             return rec
+    return None
+
+
+def tune(arm: str, frame: pd.DataFrame, cols: list, cutoff, n_trials: int, stamp: dict):
+    p = path(f"params_{arm}.json")
+    rec = load_tuned(arm, cols, cutoff, n_trials, stamp)
+    if rec is not None:
+        return rec
     if not time_left():
         return None
     sub = frame[(frame["Date"] <= cutoff) & frame["label"].notna()]
@@ -636,6 +799,8 @@ def main(argv=None) -> int:
                     help="保存済みの表を、分足の取得記録が変わっていてもそのまま使う（腕を足す回で前の回と同じ表で比べる）")
     ap.add_argument("--budget-min", type=float, default=290.0, help="この分数を過ぎたら新しい計算を始めない（0 で無制限）")
     ap.add_argument("--dry", action="store_true", help="列の付き方だけ出して終わる")
+    ap.add_argument("--importance", action="store_true",
+                    help="保存済みの探索のパラメータで A・C・B を学習し直し、重要度（gain の割合）の上位の顔ぶれを比べて終わる")
     args = ap.parse_args(argv)
     TAG = args.tag
     RUN = TAG
@@ -683,6 +848,17 @@ def main(argv=None) -> int:
           f"{df['Date'].max().date()}）。探索の期間（〜{cutoff.date()}）では {(df['Date'] <= cutoff).sum():,}行・"
           f"うち分足の付いた行 {int((att & (df['Date'] <= cutoff)).sum()):,}（全体では {int(att.sum()):,}）")
     if args.dry:
+        return 0
+    if args.importance:
+        recs = {}
+        for arm, cs in (("A", "base"), ("B", "new")):
+            rec = load_tuned(arm, colsets[cs], cutoff, args.n_trials, stamp)
+            if rec is None:
+                raise SystemExit(f"{arm} の保存済みの探索の結果が無い（--importance は探索し直さない。--keep-frame で前の回の表を使う）")
+            recs[arm] = rec["params"]
+        print(f"\n重要度の顔ぶれ（探索した A・B のパラメータ。A {short(recs['A'])} / B {short(recs['B'])}）")
+        importance_report(df, base, recs, cutoff)
+        log(f"記録: {path('importance.json')}（公開しない）")
         return 0
     frames = {"base": df, "new": df}
     t0 = time.time()

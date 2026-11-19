@@ -7,6 +7,8 @@
 - 腕は A・B・C（運用者の選択「AとBだけ」の後、結果を見て「C の腕で列の効果を切り分ける」）。A は必ず含める。C は A の
   パラメータのまま30列を足す（探索しない）。訓練に分足の無い窓では C は A とちょうど同じ
 - --keep-frame: 保存済みの表を、分足の取得記録が変わっていてもそのまま使う（前の回の A・B と同じ表で C を比べる）
+- --importance: 保存済みの探索のパラメータで A・C・B を同じ行・種で学習し直し、gain の割合の上位の顔ぶれを比べる
+  （分足の30列の割合と順位・上位 N 列の重なりと種だけ変えたときの重なり・順位相関・上位の表）。探索し直さない
 - ラベル: データセットの label が本番の +10% の定義（label_specs）と全行一致しなければ止める
 - 付けた33列の確かめ: 割合が 0〜1 の外・無限・終値との差が −100% 以下・期間の中で欠けのある行・時間帯の割合の合計が1でない行があれば止める
 - 評価の行: 全行と、分足の付いた行だけ（30列のどれかがある行）。窓は行が100件以上で正例・負例がそろうもの
@@ -258,6 +260,62 @@ class TestRunAndReport(unittest.TestCase):
             self.assertEqual(int(r["train_minute"]), want)
         # A と B は列が違うので out-of-fold も違う
         self.assertGreater(np.abs(res["prod"]["A"]["score"].to_numpy() - res["prod"]["B"]["score"].to_numpy()).max(), 1e-9)
+
+    def test_importance_report(self):
+        df = make_frame(4, minute_from="2020-03-02")
+        base = ["b0", "b1", "b2", "b3"] + [f"x{j}" for j in range(40)]
+        rng = np.random.default_rng(9)
+        for c in base[4:]:
+            df[c] = rng.normal(size=len(df))
+        tmp = tempfile.mkdtemp()
+        old = (E.OOF_DIR, E.RUN)
+        try:
+            E.OOF_DIR, E.RUN = tmp, "e132imp"
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                out = E.importance_report(df, base, {"A": PARAMS, "B": PARAMS_B}, pd.Timestamp("2021-12-31"), seeds=(42, 7))
+            log = buf.getvalue()
+            saved = json.loads(open(E.path("importance.json"), encoding="utf-8").read())
+        finally:
+            E.OOF_DIR, E.RUN = old
+            shutil.rmtree(tmp)
+        self.assertEqual(set(out["periods"]), {"tuning", "all"})
+        self.assertEqual(saved["seeds"], [42, 7])
+        for key, rec in out["periods"].items():
+            self.assertEqual(set(rec["arms"]), {"C", "B"})
+            c = rec["arms"]["C"]
+            self.assertEqual(set(c["minute_ranks"]), set(E.NEW_COLS))      # 分足の30列だけ（VWAP の3列は入らない）
+            self.assertTrue(0 <= c["minute_gain_share"] <= 1)
+            self.assertEqual(c["best_rank"], min(c["minute_ranks"].values()))
+            for name, vals in rec["overlap"].items():
+                for n, v in vals.items():
+                    self.assertTrue(0 <= float(v) <= int(n))
+            self.assertTrue(-1 <= rec["spearman"]["A_C_mean"] <= 1)
+            self.assertEqual(len(rec["top"]["A"]), min(max(E.TOP_NS), len(base)))
+            self.assertTrue(all(t["col"] in base for t in rec["top"]["A"]))     # A は既存の列だけ
+            shares = [t["share"] for t in rec["top"]["C"]]
+            self.assertEqual(shares, sorted(shares, reverse=True))
+        self.assertGreater(out["periods"]["all"]["minute_rows"], out["periods"]["tuning"]["minute_rows"])
+        # ラベルに効く分足の列（作りものでは poc_gap_20d）は、全期間の C で上位に入る
+        self.assertLessEqual(out["periods"]["all"]["arms"]["C"]["minute_ranks"][MF.column("poc_gap", 20)], 10)
+        for title in ("1. 分足の30列", "2. 上位 N 列の顔ぶれの重なり", "3. 既存の", "4. 上位20列", "種どうし"):
+            self.assertIn(title, log)
+
+    def test_importance_needs_saved_tuning(self):
+        df = make_frame(5)
+        with mock.patch.object(E, "prepare", return_value=(df, {"built_utc": "x", "rows": len(df)})), \
+             mock.patch.object(E, "check_label", return_value={}), \
+             mock.patch.object(E, "coverage_report", return_value={}), \
+             mock.patch.object(E.F, "columns", return_value=["b0", "b1"]), \
+             mock.patch.object(E, "load_tuned", return_value=None), \
+             mock.patch.object(E.tuning, "tune", side_effect=RuntimeError("searched")):
+            old = (E.RUN, E.TAG, E.DEADLINE)
+            try:
+                with redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as ctx:
+                    E.main(["--importance", "--keep-frame"])
+            finally:
+                E.RUN, E.TAG, E.DEADLINE = old
+        self.assertIn("保存済みの探索の結果が無い", str(ctx.exception))
 
     def test_tune_cache_needs_same_columns(self):
         tmp = tempfile.mkdtemp()
