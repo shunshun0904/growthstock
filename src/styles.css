@@ -79,7 +79,13 @@
 .sd-grid { stroke: var(--border); stroke-width: 1; }
 .sd-axis { stroke: var(--text-faint); stroke-width: 1; }
 
-.volume-view { --volume-muted: #52627e; }
+.volume-view {
+  --volume-muted: #52627e;
+  /* 時間帯（区別の色。dataviz の検証済みの順のダークの段。カード #141b2b で 3:1 以上・色覚の差 ΔE 8.4 以上） */
+  --vp-open: #3987e5; --vp-morning: #d95926; --vp-afternoon: #199e70; --vp-close: #c98500;
+  /* 約定代金の大きさ（同じ色相の濃淡。暗い画面なので大きいほど明るい） */
+  --vp-small: #1c5cab; --vp-medium: #3987e5; --vp-large: #86b6ef;
+}
 .volume-connect { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 12px; margin-bottom: 14px; }
 .volume-connect label, .volume-controls label { display: grid; gap: 5px; color: var(--text-dim); font-size: 12px; min-width: 0; }
 .volume-connect a { font-size: 12px; }
@@ -115,9 +121,30 @@
 .volume-list table { width: 100%; border-collapse: collapse; text-align: left; }
 .volume-list th, .volume-list td { padding: 5px 6px; border-bottom: 1px solid var(--border-soft); }
 .volume-list th { color: var(--text-dim); }
-.volume-list .volume-stock { text-align: left; }
+.volume-list .volume-stock { text-align: left; white-space: nowrap; }
+.volume-list th, .volume-list td { white-space: nowrap; }
 .volume-list .volume-stock[aria-pressed='true'] { background: var(--bg-raised); color: var(--text); border-color: var(--accent-dim); }
 .volume-stock-heading { margin-top: 18px; font-size: 14px; }
+.volume-remember { display: flex !important; align-items: center; gap: 6px; padding-bottom: 8px; }
+.volume-connect .volume-remember input { width: auto; min-height: 0; margin: 0; padding: 0; accent-color: var(--accent); }
+.volume-connect label:first-child { flex: 1 1 260px; }
+.volume-candidates { margin-left: 10px; font-weight: normal; font-size: 12px; color: var(--text-dim); }
+.volume-list td.num, .volume-list th:nth-child(3), .volume-list th:nth-child(4) { text-align: right; }
+.volume-list td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.vp-blocks { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; margin: 12px 0 4px; }
+.vp-block { background: var(--bg-raised); border-radius: 6px; padding: 10px 12px; min-width: 0; }
+.vp-block h4 { margin: 0 0 8px; font-size: 12px; font-weight: 600; color: var(--text-dim); }
+.vp-block .volume-note { margin: 8px 0 0; }
+.vp-share-bar { display: flex; gap: 2px; height: 8px; border-radius: 4px; overflow: hidden; }
+.vp-seg { display: block; flex-basis: 0; min-width: 2px; }
+.vp-share-legend { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; font-size: 12px; }
+.vp-share-legend li { display: flex; align-items: center; gap: 6px; color: var(--text-dim); min-width: 0; }
+.vp-share-legend i { width: 10px; height: 10px; border-radius: 2px; flex: none; }
+.vp-share-legend b { margin-left: auto; color: var(--text); font-family: var(--mono); font-weight: 500; font-variant-numeric: tabular-nums; }
+.vp-share-note { min-width: 4.5em; text-align: right; color: var(--text-faint); font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.vp-open { background: var(--vp-open); } .vp-morning { background: var(--vp-morning); }
+.vp-afternoon { background: var(--vp-afternoon); } .vp-close { background: var(--vp-close); }
+.vp-small { background: var(--vp-small); } .vp-medium { background: var(--vp-medium); } .vp-large { background: var(--vp-large); }
 .sd-bar-profit { fill: var(--green); opacity: .8; }
 .sd-bar-loss { fill: var(--red); opacity: .8; }
 .sd-band { cursor: pointer; }

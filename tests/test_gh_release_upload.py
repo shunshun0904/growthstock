@@ -144,7 +144,7 @@ class TestWorkflowsUseHelper(unittest.TestCase):
 
     WORKFLOWS = ["update-data.yml", "predict.yml", "fetch-edinetdb.yml",
                  "fetch-jsf.yml", "retrain-weekly.yml", "update-minute-bars.yml",
-                 "update-ticks.yml"]
+                 "update-ticks.yml", "update-volume-profile.yml"]
 
     def test_no_bare_clobber(self):
         for w in self.WORKFLOWS:

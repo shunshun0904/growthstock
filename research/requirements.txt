@@ -19,3 +19,7 @@ joblib==1.6.0
 # 認証情報が無ければそのステップは飛ばすので、他の処理はこれに依存しない。
 gspread==6.2.1
 google-auth==2.58.0
+
+# 価格帯別出来高の集計を J-Quants の API キーから作った鍵で暗号化する（research/volume_profile_crypto.py。
+# AES-GCM は標準ライブラリに無い）。google-auth の依存でも入るが、版を握るので明示する。
+cryptography==50.0.2

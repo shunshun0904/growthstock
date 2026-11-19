@@ -14,7 +14,7 @@ on:
     # 他のワークフローを起こさないため（GitHub のループ防止）。
     workflows: ['Fetch J-Quants Data', 'Predict Breakouts', 'Refresh Stock Details', 'Fetch Filings',
                 'New Training Samples', 'Backfill KNN', 'Check News Links', 'Adopt Financial Inputs',
-                'Score Distribution', 'Refresh Valuations']
+                'Score Distribution', 'Refresh Valuations', 'Update Volume Profiles']
     types: [completed]
 
 permissions:
@@ -52,8 +52,6 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
-        env:
-          VITE_VOLUME_PROFILE_REPO: ${{ vars.MINUTE_DATA_REPO || format('{0}/growthstock-minute', github.repository_owner) }}
 
       - uses: actions/setup-python@v5
         with:
@@ -91,6 +89,25 @@ jobs:
           mkdir -p dist/data
           tar -xzf "$a" -C dist/data
           echo "展開した: $(ls dist/data/recurrence | wc -l) ファイル・$(du -sh dist/data/recurrence | cut -f1)"
+
+      # 価格帯別出来高（Update Volume Profiles が Release data-volume-profile に上げた volume-profile.enc.json）を
+      # dist/data/ に置く。中身は J-Quants の API キーから作った鍵で暗号化してあり、画面でキーを入れた人の
+      # ブラウザの中だけで開く（docs/VOLUME_PROFILE.md）。暗号文の形でなければ載せない。無い・取れなくても
+      # デプロイは止めない（タブが「まだ集計がありません」と出す）
+      - name: Volume profiles (encrypted, release)
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/vp"
+          bash scripts/gh_release_download.sh data-volume-profile "$RUNNER_TEMP/vp" 'volume-profile.enc.json'
+          f="$RUNNER_TEMP/vp/volume-profile.enc.json"
+          if [ ! -f "$f" ]; then
+            echo "Release に volume-profile.enc.json が無い（タブは集計待ちと出す）"; exit 0
+          fi
+          python3 research/volume_profile_crypto.py check "$f"
+          mkdir -p dist/data
+          cp "$f" dist/data/volume-profile.enc.json
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
