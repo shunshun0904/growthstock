@@ -1,43 +1,135 @@
 # 価格帯別出来高
 
-「価格帯別出来高」タブには、最新の予測基準日と日付が一致する予測対象を全件表示します。購入条件に達していない銘柄も含みます。J-Quantsの分足・ティックから直近1・5・20営業日を集計し、未集計の銘柄も一覧に表示します。銘柄名を押すとグラフが開きます。
+「価格帯別出来高」タブには、**直近5営業日の予測対象（候補）すべて**の、予測の基準日までの 1・5・20 営業日の
+価格帯別出来高を表示します。あわせて次の指標を出します。
 
-## 保存先の初期設定
+- **終値とVWAPの差**（終値 ÷ VWAP − 1）
+- **時間帯別の出来高**（寄り・前場・後場・引け。株数の割合）
+- **約定代金の大きさ別の割合**（小口・中口・大口。ティックのザラバの約定から）
 
-1. `shunshun0904/growthstock-minute` を **Private** で作成し、READMEで初期化します。分足・ティックを蓄積する非公開リポジトリがあれば、同じリポジトリを使えます。 [リポジトリ作成](https://github.com/new)
-2. 保存先だけを対象とする fine-grained PAT を **Contents: Read and write** で発行し、公開側 `growthstock` の Actions Secret `MINUTE_DATA_TOKEN` に登録します。別名の保存先を使う場合は Actions Variable `MINUTE_DATA_REPO` に `owner/repository` を設定します。 [PAT発行](https://github.com/settings/personal-access-tokens/new) · [Actions Secrets](https://github.com/shunshun0904/growthstock/settings/secrets/actions) · [Actions Variables](https://github.com/shunshun0904/growthstock/settings/variables/actions)
-3. J-Quantsで分足・ティックアドオンを有効にした契約のAPIキーを、既存の Actions Secret `JQUANTS_API` に設定します。初回は **Update Volume Profiles** を手動で起動できます。以降は **Predict Breakouts** の成功後に自動実行します。 [J-Quantsのデータ提供仕様](https://jpx-jquants.com/ja/spec/data-spec) · [実行履歴](https://github.com/shunshun0904/growthstock/actions/workflows/update-volume-profile.yml)
+集計は J-Quants のアドオン（分足・ティック）から作るため、**暗号化して**載せます。画面で J-Quants の API キーを
+入れた人のブラウザの中だけで開きます。キーはどこにも送りません。新しい鍵や Secret の登録は要りません。
 
-更新ジョブは最新予測と同じ日付・銘柄であることを確認して、非公開リポジトリの `dashboard/volume-profile.json` を更新します。公開側に出るのは画面と既存の予測一覧です。アドオンデータと集計結果へのアクセスは非公開リポジトリで管理します。 [J-Quants利用規約 第8条](https://jpx-jquants.com/ja/termsofservice?lang=ja)
+## 見かた
 
-## ダッシュボードで見る
+1. 「価格帯別出来高」タブを開き、「J-Quants の API キー」に、Actions Secret `JQUANTS_API` に登録してあるのと
+   同じキーを入れて「開く」を押します。 [ダッシュボード](https://shunshun0904.github.io/growthstock/)
+   - キーは、この端末の中で復号の鍵を作るのに使うだけです。どこにも送りません
+   - 覚えるのはキーから作った鍵だけで、キーそのものは保存しません。既定ではタブを閉じるまで覚えます。
+     「この端末に記憶する」を選ぶと端末に残ります。「鍵を消す」で消えます
+   - J-Quants のキーを作り直したら、Secret `JQUANTS_API` も新しいキーに替えてください。次の集計（毎晩）から新しいキーで開けます
+2. 一覧には、直近5つの予測日の候補が銘柄ごとに1行で並びます（候補になった日と、その日の順位）。銘柄を押すとグラフが開きます。
+3. 集計期間（1・5・20営業日）、データ種別（ティック・分足）、横軸（株数・売買代金）を切り替えられます。
+   一覧の「終値とVWAPの差」「大口」は、選んだ期間の値です。
+4. 揃わない期間・種別は、値を作らずに理由を出します（下の「欠損の理由」）。
 
-1. 保存先だけに **Contents: Read-only** を持つ閲覧用の fine-grained PAT を別途発行します。 [PAT発行](https://github.com/settings/personal-access-tokens/new)
-2. 「価格帯別出来高」タブの「閲覧用GitHubトークン」に入力し、「接続」を押します。ブラウザからGitHubに認証し、そのセッションの間はタブを開くと自動で読み込みます。「接続を解除」でセッションから消去できます。 [ダッシュボード](https://shunshun0904.github.io/growthstock/)
-3. 一覧で分足・ティックの照合状況が分かります。銘柄を押し、集計期間と株数・売買代金を切り替えられます。予測と集計の基準日がずれている間は、最新予測の一覧に更新待ちを表示します。「再取得」で保存先を読み直します。
+## 更新の流れ
 
-## 集計の確認方法
-
-手元で疎通を確認する場合は、端末で `JQUANTS_API_KEY` または `JQUANTS_API` を設定し、`python3 -m pip install -r research/requirements.txt` を実行します。`python3 research/build_volume_profile.py --fetch --lookback 1` で最新日の全対象銘柄を1営業日分集計します。`--codes` と `--as-of` で銘柄と営業日を指定できます。
-
-ティックはBulkのCSV/GZで取得します。日別ファイルと月別ファイルの両方がある日は日別ファイルを使います。ティックは銘柄を指定しても対象日・月の一括ファイルを読むため、初回は1日から確認できます。分足は少数銘柄では銘柄別API、大きい対象ではBulkを使います。公式の提供範囲は直近2年、日次更新は16:30頃です。 [ティック](https://jpx-jquants.com/ja/spec/eq-trades) · [分足](https://jpx-jquants.com/ja/spec/eq-bars-minute) · [Bulk一覧](https://jpx-jquants.com/ja/spec/bulk-list) · [更新時刻](https://jpx-jquants.com/ja/spec/data-update)
-
-ダウンロード済みのデータでも生成できます。`--daily` には `Date,Code,L,H,C,Vo,Va,AdjFactor` を持つ未調整の日足を渡します。分割・併合を識別するため、日足に `ExRT` があれば併せて使います。`--daily`・`--minute`・`--ticks` は複数回指定できます。
-
-```bash
-python3 research/build_volume_profile.py --as-of YYYY-MM-DD --codes 7203 \
-  --calendar /path/to/calendar.csv --daily /path/to/daily.parquet \
-  --minute /path/to/minute.csv.gz --ticks /path/to/trades.csv.gz
+```
+Update Data Store（毎晩の取り込み）
+  ├─ Predict Breakouts   予測（public/data/predictions.json）
+  ├─ Update Minute Bars  分足を下書きの Release data-minute に足す
+  └─ Update Ticks        ティックを下書きの Release data-tick-YYYY に足す
+        │ それぞれが終わるたびに
+        ▼
+Update Volume Profiles   集計して暗号化し、Release data-volume-profile の volume-profile.enc.json に上げる
+        ▼
+Deploy to GitHub Pages   volume-profile.enc.json を画面の data/ に置く
 ```
 
-端末のAPIキーは環境変数で設定します。キャッシュと集計ファイルの既定の保存先 `research/_data/` はGitの対象外です。
+- ワークフローは `.github/workflows/update-volume-profile.yml`、集計は `research/build_volume_profile.py`
+- 入力は、分足・ティックの置き場（下書きの Release。[MINUTE_BARS.md](MINUTE_BARS.md)・[TICKS.md](TICKS.md)）、
+  照合用の日足（Release `data-raw` の `bars_YYYY.parquet`）、J-Quants の取引カレンダー
+- 予測・分足・ティックの3つは並んで走り、終わる順は日によって違います。最後に終わったものの後の集計が、全部そろったものです。
+  そろう前の集計では、まだ置き場に無い日の種別が「欠損」と出ます
+- 使う Secret は `JQUANTS_API` だけです。置き場の読み書きは Actions の鍵（`github.token`）です
+- 手で作り直すときは Actions の **Update Volume Profiles** を Run workflow で起動します。 [実行履歴](https://github.com/shunshun0904/growthstock/actions/workflows/update-volume-profile.yml)
 
-## 計算と品質管理
+## 暗号化
 
-- **ティック**は、東証立会内で成立した約定を価格ごとに合計します。売買代金は約定価格×株数です。
-- **分足**は、各分の株数と売買代金を、その分のVWAP（`Va / Vo`）に割り当てます。この割り当てにより、分の中で価格が動くほどティックと分布が異なります。両方揃う場合、同じ価格帯の出来高シェア差の絶対値を合計して2で割った値を表示します。0%は一致、100%は重なる帯がない状態です。
-- 期間内の日足の安値・高値から共通の価格帯を作ります。幅は `1/2/5 × 10の整数乗` 円から選び、帯の上限は含めません。最多の帯は株数で決め、同数なら低い帯を選びます。「出来高の70%範囲」は最多の帯から隣の帯を順に含め、累計が70%以上になった連続範囲です。左右の株数が同じなら低い側を先に含めます。
-- 各日に日足の出来高・売買代金・高安範囲と照合します。株数の許容差は0.01株未満、売買代金は1円以内です。必要な営業日が揃わない場合は、その期間・種別を欠損にします。日足で取引なしと確認できる日は出来高0として扱い、基準日の終値がない場合は集計しません。
-- 分割・併合を跨ぐ期間は、`AdjFactor` と `ExRT` で確認できたものに限って、過去の価格・株数を基準日の単位に換算します。価格と株数を逆方向に調整し、約定代金は維持します。換算根拠が不十分な期間は欠損です。 [日足仕様](https://jpx-jquants.com/ja/spec/eq-bars-daily) · [調整係数](https://jpx-jquants.com/ja/spec/eq-bars-daily/adj)
+`research/volume_profile_crypto.py` が暗号化し、画面（`src/lib/volumeProfile.js`）が同じ手順で開きます。
+
+| 項目 | 中身 |
+|---|---|
+| 鍵 | J-Quants の API キー（前後の空白を除く）から、PBKDF2-HMAC-SHA256（60万回・固定の塩）で 256 ビット |
+| 暗号 | AES-256-GCM。IV は毎回ランダムな 12 バイト。見出し（基準日・作った時刻・方式）を追加認証データに入れるので、見出しを書き換えると開けない |
+| 中身 | 集計の JSON を gzip で縮めたもの |
+| 公開されるもの | 暗号文と見出し（基準日・作った時刻・方式）だけ。銘柄ごとの値は暗号文の中。対象の銘柄の一覧は、予測（`public/data/predictions.json`）として元から公開 |
+
+- Release `data-volume-profile` は公開の Release です。デプロイは読み取り専用の鍵で動くため、下書きにすると読めません。中身は暗号文だけです
+- 上げる前（Update Volume Profiles）と載せる前（Deploy to GitHub Pages）に、暗号文の形であること（平文でないこと）を
+  `python3 research/volume_profile_crypto.py check FILE` で確かめます。形が違えば上げません・載せません
+- 開けるのは J-Quants の API キーを持つ人だけです。キーが漏れていなければ、暗号文から中身は分かりません。
+  キーが漏れたときは J-Quants でキーを作り直し、Secret `JQUANTS_API` を替えてください（古い集計は次の更新で置き換わります）
+- 集計の中身は J-Quants のデータから作った値なので、平文では公開の場所（`public/`・`dist/`・公開の Release）に置きません。
+  平文の書き出し（`--output`）は `public/`・`dist/` の下を拒みます。 [J-Quants 利用規約](https://jpx-jquants.com/ja/termsofservice?lang=ja)
+
+## 計算
+
+- **ティック**は、東証の立会内で成立した約定を価格ごとに合計します。売買代金は約定価格 × 株数です
+- **分足**は、各分の株数と売買代金を、その分の VWAP（`Va ÷ Vo`）に割り当てます。分の中で価格が動くほどティックと分布が違います。
+  両方揃う期間は、同じ価格帯の出来高シェアの差の絶対値を合計して2で割った値（ティックと分足の分布差）を出します。0% は一致、100% は重なる帯が無い状態です
+- 価格帯は、期間内の日足の安値・高値から作る共通の帯です。幅は `1・2・5 × 10の整数乗` 円から選び、帯の上限は含めません。
+  最多出来高の帯（POC）は株数で決め、同数なら低い帯を選びます。「出来高の70%範囲」は最多の帯から隣の帯を順に含め、累計が70%以上になった連続範囲です
+- **終値とVWAPの差** = 基準日の終値 ÷ 期間の VWAP − 1。VWAP は期間の売買代金 ÷ 株数です（分割・併合は基準日の株数に換算）
+- **時間帯別の出来高**（株数の割合）
+
+  | 時間帯 | ティック | 分足 |
+  |---|---|---|
+  | 寄り | その日の最初の約定（板寄せ）。最初の約定と同じ時刻・同じ価格の約定をまとめて数える | 最初の1分（板寄せのあとのザラバの約定も入る） |
+  | 前場 | 前場の残り（11:30 の前引けの板寄せを含む） | 12:00 より前の残りの分 |
+  | 後場 | 後場（12:30 の後場寄りの板寄せを含む）から引けを除いたもの | 12:00 以降で引けより前の分 |
+  | 引け | 大引けの板寄せ（2024-11-05 からは 15:25 以降の約定。15:25〜15:30 はクロージング・オークションで、15:30 に約定する。それより前は 15:00 以降） | 15:25 以降の分（それより前の日は 15:00 以降） |
+
+  ティックの前場・後場は `SessionDistinction`（01 前場・02 後場）で分けます。それ以外の値の行は時刻で分けます（12:00 より前は前場）。
+  引けの板寄せで初めて寄った日は、その約定を寄りとして数えます（引けと二重に数えません）
+- **約定代金の大きさ別の割合**（ティックだけ）: ザラバ（板寄せを除く）の約定を、1件の約定（ティック1行）の約定代金で
+  小口（100万円未満）・中口（100万円以上 1,000万円未満）・大口（1,000万円以上）に分け、ザラバの売買代金に占める割合と件数を出します。
+  板寄せ（寄り・前引け・後場寄り・引け）は除きます。データ種別で分足を選んでいても、この欄はティックの値です
+- 各日に、日足の出来高・売買代金・安値〜高値と照合します。株数の許容差は 0.01株未満、売買代金は 1円以内です。
+  日足で取引なしと確認できる日は出来高0として扱います。基準日の終値が無い銘柄は集計しません
+- 分割・併合を跨ぐ期間は、日足の `AdjFactor`（権利落ち日の行に入る。1:2 の分割なら 0.5）で、それより前の日の価格に係数を掛け、
+  株数を係数で割って、基準日の単位に揃えます。約定代金は変わりません。係数が無い・不正な日があれば、その期間は欠損です。
+  [日足仕様](https://jpx-jquants.com/ja/spec/eq-bars-daily) · [調整係数](https://jpx-jquants.com/ja/spec/eq-bars-daily/adj)
 
 この分布が示すのは集計期間に成立した取引です。同じ株の売買も期間中の約定ごとに数えます。
+
+## 欠損の理由
+
+| 画面の表示 | 中身（`status`） |
+|---|---|
+| 選択期間の営業日が足りません | `calendar_history_missing` |
+| 選択期間の日足が揃っていません（上場して間もない銘柄など） | `daily_missing` |
+| 照合用の日足に欠損または不整合があります | `invalid_daily` |
+| 基準日の終値がありません | `close_missing` |
+| 選択期間の分割・併合の係数を確かめられません | `share_basis_unknown` |
+| 選択期間の分足・ティックが置き場にまだ無いか、足りません | `intraday_missing`（当日分は夜の取得のあとに入る） |
+| 分足・ティックに不正な値があります | `intraday_invalid` |
+| 分足・ティックの合計が日足の出来高・売買代金と一致しません | `daily_totals_mismatch` |
+
+Update Volume Profiles の実行の画面（公開）には、件数だけを出します: 置き場にある日・無い日、日足との照合の結果
+（銘柄×日の件数。`ok`・`volume`・`turnover`・`range`・`missing` など）、期間・種別ごとの状態の件数。価格・数量・銘柄名は出しません。
+
+## 手元で確かめる
+
+合成データ（実データではない）で、集計から画面まで通せます。
+
+```bash
+python3 -m pip install -r research/requirements.txt
+python3 tests/fixtures/volume_profile_inputs.py /tmp/vp /tmp/vp/predictions.json
+JQUANTS_API=test-key python3 research/build_volume_profile.py --predictions /tmp/vp/predictions.json \
+  --work-dir /tmp/vp --calendar /tmp/vp/calendar.csv --encrypt-to /tmp/vp/volume-profile.enc.json \
+  --output /tmp/vp/plain.json
+npm run build && node tests/volume-profile-browser.mjs   # 画面で開く・違うキー・欠損・スマホの幅
+```
+
+実データで確かめるには、置き場（下書きの Release）を読める鍵（このリポジトリへの書き込み権限）が要ります。
+`GH_TOKEN` を渡して `--download-cmd "bash scripts/gh_release_download.sh"` を付けると、必要なファイルだけを
+`--work-dir`（既定 `research/_data/volume_profile`。Git の対象外）に取り出します。平文の `--output` は公開の場所に置かないでください。
+
+## 以前の作り（2026-11-18 まで）
+
+非公開リポジトリ `growthstock-minute` に平文の集計を置き、GitHub の fine-grained PAT（Secret `MINUTE_DATA_TOKEN` と閲覧用トークン）で
+読み書きする作りでした（`research/publish_volume_profile.py`）。2026-11-19、運用者の選択「暗号化し J-Quants のキーで開く」
+「既存のタブを作り替える」で、いまの作りに替えました。対象も「最新の予測日の候補」から「直近5営業日の候補すべて」に広げました。
+作っていた非公開リポジトリ・PAT・Secret `MINUTE_DATA_TOKEN`・Variable `MINUTE_DATA_REPO` は使いません（消してかまいません）。
