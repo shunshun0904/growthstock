@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import ValuationView from './views/ValuationView.jsx';
 import SupplyDemandView from './views/SupplyDemandView.jsx';
+import VolumeProfileView from './views/VolumeProfileView.jsx';
 import CompareView from './views/CompareView.jsx';
 import TimeMachineView from './views/TimeMachineView.jsx';
 import SimulatorView from './views/SimulatorView.jsx';
@@ -35,6 +36,7 @@ const TABS = [
   { id: 'valuation', label: '理論株価' },
   // 2026-11-15「推定は本番運用レベルではないので非表示に」で hidden に。画面・推計処理・データは残す。
   { id: 'supplydemand', label: '価格帯別需給', hidden: true },
+  { id: 'volumeprofile', label: '価格帯別出来高' },
   // 候補ごとのリカレンス・ネットワーク（点 = その銘柄の1営業日、線 = テクニカル指標9列の状態が似た日どうし。参考で、選定には
   // 使わない）。運用者の依頼 2026-10-19「Obsidian の球状のプロットのようなことを、ノードを1営業日として…その日の各候補銘柄単体で」。
   // データは Release の recurrence.tar.gz（research/recurrence_net.py）をデプロイで dist/data/recurrence/ に置く。
@@ -277,7 +279,7 @@ export default function App() {
         {!loading && dataset && <DataNotices dataset={dataset} />}
 
         {!loading && rows.length === 0 && tab !== 'prediction' && tab !== 'news' && tab !== 'knn' && tab !== 'samples' && tab !== 'scoredist'
-          && tab !== 'network' && tab !== 'valuation' && tab !== 'supplydemand' && (
+          && tab !== 'network' && tab !== 'valuation' && tab !== 'supplydemand' && tab !== 'volumeprofile' && (
           <div className="card empty">
             分析対象の銘柄がありません。
             <div style={{ marginTop: 'var(--s4)' }}>
@@ -296,6 +298,7 @@ export default function App() {
         )}
 
         {tab === 'valuation' && <ValuationView />}
+        {tab === 'volumeprofile' && <VolumeProfileView predictions={pred} predictionError={predError} />}
         {tab === 'prediction' && (
           predError ? (
             <div className="banner warn">
