@@ -34,6 +34,32 @@
   delta_b0〜b7           帯（minute_features.SHAPE_EDGES の8つ）ごとの株数の割合の変化（直近 − その前。出来高がどこへ移ったか）
   shape5_b0〜b7          直近5営業日の分布の形（8つの帯の割合）
   shape20_b0〜b7         20営業日の分布の形（8つの帯の割合）
+
+形だけの推移（vp_shp_*。運用者の選択 2026-11-20「形だけの推移で測り直す」。上の距離は D の終値からの距離の帯で測るので、値が
+数%動くだけで分布が重ならなくなり、形の変化より値の移動を測っていた）: 日ごと・期間ごとの分布を、位置（VWAP）・広がり（株数で
+重みを付けた価格の標準偏差）・形（VWAP を引いて標準偏差で割った分布。Z_EDGES の帯）に分ける。値が動いても広がりが変わっても、
+形が同じなら形の距離は 0。
+
+  shape_fr_recent_prior    直近とその前の形のフィッシャー・ラオ距離
+  shape_speed_recent       隣り合う日どうしの形のフィッシャー・ラオ距離の平均（直近の5回）
+  shape_speed_prior        同じく、その前の14回
+  shape_speed_log_ratio    形の変わる速さの比の対数（(直近 + 0.01) ÷ (その前 + 0.01)）
+  shape_info_recent        隣り合う日どうしの形の距離の2乗の平均（直近。形のフィッシャー情報量の見積もり）
+  shape_info_prior         同じく、その前
+  last_day_shape_fr        D と前日の形のフィッシャー・ラオ距離
+  shape_entropy_recent     直近の形のエントロピー
+  shape_entropy_change     形のエントロピーの変化（直近 − その前）
+  skew_recent              直近の分布の歪度（株数で重み。＋ は上側に裾が長い）
+  skew_change              歪度の変化（直近 − その前）
+  kurt_recent              直近の分布の尖度（正規分布で 0）
+  kurt_change              尖度の変化（直近 − その前）
+  sigma_recent             直近の広がり（VWAP に対する割合）
+  sigma_log_ratio          広がりの比の対数（直近 ÷ その前）
+  sigma_slope              日ごとの広がり（VWAP に対する割合）の対数の、日数に対する傾き
+  vwap_drift_sigma         VWAP の移動を、その前の広がりで割った値（位置が広がりの何倍動いたか）
+  vwap_up_share            日ごとの VWAP が前の日より上がった日の割合
+  z_close_recent           D の終値の、直近の分布の中での位置（VWAP からの距離 ÷ 広がり）
+  z_poc_change             形の最多の帯の位置の変化（直近 − その前。広がりの単位）
 """
 
 from __future__ import annotations
@@ -56,6 +82,18 @@ FINE_EDGES = np.concatenate([[-np.inf], np.round(np.arange(-0.30, 0.15 + 1e-9, 0
 FINE_CENTERS = np.concatenate([[-0.305], (FINE_EDGES[1:-2] + FINE_EDGES[2:-1]) / 2, [0.155]])
 #: 帯の幅（両端も 1% とみなす）
 FINE_WIDTH = 0.01
+
+#: 形（標準化した分布）の帯。VWAP から広がりの何倍離れているか（±3 の外は両端にまとめる）
+Z_EDGES = np.concatenate([[-np.inf], np.round(np.arange(-3.0, 3.0 + 1e-9, 0.25), 4), [np.inf]])
+Z_CENTERS = np.concatenate([[-3.125], (Z_EDGES[1:-2] + Z_EDGES[2:-1]) / 2, [3.125]])
+#: 形の変わる速さの比を取るときに足す値（速さがちょうど 0 の日が続いても比が出るように）
+SPEED_EPS = 0.01
+SHAPE_DYN_SCALAR = ["shape_fr_recent_prior", "shape_speed_recent", "shape_speed_prior", "shape_speed_log_ratio",
+                    "shape_info_recent", "shape_info_prior", "last_day_shape_fr", "shape_entropy_recent",
+                    "shape_entropy_change", "skew_recent", "skew_change", "kurt_recent", "kurt_change", "sigma_recent",
+                    "sigma_log_ratio", "sigma_slope", "vwap_drift_sigma", "vwap_up_share", "z_close_recent", "z_poc_change"]
+#: 形だけの推移の列
+SHAPE_DYN_COLUMNS = [f"vp_shp_{c}" for c in SHAPE_DYN_SCALAR]
 
 SCALAR_COLUMNS = ["fr_recent_prior", "hellinger_recent_prior", "w1_recent_prior", "mean_shift", "poc_shift",
                   "entropy_recent", "entropy_change", "va_width_recent", "va_width_log_ratio", "above_close_change",
@@ -135,6 +173,89 @@ def coarse(p: np.ndarray) -> np.ndarray:
     return np.bincount(idx, weights=p, minlength=N_SHAPE)[:N_SHAPE]
 
 
+def moments(price: np.ndarray, shares: np.ndarray):
+    """株数で重みを付けた (VWAP, 標準偏差, 歪度, 尖度（正規分布で 0）)。株数が無ければ None。広がりが 0 なら歪度・尖度は 0。"""
+    w = np.asarray(shares, dtype=float)
+    p = np.asarray(price, dtype=float)
+    total = float(w.sum())
+    if total <= 0:
+        return None
+    v = float(w @ p / total)
+    sd = math.sqrt(max(float(w @ (p - v) ** 2 / total), 0.0))
+    if sd <= 1e-12 * max(abs(v), 1.0):
+        return v, 0.0, 0.0, 0.0
+    z = (p - v) / sd
+    return v, sd, float(w @ z ** 3 / total), float(w @ z ** 4 / total) - 3.0
+
+
+def standard_shape(price: np.ndarray, shares: np.ndarray, mom) -> np.ndarray:
+    """位置（VWAP）と広がり（標準偏差）を除いた形（Z_EDGES の帯の割合）。広がりが 0 なら 0 の帯にすべて置く。"""
+    v, sd = mom[0], mom[1]
+    w = np.asarray(shares, dtype=float)
+    z = (np.asarray(price, dtype=float) - v) / sd if sd > 0 else np.zeros(len(w))
+    h = np.histogram(z, bins=Z_EDGES, weights=w)[0].astype(float)
+    return h / h.sum()
+
+
+def shape_features(days: List[Optional[Tuple[np.ndarray, np.ndarray]]], close: float) -> Optional[Dict[str, float]]:
+    """
+    20営業日の日ごとの (価格, 株数)（古い順。D の値の基準。約定の無い日は None）から、形だけの推移の列。
+    直近（最後の RECENT 日）とその前のどちらかに約定が無ければ None。
+    """
+    if len(days) != WINDOW:
+        return None
+
+    def window(part):
+        got = [d for d in part if d is not None and len(d[0])]
+        if not got:
+            return None
+        return np.concatenate([d[0] for d in got]), np.concatenate([d[1] for d in got])
+
+    rec, pri = window(days[-RECENT:]), window(days[:-RECENT])
+    if rec is None or pri is None:
+        return None
+    m_r, m_p = moments(*rec), moments(*pri)
+    if m_r is None or m_p is None or m_r[1] <= 0 or m_p[1] <= 0:
+        return None
+    f_r, f_p = standard_shape(*rec, m_r), standard_shape(*pri, m_p)
+    daily = []
+    for d in days:
+        mom = moments(*d) if d is not None and len(d[0]) else None
+        daily.append(None if mom is None else (mom, standard_shape(d[0], d[1], mom)))
+    steps = [(t, fisher_rao(daily[t - 1][1], daily[t][1])) for t in range(1, WINDOW)
+             if daily[t - 1] is not None and daily[t] is not None]
+    rs = [x for t, x in steps if t >= WINDOW - RECENT]
+    ps = [x for t, x in steps if t < WINDOW - RECENT]
+    rel_sd = [(t, daily[t][0][1] / daily[t][0][0]) for t in range(WINDOW) if daily[t] is not None and daily[t][0][1] > 0]
+    slope = float(np.polyfit([t for t, _ in rel_sd], np.log([x for _, x in rel_sd]), 1)[0]) if len(rel_sd) >= 3 else np.nan
+    vw = [daily[t][0][0] if daily[t] is not None else None for t in range(WINDOW)]
+    ups = [vw[t] > vw[t - 1] for t in range(1, WINDOW) if vw[t] is not None and vw[t - 1] is not None]
+    out = {
+        "shape_fr_recent_prior": fisher_rao(f_r, f_p),
+        "shape_speed_recent": float(np.mean(rs)) if rs else np.nan,
+        "shape_speed_prior": float(np.mean(ps)) if ps else np.nan,
+        "shape_info_recent": float(np.mean(np.square(rs))) if rs else np.nan,
+        "shape_info_prior": float(np.mean(np.square(ps))) if ps else np.nan,
+        "last_day_shape_fr": float(dict(steps).get(WINDOW - 1, np.nan)),
+        "shape_entropy_recent": entropy(f_r),
+        "shape_entropy_change": entropy(f_r) - entropy(f_p),
+        "skew_recent": m_r[2], "skew_change": m_r[2] - m_p[2],
+        "kurt_recent": m_r[3], "kurt_change": m_r[3] - m_p[3],
+        "sigma_recent": m_r[1] / m_r[0],
+        "sigma_log_ratio": math.log((m_r[1] / m_r[0]) / (m_p[1] / m_p[0])),
+        "sigma_slope": slope,
+        "vwap_drift_sigma": (m_r[0] - m_p[0]) / m_p[1],
+        "vwap_up_share": float(np.mean(ups)) if ups else np.nan,
+        "z_close_recent": (close - m_r[0]) / m_r[1],
+        "z_poc_change": float(Z_CENTERS[int(np.argmax(f_r))] - Z_CENTERS[int(np.argmax(f_p))]),
+    }
+    sr, sp = out["shape_speed_recent"], out["shape_speed_prior"]
+    # 張り付き（1つの値だけ）の日が続くと形の距離がちょうど 0 になるので、0.01 を足してから比べる
+    out["shape_speed_log_ratio"] = (math.log((sr + SPEED_EPS) / (sp + SPEED_EPS)) if np.isfinite(sr) and np.isfinite(sp)
+                                    else np.nan)
+    return out
+
+
 def features(hists: List[np.ndarray], buckets: List[np.ndarray]) -> Optional[Dict[str, float]]:
     """
     20営業日の日ごとの株数（古い順。hists は 1% の帯、buckets は寄り・前場・後場・引け）から、推移と形の列。
@@ -200,7 +321,7 @@ def dynamics(keys: pd.DataFrame, minute_dir: str, data_dir: str) -> Tuple[pd.Dat
     20営業日の窓が集計できる行（window_profiles の 20日が ok・D の終値がある）だけに値を付ける。
     """
     out = pd.DataFrame({"Code": keys["Code"].to_numpy(), "Date": pd.to_datetime(keys["Date"]).to_numpy()})
-    for c in COLUMNS:
+    for c in COLUMNS + SHAPE_DYN_COLUMNS:
         out[c] = np.nan
     report = {"rows": int(len(out))}
     inp = MF.load_inputs(keys, minute_dir, data_dir, lookback_days=WINDOW)
@@ -210,6 +331,8 @@ def dynamics(keys: pd.DataFrame, minute_dir: str, data_dir: str) -> Tuple[pd.Dat
     status = Counter()
     col_index = {c: out.columns.get_loc(f"vp_dyn_{c}") for c in SCALAR_COLUMNS + DELTA_COLUMNS
                  + SHAPE5_COLUMNS + SHAPE20_COLUMNS}
+    shp_index = {c: out.columns.get_loc(f"vp_shp_{c}") for c in SHAPE_DYN_SCALAR}
+    shp_status = Counter()
     for i in inp.target:
         code, day = inp.codes[i], inp.iso[i]
         daily = inp.quotes.get(code, {})
@@ -224,15 +347,25 @@ def dynamics(keys: pd.DataFrame, minute_dir: str, data_dir: str) -> Tuple[pd.Dat
         if factors is None:
             status["share_basis_unknown"] += 1
             continue
-        hists, buckets = [], []
+        hists, buckets, days = [], [], []
         for d in dates:
             sess = series["minute"].get(d)
             if sess is None or not daily[d].valid:              # 売買の無い日（window_profiles は通している）
                 hists.append(np.zeros(len(FINE_EDGES) - 1))
                 buckets.append(np.zeros(len(VP.BUCKETS)))
+                days.append(None)
                 continue
             hists.append(day_hist(sess.points, factors[d], close))
             buckets.append(np.asarray(sess.buckets, dtype=float) / factors[d])
+            pts = np.asarray(sess.points, dtype=float)
+            days.append((pts[:, 0] * factors[d], pts[:, 1] / factors[d]) if len(pts) else None)
+        shp = shape_features(days, close)
+        if shp is None:
+            shp_status["no_shape"] += 1
+        else:
+            shp_status["ok"] += 1
+            for k, v in shp.items():
+                out.iat[i, shp_index[k]] = v
         feats = features(hists, buckets)
         if feats is None:
             status["no_trades_in_part"] += 1
@@ -243,4 +376,6 @@ def dynamics(keys: pd.DataFrame, minute_dir: str, data_dir: str) -> Tuple[pd.Dat
     report["target_rows"] = int(len(inp.target))
     report["attached"] = int(out[COLUMNS].notna().any(axis=1).sum())
     report["status"] = dict(sorted(status.items()))
+    report["shape_status"] = dict(sorted(shp_status.items()))
+    report["shape_attached"] = int(out[SHAPE_DYN_COLUMNS].notna().any(axis=1).sum())
     return out, report

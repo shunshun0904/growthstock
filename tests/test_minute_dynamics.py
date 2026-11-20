@@ -104,6 +104,60 @@ class FeaturesTest(unittest.TestCase):
         self.assertIsNone(MD.features(hists[:-MD.RECENT] + empty, buckets))   # 直近に約定が無い
 
 
+def shaped_days(locs, scales, base=None, shares=None):
+    """日ごとに、同じ形（base の点と株数）を位置 locs[t]・広がり scales[t] で動かした (価格, 株数)。"""
+    base = np.array([-1.0, -0.5, 0.0, 0.5, 3.0]) if base is None else np.asarray(base, dtype=float)
+    shares = np.array([10.0, 30.0, 40.0, 15.0, 5.0]) if shares is None else np.asarray(shares, dtype=float)
+    base = base - (shares @ base) / shares.sum()                               # 株数で重みを付けた平均を 0 に
+    return [(loc + sc * base, shares.copy()) for loc, sc in zip(locs, scales)]
+
+
+class ShapeOnlyTest(unittest.TestCase):
+    def test_same_shape_has_zero_shape_distance_whatever_the_location_and_scale(self):
+        locs = [100.0] * 15 + [112.0] * 5                                     # 直近に 12% 上へ動いた
+        scales = [1.0] * 15 + [2.0] * 5                                        # 広がりは2倍
+        days = shaped_days(locs, scales)
+        f = MD.shape_features(days, close=113.0)
+        self.assertAlmostEqual(f["shape_fr_recent_prior"], 0.0, places=6)
+        self.assertAlmostEqual(f["shape_speed_recent"], 0.0, places=6)
+        self.assertAlmostEqual(f["shape_speed_prior"], 0.0, places=6)
+        self.assertAlmostEqual(f["last_day_shape_fr"], 0.0, places=6)
+        self.assertAlmostEqual(f["shape_info_recent"], 0.0, places=6)
+        self.assertAlmostEqual(f["shape_entropy_change"], 0.0, places=6)
+        self.assertAlmostEqual(f["skew_change"], 0.0, places=6)
+        self.assertGreater(f["skew_recent"], 0.5)                               # 上側に裾が長い形
+        w0, b0 = np.array([10, 30, 40, 15, 5.0]), np.array([-1, -.5, 0, .5, 3.0])
+        sd_base = math.sqrt(w0 @ (b0 - (w0 @ b0) / w0.sum()) ** 2 / w0.sum())     # 株数で重みを付けた標準偏差
+        self.assertAlmostEqual(f["sigma_recent"], 2.0 * sd_base / 112.0, places=6)
+        self.assertAlmostEqual(f["sigma_log_ratio"], math.log((2.0 / 112.0) / (1.0 / 100.0)), places=6)
+        self.assertAlmostEqual(f["vwap_drift_sigma"], 12.0 / sd_base, places=6)
+        self.assertAlmostEqual(f["z_close_recent"], 1.0 / (2.0 * sd_base), places=6)
+        self.assertAlmostEqual(f["vwap_up_share"], 1 / 19)                      # 上がったのは1日だけ
+        # D の終値からの距離の帯で測る前回の距離は、値が動いただけで大きくなる
+        hists = [MD.day_hist(np.column_stack([p, w, p * w]), 1.0, 113.0) for p, w in days]
+        old = MD.features(hists, [np.array([1.0, 1, 1, 1])] * 20)
+        self.assertGreater(old["fr_recent_prior"], 2.5)
+
+    def test_shape_change_is_measured(self):
+        days = shaped_days([100.0] * 20, [1.0] * 20)
+        flip = shaped_days([100.0] * 5, [1.0] * 5, base=[-3.0, -0.5, 0.0, 0.5, 1.0], shares=[5.0, 15.0, 40.0, 30.0, 10.0])
+        f = MD.shape_features(days[:15] + flip, close=100.0)                    # 直近は下側に裾が長い形
+        self.assertGreater(f["shape_fr_recent_prior"], 0.5)
+        self.assertLess(f["skew_change"], -1.0)
+        self.assertGreater(f["last_day_shape_fr"], -1e-12)
+        self.assertGreater(f["shape_speed_recent"], 0.0)                       # 形の変わり目が直近にある
+        self.assertAlmostEqual(f["shape_speed_prior"], 0.0, places=6)
+
+    def test_flat_days_and_missing_days(self):
+        days = shaped_days([100.0] * 20, [1.0] * 20)
+        days[3] = (np.array([100.0]), np.array([50.0]))                        # ストップ高の張り付き（1つの値だけ）
+        days[7] = None                                                        # 売買の無い日
+        f = MD.shape_features(days, close=100.0)
+        self.assertTrue(all(np.isfinite(v) for v in f.values()))                 # 1つの値だけの日・売買の無い日があっても値が出る
+        self.assertGreater(f["shape_speed_prior"], 0.0)                         # 張り付いた日の前後で形が変わる
+        self.assertIsNone(MD.shape_features(days[:-5] + [None] * 5, close=100.0))   # 直近に約定が無い
+
+
 class DynamicsOnStoreTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -128,6 +182,9 @@ class DynamicsOnStoreTest(unittest.TestCase):
         self.assertTrue(out.loc[2, MD.COLUMNS].isna().all())                   # 20営業日がそろわない
         self.assertEqual(report["attached"], 2)
         self.assertEqual(report["status"]["ok"], 2)
+        self.assertEqual(report["shape_attached"], 2)
+        self.assertTrue(out.loc[[0, 3], MD.SHAPE_DYN_COLUMNS].notna().all().all())
+        self.assertTrue(out.loc[[1, 2], MD.SHAPE_DYN_COLUMNS].isna().all().all())
         # 20日の形は minute_features の分布の形（帯で按分）に近い（こちらは価格ごとの株数をそのまま置く）
         shaped, _ = MF.build(pd.DataFrame(rows, columns=["Code", "Date"]), str(self.root / "minute"),
                              str(self.root / "raw"), with_shape=True)

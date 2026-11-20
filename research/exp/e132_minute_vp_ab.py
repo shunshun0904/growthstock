@@ -43,6 +43,8 @@ out-of-fold: 本番と同じ作り（36/6/6か月・エンバーゴ20営業日�
 列の付き方だけ見る: args="--dry"
 試運転:             args="--tag e132smoke --n-trials 2 --shifts 0"
 C を足す回:         args="--keep-frame"（A・B は保存済みの探索・out-of-fold を読む。C の out-of-fold だけ計算する）
+形だけの推移:       args="--keep-frame --shape-dynamics"（実験133 の測り直し。日ごとの分布を位置・広がり・形に分け、形だけの推移で
+                    同じ比べ方をする。docs の 98-5）
 独立したモデル:     args="--keep-frame --dynamics"（実験133。分足の形と推移・直近のテクニカルだけで +10% を当てる統計モデルと
                     LightGBM。台本は e133_minute_dynamics.py・列は research/minute_dynamics.py。docs の 97-15）
 分布の形:           args="--keep-frame --shape"（終値からの距離の帯ごとの株数の割合で、正例になりやすい分布の形を探す。平均の形の
@@ -1460,6 +1462,8 @@ def main(argv=None) -> int:
                     help="保存済みの表を、分足の取得記録が変わっていてもそのまま使う（腕を足す回で前の回と同じ表で比べる）")
     ap.add_argument("--budget-min", type=float, default=290.0, help="この分数を過ぎたら新しい計算を始めない（0 で無制限）")
     ap.add_argument("--dry", action="store_true", help="列の付き方だけ出して終わる")
+    ap.add_argument("--shape-dynamics", action="store_true",
+                    help="実験133 の測り直し: 位置と広がりを除いた形だけの推移で、独立したモデルを作って比べて終わる")
     ap.add_argument("--dynamics", action="store_true",
                     help="実験133: 分足の形と推移・直近のテクニカルだけの独立したモデルを作って比べて終わる")
     ap.add_argument("--shape", action="store_true",
@@ -1518,7 +1522,7 @@ def main(argv=None) -> int:
           f"うち分足の付いた行 {int((att & (df['Date'] <= cutoff)).sum()):,}（全体では {int(att.sum()):,}）")
     if args.dry:
         return 0
-    if args.dynamics:
+    if args.dynamics or args.shape_dynamics:
         import e133_minute_dynamics as E133
         import minute_dynamics as MD
 
@@ -1530,17 +1534,25 @@ def main(argv=None) -> int:
         dyn, rep = MD.dynamics(rows[["Code", "Date"]], MINUTE_DIR, lab.DATA_DIR)
         if len(dyn) != len(rows) or not (dyn["Code"].to_numpy() == rows["Code"].to_numpy()).all():
             raise SystemExit("推移の列を付けたら行の並びが変わった")
-        for c in MD.COLUMNS:
+        for c in MD.COLUMNS + MD.SHAPE_DYN_COLUMNS:
             rows[c] = dyn[c].to_numpy()
         tech = df[["Code", "Date"] + list(E133.TECH_COLUMNS)]
         rows = rows.merge(tech, on=["Code", "Date"], how="left")
         log(f"[dynamics] 推移の列 {len(MD.COLUMNS)}・付いた行 {rep['attached']:,} / {rep['rows']:,}・状態 {rep.get('status')}"
-            f" / {time.time() - t0:.0f}秒")
-        out = E133.report(rows, list(NEW_COLS))
+            f"・形だけの推移の列 {len(MD.SHAPE_DYN_COLUMNS)}・付いた行 {rep.get('shape_attached', 0):,}・"
+            f"状態 {rep.get('shape_status')} / {time.time() - t0:.0f}秒")
+        if args.shape_dynamics:
+            out = E133.report(rows, list(NEW_COLS), sets=E133.shape_sets(NEW_COLS), primary=E133.PRIMARY_SHAPE,
+                              coef_sets=("shp", "shp_tech"), rule_set="shp_tech", need=MD.SHAPE_DYN_COLUMNS,
+                              title="実験133 の測り直し 形だけの推移")
+            name = "dynamics_shape.json"
+        else:
+            out = E133.report(rows, list(NEW_COLS))
+            name = "dynamics.json"
         out["dynamics_report"] = rep
-        with open(path("dynamics.json"), "w", encoding="utf-8") as fh:
+        with open(path(name), "w", encoding="utf-8") as fh:
             json.dump(out, fh, ensure_ascii=False, indent=1, default=str)
-        log(f"記録: {path('dynamics.json')}（公開しない）")
+        log(f"記録: {path(name)}（公開しない）")
         return 0
     if args.shape:
         rec = load_tuned("A", colsets["base"], cutoff, args.n_trials, stamp)

@@ -70,7 +70,10 @@ TOP_A = 0.2
 N_PERM = 500
 ALPHA = 0.05 / 2
 PRIMARY = (("dist_tech", "lgbm"), ("dyn", "logit"))
-SET_JA = {"dyn": "推移だけ", "dist": "分布すべて", "tech": "直近のテクニカルだけ", "dist_tech": "分布すべて＋直近のテクニカル"}
+#: 形だけの推移で測り直す回（運用者の選択 2026-11-20「形だけの推移で測り直す」。docs の 98-5）で主に見る2つ
+PRIMARY_SHAPE = (("shp", "logit"), ("shp_tech", "lgbm"))
+SET_JA = {"dyn": "推移だけ", "dist": "分布すべて", "tech": "直近のテクニカルだけ", "dist_tech": "分布すべて＋直近のテクニカル",
+          "shp": "形の推移だけ", "shp_tech": "形の推移＋直近のテクニカル", "all": "形の推移＋分布すべて＋テクニカル"}
 MODEL_JA = {"logit": "統計（ロジスティック）", "lgbm": "機械学習（LightGBM）"}
 
 
@@ -78,6 +81,14 @@ def feature_sets(minute_cols) -> dict:
     dyn = list(MD.DYNAMIC_COLUMNS)
     dist = dyn + list(MD.SHAPE_COLUMNS) + list(minute_cols)
     return {"dyn": dyn, "dist": dist, "tech": list(TECH_COLUMNS), "dist_tech": dist + list(TECH_COLUMNS)}
+
+
+def shape_sets(minute_cols) -> dict:
+    """形だけの推移（minute_dynamics.SHAPE_DYN_COLUMNS）の組。直近のテクニカルだけは前回と同じ列なので比べるために残す。"""
+    shp = list(MD.SHAPE_DYN_COLUMNS)
+    dist = list(MD.DYNAMIC_COLUMNS) + list(MD.SHAPE_COLUMNS) + list(minute_cols)
+    return {"shp": shp, "tech": list(TECH_COLUMNS), "shp_tech": shp + list(TECH_COLUMNS),
+            "all": shp + dist + list(TECH_COLUMNS)}
 
 
 def windows(dates: pd.Series, start=TEST_START, months: int = TEST_MONTHS, embargo: int = EMBARGO_DAYS):
@@ -181,14 +192,20 @@ def rank_within(v: np.ndarray, groups: np.ndarray) -> np.ndarray:
     return pd.Series(v).groupby(groups).rank(pct=True).to_numpy()
 
 
-def report(rows: pd.DataFrame, minute_cols, seed: int = 0, n_perm: int = N_PERM) -> dict:
-    """rows: Code・Date・label・score（A の予測）と、列（minute_dynamics.COLUMNS・minute_cols・TECH_COLUMNS）。"""
+def report(rows: pd.DataFrame, minute_cols, seed: int = 0, n_perm: int = N_PERM, sets: dict | None = None,
+           primary=PRIMARY, coef_sets=("dyn", "dist_tech"), rule_set: str = "dist_tech", need=None,
+           title: str = "実験133 独立したモデル") -> dict:
+    """
+    rows: Code・Date・label・score（A の予測）と、列（minute_dynamics.COLUMNS・minute_cols・TECH_COLUMNS）。
+    sets・primary・coef_sets・rule_set・need（値が要る列。既定は推移の列）を渡すと、形だけの推移の回（shape_sets・PRIMARY_SHAPE）にも使う。
+    """
     from sklearn.metrics import average_precision_score, roc_auc_score
     from sklearn.tree import DecisionTreeClassifier
 
     rng = np.random.default_rng(seed)
-    sets = feature_sets(minute_cols)
-    rows = rows[rows[list(MD.DYNAMIC_COLUMNS)].notna().any(axis=1)].sort_values(["Date", "Code"], kind="mergesort")
+    sets = sets or feature_sets(minute_cols)
+    need = list(need or MD.DYNAMIC_COLUMNS)
+    rows = rows[rows[need].notna().any(axis=1)].sort_values(["Date", "Code"], kind="mergesort")
     rows = rows.reset_index(drop=True)
     missing = [c for c in TECH_COLUMNS if c not in rows.columns]
     if missing:
@@ -196,13 +213,13 @@ def report(rows: pd.DataFrame, minute_cols, seed: int = 0, n_perm: int = N_PERM)
     wins = windows(rows["Date"])
     out = {"rows": int(len(rows)), "pos": int(rows["label"].sum()), "windows": [[str(a.date()), str(b.date()), str(c.date())]
                                                                            for a, b, c in wins], "models": {}}
-    print(f"\n■ 実験133 独立したモデル: 分足の付いた候補で、20営業日の推移が作れる行 {len(rows):,}（正例 {out['pos']:,}・"
+    print(f"\n■ {title}: 分足の付いた候補で、20営業日の推移が作れる行 {len(rows):,}（正例 {out['pos']:,}・"
           f"{rows['label'].mean() * 100:.1f}%）。テスト窓 {len(wins)}つ（{wins[0][1].date()} 〜 {wins[-1][2].date()}・3か月ずつ。"
           f"学習はテストの始まりの {EMBARGO_DAYS}暦日前まで）")
     print("  列の数: " + " / ".join(f"{SET_JA[k]} {len(v)}" for k, v in sets.items()))
     print("  推移の列の分位（5% / 50% / 95%）: " + " / ".join(
-        f"{c.replace('vp_dyn_', '')} {np.nanquantile(rows[c], .05):.3g}/{np.nanquantile(rows[c], .5):.3g}/"
-        f"{np.nanquantile(rows[c], .95):.3g}" for c in MD.DYNAMIC_COLUMNS[:17]))
+        f"{c.replace('vp_dyn_', '').replace('vp_shp_', '')} {np.nanquantile(rows[c], .05):.3g}/"
+        f"{np.nanquantile(rows[c], .5):.3g}/{np.nanquantile(rows[c], .95):.3g}" for c in need[:20]))
 
     test_mask = np.zeros(len(rows), dtype=bool)
     scores, folds, coefs_by = {}, None, {}
@@ -310,7 +327,7 @@ def report(rows: pd.DataFrame, minute_cols, seed: int = 0, n_perm: int = N_PERM)
     print("    " + " / ".join(alt_line))
 
     # 4. 統計モデルの係数とルール
-    for set_key in ("dyn", "dist_tech"):
+    for set_key in coef_sets:
         cols = sets[set_key]
         Xall, _, used = _prep(rows, rows.head(1), cols)
         from sklearn.linear_model import LogisticRegression
@@ -326,7 +343,7 @@ def report(rows: pd.DataFrame, minute_cols, seed: int = 0, n_perm: int = N_PERM)
         print("    " + " / ".join(f"{c} {coef[c]:+.3f}（{same[c] * 100:.0f}%）" for c in topc))
         out.setdefault("coefficients", {})[set_key] = {c: {"coef": float(coef[c]), "same_sign": same[c]} for c in used}
 
-    cols = sets["dist_tech"]
+    cols = sets[rule_set]
     dates = np.sort(rows["Date"].unique())
     cut = dates[len(dates) // 2]
     first = (rows["Date"] < cut).to_numpy()
@@ -360,7 +377,7 @@ def report(rows: pd.DataFrame, minute_cols, seed: int = 0, n_perm: int = N_PERM)
     if sec.any():
         top_sec[sec] = a_all[sec] >= np.nanquantile(a_all[sec], 1 - TOP_A)
     print(f"\n  5. ルール（深さ{TREE_DEPTH}の決定木・葉の最小{TREE_MIN_LEAF}行。前半 〜{pd.Timestamp(cut).date()} で作り、後半で確かめる。"
-          f"{SET_JA['dist_tech']}）")
+          f"{SET_JA[rule_set]}）")
     leaves = []
     for lf in sorted(set(leaf)):
         m1, m2 = (leaf == lf) & first, (leaf == lf) & sec
@@ -378,7 +395,7 @@ def report(rows: pd.DataFrame, minute_cols, seed: int = 0, n_perm: int = N_PERM)
 
     # 読み
     read = {}
-    for set_key, kind in PRIMARY:
+    for set_key, kind in primary:
         r = out["models"][f"{set_key}/{kind}"]
         read[f"{set_key}/{kind}"] = {
             "単独で当たる": r["p_roc"] < ALPHA,

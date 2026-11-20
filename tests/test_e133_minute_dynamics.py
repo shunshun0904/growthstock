@@ -32,7 +32,7 @@ FAST = {**E.LGBM, "n_estimators": 30}
 FAST_ALT = {**E.LGBM_ALT, "n_estimators": 30}
 
 
-def frame(seed=0, effect=1.2, per_day=8):
+def frame(seed=0, effect=1.2, per_day=8, info_col="vp_dyn_mean_shift"):
     """2024-12〜2026-10 の候補の作りもの。A の予測は signal だけ、ラベルは signal と推移の列（mean_shift）で決まる。"""
     rng = np.random.default_rng(seed)
     dates = np.repeat(pd.bdate_range("2024-12-02", "2026-10-21"), per_day)
@@ -43,9 +43,9 @@ def frame(seed=0, effect=1.2, per_day=8):
     rows = {"Code": [f"{1000 + i % 50}" for i in range(n)], "Date": dates,
             "label": (rng.random(n) < 1 / (1 + np.exp(-logit))).astype(float),
             "score": 1 / (1 + np.exp(-(-1.5 + 0.8 * signal)))}
-    for c in MD.COLUMNS:
+    for c in MD.COLUMNS + MD.SHAPE_DYN_COLUMNS:
         rows[c] = rng.normal(size=n)
-    rows["vp_dyn_mean_shift"] = info
+    rows[info_col] = info
     for c in MINUTE_COLS + list(E.TECH_COLUMNS):
         rows[c] = rng.normal(size=n)
     return pd.DataFrame(rows)
@@ -103,6 +103,21 @@ class TestReport(unittest.TestCase):
         for title in ("1. 単独の当たり", "2. A との重なり", "3. A の上位", "4. 統計モデルの係数", "5. ルール", "読み"):
             self.assertIn(title, log)
         self.assertNotIn("1000", log.replace("1,000", ""))                      # 銘柄コードを出さない
+
+    def test_shape_only_sets(self):
+        rows = frame(seed=3, info_col="vp_shp_skew_change")
+        with mock.patch.object(E, "LGBM", FAST), mock.patch.object(E, "LGBM_ALT", FAST_ALT), \
+                redirect_stdout(io.StringIO()) as buf:
+            out = E.report(rows, MINUTE_COLS, n_perm=49, sets=E.shape_sets(MINUTE_COLS), primary=E.PRIMARY_SHAPE,
+                           coef_sets=("shp", "shp_tech"), rule_set="shp_tech", need=MD.SHAPE_DYN_COLUMNS,
+                           title="形だけの推移")
+        self.assertEqual(set(out["reading"]), {"shp/logit", "shp_tech/lgbm"})
+        self.assertTrue(out["reading"]["shp/logit"]["単独で当たる"])
+        self.assertTrue(out["reading"]["shp/logit"]["今のモデルにない情報"])
+        coef = out["coefficients"]["shp"]
+        self.assertEqual(max(coef, key=lambda c: abs(coef[c]["coef"])), "vp_shp_skew_change")
+        self.assertEqual(set(E.shape_sets(MINUTE_COLS)["shp"]), set(MD.SHAPE_DYN_COLUMNS))
+        self.assertIn("形だけの推移", buf.getvalue())
 
     def test_nothing_when_dynamics_carry_no_information(self):
         out, _ = self.run_report(frame(seed=2, effect=0.0))
