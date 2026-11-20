@@ -53,8 +53,8 @@ async function checkSupplyDemandView() {
   // 運用者の指示 2026-11-15。非表示中もPages配下・PC/スマホでタブと画面が出ないことを確かめる。
   if (await page.getByRole('tab', { name: '価格帯別需給', exact: true }).count() === 0) {
     assert.deepEqual(await page.getByRole('tab').allTextContents(), [
-      'サマリー', 'ブレイク予測', '候補銘柄のニュース', '理論株価', 'タイムマシーン',
-      // サマリーは 2026-11-21 に一番左に足した。価格帯別出来高は同じ日から隠している
+      'ブレイク予測', '候補銘柄のニュース', '理論株価', 'タイムマシーン',
+      // サマリー（2026-11-21 に足した）と価格帯別出来高は、2026-11-21 から隠している
     ]);
     assert.equal(await page.locator('.supply-demand-view').count(), 0);
     await page.screenshot({ path: path.join(SHOTS, 'screenshot-price-demand-hidden-desktop.png') });
@@ -71,9 +71,9 @@ async function checkSupplyDemandView() {
   await page.getByRole('tab', { name: '価格帯別需給', exact: true }).click();
   await page.waitForSelector('.sd-positions');
   // スコアと収益の分布・再学習で加わったサンプルは 2026-11-15 から、価格帯別出来高は 2026-11-21 から隠している（src/App.jsx の hidden）。
-  // サマリーは 2026-11-21 に一番左に足した
-  assert.equal(await page.getByRole('tab').count(), 6);
-  assert.equal(await page.getByRole('tab').nth(2).textContent(), '候補銘柄のニュース');
+  // サマリーも 2026-11-21 から隠している
+  assert.equal(await page.getByRole('tab').count(), 5);
+  assert.equal(await page.getByRole('tab').nth(1).textContent(), '候補銘柄のニュース');
   assert.equal(await page.getByRole('tab').last().textContent(), 'タイムマシーン');
   if (!real) {
     await page.getByLabel('需給の分析対象銘柄').selectOption('jq-11110');
