@@ -43,6 +43,24 @@ out-of-fold: 本番と同じ作り（36/6/6か月・エンバーゴ20営業日�
 列の付き方だけ見る: args="--dry"
 試運転:             args="--tag e132smoke --n-trials 2 --shifts 0"
 C を足す回:         args="--keep-frame"（A・B は保存済みの探索・out-of-fold を読む。C の out-of-fold だけ計算する）
+公平な測り方:       args="--keep-frame --incremental"（実験133 の続き。独立したモデルが A にない情報を持つかを、残差と、重みを
+                    過去の窓で決めて A に足す方法で測る。docs の 98-10）
+上位の中の逆向き:   args="--keep-frame --inverse"（実験133 の続き。A の上位20% の中で、分布・形のモデルの点が高いほど正例が少ないか。
+                    前半の窓で選び、後半の窓で確かめる。docs の 98-7）
+形だけの推移:       args="--keep-frame --shape-dynamics"（実験133 の測り直し。日ごとの分布を位置・広がり・形に分け、形だけの推移で
+                    同じ比べ方をする。docs の 98-5）
+独立したモデル:     args="--keep-frame --dynamics"（実験133。分足の形と推移・直近のテクニカルだけで +10% を当てる統計モデルと
+                    LightGBM。台本は e133_minute_dynamics.py・列は research/minute_dynamics.py。docs の 97-15）
+分布の形:           args="--keep-frame --shape"（終値からの距離の帯ごとの株数の割合で、正例になりやすい分布の形を探す。平均の形の
+                    比較と型（k-means）。素の正例率と、A の見込みとの差の両方。運用者の問い 2026-11-19「正例になりやすい、
+                    価格帯別出来高の分布などないでしょうか？」。docs の 97-12）
+短い期間の値動き:   args="--keep-frame --short"（分足の30列が、高値更新の翌日から数営業日の値動きを当てるか。今の373列の予測を
+                    超えて当たりが残るか。運用者の選択 2026-11-19「短い期間の値動きで見る」。docs の 97-11）
+残差で確かめる:     args="--keep-frame --residual"（保存済みの A の out-of-fold で説明しきれない部分を、分足の30列が説明するか。
+                    運用者の選択 2026-11-19「残差で確かめる」。docs の 97-9）
+重要度の顔ぶれ:     args="--keep-frame --importance"（A・C・B を同じ行・種で学習し直し、gain の割合の上位を比べる。
+                    運用者の依頼 2026-11-19「腕Cにおいて、重要度の高い特徴量の中に今回追加した特徴量は含まれてますか？
+                    重要度の高い上位の特徴量の顔ぶれがどれくらい変わったのか見たいです」）
 
 表（33列を付けた frame）は1回目に作って research/_data/oof/<tag>_* に置き、以降の回は actions/cache で引き継いだそれを使う
 （分足の取得記録・作りの台本が変わったら作り直す）。--budget-min（既定 290分）を過ぎたら新しい計算を始めずに終わる
@@ -337,9 +355,813 @@ def gain_report(df: pd.DataFrame, base: list, params: dict, cutoff, arm: str = "
 
 
 # --------------------------------------------------------------------------- #
+# 重要度の顔ぶれ（--importance）
+# --------------------------------------------------------------------------- #
+#: 顔ぶれを比べる上位の列数
+TOP_NS = (10, 20, 30, 50)
+#: 表に並べる上位の列数
+SHOW_TOP = 20
+
+
+def importance_shares(df: pd.DataFrame, cols: list, params: dict, seed: int):
+    """df（ラベルのある行）で1本学習し、列ごとの gain と split の割合（合計1）を返す。学習器は gain_report と同じ。"""
+    import lightgbm as lgb
+
+    y = df["label"].to_numpy(dtype=int)
+    m = lgb.LGBMClassifier(**{**params, "random_state": seed}, scale_pos_weight=tuning.scale_pos_weight(y))
+    m.fit(df[cols].to_numpy(dtype=float), y)
+    out = []
+    for kind in ("gain", "split"):
+        v = pd.Series(m.booster_.feature_importance(importance_type=kind), index=cols, dtype=float)
+        out.append(v / (float(v.sum()) or 1.0))
+    return out[0], out[1]
+
+
+def top_cols(share: pd.Series, n: int) -> list:
+    """割合の大きい順の上位 n 列（同じ値は列名の順）。"""
+    order = sorted(share.index, key=lambda c: (-float(share[c]), c))
+    return order[:n]
+
+
+def ranks_of(share: pd.Series) -> pd.Series:
+    """割合の大きい順の順位（1 が最上位。同じ値は同じ順位）。"""
+    return share.rank(ascending=False, method="min").astype(int)
+
+
+def overlap(a: pd.Series, b: pd.Series, n: int) -> int:
+    return len(set(top_cols(a, n)) & set(top_cols(b, n)))
+
+
+def importance_report(df: pd.DataFrame, base: list, params_of: dict, cutoff, seeds=None) -> dict:
+    """
+    A（373列・A のパラメータ）・C（403列・A のパラメータ）・B（403列・B のパラメータ）を、同じ行と種で学習し直して
+    gain の割合を比べる。期間は探索の期間（〜cutoff）と全期間（ラベルのある全行。本番の全期間の学習に近い）。
+
+    - 分足の30列が上位に入るか（割合・いちばん上の順位・上位 20/50/100 に入る列の数）
+    - 上位 N 列の顔ぶれの重なり（A と C）。偶然の入れ替わりの目安として、同じ腕で種だけ変えたときの重なりも出す
+      （列の抜き取り colsample があるので、種や列の数が変わるだけでも木は変わる）
+    - 既存の373列の割合の順位相関（A と C）と、同じ腕の種どうしの順位相関
+    - 種3つの平均の割合で並べた上位 SHOW_TOP 列（A・C の順位を並べる）
+    """
+    seeds = tuple(seeds or SEEDS)
+    new = list(NEW_COLS)
+    groups = F.column_groups()
+    arms = {"A": (list(base), params_of["A"]), "C": (list(base) + new, params_of["A"])}
+    if params_of.get("B") is not None:
+        arms["B"] = (list(base) + new, params_of["B"])
+    periods = (("tuning", f"探索の期間（〜{pd.Timestamp(cutoff).date()}）", df[df["Date"] <= cutoff]),
+               ("all", f"全期間（〜{df['Date'].max().date()}。本番の全期間の学習に近い）", df))
+    out = {"seeds": list(seeds), "periods": {}}
+    for key, title, sub in periods:
+        sub = sub[sub["label"].notna()]
+        att = attached_mask(sub)
+        print(f"\n■ 重要度（gain の割合）: {title} {len(sub):,}行・うち分足の付いた行 {int(att.sum()):,}"
+              f"（{att.mean() * 100:.0f}%）・種 {list(seeds)}。A・C は A のパラメータ、B は B のパラメータ")
+        gain, split = {}, {}
+        for arm, (cols, prm) in arms.items():
+            for sd in seeds:
+                gain[(arm, sd)], split[(arm, sd)] = importance_shares(sub, cols, prm, sd)
+        mean = {arm: pd.concat([gain[(arm, sd)] for sd in seeds], axis=1).mean(axis=1) for arm in arms}
+        rank = {arm: ranks_of(mean[arm]) for arm in arms}
+        rec = {"rows": int(len(sub)), "minute_rows": int(att.sum()), "arms": {}}
+
+        # 1. 分足の30列は上位に入るか
+        print("  1. 分足の30列（種3つの平均の割合で順位を付ける。括弧は種ごとの値の幅）")
+        for arm in [a for a in ("C", "B") if a in arms]:
+            per_seed = [float(gain[(arm, sd)][new].sum()) for sd in seeds]
+            per_seed_best = [int(ranks_of(gain[(arm, sd)])[new].min()) for sd in seeds]
+            sp_share = float(np.mean([split[(arm, sd)][new].sum() for sd in seeds]))
+            r = rank[arm][new]
+            best = r.sort_values(kind="mergesort").index[0]
+            cnt = {n: int((r <= n).sum()) for n in (20, 50, 100)}
+            print(f"    {arm}: gain の割合 {np.mean(per_seed) * 100:.2f}%（{min(per_seed) * 100:.2f}〜{max(per_seed) * 100:.2f}%）・"
+                  f"split の割合 {sp_share * 100:.2f}%・いちばん上 {best} {int(r[best])}位 / {len(arms[arm][0])}列"
+                  f"（種ごと {'・'.join(str(b) for b in per_seed_best)}位）・上位20に {cnt[20]}列・50に {cnt[50]}列・"
+                  f"100に {cnt[100]}列")
+            rec["arms"][arm] = {"minute_gain_share": float(np.mean(per_seed)), "minute_gain_share_by_seed": per_seed,
+                                "minute_split_share": sp_share, "best_col": best, "best_rank": int(r[best]),
+                                "best_rank_by_seed": per_seed_best, "in_top": {str(n): v for n, v in cnt.items()},
+                                "minute_ranks": {c: int(r[c]) for c in new}}
+
+        # 2. 上位 N 列の顔ぶれの重なり
+        print("  2. 上位 N 列の顔ぶれの重なり（同じ列の数 / N）")
+        print(f"    {'':<34}" + "".join(f"{'上位' + str(n):>8}" for n in TOP_NS))
+        lines = [("A と C（種3つの平均で並べた順位）", [overlap(mean["A"], mean["C"], n) for n in TOP_NS])]
+        same = [[overlap(gain[("A", sd)], gain[("C", sd)], n) for sd in seeds] for n in TOP_NS]
+        lines.append(("A と C（同じ種どうし・3組の平均）", [float(np.mean(v)) for v in same]))
+        pairs = [(seeds[i], seeds[j]) for i in range(len(seeds)) for j in range(i + 1, len(seeds))]
+        for arm in ("A", "C"):
+            v = [float(np.mean([overlap(gain[(arm, s1)], gain[(arm, s2)], n) for s1, s2 in pairs])) for n in TOP_NS]
+            lines.append((f"{arm} の種どうし（{len(pairs)}組の平均。偶然の目安）", v))
+        if "B" in arms:
+            lines.append(("A と B（種3つの平均で並べた順位）", [overlap(mean["A"], mean["B"], n) for n in TOP_NS]))
+        for name, vals in lines:
+            print(f"    {name:<34}" + "".join(f"{v:>6.1f}/{n:<2}" if isinstance(v, float) else f"{v:>6}/{n:<2}"
+                                             for v, n in zip(vals, TOP_NS)))
+        rec["overlap"] = {name: {str(n): v for n, v in zip(TOP_NS, vals)} for name, vals in lines}
+
+        # 3. 既存の373列の順位相関
+        b = list(base)
+        rho_ac = float(mean["A"][b].corr(mean["C"][b], method="spearman"))
+        rho_same = float(np.mean([gain[("A", sd)][b].corr(gain[("C", sd)][b], method="spearman") for sd in seeds]))
+        rho_seed = {arm: float(np.mean([gain[(arm, s1)][b].corr(gain[(arm, s2)][b], method="spearman")
+                                        for s1, s2 in pairs])) for arm in ("A", "C")}
+        print(f"  3. 既存の{len(b)}列の gain の割合の順位相関（スピアマン）: A と C（平均どうし）{rho_ac:.3f}・"
+              f"A と C（同じ種どうし）{rho_same:.3f}・A の種どうし {rho_seed['A']:.3f}・C の種どうし {rho_seed['C']:.3f}")
+        rec["spearman"] = {"A_C_mean": rho_ac, "A_C_same_seed": rho_same, "A_seeds": rho_seed["A"],
+                           "C_seeds": rho_seed["C"]}
+
+        # 4. 上位の列の表
+        print(f"  4. 上位{SHOW_TOP}列（種3つの平均の gain の割合。順位の「→」は A → C）")
+        print(f"    {'順位':>4}  {'A の上位':<34}{'割合':>7}{'C での順位':>9}   {'C の上位':<34}{'割合':>7}{'A での順位':>9}")
+        ta, tc = top_cols(mean["A"], SHOW_TOP), top_cols(mean["C"], SHOW_TOP)
+        for i in range(SHOW_TOP):
+            ca, cc = ta[i], tc[i]
+            ra_c = f"{int(rank['C'][ca])}位"
+            rc_a = f"{int(rank['A'][cc])}位" if cc in rank["A"].index else "（新）"
+            print(f"    {i + 1:>4}  {ca:<34}{mean['A'][ca] * 100:>6.2f}%{ra_c:>9}   {cc:<34}{mean['C'][cc] * 100:>6.2f}%"
+                  f"{rc_a:>9}")
+        left = [c for c in ta if c not in tc]
+        came = [c for c in tc if c not in ta]
+        print(f"    上位{SHOW_TOP}から外れた列: " + (" / ".join(f"{c}（{int(rank['A'][c])} → {int(rank['C'][c])}位）"
+                                                    for c in left) or "なし"))
+        print(f"    上位{SHOW_TOP}に入った列: " + (" / ".join(f"{c}（{int(rank['A'][c]) if c in rank['A'].index else '新'} → "
+                                                    f"{int(rank['C'][c])}位）" for c in came) or "なし"))
+        grp = {arm: mean[arm].groupby(lambda c: groups.get(c) or ("vp_minute" if c in new else "?")).sum()
+               for arm in ("A", "C")}
+        topg = grp["A"].sort_values(ascending=False).index[:8]
+        print("    グループごとの割合（A → C。上位8グループ）: "
+              + " / ".join(f"{g} {grp['A'][g] * 100:.1f} → {grp['C'].get(g, 0.0) * 100:.1f}%" for g in topg)
+              + f" / vp_minute 0.0 → {grp['C'].get('vp_minute', 0.0) * 100:.1f}%")
+        rec["top"] = {arm: [{"col": c, "group": groups.get(c) or ("vp_minute" if c in new else "?"),
+                             "share": float(mean[arm][c]), "rank": int(rank[arm][c])}
+                            for c in top_cols(mean[arm], max(TOP_NS))] for arm in arms}
+        rec["ranks_in_other"] = {"A_top_in_C": {c: int(rank["C"][c]) for c in ta},
+                                 "C_top_in_A": {c: (int(rank["A"][c]) if c in rank["A"].index else None) for c in tc}}
+        rec["groups"] = {arm: {g: float(v) for g, v in grp[arm].items()} for arm in grp}
+        out["periods"][key] = rec
+    with open(path("importance.json"), "w", encoding="utf-8") as fh:
+        json.dump(out, fh, ensure_ascii=False, indent=1, default=str)
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# 残差で確かめる（--residual）
+# --------------------------------------------------------------------------- #
+#: 並べ替え検定の回数（列ごと・30列まとめて）
+N_PERM = 1000
+N_PERM_JOINT = 500
+#: 時間で分けた検証で、30列の係数に掛ける L2 の重さ
+RIDGE = 1.0
+#: 列ごとの判定の FDR（Benjamini–Hochberg）
+BH_Q = 0.10
+#: 30列まとめての判定の有意水準
+ALPHA = 0.05
+
+
+def logit_fit(X: np.ndarray, y: np.ndarray, beta=None, ridge=None, iters: int = 50, tol: float = 1e-9):
+    """ロジスティック回帰（ニュートン法）。ridge は係数ごとの L2 の重さ（None なら無し）。(係数, 対数尤度) を返す。"""
+    k = X.shape[1]
+    b = np.zeros(k) if beta is None else np.asarray(beta, dtype=float).copy()
+    lam = np.zeros(k) if ridge is None else np.asarray(ridge, dtype=float)
+    for _ in range(iters):
+        eta = np.clip(X @ b, -35, 35)
+        p = 1.0 / (1.0 + np.exp(-eta))
+        w = p * (1.0 - p)
+        g = X.T @ (y - p) - lam * b
+        H = (X * w[:, None]).T @ X + np.diag(lam) + 1e-10 * np.eye(k)
+        step = np.linalg.solve(H, g)
+        b = b + step
+        if np.max(np.abs(step)) < tol:
+            break
+    eta = X @ b
+    return b, float(np.sum(y * eta - np.logaddexp(0.0, eta)))
+
+
+def normal_scores(v) -> np.ndarray:
+    """順位を標準正規の分位に直した値（外れ値に引っ張られない）。"""
+    from scipy.special import ndtri
+
+    r = pd.Series(np.asarray(v, dtype=float)).rank(method="average").to_numpy()
+    return ndtri((r - 0.5) / len(r))
+
+
+def within_date(v: np.ndarray, codes: np.ndarray) -> np.ndarray:
+    """日付ごとの平均を引いた値（同じ日の候補どうしの違いだけを残す）。"""
+    mean = pd.Series(v).groupby(codes).transform("mean").to_numpy()
+    return v - mean
+
+
+def date_permuter(codes: np.ndarray, rng):
+    """同じ日付の行の中だけで並べ替える添字を返す関数（日付ごとの分布を保ったまま、ラベルとの結びつきを切る）。"""
+    n = len(codes)
+    base = np.lexsort((np.arange(n), codes))
+
+    def perm() -> np.ndarray:
+        shuffled = np.lexsort((rng.random(n), codes))
+        out = np.empty(n, dtype=int)
+        out[base] = shuffled
+        return out
+    return perm
+
+
+def bh_qvalues(p) -> np.ndarray:
+    p = np.asarray(p, dtype=float)
+    n = len(p)
+    order = np.argsort(p)
+    q = np.empty(n)
+    run = 1.0
+    for rank, i in zip(range(n, 0, -1), order[::-1]):
+        run = min(run, p[i] * n / rank)
+        q[i] = run
+    return q
+
+
+def base_design(score: np.ndarray) -> np.ndarray:
+    """A の予測の logit（標準化）とその2乗（A の予測の目盛りのずれを吸収する）。"""
+    s = np.clip(np.asarray(score, dtype=float), 1e-6, 1 - 1e-6)
+    z = np.log(s / (1 - s))
+    z = (z - z.mean()) / (z.std() or 1.0)
+    return np.column_stack([np.ones(len(z)), z, z * z])
+
+
+def added_ll(X0: np.ndarray, y: np.ndarray, extra: np.ndarray, b0: np.ndarray, ll0: float) -> float:
+    if extra.ndim == 1:
+        extra = extra[:, None]
+    _, ll1 = logit_fit(np.column_stack([X0, extra]), y, beta=np.concatenate([b0, np.zeros(extra.shape[1])]))
+    return ll1 - ll0
+
+
+def residual_rows(df: pd.DataFrame, base: list, params_a: dict, shifts) -> pd.DataFrame:
+    """
+    A の out-of-fold（保存済み。ずらし × 種3つ）を行ごとに平均した予測と、分足の30列・ラベル・日付の表（分足の付いた行だけ）。
+    どの予測も、その行を学習に使っていないモデルが出したもの。
+    """
+    parts = []
+    for sh in shifts:
+        o = oof("A", df, base, params_a, sh, SEEDS)
+        if o is None:
+            raise SystemExit(f"A の out-of-fold（ずらし{sh}）が無い")
+        parts.append(o[["Code", "Date", "score"]].rename(columns={"score": f"s{sh}"}))
+    m = parts[0]
+    for x in parts[1:]:
+        m = m.merge(x, on=["Code", "Date"], how="outer")
+    sc = [c for c in m.columns if c.startswith("s") and c[1:].isdigit()]
+    m["score"] = m[sc].mean(axis=1)
+    m["n_scores"] = m[sc].notna().sum(axis=1)
+    keep = df.loc[attached_mask(df), ["Code", "Date", "label"] + list(NEW_COLS)]
+    out = keep.merge(m[["Code", "Date", "score", "n_scores"]], on=["Code", "Date"], how="inner")
+    return out[out["label"].notna() & out["score"].notna()].reset_index(drop=True)
+
+
+def residual_report(rows: pd.DataFrame, cols: list, n_perm: int = N_PERM, n_perm_joint: int = N_PERM_JOINT,
+                    seed: int = 0) -> dict:
+    """
+    A の予測で説明しきれない部分を、列が説明するか（分足の付いた行で）。
+
+    基準: ラベル ~ A の予測の logit（標準化）＋ その2乗 のロジスティック回帰。
+    列ごと: 基準に列（順位を標準正規に直した値）を足したときの対数尤度の伸び（ΔLL）。並べ替え検定は、同じ日付の行の中で
+            列の値を入れ替えて n_perm 回（日付ごとの偏りでは有意にならない）。「日付の中」は列から日付ごとの平均を引いた値で
+            同じことをする（同じ日の候補の並べ方に効くか）。q は Benjamini–Hochberg
+    まとめて: 30列（すべてそろう行）を一度に足した ΔLL と、行ごとに30列まとめて日付の中で入れ替えた並べ替え検定。
+              日付で前半・後半に分け、片方で学習してもう片方で A だけ と A＋30列 を比べる（両方向）
+    """
+    from sklearn.metrics import average_precision_score, roc_auc_score
+
+    rng = np.random.default_rng(seed)
+    rows = rows.sort_values(["Date", "Code"], kind="mergesort").reset_index(drop=True)
+    y_all = rows["label"].to_numpy(dtype=float)
+    out = {"rows": int(len(rows)), "pos": int(y_all.sum()), "dates": int(rows["Date"].nunique()),
+           "a_auc": float(roc_auc_score(y_all, rows["score"])), "a_pr_auc": float(average_precision_score(y_all, rows["score"])),
+           "columns": {}}
+    print(f"\n■ 残差で確かめる: 分足の付いた行 {len(rows):,}（正例 {out['pos']:,}・{out['dates']}日）。A の予測は保存済みの "
+          f"out-of-fold（行ごとに {int(rows['n_scores'].min())}〜{int(rows['n_scores'].max())}本の平均）で、この行での "
+          f"ROC {out['a_auc']:.4f}・PR-AUC {out['a_pr_auc']:.4f}")
+    print(f"  列ごと（並べ替え {n_perm}回・同じ日付の中で入れ替え。q は BH。ΔLL は対数尤度の伸び。"
+          "残差は「実際の正例率 − A から見込む正例率」を列の5分位ごとに（ポイント。低い → 高い））")
+    print(f"    {'列':<34}{'行':>6}{'単独AUC':>8}{'向き':>4}{'ΔLL':>7}{'p':>7}{'q':>6}  {'日付の中 ΔLL':>10}{'p':>7}{'q':>6}"
+          f"  5分位の残差")
+    res = []
+    for c in cols:
+        m = rows[c].notna().to_numpy()
+        sub = rows[m]
+        y = sub["label"].to_numpy(dtype=float)
+        codes = pd.factorize(sub["Date"])[0]
+        X0 = base_design(sub["score"].to_numpy())
+        b0, ll0 = logit_fit(X0, y)
+        p0 = 1.0 / (1.0 + np.exp(-(X0 @ b0)))
+        r = normal_scores(sub[c].to_numpy())
+        rw = within_date(r, codes)
+        perm = date_permuter(codes, rng)
+        stats = {}
+        for key, v in (("pooled", r), ("within", rw)):
+            d = added_ll(X0, y, v, b0, ll0)
+            null = np.array([added_ll(X0, y, v[perm()], b0, ll0) for _ in range(n_perm)])
+            b1, _ = logit_fit(np.column_stack([X0, v]), y, beta=np.append(b0, 0.0))
+            stats[key] = {"dll": float(d), "p": float((1 + np.sum(null >= d)) / (n_perm + 1)), "coef": float(b1[-1])}
+        bins = pd.qcut(pd.Series(r).rank(method="first"), 5, labels=False).to_numpy()
+        quint = [float(np.mean((y - p0)[bins == k]) * 100) for k in range(5)]
+        auc = float(roc_auc_score(y, sub[c].to_numpy(dtype=float))) if 0 < y.sum() < len(y) else float("nan")
+        res.append({"col": c, "n": int(m.sum()), "auc": auc, "pooled": stats["pooled"], "within": stats["within"],
+                    "quintile_resid_pt": quint})
+    for key in ("pooled", "within"):
+        q = bh_qvalues([r_[key]["p"] for r_ in res])
+        for r_, qq in zip(res, q):
+            r_[key]["q"] = float(qq)
+    for r_ in sorted(res, key=lambda x: -x["pooled"]["dll"]):
+        po, wi = r_["pooled"], r_["within"]
+        print(f"    {r_['col']:<34}{r_['n']:>6,}{r_['auc']:>8.3f}{'+' if po['coef'] > 0 else '−':>4}{po['dll']:>7.2f}"
+              f"{po['p']:>7.3f}{po['q']:>6.2f}  {wi['dll']:>10.2f}{wi['p']:>7.3f}{wi['q']:>6.2f}  "
+              + " / ".join(f"{v:+.1f}" for v in r_["quintile_resid_pt"]))
+        out["columns"][r_["col"]] = r_
+    hit = {key: [r_["col"] for r_ in res if r_[key]["q"] < BH_Q] for key in ("pooled", "within")}
+    print(f"  q < {BH_Q} の列: 全体 {len(hit['pooled'])}列{('（' + ' / '.join(hit['pooled']) + '）') if hit['pooled'] else ''}・"
+          f"日付の中 {len(hit['within'])}列{('（' + ' / '.join(hit['within']) + '）') if hit['within'] else ''}")
+    out["hits"] = hit
+
+    # 30列まとめて
+    full = rows.dropna(subset=list(cols)).reset_index(drop=True)
+    y = full["label"].to_numpy(dtype=float)
+    codes = pd.factorize(full["Date"])[0]
+    X0 = base_design(full["score"].to_numpy())
+    b0, ll0 = logit_fit(X0, y)
+    R = np.column_stack([normal_scores(full[c].to_numpy()) for c in cols])
+    d = added_ll(X0, y, R, b0, ll0)
+    perm = date_permuter(codes, rng)
+    null = np.array([added_ll(X0, y, R[perm()], b0, ll0) for _ in range(n_perm_joint)])
+    p_joint = float((1 + np.sum(null >= d)) / (n_perm_joint + 1))
+    print(f"  {len(cols)}列まとめて（{len(full):,}行。並べ替え {n_perm_joint}回）: ΔLL {d:.2f}・並べ替えの 95% 点 "
+          f"{np.quantile(null, 0.95):.2f}・p {p_joint:.3f}")
+    dates = np.sort(full["Date"].unique())
+    cut = dates[len(dates) // 2]
+    halves = {"前半で学習 → 後半で評価": (full["Date"] < cut, full["Date"] >= cut),
+              "後半で学習 → 前半で評価": (full["Date"] >= cut, full["Date"] < cut)}
+    split = {}
+    for name, (tr, te) in halves.items():
+        tr, te = tr.to_numpy(), te.to_numpy()
+        Xb = base_design(full["score"].to_numpy())
+        # 標準化は学習側の値で決める（評価側の分布を使わない）
+        Rtr = R[tr]
+        mu, sd = Rtr.mean(axis=0), Rtr.std(axis=0)
+        sd[sd == 0] = 1.0
+        Rz = (R - mu) / sd
+        bb, _ = logit_fit(Xb[tr], y[tr])
+        lam = np.concatenate([np.zeros(Xb.shape[1]), np.full(len(cols), RIDGE)])
+        bf, _ = logit_fit(np.column_stack([Xb, Rz])[tr], y[tr], ridge=lam)
+        pb = 1 / (1 + np.exp(-(Xb[te] @ bb)))
+        pf = 1 / (1 + np.exp(-(np.column_stack([Xb, Rz])[te] @ bf)))
+        yt = y[te]
+
+        def ll(pp):
+            pp = np.clip(pp, 1e-9, 1 - 1e-9)
+            return float(-np.mean(yt * np.log(pp) + (1 - yt) * np.log(1 - pp)))
+        rec = {"n_train": int(tr.sum()), "n_test": int(te.sum()),
+               "auc_a": float(roc_auc_score(yt, pb)), "auc_full": float(roc_auc_score(yt, pf)),
+               "pr_a": float(average_precision_score(yt, pb)), "pr_full": float(average_precision_score(yt, pf)),
+               "logloss_a": ll(pb), "logloss_full": ll(pf)}
+        split[name] = rec
+        print(f"  {name}（学習 {rec['n_train']:,}行・評価 {rec['n_test']:,}行。分かれ目 {pd.Timestamp(cut).date()}）: "
+              f"ROC A だけ {rec['auc_a']:.4f} → A＋{len(cols)}列 {rec['auc_full']:.4f}（{rec['auc_full'] - rec['auc_a']:+.4f}）・"
+              f"PR-AUC {rec['pr_a']:.4f} → {rec['pr_full']:.4f}（{rec['pr_full'] - rec['pr_a']:+.4f}）・"
+              f"対数損失 {rec['logloss_a']:.4f} → {rec['logloss_full']:.4f}")
+    both_up = all(v["auc_full"] > v["auc_a"] for v in split.values())
+    if p_joint < ALPHA and both_up:
+        reading = "情報が残っている（A が使い切れていない情報が30列にある）"
+    elif p_joint >= ALPHA:
+        reading = "残っていない（A の予測で説明できない部分を、30列はまとめても説明しない）"
+    else:
+        reading = "はっきりしない（まとめての検定は有意だが、時間で分けた検証の両方では上がらない）"
+    print(f"  読み（回す前に決めたもの。まとめての p < {ALPHA} かつ 時間で分けた両方向で ROC が上がれば「残っている」、"
+          f"p ≥ {ALPHA} なら「残っていない」）: {reading}")
+    out["joint"] = {"rows": int(len(full)), "dll": float(d), "p": p_joint, "null_q95": float(np.quantile(null, 0.95)),
+                    "split": split, "reading": reading}
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# 分布の形（--shape）
+# --------------------------------------------------------------------------- #
+#: 型の数（k-means。期間の前半で作り、後半で確かめる）
+N_TYPES = 5
+#: 並べ替え検定の回数
+SHAPE_PERM = 1000
+
+
+def shape_rows(df: pd.DataFrame, base: list, params_a: dict, shifts) -> tuple:
+    """分足の付いた行に、分布の形の列（minute_features.SHAPE_COLUMNS）と A の予測（residual_rows と同じ）を付けた表と確かめ。"""
+    rows = residual_rows(df, base, params_a, shifts)
+    t0 = time.time()
+    att, report = MF.build(rows[["Code", "Date"]], MINUTE_DIR, lab.DATA_DIR, with_shape=True)
+    if len(att) != len(rows) or not (att["Code"].to_numpy() == rows["Code"].to_numpy()).all():
+        raise SystemExit("分布の形を付けたら行の並びが変わった")
+    diff = float(np.nanmax(np.abs(att[list(NEW_COLS)].to_numpy(dtype=float) - rows[list(NEW_COLS)].to_numpy(dtype=float))))
+    sums = att[MF.SHAPE_COLUMNS].to_numpy(dtype=float).reshape(len(att), len(MF.WINDOWS), -1).sum(axis=2)
+    dev = float(np.nanmax(np.abs(sums - 1.0)))
+    check = {"summary_max_abs_diff": diff, "shape_sum_max_dev": dev, "seconds": round(time.time() - t0)}
+    print(f"  確かめ: 作り直した30列と表の30列の差の最大 {diff:.2e}・分布の形の割合の合計と1の差の最大 {dev:.2e}"
+          f"（{check['seconds']}秒）")
+    if diff > 1e-9 or dev > 1e-6:
+        raise SystemExit("分布の形の作り直しが表と合わない")
+    for c in MF.SHAPE_COLUMNS:
+        rows[c] = att[c].to_numpy()
+    return rows, check
+
+
+def shape_report(rows: pd.DataFrame, windows=None, n_types: int = N_TYPES, n_perm: int = SHAPE_PERM, seed: int = 0) -> dict:
+    """
+    正例になりやすい分布の形（分足の付いた行。期間ごと）。
+    A. 平均の形: 正例と負例の、帯ごとの株数の割合の平均と差。素の差は同じ日付の中でラベルを入れ替える並べ替え検定。
+       A の見込みとの差は、基準（A の予測の logit とその2乗）に帯の割合（順位を標準正規に直した値）を足した対数尤度の伸びと、
+       同じ日付の中で割合を入れ替える並べ替え検定。日付の前半・後半それぞれの差（向きがそろうか）も出す
+    B. 型: 帯の割合の平方根で k-means（前半の日付だけで作る）。型ごとの件数・正例率・A の見込みとの差を前半・後半で出し、
+       後半だけで検定する（前半で見つけて後半で確かめる）
+    q は Benjamini–Hochberg（A は 期間 × 帯、B は 期間 × 型 でそれぞれまとめて）
+    """
+    from sklearn.cluster import KMeans
+
+    rng = np.random.default_rng(seed)
+    windows = list(windows or MF.WINDOWS)
+    rows = rows.sort_values(["Date", "Code"], kind="mergesort").reset_index(drop=True)
+    dates = np.sort(rows["Date"].unique())
+    cut = dates[len(dates) // 2]
+    out = {"rows": int(len(rows)), "pos": int(rows["label"].sum()), "cut": str(pd.Timestamp(cut).date()),
+           "labels": list(MF.SHAPE_LABELS), "windows": {}}
+    print(f"\n■ 分布の形: 分足の付いた行 {len(rows):,}（正例 {out['pos']:,}・正例率 {rows['label'].mean() * 100:.1f}%）。"
+          f"帯は D の終値からの距離（{' / '.join(MF.SHAPE_LABELS)}）。前半・後半の分かれ目 {out['cut']}")
+    bin_tests, type_tests = [], []
+    for n in windows:
+        cols = MF.shape_columns(n)
+        sub = rows.dropna(subset=cols).reset_index(drop=True)
+        y = sub["label"].to_numpy(dtype=float)
+        codes = pd.factorize(sub["Date"])[0]
+        first = (sub["Date"] < cut).to_numpy()
+        X0 = base_design(sub["score"].to_numpy())
+        b0, ll0 = logit_fit(X0, y)
+        p0 = 1.0 / (1.0 + np.exp(-(X0 @ b0)))
+        resid = y - p0
+        S = sub[cols].to_numpy(dtype=float)
+        perm = date_permuter(codes, rng)
+        pos = y == 1
+        # A. 平均の形
+        diff = S[pos].mean(axis=0) - S[~pos].mean(axis=0)
+        null = np.empty((n_perm, S.shape[1]))
+        for k in range(n_perm):
+            pp = y[perm()] == 1
+            null[k] = S[pp].mean(axis=0) - S[~pp].mean(axis=0)
+        p_raw = (1 + (np.abs(null) >= np.abs(diff)).sum(axis=0)) / (n_perm + 1)
+        halves = [S[h & pos].mean(axis=0) - S[h & ~pos].mean(axis=0) for h in (first, ~first)]
+        bins = []
+        for j, c in enumerate(cols):
+            r = normal_scores(S[:, j])
+            d = added_ll(X0, y, r, b0, ll0)
+            nl = np.array([added_ll(X0, y, r[perm()], b0, ll0) for _ in range(n_perm)])
+            b1, _ = logit_fit(np.column_stack([X0, r]), y, beta=np.append(b0, 0.0))
+            # 3分位の同じ値は無作為に分ける（0 が多い帯で、行の順＝日付の順に分かれないように。run 44614546003 の後に直した）
+            shuffled = rng.permutation(len(S))
+            rk = np.empty(len(S))
+            rk[shuffled] = pd.Series(S[shuffled, j]).rank(method="first").to_numpy()
+            ter = np.minimum((3 * (rk - 0.5) / len(rk)).astype(int), 2)
+            spread = [float(np.mean(resid[(ter == 2) & h]) - np.mean(resid[(ter == 0) & h])) * 100 for h in (first, ~first)]
+            rec = {"window": n, "bin": j, "label": MF.SHAPE_LABELS[j], "pos_mean": float(S[pos, j].mean()),
+                   "neg_mean": float(S[~pos, j].mean()), "diff": float(diff[j]), "p_raw": float(p_raw[j]),
+                   "diff_halves": [float(h[j]) for h in halves], "dll": float(d),
+                   "p_model": float((1 + np.sum(nl >= d)) / (n_perm + 1)), "coef": float(b1[-1]),
+                   "resid_spread_halves_pt": spread,
+                   "resid_spread_pt": float(np.mean(resid[ter == 2]) - np.mean(resid[ter == 0])) * 100}
+            bins.append(rec)
+            bin_tests.append(rec)
+        # B. 型
+        km = KMeans(n_clusters=n_types, n_init=10, random_state=0).fit(np.sqrt(S[first]))
+        t = km.predict(np.sqrt(S))
+        cent = km.cluster_centers_ ** 2
+        cent = cent / cent.sum(axis=1, keepdims=True)
+        sec = ~first
+        y2, codes2 = y[sec], pd.factorize(sub.loc[sec, "Date"])[0]
+        perm2 = date_permuter(codes2, rng)
+        X02 = base_design(sub.loc[sec, "score"].to_numpy())
+        b02, ll02 = logit_fit(X02, y2)
+        order = sorted(range(n_types), key=lambda k: -float(np.mean(y[first & (t == k)])) if (first & (t == k)).any() else 0)
+        types = []
+        for rank, k in enumerate(order, 1):
+            m1, m2 = first & (t == k), sec & (t == k)
+            ind2 = (t[sec] == k).astype(float)
+            obs = float(y2[ind2 == 1].mean() - y2[ind2 == 0].mean()) if 0 < ind2.sum() < len(ind2) else float("nan")
+            nul = []
+            for _ in range(n_perm):
+                yp = y2[perm2()]
+                nul.append(yp[ind2 == 1].mean() - yp[ind2 == 0].mean())
+            nul = np.array(nul)
+            p_r = float((1 + np.sum(np.abs(nul) >= abs(obs))) / (n_perm + 1)) if np.isfinite(obs) else float("nan")
+            d2 = added_ll(X02, y2, ind2, b02, ll02) if 0 < ind2.sum() < len(ind2) else float("nan")
+            nl2 = np.array([added_ll(X02, y2, ind2[perm2()], b02, ll02) for _ in range(n_perm)]) if np.isfinite(d2) else None
+            p_m = float((1 + np.sum(nl2 >= d2)) / (n_perm + 1)) if nl2 is not None else float("nan")
+            rec = {"window": n, "type": f"T{rank}", "centroid": [float(v) for v in cent[k]],
+                   "n_first": int(m1.sum()), "n_second": int(m2.sum()),
+                   "pos_first": float(y[m1].mean()) if m1.any() else float("nan"),
+                   "pos_second": float(y[m2].mean()) if m2.any() else float("nan"),
+                   "base_first": float(y[first].mean()), "base_second": float(y[sec].mean()),
+                   "resid_first_pt": float(resid[m1].mean() * 100) if m1.any() else float("nan"),
+                   "resid_second_pt": float(resid[m2].mean() * 100) if m2.any() else float("nan"),
+                   "p_raw": p_r, "p_model": p_m}
+            types.append(rec)
+            type_tests.append(rec)
+        out["windows"][str(n)] = {"rows": int(len(sub)), "pos": int(pos.sum()), "bins": bins, "types": types}
+    for key in ("p_raw", "p_model"):
+        for group in (bin_tests, type_tests):
+            qs = bh_qvalues([r[key] if np.isfinite(r[key]) else 1.0 for r in group])
+            for r, q in zip(group, qs):
+                r["q" + key[1:]] = float(q)
+    for n in windows:
+        w = out["windows"][str(n)]
+        print(f"\n  {n}日（{w['rows']:,}行・正例 {w['pos']:,}）")
+        print("    A. 平均の形（帯ごとの株数の割合の平均。差は正例 − 負例のポイント。前半・後半の差で向きがそろうか。"
+              "モデルとの差は A の見込みとの差の上位3分の1 − 下位3分の1（ポイント））")
+        print(f"      {'帯':<11}{'正例':>7}{'負例':>7}{'差':>7}{'p':>7}{'q':>6}{'前半':>7}{'後半':>7}  "
+              f"{'モデルとの差':>9}{'前半':>7}{'後半':>7}{'p':>7}{'q':>6}")
+        for r in w["bins"]:
+            print(f"      {r['label']:<11}{r['pos_mean'] * 100:>6.1f}%{r['neg_mean'] * 100:>6.1f}%{r['diff'] * 100:>+7.2f}"
+                  f"{r['p_raw']:>7.3f}{r['q_raw']:>6.2f}{r['diff_halves'][0] * 100:>+7.2f}{r['diff_halves'][1] * 100:>+7.2f}  "
+                  f"{r['resid_spread_pt']:>+9.2f}{r['resid_spread_halves_pt'][0]:>+7.2f}{r['resid_spread_halves_pt'][1]:>+7.2f}"
+                  f"{r['p_model']:>7.3f}{r['q_model']:>6.2f}")
+        print(f"    B. 型（前半の日付で k-means・{n_types}つ。前半の正例率の高い順に T1〜。帯の割合は型の中心。検定は後半だけ）")
+        print(f"      {'型':<4}" + "".join(f"{lab:>10}" for lab in MF.SHAPE_LABELS)
+              + f"{'件数(前/後)':>12}{'正例率(前/後)':>15}{'モデルとの差(前/後)':>18}{'p':>7}{'q':>6}{'p(モデル)':>10}{'q':>6}")
+        for r in w["types"]:
+            print(f"      {r['type']:<4}" + "".join(f"{v * 100:>9.1f}%" for v in r["centroid"])
+                  + f"{r['n_first']:>6,}/{r['n_second']:<5,}{r['pos_first'] * 100:>8.1f}/{r['pos_second'] * 100:<5.1f}%"
+                  f"{r['resid_first_pt']:>+9.2f}/{r['resid_second_pt']:<+7.2f}{r['p_raw']:>7.3f}{r['q_raw']:>6.2f}"
+                  f"{r['p_model']:>10.3f}{r['q_model']:>6.2f}")
+        print(f"      正例率の全体（前半 / 後半）: {w['types'][0]['base_first'] * 100:.1f}% / {w['types'][0]['base_second'] * 100:.1f}%")
+    same = lambda a, b: (a > 0 and b > 0) or (a < 0 and b < 0)
+    read = {
+        "bins_raw": [f"{r['window']}日 {r['label']}（{'＋' if r['diff'] > 0 else '−'}）" for r in bin_tests
+                     if r["q_raw"] < BH_Q and same(*r["diff_halves"])],
+        "bins_model": [f"{r['window']}日 {r['label']}（{'＋' if r['coef'] > 0 else '−'}）" for r in bin_tests
+                       if r["q_model"] < BH_Q and same(*r["resid_spread_halves_pt"])],
+        "types_up": [f"{r['window']}日 {r['type']}" for r in type_tests
+                     if r["q_raw"] < BH_Q and r["pos_first"] > r["base_first"] and r["pos_second"] > r["base_second"]],
+        "types_down": [f"{r['window']}日 {r['type']}" for r in type_tests
+                       if r["q_raw"] < BH_Q and r["pos_first"] < r["base_first"] and r["pos_second"] < r["base_second"]],
+        "types_model_up": [f"{r['window']}日 {r['type']}" for r in type_tests
+                           if r["q_model"] < BH_Q and r["resid_first_pt"] > 0 and r["resid_second_pt"] > 0],
+        "types_model_down": [f"{r['window']}日 {r['type']}" for r in type_tests
+                             if r["q_model"] < BH_Q and r["resid_first_pt"] < 0 and r["resid_second_pt"] < 0],
+    }
+    print(f"\n  読み（回す前に決めたもの。q < {BH_Q} で、前半・後半の向きがそろうもの。型は前半で作り後半で確かめる）")
+    for key, title in (("bins_raw", "正例と負例で割合が違う帯（素）"), ("bins_model", "A の見込みを超えて効く帯"),
+                       ("types_up", "正例になりやすい型（素）"), ("types_down", "正例になりにくい型（素）"),
+                       ("types_model_up", "A の見込みより正例が多い型"), ("types_model_down", "A の見込みより正例が少ない型")):
+        print(f"    {title}: " + (" / ".join(read[key]) if read[key] else "なし"))
+    out["reading"] = read
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# 短い期間の値動き（--short）
+# --------------------------------------------------------------------------- #
+#: 当てる値動き（株価は分割調整後。買いは本番と同じ D+1 の寄り。gap だけは買う前の窓）
+SHORT_TARGETS = (("gap", "翌日の寄りの窓（D の終値 → D+1 の寄り）"),
+                 ("r1", "1日目（D+1 の寄り → D+1 の引け）"),
+                 ("r3", "3日目まで（D+1 の寄り → D+3 の引け）"),
+                 ("r5", "5日目まで（D+1 の寄り → D+5 の引け）"))
+#: 日付ごとの相関を取る最少の行数
+MIN_DATE_ROWS = 5
+#: 30列まとめた信号の判定に使う t（4つの値動きを見るので 2.5）
+SHORT_T = 2.5
+#: 30列まとめた信号のリッジの重さ
+SHORT_RIDGE = 10.0
+
+
+def short_returns(keys: pd.DataFrame, data_dir: str) -> pd.DataFrame:
+    """keys（Code, Date）ごとの短い期間の値動き（gap・r1・r3・r5）。日足の並び（取引のあった日）で数える。"""
+    bars = LT.load_bars(data_dir, start=pd.to_datetime(keys["Date"]).min() - pd.Timedelta(days=10))
+    b = bars.sort_values(["Code", "Date"], kind="mergesort").reset_index(drop=True)
+    g = b.groupby("Code", sort=False)
+    o1 = g["AdjO"].shift(-1)
+    out = b[["Code", "Date"]].copy()
+    out["gap"] = o1 / b["AdjC"] - 1.0
+    for h in (1, 3, 5):
+        out[f"r{h}"] = g["AdjC"].shift(-h) / o1 - 1.0
+    k = keys[["Code", "Date"]].copy()
+    k["Date"] = pd.to_datetime(k["Date"])
+    k["Code"] = k["Code"].astype(str)
+    return k.merge(out, on=["Code", "Date"], how="left")
+
+
+def date_scores(v, codes: np.ndarray) -> np.ndarray:
+    """日付ごとの順位を標準正規の分位に直した値（欠測は欠測のまま。その日に1行だけなら 0）。"""
+    from scipy.special import ndtri
+
+    x = pd.Series(np.asarray(v, dtype=float))
+    g = x.groupby(codes)
+    r = g.rank(method="average")
+    n = g.transform("count")
+    return ndtri(((r - 0.5) / n).to_numpy())
+
+
+def date_ic(x, y, codes: np.ndarray, min_rows: int = MIN_DATE_ROWS, control=None) -> dict:
+    """
+    日付ごとの順位相関（日付の中で順位を標準正規に直した値どうしの相関）の平均・SE・t・p（日付を1件として数える）。
+    control を渡すと、x と y からそれぞれ control（同じく日付の中の順位）で説明できる分を引いた残りどうしの相関（偏相関）。
+    """
+    from scipy import stats
+
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+    m = np.isfinite(x) & np.isfinite(y)
+    if control is not None:
+        m &= np.isfinite(np.asarray(control, dtype=float))
+    c = codes[m]
+    xs, ys = date_scores(x[m], c), date_scores(y[m], c)
+    if control is not None:
+        zs = date_scores(np.asarray(control, dtype=float)[m], c)
+        zz = float(zs @ zs) or 1.0
+        xs, ys = xs - (xs @ zs) / zz * zs, ys - (ys @ zs) / zz * zs
+    d = pd.DataFrame({"c": c, "x": xs, "y": ys})
+    d["x"] -= d.groupby("c")["x"].transform("mean")
+    d["y"] -= d.groupby("c")["y"].transform("mean")
+    d["xy"], d["xx"], d["yy"] = d["x"] * d["y"], d["x"] ** 2, d["y"] ** 2
+    a = d.groupby("c").agg(n=("x", "size"), xy=("xy", "sum"), xx=("xx", "sum"), yy=("yy", "sum"))
+    a = a[(a["n"] >= min_rows) & (a["xx"] > 0) & (a["yy"] > 0)]
+    ic = (a["xy"] / np.sqrt(a["xx"] * a["yy"])).to_numpy()
+    if len(ic) < 3:
+        return {"ic": float("nan"), "se": float("nan"), "t": float("nan"), "p": float("nan"), "dates": int(len(ic)),
+                "by_date": ic}
+    se = float(ic.std(ddof=1) / np.sqrt(len(ic)))
+    t = float(ic.mean() / se) if se > 0 else float("nan")
+    return {"ic": float(ic.mean()), "se": se, "t": t, "p": float(2 * stats.t.sf(abs(t), len(ic) - 1)),
+            "dates": int(len(ic)), "by_date": ic, "dates_index": a.index.to_numpy()}
+
+
+def short_oof(df: pd.DataFrame, base: list, params: dict, target: np.ndarray, rows_mask: np.ndarray) -> np.ndarray:
+    """
+    今の列（base）で target（日付の中の順位を標準正規に直した値）を当てる LightGBM の回帰の out-of-fold。
+    窓は本番と同じ作り（E41.folds_for のずらし0）。rows_mask の行がテストに入る窓だけ学習する。パラメータは A の探索のもの
+    （+10% の分類で探したものを流用。この目的では探索しない）。
+    """
+    import lightgbm as lgb
+
+    d = pd.to_datetime(df["Date"])
+    pred = np.full(len(df), np.nan)
+    ok = np.isfinite(target)
+    X = df[base].to_numpy(dtype=float)
+    for f in E41.folds_for(df["Date"], 0):
+        te = ((d >= pd.Timestamp(f.test_start)) & (d <= pd.Timestamp(f.test_end))).to_numpy()
+        if not (te & rows_mask).any():
+            continue
+        tr = (d <= pd.Timestamp(f.train_end)).to_numpy() & ok
+        m = lgb.LGBMRegressor(**{**params, "random_state": PROD_SEED})
+        m.fit(X[tr], target[tr])
+        pred[te] = m.predict(X[te])
+    return pred
+
+
+def short_report(rows: pd.DataFrame, cols: list, targets=SHORT_TARGETS, pred_cols: dict | None = None) -> dict:
+    """
+    rows: Date・値動き（targets の列）・列（cols）・今の列の予測（pred_cols[値動き] の列。無ければ偏相関は出さない）。
+    1. 列ごと・値動きごとの日付の中の順位相関（IC。日付を1件として t）。q は全部（列 × 値動き）で BH
+    2. 今の列の予測で説明できる分を引いた偏相関（今の列を超えて当たりが残るか）
+    3. 30列まとめた信号（リッジ）を日付の前半で作って後半で測る（両方向）。偏相関の側は、今の列の予測に30列を足した信号と
+       予測だけの IC の差（日付ごとの差の平均と t）
+    """
+    rows = rows.sort_values(["Date"], kind="mergesort").reset_index(drop=True)
+    codes = pd.factorize(rows["Date"])[0]
+    pred_cols = pred_cols or {}
+    out = {"rows": int(len(rows)), "dates": int(rows["Date"].nunique()), "targets": {}, "columns": {}, "joint": {}}
+    print(f"\n■ 短い期間の値動き: 分足の付いた行 {len(rows):,}・{out['dates']}日（相関は日付ごとに {MIN_DATE_ROWS}行以上の日で取り、"
+          "日付を1件として t を出す。順位相関は日付の中の順位どうし）")
+    for key, title in targets:
+        v = rows[key].to_numpy(dtype=float)
+        q = np.nanquantile(v, [0.05, 0.5, 0.95])
+        rec = {"title": title, "n": int(np.isfinite(v).sum()), "q05": float(q[0]), "q50": float(q[1]), "q95": float(q[2])}
+        if key in pred_cols:
+            r = date_ic(rows[pred_cols[key]].to_numpy(dtype=float), v, codes)
+            rec["pred_ic"] = {k: r[k] for k in ("ic", "se", "t", "dates")}
+        out["targets"][key] = rec
+        print(f"  {key}: {title}。{rec['n']:,}行・中央 {q[1] * 100:+.2f}%（5% {q[0] * 100:+.2f}% / 95% {q[2] * 100:+.2f}%）"
+              + (f"・今の373列の予測の IC {rec['pred_ic']['ic']:+.4f}（t {rec['pred_ic']['t']:+.2f}・{rec['pred_ic']['dates']}日）"
+                 if "pred_ic" in rec else ""))
+
+    # 1・2. 列ごと
+    raw, part = {}, {}
+    for c in cols:
+        for key, _ in targets:
+            raw[(c, key)] = date_ic(rows[c].to_numpy(dtype=float), rows[key].to_numpy(dtype=float), codes)
+            if key in pred_cols:
+                part[(c, key)] = date_ic(rows[c].to_numpy(dtype=float), rows[key].to_numpy(dtype=float), codes,
+                                         control=rows[pred_cols[key]].to_numpy(dtype=float))
+    for name, dct in (("raw", raw), ("partial", part)):
+        if not dct:
+            continue
+        ks = list(dct)
+        qs = bh_qvalues([dct[k]["p"] if np.isfinite(dct[k]["p"]) else 1.0 for k in ks])
+        for k, qq in zip(ks, qs):
+            dct[k]["q"] = float(qq)
+    for name, dct, title in (("raw", raw, "1. 列ごとの IC（分足の列だけ。セルは IC と t。* は q < 0.10）"),
+                             ("partial", part, "2. 今の373列の予測を引いた偏相関（今の列を超えて残るか。セルは IC と t。* は q < 0.10）")):
+        if not dct:
+            continue
+        print(f"  {title}")
+        print(f"    {'列':<34}" + "".join(f"{key:>16}" for key, _ in targets))
+        order = sorted(cols, key=lambda c: -max(abs(dct[(c, k)]["t"]) if np.isfinite(dct[(c, k)]["t"]) else 0
+                                                  for k, _ in targets))
+        for c in order:
+            cells = []
+            for key, _ in targets:
+                r = dct[(c, key)]
+                star = "*" if r.get("q", 1.0) < BH_Q else " "
+                cells.append(f"{r['ic']:+.3f}({r['t']:+.1f}){star}" if np.isfinite(r["ic"]) else "—")
+            print(f"    {c:<34}" + "".join(f"{x:>16}" for x in cells))
+        hits = [(c, k) for (c, k) in dct if dct[(c, k)].get("q", 1.0) < BH_Q]
+        print(f"    q < {BH_Q}: {len(hits)}組" + (("（" + " / ".join(f"{c}×{k}" for c, k in hits) + "）") if hits else ""))
+        for (c, k), r in dct.items():
+            out["columns"].setdefault(c, {}).setdefault(name, {})[k] = {kk: r[kk] for kk in ("ic", "se", "t", "p", "q", "dates")}
+
+    # 3. 30列まとめた信号
+    X = np.column_stack([np.nan_to_num(date_scores(rows[c].to_numpy(dtype=float), codes)) for c in cols])
+    dates = np.sort(rows["Date"].unique())
+    cut = dates[len(dates) // 2]
+    first = (rows["Date"] < cut).to_numpy()
+    print(f"  3. {len(cols)}列まとめた信号（リッジ・重さ {SHORT_RIDGE:g}）。日付で前半・後半に分け、片方で作ってもう片方で測る"
+          f"（分かれ目 {pd.Timestamp(cut).date()}）")
+    for key, _ in targets:
+        y = date_scores(rows[key].to_numpy(dtype=float), codes)
+        has_pred = key in pred_cols
+        P = date_scores(rows[pred_cols[key]].to_numpy(dtype=float), codes) if has_pred else None
+        res = {}
+        for name, tr in (("前半 → 後半", first), ("後半 → 前半", ~first)):
+            te = ~tr
+            ok_tr = tr & np.isfinite(y)
+            beta = np.linalg.solve(X[ok_tr].T @ X[ok_tr] + SHORT_RIDGE * np.eye(X.shape[1]), X[ok_tr].T @ y[ok_tr])
+            sig = X @ beta
+            r_raw = date_ic(np.where(te, sig, np.nan), np.where(te, rows[key].to_numpy(dtype=float), np.nan), codes)
+            rec = {"raw": {k: r_raw[k] for k in ("ic", "se", "t", "dates")}}
+            if has_pred:
+                ok2 = ok_tr & np.isfinite(P)
+                Z = np.column_stack([P, X])
+                b2 = np.linalg.solve(Z[ok2].T @ Z[ok2] + np.diag([0.0] + [SHORT_RIDGE] * X.shape[1]), Z[ok2].T @ y[ok2])
+                sig2 = np.column_stack([np.nan_to_num(P), X]) @ b2
+                yy = np.where(te & np.isfinite(P), rows[key].to_numpy(dtype=float), np.nan)
+                a = date_ic(np.where(te, rows[pred_cols[key]].to_numpy(dtype=float), np.nan), yy, codes)
+                b = date_ic(np.where(te & np.isfinite(P), sig2, np.nan), yy, codes)
+                both = np.intersect1d(a.get("dates_index", []), b.get("dates_index", []))
+                da = pd.Series(a["by_date"], index=a.get("dates_index", [])).reindex(both)
+                db = pd.Series(b["by_date"], index=b.get("dates_index", [])).reindex(both)
+                diff = (db - da).to_numpy()
+                se = float(diff.std(ddof=1) / np.sqrt(len(diff))) if len(diff) > 2 else float("nan")
+                rec["added"] = {"ic_pred": a["ic"], "ic_pred_plus": b["ic"], "diff": float(diff.mean()) if len(diff) else float("nan"),
+                                "se": se, "t": float(diff.mean() / se) if se and np.isfinite(se) and se > 0 else float("nan"),
+                                "dates": int(len(diff))}
+            res[name] = rec
+        out["joint"][key] = res
+        line = f"    {key}: 分足だけ " + " / ".join(f"{n} IC {r['raw']['ic']:+.4f}（t {r['raw']['t']:+.2f}）" for n, r in res.items())
+        if has_pred:
+            line += "｜今の列に足した差 " + " / ".join(
+                f"{n} {r['added']['ic_pred']:+.4f} → {r['added']['ic_pred_plus']:+.4f}（差 {r['added']['diff']:+.4f}・t {r['added']['t']:+.2f}）"
+                for n, r in res.items())
+        print(line)
+    works = [k for k, _ in targets if all(r["raw"]["t"] >= SHORT_T for r in out["joint"][k].values())]
+    beyond = [k for k, _ in targets if k in pred_cols and all(r["added"]["t"] >= SHORT_T for r in out["joint"][k].values())]
+    reading = ("分足の列は短い期間の値動きに効く（" + "・".join(works) + "）" if works else "分足の列だけで短い期間の値動きを当てるとは言えない")
+    reading += "。" + ("今の列を超えて効く（" + "・".join(beyond) + "）" if beyond else "今の列を超えて効くとは言えない")
+    print(f"  読み（回す前に決めたもの。30列まとめた信号の IC が両方向で t ≥ {SHORT_T} なら「効く」、今の列の予測に足した差が"
+          f"両方向で t ≥ {SHORT_T} なら「今の列を超えて効く」）: {reading}")
+    out["reading"] = {"works": works, "beyond": beyond, "text": reading}
+    return out
+
+
+def short_rows(df: pd.DataFrame, base: list, params_a: dict) -> tuple:
+    """分足の付いた行に、短い期間の値動きと、今の列で当てた予測（値動きごと）を付けた表。"""
+    ret = short_returns(df[["Code", "Date"]], lab.DATA_DIR)
+    if not (ret["Code"].to_numpy() == df["Code"].astype(str).to_numpy()).all():
+        raise SystemExit("短い期間の値動きを付けたら行の並びが変わった")
+    full = df.reset_index(drop=True).copy()
+    for key, _ in SHORT_TARGETS:
+        full[key] = ret[key].to_numpy()
+    check = None
+    if "entry_gap" in full.columns:
+        both = full[["gap", "entry_gap"]].dropna()
+        check = {"rows": int(len(both)), "max_abs_diff": float((both["gap"] - both["entry_gap"]).abs().max()) if len(both) else None}
+        diff = "—" if check["max_abs_diff"] is None else f"{check['max_abs_diff']:.2e}"
+        print(f"  確かめ: gap と学習データの entry_gap の差の最大 {diff}（{check['rows']:,}行）")
+    codes_all = pd.factorize(full["Date"])[0]
+    att = attached_mask(full).to_numpy()
+    pred_cols = {}
+    t0 = time.time()
+    for key, _ in SHORT_TARGETS:
+        target = date_scores(full[key].to_numpy(dtype=float), codes_all)
+        full[f"pred_{key}"] = short_oof(full, base, params_a, target, att)
+        pred_cols[key] = f"pred_{key}"
+    log(f"[short] 今の373列の回帰（値動き {len(SHORT_TARGETS)}つ・本番と同じ窓）/ {time.time() - t0:.0f}秒")
+    rows = full[att].reset_index(drop=True)
+    return rows, pred_cols, check
+
+
+# --------------------------------------------------------------------------- #
 # 探索（週次の再学習と同じ関数・条件）
 # --------------------------------------------------------------------------- #
-def tune(arm: str, frame: pd.DataFrame, cols: list, cutoff, n_trials: int, stamp: dict):
+def load_tuned(arm: str, cols: list, cutoff, n_trials: int, stamp: dict):
+    """保存済みの探索の結果（試行の数・探索の期間・表の版・列の指紋がそろうものだけ）。無ければ None。"""
     p = path(f"params_{arm}.json")
     if os.path.exists(p):
         with open(p, encoding="utf-8") as fh:
@@ -347,6 +1169,14 @@ def tune(arm: str, frame: pd.DataFrame, cols: list, cutoff, n_trials: int, stamp
         if (rec.get("_n_trials") == n_trials and rec.get("_cutoff") == str(cutoff.date())
                 and rec.get("_data") == stamp["built_utc"] and rec.get("_sig") == F.signature(cols)):
             return rec
+    return None
+
+
+def tune(arm: str, frame: pd.DataFrame, cols: list, cutoff, n_trials: int, stamp: dict):
+    p = path(f"params_{arm}.json")
+    rec = load_tuned(arm, cols, cutoff, n_trials, stamp)
+    if rec is not None:
+        return rec
     if not time_left():
         return None
     sub = frame[(frame["Date"] <= cutoff) & frame["label"].notna()]
@@ -636,6 +1466,22 @@ def main(argv=None) -> int:
                     help="保存済みの表を、分足の取得記録が変わっていてもそのまま使う（腕を足す回で前の回と同じ表で比べる）")
     ap.add_argument("--budget-min", type=float, default=290.0, help="この分数を過ぎたら新しい計算を始めない（0 で無制限）")
     ap.add_argument("--dry", action="store_true", help="列の付き方だけ出して終わる")
+    ap.add_argument("--incremental", action="store_true",
+                    help="実験133 の続き: 独立したモデルが A にない情報を持つかを、残差と重みを過去の窓で決めて足す方法で測って終わる")
+    ap.add_argument("--inverse", action="store_true",
+                    help="実験133 の続き: A の上位20% の中の逆向きを、前半の窓で選び後半の窓で確かめて終わる")
+    ap.add_argument("--shape-dynamics", action="store_true",
+                    help="実験133 の測り直し: 位置と広がりを除いた形だけの推移で、独立したモデルを作って比べて終わる")
+    ap.add_argument("--dynamics", action="store_true",
+                    help="実験133: 分足の形と推移・直近のテクニカルだけの独立したモデルを作って比べて終わる")
+    ap.add_argument("--shape", action="store_true",
+                    help="終値からの距離の帯ごとの株数の割合で、正例になりやすい分布の形を探して終わる（平均の形と型）")
+    ap.add_argument("--short", action="store_true",
+                    help="分足の30列が、高値更新の翌日から数営業日の値動きを当てるか（今の列の予測を超えて残るか）を調べて終わる")
+    ap.add_argument("--residual", action="store_true",
+                    help="保存済みの A の out-of-fold で説明しきれない部分を、分足の30列が説明するかを調べて終わる")
+    ap.add_argument("--importance", action="store_true",
+                    help="保存済みの探索のパラメータで A・C・B を学習し直し、重要度（gain の割合）の上位の顔ぶれを比べて終わる")
     args = ap.parse_args(argv)
     TAG = args.tag
     RUN = TAG
@@ -683,6 +1529,87 @@ def main(argv=None) -> int:
           f"{df['Date'].max().date()}）。探索の期間（〜{cutoff.date()}）では {(df['Date'] <= cutoff).sum():,}行・"
           f"うち分足の付いた行 {int((att & (df['Date'] <= cutoff)).sum()):,}（全体では {int(att.sum()):,}）")
     if args.dry:
+        return 0
+    if args.dynamics or args.shape_dynamics or args.inverse or args.incremental:
+        import e133_minute_dynamics as E133
+        import minute_dynamics as MD
+
+        rec = load_tuned("A", colsets["base"], cutoff, args.n_trials, stamp)
+        if rec is None:
+            raise SystemExit("A の保存済みの探索の結果が無い（--dynamics は探索し直さない。--keep-frame で前の回の表を使う）")
+        rows = residual_rows(df, base, rec["params"], shifts)
+        t0 = time.time()
+        dyn, rep = MD.dynamics(rows[["Code", "Date"]], MINUTE_DIR, lab.DATA_DIR)
+        if len(dyn) != len(rows) or not (dyn["Code"].to_numpy() == rows["Code"].to_numpy()).all():
+            raise SystemExit("推移の列を付けたら行の並びが変わった")
+        for c in MD.COLUMNS + MD.SHAPE_DYN_COLUMNS:
+            rows[c] = dyn[c].to_numpy()
+        tech = df[["Code", "Date"] + list(E133.TECH_COLUMNS)]
+        rows = rows.merge(tech, on=["Code", "Date"], how="left")
+        log(f"[dynamics] 推移の列 {len(MD.COLUMNS)}・付いた行 {rep['attached']:,} / {rep['rows']:,}・状態 {rep.get('status')}"
+            f"・形だけの推移の列 {len(MD.SHAPE_DYN_COLUMNS)}・付いた行 {rep.get('shape_attached', 0):,}・"
+            f"状態 {rep.get('shape_status')} / {time.time() - t0:.0f}秒")
+        if args.incremental:
+            out = E133.incremental_check(rows, list(NEW_COLS))
+            name = "incremental.json"
+        elif args.inverse:
+            out = E133.inverse_check(rows, list(NEW_COLS))
+            name = "inverse.json"
+        elif args.shape_dynamics:
+            out = E133.report(rows, list(NEW_COLS), sets=E133.shape_sets(NEW_COLS), primary=E133.PRIMARY_SHAPE,
+                              coef_sets=("shp", "shp_tech"), rule_set="shp_tech", need=MD.SHAPE_DYN_COLUMNS,
+                              title="実験133 の測り直し 形だけの推移")
+            name = "dynamics_shape.json"
+        else:
+            out = E133.report(rows, list(NEW_COLS))
+            name = "dynamics.json"
+        out["dynamics_report"] = rep
+        with open(path(name), "w", encoding="utf-8") as fh:
+            json.dump(out, fh, ensure_ascii=False, indent=1, default=str)
+        log(f"記録: {path(name)}（公開しない）")
+        return 0
+    if args.shape:
+        rec = load_tuned("A", colsets["base"], cutoff, args.n_trials, stamp)
+        if rec is None:
+            raise SystemExit("A の保存済みの探索の結果が無い（--shape は探索し直さない。--keep-frame で前の回の表を使う）")
+        rows, check = shape_rows(df, base, rec["params"], shifts)
+        out = shape_report(rows)
+        out["check"] = check
+        with open(path("shape.json"), "w", encoding="utf-8") as fh:
+            json.dump(out, fh, ensure_ascii=False, indent=1, default=str)
+        log(f"記録: {path('shape.json')}（公開しない）")
+        return 0
+    if args.short:
+        rec = load_tuned("A", colsets["base"], cutoff, args.n_trials, stamp)
+        if rec is None:
+            raise SystemExit("A の保存済みの探索の結果が無い（--short は探索し直さない。--keep-frame で前の回の表を使う）")
+        rows, pred_cols, check = short_rows(df, base, rec["params"])
+        out = short_report(rows, list(NEW_COLS), pred_cols=pred_cols)
+        out["gap_check"] = check
+        with open(path("short.json"), "w", encoding="utf-8") as fh:
+            json.dump(out, fh, ensure_ascii=False, indent=1, default=lambda o: o.tolist() if hasattr(o, "tolist") else str(o))
+        log(f"記録: {path('short.json')}（公開しない）")
+        return 0
+    if args.residual:
+        rec = load_tuned("A", colsets["base"], cutoff, args.n_trials, stamp)
+        if rec is None:
+            raise SystemExit("A の保存済みの探索の結果が無い（--residual は探索し直さない。--keep-frame で前の回の表を使う）")
+        rows = residual_rows(df, base, rec["params"], shifts)
+        out = residual_report(rows, list(NEW_COLS))
+        with open(path("residual.json"), "w", encoding="utf-8") as fh:
+            json.dump(out, fh, ensure_ascii=False, indent=1, default=str)
+        log(f"記録: {path('residual.json')}（公開しない）")
+        return 0
+    if args.importance:
+        recs = {}
+        for arm, cs in (("A", "base"), ("B", "new")):
+            rec = load_tuned(arm, colsets[cs], cutoff, args.n_trials, stamp)
+            if rec is None:
+                raise SystemExit(f"{arm} の保存済みの探索の結果が無い（--importance は探索し直さない。--keep-frame で前の回の表を使う）")
+            recs[arm] = rec["params"]
+        print(f"\n重要度の顔ぶれ（探索した A・B のパラメータ。A {short(recs['A'])} / B {short(recs['B'])}）")
+        importance_report(df, base, recs, cutoff)
+        log(f"記録: {path('importance.json')}（公開しない）")
         return 0
     frames = {"base": df, "new": df}
     t0 = time.time()
