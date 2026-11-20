@@ -535,3 +535,250 @@ def inverse_check(rows: pd.DataFrame, minute_cols, seed: int = 0, n_perm: int = 
     print(f"\n  読み（回す前に決めたもの。後半で、残した側 − 外した側が正・並べ替えの片側 p < {INVERSE_ALPHA}・後半の3つの窓の2つ以上で"
           f"同じ向き）: {'逆向きは偶然ではない（外すルールの候補になる）' if real else '逆向きは確かめられない'}")
     return out
+
+
+# --------------------------------------------------------------------------- #
+# A にない情報を公平に測る（運用者の選択 2026-11-20「公平な測り方で測り直す」。docs の 98-10）
+#   98-4・98-6 の「A と等しい重みで混ぜて上積みが出るか」は、A よりずっと弱いモデルを重くしすぎて、小さい独立の情報を
+#   見つけられない作りだった（98-9）。ここでは、残差（A の予測を土台にしたロジスティック回帰に足す）と、重みを過去の窓で
+#   決めて A に足す方法で測る。新しいモデルの点は、同じ日の候補の中の順位だけを使う
+# --------------------------------------------------------------------------- #
+#: 候補の列の組（98-4 の4つと、98-6 で増えた3つ）× ロジスティック・LightGBM
+INCREMENTAL_SETS = ("dyn", "dist", "tech", "dist_tech", "shp", "shp_tech", "all")
+INCREMENTAL_ALPHA = 0.05
+#: 重みを過去の窓で決めるときに、学習に要る最小の行数と、上積みが正であってほしい窓の数
+STACK_MIN_ROWS = 200
+STACK_MIN_UP = 3
+
+
+def date_normal(v, codes: np.ndarray) -> np.ndarray:
+    """同じ日付の中の順位を標準正規の分位に直した値（1行だけの日は 0）。ほかの日付の値は使わない。"""
+    from scipy.special import ndtri
+
+    g = pd.Series(np.asarray(v, dtype=float)).groupby(codes)
+    r = g.rank(method="average").to_numpy()
+    n = g.transform("size").to_numpy()
+    return ndtri((r - 0.5) / n)
+
+
+def fast_day_auc(y, s, codes: np.ndarray) -> float:
+    """day_auc と同じ値（両方のラベルがある日の、日付の中の AUC の平均）を、日付ごとの順位の和から求める。codes は 0 から。"""
+    r = pd.Series(np.asarray(s, dtype=float)).groupby(codes).rank(method="average").to_numpy()
+    y = np.asarray(y, dtype=float)
+    n = np.bincount(codes).astype(float)
+    n1 = np.bincount(codes, weights=y, minlength=len(n))
+    r1 = np.bincount(codes, weights=r * y, minlength=len(n))
+    n0 = n - n1
+    ok = (n1 > 0) & (n0 > 0)
+    if not ok.any():
+        return float("nan")
+    return float(np.mean((r1[ok] - n1[ok] * (n1[ok] + 1) / 2) / (n1[ok] * n0[ok])))
+
+
+def _logit(X: np.ndarray, y: np.ndarray, beta=None, cov: bool = False, iters: int = 50, tol: float = 1e-9):
+    """罰則の無いロジスティック回帰（ニュートン法）。(係数, 対数尤度, 係数の共分散 か None) を返す。"""
+    k = X.shape[1]
+    b = np.zeros(k) if beta is None else np.asarray(beta, dtype=float).copy()
+    for _ in range(iters):
+        p = 1.0 / (1.0 + np.exp(-np.clip(X @ b, -35, 35)))
+        H = (X * (p * (1.0 - p))[:, None]).T @ X + 1e-10 * np.eye(k)
+        step = np.linalg.solve(H, X.T @ (y - p))
+        b = b + step
+        if np.max(np.abs(step)) < tol:
+            break
+    eta = X @ b
+    ll = float(np.sum(y * eta - np.logaddexp(0.0, eta)))
+    if not cov:
+        return b, ll, None
+    p = 1.0 / (1.0 + np.exp(-np.clip(eta, -35, 35)))
+    H = (X * (p * (1.0 - p))[:, None]).T @ X + 1e-10 * np.eye(k)
+    return b, ll, np.linalg.inv(H)
+
+
+def _base(score) -> np.ndarray:
+    """A の予測の logit（標準化）とその2乗（97-9 の残差の土台と同じ。A の予測の目盛りのずれを吸収する）。"""
+    s = np.clip(np.asarray(score, dtype=float), 1e-6, 1 - 1e-6)
+    z = np.log(s / (1 - s))
+    z = (z - z.mean()) / (z.std() or 1.0)
+    return np.column_stack([np.ones(len(z)), z, z * z])
+
+
+def walk_forward(y, la, v, fold, dates, wins, eval_windows, start=None):
+    """
+    窓 k（eval_windows）ごとに「ラベル ~ 1 + A の logit + v」を、その窓の始まりの EMBARGO_DAYS 暦日前までの、前のテスト窓の行で
+    学習し、窓 k の行の点（A の logit と v の重み付きの和）にする。学習できない窓の行は NaN。start は窓ごとの係数の初期値。
+    """
+    out = np.full(len(y), np.nan)
+    coefs = {}
+    for k in eval_windows:
+        tr = (fold >= 0) & (fold < k) & (dates < np.datetime64(wins[k][0]))
+        te = fold == k
+        if tr.sum() < STACK_MIN_ROWS or not te.any() or y[tr].min() == y[tr].max():
+            continue
+        X = np.column_stack([np.ones(int(tr.sum())), la[tr], v[tr]])
+        b, _, _ = _logit(X, y[tr], beta=None if start is None else start.get(k))
+        out[te] = b[1] * la[te] + b[2] * v[te]
+        coefs[k] = b
+    return out, coefs
+
+
+def _stack_gain(y, st, la, fold, codes, eval_windows):
+    """重みを過去の窓で決めた点の日内 AUC − A の日内 AUC（点のある窓をまとめて）と、窓ごとの差。"""
+    m = np.isfinite(st)
+    if not m.any():
+        return float("nan"), []
+    c = pd.factorize(codes[m])[0]
+    total = fast_day_auc(y[m], st[m], c) - fast_day_auc(y[m], la[m], c)
+    per = []
+    for k in eval_windows:
+        w = m & (fold == k)
+        if w.any():
+            cw = pd.factorize(codes[w])[0]
+            per.append(fast_day_auc(y[w], st[w], cw) - fast_day_auc(y[w], la[w], cw))
+    return float(total), per
+
+
+def incremental_check(rows: pd.DataFrame, minute_cols, seed: int = 0, n_perm: int = 1000) -> dict:
+    """
+    独立したモデル（14の組）が A にない情報を持つか。残差（A の予測を土台に足した ΔLL）と、重みを過去の窓で決めて A に足した
+    日内 AUC の上積み。並べ替えは新しいモデルの点を同じ日付の中で入れ替える（14の組に同じ入れ替え。調整後 p は 14の組の最大と比べる）。
+    """
+    from scipy.stats import norm
+    from sklearn.metrics import average_precision_score
+
+    rng = np.random.default_rng(seed)
+    sets = {**feature_sets(minute_cols), **shape_sets(minute_cols)}
+    need = list(MD.DYNAMIC_COLUMNS) + list(MD.SHAPE_DYN_COLUMNS)
+    rows = rows[rows[need].notna().any(axis=1)].sort_values(["Date", "Code"], kind="mergesort").reset_index(drop=True)
+    wins = windows(rows["Date"])
+    keys = [(s, k) for s in INCREMENTAL_SETS for k in ("logit", "lgbm")]
+    scores, fold = {}, None
+    for key in keys:
+        sc, fd, _ = oof(rows, sets[key[0]], key[1], wins)
+        scores[key] = sc
+        fold = fd if fold is None else fold
+    a = rows["score"].to_numpy(dtype=float)
+    ok = (fold >= 0) & np.isfinite(a)
+    for sc in scores.values():
+        ok &= np.isfinite(sc)
+    T = rows[ok].reset_index(drop=True)
+    y = T["label"].to_numpy(dtype=float)
+    codes = pd.factorize(T["Date"])[0]
+    fd = fold[ok]
+    dates = T["Date"].to_numpy()
+    a = a[ok]
+    ac = np.clip(a, 1e-6, 1 - 1e-6)
+    la = np.log(ac / (1 - ac))
+    V = {}
+    for key in keys:
+        v = date_normal(scores[key][ok], codes)
+        V[key] = v / (v.std() or 1.0)
+    eval_windows = list(range(1, len(wins)))
+    auc_a = fast_day_auc(y, a, codes)
+    d_a = float(np.sqrt(2) * norm.ppf(auc_a))
+    a_n = date_normal(a, codes)
+    out = {"rows": int(len(rows)), "test_rows": int(len(T)), "pos": float(y.mean()), "dates": int(codes.max() + 1),
+           "a_day_auc": auc_a, "d_a": d_a, "windows": [[str(x.date()) for x in w] for w in wins], "candidates": {}}
+    print(f"\n■ A にない情報を公平に測る: テスト窓の行 {len(T):,}（正例率 {y.mean() * 100:.1f}%・{out['dates']}日）。"
+          f"A の日内 AUC {auc_a:.4f}（正例と負例の点の差 {d_a:.3f}）")
+    print("  新しいモデルの点は、同じ日の候補の中の順位を正規分布の分位に直した値（日付をまたぐずれを入れない）")
+
+    # 1. 残差
+    X0 = _base(a)
+    b0, ll0, _ = _logit(X0, y)
+    Q, _ = np.linalg.qr(X0)
+
+    def dll(v):
+        return _logit(np.column_stack([X0, v]), y, beta=np.append(b0, 0.0))[1] - ll0
+
+    obs = {}
+    for key in keys:
+        v = V[key]
+        b1, ll1, cv = _logit(np.column_stack([X0, v]), y, beta=np.append(b0, 0.0), cov=True)
+        se = float(np.sqrt(cv[-1, -1]))
+        sd_rest = float((v - Q @ (Q.T @ v)).std())
+        d_pt, d_hi = abs(b1[-1]) * sd_rest, (abs(b1[-1]) + 1.96 * se) * sd_rest
+        obs[key] = {"day_auc": fast_day_auc(y, scores[key][ok], codes),
+                    "within_corr_a": float(np.corrcoef(date_normal(scores[key][ok], codes), a_n)[0, 1]),
+                    "coef": float(b1[-1]), "se": se, "dll": float(ll1 - ll0), "sd_rest": sd_rest,
+                    "gain_point": float(norm.cdf(np.hypot(d_a, d_pt) / np.sqrt(2)) - norm.cdf(d_a / np.sqrt(2))),
+                    "gain_upper": float(norm.cdf(np.hypot(d_a, d_hi) / np.sqrt(2)) - norm.cdf(d_a / np.sqrt(2)))}
+
+    # 2. 重みを過去の窓で決めて足す
+    for key in keys:
+        st, coefs = walk_forward(y, la, V[key], fd, dates, wins, eval_windows)
+        g, per = _stack_gain(y, st, la, fd, codes, eval_windows)
+        pr = []
+        for k in eval_windows:
+            w = np.isfinite(st) & (fd == k)
+            if w.any() and 0 < y[w].sum() < w.sum():
+                pr.append(float(average_precision_score(y[w], st[w]) - average_precision_score(y[w], la[w])))
+        obs[key].update({"stack_gain": g, "stack_per_window": per, "stack_up": int(np.sum(np.array(per) > 0)),
+                         "stack_weight": float(np.mean([c[2] for c in coefs.values()])) if coefs else float("nan"),
+                         "stack_pr_gain": float(np.mean(pr)) if pr else float("nan"), "_start": coefs})
+
+    # 並べ替え（14の組に同じ入れ替え）。学習できる窓は v によらないので、A の日内 AUC は先に1度だけ求める
+    m_eval = np.isfinite(walk_forward(y, la, V[keys[0]], fd, dates, wins, eval_windows)[0])
+    c_eval = pd.factorize(codes[m_eval])[0]
+    auc_a_eval = fast_day_auc(y[m_eval], la[m_eval], c_eval) if m_eval.any() else float("nan")
+    perm = _perm_within(codes, rng)
+    null_dll = np.zeros((n_perm, len(keys)))
+    null_gain = np.zeros((n_perm, len(keys)))
+    for i in range(n_perm):
+        idx = perm()
+        for j, key in enumerate(keys):
+            vp = V[key][idx]
+            null_dll[i, j] = dll(vp)
+            st, _ = walk_forward(y, la, vp, fd, dates, wins, eval_windows, start=obs[key]["_start"])
+            if not np.array_equal(np.isfinite(st), m_eval):
+                raise RuntimeError("重みを過去の窓で決める行が、並べ替えで変わった")
+            null_gain[i, j] = (fast_day_auc(y[m_eval], st[m_eval], c_eval) - auc_a_eval) if m_eval.any() else np.nan
+    max_dll, max_gain = null_dll.max(axis=1), null_gain.max(axis=1)
+    for j, key in enumerate(keys):
+        r = obs[key]
+        r.pop("_start")
+        r["p_dll"] = float((1 + np.sum(null_dll[:, j] >= r["dll"])) / (n_perm + 1))
+        r["p_dll_adj"] = float((1 + np.sum(max_dll >= r["dll"])) / (n_perm + 1))
+        r["p_stack"] = float((1 + np.sum(null_gain[:, j] >= r["stack_gain"])) / (n_perm + 1))
+        r["p_stack_adj"] = float((1 + np.sum(max_gain >= r["stack_gain"])) / (n_perm + 1))
+        out["candidates"][f"{key[0]}/{key[1]}"] = r
+
+    print(f"\n  1. 残差（土台は A の予測の logit とその2乗のロジスティック回帰。新しいモデルの点を足した対数尤度の伸び ΔLL。"
+          f"並べ替えは同じ日付の中で {n_perm}回。調整後 p は 14の組の最大と比べる。上積みは係数を日内 AUC に直したもの）")
+    print(f"    {'列の組':<26}{'モデル':<22}{'日内AUC':>8}{'日内の相関':>9}{'係数':>8}{'標準誤差':>8}{'ΔLL':>7}{'p':>7}"
+          f"{'調整後p':>8}{'上積み':>9}{'上限':>9}")
+    for key in keys:
+        r = out["candidates"][f"{key[0]}/{key[1]}"]
+        print(f"    {SET_JA[key[0]]:<26}{MODEL_JA[key[1]]:<22}{r['day_auc']:>8.4f}{r['within_corr_a']:>9.3f}{r['coef']:>+8.3f}"
+              f"{r['se']:>8.3f}{r['dll']:>7.2f}{r['p_dll']:>7.3f}{r['p_dll_adj']:>8.3f}{r['gain_point']:>+9.4f}"
+              f"{r['gain_upper']:>+9.4f}")
+    out["a_day_auc_stack_windows"] = auc_a_eval
+    print(f"\n  2. 重みを過去の窓で決めて A に足す（{len(eval_windows)}つの窓。各窓の重みは、その窓の始まりの {EMBARGO_DAYS}暦日前"
+          f"までの前の窓の行で決める。この窓での A の日内 AUC {auc_a_eval:.4f}。並べ替えは 1. と同じ入れ替えで学習からやり直す）")
+    print(f"    {'列の組':<26}{'モデル':<22}{'重み':>8}{'上積み':>9}{'上の窓':>7}{'p':>7}{'調整後p':>8}{'PR-AUC差':>10}"
+          f"  窓ごとの日内 AUC の差")
+    for key in keys:
+        r = out["candidates"][f"{key[0]}/{key[1]}"]
+        print(f"    {SET_JA[key[0]]:<26}{MODEL_JA[key[1]]:<22}{r['stack_weight']:>+8.3f}{r['stack_gain']:>+9.4f}"
+              f"{r['stack_up']:>4}/{len(r['stack_per_window'])}{r['p_stack']:>7.3f}{r['p_stack_adj']:>8.3f}"
+              f"{r['stack_pr_gain']:>+10.4f}  " + " / ".join(f"{v:+.3f}" for v in r["stack_per_window"]))
+
+    info = [k for k, r in out["candidates"].items() if r["p_dll_adj"] < INCREMENTAL_ALPHA]
+    usable = [k for k, r in out["candidates"].items()
+              if r["stack_gain"] > 0 and r["p_stack_adj"] < INCREMENTAL_ALPHA and r["stack_up"] >= STACK_MIN_UP]
+    best = max(out["candidates"].items(), key=lambda kv: kv[1]["gain_upper"])
+    out["reading"] = {"information": bool(info), "information_sets": info, "usable": bool(usable), "usable_sets": usable,
+                      "largest_upper": {"set": best[0], "gain_upper": best[1]["gain_upper"]}}
+
+    def ja(k):
+        s_, m_ = k.split("/")
+        return f"{SET_JA[s_]} × {MODEL_JA[m_]}"
+
+    print(f"\n  読み（回す前に決めたもの。残差の調整後 p < {INCREMENTAL_ALPHA}・足した上積みが正で調整後 p < {INCREMENTAL_ALPHA}"
+          f"かつ {STACK_MIN_UP}つ以上の窓で正）")
+    print(f"    A にない情報がある: {'はい（' + ' / '.join(ja(k) for k in info) + '）' if info else 'いいえ'}")
+    print(f"    A に足して使える: {'はい（' + ' / '.join(ja(k) for k in usable) + '）' if usable else 'いいえ'}")
+    if not info and not usable:
+        print(f"    見つからない。あるとしても、日内 AUC の上積みは大きくて {best[1]['gain_upper']:+.4f}"
+              f"（95% 区間の上の端。14の組でいちばん大きい {ja(best[0])}）")
+    return out

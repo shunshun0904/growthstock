@@ -43,6 +43,8 @@ out-of-fold: 本番と同じ作り（36/6/6か月・エンバーゴ20営業日�
 列の付き方だけ見る: args="--dry"
 試運転:             args="--tag e132smoke --n-trials 2 --shifts 0"
 C を足す回:         args="--keep-frame"（A・B は保存済みの探索・out-of-fold を読む。C の out-of-fold だけ計算する）
+公平な測り方:       args="--keep-frame --incremental"（実験133 の続き。独立したモデルが A にない情報を持つかを、残差と、重みを
+                    過去の窓で決めて A に足す方法で測る。docs の 98-10）
 上位の中の逆向き:   args="--keep-frame --inverse"（実験133 の続き。A の上位20% の中で、分布・形のモデルの点が高いほど正例が少ないか。
                     前半の窓で選び、後半の窓で確かめる。docs の 98-7）
 形だけの推移:       args="--keep-frame --shape-dynamics"（実験133 の測り直し。日ごとの分布を位置・広がり・形に分け、形だけの推移で
@@ -1464,6 +1466,8 @@ def main(argv=None) -> int:
                     help="保存済みの表を、分足の取得記録が変わっていてもそのまま使う（腕を足す回で前の回と同じ表で比べる）")
     ap.add_argument("--budget-min", type=float, default=290.0, help="この分数を過ぎたら新しい計算を始めない（0 で無制限）")
     ap.add_argument("--dry", action="store_true", help="列の付き方だけ出して終わる")
+    ap.add_argument("--incremental", action="store_true",
+                    help="実験133 の続き: 独立したモデルが A にない情報を持つかを、残差と重みを過去の窓で決めて足す方法で測って終わる")
     ap.add_argument("--inverse", action="store_true",
                     help="実験133 の続き: A の上位20% の中の逆向きを、前半の窓で選び後半の窓で確かめて終わる")
     ap.add_argument("--shape-dynamics", action="store_true",
@@ -1526,7 +1530,7 @@ def main(argv=None) -> int:
           f"うち分足の付いた行 {int((att & (df['Date'] <= cutoff)).sum()):,}（全体では {int(att.sum()):,}）")
     if args.dry:
         return 0
-    if args.dynamics or args.shape_dynamics or args.inverse:
+    if args.dynamics or args.shape_dynamics or args.inverse or args.incremental:
         import e133_minute_dynamics as E133
         import minute_dynamics as MD
 
@@ -1545,7 +1549,10 @@ def main(argv=None) -> int:
         log(f"[dynamics] 推移の列 {len(MD.COLUMNS)}・付いた行 {rep['attached']:,} / {rep['rows']:,}・状態 {rep.get('status')}"
             f"・形だけの推移の列 {len(MD.SHAPE_DYN_COLUMNS)}・付いた行 {rep.get('shape_attached', 0):,}・"
             f"状態 {rep.get('shape_status')} / {time.time() - t0:.0f}秒")
-        if args.inverse:
+        if args.incremental:
+            out = E133.incremental_check(rows, list(NEW_COLS))
+            name = "incremental.json"
+        elif args.inverse:
             out = E133.inverse_check(rows, list(NEW_COLS))
             name = "inverse.json"
         elif args.shape_dynamics:
