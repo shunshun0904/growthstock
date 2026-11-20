@@ -67,14 +67,17 @@
 意図して予測し直すときは FORCE_PREDICT=true（workflow_dispatch の force）。
 最終バー日か asOf が読めないときは、従来の判定に落ちる。
 
-週末の学習の前の日は、日曜の朝まで予測しない（2026-11-15 に足した第二の規則）
-------------------------------------------------------------------------
+週末の学習の前の日は、土曜の夜まで予測しない（2026-11-15 に足した第二の規則。2026-11-20 に土曜 20:00 へ）
+------------------------------------------------------------------------------------------------
 運用者の依頼（2026-11-15）「新モデルで、日曜の夜に月曜購入分の予測を実施してほしいです」→ 選択「金曜の夜はやめる」
-「日曜の朝9時」。週次の学習（+10% の木3本・ランキング学習）は土曜の夜に回るので、**次の営業日が土曜をまたぐ日**
-（ふつうは金曜。金曜が休みなら木曜）の予測は、その土曜の翌日（日曜）になるまで出さない。日曜 09:00 の Routine が
-新しいモデルで予測する（その日はまだ予測していないので、上の第一の規則で進む）。1つの日付に予測は1つのまま。
+「日曜の朝9時」。2026-11-20 に週末の定時を土曜にまとめた（「土曜日の深夜0時、土曜日の朝9時、土曜日の15時、土曜日の
+夜9時にずらしてほしいです」→ 選択「土曜 00:00」「今週から」「土曜20時まで止める」。docs/MODEL_ADOPTION_RULES.md §98）。
+週次の学習（+15% の木3本 00:00・+10% の木3本 09:00・ランキング学習 15:00）は土曜の昼までに終わるので、
+**次の営業日が土曜をまたぐ日**（ふつうは金曜。金曜が休みなら木曜）の予測は、その土曜の 20:00 JST になるまで出さない。
+土曜 21:00 の Routine が新しいモデルで予測する（その日はまだ予測していないので、上の第一の規則で進む）。
+1つの日付に予測は1つのまま。土曜の昼に予測が動いても（朝の確認の起動・手での起動）、学習前の古いモデルでは出さない。
 
-  最終バー日 D の次の営業日 N の間に土曜 S がある、かつ今日（JST）が S 以前 → 飛ばす
+  最終バー日 D の次の営業日 N の間に土曜 S がある、かつ今（JST）が S の 20:00 より前 → 飛ばす
   （連休で土曜が2つ以上あれば、N に近いほうの土曜で数える）
 
 カレンダーが D か N を覆っていなければこの規則は使わない（進む側に倒す）。FORCE_PREDICT は通す。
@@ -113,6 +116,9 @@ PRED_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file_
 #: 営業日の当日の日足が揃っているはずの時刻（JST）。取り込みは 18:00 まで待つ
 #: （update-data.yml の wait_for_data --deadline 18:00）
 READY_JST = dt.time(18, 0)
+#: 週末の学習の前の日の予測を出してよくなる土曜の時刻（JST）。学習は 00:00・09:00・15:00 に起動し、
+#: 予測は 21:00 の Routine が出す。それより前（学習が終わる前）には出さない（運用者の選択 2026-11-20「土曜20時まで止める」）
+WEEKEND_RELEASE_JST = dt.time(20, 0)
 
 
 def last_bar_date(data_dir: str) -> Optional[dt.date]:
@@ -174,10 +180,11 @@ def decide_new_data(last_bar: Optional[dt.date], as_of: Optional[dt.date],
                    "予測済みの日を予測し直さない"), stale, stale_why
 
 
-def weekend_hold(cal, last_bar: Optional[dt.date], today: dt.date) -> Optional[str]:
+def weekend_hold(cal, last_bar: Optional[dt.date], now_jst: dt.datetime) -> Optional[str]:
     """
-    最終バー日の次の営業日が週末の学習（土曜の夜）の後なら、その翌日（日曜）まで待つ理由を返す。待たなくてよければ None。
-    カレンダーが分からなければ None（進む側）。
+    最終バー日の次の営業日が週末の学習（土曜）の後なら、その土曜の WEEKEND_RELEASE_JST（20:00）まで待つ理由を返す。
+    待たなくてよければ None。カレンダーが分からなければ None（進む側）。
+    now_jst は JST の時刻つき日時（日付だけが来たらその日の 00:00 とみなす）。
     """
     if cal is None or not cal or last_bar is None:
         return None
@@ -189,11 +196,16 @@ def weekend_hold(cal, last_bar: Optional[dt.date], today: dt.date) -> Optional[s
     if not sats:
         return None
     sat = max(sats)
-    release = sat + dt.timedelta(days=1)
-    if today >= release:
+    # isinstance(now_jst, dt.datetime) は使わない（テストが dt.datetime を差し替えると、本物の日時を日付と取り違える）
+    if not hasattr(now_jst, "hour"):              # 日付だけ
+        now_jst = dt.datetime.combine(now_jst, dt.time(0, 0), tzinfo=JST)
+    elif now_jst.tzinfo is None:
+        now_jst = now_jst.replace(tzinfo=JST)
+    release = dt.datetime.combine(sat, WEEKEND_RELEASE_JST, tzinfo=JST)
+    if now_jst >= release:
         return None
-    return (f"{last_bar} の次の営業日 {nxt} は週末の学習（{sat} 土曜の夜）の後なので、"
-            f"{release} 日曜の朝に新しいモデルで予測する（金曜の夜は予測しない）")
+    return (f"{last_bar} の次の営業日 {nxt} は週末の学習（{sat} 土曜）の後なので、"
+            f"{sat} 土曜の夜（{WEEKEND_RELEASE_JST:%H:%M} 以降）に新しいモデルで予測する（金曜の夜は予測しない）")
 
 
 def stale_excused(manifest: dict, expected: Optional[dt.date]) -> Optional[str]:
@@ -329,7 +341,7 @@ def main(argv=None) -> int:
                     print(f"[gate] 日足が欠けているが、取り込みの故障ではない — {excuse}")
                     nd = (nd[0], nd[1], False, "")
             if nd is not None and nd[0]:
-                hold = weekend_hold(cal, last_bar, now.astimezone(JST).date())
+                hold = weekend_hold(cal, last_bar, now.astimezone(JST))
                 if hold:
                     held = True
                     nd = (False, hold, nd[2], nd[3])
@@ -350,7 +362,7 @@ def main(argv=None) -> int:
     else:
         print(f"[gate] 予測を飛ばす — {why}")
         if held:
-            print("       日曜の朝の予測（Routine）で出す。それまで画面は予測済みの日のまま。")
+            print("       土曜の夜の予測（21:00 の Routine）で出す。それまで画面は予測済みの日のまま。")
         else:
             print("       新しい日足が無いので新しい候補は出ない。画面は予測済みの日のまま。")
 
