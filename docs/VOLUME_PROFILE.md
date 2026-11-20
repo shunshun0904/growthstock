@@ -1,5 +1,24 @@
 # 価格帯別出来高
 
+## 止めたこと（2026-11-21）
+
+運用者の依頼（2026-11-21）「それと、分足のデータは使わない方針になったので価格帯別出来高の分布タグも消してください。データ取得と
+保存は契約が切れるまで引き続きお願いします（分足のデータの保存はそのままにしておいてください）。」→ 選択（AskUserQuestion）:
+タブ =「隠して集計も止める」（勧めた）/「タブだけ隠す」/「コードごと消す」、公開中の集計 =「公開をやめる」（勧めた）/「そのまま置く」。
+
+- タブを隠した（`src/App.jsx` の `hidden`）。画面のコード（`src/views/VolumeProfileView.jsx`・`src/lib/volumeProfile.js`）は残す。
+  隠している間は集計（`data/volume-profile.json`）を読まない（`tests/volume-profile-browser.mjs`・`tests/smoke.mjs` で確かめる）
+- `Update Volume Profiles`（`.github/workflows/update-volume-profile.yml`）の自動の起動（予測・分足・ティックの workflow_run）を外した。
+  手では起動できるが、**起動すると集計が公開の Release `data-volume-profile` に上がる**ので、起動する前に運用者に確かめる
+- `Deploy to GitHub Pages` から、集計を降ろしてサイトの `data/` に置く段と、`Update Volume Profiles` の完了での起動を外した
+- 公開の Release `data-volume-profile` の `volume-profile.json` を消した（Release そのものは空のまま残す）
+- **分足・ティックの取得と保存は続ける**（`Update Minute Bars`・`Update Ticks`。下書きの Release `data-minute`・`data-tick-YYYY`。
+  [MINUTE_BARS.md](MINUTE_BARS.md)・[TICKS.md](TICKS.md)）。集計の台本（`research/build_volume_profile.py`）と単体テストも残す
+- 戻すとき: `hidden` を外し、git の履歴（2026-11-21 より前）から `deploy-pages.yml` の集計を置く段と `update-volume-profile.yml` の
+  workflow_run を戻し、`Update Volume Profiles` を手で起動して作り直す（公開に戻るので、運用者の判断で）
+
+以下は 2026-11-20 までの説明です。
+
 「価格帯別出来高」タブには、**直近5営業日の予測対象（候補）すべて**の、予測の基準日までの 1・5・20 営業日の
 価格帯別出来高を表示します。あわせて次の指標を出します。
 

@@ -9,7 +9,7 @@
 """
 
 from contextlib import redirect_stderr, redirect_stdout
-from datetime import date, time
+from datetime import date
 from io import StringIO
 import json
 import os
@@ -18,6 +18,8 @@ import re
 import sys
 import tempfile
 import unittest
+
+import yaml
 
 import numpy as np
 
@@ -326,8 +328,12 @@ class WorkflowTest(unittest.TestCase):
         self.assertIn("contents: write", text)
         self.assertNotIn("MINUTE_DATA_TOKEN", text)
         self.assertNotIn("PROFILE_REPO", text)
+        # 2026-11-21 から自動では起動しない（タブを隠し、集計も止めた。運用者の選択「隠して集計も止める」「公開をやめる」）。
+        # 手で起動するときだけ
+        on = yaml.safe_load(text).get(True) or {}
+        self.assertEqual(set(on), {"workflow_dispatch"})
         for workflow in ("Predict Breakouts", "Update Minute Bars", "Update Ticks"):
-            self.assertIn(f"'{workflow}'", text)
+            self.assertNotIn(f"'{workflow}'", text)
         # 画面と同じ確かめを通してから上げる。暗号化はしない（運用者の選択 2026-11-19）
         screen = text.index("node scripts/check_volume_profile.mjs")
         self.assertLess(screen, text.index("scripts/gh_release_upload.sh"))
@@ -338,10 +344,14 @@ class WorkflowTest(unittest.TestCase):
         self.assertNotIn("public/", text.split("--output", 1)[1].split("\n", 1)[0])
         self.assertNotIn("GH_ENSURE_DRAFT", text)  # デプロイの読み取り専用の鍵で読める公開の Release
 
-    def test_deploy_places_only_a_checked_profile(self):
+    def test_deploy_no_longer_places_the_profile(self):
+        # 2026-11-21 から集計を画面に載せない（公開をやめた）。集計の完了でデプロイも起動しない
         text = self.read("deploy-pages.yml")
-        self.assertIn("'Update Volume Profiles'", text)
-        self.assertLess(text.index('node scripts/check_volume_profile.mjs "$f"'), text.index("cp \"$f\" dist/data/volume-profile.json"))
+        on = yaml.safe_load(text).get(True) or {}
+        self.assertNotIn("Update Volume Profiles", on["workflow_run"]["workflows"])
+        self.assertNotIn("data-volume-profile 'volume-profile.json'", text)
+        self.assertNotIn("dist/data/volume-profile.json", text)
+        self.assertNotIn("check_volume_profile.mjs", text)
         self.assertNotIn("volume_profile_crypto", text)
         self.assertNotIn("VITE_VOLUME_PROFILE_REPO", text)
         self.assertNotIn("MINUTE_DATA", text)

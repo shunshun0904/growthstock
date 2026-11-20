@@ -1,5 +1,5 @@
 /**
- * 「価格帯別出来高」タブのブラウザ・スモークテスト。
+ * 「価格帯別出来高」タブのブラウザ・スモークテスト（2026-11-21 からタブを隠しているので、隠れていることを確かめる）。
  *
  * 置き場と同じ形の合成データ（tests/fixtures/volume_profile_inputs.py。実データではない）から
  * research/build_volume_profile.py で集計を作り、ビルド済みの画面に data/volume-profile.json として配る。
@@ -63,109 +63,126 @@ try {
   });
 
   await page.goto(base, { waitUntil: 'networkidle' });
-  const tab = page.getByRole('tab', { name: '価格帯別出来高', exact: true });
-  await tab.click();
-  const panel = page.locator('.volume-view');
-  const list = page.getByRole('table', { name: '直近5営業日の予測対象銘柄' });
-  const volumeBar = panel.locator('.recharts-bar-rectangle');
-  // キーの入力なしで、開いたら集計が出る
-  await volumeBar.first().waitFor();
-  assert.equal(await page.getByLabel('J-Quants の API キー').count(), 0, 'キーの入力欄は無い');
-  assert.equal(await panel.getByRole('button', { name: '鍵を消す' }).count(), 0);
-  // 直近5つの予測日の候補（123A は2日ぶんを1行に）。それより前の日の 7777 は出ない
-  assert.equal(await list.locator('tbody tr').count(), 3);
-  assert.match(await panel.innerText(), /候補 3銘柄/);
-  assert.doesNotMatch(await list.innerText(), /7777/);
-  assert.match(await list.locator('tbody tr').first().innerText(), /123A サンプル甲[\s\S]*11\/18（1位）・11\/14（2位）/);
-  // 銘柄はプルダウンで選ぶ（コード・名前を打つ検索欄は無い）
-  const stockSelect = panel.getByLabel('銘柄', { exact: true });
-  assert.deepEqual(await stockSelect.locator('option').evaluateAll((options) => options.map((o) => o.value)),
-    ['123A0', '99990', '88990']);
-  assert.match(await stockSelect.locator('option').first().innerText(), /123A サンプル甲（11\/18（1位）・11\/14（2位））/);
-  assert.equal(await panel.getByLabel('銘柄検索').count(), 0);
-  assert.equal(await panel.getByPlaceholder('銘柄名・コード').count(), 0);
+  const checkTab = async () => {
+    const tab = page.getByRole('tab', { name: '価格帯別出来高', exact: true });
+    await tab.click();
+    const panel = page.locator('.volume-view');
+    const list = page.getByRole('table', { name: '直近5営業日の予測対象銘柄' });
+    const volumeBar = panel.locator('.recharts-bar-rectangle');
+    // キーの入力なしで、開いたら集計が出る
+    await volumeBar.first().waitFor();
+    assert.equal(await page.getByLabel('J-Quants の API キー').count(), 0, 'キーの入力欄は無い');
+    assert.equal(await panel.getByRole('button', { name: '鍵を消す' }).count(), 0);
+    // 直近5つの予測日の候補（123A は2日ぶんを1行に）。それより前の日の 7777 は出ない
+    assert.equal(await list.locator('tbody tr').count(), 3);
+    assert.match(await panel.innerText(), /候補 3銘柄/);
+    assert.doesNotMatch(await list.innerText(), /7777/);
+    assert.match(await list.locator('tbody tr').first().innerText(), /123A サンプル甲[\s\S]*11\/18（1位）・11\/14（2位）/);
+    // 銘柄はプルダウンで選ぶ（コード・名前を打つ検索欄は無い）
+    const stockSelect = panel.getByLabel('銘柄', { exact: true });
+    assert.deepEqual(await stockSelect.locator('option').evaluateAll((options) => options.map((o) => o.value)),
+      ['123A0', '99990', '88990']);
+    assert.match(await stockSelect.locator('option').first().innerText(), /123A サンプル甲（11\/18（1位）・11\/14（2位））/);
+    assert.equal(await panel.getByLabel('銘柄検索').count(), 0);
+    assert.equal(await panel.getByPlaceholder('銘柄名・コード').count(), 0);
 
-  const time = page.getByLabel('集計期間');
-  const source = page.getByLabel('データ種別');
-  assert.equal(await stockSelect.inputValue(), '123A0');
-  assert.equal(await panel.getByRole('button', { name: '123A サンプル甲' }).getAttribute('aria-pressed'), 'true');
-  assert.equal(await time.inputValue(), '20');
-  assert.equal(await source.inputValue(), 'tick');
-  let text = await panel.innerText();
-  assert.match(text, /日足照合 20\/20営業日/);
-  assert.match(text, /終値とVWAPの差\s*[+-]\d+\.\d{2}%/);
-  assert.match(text, /時間帯別の出来高/);
-  for (const label of ['寄り', '前場', '後場', '引け', '大口（1,000万円以上）']) assert.match(text, new RegExp(label));
-  assert.match(text, /寄り・引けは板寄せの約定/);
-  assert.equal(await panel.locator('.vp-share-bar').count(), 2);
-  assert.match(await list.locator('tbody tr').first().innerText(), /[+-]\d+\.\d{2}%\s+\d+\.\d%\s+表示可\s+表示可/);
-  fs.mkdirSync(shots, { recursive: true });
-  await page.screenshot({ path: path.join(shots, 'screenshot-volume-profile-desktop.png') });
+    const time = page.getByLabel('集計期間');
+    const source = page.getByLabel('データ種別');
+    assert.equal(await stockSelect.inputValue(), '123A0');
+    assert.equal(await panel.getByRole('button', { name: '123A サンプル甲' }).getAttribute('aria-pressed'), 'true');
+    assert.equal(await time.inputValue(), '20');
+    assert.equal(await source.inputValue(), 'tick');
+    let text = await panel.innerText();
+    assert.match(text, /日足照合 20\/20営業日/);
+    assert.match(text, /終値とVWAPの差\s*[+-]\d+\.\d{2}%/);
+    assert.match(text, /時間帯別の出来高/);
+    for (const label of ['寄り', '前場', '後場', '引け', '大口（1,000万円以上）']) assert.match(text, new RegExp(label));
+    assert.match(text, /寄り・引けは板寄せの約定/);
+    assert.equal(await panel.locator('.vp-share-bar').count(), 2);
+    assert.match(await list.locator('tbody tr').first().innerText(), /[+-]\d+\.\d{2}%\s+\d+\.\d%\s+表示可\s+表示可/);
+    fs.mkdirSync(shots, { recursive: true });
+    await page.screenshot({ path: path.join(shots, 'screenshot-volume-profile-desktop.png') });
 
-  await source.selectOption('minute');
-  text = await panel.innerText();
-  assert.match(text, /分足では、寄りは最初の1分/);
-  assert.match(text, /各分の出来高/);
-  assert.match(text, /大口（1,000万円以上）/, '大きさ別はティックで出す');
-  await time.selectOption('5');
-  assert.match(await panel.innerText(), /日足照合 5\/5営業日/);
-  await page.getByLabel('横軸').selectOption('turnover');
-  await page.locator('.volume-table summary').click();
-  assert.match(await panel.innerText(), /売買代金（円）/);
+    await source.selectOption('minute');
+    text = await panel.innerText();
+    assert.match(text, /分足では、寄りは最初の1分/);
+    assert.match(text, /各分の出来高/);
+    assert.match(text, /大口（1,000万円以上）/, '大きさ別はティックで出す');
+    await time.selectOption('5');
+    assert.match(await panel.innerText(), /日足照合 5\/5営業日/);
+    await page.getByLabel('横軸').selectOption('turnover');
+    await page.locator('.volume-table summary').click();
+    assert.match(await panel.innerText(), /売買代金（円）/);
 
-  await stockSelect.selectOption('99990');
-  assert.equal(await panel.getByRole('button', { name: '9999 サンプル乙' }).getAttribute('aria-pressed'), 'true');
-  assert.match(await panel.locator('.volume-stock-heading').innerText(), /9999 サンプル乙/);
-  assert.equal(await source.inputValue(), 'minute', 'ティックが無ければ分足を選ぶ');
-  assert.match(await panel.innerText(), /この期間のティックが揃っていません/);
-  await source.selectOption('tick');
-  text = await panel.innerText();
-  assert.match(text, /置き場にまだ無いか、足りません/);
-  assert.match(text, /照合済み 0\/5営業日/);
-  // 表の行を押しても選べ、プルダウンも合わせて変わる
-  await page.getByRole('button', { name: '8899 集計できない銘柄' }).click();
-  assert.equal(await stockSelect.inputValue(), '88990');
-  assert.match(await panel.innerText(), /日足が揃っていません/);
+    await stockSelect.selectOption('99990');
+    assert.equal(await panel.getByRole('button', { name: '9999 サンプル乙' }).getAttribute('aria-pressed'), 'true');
+    assert.match(await panel.locator('.volume-stock-heading').innerText(), /9999 サンプル乙/);
+    assert.equal(await source.inputValue(), 'minute', 'ティックが無ければ分足を選ぶ');
+    assert.match(await panel.innerText(), /この期間のティックが揃っていません/);
+    await source.selectOption('tick');
+    text = await panel.innerText();
+    assert.match(text, /置き場にまだ無いか、足りません/);
+    assert.match(text, /照合済み 0\/5営業日/);
+    // 表の行を押しても選べ、プルダウンも合わせて変わる
+    await page.getByRole('button', { name: '8899 集計できない銘柄' }).click();
+    assert.equal(await stockSelect.inputValue(), '88990');
+    assert.match(await panel.innerText(), /日足が揃っていません/);
 
-  // 古い集計（予測の基準日より前）
-  serve = 'stale';
-  await panel.getByRole('button', { name: '再読み込み' }).click();
-  await panel.getByText(/集計の基準日は 2025-11-17/).waitFor();
-  // 読み直しに失敗しても、前に読めた集計は残す
-  serve = 'error';
-  await panel.getByRole('button', { name: '再読み込み' }).click();
-  await panel.getByRole('alert').waitFor();
-  assert.match(await panel.getByRole('alert').innerText(), /取得できませんでした/);
-  assert.match(await panel.innerText(), /集計の基準日は 2025-11-17/);
+    // 古い集計（予測の基準日より前）
+    serve = 'stale';
+    await panel.getByRole('button', { name: '再読み込み' }).click();
+    await panel.getByText(/集計の基準日は 2025-11-17/).waitFor();
+    // 読み直しに失敗しても、前に読めた集計は残す
+    serve = 'error';
+    await panel.getByRole('button', { name: '再読み込み' }).click();
+    await panel.getByRole('alert').waitFor();
+    assert.match(await panel.getByRole('alert').innerText(), /取得できませんでした/);
+    assert.match(await panel.innerText(), /集計の基準日は 2025-11-17/);
 
-  // 暗号化していたころに覚えた復号の鍵は、開いたときに消す
-  serve = 'current';
-  await page.evaluate((k) => { localStorage.setItem(k, 'old'); sessionStorage.setItem(k, 'old'); }, OLD_UNLOCK);
-  await page.reload({ waitUntil: 'networkidle' });
-  await tab.click();
-  await volumeBar.first().waitFor();
-  assert.deepEqual(await page.evaluate((k) => [localStorage.getItem(k), sessionStorage.getItem(k)], OLD_UNLOCK), [null, null]);
+    // 暗号化していたころに覚えた復号の鍵は、開いたときに消す
+    serve = 'current';
+    await page.evaluate((k) => { localStorage.setItem(k, 'old'); sessionStorage.setItem(k, 'old'); }, OLD_UNLOCK);
+    await page.reload({ waitUntil: 'networkidle' });
+    await tab.click();
+    await volumeBar.first().waitFor();
+    assert.deepEqual(await page.evaluate((k) => [localStorage.getItem(k), sessionStorage.getItem(k)], OLD_UNLOCK), [null, null]);
 
-  // まだ集計が無い
-  serve = 'missing';
-  await page.reload({ waitUntil: 'networkidle' });
-  await tab.click();
-  await panel.getByText(/まだ集計がありません/).waitFor();
-  assert.equal(await list.locator('tbody tr').count(), 3, '集計が無くても対象の一覧は出す');
+    // まだ集計が無い
+    serve = 'missing';
+    await page.reload({ waitUntil: 'networkidle' });
+    await tab.click();
+    await panel.getByText(/まだ集計がありません/).waitFor();
+    assert.equal(await list.locator('tbody tr').count(), 3, '集計が無くても対象の一覧は出す');
 
-  // スマホの幅
-  serve = 'current';
-  await page.setViewportSize({ width: 390, height: 844 });
-  await page.reload({ waitUntil: 'networkidle' });
-  await tab.click();
-  await volumeBar.first().waitFor();
-  await page.screenshot({ path: path.join(shots, 'screenshot-volume-profile-mobile.png'), fullPage: true });
-  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'スマホの幅で横にはみ出さない');
+    // スマホの幅
+    serve = 'current';
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload({ waitUntil: 'networkidle' });
+    await tab.click();
+    await volumeBar.first().waitFor();
+    await page.screenshot({ path: path.join(shots, 'screenshot-volume-profile-mobile.png'), fullPage: true });
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'スマホの幅で横にはみ出さない');
 
-  assert.deepEqual(errors, []);
-  assert.ok(requests.filter((req) => /volume-profile/.test(req.url)).every((req) => req.method === 'GET'
-    && req.url.startsWith(base)), '集計は同じサイトから GET で読むだけ');
-  console.log('PASS: 直近5営業日の候補・キーなしで開く・プルダウンで選ぶ・欠損・古い集計・読み直しの失敗・集計待ち・古い鍵の片づけ・スマホの幅');
+    assert.deepEqual(errors, []);
+    assert.ok(requests.filter((req) => /volume-profile/.test(req.url)).every((req) => req.method === 'GET'
+      && req.url.startsWith(base)), '集計は同じサイトから GET で読むだけ');
+    console.log('PASS: 直近5営業日の候補・キーなしで開く・プルダウンで選ぶ・欠損・古い集計・読み直しの失敗・集計待ち・古い鍵の片づけ・スマホの幅');
+  };
+  // 2026-11-21 からタブを隠している（運用者の依頼「分足のデータは使わない方針になったので価格帯別出来高の分布タグも消して
+  // ください」→「隠して集計も止める」「公開をやめる」。src/App.jsx の hidden）。隠している間は、PC とスマホの幅でタブと画面が
+  // 出ないこと、集計（data/volume-profile.json）を読まないことを確かめる。タブを戻すと、上の checkTab（画面の確かめ）が動く
+  if (await page.getByRole('tab', { name: '価格帯別出来高', exact: true }).count() === 0) {
+    assert.equal(await page.locator('.volume-view').count(), 0, 'PC の幅で画面が出ない');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.reload({ waitUntil: 'networkidle' });
+    assert.equal(await page.getByRole('tab', { name: '価格帯別出来高', exact: true }).count(), 0, 'スマホの幅でもタブが出ない');
+    assert.equal(await page.locator('.volume-view').count(), 0, 'スマホの幅でも画面が出ない');
+    assert.ok(!requests.some((req) => /volume-profile/.test(req.url)), '隠している間は集計を読まない');
+    assert.deepEqual(errors, []);
+    console.log('PASS: 価格帯別出来高のタブは隠れている（PC・スマホの幅。集計を読まない）');
+  } else {
+    await checkTab();
+  }
 } finally {
   await browser?.close();
   if (server.listening) await new Promise((resolve) => server.close(resolve));

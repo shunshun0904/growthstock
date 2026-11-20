@@ -7,18 +7,20 @@ name: Update Volume Profiles
 # 結果は Release data-volume-profile に volume-profile.json として上げ、Deploy to GitHub Pages がそれを dist/data/ に
 # 置く。画面はキーの入力なしで開く。
 #
-# **集計は誰でも見られる**（公開の Release とサイト）。運用者の選択（2026-11-19「暗号化をやめて公開する」）。それまでは
+# 2026-11-19〜11-20 は**集計を誰でも見られる形で公開していた**（公開の Release とサイト。2026-11-21 にやめた。下の on:）。
+# 運用者の選択（2026-11-19「暗号化をやめて公開する」）。それまでは
 # J-Quants の API キーから作った鍵で暗号化して載せていた（#11）。J-Quants の公式ヘルプでは、個人の利用はデータの第三者
 # への配信が禁止とされていることを伝えたうえでの選択（docs/VOLUME_PROFILE.md「公開について」）。
 # J-Quants の API キー（Secret JQUANTS_API）は、取引カレンダーを取るためにこのワークフローの中だけで使う。
 #
-# 予測（Predict Breakouts）・分足（Update Minute Bars）・ティック（Update Ticks）のそれぞれが終わるたびに作り直す。
-# どれも毎晩の取り込み（Update Data Store）の後に並んで走り、終わる順は日によって違うので、最後に終わったものの
-# 後の集計が全部そろったものになる。そろう前の集計では、まだ置き場に無い日の種別が「欠損」と出る。
+# 2026-11-20 までは、予測（Predict Breakouts）・分足（Update Minute Bars）・ティック（Update Ticks）のそれぞれが終わるたびに
+# 作り直していた（workflow_run）。2026-11-21 に運用者の依頼「分足のデータは使わない方針になったので価格帯別出来高の分布タグも
+# 消してください。データ取得と保存は契約が切れるまで引き続きお願いします（分足のデータの保存はそのままにしておいてください）」
+# → 選択「隠して集計も止める」「公開をやめる」で、タブを隠し、自動の起動を外し、デプロイに載せる段（deploy-pages.yml）を外し、
+# Release data-volume-profile の集計ファイルを消した。分足・ティックの取得と保存（Update Minute Bars・Update Ticks）は続ける。
+# **手で起動すると、集計がまた公開の Release に上がる**（公開をやめているので、起動する前に運用者に確かめる）。
+# docs/VOLUME_PROFILE.md「止めたこと（2026-11-21）」。
 on:
-  workflow_run:
-    workflows: ['Predict Breakouts', 'Update Minute Bars', 'Update Ticks']
-    types: [completed]
   workflow_dispatch:
 
 # 下書きの Release（分足・ティック）を読み、data-volume-profile に上げる（git にはコミットしない）

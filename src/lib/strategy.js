@@ -454,6 +454,35 @@ export function ltrRanking(rows, s = STRATEGY) {
 }
 
 /**
+ * 候補銘柄のニュースに、規則を通らなくても並べるランキング学習（日次）のその日の中の順位の上限（予測の ltr.dayRank）。
+ * 運用者の依頼（2026-11-21）「候補銘柄のニュースの探索条件を緩くしてほしいです。分類モデルのスコアは条件を満たしてなくても
+ * ランキング学習モデルが良ければ買うことはあり得るので」→ 選択「日次ランキングの3位以内」。research/news_links.py の LTR_TOP と
+ * 同じ値（tests/test_news_links.py で確かめる）。買う銘柄（strategySignal の picks）は変えない。
+ */
+export const NEWS_LTR_TOP = 3;
+
+/** その日の候補の中でランキング学習（日次）の順位が top 位以内か（1 = 最上位）。順位が無い・整数でなければ false。 */
+export function ltrTop(candidate, top = NEWS_LTR_TOP) {
+  const r = candidate?.ltr?.dayRank;
+  return Number.isInteger(r) && r >= 1 && r <= top;
+}
+
+/**
+ * 候補銘柄のニュースに並べる候補（rows はその日の候補、signal はその日の strategySignal）。今の規則を満たす候補
+ * （signal.passed。並びもそのまま）の後ろに、規則は満たさないがランキング学習（日次）がその日の top 位以内の候補を、
+ * 順位の順（同じ順位は銘柄コードの順）に足す。research/news_links.py の news_codes と同じ選び方。
+ */
+export function newsRows(rows, signal, top = NEWS_LTR_TOP) {
+  const passed = signal?.passed ?? [];
+  const key = (c) => c?.jqCode ?? c?.code;
+  const seen = new Set(passed.map(key));
+  const extra = (Array.isArray(rows) ? rows : [])
+    .filter((c) => !seen.has(key(c)) && ltrTop(c, top))
+    .sort((a, b) => (a.ltr.dayRank - b.ltr.dayRank) || String(a.code ?? '').localeCompare(String(b.code ?? '')));
+  return [...passed, ...extra];
+}
+
+/**
  * その日の発火数の帯。発火数だけで決める（2026-10-12 からは発火の数では見送らない。skipBreaks = 1）。
  *   strong  20件以上（本命）/ ok  8〜19件 / quiet  1〜7件（発火が少ない日。買うが件数が少ないと添える）/ none  0件
  * 地合いの条件は足さない（発火15件以上の日は100%が TOPIX 200日線より上で、

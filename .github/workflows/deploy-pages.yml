@@ -14,7 +14,8 @@ on:
     # 他のワークフローを起こさないため（GitHub のループ防止）。
     workflows: ['Fetch J-Quants Data', 'Predict Breakouts', 'Refresh Stock Details', 'Fetch Filings',
                 'New Training Samples', 'Backfill KNN', 'Check News Links', 'Adopt Financial Inputs',
-                'Score Distribution', 'Refresh Valuations', 'Update Volume Profiles']
+                'Score Distribution', 'Refresh Valuations']
+    # Update Volume Profiles は 2026-11-21 に外した（価格帯別出来高のタブを隠し、集計を画面に載せるのをやめた。下の注記）
     types: [completed]
 
 permissions:
@@ -90,25 +91,10 @@ jobs:
           tar -xzf "$a" -C dist/data
           echo "展開した: $(ls dist/data/recurrence | wc -l) ファイル・$(du -sh dist/data/recurrence | cut -f1)"
 
-      # 価格帯別出来高（Update Volume Profiles が Release data-volume-profile に上げた volume-profile.json）を
-      # dist/data/ に置く。画面はキーの入力なしで開く（運用者の選択 2026-11-19「暗号化をやめて公開する」。
-      # docs/VOLUME_PROFILE.md）。画面の確かめ（scripts/check_volume_profile.mjs）を通らなければ載せない。
-      # 無い・取れなくてもデプロイは止めない（タブが「まだ集計がありません」と出す）
-      - name: Volume profiles (release)
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          mkdir -p "$RUNNER_TEMP/vp"
-          bash scripts/gh_release_download.sh data-volume-profile "$RUNNER_TEMP/vp" 'volume-profile.json'
-          f="$RUNNER_TEMP/vp/volume-profile.json"
-          if [ ! -f "$f" ]; then
-            echo "Release に volume-profile.json が無い（タブは集計待ちと出す）"; exit 0
-          fi
-          node scripts/check_volume_profile.mjs "$f"
-          mkdir -p dist/data
-          cp "$f" dist/data/volume-profile.json
-          echo "置いた: dist/data/volume-profile.json"
+      # 価格帯別出来高の集計（volume-profile.json）は 2026-11-21 から画面に載せない。運用者の依頼「分足のデータは使わない
+      # 方針になったので価格帯別出来高の分布タグも消してください」→「隠して集計も止める」「公開をやめる」。それまではここで
+      # Release data-volume-profile から降ろして dist/data/ に置いていた（2026-11-19〜11-20。docs/VOLUME_PROFILE.md）。
+      # タブを戻すときは、git の履歴（2026-11-21 より前の deploy-pages.yml）からこの段を戻す
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

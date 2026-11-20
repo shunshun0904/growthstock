@@ -83,6 +83,9 @@ page.on('pageerror', (e) => consoleErrors.push(`pageerror: ${e.message}`));
 // リカレンス・ネットワークのデータ（隠している間はどのタブも読まない。下の「隠したタブ」）
 const recurrenceRequests = [];
 page.on('request', (r) => { if (r.url().includes('/data/recurrence/')) recurrenceRequests.push(r.url()); });
+// 価格帯別出来高の集計（2026-11-21 からタブを隠し、公開もやめた。隠している間はどのタブも読まない）
+const volumeProfileRequests = [];
+page.on('request', (r) => { if (r.url().includes('/data/volume-profile')) volumeProfileRequests.push(r.url()); });
 
 console.log('\n== ブレイク予測 View ==');
 await page.goto(base, { waitUntil: 'networkidle' });
@@ -379,15 +382,20 @@ const tabNames = (await page.getByRole('tab').allTextContents()).map((t) => t.tr
 // 「再学習で加わったサンプル、スコアと収益の分布タグを消してください。」→「隠して自動更新も止める」で隠している（src/App.jsx の
 // hidden。画面のコードとデータの作り方は残す）
 // 価格帯別需給も 2026-11-15「推定は本番運用レベルではないので非表示に」で隠している。
-check(tabNames.join(',') === 'ブレイク予測,候補銘柄のニュース,理論株価,価格帯別出来高,タイムマシーン',
-      'タブは ブレイク予測 / 候補銘柄のニュース / 理論株価 / 価格帯別出来高 / タイムマシーン'
-      + ` の5つ (実際: ${tabNames.join(',')})`);
+// 価格帯別出来高（2026-11-19 に足した）は、運用者の依頼 2026-11-21「分足のデータは使わない方針になったので価格帯別出来高の
+// 分布タグも消してください」→「隠して集計も止める」「公開をやめる」で隠している（src/App.jsx の hidden。画面のコードと集計の
+// 作り方は残す。分足・ティックの取得と保存は続ける）
+check(tabNames.join(',') === 'ブレイク予測,候補銘柄のニュース,理論株価,タイムマシーン',
+      'タブは ブレイク予測 / 候補銘柄のニュース / 理論株価 / タイムマシーン'
+      + ` の4つ (実際: ${tabNames.join(',')})`);
 check(!tabNames.includes('決算サンキー') && !tabNames.includes('What-If シミュレーター')
         && !tabNames.includes('8軸オクタゴン比較') && !tabNames.includes('候補の比較')
         && !tabNames.includes('リカレンス・ネットワーク') && !tabNames.includes('スコアと収益の分布')
-        && !tabNames.includes('再学習で加わったサンプル') && !tabNames.includes('価格帯別需給'),
+        && !tabNames.includes('再学習で加わったサンプル') && !tabNames.includes('価格帯別需給')
+        && !tabNames.includes('価格帯別出来高'),
       '決算サンキー・What-If シミュレーター・8軸オクタゴン比較・候補の比較・リカレンス・ネットワーク・スコアと収益の分布・'
-      + '再学習で加わったサンプル・価格帯別需給のタブは出ない');
+      + '再学習で加わったサンプル・価格帯別需給・価格帯別出来高のタブは出ない');
+check((await page.locator('.volume-view').count()) === 0, '価格帯別出来高の画面はどのタブにも出ない（隠している間）');
 check((await page.locator('.sdist').count()) === 0 && (await page.locator('.samples').count()) === 0,
       'スコアと収益の分布・再学習で加わったサンプルの画面はどのタブにも出ない（隠している間）');
 check((await page.locator('.knn').count()) === 0, '候補の比較の画面はどのタブにも出ない（隠している間）');
@@ -406,6 +414,39 @@ check(!((await page.textContent('.footer')) || '').includes('EDINET'),
 // tests/test_score_dist.py・tests/test_new_samples.py に残っている。タブを戻すときは git の履歴（2026-11-15 より前の smoke.mjs）から戻す
 
 console.log('\n== 候補銘柄のニュース ==');
+// 2026-11-21 から、規則を通らなくてもランキング学習（日次）がその日の3位以内の候補も並べる（運用者の依頼「候補銘柄のニュースの
+// 探索条件を緩くしてほしいです…」→ 選択「日次ランキングの3位以内」。理由の印は付けない「付けない」）。合成の予測データは
+// 規則を通る候補が無く、日次の順位は 9434=1・9082=2・9324=3・1671=4・1699=5
+const newsCodes = () => page.locator('.news-card .news-id .num').allTextContents();
+await page.reload();
+await page.getByRole('tab', { name: '候補銘柄のニュース' }).click();
+await page.waitForSelector('.news-card', { timeout: 10000 });
+const onlyLtr = await newsCodes();
+check(JSON.stringify(onlyLtr) === JSON.stringify(['9434', '9082', '9324']),
+      `規則を通る候補が無い日は、ランキング学習（日次）の3位以内を順位の順に並べる（4位・5位は出さない） (実際: ${onlyLtr})`);
+const newsLtrBadges = await page.locator('.news-badges .badge').allTextContents();
+check(newsLtrBadges.every((t) => !/買う候補|95以上|最小/.test(t)),
+      `順位で足した候補には「買う候補」「95以上」「最小」の印を出さない（理由の印も付けない。決算の印はそのまま） (実際: ${newsLtrBadges})`);
+check(((await page.locator('.news-card').nth(1).textContent()) || '').includes('この銘柄のリンクはまだありません'),
+      'リンクの記録が無い銘柄（9082）は「まだありません」');
+// 規則を通る候補（1671。順位は4位）がある日は、その後ろに3位以内を足す。買う候補は規則のまま
+const predMix = JSON.parse(fs.readFileSync(PRED_FIXTURE, 'utf8'));
+for (const c of predMix.candidates) {
+  if (c.code === '1671') ['lgbm', 'xgb', 'cat'].forEach((a) => { c.byModel[a].pctHistorical = 97.0; });
+}
+await page.route('**/data/predictions.json*',
+  (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(predMix) }));
+await page.reload();
+await page.getByRole('tab', { name: '候補銘柄のニュース' }).click();
+await page.waitForSelector('.news-card', { timeout: 10000 });
+const mixed = await newsCodes();
+check(JSON.stringify(mixed) === JSON.stringify(['1671', '9434', '9082', '9324']),
+      `規則を通った候補を先に、その後ろにランキング学習（日次）の3位以内 (実際: ${mixed})`);
+check(((await page.locator('.news-card').nth(0).textContent()) || '').includes('買う候補')
+        && (await page.locator('.news-badges .badge.green').count()) === 1
+        && (await page.locator('.news-badges .badge.blue').count()) === 0,
+      '「買う候補」は規則を通った 1671 だけ。順位で足した3件には印が無い');
+await page.unroute('**/data/predictions.json*');
 // 出すのは今日の戦略の候補（規則の3本すべて95以上。2026-10-30 から 基準ラベルの3本）だけ（運用者の指示 2026-10-17「取得対象は、
 // 候補銘柄のみで良いです」）。合成の予測データには規則を通る候補が無いので、9324・9434・9082 の規則の3本の百分位を上書きして配り直す
 // （tests/fixtures/synthetic-news-links.json は同じ値から research/news_links.py の書き出しで作った。9082 はリンクの記録が無い）
@@ -470,6 +511,8 @@ console.log('\n== リカレンス・ネットワーク（隠している） ==')
 // smoke.mjs）から戻す
 check(recurrenceRequests.length === 0,
       `リカレンス・ネットワークのデータ（/data/recurrence/）はどのタブを開いても読まない (実際: ${recurrenceRequests.length}件)`);
+check(volumeProfileRequests.length === 0,
+      `価格帯別出来高の集計（/data/volume-profile.json）はどのタブを開いても読まない (実際: ${volumeProfileRequests.length}件)`);
 
 console.log('\n== 固定リターンのモデルと履歴の区別 ==');
 await page.goto(base, { waitUntil: 'networkidle' });

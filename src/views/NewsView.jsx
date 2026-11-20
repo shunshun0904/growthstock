@@ -1,13 +1,16 @@
 import React, { useMemo, useState } from 'react';
 import { fmt, fmtDate } from '../lib/format.js';
 import { earningsNote } from '../lib/predictions.js';
-import { STRATEGY, RULE_JA, orderRows, strategySignal } from '../lib/strategy.js';
+import { STRATEGY, RULE_JA, NEWS_LTR_TOP, newsRows, orderRows, strategySignal } from '../lib/strategy.js';
 import { stockLinks } from '../lib/news.js';
 
 /**
  * 候補銘柄のニュース（運用者の依頼 2026-10-17。左から2番目のタブ）。
  *
- * 出すのは今日の戦略の候補（規則の3本すべて95以上。2026-10-30 から 1.2σ の3本。運用者の指示「取得対象は、候補銘柄のみで良いです」）だけ。
+ * 出すのは今日の戦略の候補（規則の3本すべて95以上。2026-10-30 から 1.2σ の3本。運用者の指示「取得対象は、候補銘柄のみで良いです」）と、
+ * 2026-11-21 からは規則を通らなくてもランキング学習（日次）がその日の3位以内の候補（strategy.js の newsRows。運用者の依頼「候補銘柄の
+ * ニュースの探索条件を緩くしてほしいです…ランキング学習モデルが良ければ買うことはあり得るので」→ 選択「日次ランキングの3位以内」。
+ * 足した候補に理由の印は付けない（選択「付けない」）。規則を通らない候補には「95以上」「買う候補」の印も出さない）。
  * リンクは public/data/news_links.json（毎晩の予測の後に research/news_links.py が候補ごとにページを開いて確かめた結果）
  * から並べる。確かめは裏でやり、画面には印や状態を出さない（運用者の指示「確かめた、未確認などの表示はいらないです。
  * バックでやってくれれば良いので」）。確かめを通らなかったリンクは出さない。自動では開かないサイトのリンクも、同じ塊に
@@ -24,7 +27,8 @@ export default function NewsView({ data, links }) {
   );
   const signal = useMemo(() => strategySignal(rows), [rows]);
   const pickIds = useMemo(() => new Set(signal.picks.map((c) => c.jqCode)), [signal]);
-  const shown = signal.passed;
+  const ruleIds = useMemo(() => new Set(signal.passed.map((c) => c.jqCode)), [signal]);
+  const shown = useMemo(() => newsRows(rows, signal), [rows, signal]);
 
   return (
     <div className="news">
@@ -32,7 +36,8 @@ export default function NewsView({ data, links }) {
         <div className="card-head">
           <h2>候補銘柄のニュース</h2>
           <span className="sub">
-            {`今日の戦略の候補（${RULE_JA}がすべて${STRATEGY.agreePct}以上）ごとに、ニュース・適時開示・アナリスト予想・`
+            {`今日の戦略の候補（${RULE_JA}がすべて${STRATEGY.agreePct}以上）と、ランキング学習（日次）がその日の${NEWS_LTR_TOP}位以内の`
+              + '候補ごとに、ニュース・適時開示・アナリスト予想・'
               + '個人投資家の声のページを開けます（外部サイト）'}
           </span>
         </div>
@@ -68,12 +73,15 @@ export default function NewsView({ data, links }) {
 
         {rows.length === 0 && <div className="empty">この日は新規の高値更新がありません。</div>}
         {rows.length > 0 && shown.length === 0 && (
-          <div className="empty">{`この日は今日の戦略の候補（${RULE_JA}がすべて${STRATEGY.agreePct}以上）がありません。`}</div>
+          <div className="empty">
+            {`この日は、今日の戦略の候補（${RULE_JA}がすべて${STRATEGY.agreePct}以上）も、ランキング学習（日次）の${NEWS_LTR_TOP}位以内の`
+              + '候補もありません。'}
+          </div>
         )}
 
         <div className="news-list">
           {shown.map((c) => (
-            <NewsCard key={c.jqCode} c={c} pick={pickIds.has(c.jqCode)} links={links} />
+            <NewsCard key={c.jqCode} c={c} pick={pickIds.has(c.jqCode)} rule={ruleIds.has(c.jqCode)} links={links} />
           ))}
         </div>
       </section>
@@ -85,8 +93,11 @@ export default function NewsView({ data, links }) {
   );
 }
 
-/** 候補1件。見出し（コード・名前・市場・業種と印）と、見出しの塊ごとのリンク。 */
-function NewsCard({ c, pick, links }) {
+/**
+ * 候補1件。見出し（コード・名前・市場・業種と印）と、見出しの塊ごとのリンク。印（買う候補・95以上・最小）は今の規則を満たす候補
+ * （rule）だけに出す。ランキング学習（日次）の順位で足した候補には印を出さない（運用者の選択 2026-11-21「付けない」）。
+ */
+function NewsCard({ c, pick, rule, links }) {
   const g = stockLinks(links, c);
   const earn = earningsNote(c, STRATEGY.holdDays);
   return (
@@ -98,10 +109,10 @@ function NewsCard({ c, pick, links }) {
         </div>
         <div className="news-badges">
           {pick ? <span className="badge green" title="今日の戦略で買う候補（上位の枠に入った）">買う候補</span>
-            : <span className="badge blue" title={`${RULE_JA}がすべて${STRATEGY.agreePct}以上（上位の枠の外）`}>
+            : rule && <span className="badge blue" title={`${RULE_JA}がすべて${STRATEGY.agreePct}以上（上位の枠の外）`}>
               {`${STRATEGY.agreePct}以上`}
             </span>}
-          {Number.isFinite(c.minPct) && (
+          {rule && Number.isFinite(c.minPct) && (
             <span className="badge slate" title={`${RULE_JA}の百分位の最小（ブレイク予測の並び順の物差し）`}>
               最小 {fmt(c.minPct, 1)}
             </span>

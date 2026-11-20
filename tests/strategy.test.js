@@ -10,6 +10,7 @@ import {
   freeSlots, pctSpread, laggard, nearMisses, fundContrib, frozenNote,
   BORDER, BORDER_STATS, BORDER_WARN, borderShape, borderNote, borderWarn, orderRows, ruleMinTier,
   ltrDayPct, ltrUpper, passesBoth, bothSummary, ltrRanking, ltr5Rank, ltr5Pool, condLevel,
+  NEWS_LTR_TOP, ltrTop, newsRows,
 } from '../src/lib/strategy.js';
 
 const cand = (code, pcts, score = 0.5) => ({
@@ -540,4 +541,42 @@ test('ltrRanking: 順位表の行に、直近5営業日の組の中の順位と3
     r('A', 1, { ltr5: { rank: 1, nPool: 30 }, conds: { c3: true, c4: true } }),
   ]);
   assert.deepEqual(k.items.map((x) => [x.c.code, x.rank5, x.pool5, x.cond]), [['A', 1, 30, 'c4'], ['B', null, null, null]]);
+});
+
+test('NEWS_LTR_TOP / ltrTop: 候補銘柄のニュースに足すのはランキング学習（日次）のその日の3位以内（運用者の選択 2026-11-21）', () => {
+  assert.equal(NEWS_LTR_TOP, 3);
+  const r = (rank) => ({ ...rule('A', [10, 10, 10]), ltr: { dayRank: rank } });
+  assert.deepEqual([1, 2, 3, 4].map((k) => ltrTop(r(k))), [true, true, true, false]);
+  // 順位が無い・整数でない・0 以下は足さない
+  for (const bad of [undefined, null, 0, -1, 1.5, '1', true, NaN]) assert.equal(ltrTop(r(bad)), false, String(bad));
+  assert.equal(ltrTop(rule('B', [99, 99, 99])), false);
+  assert.equal(ltrTop(null), false);
+  assert.equal(ltrTop(r(4), 5), true);
+});
+
+test('newsRows: 規則を満たす候補（passed の並び）の後ろに、規則を満たさない3位以内を順位の順で足す。買う銘柄は変えない', () => {
+  const r = (code, pcts, rank) => ({ ...rule(code, pcts), ltr: rank === undefined ? undefined : { dayRank: rank, upper: rank <= 2 } });
+  const rows = [
+    r('A', [99, 99, 99], 5),      // 規則を満たす（順位は5位）
+    r('B', [50, 60, 70], 2),      // 規則を満たさない・2位 → 足す
+    r('C', [96, 97, 98], 3),      // 規則を満たす・3位（二重に出さない）
+    r('D', [40, 40, 40], 1),      // 規則を満たさない・1位 → 足す
+    r('E', [40, 40, 40], 4),      // 規則を満たさない・4位 → 出さない
+    r('F', [40, 40, 40]),         // 順位が無い → 出さない
+  ];
+  const signal = strategySignal(rows);
+  const shown = newsRows(rows, signal);
+  assert.deepEqual(shown.map((c) => c.code), ['A', 'C', 'D', 'B']);
+  assert.deepEqual(signal.picks.map((c) => c.code), ['A', 'C']);                 // 買う銘柄は規則のまま
+  assert.deepEqual(shown.slice(0, 2), signal.passed);                           // 規則を満たす候補は passed のまま（minPct つき）
+  assert.equal(shown[2].minPct, undefined);                                      // 足した候補に最小の百分位は付けない
+  // 規則を満たす候補が無い日は3位以内だけ。同じ順位は銘柄コードの順
+  const none = [r('Z', [1, 1, 1], 1), r('Y', [1, 1, 1], 1), r('X', [1, 1, 1], 3), r('W', [1, 1, 1], 4)];
+  assert.deepEqual(newsRows(none, strategySignal(none)).map((c) => c.code), ['Y', 'Z', 'X']);
+  // ランキング学習の無い日は今までどおり規則を満たす候補だけ
+  const old = [rule('P', [99, 99, 99]), rule('Q', [10, 10, 10])];
+  assert.deepEqual(newsRows(old, strategySignal(old)).map((c) => c.code), ['P']);
+  assert.deepEqual(newsRows([], strategySignal([])), []);
+  assert.deepEqual(newsRows(null, null), []);
+  assert.equal(rows[1].minPct, undefined);                                       // 元の行は変えない
 });

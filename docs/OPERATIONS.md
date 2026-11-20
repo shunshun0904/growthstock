@@ -42,7 +42,7 @@
 | 画面用の追跡 | `public/data/prediction_history.json`（上位5件/日・400日で削除） | git | 平日夜 | 画面に出すぶんだけ。**長期の台帳ではない** |
 | 再学習で加わったサンプル | `public/data/new_samples.json`（週次の再学習で新しく学習に入ったサンプルから正例・負例を最大5件ずつ。日足（更新日の78週前〜判定の20営業日の後5日）・到達の線・終盤の線・成否の内訳） | git → GitHub Pages | 日曜の Retrain Weekly の後に `New Training Samples` が workflow_run で続けて走る（基準モデル（1.2σ の LightGBM）の学習日が変わったときだけ作り直す。手で起動すると今の週を作り直す） | 画面のタブ「再学習で加わったサンプル」（運用者の依頼 2026-10-13。同日夜に名前を「例」から「サンプル」に、チャートを78週に）。加わったサンプル = 前回の学習期間の終わり（meta.json の git の履歴）より後・今回の終わりまでの更新日。選び方は学習期間の終わりを種にした無作為抽出。線は学習のラベルと同じ式（`research/new_samples.py` → `export_label_samples.build_case`）。内訳から引き直したラベルがデータセットと食い違えば止まる（2026-11-15 から画面に出さず、週次の更新も止めた。手で起動すれば作り直す。§95） |
 | スコアと収益の分布 | `public/data/score_dist.json`（集計だけ: +10% の LightGBM の out-of-fold のスコアの度数（正例・負例）・分位点・スコア帯ごとの到達率と収益、直近5営業日の組のランキング学習（ltr5）の out-of-fold のスコアの度数と収益（20営業日目の終値・20営業日以内の終値の最高値）の度数・要約・組の中の10分位ごとの平均、2つの上位10% の重なりと組み合わせごとの収益） | git → GitHub Pages | Retrain Weekly の後に `Score Distribution` が workflow_run で続けて走る（2つのモデルの学習日が画面のファイルと同じなら何もしない。手で起動すると作り直す） | 画面のタブ「スコアと収益の分布」（運用者の依頼 2026-11-08）。out-of-fold は Release data-raw の `fixed_return_v1_oof.parquet`・`ltr5_oof.parquet` で、学習の記録（artifactHashes）と SHA-256 が違えば止まる。収益は日足から計算し、20営業日目の終値の収益を `live_track.forward` と300行で突き合わせて合わなければ止まる（`research/score_dist.py`）。直近の予測の候補のスコアは画面が予測ファイルから数える（2026-11-15 から画面に出さず、週次の更新も止めた。手で起動すれば作り直す。§95） |
-| 候補銘柄のニュースのリンク | `public/data/news_links.json`（候補ごとのリンクと、開いて確かめた結果・理由） | git → GitHub Pages | 平日の Predict Breakouts の後に `Check News Links` が workflow_run で続けて走る（手でも起動できる） | 画面のタブ「候補銘柄のニュース」。今日の戦略の候補（規則の3本すべて95以上。2026-10-30 から 1.2σ の3本）のリンクを毎晩開いて確かめ、通らなかったものは出さない（画面に確かめの印は出さない）。URL の正本は `research/news_links.py` |
+| 候補銘柄のニュースのリンク | `public/data/news_links.json`（候補ごとのリンクと、開いて確かめた結果・理由） | git → GitHub Pages | 平日の Predict Breakouts の後に `Check News Links` が workflow_run で続けて走る（手でも起動できる） | 画面のタブ「候補銘柄のニュース」。今日の戦略の候補（規則の3本すべて95以上。2026-10-30 から 1.2σ の3本）と、2026-11-21 からは規則を通らなくてもランキング学習（日次）がその日の3位以内の候補のリンクを毎晩開いて確かめ、通らなかったものは出さない（画面に確かめの印は出さない）。URL の正本は `research/news_links.py` |
 | リカレンス・ネットワーク | `recurrence.tar.gz`（中は `recurrence/index.json` と、購入条件を満たした銘柄ごとの `recurrence/<日付>_<コード>.json`。予測ファイルの5日ぶん・1銘柄 約130KB） | **GitHub Release（`data-raw`）** → デプロイで `dist/data/recurrence/` | 平日の Predict Breakouts の中（予測の後） | 画面のタブ「リカレンス・ネットワーク」（運用者の依頼 2026-10-19。2026-10-24 からタブは隠している。作成は続ける）。取れる全期間（1銘柄 約2,200営業日 × テクニカル指標9列）で作るので git に入れない（運用者の選択「Release に置く」。選んだときは高値更新の全銘柄で1日あたり約1MB の見込みだった。同日に対象を購入条件を満たした銘柄だけに絞り、色付けの値を足した後で、10/09〜16 の5日で5銘柄・0.7MB、archive 0.2MB）。過去の日は前の archive から引き継ぐ。下の「リカレンス・ネットワーク」 |
 | 特徴量の日本語名 | `public/data/feature_names.json`（列名 → 短い日本語名と説明） | git → GitHub Pages | 特徴量を足したとき（手で） | 画面の「効いた特徴量」を日本語名で出す。正本は `research/feature_dict.py`（`NAME_JA`・軸 × 接尾辞）で、`python3 research/feature_dict.py --names-json public/data/feature_names.json` で書き出す。辞書とずれると `tests/test_feature_names.py` が落ちる |
 | **長期の台帳** | 予測ログ（全候補・1行1銘柄） | **Google スプレッドシート**（2026-11-02 の予測からは同じスプレッドシートの「予測ログ v2」タブ。ランキング学習の列つき） | 平日夜 | 手売買の記録を同じ行に書き足せる。実績の検証はここを正本にする。v2 は下の「v1 と v2 のタブ」 |
@@ -53,9 +53,9 @@
 | モデル本体（追加4つ） | `<algo>_model.joblib` / `<algo>_oof.parquet` | **GitHub Release（`data-raw`）** | 土曜（2026-11-21 から 00:00・09:00・15:00 の回。11/14 は土曜の夜、それまでは日曜の朝） | 同上。合計2.7MB。meta.json だけ git に残す |
 | モデルの素性 | `research/model/meta.json`（9KB） | git | 土曜（2026-11-21 から 00:00・09:00・15:00 の回。11/14 は土曜の夜、それまでは日曜の朝） | 過去のモデルが「どういうものだったか」を追えるようにする |
 | 生データ | 日次バー・財務・信用残ほか | GitHub Release（`data-raw`） | 平日 18:40 JST に Routine が起動（10/7 までは 16:10） | 全期間の取得に2.5時間かかるため、差分だけ取って書き戻す |
-| ティック（約定） | `tick_YYYYMMDD.parquet`（日ごと・全銘柄。Release `data-tick-YYYY`）/ `tick_manifest.json`（取得記録。Release `data-tick`） | このリポジトリの**下書き**の GitHub Release（公開しない） | 平日。Update Data Store の完了に続けて `Update Ticks` が workflow_run で走る（2026-11-18 から） | J-Quants のティックは CSV の一括ダウンロードだけで提供され、直近2年分（2年で CSV.gz 21GB・parquet 約13.5GB）。年ごとの Release に分けるのは、1 Release のアセットが 1,000 個までのため。予測には使わず、「価格帯別出来高」タブの集計（暗号化）に使う（`docs/TICKS.md`・`docs/VOLUME_PROFILE.md`） |
-| 分足 | `minute_YYYYMM.parquet`（月ごと・全銘柄）/ `minute_manifest.json`（取得記録） | このリポジトリの**下書き**の GitHub Release（`data-minute`。公開しない） | 平日。Update Data Store の完了に続けて `Update Minute Bars` が workflow_run で走る（2026-11-18 から） | J-Quants の分足（アドオン）は直近2年分だけで、毎日1日ずつ取れなくなるので、取った日を消さずに貯める。公開した Release は誰でも落とせ、J-Quants の個人の利用は第三者への配信が禁止なので、書き込み権限のある人にしか見えない下書きに置く（運用者の選択 2026-11-18「非公開」、2026-11-19「新しい鍵を作らずに」。鍵なしでは見えないことを確かめた）。書き込みは Actions の鍵。予測には使わず、「価格帯別出来高」タブの集計（暗号化）に使う（`docs/MINUTE_BARS.md`・`docs/VOLUME_PROFILE.md`） |
-| 価格帯別出来高 | `volume-profile.json`（直近5営業日の候補すべての 1・5・20営業日の集計） | GitHub Release（`data-volume-profile`。公開）→ GitHub Pages | 平日。予測・分足・ティックのそれぞれが終わるたびに `Update Volume Profiles` が作り直す（2026-11-19 から） | 画面はキーの入力なしで開く。**集計は誰でも見られる**（運用者の選択 2026-11-19「暗号化をやめて公開する」。J-Quants の公式ヘルプが個人の利用での第三者への配信を禁止としていることを伝えたうえで）。分足・ティックそのものは下書きの Release のまま（`docs/VOLUME_PROFILE.md`） |
+| ティック（約定） | `tick_YYYYMMDD.parquet`（日ごと・全銘柄。Release `data-tick-YYYY`）/ `tick_manifest.json`（取得記録。Release `data-tick`） | このリポジトリの**下書き**の GitHub Release（公開しない） | 平日。Update Data Store の完了に続けて `Update Ticks` が workflow_run で走る（2026-11-18 から） | J-Quants のティックは CSV の一括ダウンロードだけで提供され、直近2年分（2年で CSV.gz 21GB・parquet 約13.5GB）。年ごとの Release に分けるのは、1 Release のアセットが 1,000 個までのため。予測には使わない。「価格帯別出来高」タブの集計に使っていたが、2026-11-21 にタブを隠し、集計も止めた（取得と保存は契約が切れるまで続ける。運用者の依頼 2026-11-21。`docs/TICKS.md`・`docs/VOLUME_PROFILE.md`） |
+| 分足 | `minute_YYYYMM.parquet`（月ごと・全銘柄）/ `minute_manifest.json`（取得記録） | このリポジトリの**下書き**の GitHub Release（`data-minute`。公開しない） | 平日。Update Data Store の完了に続けて `Update Minute Bars` が workflow_run で走る（2026-11-18 から） | J-Quants の分足（アドオン）は直近2年分だけで、毎日1日ずつ取れなくなるので、取った日を消さずに貯める。公開した Release は誰でも落とせ、J-Quants の個人の利用は第三者への配信が禁止なので、書き込み権限のある人にしか見えない下書きに置く（運用者の選択 2026-11-18「非公開」、2026-11-19「新しい鍵を作らずに」。鍵なしでは見えないことを確かめた）。書き込みは Actions の鍵。予測には使わない。「価格帯別出来高」タブの集計に使っていたが、2026-11-21 にタブを隠し、集計も止めた（取得と保存は契約が切れるまで続ける。運用者の依頼 2026-11-21。`docs/MINUTE_BARS.md`・`docs/VOLUME_PROFILE.md`） |
+| 価格帯別出来高 | `volume-profile.json`（直近5営業日の候補すべての 1・5・20営業日の集計） | （2026-11-21 から置かない。それまでは GitHub Release（`data-volume-profile`。公開）→ GitHub Pages） | **2026-11-21 から作らない**（`Update Volume Profiles` は手で起動するときだけ。起動すると公開の Release に上がるので、起動する前に運用者に確かめる）。2026-11-19〜11-20 は予測・分足・ティックのそれぞれが終わるたびに作り直していた | 運用者の依頼 2026-11-21「分足のデータは使わない方針になったので価格帯別出来高の分布タグも消してください」→「隠して集計も止める」「公開をやめる」で、タブを隠し、自動の起動とデプロイの段を外し、Release の集計ファイルを消した。2026-11-19〜11-20 は**集計を誰でも見られる形で公開していた**（運用者の選択 2026-11-19「暗号化をやめて公開する」）。分足・ティックそのものは下書きの Release のまま（`docs/VOLUME_PROFILE.md`） |
 | 有報の年次財務 | `edinet_fin.parquet` / `edinet_companies.parquet` / `edinet_manifest.json` | GitHub Release（`data-raw`） | 毎日 10:10 JST に Routine が起動 | EDINET DB は 100/日・900/月の枠しか無いので、毎日 85社ずつ差分で貯める（`docs/DATA_EDINETDB.md`）。**まだ研究用で、本番の特徴量には入っていない** |
 | 有報・半期報告書の損益（画面） | `public/data/filings.json`（git）/ 索引・控え `edinet_filings_index.json` / `edinet_filings_cache.json`（Release `data-raw`） | git / Release | 毎晩の予測の後に `Fetch Filings` が workflow_run で続けて走る | 金融庁 EDINET の公式 API から候補銘柄の最新の有報・半期報告書を取り、売上原価・販管費まで分けた損益を「決算サンキー」のタブに出す（`docs/DATA_EDINET_API.md`）。鍵は Secrets `EDINET_FSA_API_KEY`。**2026-10-13 からタブは画面に出していない**（運用者の指示「表示から消してくれるだけで良いです」。取り込みは続けている。`src/App.jsx` の `TABS` の `hidden` を外せば戻る） |
 
@@ -100,11 +100,9 @@
                 Update Ticks         ティックの一括ファイルのうち、まだ取り込んでいないものを日ごとの
                                      ファイルにして、下書きの Release（data-tick-YYYY）に足す
                                      （2026-11-18 から。予測・分足とは別。docs/TICKS.md）
-      ↓ 予測・分足・ティックのそれぞれの完了で起動
-                Update Volume Profiles  直近5営業日の候補すべての価格帯別出来高を、置き場の分足・
-                                     ティックと日足から集計し、Release（data-volume-profile）に
-                                     上げる → Pages 再デプロイ（画面はキーの入力なしで開く）
-                                     （2026-11-19 から。docs/VOLUME_PROFILE.md）
+      （2026-11-19〜11-20 は、予測・分足・ティックのそれぞれの完了で Update Volume Profiles が価格帯別出来高を
+       集計して公開の Release に上げ、Pages に載せていた。2026-11-21 にタブを隠し、自動の起動と公開をやめた。
+       分足・ティックの取得と保存は続ける。docs/VOLUME_PROFILE.md「止めたこと（2026-11-21）」）
 
 平日 13:10 JST  Fetch JSF            日証金の前営業日の確報（daily）と、銘柄ごとの
 土日 10:20 JST                       過去3年の続き（history）を Release（data-jsf）へ。
@@ -1051,8 +1049,14 @@ XGBoost 25分 / CatBoost 22分。`logit` は153列で70分だったので、そ�
 次の決算発表を控えた銘柄だと分かったこと（`research/exp/probe_earn_direction.py`、run 39015153881。規則を通った OOF の行の
 約8割は、予測日の翌営業日から20営業日の中に決算短信が出ていた）。ニュースとアナリスト予想はモデルの特徴量に無い。
 
-- **出すのは今日の戦略の候補だけ**（規則の3本すべて95以上。2026-10-30 から 1.2σ の3本（2026-10-23〜10-29 も同じ）、2026-10-29〜10-30 は 1.5σ の3本。`live_track.RULE_MODELS` / `AGREE_PCT`、
+- **出すのは今日の戦略の候補**（規則の3本すべて95以上。2026-10-30 から 1.2σ の3本（2026-10-23〜10-29 も同じ）、2026-10-29〜10-30 は 1.5σ の3本。`live_track.RULE_MODELS` / `AGREE_PCT`、
   画面の `strategy.js` と同じ）。並びは最小の百分位が高い順、上位の枠に「買う候補」、枠の外に「95以上」。印は「最小」「決算 N営業日後」も
+- **2026-11-21 からは、規則を通らなくても、その日の候補の中でランキング学習（日次）の順位が3位以内の候補も出す**（運用者の依頼
+  「候補銘柄のニュースの探索条件を緩くしてほしいです。分類モデルのスコアは条件を満たしてなくてもランキング学習モデルが良ければ
+  買うことはあり得るので」→ 選択「日次ランキングの3位以内」「（理由の印は）付けない」。`research/news_links.py` の `LTR_TOP` と
+  画面の `strategy.js` の `NEWS_LTR_TOP`・`newsRows` が同じ値・同じ選び方。`tests/test_news_links.py` で値が同じことを確かめる）。
+  規則を通った候補の後ろに、順位の順で並べる。足した候補には「買う候補」「95以上」「最小」の印を出さない（決算の印は出す）。
+  買う銘柄（上位2件）は今日の戦略の規則のまま。ランキング学習の順位が無い日（2026-10-24 より前など）は今までどおり規則の候補だけ
 - **リンクは毎晩、候補ごとに実際に開いて確かめる**: `Check News Links`（`.github/workflows/news-links.yml`）が Predict Breakouts の
   完了で workflow_run で続けて走り、`research/news_links.py` が予測ファイルの日の候補のリンクを開いて
   `public/data/news_links.json` に書く（終わると Pages を作り直す）。確かめを通るのは次をすべて満たしたもの:

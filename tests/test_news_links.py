@@ -2,7 +2,8 @@
 """
 候補銘柄のニュースのリンクの確かめ（research/news_links.py）。ネットには出ない（偽の取得で確かめる）。
 
-- 候補は規則（1.5σ の3本すべて95以上）を通った銘柄だけ。1本でも百分位が無ければ通さない。日は予測ファイルの dates の中だけ
+- 候補は規則（1.2σ の3本すべて95以上）を通った銘柄。1本でも百分位が無ければ通さない。日は予測ファイルの dates の中だけ。
+  2026-11-21 からは、規則を通らなくてもランキング学習（日次）がその日の3位以内の銘柄も足す（画面の strategy.js と同じ値）
 - 1本のページの判定: HTTP 200・同じページ（転送でトップや検索に飛ばされていない）・題名にそのサイトの書き方のコード・
   題名にリンクの中身を表す言葉・題名に候補の銘柄名（全角・半角と「(株)」はそろえる）。理由の文
 - 自動では開かないホスト（日経・株予報Pro・株探・みんかぶ）へは1件も接続しない（unchecked として URL だけ置く）。
@@ -18,6 +19,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import sys
 import tempfile
 import unittest
@@ -31,9 +33,12 @@ import news_links as N  # noqa: E402
 RULE = ("lgbm", "xgb", "cat")                # 今日の戦略の規則の3本（2026-10-30 から 1.2σ。2026-10-23〜10-29 も同じ。2026-10-29〜10-30 は 1.5σ の3本）
 
 
-def cand(code, date, pcts, name="テスト"):
-    return {"code": code, "date": date, "name": name,
-            "byModel": {a: {"pctHistorical": p} for a, p in zip(RULE, pcts) if p is not None}}
+def cand(code, date, pcts, name="テスト", rank=None):
+    c = {"code": code, "date": date, "name": name,
+         "byModel": {a: {"pctHistorical": p} for a, p in zip(RULE, pcts) if p is not None}}
+    if rank is not None:
+        c["ltr"] = {"dayRank": rank}
+    return c
 
 
 def page(title, body=""):
@@ -94,6 +99,69 @@ class TestRuleCodes(unittest.TestCase):
     def test_rule_is_the_live_rule(self):
         self.assertEqual(tuple(N.LT.RULE_MODELS), RULE)
         self.assertEqual(N.LT.AGREE_PCT, 95.0)
+
+
+class TestLtrCodes(unittest.TestCase):
+    """2026-11-21 から、規則を通らなくてもランキング学習（日次）がその日の3位以内なら確かめる（運用者の選択「日次ランキングの3位以内」）。"""
+
+    def test_top3_even_if_rule_fails(self):
+        pred = {"dates": ["2026-11-19"], "candidates": [
+            cand("1111", "2026-11-19", [10.0, 10.0, 10.0], rank=1),
+            cand("2222", "2026-11-19", [10.0, 10.0, 10.0], rank=2),
+            cand("3333", "2026-11-19", [10.0, 10.0, 10.0], rank=3),
+            cand("4444", "2026-11-19", [99.0, 99.0, 99.0], rank=4),     # 4位は ltr では入らない（規則では入る）
+            cand("5555", "2026-11-19", [10.0, 10.0, 10.0], rank=5),
+        ]}
+        self.assertEqual(N.ltr_codes(pred), {"1111": ["2026-11-19"], "2222": ["2026-11-19"], "3333": ["2026-11-19"]})
+        self.assertEqual(sorted(N.news_codes(pred)), ["1111", "2222", "3333", "4444"])
+        self.assertNotIn("5555", N.news_codes(pred))
+
+    def test_bad_ranks_are_not_added(self):
+        bad = [None, 0, -1, 1.5, "1", True]
+        pred = {"dates": ["2026-11-19"], "candidates": [cand(f"{i + 1}000", "2026-11-19", [10.0, 10.0, 10.0], rank=r)
+                                                       for i, r in enumerate(bad)]
+                + [{**cand("9000", "2026-11-19", [10.0, 10.0, 10.0]), "ltr": None},
+                   cand("8000", "2026-11-19", [10.0, 10.0, 10.0])]}           # 順位が無い（ランキング学習の前の日）
+        self.assertEqual(N.ltr_codes(pred), {})
+        self.assertEqual(N.news_codes(pred), {})
+
+    def test_days_codes_and_union(self):
+        pred = {"dates": ["2026-11-18", "2026-11-19"], "candidates": [
+            cand("1111", "2026-11-18", [99.0, 99.0, 99.0], rank=7),     # 18日は規則で
+            cand("1111", "2026-11-19", [10.0, 10.0, 10.0], rank=1),     # 19日はランキングで（日を合わせる）
+            cand("130a", "2026-11-19", [10.0, 10.0, 10.0], rank=2),     # 英字入り（大文字にそろえる）
+            cand("2222", "2026-10-01", [10.0, 10.0, 10.0], rank=1),     # dates に無い日
+            cand("33333", "2026-11-19", [10.0, 10.0, 10.0], rank=3),    # 5桁は使わない
+        ]}
+        self.assertEqual(N.news_codes(pred), {"1111": ["2026-11-18", "2026-11-19"], "130A": ["2026-11-19"]})
+        self.assertEqual(N.rule_codes(pred), {"1111": ["2026-11-18"]})          # 規則の判定そのものは変えない
+
+    def test_same_top_as_screen(self):
+        with open(os.path.join(ROOT, "src", "lib", "strategy.js"), encoding="utf-8") as fh:
+            js = fh.read()
+        m = re.search(r"^export const NEWS_LTR_TOP = (\d+);", js, re.M)
+        self.assertIsNotNone(m)
+        self.assertEqual(int(m.group(1)), N.LTR_TOP)
+        self.assertEqual(N.LTR_TOP, 3)
+
+    def test_build_opens_ltr_only_stocks_and_counts_them(self):
+        pred = {"asOf": "2026-11-19", "dates": ["2026-11-19"], "candidates": [
+            cand("7203", "2026-11-19", [99.0, 98.0, 97.0], rank=4),     # 規則で
+            cand("285A", "2026-11-19", [50.0, 50.0, 50.0], rank=1),     # ランキングだけで
+            cand("9999", "2026-11-19", [50.0, 50.0, 50.0], rank=5),     # どちらでもない → 開かない
+        ]}
+        web = FakeWeb(default=yahoo_ok)
+        op, _ = opener(web)
+        res = N.build(pred, op)
+        self.assertEqual(sorted(res["stocks"]), ["285A", "7203"])
+        self.assertFalse(any("9999" in u for u in web.calls))
+        self.assertEqual(res["rule"]["ltrTop"], 3)
+        s = res["summary"]
+        self.assertEqual((s["stocks"], s["byRule"], s["byLtrOnly"], s["requests"]), (2, 1, 1, 8))
+        out = "\n".join(N.report(res))
+        self.assertIn("規則を通った 1・規則は通らずランキング学習（日次）3位以内 1", out)
+        self.assertNotIn("7203", out)
+        self.assertNotIn("285A", out)
 
 
 class TestJudge(unittest.TestCase):
@@ -311,7 +379,7 @@ class TestBuild(unittest.TestCase):
                 d2 = json.load(fh)
             self.assertEqual(sorted(d2), sorted(["checkedAt", "asOf", "rule", "groups", "noAuto", "excluded", "stocks",
                                                  "summary"]))
-            self.assertEqual(d2["rule"], {"models": list(RULE), "agreePct": 95.0})
+            self.assertEqual(d2["rule"], {"models": list(RULE), "agreePct": 95.0, "ltrTop": 3})
             self.assertEqual([g["id"] for g in d2["groups"]], ["news", "disclosure", "forecast", "voice"])
 
 

@@ -36,7 +36,10 @@ const TABS = [
   { id: 'valuation', label: '理論株価' },
   // 2026-11-15「推定は本番運用レベルではないので非表示に」で hidden に。画面・推計処理・データは残す。
   { id: 'supplydemand', label: '価格帯別需給', hidden: true },
-  { id: 'volumeprofile', label: '価格帯別出来高' },
+  // 2026-11-21「分足のデータは使わない方針になったので価格帯別出来高の分布タグも消してください」→「隠して集計も止める」
+  // 「公開をやめる」で hidden に。画面（VolumeProfileView）と集計の作り方（research/build_volume_profile.py。ワークフローは手で
+  // 起動するときだけ）は残してあり、hidden を外し、デプロイに集計を置く段を戻して手で作り直せば戻る。分足・ティックの取得と保存は続ける
+  { id: 'volumeprofile', label: '価格帯別出来高', hidden: true },
   // 候補ごとのリカレンス・ネットワーク（点 = その銘柄の1営業日、線 = テクニカル指標9列の状態が似た日どうし。参考で、選定には
   // 使わない）。運用者の依頼 2026-10-19「Obsidian の球状のプロットのようなことを、ノードを1営業日として…その日の各候補銘柄単体で」。
   // データは Release の recurrence.tar.gz（research/recurrence_net.py）をデプロイで dist/data/recurrence/ に置く。
