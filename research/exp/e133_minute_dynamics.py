@@ -409,3 +409,129 @@ def report(rows: pd.DataFrame, minute_cols, seed: int = 0, n_perm: int = N_PERM,
         print(f"    {SET_JA[s_]} × {MODEL_JA[m_]}: " + " / ".join(f"{kk} {'はい' if vv else 'いいえ'}" for kk, vv in v.items()))
     out["reading"] = read
     return out
+
+
+# --------------------------------------------------------------------------- #
+# A の上位の中の逆向き（運用者の選択 2026-11-20「上位の中の逆向きを確かめる」。docs の 98-7）
+# --------------------------------------------------------------------------- #
+#: 候補（分布・形の列を使うモデル）
+INVERSE_CANDIDATES = (("dyn", "logit"), ("dyn", "lgbm"), ("dist", "logit"), ("dist", "lgbm"), ("shp", "logit"), ("shp", "lgbm"))
+#: 前半（どのモデルを使うかを決める窓）と後半（確かめる窓）。窓の番号は windows() の順
+DISCOVER_WINDOWS = (0, 1, 2)
+CONFIRM_WINDOWS = (3, 4, 5)
+INVERSE_ALPHA = 0.05
+
+
+def inverse_check(rows: pd.DataFrame, minute_cols, seed: int = 0, n_perm: int = 1000) -> dict:
+    """
+    A の上位20%（窓ごと）の中で、分布・形のモデルの点が高いほど正例が少ないか。前半の窓で候補のうちいちばん逆向き（その中の AUC が
+    いちばん低い）のモデルを選び、後半の窓で「そのモデルの点が上半分の候補を外す」を確かめる（外し方は回す前に決めた）。
+    後半の検定は、A の上位の行の中で、新しいモデルの点を同じ日付の中で入れ替える並べ替え（片側。残した側 − 外した側が観測以上）。
+    """
+    from sklearn.metrics import roc_auc_score
+
+    rng = np.random.default_rng(seed)
+    sets = {**feature_sets(minute_cols), **shape_sets(minute_cols)}
+    need = list(MD.DYNAMIC_COLUMNS) + list(MD.SHAPE_DYN_COLUMNS)
+    rows = rows[rows[need].notna().any(axis=1)].sort_values(["Date", "Code"], kind="mergesort").reset_index(drop=True)
+    wins = windows(rows["Date"])
+    scores, fold = {}, None
+    for key in INVERSE_CANDIDATES:
+        sc, fd, _ = oof(rows, sets[key[0]], key[1], wins)
+        scores[key] = sc
+        fold = fd if fold is None else fold
+    a = rows["score"].to_numpy(dtype=float)
+    ok = (fold >= 0) & np.isfinite(a)
+    for sc in scores.values():
+        ok &= np.isfinite(sc)
+    top = np.zeros(len(rows), dtype=bool)
+    for k in sorted(set(fold[ok])):
+        m = ok & (fold == k)
+        top[m] = a[m] >= np.quantile(a[m], 1 - TOP_A)
+    y = rows["label"].to_numpy(dtype=int)
+    disc = top & np.isin(fold, DISCOVER_WINDOWS)
+    conf = top & np.isin(fold, CONFIRM_WINDOWS)
+    out = {"windows": [[str(x.date()) for x in w] for w in wins], "discover_rows": int(disc.sum()),
+           "confirm_rows": int(conf.sum()), "candidates": {}}
+    print(f"\n■ A の上位{int(TOP_A * 100)}% の中の逆向き: 前半の窓 {[str(wins[k][1].date()) for k in DISCOVER_WINDOWS]} で選び、"
+          f"後半の窓 {[str(wins[k][1].date()) for k in CONFIRM_WINDOWS]} で確かめる。A の上位の行 前半 {int(disc.sum()):,}"
+          f"（正例率 {y[disc].mean() * 100:.1f}%）・後半 {int(conf.sum()):,}（正例率 {y[conf].mean() * 100:.1f}%）")
+
+    def halves(sc, mask):
+        """窓ごとに、A の上位の行を新しいモデルの点の中央で上半分・下半分に分ける。"""
+        upper = np.zeros(len(rows), dtype=bool)
+        for k in sorted(set(fold[mask])):
+            m = mask & (fold == k)
+            upper[m] = sc[m] >= np.median(sc[m])
+        return upper
+
+    print(f"  1. 前半の窓での、A の上位の中の AUC（低いほど逆向き）と、上半分・下半分の正例率")
+    for key in INVERSE_CANDIDATES:
+        sc = scores[key]
+        up = halves(sc, disc)
+        auc = float(roc_auc_score(y[disc], sc[disc]))
+        rec = {"discover_auc": auc, "discover_upper_pos": float(y[disc & up].mean()),
+               "discover_lower_pos": float(y[disc & ~up].mean())}
+        out["candidates"][f"{key[0]}/{key[1]}"] = rec
+        print(f"    {SET_JA[key[0]]} × {MODEL_JA[key[1]]}: AUC {auc:.3f}・上半分 {rec['discover_upper_pos'] * 100:.1f}%・"
+              f"下半分 {rec['discover_lower_pos'] * 100:.1f}%")
+    chosen = min(INVERSE_CANDIDATES, key=lambda k: out["candidates"][f"{k[0]}/{k[1]}"]["discover_auc"])
+    out["chosen"] = f"{chosen[0]}/{chosen[1]}"
+    print(f"  選んだモデル（前半でいちばん逆向き）: {SET_JA[chosen[0]]} × {MODEL_JA[chosen[1]]}")
+
+    # 2. 後半で確かめる
+    sc = scores[chosen]
+    up = halves(sc, conf)
+    kept, cut = conf & ~up, conf & up
+    obs = float(y[kept].mean() - y[cut].mean())
+    codes = pd.factorize(rows["Date"])[0]
+    idx = np.flatnonzero(conf)
+    perm_codes = codes[idx]
+    base = np.lexsort((np.arange(len(idx)), perm_codes))
+    null = []
+    for _ in range(n_perm):
+        shuffled = np.empty(len(idx), dtype=int)
+        shuffled[base] = np.lexsort((rng.random(len(idx)), perm_codes))
+        s2 = sc.copy()
+        s2[idx] = sc[idx][shuffled]
+        u2 = halves(s2, conf)
+        null.append(float(y[conf & ~u2].mean() - y[conf & u2].mean()))
+    p = float((1 + np.sum(np.array(null) >= obs)) / (n_perm + 1))
+    per = []
+    for k in CONFIRM_WINDOWS:
+        m = conf & (fold == k)
+        if m.sum() == 0:
+            continue
+        per.append({"window": str(wins[k][1].date()), "rows": int(m.sum()), "all": float(y[m].mean()),
+                    "kept": float(y[m & ~up].mean()), "cut": float(y[m & up].mean())})
+    same = sum(1 for r in per if r["kept"] > r["cut"])
+    out["confirm"] = {"all_pos": float(y[conf].mean()), "kept_pos": float(y[kept].mean()), "cut_pos": float(y[cut].mean()),
+                      "kept_rows": int(kept.sum()), "cut_rows": int(cut.sum()), "diff": obs, "p": p,
+                      "per_window": per, "windows_same_direction": same,
+                      "auc": float(roc_auc_score(y[conf], sc[conf]))}
+    print(f"\n  2. 後半の窓で確かめる（選んだモデルの点の上半分を外す）: A の上位 {int(conf.sum()):,}行の正例率 {y[conf].mean() * 100:.1f}% → "
+          f"残した下半分 {int(kept.sum()):,}行 {y[kept].mean() * 100:.1f}%・外した上半分 {int(cut.sum()):,}行 {y[cut].mean() * 100:.1f}%"
+          f"（差 {obs * 100:+.1f}ポイント・並べ替え {n_perm}回の片側 p {p:.3f}・AUC {out['confirm']['auc']:.3f}）")
+    for r in per:
+        print(f"    {r['window']} からの窓: {r['rows']:,}行 {r['all'] * 100:.1f}% → 残した側 {r['kept'] * 100:.1f}%・"
+              f"外した側 {r['cut'] * 100:.1f}%")
+    print("  参考（後半の窓。ほかの候補で同じ外し方をした場合）: " + " / ".join(
+        f"{SET_JA[k[0]]}×{k[1]} 残した側 {y[conf & ~halves(scores[k], conf)].mean() * 100:.1f}%・外した側 "
+        f"{y[conf & halves(scores[k], conf)].mean() * 100:.1f}%" for k in INVERSE_CANDIDATES))
+
+    # 3. 選んだモデルの点は何を表すか（前半の A の上位の中で、直近のテクニカルの列との順位相関）
+    rho = {}
+    for c in TECH_COLUMNS:
+        v = rows.loc[disc, c]
+        if v.notna().sum() > 30:
+            rho[c] = float(pd.Series(sc[disc]).corr(v.reset_index(drop=True), method="spearman"))
+    topc = sorted(rho, key=lambda c: -abs(rho[c]))[:8]
+    out["what_it_is"] = {c: rho[c] for c in topc}
+    print("  3. 選んだモデルの点と、A の上位の中で重なる直近のテクニカルの列（前半の窓の順位相関。上位8つ）: "
+          + " / ".join(f"{c} {rho[c]:+.2f}" for c in topc))
+
+    real = obs > 0 and p < INVERSE_ALPHA and same >= 2
+    out["reading"] = {"inverse_is_real": bool(real)}
+    print(f"\n  読み（回す前に決めたもの。後半で、残した側 − 外した側が正・並べ替えの片側 p < {INVERSE_ALPHA}・後半の3つの窓の2つ以上で"
+          f"同じ向き）: {'逆向きは偶然ではない（外すルールの候補になる）' if real else '逆向きは確かめられない'}")
+    return out

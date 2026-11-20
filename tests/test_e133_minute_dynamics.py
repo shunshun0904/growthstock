@@ -76,6 +76,42 @@ class TestParts(unittest.TestCase):
         np.testing.assert_allclose(r, [1.0, 1 / 3, 2 / 3, 0.5, 1.0])
 
 
+def inverse_frame(seed=0, effect=1.5, per_day=12):
+    """全体では x が高いほど正例が多いが、A の上位（signal が高い行）の中では x が高いほど正例が少ない作りもの。"""
+    rows = frame(seed=seed, effect=0.0, per_day=per_day)
+    rng = np.random.default_rng(seed + 100)
+    n = len(rows)
+    signal = np.log(rows["score"] / (1 - rows["score"])).to_numpy() + 1.5          # frame の A の予測の logit に戻す
+    x = rng.normal(size=n)
+    high = signal > np.quantile(signal, 0.8)
+    logit = -1.5 + 0.8 * signal + 0.5 * x - effect * x * high
+    rows["label"] = (rng.random(n) < 1 / (1 + np.exp(-logit))).astype(float)
+    for c in ("vp_dyn_mean_shift", "vp_shp_skew_change"):
+        rows[c] = x + 0.3 * rng.normal(size=n)
+    return rows
+
+
+class TestInverse(unittest.TestCase):
+    def run_check(self, rows):
+        with mock.patch.object(E, "LGBM", FAST), redirect_stdout(io.StringIO()) as buf:
+            out = E.inverse_check(rows, MINUTE_COLS, n_perm=99)
+        return out, buf.getvalue()
+
+    def test_finds_the_inverse_relation_inside_the_top(self):
+        out, log = self.run_check(inverse_frame())
+        c = out["confirm"]
+        self.assertGreater(c["kept_pos"], c["cut_pos"])
+        self.assertLess(c["p"], 0.05)
+        self.assertGreaterEqual(c["windows_same_direction"], 2)
+        self.assertTrue(out["reading"]["inverse_is_real"])
+        self.assertIn(out["chosen"], {f"{a}/{b}" for a, b in E.INVERSE_CANDIDATES})
+        self.assertIn("後半の窓で確かめる", log)
+
+    def test_no_inverse_when_absent(self):
+        out, _ = self.run_check(inverse_frame(seed=5, effect=0.0))
+        self.assertFalse(out["reading"]["inverse_is_real"])
+
+
 class TestReport(unittest.TestCase):
     def run_report(self, rows):
         with mock.patch.object(E, "LGBM", FAST), mock.patch.object(E, "LGBM_ALT", FAST_ALT), \
