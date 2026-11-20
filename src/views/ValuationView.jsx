@@ -20,7 +20,7 @@ export default function ValuationView() {
   return <div className="valuation-view">
     <section className="card">
       <h2>理論株価ランキング</h2>
-      <p>直近3営業日の推論対象銘柄すべてを、理論株価に対する現在株価の割合が低い順に表示します。同じ銘柄は最新の推論日で1件にまとめています。</p>
+      <p>直近5営業日の推論対象銘柄すべてを、理論株価に対する現在株価の割合が低い順に表示します。同じ銘柄は最新の推論日で1件にまとめています。</p>
       <p>推論対象日：{data.inferenceDates?.join(' / ') || '—'} ／ 株価基準日：{data.asOf || '—'}</p>
       <div className="valuation-controls">
         <label>算出方法 <select aria-label="算出方法" value={method} onChange={e => setMethod(e.target.value)}>

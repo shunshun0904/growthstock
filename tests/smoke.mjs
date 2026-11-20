@@ -385,9 +385,10 @@ const tabNames = (await page.getByRole('tab').allTextContents()).map((t) => t.tr
 // 価格帯別出来高（2026-11-19 に足した）は、運用者の依頼 2026-11-21「分足のデータは使わない方針になったので価格帯別出来高の
 // 分布タグも消してください」→「隠して集計も止める」「公開をやめる」で隠している（src/App.jsx の hidden。画面のコードと集計の
 // 作り方は残す。分足・ティックの取得と保存は続ける）
-check(tabNames.join(',') === 'ブレイク予測,候補銘柄のニュース,理論株価,タイムマシーン',
-      'タブは ブレイク予測 / 候補銘柄のニュース / 理論株価 / タイムマシーン'
-      + ` の4つ (実際: ${tabNames.join(',')})`);
+// サマリー（2026-11-21 に一番左に足した。運用者の依頼「サマリーという名のタグで一番左に追加してほしいです」）
+check(tabNames.join(',') === 'サマリー,ブレイク予測,候補銘柄のニュース,理論株価,タイムマシーン',
+      'タブは サマリー / ブレイク予測 / 候補銘柄のニュース / 理論株価 / タイムマシーン'
+      + ` の5つ (実際: ${tabNames.join(',')})`);
 check(!tabNames.includes('決算サンキー') && !tabNames.includes('What-If シミュレーター')
         && !tabNames.includes('8軸オクタゴン比較') && !tabNames.includes('候補の比較')
         && !tabNames.includes('リカレンス・ネットワーク') && !tabNames.includes('スコアと収益の分布')
@@ -412,6 +413,61 @@ check(!((await page.textContent('.footer')) || '').includes('EDINET'),
 // スコアと収益の分布・再学習で加わったサンプルの画面の確かめ（3つの欄・件数・グラフの枚数、正例・負例のカード・78週の横軸）は、
 // タブを隠している間は外してある（2026-11-15）。集計・表示の純粋な計算のテストは tests/scoredist.test.js・tests/samples.test.js・
 // tests/test_score_dist.py・tests/test_new_samples.py に残っている。タブを戻すときは git の履歴（2026-11-15 より前の smoke.mjs）から戻す
+
+console.log('\n== サマリー ==');
+// 運用者の依頼 2026-11-21「パット見で、すべての良し悪しを測りたいので、レーダーチャートで…六角形で表示してほしいです」。
+// 6つの頂点（6本の分類モデルの平均・最低値・偏差、ランキング学習の日次・5日、割安度）を 0〜1 で（外側ほど良い）。
+// 合成の予測データの 9324 は 6本の百分位が 85.0・96.0・98.0・83.6・97.1・97.4（平均 92.9・最小 83.6・標準偏差 6.1）、
+// 日次 3位/5件、5日 5位/9件。9082 は cat_k15 が無いので分類の3つは「なし」。理論株価は合成のものを配る
+// （9434=84%・9324=162%・1671=274%・1699=算出できない → 9434 が 1、9324 が 0.5、1671 が 0）
+const summaryVals = { schemaVersion: 1, asOf: '2026-09-11', inferenceDates: ['2026-09-11'], stocks: [
+  { code: '93240', name: '合成', price: 1620, methods: [{ id: 'ri', available: true, median: 1000 }] },
+  { code: '94340', name: '合成', price: 840, methods: [{ id: 'ri', available: true, median: 1000 }] },
+  { code: '16710', name: '合成', price: 2740, methods: [{ id: 'ri', available: true, median: 1000 }] },
+  { code: '16990', name: '合成', price: 1000, methods: [{ id: 'ri', available: false, median: null }] },
+] };
+await page.route('**/data/valuations.json*',
+  (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(summaryVals) }));
+await page.reload();
+await page.waitForSelector('.pred-row', { timeout: 15000 });
+check((await page.getByRole('tab').first().textContent()) === 'サマリー'
+        && (await page.locator('[role="tab"][aria-selected="true"]').textContent()) === 'ブレイク予測',
+      'サマリーは一番左のタブ。開いたときのタブはブレイク予測のまま');
+await page.getByRole('tab', { name: 'サマリー' }).click();
+await page.waitForSelector('.summary-card', { timeout: 10000 });
+const sCards = page.locator('.summary-card');
+check((await sCards.count()) === 5 && (await page.locator('.summary-card .summary-radar svg.recharts-surface').count()) === 5,
+      `候補5件それぞれに六角形の図とカード (実際: ${await sCards.count()})`);
+const sVals = (i) => sCards.nth(i).locator('.summary-values tr').evaluateAll(
+  (trs) => trs.map((tr) => [tr.querySelector('th').textContent, tr.querySelector('td.num').textContent]));
+const s9324 = await sVals(0);
+check(JSON.stringify(s9324) === JSON.stringify([['平均（6本）', '0.93'], ['最低値（6本）', '0.84'],
+  ['偏差（6本のそろい）', '0.70'], ['ランキング（日次）', '0.50'], ['ランキング（5日）', '0.50'], ['割安度（RIM）', '0.50']]),
+      `9324 の6つの値（平均・最小÷100、1−標準偏差÷20、日次・5日の順位、割安度の順位） (実際: ${JSON.stringify(s9324)})`);
+const t9324 = (await sCards.nth(0).textContent()) || '';
+check(t9324.includes('最小 83.6') && t9324.includes('標準偏差 6.1') && t9324.includes('3位 / 5件')
+        && t9324.includes('5位 / 9件') && t9324.includes('162%・3銘柄中 2位'),
+      '表の右に元の値（最小と最小のモデル・標準偏差・順位 / 件数・使用終値÷理論株価と順位）');
+const svg9324 = (await sCards.nth(0).locator('svg.recharts-surface').textContent()) || '';
+check(['平均', '最低値', '偏差', '日次', '5日', '割安度'].every((w) => svg9324.includes(w)) && !svg9324.includes('なし'),
+      '六角形の6つの頂点の名前（値の無い頂点は無い）');
+const s9082 = await sVals(1);
+const svg9082 = (await sCards.nth(1).locator('svg.recharts-surface').textContent()) || '';
+check(JSON.stringify(s9082.map((x) => x[1])) === JSON.stringify(['なし', 'なし', 'なし', '0.75', '1.00', 'なし'])
+        && svg9082.includes('平均（なし）') && svg9082.includes('割安度（なし）'),
+      `6本がそろわない・理論株価が無い頂点は「なし」（0 とは描かない） (実際: ${JSON.stringify(s9082.map((x) => x[1]))})`);
+const s9434 = (await sVals(2)).map((x) => x[1]);
+check(JSON.stringify(s9434) === JSON.stringify(['0.83', '0.68', '0.40', '1.00', '0.75', '1.00']),
+      `9434（日次1位・いちばん割安）の値 (実際: ${JSON.stringify(s9434)})`);
+const sumText = (await page.textContent('.summary')) || '';
+check(sumText.includes('1 − 標準偏差 ÷ 20') && sumText.includes('理論株価を出せる 3 銘柄') && !sumText.includes('NaN')
+        && !sumText.includes('undefined'),
+      'そろえ方の説明（偏差の目盛り・割安度の母集団の数）が出て、NaN / undefined が出ていない');
+await page.setViewportSize({ width: 390, height: 844 });
+const sumFit = await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
+check(sumFit, 'スマホの幅（390px）でサマリーが横にはみ出さない');
+await page.setViewportSize({ width: 1440, height: 1000 });
+await page.unroute('**/data/valuations.json*');
 
 console.log('\n== 候補銘柄のニュース ==');
 // 2026-11-21 から、規則を通らなくてもランキング学習（日次）がその日の3位以内の候補も並べる（運用者の依頼「候補銘柄のニュースの

@@ -850,6 +850,28 @@ input[type='range']::-moz-range-thumb {
 @media (max-width: 900px) {
   .news-list { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ------------------------------------------------------------------ サマリー
+   候補ごとの六角形（運用者の依頼 2026-11-21。一番左のタブ）。カードは幅に合わせて並べ、狭い画面で1列 */
+.summary-defs { margin: var(--s3) 0 0; padding-left: 1.2em; color: var(--text-dim); font-size: 12px; line-height: 1.7; }
+.summary-defs b { color: var(--text); font-weight: 600; }
+.summary-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; margin-top: var(--s4); }
+.summary-card { border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--bg-raised);
+  padding: var(--s3) var(--s4); display: flex; flex-direction: column; gap: var(--s2); min-width: 0; }
+.summary-radar { width: 100%; min-width: 0; }
+.summary-tip { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 6px 9px; font-size: 12px; color: var(--text); }
+.summary-tip .num { font-family: var(--mono); color: var(--accent); }
+.summary-values { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+.summary-values th { text-align: left; font-weight: 400; color: var(--text-dim); padding: 3px 8px 3px 0; white-space: nowrap; }
+.summary-values td { padding: 3px 0; }
+.summary-values td.num { font-family: var(--mono); color: var(--text); text-align: right; padding-right: 10px; width: 3.2em; }
+.summary-values td.sub { color: var(--text-faint); overflow-wrap: anywhere; }
+.summary-values tr + tr th, .summary-values tr + tr td { border-top: 1px solid var(--border-soft); }
+.summary-values tr.na td.num { color: var(--text-faint); }
+@media (max-width: 520px) {
+  .summary-grid { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 520px) {
   .news-group { grid-template-columns: minmax(0, 1fr); gap: 3px; }
   .news-link { white-space: normal; }

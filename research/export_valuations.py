@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""RIM / DDM valuations for ALL unique candidates in the last three inference days."""
+"""RIM / DDM valuations for ALL unique candidates in the last five inference days.
+
+2026-11-21 に直近3営業日から5営業日に広げた（運用者の依頼「サマリー」の割安度を「直近5日の予測対象の全銘柄内での
+相対評価」にするため → 選択「直近5営業日の候補すべて」「（理論株価の）タブも5営業日に広げる」。
+docs/MODEL_ADOPTION_RULES.md §100）。
+"""
 from pathlib import Path
 import argparse
 import json
@@ -25,10 +30,14 @@ def clean(value):
     if isinstance(value, pd.Timestamp): return value.strftime('%Y-%m-%d')
     return value
 
-def recent_candidates(pred):
-    days = sorted({str(d) for d in pred.get('dates', []) if str(d) <= pred.get('asOf', '9999')})[-3:]
+#: 理論株価を出す推論日の数（予測ファイルの直近の推論日。候補ゼロの日も1日と数える）。2026-11-21 に 3 → 5
+DAYS = 5
+
+
+def recent_candidates(pred, n_days=DAYS):
+    days = sorted({str(d) for d in pred.get('dates', []) if str(d) <= pred.get('asOf', '9999')})[-n_days:]
     if not days:
-        days = sorted({str(c['date']) for c in pred.get('candidates', [])})[-3:]
+        days = sorted({str(c['date']) for c in pred.get('candidates', [])})[-n_days:]
     latest = {}
     for c in pred.get('candidates', []):
         if c['date'] not in days:

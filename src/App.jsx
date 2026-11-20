@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import ValuationView from './views/ValuationView.jsx';
 import SupplyDemandView from './views/SupplyDemandView.jsx';
 import VolumeProfileView from './views/VolumeProfileView.jsx';
+import SummaryView from './views/SummaryView.jsx';
 import CompareView from './views/CompareView.jsx';
 import TimeMachineView from './views/TimeMachineView.jsx';
 import SimulatorView from './views/SimulatorView.jsx';
@@ -29,6 +30,10 @@ import {
  * （FilingsView / SimulatorView / CompareView）とデータの取り込み（Fetch Filings）は残してあるので、hidden を外せば戻る。
  */
 const TABS = [
+  // サマリー（候補ごとの六角形。6本の分類モデルの平均・最低値・偏差、ランキング学習の日次・5日、割安度を 0〜1 で）。
+  // 運用者の依頼 2026-11-21「パット見で、すべての良し悪しを測りたいので、レーダーチャートで…六角形で表示してほしいです…
+  // サマリーという名のタグで一番左に追加してほしいです」。開いたときのタブはブレイク予測のまま
+  { id: 'summary', label: 'サマリー' },
   { id: 'prediction', label: 'ブレイク予測' },
   // 候補銘柄のニュース（候補ごとのニュース・適時開示・アナリスト予想・個人投資家の声へのリンク）。運用者の依頼 2026-10-17
   // 「候補銘柄のニュース として新たにタブを追加してほしいです。左から2番目で」
@@ -281,7 +286,7 @@ export default function App() {
 
         {!loading && dataset && <DataNotices dataset={dataset} />}
 
-        {!loading && rows.length === 0 && tab !== 'prediction' && tab !== 'news' && tab !== 'knn' && tab !== 'samples' && tab !== 'scoredist'
+        {!loading && rows.length === 0 && tab !== 'summary' && tab !== 'prediction' && tab !== 'news' && tab !== 'knn' && tab !== 'samples' && tab !== 'scoredist'
           && tab !== 'network' && tab !== 'valuation' && tab !== 'supplydemand' && tab !== 'volumeprofile' && (
           <div className="card empty">
             分析対象の銘柄がありません。
@@ -300,6 +305,7 @@ export default function App() {
           </div>
         )}
 
+        {tab === 'summary' && <SummaryView pred={pred} predError={predError} />}
         {tab === 'valuation' && <ValuationView />}
         {tab === 'volumeprofile' && <VolumeProfileView predictions={pred} predictionError={predError} />}
         {tab === 'prediction' && (
