@@ -93,55 +93,55 @@
   "cat_k15": {
     "_cv": {
       "algo": "cat_k15",
-      "base_rate": 0.1072,
+      "base_rate": 0.1069,
       "features_sig": "7091517f6ec2",
       "fold_scores": [
-        0.2315,
-        0.2348,
-        0.2406,
-        0.2524,
-        0.2366
+        0.2434,
+        0.2252,
+        0.2397,
+        0.2491,
+        0.2229
       ],
       "fold_windows": [
         {
-          "n_train": 14667,
-          "n_valid": 3643,
-          "pos_rate": 0.1043,
-          "train_to": "2025-09-16",
+          "n_train": 14757,
+          "n_valid": 3612,
+          "pos_rate": 0.1063,
+          "train_to": "2025-09-22",
           "valid_from": "2018-04-11",
-          "valid_to": "2025-09-08"
+          "valid_to": "2025-09-17"
         },
         {
-          "n_train": 14443,
-          "n_valid": 3867,
+          "n_train": 14522,
+          "n_valid": 3847,
           "pos_rate": 0.1016,
-          "train_to": "2025-09-16",
+          "train_to": "2025-09-22",
           "valid_from": "2018-04-04",
-          "valid_to": "2025-09-10"
+          "valid_to": "2025-09-19"
         },
         {
-          "n_train": 14974,
-          "n_valid": 3336,
-          "pos_rate": 0.1187,
-          "train_to": "2025-09-16",
+          "n_train": 14944,
+          "n_valid": 3425,
+          "pos_rate": 0.1159,
+          "train_to": "2025-09-22",
           "valid_from": "2018-04-20",
           "valid_to": "2025-08-21"
         },
         {
-          "n_train": 14607,
-          "n_valid": 3703,
-          "pos_rate": 0.1072,
-          "train_to": "2025-09-16",
+          "n_train": 14662,
+          "n_valid": 3707,
+          "pos_rate": 0.1074,
+          "train_to": "2025-09-19",
           "valid_from": "2018-04-06",
-          "valid_to": "2025-09-12"
+          "valid_to": "2025-09-22"
         },
         {
-          "n_train": 14549,
-          "n_valid": 3761,
-          "pos_rate": 0.104,
-          "train_to": "2025-09-12",
+          "n_train": 14591,
+          "n_valid": 3778,
+          "pos_rate": 0.1035,
+          "train_to": "2025-09-22",
           "valid_from": "2018-04-03",
-          "valid_to": "2025-09-16"
+          "valid_to": "2025-09-12"
         }
       ],
       "label_spec": {
@@ -158,27 +158,27 @@
         "version": "fixed_return_v1",
         "vol_norm_k": null
       },
-      "mean_pr_auc": 0.2392,
-      "mean_roc_auc": 0.7262,
+      "mean_pr_auc": 0.2361,
+      "mean_roc_auc": 0.7259,
       "n_estimators": 200,
       "n_features": 373,
       "n_splits": 5,
       "n_trials": 50,
       "objective": "pr_auc",
-      "objective_value": 0.2392,
+      "objective_value": 0.2361,
       "preset": "all_plus_prog_listing_vol_book_shape_dd_recent_tx_financial",
       "scheme": "year_cap_date",
-      "std": 0.0072,
-      "train_rows": 18310,
-      "train_to": "2025-09-16"
+      "std": 0.0103,
+      "train_rows": 18369,
+      "train_to": "2025-09-22"
     },
     "params": {
-      "bagging_temperature": 0.9614544802907711,
-      "border_count": 64,
-      "depth": 5,
-      "l2_leaf_reg": 25.70871794280905,
-      "learning_rate": 0.03454062156445218,
-      "random_strength": 0.1984162633748049
+      "bagging_temperature": 0.06516664703726516,
+      "border_count": 254,
+      "depth": 7,
+      "l2_leaf_reg": 27.664808255488314,
+      "learning_rate": 0.019869369895336636,
+      "random_strength": 0.008245642001981487
     }
   },
   "cat_k18": {
@@ -354,55 +354,55 @@
   "lgbm_k15": {
     "_cv": {
       "algo": "lgbm_k15",
-      "base_rate": 0.1072,
+      "base_rate": 0.1069,
       "features_sig": "7091517f6ec2",
       "fold_scores": [
-        0.2335,
-        0.2367,
-        0.2535,
-        0.2522,
-        0.2265
+        0.2479,
+        0.2291,
+        0.2561,
+        0.2492,
+        0.2235
       ],
       "fold_windows": [
         {
-          "n_train": 14667,
-          "n_valid": 3643,
-          "pos_rate": 0.1043,
-          "train_to": "2025-09-16",
+          "n_train": 14757,
+          "n_valid": 3612,
+          "pos_rate": 0.1063,
+          "train_to": "2025-09-22",
           "valid_from": "2018-04-11",
-          "valid_to": "2025-09-08"
+          "valid_to": "2025-09-17"
         },
         {
-          "n_train": 14443,
-          "n_valid": 3867,
+          "n_train": 14522,
+          "n_valid": 3847,
           "pos_rate": 0.1016,
-          "train_to": "2025-09-16",
+          "train_to": "2025-09-22",
           "valid_from": "2018-04-04",
-          "valid_to": "2025-09-10"
+          "valid_to": "2025-09-19"
         },
         {
-          "n_train": 14974,
-          "n_valid": 3336,
-          "pos_rate": 0.1187,
-          "train_to": "2025-09-16",
+          "n_train": 14944,
+          "n_valid": 3425,
+          "pos_rate": 0.1159,
+          "train_to": "2025-09-22",
           "valid_from": "2018-04-20",
           "valid_to": "2025-08-21"
         },
         {
-          "n_train": 14607,
-          "n_valid": 3703,
-          "pos_rate": 0.1072,
-          "train_to": "2025-09-16",
+          "n_train": 14662,
+          "n_valid": 3707,
+          "pos_rate": 0.1074,
+          "train_to": "2025-09-19",
           "valid_from": "2018-04-06",
-          "valid_to": "2025-09-12"
+          "valid_to": "2025-09-22"
         },
         {
-          "n_train": 14549,
-          "n_valid": 3761,
-          "pos_rate": 0.104,
-          "train_to": "2025-09-12",
+          "n_train": 14591,
+          "n_valid": 3778,
+          "pos_rate": 0.1035,
+          "train_to": "2025-09-22",
           "valid_from": "2018-04-03",
-          "valid_to": "2025-09-16"
+          "valid_to": "2025-09-12"
         }
       ],
       "label_spec": {
@@ -419,28 +419,28 @@
         "version": "fixed_return_v1",
         "vol_norm_k": null
       },
-      "mean_pr_auc": 0.2405,
-      "mean_roc_auc": 0.7285,
+      "mean_pr_auc": 0.2412,
+      "mean_roc_auc": 0.7292,
       "n_estimators": 200,
       "n_features": 373,
       "n_splits": 5,
       "n_trials": 50,
       "objective": "pr_auc",
-      "objective_value": 0.2405,
+      "objective_value": 0.2412,
       "preset": "all_plus_prog_listing_vol_book_shape_dd_recent_tx_financial",
       "scheme": "year_cap_date",
-      "std": 0.0107,
-      "train_rows": 18310,
-      "train_to": "2025-09-16"
+      "std": 0.0126,
+      "train_rows": 18369,
+      "train_to": "2025-09-22"
     },
     "params": {
-      "colsample_bytree": 0.9388651505232762,
-      "learning_rate": 0.025095776949556996,
-      "min_child_samples": 230,
-      "num_leaves": 79,
-      "reg_alpha": 0.0006820955016526092,
-      "reg_lambda": 0.003864987793156135,
-      "subsample": 0.7588324559631439
+      "colsample_bytree": 0.9220127413634003,
+      "learning_rate": 0.020239704557756904,
+      "min_child_samples": 213,
+      "num_leaves": 89,
+      "reg_alpha": 0.00013919913617007284,
+      "reg_lambda": 0.0006115861129313921,
+      "subsample": 0.6660967251966801
     }
   },
   "lgbm_k18": {
@@ -871,55 +871,55 @@
   "xgb_k15": {
     "_cv": {
       "algo": "xgb_k15",
-      "base_rate": 0.1072,
+      "base_rate": 0.1069,
       "features_sig": "7091517f6ec2",
       "fold_scores": [
-        0.2303,
-        0.2305,
-        0.2491,
-        0.2494,
-        0.225
+        0.2416,
+        0.2298,
+        0.2502,
+        0.2403,
+        0.2282
       ],
       "fold_windows": [
         {
-          "n_train": 14667,
-          "n_valid": 3643,
-          "pos_rate": 0.1043,
-          "train_to": "2025-09-16",
+          "n_train": 14757,
+          "n_valid": 3612,
+          "pos_rate": 0.1063,
+          "train_to": "2025-09-22",
           "valid_from": "2018-04-11",
-          "valid_to": "2025-09-08"
+          "valid_to": "2025-09-17"
         },
         {
-          "n_train": 14443,
-          "n_valid": 3867,
+          "n_train": 14522,
+          "n_valid": 3847,
           "pos_rate": 0.1016,
-          "train_to": "2025-09-16",
+          "train_to": "2025-09-22",
           "valid_from": "2018-04-04",
-          "valid_to": "2025-09-10"
+          "valid_to": "2025-09-19"
         },
         {
-          "n_train": 14974,
-          "n_valid": 3336,
-          "pos_rate": 0.1187,
-          "train_to": "2025-09-16",
+          "n_train": 14944,
+          "n_valid": 3425,
+          "pos_rate": 0.1159,
+          "train_to": "2025-09-22",
           "valid_from": "2018-04-20",
           "valid_to": "2025-08-21"
         },
         {
-          "n_train": 14607,
-          "n_valid": 3703,
-          "pos_rate": 0.1072,
-          "train_to": "2025-09-16",
+          "n_train": 14662,
+          "n_valid": 3707,
+          "pos_rate": 0.1074,
+          "train_to": "2025-09-19",
           "valid_from": "2018-04-06",
-          "valid_to": "2025-09-12"
+          "valid_to": "2025-09-22"
         },
         {
-          "n_train": 14549,
-          "n_valid": 3761,
-          "pos_rate": 0.104,
-          "train_to": "2025-09-12",
+          "n_train": 14591,
+          "n_valid": 3778,
+          "pos_rate": 0.1035,
+          "train_to": "2025-09-22",
           "valid_from": "2018-04-03",
-          "valid_to": "2025-09-16"
+          "valid_to": "2025-09-12"
         }
       ],
       "label_spec": {
@@ -936,29 +936,29 @@
         "version": "fixed_return_v1",
         "vol_norm_k": null
       },
-      "mean_pr_auc": 0.2369,
-      "mean_roc_auc": 0.7281,
+      "mean_pr_auc": 0.238,
+      "mean_roc_auc": 0.7256,
       "n_estimators": 200,
       "n_features": 373,
       "n_splits": 5,
       "n_trials": 50,
       "objective": "pr_auc",
-      "objective_value": 0.2369,
+      "objective_value": 0.238,
       "preset": "all_plus_prog_listing_vol_book_shape_dd_recent_tx_financial",
       "scheme": "year_cap_date",
-      "std": 0.0103,
-      "train_rows": 18310,
-      "train_to": "2025-09-16"
+      "std": 0.0081,
+      "train_rows": 18369,
+      "train_to": "2025-09-22"
     },
     "params": {
-      "colsample_bytree": 0.35666877912869077,
-      "gamma": 0.005529168996308528,
-      "learning_rate": 0.024537575295974157,
-      "max_depth": 6,
-      "min_child_weight": 31.67751395132526,
-      "reg_alpha": 3.206492257203482e-05,
-      "reg_lambda": 0.3587419451751446,
-      "subsample": 0.8207391690271627
+      "colsample_bytree": 0.31908102902659835,
+      "gamma": 0.004783777061527709,
+      "learning_rate": 0.04031104790048173,
+      "max_depth": 3,
+      "min_child_weight": 11.403798383461211,
+      "reg_alpha": 1.3611703391904501e-05,
+      "reg_lambda": 0.019516075956922035,
+      "subsample": 0.7562289473604964
     }
   },
   "xgb_k18": {
