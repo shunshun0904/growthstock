@@ -43,6 +43,8 @@ out-of-fold: 本番と同じ作り（36/6/6か月・エンバーゴ20営業日�
 列の付き方だけ見る: args="--dry"
 試運転:             args="--tag e132smoke --n-trials 2 --shifts 0"
 C を足す回:         args="--keep-frame"（A・B は保存済みの探索・out-of-fold を読む。C の out-of-fold だけ計算する）
+独立したモデル:     args="--keep-frame --dynamics"（実験133。分足の形と推移・直近のテクニカルだけで +10% を当てる統計モデルと
+                    LightGBM。台本は e133_minute_dynamics.py・列は research/minute_dynamics.py。docs の 97-15）
 分布の形:           args="--keep-frame --shape"（終値からの距離の帯ごとの株数の割合で、正例になりやすい分布の形を探す。平均の形の
                     比較と型（k-means）。素の正例率と、A の見込みとの差の両方。運用者の問い 2026-11-19「正例になりやすい、
                     価格帯別出来高の分布などないでしょうか？」。docs の 97-12）
@@ -1458,6 +1460,8 @@ def main(argv=None) -> int:
                     help="保存済みの表を、分足の取得記録が変わっていてもそのまま使う（腕を足す回で前の回と同じ表で比べる）")
     ap.add_argument("--budget-min", type=float, default=290.0, help="この分数を過ぎたら新しい計算を始めない（0 で無制限）")
     ap.add_argument("--dry", action="store_true", help="列の付き方だけ出して終わる")
+    ap.add_argument("--dynamics", action="store_true",
+                    help="実験133: 分足の形と推移・直近のテクニカルだけの独立したモデルを作って比べて終わる")
     ap.add_argument("--shape", action="store_true",
                     help="終値からの距離の帯ごとの株数の割合で、正例になりやすい分布の形を探して終わる（平均の形と型）")
     ap.add_argument("--short", action="store_true",
@@ -1513,6 +1517,30 @@ def main(argv=None) -> int:
           f"{df['Date'].max().date()}）。探索の期間（〜{cutoff.date()}）では {(df['Date'] <= cutoff).sum():,}行・"
           f"うち分足の付いた行 {int((att & (df['Date'] <= cutoff)).sum()):,}（全体では {int(att.sum()):,}）")
     if args.dry:
+        return 0
+    if args.dynamics:
+        import e133_minute_dynamics as E133
+        import minute_dynamics as MD
+
+        rec = load_tuned("A", colsets["base"], cutoff, args.n_trials, stamp)
+        if rec is None:
+            raise SystemExit("A の保存済みの探索の結果が無い（--dynamics は探索し直さない。--keep-frame で前の回の表を使う）")
+        rows = residual_rows(df, base, rec["params"], shifts)
+        t0 = time.time()
+        dyn, rep = MD.dynamics(rows[["Code", "Date"]], MINUTE_DIR, lab.DATA_DIR)
+        if len(dyn) != len(rows) or not (dyn["Code"].to_numpy() == rows["Code"].to_numpy()).all():
+            raise SystemExit("推移の列を付けたら行の並びが変わった")
+        for c in MD.COLUMNS:
+            rows[c] = dyn[c].to_numpy()
+        tech = df[["Code", "Date"] + list(E133.TECH_COLUMNS)]
+        rows = rows.merge(tech, on=["Code", "Date"], how="left")
+        log(f"[dynamics] 推移の列 {len(MD.COLUMNS)}・付いた行 {rep['attached']:,} / {rep['rows']:,}・状態 {rep.get('status')}"
+            f" / {time.time() - t0:.0f}秒")
+        out = E133.report(rows, list(NEW_COLS))
+        out["dynamics_report"] = rep
+        with open(path("dynamics.json"), "w", encoding="utf-8") as fh:
+            json.dump(out, fh, ensure_ascii=False, indent=1, default=str)
+        log(f"記録: {path('dynamics.json')}（公開しない）")
         return 0
     if args.shape:
         rec = load_tuned("A", colsets["base"], cutoff, args.n_trials, stamp)
