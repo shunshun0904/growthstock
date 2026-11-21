@@ -3,7 +3,7 @@
   "name": "ランキング学習",
   "short": "LTR",
   "note": "LambdaRank。同じ日の候補の中で、翌営業日の寄りで買い20営業日目の終値で売った収益の順番を学ぶ（実験114）。その日の中の順位だけを使い、買いの規則には使わない（参考。両方使う形）",
-  "trainedAt": "2026-11-14T18:27:17.323998+00:00",
+  "trainedAt": "2026-11-21T06:36:58.975942+00:00",
   "kind": "lambdarank",
   "target": "同じ日の候補の中の、翌営業日の寄りで買い20営業日目の終値で売った収益の5分位（0〜4）",
   "preset": "all_plus_prog_listing_vol_book_shape_dd_recent_tx_financial",
@@ -388,25 +388,25 @@
     "subsample_freq": 1,
     "n_jobs": -1,
     "verbose": -1,
-    "learning_rate": 0.015283553399852434,
-    "num_leaves": 19,
-    "min_child_samples": 173,
-    "subsample": 0.5493523788661878,
-    "colsample_bytree": 0.807652393573247,
-    "reg_alpha": 1.8211707763309082,
-    "reg_lambda": 0.006651733928983999
+    "learning_rate": 0.010002401601606335,
+    "num_leaves": 124,
+    "min_child_samples": 281,
+    "subsample": 0.798819699197934,
+    "colsample_bytree": 0.9988031498418668,
+    "reg_alpha": 2.518952410836304e-06,
+    "reg_lambda": 0.1760649186421912
   },
   "seed": 42,
   "dayUpper": 0.5,
-  "nTrain": 22195,
-  "nDays": 2021,
+  "nTrain": 22242,
+  "nDays": 2026,
   "trainFrom": "2018-04-03",
-  "trainTo": "2026-10-15",
-  "nOof": 16572,
+  "trainTo": "2026-10-22",
+  "nOof": 16619,
   "oofFolds": 11,
   "oofMetrics": {
-    "ndcg5": 0.6229,
-    "ndcg5CodeOrder": 0.5875
+    "ndcg5": 0.6275,
+    "ndcg5CodeOrder": 0.5879
   },
   "tuning": {
     "objective": "検証分割の日付内 NDCG@5（候補5件以上の日。利得は20営業日目の終値の段階 0〜4）",
@@ -414,24 +414,24 @@
     "n_splits": 5,
     "n_trials": 50,
     "seed": 0,
-    "best_trial": 27,
-    "ndcg": 0.6609,
+    "best_trial": 16,
+    "ndcg": 0.665,
     "ndcg_folds": [
-      0.658,
-      0.6639,
-      0.659,
-      0.6703,
-      0.6533
+      0.6648,
+      0.6692,
+      0.6532,
+      0.682,
+      0.6556
     ],
-    "n_rows": 18302,
-    "n_days": 1760,
+    "n_rows": 18361,
+    "n_days": 1764,
     "train_from": "2018-04-03",
-    "train_to": "2025-09-16",
-    "minutes": 10.1
+    "train_to": "2025-09-22",
+    "minutes": 17.4
   },
-  "tuningSource": "週次の探索（Retrain Weekly run 43624640872・a3a8a6d。2025-09-16 までの 18,302件・50試行・5分割・目的は検証分割の日付内 NDCG@5）",
+  "tuningSource": "週次の探索（Retrain Weekly run 44873703652・cb194c3。2025-09-23 までの 18,361件・50試行・5分割・目的は検証分割の日付内 NDCG@5）",
   "artifactHashes": {
-    "model.joblib": "69ecdd3075d669ab7da0b76607f0847b82f73cc6686c9e7afd02a33c3697db26",
-    "oof.parquet": "27977716f279371aaa32857f87fb0e911d16174141d2f2784f223ba4df49b5ab"
+    "model.joblib": "f866e87e554b7ebfc6e566ae65e43e3df668aea4fd9df4d3101cb0c9e794b633",
+    "oof.parquet": "d605c5d8a7fe50d76d64b5f82c6474baa19699199e25a78dd732a7c20ac785cd"
   }
 }
