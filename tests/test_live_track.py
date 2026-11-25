@@ -433,6 +433,58 @@ class BothUse(unittest.TestCase):
         self.assertIn("両方使う形", buf.getvalue())
 
 
+class TradeSummary(unittest.TestCase):
+    """■3 は公開のログに出るので、銘柄コード・名前・1件ごとの値を出さず、状態ごとの件数と平均だけ（2026-11-25）。"""
+
+    def sim(self):
+        return pd.DataFrame([
+            {"Date": pd.Timestamp("2026-10-01"), "Code": "72030", "name": "テスト自動車", "rank": 1,
+             "status": L.HIT, "ret": 10.0, "ret_close": 4.0, "ret_now": NAN, "taken": L.TAKEN},
+            {"Date": pd.Timestamp("2026-10-02"), "Code": "67580", "name": "テスト電機", "rank": 1,
+             "status": "満了", "ret": -3.0, "ret_close": -3.0, "ret_now": NAN, "taken": L.TAKEN},
+            {"Date": pd.Timestamp("2026-10-05"), "Code": "99840", "name": "テスト通信", "rank": 1,
+             "status": "満了", "ret": 1.0, "ret_close": 1.0, "ret_now": NAN, "taken": L.TAKEN},
+            {"Date": pd.Timestamp("2026-11-20"), "Code": "83060", "name": "テスト銀行", "rank": 1,
+             "status": "保有中", "ret": NAN, "ret_close": NAN, "ret_now": 2.5, "taken": L.TAKEN},
+            {"Date": pd.Timestamp("2026-11-20"), "Code": "45020", "name": "テスト薬品", "rank": 2,
+             "status": "満了", "ret": 7.0, "ret_close": 7.0, "ret_now": NAN, "taken": L.FULL},
+        ])
+
+    def test_counts_and_means_by_state(self):
+        tab = L.trade_summary(self.sim())
+        self.assertEqual(list(tab["state"]), [L.HIT, "満了", "保有中", L.FULL])
+        self.assertEqual(list(tab["n"]), [1, 2, 1, 1])
+        by = tab.set_index("state")
+        self.assertAlmostEqual(by.loc["満了", "ret"], -1.0)
+        self.assertAlmostEqual(by.loc["満了", "ret_close"], -1.0)
+        self.assertAlmostEqual(by.loc["保有中", "ret_now"], 2.5)
+        self.assertTrue(np.isnan(by.loc["保有中", "ret"]))
+        # 枠に入らなかったものは値動きの状態ではなく taken で数える（満了の平均に入れない）
+        self.assertEqual(int(by.loc[L.FULL, "n"]), 1)
+
+    def test_print_has_no_code_or_name(self):
+        import contextlib
+        import io
+        sim = self.sim()
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            L.print_trades(sim)
+        out = buf.getvalue()
+        for code, name in zip(sim["Code"], sim["name"]):
+            self.assertNotIn(code[:4], out)
+            self.assertNotIn(name, out)
+        self.assertIn("計 5件（枠に入った 4件）", out)
+
+    def test_empty(self):
+        import contextlib
+        import io
+        self.assertEqual(len(L.trade_summary(pd.DataFrame())), 0)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            L.print_trades(pd.DataFrame())
+        self.assertIn("買う銘柄が出た日が無い", buf.getvalue())
+
+
 class CompleteOnly(unittest.TestCase):
     def test_open_and_recent_trades_excluded(self):
         """+20% に早く届いた最近の取引を入れると勝ち側に偏るので数えない。"""

@@ -51,7 +51,9 @@ tests/test_live_track.py が両者を突き合わせる）
   その規則の百分位が予測に入った日から、月2件の先着（今の規則を満たした候補を月ごとに先着2件。運用者の買い方）を今の規則の
   記録の始まりから。両方使う形（今の規則を満たし、かつその日の候補の中でランキング学習が上半分。上位2件・3枠。運用者の選択
   「まず並べて見る」2026-10-24。docs/MODEL_ADOPTION_RULES.md §78-9）を、ランキング学習の順位が予測に入った日から、同じ期間の
-  今の規則と並べて。公開ログには買値（日足の生の値）を出さない
+  今の規則と並べて。公開ログには買値（日足の生の値）を出さない。
+  銘柄コード・名前・1件ごとの値も出さない（2026-11-25 の運用者の選択「銘柄を出さない形に直す」。紙の売買には実際の
+  保有と重なる銘柄も入るため）。■2 は件数と判断だけ、■3 は状態ごとの件数と平均（%）だけ（trade_summary）
 
 使い方
   python3 research/live_track.py                  # 集計して表示
@@ -679,16 +681,6 @@ def _f(v, fmt="{:+.2f}", na="-"):
     return fmt.format(v)
 
 
-def _cut(s: str, w: int) -> str:
-    """表示幅 w に収まるように切る。"""
-    out = ""
-    for ch in str(s):
-        if _width(out + ch) > w:
-            break
-        out += ch
-    return out
-
-
 def compare_line(name: str, live: float, w: dict, fmt: str = "{:+.2f}") -> str:
     head = f"  {_l(name, 24)}{_r(_f(live, fmt), 9)}"
     if not w.get("n"):
@@ -736,6 +728,51 @@ def monthly_first(rows: pd.DataFrame, n: int = 2) -> pd.DataFrame:
     out = p.groupby("_m", sort=False).head(n).drop(columns="_m").reset_index(drop=True)
     out["rank"] = out.groupby("Date").cumcount() + 1
     return out
+
+
+#: ■3 の状態の並び（枠に入った取引の status、入らなかったものの taken）。ここに無い状態は後ろに出た順で並べる
+STATE_ORDER = (HIT, "+20%到達", "満了", "保有中", "未約定", FULL, "買えない")
+
+
+def trade_summary(sim: pd.DataFrame) -> pd.DataFrame:
+    """
+    ■3 の集計。公開のログに出すので、銘柄コード・名前・1件ごとの値は出さず、状態ごとにまとめる
+    （2026-11-25 の運用者の選択「銘柄を出さない形に直す」）。
+    状態は、枠に入った取引（taken == 買う）なら値動きの status（指値到達 / 満了 / 保有中 / 未約定）、入らなかったものは
+    taken（枠が満杯 / 買えない）。列: state, n（件数）, ret（規則どおりの収益 % の平均）, ret_close（20営業日目の終値で
+    売った場合 % の平均）, ret_now（保有中の含み % の平均）。値が無い状態は NaN。
+    """
+    cols = ["state", "n", "ret", "ret_close", "ret_now"]
+    if sim is None or not len(sim):
+        return pd.DataFrame(columns=cols)
+    s = sim.copy()
+    for c in ("ret", "ret_close", "ret_now"):
+        s[c] = pd.to_numeric(s[c], errors="coerce") if c in s else np.nan
+    status = s["status"] if "status" in s else pd.Series("", index=s.index)
+    s["state"] = np.where(s["taken"] == TAKEN, status.fillna("").astype(str), s["taken"].astype(str))
+    g = s.groupby("state", sort=False)
+    out = pd.DataFrame({"n": g.size(), "ret": g["ret"].mean(), "ret_close": g["ret_close"].mean(),
+                        "ret_now": g["ret_now"].mean()}).reset_index()
+    rank = {k: i for i, k in enumerate(STATE_ORDER)}
+    out["_o"] = [rank.get(k, len(STATE_ORDER) + i) for i, k in enumerate(out["state"])]
+    out = out.sort_values("_o", kind="mergesort").drop(columns="_o").reset_index(drop=True)
+    out["n"] = out["n"].astype(int)
+    return out[cols]
+
+
+def print_trades(sim: pd.DataFrame) -> pd.DataFrame:
+    """■3 を出す（状態ごとの件数と平均だけ。trade_summary）。戻り値は集計の表。"""
+    print(f"\n■ 3. 取引（規則どおり・枠{SLOTS}・先着順。公開のログなので銘柄と1件ごとの値は出さず、状態ごとの件数と平均だけ）")
+    tab = trade_summary(sim)
+    if not len(tab):
+        print("  （買う銘柄が出た日が無い）")
+        return tab
+    print(f"  {_l('状態', 12)}{_r('件数', 6)}{_r('収益%の平均', 13)}{_r('20日目終値%の平均', 19)}{_r('含み%の平均', 13)}")
+    for r in tab.itertuples(index=False):
+        print(f"  {_l(r.state, 12)}{_r(r.n, 6)}{_r(_f(r.ret), 13)}{_r(_f(r.ret_close), 19)}{_r(_f(r.ret_now), 13)}")
+    n_taken = int(tab.loc[~tab["state"].isin((FULL, "買えない")), "n"].sum())
+    print(f"  計 {int(tab['n'].sum())}件（枠に入った {n_taken}件）。成績の比較（■4 (b)）に数えるのは選定日から{HOLD}営業日たった取引だけ")
+    return tab
 
 
 def ref_summary(picks_fwd: pd.DataFrame, bar_days: Sequence, complete_to, slots: Optional[int] = SLOTS) -> dict:
@@ -963,34 +1000,19 @@ def main(argv=None) -> int:
     print(f"  日足の最終日 {last_bar.date()} / 成績に数えるのは選定日が "
           f"{complete_to.date() if complete_to is not None else '-'} 以前の取引")
 
+    # 銘柄コード・名前は公開のログに出さない（2026-11-25 の運用者の選択。件数と判断だけ）
     print("\n■ 2. 日ごとの判断（画面が出していた版）")
     print(f"  {_l('選定日', 11)}{_r('発火', 5)}{_r('通過', 5)}  {_l('判断', 34)}"
-          f"{_l('買う銘柄', 12)}{_l('版', 9)}{_l('出た時刻(UTC)', 14)}{_l('学習日', 11)}")
+          f"{_l('版', 9)}{_l('出た時刻(UTC)', 14)}{_l('学習日', 11)}")
     for r in ldays.itertuples(index=False):
         m = meta.loc[r.Date]
-        codes = " ".join(p.code for p in lpicks[lpicks["Date"] == r.Date].itertuples())
         mark = "（遅れ）" if m["late"] else ""
         print(f"  {_l(r.Date.date(), 11)}{_r(r.n_break, 5)}{_r(r.n_pass, 5)}  "
-              f"{_l(r.verdict, 34)}{_l(codes, 12)}{_l(m['sha'], 9)}"
+              f"{_l(r.verdict, 34)}{_l(m['sha'], 9)}"
               f"{_l(m['committed'].strftime('%m-%d %H:%M'), 14)}{_l(m['trained'], 11)}{mark}")
 
-    print(f"\n■ 3. 取引（規則どおり・枠{SLOTS}・先着順）")
-    if not len(lsim):
-        print("  （買う銘柄が出た日が無い）")
-    else:
-        # 買値（日足の生の値）は公開のログに出さない。収益は % だけ
-        print(f"  {_l('選定日', 11)}{_l('銘柄', 6)}{_l('名前', 16)}{_r('順', 3)}{_r('最小%', 7)}"
-              f"{_r('枠', 4)}{_r('買った日', 12)}{_r('状態', 12)}"
-              f"{_r('収益%', 8)}{_r('20日目終値%', 13)}{_r('含み%', 8)}")
-        names = lrows.set_index(["Date", "Code"])["name"].to_dict()
-        for r in lsim.itertuples(index=False):
-            state = r.status if r.taken == TAKEN else r.taken
-            bought = r.buy_date.date() if pd.notna(r.buy_date) else "-"
-            print(f"  {_l(r.Date.date(), 11)}{_l(r.Code[:4], 6)}"
-                  f"{_l(_cut(names.get((r.Date, r.Code)) or '', 15), 16)}{_r(r.rank, 3)}"
-                  f"{_r(_f(r.p_min, '{:.1f}'), 7)}{_r(_f(r.slot, '{:.0f}'), 4)}"
-                  f"{_r(bought, 12)}{_r(state, 12)}"
-                  f"{_r(_f(r.ret), 8)}{_r(_f(r.ret_close), 13)}{_r(_f(r.ret_now), 8)}")
+    # 買値（日足の生の値）も、銘柄ごとの収益も公開のログに出さない。状態ごとの件数と平均（%）だけ
+    print_trades(lsim)
 
     print("\n■ 4. 見込みとの比較（OOF を同じ長さで切り出した散らばり）")
     print(f"  OOF 全体: {o_lo.date()}〜{o_hi.date()}、候補 {len(orows):,}件。"
