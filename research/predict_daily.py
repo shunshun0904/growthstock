@@ -619,6 +619,11 @@ def main(argv=None) -> int:
             "baseLength": r(s.get("base_length"), 0),
             "creditRatio": r(s.get("credit_ratio")),
             "per": r(s.get("per")), "pbr": r(s.get("pbr")),
+            # 予想PER・予想ROE（J-Quants の FwdPER と、% に揃えた FwdROE）。画面の PER・ROE は実績（直近12か月の利益）で、
+            # 一時的な損益で大きく振れる（2026-11-25、実績が予想の数倍になっている候補があった）。証券会社の画面の多くは
+            # 予想を出すので、画面では実績に予想を添える（運用者の選択 2026-11-25「実績と予想を並べる」）。
+            # モデルの入力（per・jq_fwdper・jq_per_gap）は変えない。表示のための値
+            "fwdPer": r(s.get("jq_fwdper")), "fwdRoe": r(s.get("jq_fwdroe")),
             "divYield": r(s.get("div_yield")),
             "epsGrowth": r(s.get("eps_growth_q0")),
             "salesGrowth": r(s.get("sales_growth_q0")),

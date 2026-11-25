@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { fmt, fmtInt, fmtSigned, fmtOku, fmtDate, fmtDateTime, DASH } from '../lib/format.js';
+import { fmt, fmtInt, fmtSigned, fmtOku, fmtDate, fmtDateTime, fmtWithForecast, DASH } from '../lib/format.js';
 import { bandColor, bandLabel, pctColor, pctInk, PCT_LEGEND, scoreRange, scoreColor, scoreInk, modelRows, modelGrid, MODEL_SHORT, MODEL_FAMILY,
   FAMILY_JA, activeModels, marketTone, candidateToStock, dayOrigin, featureLabel, earningsNote, earningsSummary,
 } from '../lib/predictions.js';
@@ -787,8 +787,11 @@ const NUMS = [
   ['抜けた幅', (c) => fmtSigned(c.breakMargin, 2)],
   ['ベース日数', (c) => fmtInt(c.baseLength, '日')],
   ['信用倍率', (c) => fmt(c.creditRatio, 2, '倍')],
-  ['PER', (c) => fmt(c.per, 1, '倍')],
+  // PER・ROE は実績（直近12か月の利益）。一時的な損益で大きく振れるので、予想（J-Quants の予想PER・予想ROE）を添える
+  // （運用者の選択 2026-11-25「実績と予想を並べる」。証券会社の画面の多くは予想PER）。古い予測ファイルには予想が無く、実績だけ出る
+  ['PER（実績）', (c) => fmtWithForecast(c.per, c.fwdPer, 1, '倍')],
   ['PBR', (c) => fmt(c.pbr, 2, '倍')],
+  ['ROE（実績）', (c) => fmtWithForecast(c.roe, c.fwdRoe, 1, '%')],
   ['配当利回り', (c) => fmt(c.divYield, 2, '%')],
   ['EPS成長', (c) => fmtSigned(c.epsGrowth, 1)],
   ['売上成長', (c) => fmtSigned(c.salesGrowth, 1)],

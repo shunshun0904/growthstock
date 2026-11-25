@@ -12,6 +12,16 @@ export function fmt(value, digits = 1, suffix = '') {
   }) + suffix;
 }
 
+/**
+ * 実績の値に予想を添える（例「120.0倍（予想 25.0倍）」）。予想が無ければ実績だけ、実績が無ければ「—（予想 …）」。
+ * PER・ROE は実績（直近12か月の利益）で、一時的な損益で大きく振れる。証券会社の画面の多くは予想を出すので、
+ * 並べて見せる（運用者の選択 2026-11-25「実績と予想を並べる」）。
+ */
+export function fmtWithForecast(value, forecast, digits = 1, suffix = '') {
+  const base = fmt(value, digits, suffix);
+  return isNum(forecast) ? `${base}（予想 ${fmt(forecast, digits, suffix)}）` : base;
+}
+
 export function fmtInt(value, suffix = '') {
   if (!isNum(value)) return DASH;
   return Math.round(value).toLocaleString('ja-JP') + suffix;
