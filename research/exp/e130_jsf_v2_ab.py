@@ -23,7 +23,7 @@ lgbm_params.json）と build_dataset.py には書かない。20列はこの台�
 確かめてから使う（label_specs.check_training_frame）。行: 学習は全行（日証金の値が無い行は欠測のまま。木は欠測として扱う）。
 評価は2通り: 全行（32窓）と、日証金の付いた行だけ（jsf2_lag がある行。その行が MIN_WINDOW_ROWS 件以上ある窓）。
 
-判定（回す前に運用者に確かめてから、この台本と docs/MODEL_ADOPTION_RULES.md に書く。下は案）
+判定（運用者の選択 2026-11-26「案のとおり」。回す前に決めた。docs/MODEL_ADOPTION_RULES.md §104）
   docs/MODEL_ADOPTION_RULES.md §7（2026-09-26 改訂）の1モデル分の3条件を、32窓（ずらし 0/2/4か月 × 種3つの平均）の PR-AUC に
   当てる: 窓ごとの C−A の平均が正・対照 P−A の平均を上回る・C が上の窓が過半（n//2 + 1 以上）。木3モデルの票は数えられないので、
   本番に入れるかは結果を見て運用者が決める（実験101〜105 と同じ扱い）。
@@ -34,7 +34,7 @@ lgbm_params.json）と build_dataset.py には書かない。20列はこの台�
   3b. 窓の差（付いた行だけ）  4. §7 の判定  5. 窓の中の上位2% の Precision・+10% の指値に届いた割合・1取引の平均（参考）
   6. 窓ごとの値
 
-    exp=e130_jsf_v2_ab.py args="--restrict-shift 1"            ← 写しの日 + 1営業日 = 申込日（運用者に確かめてから決める）
+    exp=e130_jsf_v2_ab.py args="--restrict-shift 1"            ← 写しの日 + 1営業日 = 申込日（運用者の選択 2026-11-26「+1営業日」）
 列の付き方だけ見る: exp=e130_jsf_v2_ab.py args="--restrict-shift 1 --dry"
 試運転:             exp=e130_jsf_v2_ab.py args="--tag e130smoke --n-trials 2 --shifts 0 --arms A,C,P --restrict-shift 1"
 
@@ -603,7 +603,7 @@ def main(argv=None) -> int:
     global TAG, RUN, DEADLINE
     ap = argparse.ArgumentParser(description="実験130: 日証金の20列（v2）を373列に足す前後（lgbm +10%・検証だけ）")
     ap.add_argument("--restrict-shift", required=True,
-                    help="制限措置の写しの日と申込日の対応（営業日。none で写しを使わない）。運用者に確かめてから決める")
+                    help="制限措置の写しの日と申込日の対応（営業日。none で写しを使わない）。運用者の選択 2026-11-26 で 1")
     ap.add_argument("--arms", default=",".join(ARMS), help="この回に計算する腕（A は必ず含める）")
     ap.add_argument("--n-trials", type=int, default=50)
     ap.add_argument("--shifts", default="0,2,4")
