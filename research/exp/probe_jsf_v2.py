@@ -19,7 +19,9 @@
   [4] 作り直し: 別の書き方（1行ずつ、元の数とカレンダーと日足から）で抜き出した行を計算し、全列が一致するか
   [5] 先読み: T より前のデータだけで作り直して、T の行の値が全部同じか（K 日）
   [6] 10/9 の作り（v1）との違い: 定義が同じ列は、窓に欠けた日がかからない行で一致するか
-  [7] 取り直し前の控えがあれば比べる（research/jsf_hist_compare.py）
+  [7] 取り直し前の控えがあれば比べる（research/jsf_hist_compare.py）。メモリを多く使うので**最初に**回す（2026-11-26。
+      取り直しの後は控えと今（各約300万行）の外部結合だけで約10GB 使い、[0]〜[6] の表（約7GB）を持ったまま最後に回すと
+      Actions の runner（16GB）のメモリが尽きて落ちた。run 45765636163「The hosted runner lost communication with the server」）
 
     exp=probe_jsf_v2.py                         ← 写しを使わない（RESTRICT_SNAP_SHIFT 未定）
     exp=probe_jsf_v2.py args="--shift 1"        ← 写しの日 + 1営業日 = 申込日 で作る
@@ -27,6 +29,7 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import glob
 import math
 import os
@@ -531,6 +534,23 @@ def v1_check(df: pd.DataFrame, data_dir: str) -> None:
               f"v2 だけ値あり {int((u.isna() & v.notna()).sum()):,}")
 
 
+BACKUP_NAME = "backup_jsf_hist_20261112.parquet"
+
+
+def backup_check(data_dir: str) -> bool:
+    """
+    [7] 取り直し前の控えと今の過去ファイルを比べる（research/jsf_hist_compare.py）。控えが無ければ何もしない（False）。
+    比べるのに約10GB 使うので、[0]〜[6] の表を作る前に回し、この関数の中で使い切る（呼んだ側で gc.collect）。
+    """
+    bk = os.path.join(data_dir, BACKUP_NAME)
+    if not os.path.exists(bk):
+        return False
+    log("[7] 取り直し前の控えと比べる（メモリを多く使うので最初に回す）")
+    import jsf_hist_compare as HC
+    HC.report(HC.compare(HC._load(bk), HC._load(os.path.join(data_dir, "jsf_hist.parquet"))))
+    return True
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="日証金の特徴量 v2 の値の確認（件数・割合・分位だけ）")
     ap.add_argument("--data-dir", default=DATA_DIR)
@@ -540,6 +560,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     ap.add_argument("--seed", type=int, default=0)
     a = ap.parse_args(argv)
     d = a.data_dir
+
+    # [7] を先に回し、比べに使ったメモリを返してから [0] 以降の表を作る（同時に持つと runner の 16GB を超える）
+    if backup_check(d):
+        gc.collect()
 
     log("[0] 入力")
     hist_raw = pd.read_parquet(os.path.join(d, "jsf_hist.parquet"))
@@ -570,11 +594,6 @@ def main(argv: Optional[List[str]] = None) -> int:
     rebuild_check(df, hist, daily, snaps, a.shift, margin, days, d, a.sample, a.seed)
     lookahead_check(df, hist, daily, snaps, a.shift, margin, days, d, a.lookahead_days, a.seed)
     v1_check(df, d)
-    bk = os.path.join(d, "backup_jsf_hist_20261112.parquet")
-    if os.path.exists(bk):
-        log("[7] 取り直し前の控えと比べる")
-        import jsf_hist_compare as HC
-        HC.report(HC.compare(HC._load(bk), HC._load(os.path.join(d, "jsf_hist.parquet"))))
     log("[done]")
     return 0
 
