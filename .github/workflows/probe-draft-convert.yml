@@ -3,12 +3,16 @@ name: Probe Draft Convert
 # 公開の Release data-raw を下書き（非公開）に移す前の確かめ（2026-11-27。運用者の選択「非公開にする案を作る」）。
 #
 # J-Quants の個人の利用はデータの第三者への配信が禁止（docs/MINUTE_BARS.md「置き場」）なのに、data-raw（日足・財務など）は
-# 公開の Release で誰でも落とせる。移す前に次の2つを確かめる。data-raw そのものには触らない。
-#   1. 読むだけの鍵（contents: read）の job から、下書きの Release（今ある data-minute）が見え、取り出しの台本で取れるか
-#      （保有の推移・Pages のデプロイ・Check Data Store など、読むだけの鍵で data-raw を読むワークフローが6本ある）
-#   2. 公開した Release を下書きに戻せるか。確かめ用の公開の Release（中身は乱数の 2KB）を作り、下書きに戻し、
-#      鍵なしで見えなくなるか・鍵ありで中身が同じかを見て、必ず消す
+# 公開の Release で誰でも落とせる。移す前に次を確かめる。data-raw そのものには触らない。
+#   readonly  読むだけの鍵（contents: read）の job から、今ある下書きの Release（data-minute）が見え、取り出しの台本で取れるか
+#             （保有の推移・Pages のデプロイ・Check Data Store など、読むだけの鍵で data-raw を読むワークフローが6本ある）
+#   convert   確かめ用の公開の Release（乱数 2KB）を作って下書きに戻し、鍵なしで前のダウンロードの URL・ページから取れなく
+#             なるかを、時間を置いて何回か見る（1回目 run 46011208314 では、戻した直後に前の URL からまだ取れた）
+#   droptag   同じく下書きに戻したうえで git のタグを消すと、前の URL から取れなくなるか。タグを消しても下書きをタグ名で
+#             見つけ、上げ・取り出しができるか（取り出しの台本 scripts/gh_release_download.sh も）
 # 確かめた結果は job の要約に PASS / FAIL で出す（分からないことを確かめる回なので、FAIL でも job は止めない）。
+# 確かめ用の Release とタグは、何があっても消す。公開のログに出すのは状態の番号・一致したか・ホスト名だけ
+# （署名付きのダウンロード URL は出さない）。
 on:
   workflow_dispatch:
 
@@ -30,28 +34,33 @@ jobs:
 
       - name: Read a draft release with a read-only token
         run: |
-          set -u
+          set +e
           ok=(); ng=()
           check() { if [ "$2" = "$3" ]; then ok+=("$1"); echo "PASS $1（$2）"; else ng+=("$1"); echo "FAIL $1（期待 $3 / 実際 $2）"; fi; }
           gh --version | head -1
-          v=$(gh release view data-minute --json isDraft --jq .isDraft 2>&1 | head -c 120)
-          check "読むだけの鍵: 下書き data-minute をタグ名で見つける" "$v" "true"
-          n=$(gh release view data-minute --json assets --jq '[.assets[] | select(.state == "uploaded")] | length' 2>/dev/null || echo error)
-          if [ "$n" != "error" ] && [ "$n" -gt 0 ] 2>/dev/null; then r=ok; else r="$n"; fi
-          check "読むだけの鍵: アセットの一覧が引ける" "$r" "ok"
+          out=$(gh release view data-minute --json isDraft --jq .isDraft 2>&1); rc=$?
+          echo "gh release view data-minute: 終了コード $rc / $(head -c 160 <<<"$out")"
+          check "読むだけの鍵: 下書き data-minute をタグ名で見つける" "$(head -c 60 <<<"$out")" "true"
+          n=$(gh api "repos/$GH_REPO/releases?per_page=100" --jq '[.[] | select(.draft)] | length' 2>&1)
+          echo "読むだけの鍵で一覧に出る下書きの数: $n"
+          if [ "$n" -gt 0 ] 2>/dev/null; then r=ok; else r="$n"; fi
+          check "読むだけの鍵: 一覧に下書きが出る" "$r" "ok"
           mkdir -p probe_out
-          if GH_DOWNLOAD_TRIES=2 GH_DOWNLOAD_WAIT=2 bash scripts/gh_release_download.sh data-minute probe_out 'minute_manifest.json' >/dev/null 2>&1 \
-             && [ -s probe_out/minute_manifest.json ]; then r=ok; else r=ng; fi
+          GH_DOWNLOAD_TRIES=2 GH_DOWNLOAD_WAIT=2 bash scripts/gh_release_download.sh data-minute probe_out 'minute_manifest.json' > dl.log 2>&1
+          rc=$?
+          echo "取り出しの台本: 終了コード $rc / 最後の行: $(tail -1 dl.log | head -c 160)"
+          if [ -s probe_out/minute_manifest.json ]; then r=ok; else r=ng; fi
           check "読むだけの鍵: 取り出しの台本で1ファイル取れる" "$r" "ok"
-          rm -rf probe_out
+          rm -rf probe_out dl.log
           echo ""
           echo "PASS ${#ok[@]} / FAIL ${#ng[@]}"
           { echo "## 読むだけの鍵（contents: read）で下書きの Release を読めるか"; echo "";
             for x in "${ok[@]}"; do echo "- PASS $x"; done; for x in "${ng[@]}"; do echo "- **FAIL** $x"; done; } >> "$GITHUB_STEP_SUMMARY"
+          exit 0
 
   convert:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     permissions:
       contents: write
     env:
@@ -59,12 +68,16 @@ jobs:
       GH_REPO: ${{ github.repository }}
       TAG: probe-pub-${{ github.run_id }}
     steps:
-      - name: Publish, then convert to draft
+      - name: Publish, convert to draft, then watch the old URLs
         run: |
-          set -u
+          set +e
           ok=(); ng=()
           check() { if [ "$2" = "$3" ]; then ok+=("$1"); echo "PASS $1（$2）"; else ng+=("$1"); echo "FAIL $1（期待 $3 / 実際 $2）"; fi; }
-          code() { curl -s -o /dev/null -w '%{http_code}' -L "$@"; }
+          # 鍵なしで取る。状態の番号・中身が同じか・行き先のホスト名だけを返す（署名付きの URL は出さない）
+          anon() { rm -f anon.bin; r=$(curl -s -L -o anon.bin -w '%{http_code} %{url_effective}' "$1"); c=${r%% *}; u=${r#* }
+                   h=$(python3 -c 'import sys,urllib.parse; print(urllib.parse.urlparse(sys.argv[1]).hostname)' "$u")
+                   s=$( [ -s anon.bin ] && [ "$(sha256sum anon.bin | cut -d' ' -f1)" = "$want" ] && echo same || echo diff )
+                   echo "$c $s $h"; }
           head -c 2000 /dev/urandom > probe.bin
           want=$(sha256sum probe.bin | cut -d' ' -f1)
           gh release create "$TAG" probe.bin --title "公開→下書きの確かめ（すぐ消す）" \
@@ -73,32 +86,101 @@ jobs:
           aid=$(gh api "repos/$GH_REPO/releases/$rid/assets" --jq '.[0].id')
           dl=$(gh api "repos/$GH_REPO/releases/$rid/assets" --jq '.[0].browser_download_url')
           html=$(gh api "repos/$GH_REPO/releases/$rid" --jq '.html_url')
-          check "公開のうちは鍵なしでダウンロードの URL から取れる" "$(code "$dl")" "200"
+          check "公開のうちは鍵なしでダウンロードの URL から同じ中身が取れる" "$(anon "$dl" | cut -d' ' -f1,2)" "200 same"
           if gh release edit "$TAG" --draft=true >/dev/null 2>&1; then r=ok; else r=ng; fi
           check "公開した Release を下書きに戻せる（gh release edit --draft=true）" "$r" "ok"
           check "戻した後: 下書きになっている" "$(gh api "repos/$GH_REPO/releases/$rid" --jq .draft)" "true"
-          check "戻した後: 鍵なしで Release（API）を取れない" "$(code "https://api.github.com/repos/$GH_REPO/releases/$rid")" "404"
+          check "戻した後: 鍵なしで Release（API）を取れない" "$(curl -s -o /dev/null -w '%{http_code}' "https://api.github.com/repos/$GH_REPO/releases/$rid")" "404"
           check "戻した後: 鍵なしでアセット（API）を取れない" \
-            "$(code -H 'Accept: application/octet-stream' "https://api.github.com/repos/$GH_REPO/releases/assets/$aid")" "404"
-          check "戻した後: 鍵なしで前のダウンロードの URL から取れない" "$(code "$dl")" "404"
-          check "戻した後: 鍵なしで前の Release のページを開けない" "$(code "$html")" "404"
-          check "戻した後: 鍵ありでタグ名で見つかる" "$(gh release view "$TAG" --json isDraft --jq .isDraft 2>&1 | head -c 80)" "true"
-          mkdir -p probe_out
-          gh release download "$TAG" --pattern probe.bin --dir probe_out --clobber >/dev/null 2>&1 || true
-          got=$(sha256sum probe_out/probe.bin 2>/dev/null | cut -d' ' -f1)
-          check "戻した後: 鍵ありで取り出した中身が同じ" "${got:-none}" "$want"
+            "$(curl -s -o /dev/null -w '%{http_code}' -L -H 'Accept: application/octet-stream' "https://api.github.com/repos/$GH_REPO/releases/assets/$aid")" "404"
+          check "戻した後: git のタグは残る" "$(gh api "repos/$GH_REPO/git/matching-refs/tags/$TAG" --jq 'length')" "1"
+          # 前のダウンロードの URL とページを、時間を置いて見る（0・30・90・210・450秒後）
+          last=""
+          for w in 0 30 60 120 240; do
+            sleep "$w"
+            a=$(anon "$dl")
+            p=$(curl -s -L "$html" | grep -c 'probe.bin')
+            echo "  $(date -u +%H:%M:%S) 前のダウンロードの URL: $a ／ 前のページに probe.bin が出る行: $p"
+            last="$a"
+          done
+          check "戻して約7分後: 鍵なしで前のダウンロードの URL から取れない" "$(cut -d' ' -f1 <<<"$last")" "404"
+          check "戻して約7分後: 前のページに中身の名前が出ない" "$p" "0"
           echo ""
           echo "PASS ${#ok[@]} / FAIL ${#ng[@]}"
-          { echo "## 公開した Release を下書きに戻せるか"; echo ""; echo "gh: $(gh --version | head -1)"; echo "";
+          { echo "## 公開した Release を下書きに戻せるか（タグは残す）"; echo ""; echo "gh: $(gh --version | head -1)"; echo "";
             for x in "${ok[@]}"; do echo "- PASS $x"; done; for x in "${ng[@]}"; do echo "- **FAIL** $x"; done; } >> "$GITHUB_STEP_SUMMARY"
+          exit 0
 
-      # 何があっても消す（下書きでも公開でも）
       - name: Delete the probe release
         if: always()
         run: |
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null && echo "確かめの Release $TAG を消した" || echo "（消す Release は無い）"
-          left=$(gh api "repos/$GH_REPO/releases?per_page=100" --jq "[.[] | select(.tag_name | startswith(\"probe-pub-\"))] | length")
-          echo "残った確かめの Release: $left"
-          tags=$(gh api "repos/$GH_REPO/git/matching-refs/tags/probe-pub-" --jq 'length')
-          echo "残った確かめのタグ: $tags"
+          gh api -X DELETE "repos/$GH_REPO/git/refs/tags/$TAG" >/dev/null 2>&1 && echo "残っていたタグ $TAG を消した" || true
+          left=$(gh api "repos/$GH_REPO/releases?per_page=100" --jq "[.[] | select(.tag_name == \"$TAG\")] | length")
+          tags=$(gh api "repos/$GH_REPO/git/matching-refs/tags/$TAG" --jq 'length')
+          echo "残った確かめの Release: $left / タグ: $tags"
+          [ "$left" = "0" ] && [ "$tags" = "0" ]
+
+  droptag:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: probe-tag-${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Publish, convert to draft, delete the tag
+        run: |
+          set +e
+          ok=(); ng=()
+          check() { if [ "$2" = "$3" ]; then ok+=("$1"); echo "PASS $1（$2）"; else ng+=("$1"); echo "FAIL $1（期待 $3 / 実際 $2）"; fi; }
+          anon_code() { curl -s -o /dev/null -L -w '%{http_code}' "$@"; }
+          head -c 2000 /dev/urandom > probe.bin
+          want=$(sha256sum probe.bin | cut -d' ' -f1)
+          gh release create "$TAG" probe.bin --title "タグを消す確かめ（すぐ消す）" \
+            --notes "Probe Draft Convert が作って消す（中身は乱数）" >/dev/null
+          rid=$(gh api "repos/$GH_REPO/releases/tags/$TAG" --jq .id)
+          dl=$(gh api "repos/$GH_REPO/releases/$rid/assets" --jq '.[0].browser_download_url')
+          html=$(gh api "repos/$GH_REPO/releases/$rid" --jq '.html_url')
+          gh release edit "$TAG" --draft=true >/dev/null 2>&1
+          if gh api -X DELETE "repos/$GH_REPO/git/refs/tags/$TAG" >/dev/null 2>&1; then r=ok; else r=ng; fi
+          check "下書きに戻した後に git のタグを消せる" "$r" "ok"
+          check "タグを消した後: タグが無い" "$(gh api "repos/$GH_REPO/git/matching-refs/tags/$TAG" --jq 'length')" "0"
+          check "タグを消した後: 下書きは残り、タグ名も同じ" \
+            "$(gh api "repos/$GH_REPO/releases/$rid" --jq '"\(.draft) \(.tag_name)"')" "true $TAG"
+          check "タグを消した後: gh がタグ名で下書きを見つける" "$(gh release view "$TAG" --json isDraft --jq .isDraft 2>&1 | head -c 60)" "true"
+          head -c 2000 /dev/urandom > probe2.bin
+          if gh release upload "$TAG" probe2.bin --clobber >/dev/null 2>&1; then r=ok; else r=ng; fi
+          check "タグを消した後: 上げられる" "$r" "ok"
+          mkdir -p probe_out
+          GH_DOWNLOAD_TRIES=2 GH_DOWNLOAD_WAIT=2 bash scripts/gh_release_download.sh "$TAG" probe_out 'probe.bin' > dl.log 2>&1
+          got=$(sha256sum probe_out/probe.bin 2>/dev/null | cut -d' ' -f1)
+          check "タグを消した後: 取り出しの台本で同じ中身が取れる" "${got:-none}" "$want"
+          check "タグを消した後: 下書きのままで、タグも作られていない" \
+            "$(gh api "repos/$GH_REPO/releases/$rid" --jq .draft) $(gh api "repos/$GH_REPO/git/matching-refs/tags/$TAG" --jq 'length')" "true 0"
+          for w in 0 30 60; do
+            sleep "$w"
+            c=$(anon_code "$dl"); p=$(anon_code "$html")
+            echo "  $(date -u +%H:%M:%S) 鍵なし: 前のダウンロードの URL $c ／ 前のページ $p"
+          done
+          check "タグを消して約90秒後: 鍵なしで前のダウンロードの URL から取れない" "$c" "404"
+          check "タグを消して約90秒後: 鍵なしで前のページを開けない" "$p" "404"
+          echo ""
+          echo "PASS ${#ok[@]} / FAIL ${#ng[@]}"
+          { echo "## 下書きに戻してタグを消すと見えなくなるか"; echo "";
+            for x in "${ok[@]}"; do echo "- PASS $x"; done; for x in "${ng[@]}"; do echo "- **FAIL** $x"; done; } >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+
+      - name: Delete the probe release
+        if: always()
+        run: |
+          gh release delete "$TAG" --yes 2>/dev/null && echo "確かめの Release $TAG を消した" || echo "（消す Release は無い）"
+          gh api -X DELETE "repos/$GH_REPO/git/refs/tags/$TAG" >/dev/null 2>&1 && echo "残っていたタグ $TAG を消した" || true
+          left=$(gh api "repos/$GH_REPO/releases?per_page=100" --jq "[.[] | select(.tag_name == \"$TAG\")] | length")
+          tags=$(gh api "repos/$GH_REPO/git/matching-refs/tags/$TAG" --jq 'length')
+          echo "残った確かめの Release: $left / タグ: $tags"
           [ "$left" = "0" ] && [ "$tags" = "0" ]
