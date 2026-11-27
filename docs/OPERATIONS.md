@@ -68,6 +68,36 @@
 作り直した値と保存した値が一致するか・ETF の段差・AdjC だけの段差。2026-10-16 の結果は全 10,172,431 行で一致、`docs/MODEL_ADOPTION_RULES.md`
 §61 の実施の記録）。
 
+
+### data-raw を非公開にする案（2026-11-27。まだ変えていない）
+
+運用者の選択（2026-11-27、AskUserQuestion）「非公開にする案を作る」。J-Quants の個人の利用は私的利用に限られ、データの第三者への
+配信は禁止（`docs/MINUTE_BARS.md`「置き場」）なのに、Release `data-raw` は公開（下書きでない）で、日足・財務・信用残・空売り・
+指数・銘柄一覧などの J-Quants の生データ（214ファイル・約541MB。うち日足 約254MB）を誰でも落とせる。分足・ティックは同じ
+理由で下書きに置いている。
+
+確かめ（Probe Draft Convert、`.github/workflows/probe-draft-convert.yml`。run 46011208314・46013759291。data-raw には触っていない）:
+
+| 確かめたこと | 結果 |
+|---|---|
+| 読むだけの鍵（`contents: read`）の job から下書きの Release（data-minute）を見る | **見えない**（`gh release view` は release not found・一覧に出る下書き 0）。取り出しの台本は「Release が無い。初回として進む」で**黙って exit 0** |
+| 公開の Release を下書きに戻す（`gh release edit --draft=true`） | できる。API からはすぐ 404。**前のダウンロードの URL（タグ名入り）からは約1分のあいだ鍵なしで同じ中身が取れ**、約1分半後から 404 |
+| 下書きに戻してから git のタグを消す | できる。前の URL・ページは**すぐ 404**。下書きはタグ名のまま残り、Actions の鍵（`contents: write`）でタグ名から見つけ・上げ・取り出しの台本で同じ中身が取れる。タグは作り直されない |
+
+案（運用者が決めてから。移すのは週末の定時の合間）:
+
+1. data-raw を読むのに読むだけの鍵を使う6本（check-store・deploy-pages・export-train-sample・holdings・preview-supply-demand・
+   run-experiment）を `contents: write` にする（下書きは書き込み権限のある鍵にしか見えない。新しい鍵は作らない）
+2. 取り出しの台本（`scripts/gh_release_download.sh`）に「無ければ止まる」の指定を足し、data-raw の取り出しで使う（読めないときに
+   「初回」と見なして黙って進まない）
+3. data-raw に上げる手順で `GH_ENSURE_DRAFT=1` を使う（公開になっていたら上げずに止まる。分足と同じ）
+4. 1回だけのワークフローで data-raw を下書きに戻し、git のタグ `data-raw` を消す
+5. 鍵なしで一覧・API・ダウンロードの URL・ページが 404 になること、平日の連鎖・週末の学習・Pages のデプロイが通ることを確かめる
+
+残ること（別に決める）: これまでに公開されていた分は、落とした人の手元からは消せない。git の `public/data/*.json`（予測の候補の
+株価・PER など）と、それを出す公開の画面（GitHub Pages）にも J-Quants の値が出ていて、git の履歴にも残る。EDINET DB のデータ
+（`edinet_fin` など）の利用条件は確かめていない。
+
 ## 動く順番
 
 ```
