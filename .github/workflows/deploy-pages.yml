@@ -19,7 +19,9 @@ on:
     types: [completed]
 
 permissions:
-  contents: read
+  # data-raw は下書き（非公開）の Release にする。下書きは書き込み権限のある鍵にしか見えず、読むだけの鍵では
+  # 「無い」と同じに見えるので write（2026-11-27。docs/OPERATIONS.md「data-raw を非公開にする」）
+  contents: write
   pages: write
   id-token: write
 

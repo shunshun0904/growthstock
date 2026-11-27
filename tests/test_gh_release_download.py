@@ -9,7 +9,8 @@ scripts/gh_release_download.sh（Release からの取り出しを「一部だけ
 - 途中で失敗したら、足りないものだけを取り直してそろえる
 - gh が成功を返しても大きさが違えば取り直す
 - 失敗が続けば exit 1（一部だけで先へ進ませない）
-- Release が無い・合うアセットが無いのは初回として exit 0
+- Release が無い・合うアセットが無いのは初回として exit 0。ただし data-raw は Release が見つからなければ exit 1
+  （下書きにすると読むだけの鍵からは「無い」と同じに見えるため。GH_DOWNLOAD_REQUIRED で変えられる）
 - パターンで絞ったら、それ以外は取らない
 - 一覧が一時的に引けなくても、やり直して進む
 
@@ -143,10 +144,29 @@ class TestDownload(unittest.TestCase):
         self.assertIn("そろわなかった", r.stderr)
 
     def test_release_not_found_is_first_run(self):
-        r = self.run_script("data-raw", self.out, STUB_NOTFOUND="1")
+        r = self.run_script("data-jsf", self.out, STUB_NOTFOUND="1")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertIn("初回", r.stdout)
         self.assertEqual(self.calls("dl_calls"), 0)
+
+    def test_data_raw_not_found_stops(self):
+        """data-raw は下書き（非公開）。読むだけの鍵では見えないので、黙って初回として進ませない。"""
+        r = self.run_script("data-raw", self.out, STUB_NOTFOUND="1")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("見つからない", r.stderr)
+        self.assertNotIn("初回", r.stdout)
+        self.assertEqual(self.calls("dl_calls"), 0)
+
+    def test_required_can_be_set(self):
+        r = self.run_script("data-raw", self.out, STUB_NOTFOUND="1", GH_DOWNLOAD_REQUIRED="0")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("初回", r.stdout)
+        r = self.run_script("data-jsf", self.out, STUB_NOTFOUND="1", GH_DOWNLOAD_REQUIRED="1")
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        # 見つかれば、data-raw でも合うアセットが無いのは今までどおり初回
+        r = self.run_script("data-raw", self.out, "edinet_*")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("初回", r.stdout)
 
     def test_no_matching_assets_is_first_run(self):
         r = self.run_script("data-jsf", self.out, "edinet_*")
