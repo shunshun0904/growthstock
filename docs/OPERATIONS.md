@@ -100,6 +100,13 @@
 作るときは下書きで作るようにした。④は定時の無い時間に1回だけ行い、③は④の直後に入れる（④の前に入れると、公開のままの
 data-raw に上げる手順がすべて止まるため）。
 
+運用者の選択（同日、AskUserQuestion）: ほかの公開の Release =「3つとも一緒に非公開」（勧めたもの。data-jsf（日証金）・
+pre-dedupe-20260924（9/24 の取り直し前の J-Quants の写し）・data-volume-profile（分足から作った集計）。後の2つはもう使って
+いないので、下書きに戻して残す。消さない）、④をいつ =「土曜 21:00」（勧めたもの。2026-11-28 21:00 JST。土曜 15:00 の予測と
+保有の推移が終わった後で、日曜 10:10 まで定時が無い）。同日、data-jsf も取り出しで「無ければ止まる」にし、data-raw・data-jsf を
+作る手順（Update Data Store・Fetch JSF）も無いときは下書きで作るようにした。④は1回だけのワークフロー **Make Releases Private**
+（`.github/workflows/make-releases-private.yml`。confirm が yes でなければ何もしない。ほかの run が動いていれば止める）で行う。
+
 残ること（別に決める）: これまでに公開されていた分は、落とした人の手元からは消せない。git の `public/data/*.json`（予測の候補の
 株価・PER など）と、それを出す公開の画面（GitHub Pages）にも J-Quants の値が出ていて、git の履歴にも残る。EDINET DB のデータ
 （`edinet_fin` など）の利用条件は確かめていない。

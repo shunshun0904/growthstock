@@ -75,7 +75,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" --title "data-jsf" \
+            # 日証金の掲載データは私的利用の範囲。公開しないので下書きで作る（2026-11-27。docs/OPERATIONS.md「data-raw を非公開にする」）
+            gh release create "$RELEASE_TAG" --draft --title "data-jsf" \
               --notes "日証金（taisyaku.jp）の需給データ（research/jsf_fetch.py）。私的利用の範囲で使う。"
           fi
           mkdir -p research/_data

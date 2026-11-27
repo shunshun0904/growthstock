@@ -1,0 +1,116 @@
+name: Make Releases Private
+
+# 公開の Release を下書き（非公開）に戻し、git のタグを消す。1回だけ手で起動する（2026-11-28 土曜 21:00 JST の予定）。
+#
+# 運用者の選択（2026-11-27、AskUserQuestion）「案のとおり進める」「3つとも一緒に非公開」「土曜 21:00」。
+# J-Quants の個人の利用・日証金の掲載データは私的利用に限られ、第三者への配信は禁止なのに、次の Release が公開で
+# 誰でも落とせた: data-raw（日足・財務など）・data-jsf（日証金）・pre-dedupe-20260924（9/24 の取り直し前の写し）・
+# data-volume-profile（分足から作った集計）。docs/OPERATIONS.md「data-raw を非公開にする」。
+#
+# やり方は Probe Draft Convert（run 46013759291）で確かめたとおり:
+#   1. gh release edit TAG --draft=true（API からはすぐ見えなくなる）
+#   2. git のタグを消す（消さないと、前のダウンロードの URL から約1分は鍵なしで取れる。消すとすぐ 404）
+#   下書きはタグ名のまま残り、書き込み権限のある鍵（contents: write）でタグ名から見つけ・上げ・取り出せる。
+# ほかのワークフローが動いているあいだは何もしないで止める。確かめが1つでも FAIL なら job を失敗にする（気づけるように）。
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: '本当に下書きに戻すなら yes'
+        required: true
+        default: 'no'
+      tags:
+        description: '下書きに戻す Release（空白区切り）'
+        required: false
+        default: 'data-raw data-jsf pre-dedupe-20260924 data-volume-profile'
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: make-releases-private
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  private:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      CONFIRM: ${{ inputs.confirm }}
+      TAGS: ${{ inputs.tags }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stop unless confirmed and nothing else is running
+        run: |
+          set -u
+          if [ "$CONFIRM" != "yes" ]; then echo "confirm が yes でないので何もしない"; exit 1; fi
+          for t in $TAGS; do
+            if ! [[ "$t" =~ ^[a-z0-9][a-z0-9-]{2,60}$ ]]; then echo "タグ名が不正: $t"; exit 1; fi
+          done
+          # この run のほかに動いている run があれば止める（取り込み・予測・学習の最中に置き場を変えない）
+          busy=$(gh api "repos/$GH_REPO/actions/runs?status=in_progress&per_page=50" \
+                   --jq "[.workflow_runs[] | select(.id != ${{ github.run_id }}) | .name] | join(\", \")")
+          queued=$(gh api "repos/$GH_REPO/actions/runs?status=queued&per_page=50" \
+                   --jq "[.workflow_runs[] | select(.id != ${{ github.run_id }}) | .name] | join(\", \")")
+          if [ -n "$busy$queued" ]; then echo "ほかのワークフローが動いている（${busy} ${queued}）。何もしないで止める"; exit 1; fi
+          echo "ほかに動いている run は無い"
+
+      - name: Convert to draft and delete the tags
+        run: |
+          set +e
+          ok=(); ng=()
+          check() { if [ "$2" = "$3" ]; then ok+=("$1"); echo "PASS $1（$2）"; else ng+=("$1"); echo "FAIL $1（期待 $3 / 実際 $2）"; fi; }
+          anon() { curl -s -o /dev/null -L -w '%{http_code}' "$@"; }
+          for t in $TAGS; do
+            echo "== $t"
+            rid=$(gh api "repos/$GH_REPO/releases?per_page=100" --jq ".[] | select(.tag_name == \"$t\") | .id" | head -1)
+            if [ -z "$rid" ]; then ng+=("$t: Release が見つからない"); echo "FAIL $t: Release が見つからない"; continue; fi
+            n0=$(gh api "repos/$GH_REPO/releases/$rid/assets?per_page=100" --paginate --jq '.[].id' | wc -l)
+            aid=$(gh api "repos/$GH_REPO/releases/$rid/assets?per_page=100" --jq 'sort_by(.size) | .[0].id')
+            aname=$(gh api "repos/$GH_REPO/releases/assets/$aid" --jq .name)
+            dl=$(gh api "repos/$GH_REPO/releases/assets/$aid" --jq .browser_download_url)
+            html=$(gh api "repos/$GH_REPO/releases/$rid" --jq .html_url)
+            mkdir -p "before/$t" "after/$t"
+            gh release download "$t" --pattern "$aname" --dir "before/$t" --clobber >/dev/null 2>&1
+            want=$(sha256sum "before/$t/$aname" 2>/dev/null | cut -d' ' -f1)
+            echo "  アセット $n0 件。確かめに使う一番小さいアセットを1つ取った（中身の指紋だけ比べる）"
+            if [ "$(gh api "repos/$GH_REPO/releases/$rid" --jq .draft)" != "true" ]; then
+              gh release edit "$t" --draft=true >/dev/null 2>&1 && r=ok || r=ng
+              check "$t: 下書きに戻す" "$r" "ok"
+            else
+              echo "  もう下書き"
+            fi
+            if [ "$(gh api "repos/$GH_REPO/git/matching-refs/tags/$t" --jq "[.[] | select(.ref == \"refs/tags/$t\")] | length")" != "0" ]; then
+              gh api -X DELETE "repos/$GH_REPO/git/refs/tags/$t" >/dev/null 2>&1 && r=ok || r=ng
+              check "$t: git のタグを消す" "$r" "ok"
+            else
+              echo "  タグはもう無い"
+            fi
+            check "$t: 下書きになっている" "$(gh api "repos/$GH_REPO/releases/$rid" --jq .draft)" "true"
+            check "$t: タグが無い" "$(gh api "repos/$GH_REPO/git/matching-refs/tags/$t" --jq "[.[] | select(.ref == \"refs/tags/$t\")] | length")" "0"
+            check "$t: アセットの数が変わらない" "$(gh api "repos/$GH_REPO/releases/$rid/assets?per_page=100" --paginate --jq '.[].id' | wc -l)" "$n0"
+            check "$t: 鍵なしで Release（API）を取れない" "$(curl -s -o /dev/null -w '%{http_code}' "https://api.github.com/repos/$GH_REPO/releases/$rid")" "404"
+            check "$t: 鍵なしでアセット（API）を取れない" "$(anon -H 'Accept: application/octet-stream' "https://api.github.com/repos/$GH_REPO/releases/assets/$aid")" "404"
+            check "$t: 鍵なしで前のダウンロードの URL から取れない" "$(anon "$dl")" "404"
+            check "$t: 鍵なしで前の Release のページを開けない" "$(anon "$html")" "404"
+            check "$t: 鍵ありでタグ名から見つかる" "$(gh release view "$t" --json isDraft --jq .isDraft 2>&1 | head -c 60)" "true"
+            GH_DOWNLOAD_TRIES=3 GH_DOWNLOAD_WAIT=5 bash scripts/gh_release_download.sh "$t" "after/$t" "$aname" > dl.log 2>&1
+            got=$(sha256sum "after/$t/$aname" 2>/dev/null | cut -d' ' -f1)
+            check "$t: 取り出しの台本で同じ中身が取れる" "${got:-none}" "${want:-missing}"
+          done
+          anon_list=$(curl -s "https://api.github.com/repos/$GH_REPO/releases?per_page=100" | python3 -c "import json, sys, os; d = json.load(sys.stdin); t = set(os.environ['TAGS'].split()); print(sum(1 for r in d if r.get('tag_name') in t) if isinstance(d, list) else 'error')")
+          check "鍵なしの Release の一覧に出ない" "$anon_list" "0"
+          rm -rf before after dl.log
+          echo ""
+          echo "PASS ${#ok[@]} / FAIL ${#ng[@]}"
+          { echo "## Release を下書き（非公開）に戻した"; echo ""; echo "対象: $TAGS"; echo "";
+            for x in "${ok[@]}"; do echo "- PASS $x"; done; for x in "${ng[@]}"; do echo "- **FAIL** $x"; done; } >> "$GITHUB_STEP_SUMMARY"
+          [ "${#ng[@]}" -eq 0 ]

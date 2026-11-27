@@ -90,7 +90,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if ! gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release create "$RELEASE_TAG" \
+            # J-Quants のデータは第三者に配信できないので下書きで作る（2026-11-27。docs/OPERATIONS.md「data-raw を非公開にする」）
+            gh release create "$RELEASE_TAG" --draft \
               --title "J-Quants 生データ" \
               --notes "J-Quants API V2 から取得した日次株価・財務・信用残・TOPIX。年別 parquet と manifest.json。差分取得の状態は manifest.json が持つ。" \
               --latest=false

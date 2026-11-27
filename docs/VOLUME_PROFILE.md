@@ -12,6 +12,9 @@
   手では起動できるが、**起動すると集計が公開の Release `data-volume-profile` に上がる**ので、起動する前に運用者に確かめる
 - `Deploy to GitHub Pages` から、集計を降ろしてサイトの `data/` に置く段と、`Update Volume Profiles` の完了での起動を外した
 - 公開の Release `data-volume-profile` の `volume-profile.json` を消した（Release そのものは空のまま残す）
+  - 訂正（2026-11-27）: `volume-profile.json` は消えておらず、公開の Release に残っていた（Release の一覧で確かめた）。運用者の
+    選択（2026-11-27）「3つとも一緒に非公開」で、2026-11-28 21:00 JST に Release ごと下書き（非公開）にして残す
+    （`docs/OPERATIONS.md`「data-raw を非公開にする」）
 - **分足・ティックの取得と保存は続ける**（`Update Minute Bars`・`Update Ticks`。下書きの Release `data-minute`・`data-tick-YYYY`。
   [MINUTE_BARS.md](MINUTE_BARS.md)・[TICKS.md](TICKS.md)）。集計の台本（`research/build_volume_profile.py`）と単体テストも残す
 - 戻すとき: `hidden` を外し、git の履歴（2026-11-21 より前）から `deploy-pages.yml` の集計を置く段と `update-volume-profile.yml` の
