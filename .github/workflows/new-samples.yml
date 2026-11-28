@@ -10,10 +10,11 @@ name: New Training Samples
 #
 # ログに出すのは件数と日付だけ（銘柄は出さない）。内訳から引き直したラベルがデータセットと食い違えば止まり、
 # コミットしない。
+#
+# 2026-11-15 に Retrain Weekly の後の自動の起動（workflow_run）をやめた。運用者の依頼「再学習で加わったサンプル、スコアと
+# 収益の分布タグを消してください。」→ AskUserQuestion「隠して自動更新も止める」で画面のタブを隠したため。手で起動すれば
+# 今までどおり作り直す（docs/MODEL_ADOPTION_RULES.md §95）。
 on:
-  workflow_run:
-    workflows: ['Retrain Weekly']
-    types: [completed]
   workflow_dispatch:
 
 permissions:

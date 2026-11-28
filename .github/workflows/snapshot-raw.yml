@@ -57,7 +57,7 @@ jobs:
           n=$(ls snap | wc -l)
           [ "$n" -gt 0 ] || { echo "写すファイルが無い"; exit 1; }
           gh release view "$TAG" >/dev/null 2>&1 || \
-            gh release create "$TAG" --title "生データの写し: $TAG" \
+            gh release create "$TAG" --draft --title "生データの写し: $TAG" \
               --notes "取り直す前の data-raw の写し（種別: $KINDS_IN）。比べる実験のためだけに置く。" \
               --latest=false
           gh release upload "$TAG" snap/* --clobber

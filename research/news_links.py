@@ -5,8 +5,12 @@
 時間をかけてください」）。
 
 毎晩の予測（Predict Breakouts）の後に Check News Links（.github/workflows/news-links.yml）が続けて走り、
-public/data/predictions.json に載っている日の**候補**（今日の戦略の規則 = 1.5σ の3本すべて95以上。live_track.RULE_MODELS /
-AGREE_PCT。画面の strategy.js と同じ）について、リンクを1本ずつ開き、次をすべて満たしたものだけを「確かめた」とする。
+public/data/predictions.json に載っている日の**候補**（今日の戦略の規則 = 2026-10-30 から 1.2σ の3本すべて95以上。2026-10-23〜10-29 も
+同じ。2026-10-12〜10-23 と 2026-10-29〜10-30 は 1.5σ の3本。live_track.RULE_MODELS /
+AGREE_PCT。画面の strategy.js と同じ）と、2026-11-21 からは**規則を通らなくても、その日の候補の中でランキング学習（日次）の順位が
+3位以内の候補**（LTR_TOP。運用者の依頼 2026-11-21「候補銘柄のニュースの探索条件を緩くしてほしいです。分類モデルのスコアは条件を
+満たしてなくてもランキング学習モデルが良ければ買うことはあり得るので」→ 選択「日次ランキングの3位以内」。画面の strategy.js の
+newsRows と同じ選び方）について、リンクを1本ずつ開き、次をすべて満たしたものだけを「確かめた」とする。
 
   1. HTTP 200（転送の後）
   2. 最後の URL が、開いた URL と同じホスト・同じ道・同じクエリ（トップや検索のページに飛ばされていない）
@@ -169,7 +173,7 @@ EXCLUDED: Sequence[Dict[str, str]] = (
 
 
 # --------------------------------------------------------------------------- #
-# 候補（今日の戦略の規則を通った銘柄）
+# 候補（今日の戦略の規則を通った銘柄と、2026-11-21 からはランキング学習（日次）のその日の3位以内）
 # --------------------------------------------------------------------------- #
 
 def rule_codes(pred: dict, models: Sequence[str] = LT.RULE_MODELS, line: float = LT.AGREE_PCT) -> Dict[str, List[str]]:
@@ -194,6 +198,47 @@ def rule_codes(pred: dict, models: Sequence[str] = LT.RULE_MODELS, line: float =
         out.setdefault(code, [])
         if c.get("date") and c["date"] not in out[code]:
             out[code].append(c["date"])
+    return {k: sorted(v) for k, v in sorted(out.items())}
+
+
+#: 規則を通らなくても足す、ランキング学習（日次）のその日の候補の中の順位の上限（予測の ltr.dayRank。1 = 最上位）。
+#: 運用者の依頼（2026-11-21）「候補銘柄のニュースの探索条件を緩くしてほしいです。分類モデルのスコアは条件を満たしてなくても
+#: ランキング学習モデルが良ければ買うことはあり得るので」→ 選択「日次ランキングの3位以内」。画面（src/lib/strategy.js の
+#: NEWS_LTR_TOP）と同じ値（tests/test_news_links.py で確かめる）
+LTR_TOP = 3
+
+
+def ltr_codes(pred: dict, top: int = LTR_TOP) -> Dict[str, List[str]]:
+    """
+    予測ファイルの日ごとの候補のうち、ランキング学習（日次）のその日の中の順位（ltr.dayRank）が top 位以内の銘柄 → その日の一覧。
+    順位が無い・整数でない候補（ランキング学習を予測に入れる前の日・その日に学習済みのモデルが無かった日）は入れない。
+    """
+    days = set(pred.get("dates") or [])
+    out: Dict[str, List[str]] = {}
+    for c in pred.get("candidates") or []:
+        if days and c.get("date") not in days:
+            continue
+        rank = (c.get("ltr") or {}).get("dayRank")
+        if not isinstance(rank, int) or isinstance(rank, bool) or not 1 <= rank <= top:
+            continue
+        code = str(c.get("code") or "").strip().upper()
+        if not CODE_RE.match(code):
+            continue
+        out.setdefault(code, [])
+        if c.get("date") and c["date"] not in out[code]:
+            out[code].append(c["date"])
+    return {k: sorted(v) for k, v in sorted(out.items())}
+
+
+def news_codes(pred: dict) -> Dict[str, List[str]]:
+    """
+    ニュースを確かめる銘柄 → 日の一覧。規則を通った銘柄（rule_codes）に、ランキング学習（日次）がその日の LTR_TOP 位以内の
+    銘柄（ltr_codes）を合わせる。同じ銘柄が両方にあれば日を合わせる。画面（src/lib/strategy.js の newsRows）と同じ選び方。
+    """
+    out: Dict[str, set] = {}
+    for part in (rule_codes(pred), ltr_codes(pred)):
+        for code, dates in part.items():
+            out.setdefault(code, set()).update(dates)
     return {k: sorted(v) for k, v in sorted(out.items())}
 
 
@@ -387,7 +432,8 @@ def build(pred: dict, op: Opener, now: Optional[dt.datetime] = None) -> dict:
     """予測ファイルから候補を選び、全部のリンクを確かめた結果（news_links.json の中身）を返す。"""
     now = now or dt.datetime.now(dt.timezone.utc)
     stamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
-    codes = rule_codes(pred)
+    codes = news_codes(pred)
+    n_rule = len(rule_codes(pred))
     names = names_of(pred)
     tried = passed = 0
 
@@ -420,12 +466,13 @@ def build(pred: dict, op: Opener, now: Optional[dt.datetime] = None) -> dict:
     return {
         "checkedAt": stamp,
         "asOf": pred.get("asOf"),
-        "rule": {"models": list(LT.RULE_MODELS), "agreePct": LT.AGREE_PCT},
+        "rule": {"models": list(LT.RULE_MODELS), "agreePct": LT.AGREE_PCT, "ltrTop": LTR_TOP},
         "groups": [{"id": g, "label": lab} for g, lab in GROUPS],
         "noAuto": [{"host": h, "reason": r} for h, r in NO_AUTO.items()],
         "excluded": list(EXCLUDED),
         "stocks": stocks,
-        "summary": {"stocks": len(stocks), "links": len(links), "ok": count(links, OK), "ng": count(links, NG),
+        "summary": {"stocks": len(stocks), "byRule": n_rule, "byLtrOnly": len(stocks) - n_rule,
+                    "links": len(links), "ok": count(links, OK), "ng": count(links, NG),
                     "unchecked": count(links, UNCHECKED), "requests": op.requests,
                     "decoyTried": tried, "decoyPassed": passed},
     }
@@ -435,7 +482,8 @@ def report(res: dict) -> List[str]:
     """ログの行（件数と理由の内訳だけ。銘柄コード・銘柄名は出さない）。"""
     s = res["summary"]
     links = [l for v in res["stocks"].values() for l in v["links"]]
-    lines = [f"[news-links] 候補 {s['stocks']}銘柄（予測ファイルの {res.get('asOf')} までの日）、リンク {s['links']}本: "
+    lines = [f"[news-links] 候補 {s['stocks']}銘柄（予測ファイルの {res.get('asOf')} までの日。規則を通った {s['byRule']}・"
+             f"規則は通らずランキング学習（日次）{res['rule']['ltrTop']}位以内 {s['byLtrOnly']}）、リンク {s['links']}本: "
              f"確かめて開けた {s['ok']} / 開けなかった {s['ng']} / 自動では開かないサイト {s['unchecked']}。"
              f"開いたページ {s['requests']}件",
              f"[news-links] 確かめ方の確かめ: 開けたページを、わざと間違えた見出し・ほかの銘柄のコードで "

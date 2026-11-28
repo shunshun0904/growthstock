@@ -140,7 +140,8 @@ class TestProductionChecksTheTreeCount(unittest.TestCase):
         cols = F.columns(F.DEFAULT_PRESET)
         return {F.DEFAULT_PRESET: {"_n_features": len(cols),
                                    "_features_sig": F.signature(cols),
-                                   "n_estimators": trees, "learning_rate": 0.02}}
+                                   "n_estimators": trees, "learning_rate": 0.02,
+                                   "_cv": {"label_spec": __import__("label_specs").for_model()}}}
 
     def test_a_search_with_another_tree_count_is_not_used(self):
         """例: 500本で探索した記録（fcbe4c1 の頃の週次実行なら書かれえた）で200本の本番を作らない。"""
@@ -198,7 +199,8 @@ class TestExtraModels(unittest.TestCase):
         import train_multi as TMlt
         import tuning_multi as TM
         cols = F.columns(F.DEFAULT_PRESET)
-        cv = {"features_sig": F.signature(cols), "n_features": len(cols)}
+        cv = {"features_sig": F.signature(cols), "n_features": len(cols),
+              "label_spec": __import__("label_specs").for_model()}
         store = {"xgb": {"_cv": {**cv, "n_estimators": 500}},
                  "cat": {"_cv": {**cv, "n_estimators": TM.N_ESTIMATORS}},
                  "logit": {"_cv": {**cv, "n_estimators": 500}}}

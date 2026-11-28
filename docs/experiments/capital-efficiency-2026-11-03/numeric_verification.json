@@ -1,0 +1,9 @@
+{
+  "rows": 22110,
+  "finite_or_missing_values": true,
+  "ROIC_decomposition_annual_rows": 9635,
+  "CCC_identity_annual_rows": 10848,
+  "original_reference_companies_reproduced": 3,
+  "label10_exact_match": true,
+  "label15_positives": 2463
+}

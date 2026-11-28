@@ -1,0 +1,61 @@
+name: Rewrite Prediction Log Day
+
+# 「予測ログ v2」のある予測日の行を、公開済みの predictions.json の値で書き直す（research/export_sheets.py --rewrite-day。
+# 中身は rewrite_day の説明のとおり）。運用者の選択（2026-11-05「固定%の値に書き直す」）: 2026-11-02 の行は 11/2 夜に旧σモデルの
+# 値で足したあと、11/3 に固定 +10%・+15% のモデルで採点し直した値（画面）と食い違い、あとから足した印の列だけが新しい値で
+# 埋まって混ざっていた。手で起動するだけ（定時には回さない）。v1 のタブは触らない。
+#
+# ログに出すのは件数だけ（銘柄名・値は出さない）。認証情報は環境変数から読むだけで出さない。
+on:
+  workflow_dispatch:
+    inputs:
+      day:
+        description: '書き直す予測日（YYYY-MM-DD。v2 のタブの日だけ）'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: predict-breakouts        # 日次予測（予測ログへの追記）と同じ列に並べ、同じタブを同時に書かない
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  rewrite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: claude/jquants-browser-app-bwk19a      # 公開ブランチ（predict.yml と同じ）
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r research/requirements.txt
+
+      - name: Rewrite
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GSHEET_ID: ${{ secrets.GSHEET_ID }}
+          DAY: ${{ inputs.day }}
+        run: |
+          # 入力をそのままシェルに展開しない（run-experiment.yml と同じ考え方）。日付の形だけ通す
+          if ! [[ "$DAY" =~ ^20[0-9]{2}-[01][0-9]-[0-3][0-9]$ ]]; then
+            echo "日付の形が不正: $DAY"; exit 1
+          fi
+          python3 research/export_sheets.py --book v2 --rewrite-day "$DAY" 2>&1 | tee rewrite.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Summary
+        if: always()
+        run: |
+          { echo '## 予測ログ v2 の書き直し'
+            echo '```'
+            if [ -f rewrite.log ]; then grep -v 'docs.google.com' rewrite.log; else echo "(実行せず)"; fi
+            echo '```'; } >> "$GITHUB_STEP_SUMMARY"

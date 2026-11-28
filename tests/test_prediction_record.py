@@ -91,6 +91,34 @@ class HistoryIsFrozenPerDate(unittest.TestCase):
         got = sorted(e["code"] for e in self.history()["entries"])
         self.assertEqual(got, ["1111"])
 
+    def test_replace_day_swaps_the_record_for_that_day(self):
+        """運用者が置き換えを指示した日（REPLACE_HISTORY_DAY。force と一緒）だけ、その日の記録を今回の予測に置き換える。"""
+        from unittest.mock import patch
+        PD.update_history(self.args, [pick("2026-09-18", "1111", 1)], self.days)
+        with patch.dict(os.environ, {"REPLACE_HISTORY_DAY": "2026-09-18"}):
+            PD.update_history(self.args, [pick("2026-09-18", "2222", 1),
+                                          pick("2026-09-18", "1111", 2)], self.days)
+        got = sorted((e["code"], e["rank"]) for e in self.history()["entries"])
+        self.assertEqual(got, [("1111", 2), ("2222", 1)])
+
+    def test_replace_day_for_another_day_or_bad_value_keeps_the_record(self):
+        from unittest.mock import patch
+        PD.update_history(self.args, [pick("2026-09-18", "1111", 1)], self.days)
+        for v in ("2026-09-17", "2026/09/18", "x"):
+            with patch.dict(os.environ, {"REPLACE_HISTORY_DAY": v}):
+                PD.update_history(self.args, [pick("2026-09-18", "2222", 1)], self.days)
+            got = sorted(e["code"] for e in self.history()["entries"])
+            self.assertEqual(got, ["1111"], v)
+
+    def test_replace_day_keeps_other_days(self):
+        from unittest.mock import patch
+        PD.update_history(self.args, [pick("2026-09-17", "3333", 1)], [pd.Timestamp("2026-09-17")])
+        PD.update_history(self.args, [pick("2026-09-18", "1111", 1)], self.days)
+        with patch.dict(os.environ, {"REPLACE_HISTORY_DAY": "2026-09-18"}):
+            PD.update_history(self.args, [pick("2026-09-18", "2222", 1)], self.days)
+        got = sorted((e["date"], e["code"]) for e in self.history()["entries"])
+        self.assertEqual(got, [("2026-09-17", "3333"), ("2026-09-18", "2222")])
+
     def test_tracking_is_still_updated(self):
         PD.update_history(self.args, [pick("2026-09-18", "1111", 1)], self.days)
         PD.update_history(self.args, [pick("2026-09-18", "2222", 1)], self.days)

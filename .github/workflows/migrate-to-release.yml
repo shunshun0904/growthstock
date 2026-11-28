@@ -89,7 +89,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release view "$RELEASE_TAG" >/dev/null 2>&1 || \
-            gh release create "$RELEASE_TAG" \
+            gh release create "$RELEASE_TAG" --draft \
               --title "J-Quants 生データ" \
               --notes "J-Quants API V2 から取得した日次株価・財務・信用残・TOPIX・銘柄マスタ。年別 parquet と manifest.json。" \
               --latest=false

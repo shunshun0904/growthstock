@@ -14,8 +14,10 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
+import tempfile
 import unittest
 
 import pandas as pd
@@ -458,6 +460,184 @@ class TestCodeFixes(unittest.TestCase):
         w = self._written(ws)
         self.assertNotIn((2, "コード"), w)
         self.assertEqual(w[(2, "現在値")], 2000.0)
+
+
+class TestV2(unittest.TestCase):
+    """
+    v2 のタブ（運用者の依頼 2026-10-30「…予測＆購買記録をv２として…」→「別スプレッドシートはやっぱやめましょう」→
+    「同じシートに v2 のタブ」）。予測日が V2_FROM（2026-11-02）以降の行は「予測ログ v2」にだけ、それより前の行は今の
+    「予測ログ」にだけ足す。すでにある行の値動きはどちらも更新する。v2 にはランキング学習の列がある。
+    """
+
+    @staticmethod
+    def pred():
+        c = [
+            {"date": "2026-10-30", "code": "1111", "jqCode": "11110", "name": "前の週", "rankInDay": 1, "nInDay": 1,
+             "score": 0.3, "band": 5, "close": 100.0, "ltr": {"dayRank": 1, "dayPct": 50.0}},
+            {"date": "2026-11-02", "code": "2222", "jqCode": "22220", "name": "月曜の1位", "rankInDay": 1, "nInDay": 2,
+             "score": 0.4, "band": 9, "close": 200.0, "ltr": {"dayRank": 1, "dayPct": 100.0},
+             "ltr5": {"rank": 1, "nPool": 30, "score": 0.9, "pct": 100.0},
+             "conds": {"d1": True, "w1": True, "r15": False, "r0": True, "c3": True, "c4": False}},
+            {"date": "2026-11-02", "code": "3333", "jqCode": "33330", "name": "月曜の2位", "rankInDay": 2, "nInDay": 2,
+             "score": 0.2, "band": 3, "close": 300.0, "ltr": {"dayRank": 2, "dayPct": 0.0},
+             "ltr5": {"rank": 7, "nPool": 30, "score": 0.1, "pct": 79.3},
+             "conds": {"d1": False, "w1": False, "r15": False, "r0": None, "c3": None, "c4": None}},
+        ]
+        return {"asOf": "2026-11-02", "dates": ["2026-10-30", "2026-11-02"], "models": [], "candidates": c}
+
+    def test_book_dates_and_headers(self):
+        self.assertEqual(ES.V2_FROM, "2026-11-02")
+        self.assertEqual(ES.V2_TITLE, "予測ログ v2")
+        self.assertTrue(ES.in_book("2026-10-30", "v1"))
+        self.assertFalse(ES.in_book("2026-11-02", "v1"))
+        self.assertTrue(ES.in_book("2026-11-02", "v2"))
+        self.assertFalse(ES.in_book("2026-10-30", "v2"))
+        h1, h2 = ES.header_of("v1"), ES.header_of("v2")
+        self.assertFalse(set(ES.RANK_COLS) & set(h1))
+        self.assertEqual(h2[len(ES.OWNED_COLS):len(ES.OWNED_COLS) + len(ES.RANK_COLS)], ES.RANK_COLS)
+        self.assertEqual([c for c in h2 if c not in ES.RANK_COLS], h1)       # 残りの並びは同じ
+        self.assertEqual(len(set(h2)), len(h2))
+
+    def test_rank_fields(self):
+        rows = {r["コード"]: r for r in ES.rows_from_predictions(self.pred())}
+        a, b, old = rows["2222"], rows["3333"], rows["1111"]
+        self.assertEqual((a["ランキング順位"], a["5日の順位"], a["5日の組の数"]), (1, 1, 30))
+        # 3条件 = 日次の1位・5日の1位・1.2σ の3本95以上、4条件 = それに 1.5σ の3本95以上（2026-11-02 から。§87）
+        self.assertEqual((a["1.5σの3本95以上"], a["1.2σの3本95以上"], a["3条件"], a["4条件"]), ("×", "○", "○", "×"))
+        self.assertEqual((b["1.2σの3本95以上"], b["3条件"], b["4条件"]), (None, None, None))   # 決まらないものは空
+        self.assertIsNone(old["5日の順位"])                                    # 前の週の行には無い
+        self.assertEqual(old["ランキング順位"], 1)
+
+    def test_v1_stops_at_the_cutover_but_keeps_tracking(self):
+        header = ES.header_of("v1")
+        line = [""] * len(header)
+        p = {h: i for i, h in enumerate(header)}
+        line[p["予測日"]], line[p["コード"]], line[p["予測時株価"]] = "2026-10-29", "9999", "100"
+        ws = FakeWorksheet([header, line])
+        res = ES.sync(ws, ES.rows_from_predictions(self.pred()), pd.Series({"99990": 110.0, "11110": 120.0}),
+                      pd.Timestamp("2026-11-02"), book="v1")
+        self.assertEqual(res["appended"], 1)                                  # 10/30 の行だけ
+        self.assertEqual([r[p["コード"]] for r in ws.appended], ["1111"])
+        self.assertFalse(set(ES.RANK_COLS) & set(ws.values[0]))                # v1 にはランキングの列を足さない
+        got = {u["range"] for u in ws.batches}
+        self.assertIn(ES.a1(p["現在値"] + 1, 2), got)                          # 既存の行の値動きは更新する
+
+    def test_v2_gets_new_rows_with_rank_columns(self):
+        header = ES.header_of("v2")
+        ws = FakeWorksheet([header])
+        res = ES.sync(ws, ES.rows_from_predictions(self.pred()), pd.Series(dtype=float), None, book="v2")
+        self.assertEqual(res["appended"], 2)                                  # 11/2 の2行だけ
+        rows = [row_dict(header, r) for r in ws.appended]
+        self.assertEqual([r["コード"] for r in rows], ["2222", "3333"])
+        self.assertEqual((rows[0]["5日の順位"], rows[0]["3条件"], rows[0]["4条件"]), (1, "○", "×"))
+        self.assertEqual((rows[1]["5日の順位"], rows[1]["3条件"]), (7, ""))
+        for name in ES.USER_COLS:
+            self.assertEqual(rows[0][name], "")
+
+
+class TestRewriteDay(unittest.TestCase):
+    """
+    予測ログ v2 のある予測日の行を、今の predictions.json の値で書き直す（export_sheets.rewrite_day。運用者の選択 2026-11-05
+    「固定%の値に書き直す」）。2026-11-02 の行は旧σモデルの値で足したあと固定%で採点し直され、あとから足した印の列だけ新しい値で
+    埋まって混ざっていた。
+    """
+    DAY = "2026-11-02"
+
+    @staticmethod
+    def pred():
+        fixed = {"kind": "fixed_return", "threshold": 0.10}
+
+        def cand(code, rank, r0):
+            return {"date": "2026-11-02", "code": code, "jqCode": code + "0", "name": "名" + code, "rankInDay": rank,
+                    "nInDay": 2, "score": 0.5 - rank / 10, "band": 9 - rank, "close": 100.0 * rank,
+                    "byModel": {"lgbm": {"score": 0.4, "pctHistorical": 96.0 - rank, "labelSpec": fixed},
+                                "xgb": {"score": 0.3, "pctHistorical": 97.0 - rank, "labelSpec": fixed}},
+                    "ltr5": {"rank": rank, "nPool": 41},
+                    "conds": {"d1": False, "w1": False, "r15": False, "r0": r0, "c3": False, "c4": False}}
+        return {"asOf": "2026-11-04", "dates": ["2026-11-02", "2026-11-04"],
+                "models": [{"algo": "lgbm", "short": "LGB"}, {"algo": "xgb", "short": "XGB"}],
+                "candidates": [cand("2222", 1, True), cand("3333", 2, False),
+                               {"date": "2026-11-04", "code": "4444", "jqCode": "44440", "name": "別の日", "rankInDay": 1,
+                                "nInDay": 1, "score": 0.2, "band": 3, "close": 400.0}]}
+
+    def sheet(self, user=None):
+        """旧σの値で足した 11/2 の2行（σ の順位で 3333 が1位）と、ほかの日の1行。"""
+        header = ES.header_of("v2")
+        p = {h: i for i, h in enumerate(header)}
+
+        def line(day, code, rank, lgb, mark):
+            x = [""] * len(header)
+            for k, v in {"予測日": day, "コード": code, "銘柄名": "名" + code, "順位": rank, "LGB%": lgb,
+                         "1.2σの3本95以上": mark, "1.5σの3本95以上": mark, "+10%の3本95以上": "×",
+                         "翌営業日始値": "655", "現在値": "627", "騰落率%": "-3.98", "経過営業日": "1"}.items():
+                x[p[k]] = v
+            return x
+        rows = [header, line(self.DAY, "3333", "1", "99.7", "○"), line(self.DAY, "2222", "2", "89.9", "×"),
+                line("2026-11-04", "4444", "1", "53.7", "")]
+        if user:
+            rows[2][p["建値"]] = user
+        return FakeWorksheet(rows), header, p
+
+    @staticmethod
+    def applied(ws):
+        """batch_update を見出し・行に当てたあとの表（FakeWorksheet は記録するだけなので、ここで当てる）。"""
+        vals = [list(r) for r in ws.values]
+        for u in ws.batches:
+            r, c = a1_to_rc(u["range"])
+            vals[r - 1][c - 1] = u["values"][0][0]
+        return vals
+
+    def test_reorders_and_overwrites(self):
+        ws, header, p = self.sheet()
+        res = ES.rewrite_day(ws, ES.rows_from_predictions(self.pred()), self.DAY)
+        self.assertEqual((res["rows"], res["moved"], res["inPlace"]), (2, 2, False))
+        v = self.applied(ws)
+        a, b = row_dict(header, v[1]), row_dict(header, v[2])
+        self.assertEqual((a["コード"], a["順位"], a["LGB%"]), ("2222", 1, 95.0))         # 新しい順位の順
+        self.assertEqual((b["コード"], b["順位"], b["LGB%"]), ("3333", 2, 94.0))
+        self.assertEqual(a["目的変数定義"], "固定+10%/+15%・終盤+5%/+7.5%")
+        self.assertEqual((a["1.2σの3本95以上"], a["1.5σの3本95以上"]), ("", ""))       # 旧σの印は消える
+        self.assertEqual((a["+10%の3本95以上"], b["+10%の3本95以上"]), ("○", "×"))
+        self.assertEqual((a["5日の順位"], a["5日の組の数"]), (1, 41))
+        for r in (a, b):                                                       # 動いた行は空にして、夜の sync に任せる
+            self.assertEqual([r[h] for h in ("翌営業日始値", "現在値", "騰落率%", "経過営業日")], ["", "", "", ""])
+        self.assertEqual(v[3], ws.values[3])                                   # ほかの日の行は触らない
+        self.assertFalse(any(a1_to_rc(u["range"])[0] in (1, 4) for u in ws.batches))
+
+    def test_in_place_when_the_user_wrote_something(self):
+        ws, header, p = self.sheet(user="1000")
+        res = ES.rewrite_day(ws, ES.rows_from_predictions(self.pred()), self.DAY)
+        self.assertEqual((res["moved"], res["inPlace"]), (0, True))
+        v = self.applied(ws)
+        a, b = row_dict(header, v[1]), row_dict(header, v[2])
+        self.assertEqual((a["コード"], a["順位"]), ("3333", 2))                        # 行は動かさない
+        self.assertEqual((b["コード"], b["順位"], b["建値"]), ("2222", 1, "1000"))     # 書いたものは残る
+        self.assertEqual((a["翌営業日始値"], b["現在値"]), ("655", "627"))             # 動かない行の値はそのまま
+        written = {a1_to_rc(u["range"])[1] - 1 for u in ws.batches}
+        self.assertFalse(written & {p[h] for h in ES.REWRITE_KEEP})                    # 引き継ぐ列には書かない
+
+    def test_refuses(self):
+        rows = ES.rows_from_predictions(self.pred())
+        ws, header, p = self.sheet()
+        with self.assertRaises(SystemExit):
+            ES.rewrite_day(ws, rows, self.DAY, book="v1")
+        with self.assertRaises(SystemExit):
+            ES.rewrite_day(ws, rows, "2026-10-30")
+        with self.assertRaises(SystemExit):                                    # 銘柄の組が違う
+            ES.rewrite_day(ws, [x for x in rows if x["コード"] != "3333"], self.DAY)
+        ws.values.append(list(ws.values[1]))                                   # 同じコードが2行
+        with self.assertRaises(SystemExit):
+            ES.rewrite_day(ws, rows, self.DAY)
+        self.assertEqual(ws.batches, [])
+
+    def test_cli_dry_run_and_book(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "predictions.json")
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(self.pred(), fh)
+            self.assertEqual(ES.main(["--book", "v2", "--rewrite-day", self.DAY, "--predictions", path, "--dry-run"]), 0)
+            with self.assertRaises(SystemExit):
+                ES.main(["--book", "v1", "--rewrite-day", self.DAY, "--predictions", path, "--dry-run"])
 
 
 class TestSheetExport(unittest.TestCase):

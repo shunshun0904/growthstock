@@ -1,0 +1,137 @@
+{
+  "arms": {
+    "A": "existing features",
+    "C": "A + audited financial/CAPM inputs, coverage and missingness",
+    "R": "C + RI five price-relative statistics",
+    "D": "C + DDM five price-relative statistics",
+    "B": "C + both families (10 values)",
+    "P": "C + jointly date/availability-shuffled ten values"
+  },
+  "seeds": [
+    42,
+    43,
+    44
+  ],
+  "permutation_seed": 20261103,
+  "trees": 200,
+  "train_end": "2025-09-03 00:00:00",
+  "test_start": "2025-10-04 00:00:00",
+  "test_end": "2026-10-02 00:00:00",
+  "latest_parameter_training_outcome": "2025-10-03 00:00:00",
+  "parameters": {
+    "class10": {
+      "objective": "binary",
+      "boosting_type": "gbdt",
+      "n_estimators": 200,
+      "random_state": 0,
+      "n_jobs": -1,
+      "verbose": -1,
+      "learning_rate": 0.02955716726977837,
+      "num_leaves": 36,
+      "min_child_samples": 173,
+      "subsample": 0.843478335380275,
+      "colsample_bytree": 0.7887994547022888,
+      "reg_alpha": 5.384402084245105e-08,
+      "reg_lambda": 1.1431665266079738e-06,
+      "subsample_freq": 1
+    },
+    "class15": {
+      "colsample_bytree": 0.7701964887628168,
+      "learning_rate": 0.016121693201526958,
+      "min_child_samples": 158,
+      "num_leaves": 78,
+      "reg_alpha": 1.340122060575527e-06,
+      "reg_lambda": 7.299373595589124e-08,
+      "subsample": 0.8523887323688207,
+      "objective": "binary",
+      "boosting_type": "gbdt",
+      "n_estimators": 200,
+      "subsample_freq": 1,
+      "verbose": -1
+    },
+    "ltr": {
+      "boosting_type": "gbdt",
+      "n_estimators": 200,
+      "subsample_freq": 1,
+      "n_jobs": -1,
+      "verbose": -1,
+      "learning_rate": 0.011189641953254732,
+      "num_leaves": 11,
+      "min_child_samples": 212,
+      "subsample": 0.6411061649378713,
+      "colsample_bytree": 0.8816807065987535,
+      "reg_alpha": 0.1477493957155587,
+      "reg_lambda": 0.04230920921534301
+    },
+    "ltr5": {
+      "boosting_type": "gbdt",
+      "n_estimators": 200,
+      "subsample_freq": 1,
+      "n_jobs": -1,
+      "verbose": -1,
+      "learning_rate": 0.023292938448919526,
+      "num_leaves": 9,
+      "min_child_samples": 168,
+      "subsample": 0.7498775102958413,
+      "colsample_bytree": 0.5521318372713037,
+      "reg_alpha": 1.0463661748653903e-08,
+      "reg_lambda": 1.4704959544128534e-08
+    }
+  },
+  "ranking_checks": {
+    "rolling_rows": 110480,
+    "move_checks": {
+      "rows": 300,
+      "same": 300
+    },
+    "same_day_checks": {
+      "rows": 22110,
+      "mismatch": 0
+    }
+  },
+  "ERP": [
+    0.03,
+    0.04,
+    0.05,
+    0.06,
+    0.07
+  ],
+  "horizons": [
+    5,
+    10
+  ],
+  "payouts": [
+    0.25,
+    0.5,
+    0.75
+  ],
+  "growth": [
+    0.0,
+    0.01,
+    0.02
+  ],
+  "beta_window": 504,
+  "beta_min_obs": 252,
+  "beta_shrinkage": "2/3 raw + 1/3 (declared prior)",
+  "DDM_min_ke_minus_g": 0.01,
+  "scenario_valid_fraction_min": 0.8,
+  "primary_metrics": {
+    "class10": "AP",
+    "class15": "AP",
+    "ltr": "daily NDCG@5",
+    "ltr5": "pool NDCG@5"
+  },
+  "rolling_feature_date": "candidate date, frozen",
+  "re_tuned": false,
+  "adoption_test": false,
+  "classifier_imbalance": "production tuning.scale_pos_weight(y_train)",
+  "limitations": [
+    "previously examined single holdout",
+    "price-return beta excludes cash dividends",
+    "clean-surplus and fade are assumptions, not company forecasts",
+    "10Y JGB is a risk-free proxy, not zero curve",
+    "original historical API versions not independently verified",
+    "no costs/liquidity constraints/independent trade accounting",
+    "60/120-day sorts are right-censored, not same sample as 20-day"
+  ]
+}

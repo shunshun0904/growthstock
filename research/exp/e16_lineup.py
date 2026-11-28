@@ -85,7 +85,8 @@ def overlap(a: pd.DataFrame, b: pd.DataFrame, pct: float = 90) -> tuple:
 
 
 def main() -> int:
-    algos = sys.argv[1:] or list(M.ALGOS)
+    # 既定は 2026-10-30 までの models.ALGOS（2026-11-02 の予測からロジスティック回帰を外したが、実験は同じ条件で再現する）
+    algos = sys.argv[1:] or ["lgbm", "xgb", "cat", "logit"]
     df = lab.frame()
     cols = F.columns("all")
     os.makedirs(OOF_DIR, exist_ok=True)

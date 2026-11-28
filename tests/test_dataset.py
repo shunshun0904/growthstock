@@ -1166,8 +1166,10 @@ class TestDefaultLabel(unittest.TestCase):
         # σ基準にすると選ぶ銘柄が反転し、10窓のウォークフォワードで
         # 実収益の差が +5.02pt [+3.19,+5.96] と有意になった
         # （docs/MODEL_DESIGN_SWEEP.md / MODEL_DESIGN_WALKFORWARD.md）。
-        self.assertAlmostEqual(R.vol_norm_k, 1.2)
-        self.assertTrue(R.normalised)
+        self.assertIsNone(R.vol_norm_k)
+        self.assertFalse(R.normalised)
+        self.assertAlmostEqual(R.threshold, 0.10)
+        self.assertAlmostEqual(R.end_ratio, 0.05)
         # 維持日数は課さない。しきい値が行ごとに動く定義で有意性を確かめたのは
         # 維持条件なしの形なので、確かめていない条件を足さない
         self.assertEqual(R.keep_days, 0)
@@ -1815,10 +1817,10 @@ class TestMetaRecordsTheLabelActuallyUsed(unittest.TestCase):
         self.assertEqual(B.POPULATION, "breakout")
         # いまの定義。変えたらこのテストも一緒に更新すること
         self.assertEqual(B.DEFAULT_RISE.name,
-                         "1ヶ月内+1.2σ / 終盤+0.50倍 / MA5>=MA20 / 翌営業日寄り基準")
+                         "1ヶ月内+10% / 終盤+5% / MA5>=MA20 / 翌営業日寄り基準")
         self.assertEqual(B.DEFAULT_RISE.entry, "next_open")
         self.assertEqual(B.DEFAULT_RISE.horizon, 20)
-        self.assertEqual(B.DEFAULT_RISE.vol_norm_k, 1.2)
+        self.assertIsNone(B.DEFAULT_RISE.vol_norm_k)
         self.assertEqual(B.DEFAULT_RISE.keep_days, 0)
         self.assertTrue(B.DEFAULT_RISE.require_uptrend)
 
@@ -1845,8 +1847,8 @@ class TestHorizonScalesEverything(unittest.TestCase):
 
     def test_threshold_scales_with_sqrt_horizon(self):
         import build_dataset as B
-        h20 = B.RiseConfig(horizon=20)
-        h60 = B.RiseConfig(horizon=60)
+        h20 = B.RiseConfig(horizon=20, vol_norm_k=1.2)
+        h60 = B.RiseConfig(horizon=60, vol_norm_k=1.2)
         n20, _ = B.rise_thresholds([2.0], h20)
         n60, _ = B.rise_thresholds([2.0], h60)
         self.assertAlmostEqual(n20[0] / n60[0], (20 / 60) ** 0.5, places=6)

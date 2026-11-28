@@ -114,7 +114,7 @@ class TestPresets(unittest.TestCase):
         self.assertEqual(tx[249:], TX.COLUMNS)
         self.assertEqual(F.signature(base), "5ffd7c53c80f")
         self.assertEqual(F.signature(tx), "a0638dfd0880")                        # 実験105 の腕 C と同じ並び
-        self.assertEqual(F.DEFAULT_PRESET, "all_plus_prog_listing_vol_book_shape_dd_recent_tx")
+        self.assertEqual(F.DEFAULT_PRESET, F.LEGACY_PRESET + "_financial")
         self.assertFalse(set(TX.COLUMNS) - set(F.all_columns()))
 
 

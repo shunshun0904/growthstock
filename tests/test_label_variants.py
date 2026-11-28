@@ -4,8 +4,9 @@
 運用者の指示 2026-10-11。同日夜に xgb / cat / logit の版を足した）。
 
 - 名前と元の学習器の対応（base_algo / label_k / is_tree）。探索・学習は元の学習器（lgbm）で組み、study 名は別
-- 画面・スプレッドシートの並び（models.LINEUP。1.5σ の4本 → 1.8σ の4本）。train_multi の既定は EXTRA（日曜）で、
-  ラベル違いは名指ししたときだけ（土曜）。本番の合議（ALGOS）には入れない
+- 画面・スプレッドシートの並び（models.LINEUP。1.2σ の木3本 → 1.5σ の木3本。1.8σ の4本は 2026-10-24 に、ロジスティック
+  回帰（logit・logit_k15）は 2026-11-02 の予測から外した）。train_multi の既定は EXTRA（日曜）で、ラベル違いは名指ししたとき
+  だけ（土曜）。本番の合議（ALGOS）には入れない
 - ラベルの引き直し（build_dataset.rise_label_for_k）: k = 1.2 なら本番のラベルと一致、k を上げると正例は部分集合
 - train_multi.untuned は木の本数をラベル違いでも見る
 - predict_daily.agreement: 本番の一致（ALGOS）とラベル違いの一致（VARIANTS）を別に数える
@@ -52,9 +53,20 @@ class TestNames(unittest.TestCase):
         self.assertFalse(TM.is_tree("logit"))
         self.assertEqual(TM.preprocess_version("lgbm_k15"), "")                  # 木なので前処理なし
         self.assertEqual(TM.preprocess_version("logit_k15"), TM.preprocess_version("logit"))  # 線形は元の前処理の版
-        self.assertEqual(M.VARIANTS, TM.VARIANTS)
-        self.assertEqual(M.LINEUP, M.ALGOS + k15 + k18)
-        self.assertEqual(M.MULTI, M.EXTRA + k15 + k18)
+        self.assertEqual(M.VARIANTS, TM.VARIANTS)                                  # 過去の実験の記録を読むために 1.8σ も残す
+        # 1.8σ の4本は 2026-10-24 に外した（運用者の依頼）。ロジスティック回帰（logit・logit_k15）は運用者の指示（2026-10-29）で
+        # 2026-11-02 の予測から外した: 学習・毎日の採点・画面・シートは 1.2σ・1.5σ の木の各3本だけ
+        k15_trees = ("lgbm_k15", "xgb_k15", "cat_k15")
+        self.assertEqual(M.ALGOS, ("lgbm", "xgb", "cat"))
+        self.assertEqual(M.RETIRED, ("mlp", "logit"))
+        self.assertEqual(M.EXTRA, ("xgb", "cat"))
+        self.assertEqual(M.RETIRED_VARIANTS, k18 + ("logit_k15",))
+        self.assertEqual(M.ACTIVE_VARIANTS, k15_trees)
+        self.assertEqual(M.LINEUP, M.ALGOS + k15_trees)
+        self.assertEqual(M.MULTI, M.EXTRA + k15_trees)
+        for a in k18 + ("logit", "logit_k15", "mlp"):
+            self.assertNotIn(a, M.LINEUP)
+            self.assertNotIn(a, M.MULTI)
         for a in M.VARIANTS:
             self.assertNotIn(a, M.ALGOS)                                           # 本番の合議には入れない
             self.assertIn(a, M.JA)
@@ -107,11 +119,17 @@ class TestNames(unittest.TestCase):
                 os.makedirs(M.sub_dir(a, d))
                 open(os.path.join(M.sub_dir(a, d), "model.joblib"), "w").close()
             self.assertEqual(M.available(d), ["xgb", "lgbm_k15"])
-            os.makedirs(M.sub_dir("logit_k18", d))
-            open(os.path.join(M.sub_dir("logit_k18", d), "model.joblib"), "w").close()
-            self.assertEqual(M.available(d), ["xgb", "lgbm_k15", "logit_k18"])    # LINEUP の順
-            r = ML.row("lgbm_k18", d)
-            self.assertEqual((r["state"], r["name"]), ("未学習", M.JA["lgbm_k18"]))
+            os.makedirs(M.sub_dir("cat_k15", d))
+            open(os.path.join(M.sub_dir("cat_k15", d), "model.joblib"), "w").close()
+            self.assertEqual(M.available(d), ["xgb", "lgbm_k15", "cat_k15"])      # LINEUP の順
+            # 外したモデル（1.8σ は 2026-10-24、ロジスティック回帰の 1.2σ・1.5σ は 2026-11-02 の予測から）は、Release から
+            # 落ちてきて置き場にあっても採点しない
+            for a in ("logit_k18", "logit_k15", "logit"):
+                os.makedirs(M.sub_dir(a, d))
+                open(os.path.join(M.sub_dir(a, d), "model.joblib"), "w").close()
+            self.assertEqual(M.available(d), ["xgb", "lgbm_k15", "cat_k15"])
+            r = ML.row("cat_k15", d)
+            self.assertEqual((r["state"], r["name"]), ("未学習", M.JA["cat_k15"]))
         finally:
             shutil.rmtree(d, ignore_errors=True)
 
@@ -121,7 +139,7 @@ def frame(n=500, seed=0):
     df = pd.DataFrame({"vol_20d": rng.uniform(0.8, 5.0, n), "future_rise": rng.normal(0.05, 0.15, n),
                        "uptrend_end": (rng.random(n) < 0.7).astype(float)})
     df["end_level"] = df["future_rise"] - rng.uniform(0.0, 0.12, n)
-    need, end_need = B.rise_thresholds(df["vol_20d"], B.DEFAULT_RISE)
+    need, end_need = B.rise_thresholds(df["vol_20d"], __import__("dataclasses").replace(B.DEFAULT_RISE, vol_norm_k=1.2))
     df["label"] = ((df["future_rise"] >= need.to_numpy()) & (df["end_level"] >= end_need.to_numpy())
                    & (df["uptrend_end"] == 1.0)).astype(float)
     return df
@@ -130,7 +148,7 @@ def frame(n=500, seed=0):
 class TestRelabel(unittest.TestCase):
     def test_k12_matches_and_higher_k_is_subset(self):
         df = frame()
-        y12 = B.rise_label_for_k(df, B.VOL_NORM_K)
+        y12 = B.rise_label_for_k(df, 1.2)
         self.assertTrue((y12 == df["label"]).all())
         y15 = B.rise_label_for_k(df, 1.5)
         y18 = B.rise_label_for_k(df, 1.8)
@@ -158,7 +176,7 @@ class TestTrainMulti(unittest.TestCase):
     def test_untuned_checks_trees_for_variants(self):
         cols = ["a", "b", "c"]
         sig = F.signature(cols)
-        ok = {"lgbm_k15": {"_cv": {"features_sig": sig, "n_features": 3, "n_estimators": TM.N_ESTIMATORS}}}
+        ok = {"lgbm_k15": {"_cv": {"features_sig": sig, "n_features": 3, "n_estimators": TM.N_ESTIMATORS, "label_spec": __import__("label_specs").for_model("lgbm_k15")}}}
         self.assertEqual(TR.untuned(["lgbm_k15"], ok, cols), {})
         bad = {"lgbm_k15": {"_cv": {"features_sig": sig, "n_features": 3, "n_estimators": 500}}}
         self.assertIn("本数", TR.untuned(["lgbm_k15"], bad, cols)["lgbm_k15"])
@@ -180,11 +198,17 @@ class TestPredict(unittest.TestCase):
 class TestSheets(unittest.TestCase):
     def test_columns_and_rows(self):
         self.assertIn("L15%", ES.MODEL_COLS)
-        self.assertIn("L18スコア", ES.SCORE_COLS)
-        for c in ("X15%", "C15%", "LR15%", "X18%", "C18%", "LR18%"):
+        self.assertIn("L15スコア", ES.SCORE_COLS)
+        for c in ("X15%", "C15%"):
             self.assertIn(c, ES.MODEL_COLS)
-        self.assertIn("LR18スコア", ES.SCORE_COLS)
+        # 1.8σ の4本は 2026-10-24 に、ロジスティック回帰（LR・LR15）は 2026-11-02 の予測から外した: 列を書かない（シートの
+        # 見出しは残り、前の行の値もそのまま）
+        for c in ("L18%", "X18%", "C18%", "LR18%", "LR%", "LR15%"):
+            self.assertNotIn(c, ES.MODEL_COLS)
+        for c in ("LR18スコア", "LRスコア", "LR15スコア"):
+            self.assertNotIn(c, ES.SCORE_COLS)
         self.assertEqual(len(ES.MODEL_COLS), len(M.LINEUP))
+        self.assertEqual(len(M.LINEUP), 6)
         self.assertEqual(ES.AGREE_COLS, [ES.AGREE_COL, ES.AGREE_K_COL])
         pred = {"models": [{"algo": "lgbm", "short": "LGB"}, {"algo": "lgbm_k15", "short": "L15"}],
                 "candidates": [{"date": "2026-10-13", "code": "1234", "jqCode": "12340", "name": "x", "rankInDay": 1,
@@ -203,6 +227,25 @@ class TestSheets(unittest.TestCase):
         row = ES.rows_from_predictions(old)[0]
         self.assertNotIn("L15%", row)                                              # 無いモデルの列は作らない
         self.assertIsNone(row[ES.AGREE_K_COL])
+        # 外す前に出した予測ファイル（models に 1.8σ がある）でも、1.8σ の列は書かない
+        k18 = {"models": pred["models"] + [{"algo": "lgbm_k18", "short": "L18"}],
+               "candidates": [{**pred["candidates"][0],
+                               "byModel": {**pred["candidates"][0]["byModel"],
+                                           "lgbm_k18": {"score": 0.3, "pctHistorical": 90.0}}}]}
+        row = ES.rows_from_predictions(k18)[0]
+        self.assertEqual(row["L15%"], 93.0)
+        self.assertNotIn("L18%", row)
+        self.assertNotIn("L18スコア", row)
+        # ロジスティック回帰（2026-11-02 の予測から外した）も、外す前の予測ファイルにあっても書かない
+        lr = {"models": pred["models"] + [{"algo": "logit", "short": "LR"}, {"algo": "logit_k15", "short": "LR15"}],
+              "candidates": [{**pred["candidates"][0],
+                              "byModel": {**pred["candidates"][0]["byModel"],
+                                          "logit": {"score": 0.2, "pctHistorical": 80.0},
+                                          "logit_k15": {"score": 0.2, "pctHistorical": 81.0}}}]}
+        row = ES.rows_from_predictions(lr)[0]
+        self.assertEqual(row["L15%"], 93.0)
+        for c in ("LR%", "LRスコア", "LR15%", "LR15スコア"):
+            self.assertNotIn(c, row)
 
 
 if __name__ == "__main__":

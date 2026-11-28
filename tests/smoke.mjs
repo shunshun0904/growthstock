@@ -10,7 +10,6 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { decode, knnLists, network, todayNeighbors, methodOf, BWR, NA_VALUE } from '../src/lib/recurrence.js';
 
 const ROOT = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const DIST = path.join(ROOT, 'dist');
@@ -20,13 +19,11 @@ const FIXTURE = path.join(ROOT, 'tests', 'fixtures', 'synthetic-stocks.json');
 const PRED_FIXTURE = path.join(ROOT, 'tests', 'fixtures', 'synthetic-predictions.json');
 const FILINGS_FIXTURE = path.join(ROOT, 'tests', 'fixtures', 'synthetic-filings.json');
 const SAMPLES_FIXTURE = path.join(ROOT, 'tests', 'fixtures', 'synthetic-new-samples.json');
+// スコアと収益の分布。tests/test_score_dist.py の合成データを research/score_dist.py に通して作った
+const SCORE_DIST_FIXTURE = path.join(ROOT, 'tests', 'fixtures', 'synthetic-score-dist.json');
 // 候補銘柄のニュースのリンクを確かめた結果。research/news_links.py の書き出しで作った（偽の取得。9324 の掲示板は開けない）
 const NEWS_FIXTURE = path.join(ROOT, 'tests', 'fixtures', 'synthetic-news-links.json');
-// リカレンス・ネットワーク（目次と候補ごとのファイル）。tests/test_recurrence_net.py --write-fixtures が作りものの日足から作る
-// （日付・銘柄コードは synthetic-predictions.json と同じ 2026-09-11 の 9324・9434）
-const RECURRENCE_FIXTURES = path.join(ROOT, 'tests', 'fixtures', 'recurrence');
-const RECURRENCE_EXPECTED = JSON.parse(fs.readFileSync(path.join(ROOT, 'tests', 'fixtures', 'recurrence-expected.json'), 'utf8'));
-const SHOTS = path.join(ROOT, 'docs');
+const SHOTS = process.env.SMOKE_ARTIFACT_DIR || path.join(ROOT, 'docs');
 fs.mkdirSync(SHOTS, { recursive: true });
 
 const MIME = {
@@ -39,14 +36,15 @@ const server = http.createServer((req, res) => {
   if (rel === '/') rel = '/index.html';
   // データファイルだけは合成フィクスチャに差し替える
   const fixtures = {
+    '/data/valuations.json': path.join(ROOT, 'tests', 'fixtures', 'synthetic-valuations.json'),
     '/data/stocks.json': FIXTURE,
     '/data/predictions.json': PRED_FIXTURE,
     '/data/filings.json': FILINGS_FIXTURE,
     '/data/new_samples.json': SAMPLES_FIXTURE,
+    '/data/score_dist.json': SCORE_DIST_FIXTURE,
     '/data/news_links.json': NEWS_FIXTURE,
   };
-  const rec = rel.startsWith('/data/recurrence/') ? path.join(RECURRENCE_FIXTURES, path.basename(rel)) : null;
-  const file = fixtures[rel] || rec || path.join(DIST, rel);
+  const file = fixtures[rel] || path.join(DIST, rel);
   if (!fs.existsSync(file) || fs.statSync(file).isDirectory()) {
     res.writeHead(404).end('not found');
     return;
@@ -76,9 +74,18 @@ console.log(launchOptions.executablePath
 const browser = await chromium.launch(launchOptions);
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
 
+await page.route('**/data/active_models.json*', (route) => route.fulfill({
+  json: { kind: 'fixed_return', models: [{ dataThrough: '2026-11-02', trainTo: '2026-10-02' }] },
+}));
 const consoleErrors = [];
 page.on('console', (m) => { if (m.type() === 'error') consoleErrors.push(m.text()); });
 page.on('pageerror', (e) => consoleErrors.push(`pageerror: ${e.message}`));
+// リカレンス・ネットワークのデータ（隠している間はどのタブも読まない。下の「隠したタブ」）
+const recurrenceRequests = [];
+page.on('request', (r) => { if (r.url().includes('/data/recurrence/')) recurrenceRequests.push(r.url()); });
+// 価格帯別出来高の集計（2026-11-21 からタブを隠し、公開もやめた。隠している間はどのタブも読まない）
+const volumeProfileRequests = [];
+page.on('request', (r) => { if (r.url().includes('/data/volume-profile')) volumeProfileRequests.push(r.url()); });
 
 console.log('\n== ブレイク予測 View ==');
 await page.goto(base, { waitUntil: 'networkidle' });
@@ -89,16 +96,20 @@ const nRows = await page.locator('.pred-row').count();
 check(nRows === 5, `候補が5件描画される (実際: ${nRows})`);
 
 // モデル別の百分位の表（運用者の指示 2026-10-12「12個全てを載せてほしい。棒グラフ形式でなくてよい。大小が分かればよい」）。
-// 行 = ラベル（1.2σ / 1.5σ / 1.8σ）、列 = 学習器。合成データは12本で、5件目だけ logit_k18 が欠ける
+// 行 = ラベル（1.2σ / 1.5σ）、列 = 学習器。合成データは 1.8σ とロジスティック回帰を含む12本（外す前の日の予測ファイルの形）で、
+// 5件目だけ logit_k15 と 1.5σ の cat が欠ける（欠けたマスの「—」を見るため。logit_k15 は外したモデルなので表に出ない。
+// 2026-10-30 に規則が 基準ラベルの3本に戻ったので、欠けるマスを規則の外の 1.5σ の行に移した）。
+// ロジスティック回帰（LR / LR15）は運用者の指示（2026-10-29）で 2026-11-02 の予測から外し、前の日の値も出さない。1.8σ の4本は運用者の依頼（2026-10-24「1.8σの週次学習はなくしたはずです」→「採点・表示からも外す」）で、
+// 予測ファイルに値があっても出さない（src/lib/predictions.js の RETIRED_VARIANTS）
 const gridCells = page.locator('.pred-list .pred-row .pred-main .pred-mg .c');
-check((await gridCells.count()) === nRows * 12, `行ごとに12マス (実際: ${await gridCells.count()})`);
+check((await gridCells.count()) === nRows * 6, `行ごとに6マス（1.8σ の4本とロジスティック回帰は出さない） (実際: ${await gridCells.count()})`);
 const firstGrid = page.locator('.pred-row').first().locator('.pred-main .pred-mg');
 const heads = await firstGrid.locator('.h').allTextContents();
-check(heads.join(',') === ',LGB,XGB,CAT,LR', `列は LGB / XGB / CAT / LR (実際: ${heads.join(',')})`);
+check(heads.join(',') === ',LGB,XGB,CAT', `列は LGB / XGB / CAT（LR は出さない） (実際: ${heads.join(',')})`);
 const labels = await firstGrid.locator('.r').allTextContents();
-check(labels.join(',') === '1.2σ,1.5σ,1.8σ', `行は 1.2σ / 1.5σ / 1.8σ (実際: ${labels.join(',')})`);
+check(labels.join(',') === '1.2σ,1.5σ', `行は 1.2σ / 1.5σ（1.8σ の行は出さない） (実際: ${labels.join(',')})`);
 const vals = await firstGrid.locator('.c').allTextContents();
-check(vals.join(',') === '85,96,98,56,84,97,97,54,81,94,95,51', `1件目の12本の値 (実際: ${vals.join(',')})`);
+check(vals.join(',') === '85,96,98,84,97,97', `1件目の6本の値 (実際: ${vals.join(',')})`);
 check(((await firstGrid.locator('.c').first().getAttribute('title')) || '').includes('過去スコア分布の下から 85.0%'),
       'マスの title に小数1桁の百分位が出る');
 const look = (loc) => loc.evaluate((el) => {
@@ -116,72 +127,149 @@ check((await naCells.count()) === 1 && ((await naCells.textContent()) || '').inc
       '欠けたモデルのマスは「—」');
 check((await page.locator('.pred-ms-i').count()) === 0, 'モデル別の縦棒は出さない');
 check(!predBody.includes('12本の合意'), '12本の合意（平均）は出さない');
-check(predBody.includes('決定木系') && predBody.includes('ラベル1.8σ'), '塊の名前が一覧パネルに出る');
+check(predBody.includes('決定木系') && predBody.includes('厳しい到達条件') && !predBody.includes('ラベル1.8σ'),
+      '塊の名前が一覧パネルに出る（外した 1.8σ の塊は出さない）');
 
 // 同じ表でスコアそのものに切り替えられる（運用者の依頼 2026-10-16「目的変数横断での比較ができないので、モデルのスコア自体も
-// 表示してほしい。同じ形式で、青白の濃淡でモデル×目的変数横断で色付け」）。色の物差しは全候補・12本で1つ（最小〜最大の帯）
+// 表示してほしい。同じ形式で、青白の濃淡でモデル×目的変数横断で色付け」）。色の物差しはその表の6本の中の最小〜最大
 await page.locator('.pred-metric button', { hasText: 'スコア' }).click();
 const scoreVals = await firstGrid.locator('.c').allTextContents();
-check(scoreVals.length === 12 && scoreVals.every((v) => /^\d\.\d{2}$/.test(v)),
-      `スコアに切り替えると1件目の12マスが小数2桁のスコアになる (実際: ${scoreVals.slice(0, 3).join(',')}…)`);
+check(scoreVals.length === 6 && scoreVals.every((v) => /^\d\.\d{2}$/.test(v)),
+      `スコアに切り替えると1件目の6マスが小数2桁のスコアになる (実際: ${scoreVals.slice(0, 3).join(',')}…)`);
 check((await page.locator('.pred-row').first().locator('.pred-ms .lab').textContent()).includes('モデル別のスコア'),
       '見出しが「モデル別のスコア」になる');
 check((await page.locator('.pred-row').first().locator('.pred-ms-grad i').count()) === 1, 'スコアの色の物差し（最小〜最大の帯）が見出しに出る');
 await page.locator('.pred-metric button', { hasText: '百分位' }).click();
-check((await firstGrid.locator('.c').allTextContents()).join(',') === '85,96,98,56,84,97,97,54,81,94,95,51',
+check((await firstGrid.locator('.c').allTextContents()).join(',') === '85,96,98,84,97,97',
       '百分位に戻すと元の値');
 check(predBody.includes('並べているモデル'), 'モデル一覧パネルが表示される');
-check(predBody.includes('LightGBM（1.5σ）') && predBody.includes('ロジスティック回帰（1.8σ）'),
-  '12本の日本語名が出る');
+check(predBody.includes('LightGBM（1.5σ）') && predBody.includes('CatBoost（1.5σ）') && !predBody.includes('（1.8σ）')
+        && !predBody.includes('ロジスティック回帰（1.5σ）'),
+  '6本の日本語名が出る（1.8σ の4本とロジスティック回帰は並べているモデルにも出さない）');
 // 今日の戦略パネル（docs/PLAYBOOK.md の手順）。
 // 合成データは候補5件。2026-10-12 から発火の数では見送らないので「発火が少ない日」。
-// 1.5σ の3本がすべて95以上の候補は無いので、買う銘柄は出ない
+// 基準ラベルの3本（2026-10-30 からの規則）がすべて95以上の候補は無いので、買う銘柄は出ない
 const strat = await page.textContent('.strat');
 check(strat.includes('今日の戦略'), '戦略パネルが表示される');
 check(strat.includes('発火が少ない日'), '発火5件の日は「発火が少ない日」と出る（見送りではない）');
 check(strat.includes('発火の数では見送らない'), 'パネルの見出しに「発火の数では見送らない」と出る');
-check(strat.includes('1.5σ の3本がすべて95以上の銘柄はありません'), '買わない理由（基準を満たす銘柄なし）が出る');
+check(strat.includes('基準ラベルの3本がすべて95以上の銘柄はありません'), '買わない理由（基準を満たす銘柄なし）が出る');
+check(strat.includes('基準ラベルの3本（LGB・XGB・CAT）がすべて95以上の銘柄を2件まで'), 'パネルの見出しに規則（基準ラベルの3本）が出る');
 check((await page.locator('.strat-pick').count()) === 0,
       '基準を満たす銘柄が無い日は買う銘柄を出さない');
 check(strat.includes('発火数'), '発火数が表示される');
 check(!strat.includes('NaN') && !strat.includes('undefined'),
       '戦略パネルに NaN / undefined が出ていない');
 
+// ランキング学習（参考。買いの規則は変えない。運用者の選択「まず並べて見る」2026-10-24）。合成データの5件に
+// その日の中の順位を付けてある（ソフトバンク 1位・大和自動車交通 2位・安田倉庫 3位（50。上半分）・シンプレクス 4位・野村 5位）。
+// 規則を満たす銘柄が無いので「両方使う形」は 0件 / 0件、印はどれも灰（紫の「両方使う形」は出ない）
+check(strat.includes('両方使う形（参考）'), '今日の戦略に「両方使う形（参考）」が出る');
+check(strat.includes('0件 / 0件（ランキング学習がその日の中で上半分）'), '規則を満たす銘柄が無い日は 0件 / 0件');
+const ltrBadges = page.locator('.pred-list .pred-ltr');
+check((await ltrBadges.count()) === 5, `ランキング学習の印が5件すべてに出る (実際: ${await ltrBadges.count()})`);
+check(((await rowOf('ソフトバンク').locator('.pred-ltr').textContent()) || '') === 'ランキング上半分',
+      'ソフトバンク（1位）は「ランキング上半分」');
+check(((await rowOf('安田倉庫').locator('.pred-ltr').textContent()) || '') === 'ランキング上半分',
+      '安田倉庫（3位 / 5件。百分位 50）は上半分');
+check(((await rowOf('シンプレクス').locator('.pred-ltr').textContent()) || '') === 'ランキング下半分',
+      'シンプレクス（4位）は「ランキング下半分」');
+check(((await rowOf('ソフトバンク').locator('.pred-ltr').getAttribute('class')) || '').includes('slate'),
+      '規則を満たさない候補の印は灰（両方使う形ではない）');
+check(((await rowOf('ソフトバンク').locator('.pred-ltr').getAttribute('title')) || '').includes('買いの規則には使いません'),
+      '印の title に「買いの規則には使いません」と出る');
+
+// ランキング学習の順位表（運用者の依頼 2026-10-29「ランキング学習モデルによるランキングをわかりやくどこかに表示してください」
+// →「予測タブに順位表」）。今日の戦略の下に、対象日の候補をランキング学習の順位の順に並べる。上位3件（百分位 50 以上）が上半分で、
+// その下に区切り。規則を満たす候補は無いので「満たす」「両方使う形」は出ない。銘柄名を押すと下の一覧でその候補が開く
+const ltrCard = page.locator('.card.ltr-rank');
+check((await ltrCard.count()) === 1 && ((await ltrCard.locator('h2').textContent()) || '').includes('ランキング学習の順位'),
+      '予測タブにランキング学習の順位表が出る');
+const ltrOrderOk = await page.evaluate(() => {
+  const cards = [...document.querySelectorAll('.pred > section.card')];
+  const i = cards.findIndex((c) => c.classList.contains('ltr-rank'));
+  return i > 0 && cards[i - 1].classList.contains('strat') && (cards[i + 1]?.textContent || '').includes('ブレイク予測');
+});
+check(ltrOrderOk, '順位表は今日の戦略のすぐ下・一覧（ブレイク予測）の上');
+const ltrRows = ltrCard.locator('tbody tr');
+const ltrNames = await ltrCard.locator('tbody .ltr-rank-nm').allTextContents();
+const wantLtr = ['ソフトバンク', '大和自動車交通', '安田倉庫', 'シンプレクス', '野村アセットマネジメント'];
+check(ltrNames.length === 5 && wantLtr.every((w, i) => (ltrNames[i] || '').includes(w)),
+      `順位表はランキング学習の順位の順 (実際: ${ltrNames.map((t) => t.slice(0, 6)).join(' / ')})`);
+const ltrRanks = await ltrCard.locator('tbody td.ltr-rank-n').allTextContents();
+check(ltrRanks.join(',') === '1 / 5,2 / 5,3 / 5,4 / 5,5 / 5', `順位の列は「N / 件数」 (実際: ${ltrRanks.join(',')})`);
+const ltrPcts = await ltrRows.evaluateAll((trs) => trs.map((tr) => tr.children[2].textContent));
+check(ltrPcts.join(',') === '100.0,75.0,50.0,25.0,0.0', `その日の中の百分位 (実際: ${ltrPcts.join(',')})`);
+const ltrClasses = await ltrRows.evaluateAll((trs) => trs.map((tr) => tr.className));
+check(ltrClasses.join(',') === 'upper,upper,upper cut,lower,lower', `上半分（3件）の下に区切りの線 (実際: ${ltrClasses.join(',')})`);
+check((await ltrCard.locator('.badge').count()) === 0, '規則を満たす候補が無い日は「満たす」「両方使う形」の印が出ない');
+check(((await ltrCard.locator('.ltr-rank-note').textContent()) || '').includes('上の 3 件がその日の中で上半分'),
+      '順位表の注記に上半分の件数が出る');
+// 直近5営業日の組のランキング学習（2026-11-02 から。§82-6）の「5日の順位」と「3条件・4条件」の列。合成データでは
+// ソフトバンクが日次の1位・大和自動車交通が5日の1位で、両方を満たす候補は無いので3条件・4条件の印は出ない（3条件 = 日次の
+// 1位・5日の1位・基準ラベルの3本 95以上、4条件 = それに 1.5σ の3本 95以上。§87）
+const ltrHeads = await ltrCard.locator('thead th').allTextContents();
+check(ltrHeads.some((t) => t.includes('5日の順位')) && ltrHeads.some((t) => t.includes('3条件・4条件')),
+      `順位表に「5日の順位」と「3条件・4条件」の列がある (実際: ${ltrHeads.join(' / ')})`);
+const ltr5s = await ltrRows.evaluateAll((trs) => trs.map((tr) => tr.children[5].textContent));
+check(ltr5s.join(',') === '3 / 9,1 / 9,5 / 9,2 / 9,7 / 9', `5日の順位の列は「N / 組の件数」 (実際: ${ltr5s.join(',')})`);
+const condCells = await ltrRows.evaluateAll((trs) => trs.map((tr) => tr.children[6].textContent));
+check(condCells.every((t) => t === '—'), `3条件・4条件を満たす候補が無い日は「—」 (実際: ${condCells.join(',')})`);
+check(((await rowOf('ソフトバンク').locator('.pred-ltr').getAttribute('title')) || '').includes('直近5営業日の組の中で 3位 / 9件'),
+      'ランキング学習の印の title に直近5営業日の組の中の順位が出る');
+check((await page.locator('.pred-list .pred-cond').count()) === 0, '3条件・4条件を満たす候補が無い日は一覧に印が出ない');
+check((await page.locator('.pred-list .pred-main .pred-ltr5').count()) === 5,
+      '条件を満たす候補がゼロでも、主一覧の全5銘柄に5営業日順位が出る');
+check((await rowOf('シンプレクス').locator('.pred-main .pred-ltr5').allTextContents()).join('').includes('2位 / 9銘柄'),
+      '条件未達銘柄にも5営業日の組全体の順位を表示し、当日5件で順位を付け直さない');
+
+const ltrHead = (await ltrCard.locator('.card-head .sub').textContent()) || '';
+check(ltrHead.includes('参考に並べるだけで、買う銘柄は今日の戦略の規則のまま') && ltrHead.includes('2026/09/10 学習'),
+      '順位表の見出しに「参考」とモデルの学習日が出る');
+await ltrCard.locator('.ltr-rank-name', { hasText: 'シンプレクス' }).click();
+await page.waitForSelector('.pred-row.open .pred-detail', { timeout: 5000 });
+check(((await page.locator('.pred-row.open .pred-id').textContent()) || '').includes('シンプレクス'),
+      '順位表の銘柄名を押すと、下の一覧でその候補が開く');
+// 開いた行を閉じて、下の確かめを何も開いていない状態から始める
+await page.locator('.pred-row.open .pred-main').click();
+
 check(!predBody.includes('NaN'), '予測タブに NaN が出ていない');
 check(!predBody.includes('undefined'), '予測タブに undefined が出ていない');
 
-// 際どい候補の印（今の規則の線「1.5σ の3本とも95以上」の下）。合成データの1件目は 1.5σ の3本で
-// lgbm_k15 83.6・xgb_k15 97.1・cat_k15 97.4（2本95以上で LightGBM が最下位。今の数字では赤の組が無いので黄）。
-// 5件目は 1.2σ の3本なら際どい形（96・100・78.1）だが、1.5σ の3本（92.9・100・76.8）では際どくない → 印なし
+// 際どい候補の印（今の規則の線「基準ラベルの3本とも95以上」の下。2026-10-30 から）。合成データの1件目は 基準ラベルの3本で
+// lgbm 85・xgb 96・cat 98（2本95以上で LightGBM が最下位。今の数字では赤の組が無いので黄）。
+// 5件目の大和自動車交通も 基準ラベルの3本では際どい形（96・100・78.1。2本95以上で CatBoost が最下位）→ 印が出る
+// （1.5σ の3本（92.9・100・欠け）が規則だった 2026-10-29〜10-30 は際どくなかった）
 const borders = page.locator('.pred-list .pred-border');
-check((await borders.count()) === 1, `際どい候補の印が1件に出る (実際: ${await borders.count()})`);
+check((await borders.count()) === 2, `際どい候補の印が2件に出る (実際: ${await borders.count()})`);
 const firstBorder = page.locator('.pred-row').first().locator('.pred-border');
-check(((await firstBorder.textContent()) || '').includes('1.5σで際どい・最下位 LightGBM'),
-      '1件目は「1.5σで際どい・最下位 LightGBM」と出る');
+check(((await firstBorder.textContent()) || '').includes('基準ラベルで際どい・最下位 LightGBM'),
+      '1件目は「基準ラベルで際どい・最下位 LightGBM」と出る');
 check(((await firstBorder.getAttribute('class')) || '').includes('amber'), '1件目の印は黄（赤の組は無い）');
-check(((await firstBorder.getAttribute('title')) || '').includes('LightGBM が一番低いときは、過去 +1.6%（141件）'),
+check(((await firstBorder.getAttribute('title')) || '').includes('LightGBM が一番低いときは、過去 +2.3%（200件）'),
       '印の title にその形の過去の数字が出る');
-check((await rowOf('大和自動車交通').locator('.pred-border').count()) === 0,
-      '大和自動車交通（1.2σ の3本なら際どい形）には印が出ない');
+check(((await rowOf('大和自動車交通').locator('.pred-border').textContent()) || '').includes('基準ラベルで際どい・最下位 CatBoost'),
+      '大和自動車交通（基準ラベルの3本で 2本95以上・残り 85未満）にも印が出る');
 
-// 一覧の並び順（運用者の決定 2026-10-13「1.5σ の3本のうち一番低い百分位でいきましょう」）。
-// 合成データの 1.5σ の3本の最小: 安田倉庫 83.6・大和自動車交通 76.8・ソフトバンク 70.5・シンプレクス 59.9・
-// 野村 35.5（1.2σ の LightGBM のスコア順なら 安田倉庫・野村・シンプレクス・ソフトバンク・大和自動車交通）
+// 一覧の並び順（運用者の決定 2026-10-13「1.5σ の3本のうち一番低い百分位でいきましょう」を、規則の3本で続ける。2026-10-30 から
+// 規則と一緒に 基準ラベルの3本。2026-10-29〜10-30 は 1.5σ の3本）。
+// 合成データの 基準ラベルの3本の最小: 安田倉庫 85.0・大和自動車交通 78.1・ソフトバンク 68.4・シンプレクス 58.1・
+// 野村 37.3（1.2σ の LightGBM のスコア順なら 安田倉庫・野村・シンプレクス・ソフトバンク・大和自動車交通）
 const names = await page.locator('.pred-list .pred-row .pred-id strong').allTextContents();
 const want = ['安田倉庫', '大和自動車交通', 'ソフトバンク', 'シンプレクス', '野村アセットマネジメント'];
 check(names.length === 5 && want.every((w, i) => (names[i] || '').includes(w)),
-      `一覧は 1.5σ の3本の最小が高い順 (実際: ${names.map((t) => t.slice(0, 6)).join(' / ')})`);
+      `一覧は 基準ラベルの3本の最小が高い順 (実際: ${names.map((t) => t.slice(0, 6)).join(' / ')})`);
 const ranks = await page.locator('.pred-list .pred-rank').allTextContents();
-check(ranks.join(',') === '183.6,276.8,370.5,459.9,535.5', `順位の数字は並び順で、下に最小を添える (実際: ${ranks.join(',')})`);
+check(ranks.join(',') === '185.0,278.1,368.4,458.1,537.3', `順位の数字は並び順で、下に最小を添える (実際: ${ranks.join(',')})`);
 const rank2 = page.locator('.pred-list .pred-rank').nth(1);
 check(((await rank2.getAttribute('title')) || '').includes('基準モデル（1.2σ の LightGBM）の順位 5 / 5'),
       '順位の title に基準モデルの順位を添える');
 check((await rank2.evaluate((el) => getComputedStyle(el).color)) === 'rgb(151, 163, 184)',
       '最小が 85 未満の順位は控えめの字');
 check(((await page.textContent('.card-head:has(h2:text-is("ブレイク予測")) .sub')) || '')
-        .includes('1.5σ の3本のうち一番低い百分位が高い順'),
+        .includes('基準ラベルの3本のうち一番低い百分位が高い順'),
       '見出しに並び順の物差しが出る');
-check((await page.locator('.pred-order-note').count()) === 0, '1.5σ の値がそろった日は並び順の注記を出さない');
+check((await page.locator('.pred-order-note').count()) === 0, '規則の3本の値がそろった日は並び順の注記を出さない');
 
 // 1件目を開いて、モデル別の見立てを確かめる
 await page.locator('.pred-row').first().locator('.pred-main').click();
@@ -194,25 +282,32 @@ check(detail.includes('混ぜていません'), 'アンサンブルではない�
 const bigGrids = page.locator('.pred-detail .pred-mg.lg');
 check((await bigGrids.count()) === 2, `詳細には百分位とスコアの2つの表が出る (実際: ${await bigGrids.count()})`);
 const bigCells = await bigGrids.nth(0).locator('.c').allTextContents();
-check(bigCells.length === 12 && bigCells[0] === '85.0', `詳細に12本の表（小数1桁）が出る (実際: ${bigCells.slice(0, 3).join(',')}…)`);
+check(bigCells.length === 6 && bigCells[0] === '85.0', `詳細に6本の表（小数1桁）が出る (実際: ${bigCells.slice(0, 3).join(',')}…)`);
 const bigScores = await bigGrids.nth(1).locator('.c').allTextContents();
-check(bigScores.length === 12 && bigScores.every((v) => /^\d\.\d{3}$/.test(v)),
-      `詳細のスコアの表は12本・小数3桁 (実際: ${bigScores.slice(0, 3).join(',')}…)`);
-check(detail.includes('スコアそのもの') && detail.includes('この表の12本の中の最小〜最大'),
-      '詳細にスコアの表の読み方（色はこの表の12本の中の最小〜最大）が出る');
+check(bigScores.length === 6 && bigScores.every((v) => /^\d\.\d{3}$/.test(v)),
+      `詳細のスコアの表は6本・小数3桁 (実際: ${bigScores.slice(0, 3).join(',')}…)`);
+check(detail.includes('スコアそのもの') && detail.includes('この表の6本の中の最小〜最大'),
+      '詳細にスコアの表の読み方（色はこの表の6本の中の最小〜最大）が出る');
+const bigLabels = await bigGrids.nth(0).locator('.r').allTextContents();
+check(bigLabels.length === 2 && !bigLabels.some((l) => l.includes('1.8σ')), `詳細の表に 1.8σ の行は無い (実際: ${bigLabels.join(' / ')})`);
 // 百分位の表とスコアの表は上下に並べたとき列がそろう（列の最小幅を数字の幅に依らない値にした。2026-10-16）
 const gridWidths = await bigGrids.evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().width)));
 check(gridWidths.length === 2 && gridWidths[0] === gridWidths[1], `詳細の2つの表は同じ幅 (実際: ${gridWidths.join(' / ')})`);
-// 12本とも本番で使うので、1.2σ を「本番」と呼ばない（運用者の指示 2026-10-17）。規則の 1.5σ の行に「規則」と添える
-check(detail.includes('1.5σ（規則）') && !detail.includes('本番'), '詳細の表は 1.5σ の行に「規則」と出て、どこにも「本番」と出ない');
-check(/並び順\s*1\.5σ の3本の最小\s*（83\.6）/.test(detail) && /帯の基準\s*LightGBM（1\.2σ）\s*（1 \/ 5 位）/.test(detail),
-      '詳細に並び順の物差し（1.5σ の3本の最小）と帯の基準（1.2σ の LightGBM の順位）が分けて出る');
-check(detail.includes('基準モデルの見立ての内訳') && detail.includes('基準モデル（1.2σ の LightGBM）の出力を')
-        && detail.includes('一覧の並び順（1.5σ の3本の最小）の内訳ではありません'),
+// どれも本番で使うので、1.2σ を「本番」と呼ばない（運用者の指示 2026-10-17）。規則の 1.2σ の行に「規則」と添える（2026-10-30 から）
+check(detail.includes('1.2σ（規則）') && !detail.includes('1.5σ（規則）') && !detail.includes('本番'),
+      '詳細の表は 1.2σ の行に「規則」と出て、どこにも「本番」と出ない');
+check(/並び順\s*基準ラベルの3本の最小\s*（85\.0）/.test(detail) && /帯の基準\s*LightGBM（基準ラベル）\s*（1 \/ 5 位）/.test(detail),
+      '詳細に並び順の物差し（基準ラベルの3本の最小）と帯の基準（1.2σ の LightGBM の順位）が分けて出る');
+check(detail.includes('基準モデルの見立ての内訳') && detail.includes('基準モデル（上段のLightGBM）の出力を')
+        && detail.includes('一覧の並び順（基準ラベルの3本の最小）の内訳ではありません'),
       '寄与の欄は 1.2σ の LightGBM のものと明示される');
-check(detail.includes('上位10%と見たモデル') && /1\.2σ\s*2\/4/.test(detail) && detail.includes('1.5σ・1.8σ 4/8'),
-      '詳細に上位10%と見たモデルの数（1.2σ の4本と、1.5σ・1.8σ の8本）が出る');
-check(detail.includes('実験82'), '詳細に「1.5σ・1.8σ も95以上」を足しても安定しない（実験82）と出る');
+// 上位10%と見たモデルの数は、画面で表に出すモデル（1.2σ・1.5σ の木3本ずつ）の百分位から数え直す（予測ファイルの agree90 /
+// agreeK90 は外す前の日はロジスティック回帰・1.8σ を含む数）。1件目の 1.2σ は 85・96・98、1.5σ は 83.6・97.1・97.4 なので
+// どちらも 2/3（ファイルの値は 2/4・4/8）
+check(detail.includes('上位10%と見たモデル') && /1\.2σ\s*2\/3/.test(detail) && detail.includes('（1.5σ 2/3）')
+        && !detail.includes('4/8') && !detail.includes('2/4'),
+      '詳細に上位10%と見たモデルの数（1.2σ の木3本と、1.5σ の木3本）が出る');
+check(detail.includes('旧σモデルでの過去成績は固定%モデルの運用成績を示すものではありません'), '詳細に「1.5σ・1.8σ も95以上」を足しても安定しない（実験82）と出る');
 check(!detail.includes('12本の合意'), '詳細にも12本の合意（平均）は出さない');
 // 次の決算発表（予測日までに公表済みの予定）。合成データの1件目は7営業日後（持つ20営業日の中 → 黄）、
 // 4件目は36営業日後（灰）、ほかは未公表（灰）。帯に「20営業日以内に決算 1 / 5」
@@ -233,8 +328,8 @@ check(featNames.length > 0 && featNames[0] === '20日ボラティリティ' && !
 const featTitle = await page.locator('.pred-detail .pred-feats .pred-b').first().getAttribute('title');
 check((featTitle || '').includes('（vol_20d）'), 'ホバーの説明に元の列名が添えてある');
 const borderNote = await page.textContent('.pred-detail .pred-border-note');
-check((borderNote || '').includes('1.5σ の3本で見た際どい候補') && (borderNote || '').includes('+1.6%（141件）'),
-      '詳細の先頭に際どい候補の注意（1.5σ の3本）が出る');
+check((borderNote || '').includes('基準ラベルの3本で見た際どい候補') && (borderNote || '').includes('+2.3%（200件）'),
+      '詳細の先頭に際どい候補の注意（基準ラベルの3本）が出る');
 await page.screenshot({ path: path.join(SHOTS, 'screenshot-prediction.png') });
 await page.locator('.pred-row').first().locator('.pred-main').click();
 
@@ -250,6 +345,25 @@ check(tmBody.includes('78週高値を更新'), 'ストーリータイムライ�
 check(await page.locator('.recharts-line').count() >= 1, '株価推移チャートが描画される');
 await page.screenshot({ path: path.join(SHOTS, 'screenshot-timemachine.png') });
 
+console.log('\n== 理論株価ランキング ==');
+await page.getByRole('tab', { name: '理論株価', exact: true }).click();
+await page.locator('.valuation-table tbody tr').first().waitFor();
+check(await page.locator('.valuation-table tbody tr').count() === 3, '算出不可を含む全銘柄を表示する');
+check((await page.locator('.valuation-table tbody tr').first().textContent()).includes('TEST1'), 'RIMは理論株価に対する現在株価の割合が低い順');
+check((await page.locator('.valuation-table').textContent()).includes('提供EPS・BPSを使用'), 'RIMの提供EPS・BPSによる補完元を表示する');
+check((await page.locator('.valuation-table tbody tr').first().textContent()).includes('赤字・回復仮定あり'), '赤字RIMの回復仮定を評価額の行に表示する');
+check((await page.locator('.valuation-view').textContent()).includes('回復が実現するという予測ではありません'), '回復ケースを業績予想と区別する');
+check(await page.locator('.valuation-view .recharts-wrapper').count() === 0, '20営業日の株価比較は表示しない');
+await page.getByRole('combobox', { name: '算出方法' }).selectOption('ddm');
+check((await page.locator('.valuation-table tbody tr').first().textContent()).includes('TEST0'), '配当割引法へ切り替えると順位も切り替わる');
+check(await page.getByRole('combobox', { name: '算出方法' }).locator('option').count() === 2, '算出方法はRIMと配当割引法の2種類');
+check((await page.locator('.valuation-table').textContent()).includes('前営業日'), '前営業日の終値を使った場合は日付に明示する');
+check((await page.locator('.valuation-table').textContent()).includes('自己株式数が欠損'), '算出不可の具体的な原因を表示する');
+await page.setViewportSize({ width: 390, height: 844 });
+check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), '理論株価はスマホで横にはみ出さない');
+await page.setViewportSize({ width: 1440, height: 1000 });
+await page.getByRole('tab', { name: 'タイムマシーン' }).click();
+
 console.log('\n== 隠したタブ ==');
 // 運用者の指示（2026-10-13）「決算サンキーとWhat-Ifシミュレーターのタブは消してください。表示から消してくれるだけで
 // 良いです」、同日夜「8軸オクタゴン比較のタブも消してください」。画面のコードは残し、タブの一覧から外しただけ
@@ -261,14 +375,34 @@ const tabNames = (await page.getByRole('tab').allTextContents()).map((t) => t.tr
 // 再学習で加わったサンプルは一番右（運用者の指示 2026-10-14「一番右側に持ってきてください」）
 // 候補銘柄のニュースは左から2番目（運用者の依頼 2026-10-17「候補銘柄のニュース として新たにタブを追加してほしいです。
 // 左から2番目で」）
-// リカレンス・ネットワークは候補銘柄のニュースの右（運用者の依頼 2026-10-19。場所の指定は無かったので、候補ごとに見る
-// タブどうしを並べた。再学習で加わったサンプルは一番右のまま）
-check(tabNames.join(',') === 'ブレイク予測,候補銘柄のニュース,リカレンス・ネットワーク,タイムマシーン,再学習で加わったサンプル',
-      `タブは ブレイク予測 / 候補銘柄のニュース / リカレンス・ネットワーク / タイムマシーン / 再学習で加わったサンプル の5つ (実際: ${tabNames.join(',')})`);
+// リカレンス・ネットワーク（2026-10-19 に候補銘柄のニュースの右に足した）は、運用者の依頼 2026-10-24「現状、参考にできる
+// レベルでもないので非表示にしてください。なくて良いです」で隠している（src/App.jsx の hidden。画面のコードと日次予測の網の
+// 作成は残す）
+// スコアと収益の分布（2026-11-08 に足した）と再学習で加わったサンプル（2026-10-13 に足した）は、運用者の依頼 2026-11-15
+// 「再学習で加わったサンプル、スコアと収益の分布タグを消してください。」→「隠して自動更新も止める」で隠している（src/App.jsx の
+// hidden。画面のコードとデータの作り方は残す）
+// 価格帯別需給も 2026-11-15「推定は本番運用レベルではないので非表示に」で隠している。
+// 価格帯別出来高（2026-11-19 に足した）は、運用者の依頼 2026-11-21「分足のデータは使わない方針になったので価格帯別出来高の
+// 分布タグも消してください」→「隠して集計も止める」「公開をやめる」で隠している（src/App.jsx の hidden。画面のコードと集計の
+// 作り方は残す。分足・ティックの取得と保存は続ける）
+// サマリー（2026-11-21 に一番左に足した）は、同じ日の運用者の依頼「サマリーのタグはなしで良いです。消してください。」→
+// 「タブを隠す」で隠している（src/App.jsx の hidden。画面のコードと計算は残す）
+check(tabNames.join(',') === 'ブレイク予測,候補銘柄のニュース,理論株価,タイムマシーン',
+      'タブは ブレイク予測 / 候補銘柄のニュース / 理論株価 / タイムマシーン'
+      + ` の4つ (実際: ${tabNames.join(',')})`);
 check(!tabNames.includes('決算サンキー') && !tabNames.includes('What-If シミュレーター')
-        && !tabNames.includes('8軸オクタゴン比較') && !tabNames.includes('候補の比較'),
-      '決算サンキー・What-If シミュレーター・8軸オクタゴン比較・候補の比較のタブは出ない');
+        && !tabNames.includes('8軸オクタゴン比較') && !tabNames.includes('候補の比較')
+        && !tabNames.includes('リカレンス・ネットワーク') && !tabNames.includes('スコアと収益の分布')
+        && !tabNames.includes('再学習で加わったサンプル') && !tabNames.includes('価格帯別需給')
+        && !tabNames.includes('価格帯別出来高') && !tabNames.includes('サマリー'),
+      '決算サンキー・What-If シミュレーター・8軸オクタゴン比較・候補の比較・リカレンス・ネットワーク・スコアと収益の分布・'
+      + '再学習で加わったサンプル・価格帯別需給・価格帯別出来高・サマリーのタブは出ない');
+check((await page.locator('.volume-view').count()) === 0, '価格帯別出来高の画面はどのタブにも出ない（隠している間）');
+check((await page.locator('.sdist').count()) === 0 && (await page.locator('.samples').count()) === 0,
+      'スコアと収益の分布・再学習で加わったサンプルの画面はどのタブにも出ない（隠している間）');
 check((await page.locator('.knn').count()) === 0, '候補の比較の画面はどのタブにも出ない（隠している間）');
+check((await page.locator('.net').count()) === 0 && (await page.locator('.net-canvas').count()) === 0,
+      'リカレンス・ネットワークの画面はどのタブにも出ない（隠している間）');
 check((await page.locator('.sankey').count()) === 0 && (await page.locator('.stock-card').count()) === 0,
       '8軸オクタゴン比較の画面（銘柄カード・サンキー図）はどのタブにも出ない');
 check(!((await page.textContent('.footer')) || '').includes('EDINET'),
@@ -277,41 +411,114 @@ check(!((await page.textContent('.footer')) || '').includes('EDINET'),
 // 候補の比較の画面の確かめ（3枚の図・Q / M・母集団の件数・ホバー）は、タブを隠している間は外してある。純粋な計算の
 // テストは tests/knn.test.js に残っている。タブを戻すときは git の履歴（2026-10-16 より前の smoke.mjs）から戻す
 
-console.log('\n== 再学習で加わったサンプル ==');
-// 運用者の依頼（2026-10-13）「直近追加されたサンプルのチャート（週次のリトレインで新たに追加されたサンプルのチャート）、
-// 正例、負例で5例ずつ程度」、同日夜「チャートの表示期間は78週にしてください。タブの名前も「例」ではなく「サンプル」」。
-// 合成データは加わった4件（正例2・負例2）を全部出す。日足は更新日（2025-07-28）の78週前 2024-02-28 から 2025-09-01 まで
-await page.getByRole('tab', { name: '再学習で加わったサンプル' }).click();
-await page.waitForSelector('.sample-card', { timeout: 10000 });
-await page.waitForSelector('.sample-card .recharts-line', { timeout: 10000 });
-const smp = (await page.textContent('.samples')) || '';
-check((await page.locator('.sample-card').count()) === 4, `正例2・負例2の4枚のチャート (実際: ${await page.locator('.sample-card').count()})`);
-check((await page.locator('.sample-card .recharts-line').count()) === 4, '各カードに終値の線が1本ずつ');
-check(smp.includes('2026/10/11') && smp.includes('2025/07/25 より後 〜 2025/07/28'),
-      '再学習の日と、加わった更新日の範囲が出る');
-check(/加わった件数\s*4\s*件/.test(smp) && smp.includes('正例 2・負例 2・正例率 50.0%'), '加わった件数と正例率が出る');
-check(smp.includes('2件中 2件を表示'), '正例・負例の見出しに件数が出る');
-check(smp.includes('最大 +15.0%（必要 +9.5%）'), '正例の成否の内訳（到達）が数字で出る');
-check((await page.locator('.sample-verdict li.ng').count()) === 6, '負例2件の3条件はどれも ✗（6行）');
-check((await page.locator('.sample-verdict li.ok').count()) === 6, '正例2件の3条件はどれも ✓（6行）');
-check(smp.includes('到達に必要な水準') && smp.includes('判定の20営業日'), '線の見分け方（凡例）が言葉で出る');
-check(!smp.includes('NaN') && !smp.includes('undefined'), '再学習で加わったサンプルに NaN / undefined が出ていない');
-check(smp.includes('再学習で加わったサンプル') && smp.includes('更新日の78週前から'), '見出しが「サンプル」で、78週の表示と書いてある');
-const xTicks = (await page.locator('.sample-card').first().locator('.recharts-xAxis .recharts-cartesian-axis-tick-value')
-  .allTextContents()).map((t) => t.trim());
-check(xTicks.includes('24/4') && xTicks.includes('25/7') && xTicks.every((t) => /^\d{2}\/\d{1,2}$/.test(t)),
-      `横軸は78週を四半期の初め（年/月）で刻む (実際: ${xTicks.join(' ')})`);
-await page.screenshot({ path: path.join(SHOTS, 'screenshot-samples.png'), fullPage: true });
+// スコアと収益の分布・再学習で加わったサンプルの画面の確かめ（3つの欄・件数・グラフの枚数、正例・負例のカード・78週の横軸）は、
+// タブを隠している間は外してある（2026-11-15）。集計・表示の純粋な計算のテストは tests/scoredist.test.js・tests/samples.test.js・
+// tests/test_score_dist.py・tests/test_new_samples.py に残っている。タブを戻すときは git の履歴（2026-11-15 より前の smoke.mjs）から戻す
+
+console.log('\n== サマリー ==');
+// 運用者の依頼 2026-11-21「パット見で、すべての良し悪しを測りたいので、レーダーチャートで…六角形で表示してほしいです」。
+// 6つの頂点（6本の分類モデルの平均・最低値・偏差、ランキング学習の日次・5日、割安度）を 0〜1 で（外側ほど良い）。
+// 合成の予測データの 9324 は 6本の百分位が 85.0・96.0・98.0・83.6・97.1・97.4（平均 92.9・最小 83.6・標準偏差 6.1）、
+// 日次 3位/5件、5日 5位/9件。9082 は cat_k15 が無いので分類の3つは「なし」。理論株価は合成のものを配る
+// （9434=84%・9324=162%・1671=274%・1699=算出できない → 9434 が 1、9324 が 0.5、1671 が 0）
+// 同じ日に運用者の依頼「サマリーのタグはなしで良いです。消してください。」→「タブを隠す」で隠した。隠している間は
+// タブも画面も出ないことだけを確かめる（下の画面の確かめは、タブを戻すと動く）
+if (await page.getByRole('tab', { name: 'サマリー', exact: true }).count() === 0) {
+  check((await page.locator('.summary').count()) === 0 && (await page.locator('.summary-card').count()) === 0,
+        'サマリーのタブも画面も出ない（隠している間）');
+} else {
+  const summaryVals = { schemaVersion: 1, asOf: '2026-09-11', inferenceDates: ['2026-09-11'], stocks: [
+    { code: '93240', name: '合成', price: 1620, methods: [{ id: 'ri', available: true, median: 1000 }] },
+    { code: '94340', name: '合成', price: 840, methods: [{ id: 'ri', available: true, median: 1000 }] },
+    { code: '16710', name: '合成', price: 2740, methods: [{ id: 'ri', available: true, median: 1000 }] },
+    { code: '16990', name: '合成', price: 1000, methods: [{ id: 'ri', available: false, median: null }] },
+  ] };
+  await page.route('**/data/valuations.json*',
+    (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(summaryVals) }));
+  await page.reload();
+  await page.waitForSelector('.pred-row', { timeout: 15000 });
+  check((await page.getByRole('tab').first().textContent()) === 'サマリー'
+          && (await page.locator('[role="tab"][aria-selected="true"]').textContent()) === 'ブレイク予測',
+        'サマリーは一番左のタブ。開いたときのタブはブレイク予測のまま');
+  await page.getByRole('tab', { name: 'サマリー' }).click();
+  await page.waitForSelector('.summary-card', { timeout: 10000 });
+  const sCards = page.locator('.summary-card');
+  check((await sCards.count()) === 5 && (await page.locator('.summary-card .summary-radar svg.recharts-surface').count()) === 5,
+        `候補5件それぞれに六角形の図とカード (実際: ${await sCards.count()})`);
+  const sVals = (i) => sCards.nth(i).locator('.summary-values tr').evaluateAll(
+    (trs) => trs.map((tr) => [tr.querySelector('th').textContent, tr.querySelector('td.num').textContent]));
+  const s9324 = await sVals(0);
+  check(JSON.stringify(s9324) === JSON.stringify([['平均（6本）', '0.93'], ['最低値（6本）', '0.84'],
+    ['偏差（6本のそろい）', '0.70'], ['ランキング（日次）', '0.50'], ['ランキング（5日）', '0.50'], ['割安度（RIM）', '0.50']]),
+        `9324 の6つの値（平均・最小÷100、1−標準偏差÷20、日次・5日の順位、割安度の順位） (実際: ${JSON.stringify(s9324)})`);
+  const t9324 = (await sCards.nth(0).textContent()) || '';
+  check(t9324.includes('最小 83.6') && t9324.includes('標準偏差 6.1') && t9324.includes('3位 / 5件')
+          && t9324.includes('5位 / 9件') && t9324.includes('162%・3銘柄中 2位'),
+        '表の右に元の値（最小と最小のモデル・標準偏差・順位 / 件数・使用終値÷理論株価と順位）');
+  const svg9324 = (await sCards.nth(0).locator('svg.recharts-surface').textContent()) || '';
+  check(['平均', '最低値', '偏差', '日次', '5日', '割安度'].every((w) => svg9324.includes(w)) && !svg9324.includes('なし'),
+        '六角形の6つの頂点の名前（値の無い頂点は無い）');
+  const s9082 = await sVals(1);
+  const svg9082 = (await sCards.nth(1).locator('svg.recharts-surface').textContent()) || '';
+  check(JSON.stringify(s9082.map((x) => x[1])) === JSON.stringify(['なし', 'なし', 'なし', '0.75', '1.00', 'なし'])
+          && svg9082.includes('平均（なし）') && svg9082.includes('割安度（なし）'),
+        `6本がそろわない・理論株価が無い頂点は「なし」（0 とは描かない） (実際: ${JSON.stringify(s9082.map((x) => x[1]))})`);
+  const s9434 = (await sVals(2)).map((x) => x[1]);
+  check(JSON.stringify(s9434) === JSON.stringify(['0.83', '0.68', '0.40', '1.00', '0.75', '1.00']),
+        `9434（日次1位・いちばん割安）の値 (実際: ${JSON.stringify(s9434)})`);
+  const sumText = (await page.textContent('.summary')) || '';
+  check(sumText.includes('1 − 標準偏差 ÷ 20') && sumText.includes('理論株価を出せる 3 銘柄') && !sumText.includes('NaN')
+          && !sumText.includes('undefined'),
+        'そろえ方の説明（偏差の目盛り・割安度の母集団の数）が出て、NaN / undefined が出ていない');
+  await page.setViewportSize({ width: 390, height: 844 });
+  const sumFit = await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth);
+  check(sumFit, 'スマホの幅（390px）でサマリーが横にはみ出さない');
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.unroute('**/data/valuations.json*');
+}
 
 console.log('\n== 候補銘柄のニュース ==');
-// 出すのは今日の戦略の候補（1.5σ の3本すべて95以上）だけ（運用者の指示 2026-10-17「取得対象は、候補銘柄のみで良いです」）。
-// 合成の予測データには規則を通る候補が無いので、9324・9434・9082 の 1.5σ の3本の百分位を上書きして配り直す
+// 2026-11-21 から、規則を通らなくてもランキング学習（日次）がその日の3位以内の候補も並べる（運用者の依頼「候補銘柄のニュースの
+// 探索条件を緩くしてほしいです…」→ 選択「日次ランキングの3位以内」。理由の印は付けない「付けない」）。合成の予測データは
+// 規則を通る候補が無く、日次の順位は 9434=1・9082=2・9324=3・1671=4・1699=5
+const newsCodes = () => page.locator('.news-card .news-id .num').allTextContents();
+await page.reload();
+await page.getByRole('tab', { name: '候補銘柄のニュース' }).click();
+await page.waitForSelector('.news-card', { timeout: 10000 });
+const onlyLtr = await newsCodes();
+check(JSON.stringify(onlyLtr) === JSON.stringify(['9434', '9082', '9324']),
+      `規則を通る候補が無い日は、ランキング学習（日次）の3位以内を順位の順に並べる（4位・5位は出さない） (実際: ${onlyLtr})`);
+const newsLtrBadges = await page.locator('.news-badges .badge').allTextContents();
+check(newsLtrBadges.every((t) => !/買う候補|95以上|最小/.test(t)),
+      `順位で足した候補には「買う候補」「95以上」「最小」の印を出さない（理由の印も付けない。決算の印はそのまま） (実際: ${newsLtrBadges})`);
+check(((await page.locator('.news-card').nth(1).textContent()) || '').includes('この銘柄のリンクはまだありません'),
+      'リンクの記録が無い銘柄（9082）は「まだありません」');
+// 規則を通る候補（1671。順位は4位）がある日は、その後ろに3位以内を足す。買う候補は規則のまま
+const predMix = JSON.parse(fs.readFileSync(PRED_FIXTURE, 'utf8'));
+for (const c of predMix.candidates) {
+  if (c.code === '1671') ['lgbm', 'xgb', 'cat'].forEach((a) => { c.byModel[a].pctHistorical = 97.0; });
+}
+await page.route('**/data/predictions.json*',
+  (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(predMix) }));
+await page.reload();
+await page.getByRole('tab', { name: '候補銘柄のニュース' }).click();
+await page.waitForSelector('.news-card', { timeout: 10000 });
+const mixed = await newsCodes();
+check(JSON.stringify(mixed) === JSON.stringify(['1671', '9434', '9082', '9324']),
+      `規則を通った候補を先に、その後ろにランキング学習（日次）の3位以内 (実際: ${mixed})`);
+check(((await page.locator('.news-card').nth(0).textContent()) || '').includes('買う候補')
+        && (await page.locator('.news-badges .badge.green').count()) === 1
+        && (await page.locator('.news-badges .badge.blue').count()) === 0,
+      '「買う候補」は規則を通った 1671 だけ。順位で足した3件には印が無い');
+await page.unroute('**/data/predictions.json*');
+// 出すのは今日の戦略の候補（規則の3本すべて95以上。2026-10-30 から 基準ラベルの3本）だけ（運用者の指示 2026-10-17「取得対象は、
+// 候補銘柄のみで良いです」）。合成の予測データには規則を通る候補が無いので、9324・9434・9082 の規則の3本の百分位を上書きして配り直す
 // （tests/fixtures/synthetic-news-links.json は同じ値から research/news_links.py の書き出しで作った。9082 はリンクの記録が無い）
 const PASS = { 9324: [98.1, 97.1, 97.4], 9434: [97.1, 96.5, 95.2], 9082: [96.0, 100.0, 95.0] };
 const predPass = JSON.parse(fs.readFileSync(PRED_FIXTURE, 'utf8'));
 for (const c of predPass.candidates) {
   const p = PASS[c.code];
-  if (p) ['lgbm_k15', 'xgb_k15', 'cat_k15'].forEach((a, i) => { c.byModel[a].pctHistorical = p[i]; });
+  if (p) ['lgbm', 'xgb', 'cat'].forEach((a, i) => { c.byModel[a].pctHistorical = p[i]; });
 }
 await page.route('**/data/predictions.json*',
   (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(predPass) }));
@@ -361,326 +568,52 @@ check(newsFit.right <= newsFit.vw + 0.5 && !newsFit.scroll,
 await page.setViewportSize({ width: 1440, height: 1000 });
 await page.unroute('**/data/predictions.json*');
 
-console.log('\n== リカレンス・ネットワーク ==');
-// 運用者の依頼（2026-10-19）「Obsidian の球状のプロットのようなことを、ノードを1営業日として…その日の各候補銘柄単体で」。
-// 対象は購入条件（1.5σ の3本がすべて95以上）を満たした銘柄だけ（同日の指定「候補といったのは、予測サンプルではなく、その中でも
-// 購入条件を満たした銘柄です」）。元の合成データ（2026-09-11 の5件。どれも満たさない）では図を出さずに理由を書く
-await page.reload({ waitUntil: 'networkidle' });
-await page.getByRole('tab', { name: 'リカレンス・ネットワーク' }).click();
-// 読み込み中の文言も同じ枠（.card.empty）に出るので、理由の文言が出るまで待つ（枠だけを待つと読み込み中を読んでしまう）
-await page.locator('.net .card.empty', { hasText: '購入条件' }).waitFor({ timeout: 10000 }).catch(() => {});
-const netEmpty = (await page.locator('.net .card.empty').textContent()) || '';
-check(netEmpty.includes('購入条件') && netEmpty.includes('高値更新 5 銘柄のうち'),
-      `購入条件を満たした銘柄が無い日は、図を出さずに理由を書く (実際: ${netEmpty.slice(0, 70)})`);
-check((await page.locator('.net-canvas canvas').count()) === 0 && (await page.locator('.net-crow').count()) === 0,
-      '満たさない銘柄（高値更新の5件）は一覧にも図にも出さない');
-// 上の候補銘柄のニュースと同じ predPass（9324・9434・9082 が満たす）で読み込み直す。ネットワークのフィクスチャは購入条件を
-// 満たした3件のうち 9324・9434 の2件（9082 は日足が無いので作れない。tests/test_recurrence_net.py の fixture_build）
-await page.route('**/data/predictions.json*',
-  (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(predPass) }));
-await page.reload({ waitUntil: 'networkidle' });
-await page.getByRole('tab', { name: 'リカレンス・ネットワーク' }).click();
-await page.waitForSelector('.net-canvas canvas', { timeout: 10000 });
-const exp = (code, k) => RECURRENCE_EXPECTED[`2026-09-11_${code}.json`][String(k)];
-const netFocus = async () => (await page.locator('.net-canvas').getAttribute('data-focus')) || '';
-const netN = (code) => JSON.parse(fs.readFileSync(path.join(ROOT, 'tests', 'fixtures', 'recurrence', `2026-09-11_${code}.json`), 'utf8')).n;
-const crows = page.locator('.net-crow:not(.head)');
-check((await crows.count()) === 3, `一覧は購入条件を満たした3件だけ（高値更新の5件ではない） (実際: ${await crows.count()})`);
-const crowCodes = await crows.locator('.id b').allTextContents();
-check(crowCodes.join(',') === '9324,9434,9082', `今日の戦略の順（3本の最小 97.1・95.2・95.0） (実際: ${crowCodes.join(',')})`);
-const pickMarks = await crows.evaluateAll((els) => els.map((e) => Boolean(e.querySelector('.net-pick'))));
-check(pickMarks.join(',') === 'true,true,false', `上位2件（9324・9434）に「買う候補」の印 (実際: ${pickMarks.join(',')})`);
-check((await page.locator('.net-crow:not(.head):not([disabled])').count()) === 2, 'ネットワークのある2件だけ選べる');
-check(((await crows.nth(2).getAttribute('title')) || '').includes('日足が無い'), '作れなかった 9082 は理由（日足が無い）を出す');
-const netStrip = (await page.locator('.net .pred-strip').innerText()) || '';
-check(netStrip.includes('購入条件を満たした銘柄') && netStrip.includes('高値更新 5 銘柄のうち'),
-      `件数の欄に「購入条件を満たした銘柄 3（高値更新 5 銘柄のうち）」 (実際: ${netStrip.replace(/\s+/g, ' ').slice(0, 90)})`);
-check((await crows.first().getAttribute('aria-selected')) === 'true', '最初はネットワークのある先頭の銘柄（9324）を出す');
-const netSide = async () => (await page.locator('.net-side').innerText()) || '';
-let side = await netSide();
-// k近傍（運用者の選択 2026-10-19「k近傍だけにする」。k は指定「kは1〜10までで良いです」で 1〜10、最初の k は指定「初期状態のkは5で
-// お願いします」で 5）。K0 = 最初の k、K2 = 切り替えて数え直させる k
-const K0 = 5;
-const K2 = 10;
-const kBtn = (v) => page.locator(`.net-seg[aria-label^="似た日の数"] button[aria-label="${v} 日"]`);
-const kBtns = await page.locator('.net-seg[aria-label^="似た日の数"] button').allTextContents();
-check(kBtns.join(',') === '1,2,3,4,5,6,7,8,9,10', `k は 1〜10 日から選ぶ (実際: ${kBtns.join(',')})`);
-check((await page.locator('.net-seg[aria-label^="似た日の数"] button[aria-pressed="true"]').getAttribute('aria-label')) === `${K0} 日`,
-      `最初の k は ${K0}`);
-check((await page.locator('[aria-label="辺の密度（リカレンス率）"]').count()) === 0
-        && !(await page.locator('.net .pred-strip').innerText()).includes('辺の密度'), '辺の密度のボタンは無い（ε はやめた）');
-check(side.includes(`${exp('93240', K0).deg} 日`) && side.includes(`${exp('93240', K0).periods} つの時期`) && side.includes('珍しい状態'),
-      `9324 の今日に似た日は ${exp('93240', K0).deg} 日・${exp('93240', K0).periods} つの時期（Python の要約と同じ）で、珍しさの説明が出る`);
-const crowCells = await crows.first().locator(':scope > span.num').allTextContents();   // 最小・似た日・全期間
-const pctTxt = (v) => (Number.isFinite(v) ? `${Math.round(v * 100)}%` : '—');
-check(crowCells[1] === pctTxt(exp('93240', K0).nbr.hit) && crowCells[2] === pctTxt(exp('93240', K0).base.hit),
-      `一覧の「似た日」「全期間」は目次の k = ${K0} の要約（+10% 到達）と同じ (実際: ${crowCells.join(' / ')})`);
-// 今日に似た日を光らせる（運用者の依頼「対象日と似ている（紐づく）サンプルもハイライト」）。強調している日:似た日の数
-await page.waitForFunction(() => document.querySelector('.net-canvas')?.dataset.focus);
-check(await netFocus() === `${netN('93240') - 1}:${exp('93240', K0).deg}`,
-      `開いたときから今日（最後の点）と似た ${exp('93240', K0).deg} 日を光らせている (実際: ${await netFocus()})`);
-const inkOf = () => page.evaluate(() => {
-  const c = document.querySelector('.net-canvas canvas');
-  const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
-  let n = 0;
-  for (let i = 0; i < d.length; i += 4 * 7) if (d[i] > 40 || d[i + 1] > 40 || d[i + 2] > 60) n += 1;
-  return n;
-});
-await page.locator('label', { hasText: '今日に似た日を光らせる' }).click();
-await page.waitForFunction(() => document.querySelector('.net-canvas')?.dataset.focus === '');
-check(await netFocus() === '', '「今日に似た日を光らせる」を外すと強調しない');
-const inkOff = await inkOf();
-await page.locator('label', { hasText: '今日に似た日を光らせる' }).click();
-await page.waitForFunction(() => document.querySelector('.net-canvas')?.dataset.focus);
-const inked = await inkOf();
-check(inked > 200, `図に点と線が描かれている（明るい画素 ${inked}）`);
-// 強調しても、ほかの点と線は暗くしない（運用者の依頼 2026-10-20「他の日付が暗くなるのですが、相対的な差がわからなくなるので、
-// 他はくらくしないでそのままに」）。前は強調中にほかを暗くしていたので、明るい画素が半分ほどに減っていた
-check(inked >= inkOff * 0.85, `今日に似た日を光らせても、ほかの点と線は暗くならない（明るい画素 外す ${inkOff} → 光らせる ${inked}）`);
-// 似た日はその日の色のまま（運用者の依頼 2026-10-20「白く光らせてますが、それ自身が何色かわからなくなるので、もう少し抑えた表現に」）。
-// 今日の光と日付の字から離れた似た日について、点の中心がその日の色で、まわり 29px 四方に白に近い画素がほとんど無い（前は足し算の
-// 光と白い輪で、まわりが白くなっていた）。離れた似た日が無ければ拡大してから測る
-const nbLook = () => page.evaluate(() => {
-  const wrap = document.querySelector('.net-canvas');
-  const c = wrap.querySelector('canvas');
-  const k = c.width / c.clientWidth;
-  const ctx = c.getContext('2d');
-  const [tx, ty] = (wrap.dataset.today || '0,0').split(',').map(Number);
-  const out = [];
-  for (const part of (wrap.dataset.nbpos || '').split(';').filter(Boolean)) {
-    const [x, y, col] = part.split(',');
-    const X = Number(x);
-    const Y = Number(y);
-    const nearToday = Math.hypot(X - tx, Y - ty) < 60 || (Math.abs(Y - ty) < 26 && X - tx > -14 && X - tx < 130);
-    if (nearToday || X < 16 || Y < 16 || X > c.clientWidth - 16 || Y > c.clientHeight - 16) continue;
-    const d = ctx.getImageData(Math.round((X - 14) * k), Math.round((Y - 14) * k), Math.round(29 * k), Math.round(29 * k)).data;
-    let white = 0;
-    for (let i = 0; i < d.length; i += 4) if (Math.min(d[i], d[i + 1], d[i + 2]) > 215) white += 1;
-    const m = ctx.getImageData(Math.round(X * k), Math.round(Y * k), 1, 1).data;
-    out.push({ white, center: [m[0], m[1], m[2]], col });
+console.log('\n== リカレンス・ネットワーク（隠している） ==');
+// リカレンス・ネットワークの画面の確かめ（購入条件を満たした銘柄の一覧・k の切り替え・似た日・色・軌跡・点の大きさ・回す・
+// 拡大縮小）は、タブを隠している間は外してある（運用者の依頼 2026-10-24）。純粋な計算のテストは tests/recurrence.test.js・
+// tests/forcegraph.test.js・tests/test_recurrence_net.py に残っている。タブを戻すときは git の履歴（2026-10-24 より前の
+// smoke.mjs）から戻す
+check(recurrenceRequests.length === 0,
+      `リカレンス・ネットワークのデータ（/data/recurrence/）はどのタブを開いても読まない (実際: ${recurrenceRequests.length}件)`);
+check(volumeProfileRequests.length === 0,
+      `価格帯別出来高の集計（/data/volume-profile.json）はどのタブを開いても読まない (実際: ${volumeProfileRequests.length}件)`);
+
+console.log('\n== 固定リターンのモデルと履歴の区別 ==');
+await page.goto(base, { waitUntil: 'networkidle' });
+await page.waitForSelector('.pred-row');
+const activeModelsText = await page.getByTestId('active-models').textContent();
+check(activeModelsText.includes('使っているモデル：固定+10%・+15%'),
+      '使っている固定リターンのモデルを表示する');
+check(!activeModelsText.includes('本番モデル'),
+      '見出しに「本番モデル」と書かない（運用者の指示「本番モデルって名前やめてください」）');
+check((await page.locator('.pred-row').first().locator('.pred-main .pred-mg .r').allTextContents()).join(',').includes('1.2σ'),
+      '固定%のモデルに切り替えても過去のσ予測を固定%と表示しない');
+const fixedPrediction = JSON.parse(fs.readFileSync(PRED_FIXTURE, 'utf8'));
+for (const row of fixedPrediction.candidates) {
+  for (const [algo, score] of Object.entries(row.byModel || {})) {
+    score.labelSpec = {kind: 'fixed_return', threshold: algo.endsWith('_k15') ? .15 : .10};
   }
-  return out;
-});
-let looks = await nbLook();
-for (let z = 0; z < 3 && !looks.length; z += 1) {
-  await page.locator('button[aria-label="拡大"]').click();
-  await page.waitForTimeout(150);
-  looks = await nbLook();
 }
-const hexRgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
-check(looks.length > 0 && looks.every((l) => l.white <= 3)
-        && looks.every((l) => hexRgb(l.col).every((v, i) => Math.abs(v - l.center[i]) <= 12)),
-      `似た日の点はその日の色のままで、まわりが白く光らない (${looks.length} 点・白に近い画素 ${looks.map((l) => l.white).join('/')})`);
-await page.locator('.net-seg button', { hasText: '元に戻す' }).click();
-await page.locator('.net-crow', { hasText: '9434' }).click();
-await page.waitForFunction(() => document.querySelector('.net-head strong')?.textContent.includes('9434'));
-await kBtn(K2).click();
-side = await netSide();
-check(side.includes(`${exp('94340', K2).deg} 日`) && side.includes(`${exp('94340', K2).periods} つの時期`),
-      `9434 を k = ${K2} で数え直すと今日に似た日 ${exp('94340', K2).deg} 日・${exp('94340', K2).periods} つの時期（Python と同じ）`);
-const foot = (await page.locator('.net-foot').textContent()) || '';
-check(foot.includes(`線 ${exp('94340', K2).edges.toLocaleString('ja-JP')} 本`), `線の本数も Python と同じ（${exp('94340', K2).edges}）`);
-await page.waitForFunction((want) => document.querySelector('.net-canvas')?.dataset.focus === want,
-  `${netN('94340') - 1}:${exp('94340', K2).deg}`, { timeout: 5000 }).catch(() => {});
-check(await netFocus() === `${netN('94340') - 1}:${exp('94340', K2).deg}`, `k = ${K2} なら光らせる似た日も ${K2} 日 (実際: ${await netFocus()})`);
-// 右の一覧は図で光らせる日と同じ近い k 日（運用者の指定 2026-10-19「プロット上の近傍の日付で統一してほしい」）。日付を
-// フィクスチャから同じ式で数えた今日の近い k 日（近い順）と比べる。更新日だけから選んだ「今日に近い過去の更新日」の欄は無い
-const nearWant = (() => {
-  const idx = JSON.parse(fs.readFileSync(path.join(RECURRENCE_FIXTURES, 'index.json'), 'utf8'));
-  const m = methodOf(idx);
-  const dec = decode(JSON.parse(fs.readFileSync(path.join(RECURRENCE_FIXTURES, '2026-09-11_94340.json'), 'utf8')), m.labels);
-  const net = network(dec, m.theiler, K2, knnLists(dec, m.theiler, K2));
-  return todayNeighbors(dec, net).map((r) => dec.dates[r.i].replace(/-/g, '/') + (dec.isFresh[r.i] ? ' ○' : ''));   // ○ = 更新日
-})();
-const nearDates = await page.locator('.net-near tbody tr td:first-child').allTextContents();
-check(nearDates.join(',') === nearWant.join(',') && nearDates.length === exp('94340', K2).deg,
-      `「今日に似た日」の表は図で光らせる近い ${K2} 日と同じ日・同じ順 (実際: ${nearDates.join(',')} / 期待: ${nearWant.join(',')})`);
-check((await page.locator('.net-near h3').textContent()).includes(`図で今日と結んだ ${exp('94340', K2).deg} 日`)
-        && !(await netSide()).includes('今日に近い過去の更新日') && (await page.locator('.net-details').count()) === 0,
-      '「今日に近い過去の更新日」の欄と、同じ中身だった「表で見る」は無い（一覧は1つ）');
-// 自動の回転と 2D / 3D の切り替えは無い（運用者の指定 2026-10-20「回転機能と２D機能はいらないです」）。図はいつも3次元で、
-// 並べ終わったら触らなければ止まっている（今日の点の位置が変わらない）
-check((await page.locator('.net-controls label', { hasText: '回転' }).count()) === 0
-        && (await page.locator('.net-seg[aria-label="次元"]').count()) === 0
-        && (await page.locator('.net-controls button', { hasText: /^[23]D$/ }).count()) === 0,
-      '「回転」のチェックと 2D / 3D の切り替えは無い');
-await page.waitForSelector('.net-canvas[data-settled="1"]', { timeout: 20000 });
-const still0 = await page.locator('.net-canvas').getAttribute('data-today');
-await page.waitForTimeout(800);
-const still1 = await page.locator('.net-canvas').getAttribute('data-today');
-check(Boolean(still0) && still0 === still1, `触らなければ図は止まっている（今日の点 ${still0} → 0.8 秒後 ${still1}）`);
-const [todayX, todayY] = ((await page.locator('.net-canvas').getAttribute('data-today')) || '0,0').split(',').map(Number);
-await page.locator('.net-canvas canvas').scrollIntoViewIfNeeded();    // 図の下が画面の外だと、そこにある点に触れられない
-const cbox = await page.locator('.net-canvas canvas').boundingBox();
-await page.mouse.move(cbox.x + todayX, cbox.y + todayY);
-await page.waitForSelector('.net-tip', { timeout: 3000 }).catch(() => {});
-const netTip = (await page.locator('.net-tip').textContent().catch(() => '')) || '';
-check(netTip.includes('（今日）') && netTip.includes('2026/09/11'), `今日の点に触れると日付と（今日）が出る (実際: ${netTip.slice(0, 40)})`);
-check(netTip.includes('20日以内の最高値まで未確定') && netTip.includes('20営業日目の騰落率未確定'),
-      '今日の点の先20営業日の値動きは未確定（予測日より後の日足は読まない）');
-await page.mouse.move(cbox.x + 2, cbox.y + 2);
-await page.locator('.net-seg button', { hasText: '時期' }).click();
-check((await page.locator('.net-legend .net-ramp').count()) === 1, '時期の色にすると凡例が古い → 新しいの帯になる');
-// 時期・最高値までの色は青白赤（運用者の指定「青白ではなく、青白赤で」→ 選択「高い・新しい方を赤」）
-const rgbOf = (h) => `rgb(${parseInt(h.slice(1, 3), 16)}, ${parseInt(h.slice(3, 5), 16)}, ${parseInt(h.slice(5, 7), 16)})`;
-const rampBg = await page.locator('.net-legend .net-ramp i').evaluate((e) => getComputedStyle(e).backgroundImage);
-const rampStops = rampBg.match(/rgb\([^)]*\)/g) || [];
-check(rampStops.join(',') === BWR.map(rgbOf).join(','),
-      `時期の帯は古い = 青 → 白 → 新しい = 赤 (実際: ${rampStops.join(' ')})`);
-// ノードの色付け（運用者の依頼 2026-10-19「先20日間の最大上昇率は最低限」→「その日から最高到達価格（20日以内最高高値）
-// までの上昇率」）: 凡例の5段と未確定の件数が、フィクスチャの値をここで数え直した件数と同じ。今日に似た日の内訳・表の列も出る
-await page.locator('.net-seg button', { hasText: '最高値までの上昇率（20日以内）' }).click();
-const fx94 = JSON.parse(fs.readFileSync(path.join(ROOT, 'tests', 'fixtures', 'recurrence', '2026-09-11_94340.json'), 'utf8'));
-const riseWant = { '20% 以上': 0, '10〜20%': 0, '5〜10%': 0, '0〜5%': 0, '0% 未満': 0, '未確定': 0 };
-for (const v of fx94.rise) {
-  riseWant[v === null ? '未確定' : v >= 20 ? '20% 以上' : v >= 10 ? '10〜20%' : v >= 5 ? '5〜10%' : v >= 0 ? '0〜5%' : '0% 未満'] += 1;
-}
-const legendOf = async () => Object.fromEntries((await page.locator('.net-legend > span:has(.sw)').allInnerTexts()).map((t) => {
-  const m = t.replace(/\s+/g, ' ').trim().match(/^(.*) ([\d,]+)$/);
-  return m ? [m[1], Number(m[2].replace(/,/g, ''))] : [t, NaN];
-}));
-const riseGot = await legendOf();
-check(JSON.stringify(riseGot) === JSON.stringify(riseWant),
-      `最高値までの上昇率の凡例（高い順の5段と未確定）の件数がファイルの値と同じ (実際: ${JSON.stringify(riseGot)})`);
-const riseSw = await page.locator('.net-legend .sw').evaluateAll((els) => els.map((e) => getComputedStyle(e).backgroundColor));
-check(riseSw.join(',') === [...BWR].reverse().concat(NA_VALUE).map(rgbOf).join(','),
-      `最高値までの段は高い順に 赤・薄い赤・白（5〜10%）・薄い青・青 と未確定の灰 (実際: ${riseSw.join(' ')})`);
-const nbrMix = (await page.locator('.net-nbrmix').textContent()) || '';
-check(nbrMix.includes(`今日に似た日 ${exp('94340', K2).deg} 日の内訳`), `凡例の下に今日に似た日の内訳 (実際: ${nbrMix.slice(0, 60)})`);
-const riseHead = await page.locator('.net-near thead th').allTextContents();
-const riseCells = await page.locator('.net-near tbody tr td:nth-child(4)').allTextContents();
-check(riseHead.includes('最高値まで') && riseCells.length === exp('94340', K2).deg && riseCells.every((t) => /^[+-]?\d+\.\d%$/.test(t)),
-      `今日に似た日の表に最高値までの列（どれも結果が出そろっているので値がある） (実際: ${riseCells.slice(0, 3).join(' ')})`);
-// 最安値までの色は外した（運用者の指定「安値の色付けは、なしで良いです」）。軌跡は直近20営業日（「軌跡は直近20営業日で良いです」）
-const colorBtns = await page.locator('.net-seg[aria-label="点の色"] button').allTextContents();
-check(colorBtns.length === 6 && !colorBtns.some((t) => t.includes('最安値')),
-      `色の付け方に最安値までは無い（6通り） (実際: ${colorBtns.join(' / ')})`);
-check((await page.locator('label', { hasText: '直近20営業日の軌跡' }).count()) === 1, '軌跡は直近20営業日');
-// 直近の軌跡は最初は出さない（運用者の指定 2026-10-20「デフォルトで直近20日の軌跡はチェックを入れなくて良いです」）。入れると出る
-const flowAt = async () => (await page.locator('.net-canvas').getAttribute('data-flow')) ?? '';
-check(!(await page.locator('label', { hasText: '直近20営業日の軌跡' }).locator('input').isChecked()) && await flowAt() === '',
-      '直近の軌跡は最初は出さない（チェックなし）');
-await page.locator('label', { hasText: '直近20営業日の軌跡' }).click();
-await page.waitForFunction(() => (document.querySelector('.net-canvas')?.dataset.flow || '') !== '', null, { timeout: 3000 }).catch(() => {});
-// 直近の軌跡は古い日から今日へ流れる（運用者の依頼 2026-10-19「日付の順方向に流れているような（流れがわかるような）可視化」）。
-// 2026-10-20「ビュンビュンしすぎなので、もう少し落ち着かせて」「破線もなしでよいです。モーションさえあればよい」で、暗い橙の実線の
-// 上を同じ色の明るみが毎秒 12px でゆっくり流れる見せ方にした。明るみの進んだ位置（px。60px で一回り）が、0.6 秒で約 7px 今日の
-// 向きへ進む
-const flow1 = Number(await flowAt());
-await page.waitForTimeout(600);
-const flow2 = Number(await flowAt());
-const flowAdv = (flow2 - flow1 + 60) % 60;
-check(Number.isFinite(flow1) && Number.isFinite(flow2) && flowAdv > 4 && flowAdv < 13,
-      `軌跡の明るみが古い日から今日の向きへゆっくり流れる（0.6 秒で ${flowAdv.toFixed(1)}px）`);
-check((await page.locator('.net-legend').innerText()).includes('直近の軌跡（古い日 → 今日へ流れる）'), '凡例に流れる向きを書く');
-await page.locator('label', { hasText: '直近20営業日の軌跡' }).click();
-await page.waitForFunction(() => document.querySelector('.net-canvas')?.dataset.flow === '', null, { timeout: 3000 }).catch(() => {});
-check(await flowAt() === '', '軌跡を外すと流れも消える');
-await page.locator('label', { hasText: '直近20営業日の軌跡' }).click();
-await page.locator('.net-seg button', { hasText: '20営業日目の騰落率' }).click();
-const r20Got = await legendOf();
-check(Object.keys(r20Got).join(',') === '+10% 以上,0〜+10%,−10〜0%,−10% 未満,未確定'
-        && r20Got['未確定'] === fx94.r20.filter((v) => v === null).length,
-      `20営業日目の騰落率は結果と同じ区切りの4段と未確定 (実際: ${JSON.stringify(r20Got)})`);
-// 色の向きはどの付け方も同じ（低い・届かない = 青、高い・届いた = 赤。運用者の指定 2026-10-20「揃えたいです」→ 目的変数も正例 = 赤）
-const swatches = () => page.locator('.net-legend .sw').evaluateAll((els) => els.map((e) => getComputedStyle(e).backgroundColor));
-const outcomeWant = [BWR[4], BWR[3], BWR[1], BWR[0], NA_VALUE].map(rgbOf).join(',');
-check((await swatches()).join(',') === outcomeWant, `20営業日目の段は +10% 以上 = 赤 → 薄い赤 → 薄い青 → −10% 未満 = 青 (実際: ${(await swatches()).join(' ')})`);
-await page.locator('.net-seg button', { hasText: '結果（+10% / 20営業日目）' }).click();
-check((await swatches()).join(',') === outcomeWant, `結果の段も同じ向き（+10% 到達 = 赤・−10% 未満 = 青） (実際: ${(await swatches()).join(' ')})`);
-await page.locator('.net-seg button', { hasText: '目的変数 1.5σ' }).click();
-check((await swatches()).join(',') === [BWR[4], '#64748b', '#334155'].map(rgbOf).join(','),
-      `目的変数は正例 = 赤・負例 = 灰 (実際: ${(await swatches()).join(' ')})`);
-// 並べ方は力学だけ（運用者の指定 2026-10-19「3種のプロット方法がありますが、今のデフォルトのみのもので良いです」。状態の地図・
-// 時間のらせんのボタンは無い）。並べ直す・力の調整はいつも出す
-check((await page.locator('.net-seg[aria-label="並べ方"]').count()) === 0
-        && (await page.locator('.net-seg button', { hasText: '状態の地図' }).count()) === 0
-        && (await page.locator('.net-seg button', { hasText: '時間のらせん' }).count()) === 0
-        && (await page.locator('.net-seg button', { hasText: '並べ直す' }).count()) === 1,
-      '並べ方の切り替えは無い（力学だけ。並べ直すは出す）');
-// ドラッグで回すのは残した（何も無いところから横へ 120px ドラッグすると今日の点が動く。選ぶことはしない）
-{
-  await page.locator('.net-canvas canvas').scrollIntoViewIfNeeded();
-  const box = await page.locator('.net-canvas canvas').boundingBox();
-  const before = await page.locator('.net-canvas').getAttribute('data-today');
-  const y0 = box.y + Math.min(box.height / 2, 200);
-  await page.mouse.move(box.x + 6, y0);
-  await page.mouse.down();
-  await page.mouse.move(box.x + 126, y0, { steps: 8 });
-  await page.mouse.up();
-  await page.waitForFunction((b) => document.querySelector('.net-canvas')?.dataset.today !== b, before, { timeout: 3000 }).catch(() => {});
-  const after = await page.locator('.net-canvas').getAttribute('data-today');
-  check(after !== before, `ドラッグで回すと今日の点が動く（${before} → ${after}）`);
-}
-await page.locator('.net-seg button', { hasText: '力の調整' }).click();
-check((await page.locator('.net-forces input[type=range]').count()) === 4, '力の調整は Obsidian と同じ4つのつまみ');
-side = await netSide();
-check(!side.includes('NaN') && !side.includes('undefined'), 'ネットワークの欄に NaN / undefined が出ていない');
-// README の画像（docs/screenshot-network.png）は実データで撮るので、ここでは別の名前に書く（.gitignore。CI の画像には入る）
-// 点の大きさ（運用者の依頼 2026-10-20「プロットのサイズをもう少し大きく」→「図自体ではなく、点のサイズですかね」）: 小・標準・大・
-// 特大（前の大きさの 0.75・1・1.5・2 倍。最初は大）。大きくすると描かれる画素が増える。特大のまま下の読み込み直しで残るかを見る
-const sizeBtn = (t) => page.locator('.net-seg[aria-label="点の大きさ"] button', { hasText: new RegExp(`^${t}$`) });
-check((await page.locator('.net-seg[aria-label="点の大きさ"] button').allTextContents()).join(',') === '小,標準,大,特大'
-        && (await sizeBtn('大').getAttribute('aria-pressed')) === 'true',
-      '点の大きさは 小・標準・大・特大 で、最初は「大」');
-await sizeBtn('小').click();
-await page.waitForTimeout(200);
-const inkSmall = await inkOf();
-await sizeBtn('特大').click();
-await page.waitForTimeout(200);
-const inkLarge = await inkOf();
-check(inkLarge > inkSmall * 1.2, `点を大きくすると描かれる画素が増える（小 ${inkSmall} → 特大 ${inkLarge}）`);
-await page.screenshot({ path: path.join(SHOTS, 'screenshot-network-smoke.png') });
+await page.route('**/data/predictions.json*', (route) => route.fulfill({json: fixedPrediction}));
+await page.goto(base, { waitUntil: 'networkidle' });
+await page.waitForSelector('.pred-row');
+const fixedHeads = await page.locator('.pred-row').first().locator('.pred-main .pred-mg .r').allTextContents();
+check(fixedHeads.join(',') === '+10%,+15%', '切替後の予測では到達条件+10%・+15%を表示する');
+
+// 順位が欠ける過去の行でも全銘柄を残し、他の銘柄の順位を隠さない。
+delete fixedPrediction.candidates[0].ltr5;
+await page.goto(base, { waitUntil: 'networkidle' });
+await page.waitForSelector('.pred-row');
+check((await page.locator('.pred-list .pred-main .pred-ltr5').count()) === 5,
+      '5営業日順位の未記録行を含めて全銘柄の欄を出す');
+check((await rowOf(fixedPrediction.candidates[0].name).locator('.pred-main .pred-ltr5').allTextContents()).join('').includes('未記録'),
+      '未記録の順位を推測せず、明示する');
+check((await page.locator('.pred-list .pred-ltr5:not(.unavailable)').count()) === 4,
+      '一部の順位が欠けても他4銘柄の記録済み順位は表示する');
 await page.setViewportSize({ width: 390, height: 844 });
-await page.waitForTimeout(200);
-const netFit = await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
-check(netFit, 'スマホの幅（390px）で横にはみ出さない');
+const rank5Fits = await page.locator('.pred-list .pred-ltr5').evaluateAll(nodes => nodes.every(n => n.getBoundingClientRect().right <= innerWidth));
+check(rank5Fits, '全銘柄の5営業日順位がスマホ幅に収まる');
 await page.setViewportSize({ width: 1440, height: 1000 });
-// 動きを減らす設定（prefers-reduced-motion）では明るみを流さず、向きの矢印にする
-await page.emulateMedia({ reducedMotion: 'reduce' });
-await page.reload({ waitUntil: 'networkidle' });
-await page.getByRole('tab', { name: 'リカレンス・ネットワーク' }).click();
-await page.waitForSelector('.net-canvas canvas', { timeout: 10000 });
-// 選んだ点の大きさは読み込み直しても残る（このブラウザに覚える）。確かめたら既定の「大」に戻す
-check((await page.locator('.net-seg[aria-label="点の大きさ"] button', { hasText: /^特大$/ }).getAttribute('aria-pressed')) === 'true',
-      '選んだ点の大きさは読み込み直しても残る');
-await page.locator('.net-seg[aria-label="点の大きさ"] button', { hasText: /^大$/ }).click();
-await page.locator('label', { hasText: '直近20営業日の軌跡' }).click();
-await page.waitForFunction(() => document.querySelector('.net-canvas')?.dataset.flow === 'arrows', null, { timeout: 5000 }).catch(() => {});
-check(await flowAt() === 'arrows', `動きを減らす設定では、軌跡は向きの矢印（流さない） (実際: ${await flowAt()})`);
-await page.emulateMedia({ reducedMotion: 'no-preference' });
-await page.unroute('**/data/predictions.json*');
-// 指で拡大縮小（運用者の依頼 2026-10-19「指で拡大縮小できるようにしたい」）: 触れる画面で、2本指を 60px → 220px に広げると
-// 3.67 倍になる（指の間を中心に）。CDP の触る操作を Chromium が pointer イベントにする
-{
-  const tctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
-  const tpage = await tctx.newPage();
-  tpage.on('pageerror', (e) => consoleErrors.push(`pageerror: ${e.message}`));
-  await tpage.route('**/data/predictions.json*',
-    (route) => route.fulfill({ contentType: 'application/json', body: JSON.stringify(predPass) }));
-  await tpage.goto(base, { waitUntil: 'networkidle' });
-  await tpage.getByRole('tab', { name: 'リカレンス・ネットワーク' }).click();
-  await tpage.waitForSelector('.net-canvas canvas', { timeout: 10000 });
-  await tpage.locator('.net-canvas canvas').scrollIntoViewIfNeeded();
-  const tb = await tpage.locator('.net-canvas canvas').boundingBox();
-  const cx = tb.x + tb.width / 2;
-  const cy = tb.y + tb.height / 2;
-  const cdp = await tctx.newCDPSession(tpage);
-  const pts = (dd) => [{ x: cx - dd, y: cy, id: 1 }, { x: cx + dd, y: cy, id: 2 }];
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: pts(30) });
-  for (let dd = 40; dd <= 110; dd += 10) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: pts(dd) });
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-  await tpage.waitForTimeout(200);
-  const zoomed = Number(await tpage.locator('.net-canvas').getAttribute('data-zoom'));
-  check(Math.abs(zoomed - 220 / 60) < 0.01, `2本指でつまんで広げると拡大する（60px → 220px で ${(220 / 60).toFixed(2)} 倍。実際: ${zoomed}）`);
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: pts(110) });
-  for (let dd = 100; dd >= 50; dd -= 10) await cdp.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: pts(dd) });
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-  await tpage.waitForTimeout(200);
-  const back = Number(await tpage.locator('.net-canvas').getAttribute('data-zoom'));
-  check(Math.abs(back - zoomed * (100 / 220)) < 0.01, `つまんで縮めると縮小する（実際: ${back}）`);
-  await tctx.close();
-}
 
 console.log('\n== コンソールエラー ==');
 check(consoleErrors.length === 0, `JS エラーなし (${consoleErrors.length}件)`);

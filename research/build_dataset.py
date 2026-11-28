@@ -15,11 +15,15 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import glob
+import io
 import json
 import os
 import sys
+import tempfile
 import time
+import warnings
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -32,6 +36,7 @@ sys.path.append(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__f
                              "scripts"))
 import availability as AV  # noqa: E402
 import features  # noqa: E402
+import label_specs as LS  # noqa: E402
 import extra_features  # noqa: E402
 import jquants_data_fetcher as JF  # noqa: E402
 import technicals as TX  # noqa: E402
@@ -84,6 +89,15 @@ SWEEP_OVERRIDES: dict = {}
 #: True にするのは日次予測のときだけで、予測したい行（今日のブレイク）は
 #: 定義上まだラベルが無いため。build_dataset.py --keep-unlabeled で立つ。
 KEEP_UNLABELED = False
+
+#: True にすると、決算の出し直し（同じ期の後からの版）があった期について、元の版の開示日から出し直しの日までの行の
+#: 決算の列を「その日までに開示された決算だけで作った値」にする（repair_reissued。直す版）。False は前の作り: 同じ
+#: （銘柄, 事業年度, 四半期）の最後の版だけを残して結合するので、その間の行には後の版が先回りして効き、予測の時点の値
+#: （元の版）と食い違う（2026-10-28 の一致チェック。docs/DATA_TIMING.md）。運用者の選択「直す版を作って比べる」
+#: （2026-10-29）で比べる版を作り（実験116。docs/MODEL_ADOPTION_RULES.md §80）、運用者の選択「入れる」（同じ日）で、
+#: 金曜 10/30 の予測の後に既定を True にした（土曜 10/31 の 1.5σ・日曜 11/01 の再学習から直す版で学ぶ。§80-5）。
+#: --no-pit-fins で前の作りに戻す（実験116 を比べ直すときなど）。--pit-fins は既定と同じ（明示したいとき）
+PIT_FINS = True
 
 # 78週 ≒ 368営業日。52週(245日)から広げた。
 # 52週だと「1年前の高値を1円抜いただけ」も母集団に入り、
@@ -195,7 +209,7 @@ BREAKOUT_COOLDOWN = _sweep_override("BREAKOUT_COOLDOWN", 20, int)
 # 終盤条件（END_RATIO）とトレンド条件も同じ t+horizon 時点を見るので、
 # この1行で3条件すべての基準点が t+60 から t+20 に移る。
 RISE_HORIZON = 20        # 営業日。約1ヶ月
-RISE_THRESHOLD = 0.20    # +20%。VOL_NORM_K が None のときだけ効く
+RISE_THRESHOLD = 0.10    # 本番の到達は固定+10%（2026-11-03の運用者指示）
 
 # --- 上昇を測る基準の価格 --- #
 # 2026-09-25 から **翌営業日の寄り付き（分割調整後の始値 AdjO[t+1]）**（運用者の決定）。
@@ -229,7 +243,7 @@ LABEL_ENTRIES = ("next_open", "close")
 # 1.2σ が最も良かったので採用する。
 #
 # None にすると固定 RISE_THRESHOLD に戻る。
-VOL_NORM_K: Optional[float] = 1.2
+VOL_NORM_K: Optional[float] = None
 
 # --- 継続の軸 --- #
 # 「到達したか」だけだと、一瞬吹き上げてすぐ下落トレンドに入った銘柄も
@@ -249,7 +263,7 @@ VOL_NORM_K: Optional[float] = 1.2
 # 差の714件はチャートで見ると「+20%に届いたあと10〜20日で失速した」群で、
 # 買えないほど悪いわけではない。まずは推定を安定させることを優先する。
 KEEP_DAYS = 0            # 維持日数の条件。0 なら課さない
-END_RATIO = 0.10         # t+horizon 後もまだ +10%以上（ボラ正規化時は比例させる）
+END_RATIO = 0.05         # 固定+10%の半分。追加モデルは到達+15%・終盤+7.5%
 END_WINDOW = 5           # 終盤の水準は5営業日平均で見る（1日の綾を拾わない）
 
 # トレンド条件の移動平均。**RISE_HORIZON に合わせて選ぶ必要がある**。
@@ -1159,7 +1173,7 @@ def attach_rise_label(df: pd.DataFrame, cfg: RiseConfig = DEFAULT_RISE) -> pd.Da
     need.index = df.index
     end_need.index = df.index
     df["rise_need"] = need
-    hit = ratio >= need
+    hit = (ratio >= need) if cfg.normalised else LS.at_least(ratio, need)
 
     close = df["close"].to_numpy(dtype=float)
 
@@ -1202,7 +1216,8 @@ def attach_rise_label(df: pd.DataFrame, cfg: RiseConfig = DEFAULT_RISE) -> pd.Da
     if cfg.keep_days:
         ok &= df["keep_days_cnt"] >= cfg.keep_days
     if cfg.end_ratio is not None:
-        ok &= df["end_level"] >= df["end_need"]
+        ok &= ((df["end_level"] >= df["end_need"]) if cfg.normalised
+               else LS.at_least(df["end_level"], df["end_need"]))
     if cfg.require_uptrend:
         ok &= df["uptrend_end"] == 1.0
 
@@ -2194,6 +2209,19 @@ def progress_pct_point_in_time(df: pd.DataFrame, raw_ver: Optional[pd.DataFrame]
                                    df["progress_basis"].to_numpy(),
                                    df["progress_ratio"].to_numpy())
     key = ["Code", "CurFYSt", "quarter"]
+    last = progress_pct_by_version(raw_ver, raw_op).drop_duplicates(key, keep="last")
+    table = dict(zip(zip(last["Code"], last["CurFYSt"], last["quarter"]), last["_pct"]))
+    return np.array([table.get(k, np.nan)
+                     for k in zip(df["Code"], df["CurFYSt"], df["quarter"])], dtype=float)
+
+
+def progress_pct_by_version(raw_ver: pd.DataFrame, raw_op: pd.DataFrame) -> pd.DataFrame:
+    """
+    版ごと（raw_ver の各行。(Code, CurFYSt, quarter, DiscDate, DiscTime) の順）の進捗の比率の順位 _pct。その版の開示日より前の
+    母集団（各期のその時点の最新の版）で数えた値。progress_pct_point_in_time は期ごとの最後の版の行を引き、repair_reissued
+    （PIT_FINS）は行の日付に分かっていた版の行を引く。
+    """
+    key = ["Code", "CurFYSt", "quarter"]
     order = key + ["DiscDate"] + (["DiscTime"] if "DiscTime" in raw_ver.columns else [])
     ver = raw_ver.sort_values(order, kind="mergesort").reset_index(drop=True)
     ver["OP"] = pd.to_numeric(ver["OP"], errors="coerce")
@@ -2204,10 +2232,7 @@ def progress_pct_point_in_time(df: pd.DataFrame, raw_ver: Optional[pd.DataFrame]
     pct = progress_percentile(ver["DiscDate"], ver["quarter"].to_numpy(),
                               sp["progress_basis"].to_numpy(), sp["progress_ratio"].to_numpy(),
                               keys=list(zip(ver["Code"], ver["CurFYSt"], ver["quarter"])))
-    last = ver.assign(_pct=pct).drop_duplicates(key, keep="last")
-    table = dict(zip(zip(last["Code"], last["CurFYSt"], last["quarter"]), last["_pct"]))
-    return np.array([table.get(k, np.nan)
-                     for k in zip(df["Code"], df["CurFYSt"], df["quarter"])], dtype=float)
+    return ver.assign(_pct=pct)
 
 
 def attach_fins(samples: pd.DataFrame, q: pd.DataFrame) -> pd.DataFrame:
@@ -2230,6 +2255,152 @@ def attach_fins(samples: pd.DataFrame, q: pd.DataFrame) -> pd.DataFrame:
         allow_exact_matches=True,
     )
     return out.drop(columns=["CurFYSt"])
+
+
+# --------------------------------------------------------------------------- #
+# 決算の出し直しを、その日に分かっていた版で結合する（PIT_FINS。既定はオフ）
+# --------------------------------------------------------------------------- #
+
+def fin_versions(fins: pd.DataFrame) -> pd.DataFrame:
+    """quarterize_panel が使う決算（実績のある四半期の開示）の版: Code・CurFYSt・quarter・DiscDate。"""
+    d = actual_disclosures(fins)
+    return pd.DataFrame({"Code": d["Code"].astype(str).to_numpy(), "CurFYSt": d["CurFYSt"].astype(str).to_numpy(),
+                         "quarter": d["quarter"].to_numpy(dtype=int), "DiscDate": d["DiscDate"].to_numpy()})
+
+
+def reissue_windows(ver: pd.DataFrame) -> pd.DataFrame:
+    """
+    同じ期の版が別の日に出た期の [最初の版の開示日, 最後の版の開示日)（Code・start・end）。この間の行は、今の作りでは
+    最後の版しか見えない（同じ日の重複は窓にしない）。
+    """
+    g = ver.groupby(["Code", "CurFYSt", "quarter"])["DiscDate"].agg(["min", "max"]).reset_index()
+    g = g[g["max"] > g["min"]]
+    return g.rename(columns={"min": "start", "max": "end"})[["Code", "start", "end"]].reset_index(drop=True)
+
+
+def in_reissue_windows(rows: pd.DataFrame, win: pd.DataFrame) -> np.ndarray:
+    """rows（Code・Date）のうち、同じ銘柄の窓 [start, end) に入る行。"""
+    r = pd.DataFrame({"_i": np.arange(len(rows)), "Code": rows["Code"].astype(str).to_numpy(),
+                      "Date": pd.to_datetime(rows["Date"]).to_numpy()})
+    m = r.merge(win, on="Code", how="inner")
+    hit = m.loc[(m["Date"] >= m["start"]) & (m["Date"] < m["end"]), "_i"].unique()
+    out = np.zeros(len(rows), dtype=bool)
+    out[hit] = True
+    return out
+
+
+def split_valuation(codes, data_dir: str, root: str) -> Dict[str, str]:
+    """
+    quarterize_panel が読むバリュエーション（data_dir の valuation_*.parquet。API の ROE）を、銘柄ごとの置き場（root の下）に
+    分ける。銘柄ごとに作り直すたびに全銘柄分（約90MB）を読み直すと1回数秒かかるので、その銘柄の行だけを置いた置き場を渡す
+    （api_valuation は銘柄で結合するので、ほかの銘柄の行が無くても値は同じ。research/exp/probe_fins_versions.py で確かめた）。
+    置き場にバリュエーションが無ければ、どの銘柄も data_dir のまま。
+    """
+    codes = sorted(set(map(str, codes)))
+    paths = sorted(glob.glob(os.path.join(data_dir, "valuation_[0-9]*.parquet")))
+    if not paths:
+        return {c: data_dir for c in codes}
+    want = set(codes)
+    parts = []
+    for p in paths:
+        v = pd.read_parquet(p)
+        v = v[v["Code"].astype(str).isin(want)]
+        if len(v):
+            parts.append(v)
+    v = pd.concat(parts, ignore_index=True) if parts else pd.DataFrame()
+    by = dict(tuple(v.groupby(v["Code"].astype(str), sort=False))) if len(v) else {}
+    out = {}
+    for c in codes:
+        d = os.path.join(root, c)
+        os.makedirs(d, exist_ok=True)
+        if c in by:
+            by[c].to_parquet(os.path.join(d, "valuation_0.parquet"), index=False)
+        out[c] = d
+    return out
+
+
+def as_of_panel_rows(rows: pd.DataFrame, fins: pd.DataFrame, adj: Optional[pd.DataFrame] = None,
+                     data_dir: str = DATA_DIR, dirs: Optional[Dict[str, str]] = None) -> pd.DataFrame:
+    """
+    rows（Code・Date）の行ごとに、その日までに開示された決算だけで quarterize_panel を作り、attach_fins と同じく結合した
+    決算パネルの行（CurFYSt も残す）。銘柄ごとに、決算の開示が増える日で区切って作る（同じ区間の行は同じ）。rows の順で
+    返す（その日までに決算の無い行は欠測）。dirs（銘柄 -> バリュエーションの置き場。split_valuation）があれば使う。
+    """
+    r = pd.DataFrame({"Code": rows["Code"].astype(str).to_numpy(), "Date": pd.to_datetime(rows["Date"]).to_numpy(),
+                      "_i": np.arange(len(rows))})
+    codes = set(r["Code"])
+    f = fins[fins["Code"].astype(str).isin(codes)]
+    f = f.assign(Code=f["Code"].astype(str), _dd=pd.to_datetime(f["DiscDate"]))
+    by_code = dict(tuple(f.groupby("Code", sort=False)))
+    adj_by = {}
+    if adj is not None:
+        a = adj[adj["Code"].astype(str).isin(codes)]
+        adj_by = dict(tuple(a.assign(Code=a["Code"].astype(str)).groupby("Code", sort=False)))
+    parts: List[pd.DataFrame] = [r.iloc[:0][["_i"]]]
+    for code, rc in r.groupby("Code", sort=False):
+        fc = by_code.get(code)
+        if fc is None:
+            parts.append(rc[["_i"]])
+            continue
+        dates = np.sort(fc["_dd"].unique())
+        pos = np.searchsorted(dates, rc["Date"].to_numpy(), side="right") - 1
+        for p, rr in rc.groupby(pos):
+            if p < 0:
+                parts.append(rr[["_i"]])
+                continue
+            # 銘柄ごとに何度も呼ぶので、ログと警告は出さない
+            with warnings.catch_warnings(), contextlib.redirect_stdout(io.StringIO()):
+                warnings.simplefilter("ignore")
+                qp = quarterize_panel(fc[fc["_dd"] <= dates[p]].drop(columns=["_dd"]),
+                                      data_dir=(dirs or {}).get(code, data_dir), adj=adj_by.get(code))
+            qp = qp.assign(Code=qp["Code"].astype(str)).sort_values(["DiscDate", "CurFYSt", "quarter"],
+                                                                    kind="mergesort")
+            got = pd.merge_asof(rr.sort_values("Date", kind="mergesort"), qp, left_on="Date", right_on="DiscDate",
+                                by="Code", direction="backward", allow_exact_matches=True)
+            parts.append(got)
+    out = pd.concat(parts, ignore_index=True).sort_values("_i").reset_index(drop=True)
+    return out.drop(columns=["_i", "Date"], errors="ignore")
+
+
+def repair_reissued(samples: pd.DataFrame, q: pd.DataFrame, fins: pd.DataFrame, data_dir: str = DATA_DIR,
+                    adj: Optional[pd.DataFrame] = None) -> Tuple[pd.DataFrame, Dict]:
+    """
+    attach_fins の後の samples のうち、出し直しの窓（ある期の最初の版の開示日 ≤ 行の日付 < 最後の版の開示日）に入る行の
+    決算の列（q から付いた列。DiscDate を含む）を、その日までに開示された決算だけで作った決算パネルの値に置き換える
+    （PIT_FINS のとき build が呼ぶ）。進捗の順位（progress_pct）は全銘柄の中の順位なので、銘柄ごとの作り直しでは数え
+    られない。全部の版で数えた「その版の開示日の順位」（progress_pct_by_version）を、付いた版で引く（予測の時点で
+    quarterize_panel が付ける値と同じ）。1年以上古い決算の欠測は、このあと build が付いた開示日で決める。
+    返す情報: 窓の数・当たる行・値が変わった行。
+    """
+    win = reissue_windows(fin_versions(fins))
+    mask = in_reissue_windows(samples, win)
+    info = {"windows": int(len(win)), "rows": int(mask.sum()), "changed": 0}
+    if not mask.any():
+        return samples, info
+    cols = [c for c in q.columns if c not in ("Code", "CurFYSt") and c in samples.columns]
+    rows = samples.loc[mask, ["Code", "Date"]]
+    with tempfile.TemporaryDirectory() as root:
+        dirs = split_valuation(rows["Code"], data_dir, root)
+        vals = as_of_panel_rows(rows, fins, adj, data_dir=data_dir, dirs=dirs)
+    if "progress_pct" in cols:
+        raw_op, raw_ver = raw_versions(actual_disclosures(fins))
+        if len(raw_ver) and "FOP" in raw_ver.columns:
+            by_ver = progress_pct_by_version(raw_ver, raw_op)
+            key = ["Code", "CurFYSt", "quarter", "DiscDate"]
+            by_ver = by_ver.assign(Code=by_ver["Code"].astype(str)).drop_duplicates(key, keep="last")
+            k = vals[key].copy()
+            k["quarter"] = pd.to_numeric(k["quarter"], errors="coerce")
+            got = k.merge(by_ver[key + ["_pct"]].assign(quarter=by_ver["quarter"].astype(float)), on=key, how="left")
+            vals["progress_pct"] = got["_pct"].to_numpy(dtype=float)
+    out = samples.copy()
+    idx = out.index[mask]
+    before = out.loc[idx, cols].copy()
+    for c in cols:
+        out.loc[idx, c] = vals[c].to_numpy() if c in vals.columns else np.nan
+    after = out.loc[idx, cols]
+    same = (before.isna() & after.isna()) | (before == after)
+    info["changed"] = int((~same.all(axis=1)).sum())
+    return out, info
 
 
 #: 本（ファンダメンタルズ分析の目次）の第2・3章で、取得済みの J-Quants の項目から作れるのに
@@ -2382,6 +2553,35 @@ def add_book_ratios(df: pd.DataFrame, adj: Optional[pd.DataFrame] = None) -> pd.
     return df
 
 
+#: 決算の期の番号（通期は4）。quarterize_panel と、出し直しの窓（PIT_FINS）で同じものを使う
+FIN_Q_MAP = {"1Q": 1, "2Q": 2, "3Q": 3, "4Q": 4, "FY": 4}
+
+
+def actual_disclosures(fins: pd.DataFrame) -> pd.DataFrame:
+    """実績値を持つ四半期の開示だけ（業績予想の修正だけの開示を除く）。quarter（1〜4）を足し、DiscDate を日付にする。"""
+    df = fins.copy()
+    df["quarter"] = df["CurPerType"].map(FIN_Q_MAP)
+    has_actual = df[["Sales", "OP", "NP", "EPS"]].notna().any(axis=1)
+    df = df[df["quarter"].notna() & has_actual].copy()
+    df["quarter"] = df["quarter"].astype(int)
+    df["DiscDate"] = pd.to_datetime(df["DiscDate"])
+    return df
+
+
+def raw_versions(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    重複（同じ期の出し直し）を除く前の開示の表 (raw_op, raw_ver)。df は actual_disclosures の出力。
+      raw_op   進捗の基準（前年同期）を「その日までに出ていた版」で引くため
+      raw_ver  版をすべて残した表。進捗の順位（progress_pct_point_in_time）の母集団を「その日までに出ていた各期の最新の
+               版」で持つため。FOP はその版の通期予想
+    """
+    raw_op = df[[c for c in ("Code", "CurFYSt", "quarter", "DiscDate", "DiscTime", "OP")
+                 if c in df.columns]].copy()
+    raw_ver = df[[c for c in ("Code", "CurFYSt", "quarter", "DiscDate", "DiscTime", "OP", "FOP")
+                  if c in df.columns]].copy()
+    return raw_op, raw_ver
+
+
 def quarterize_panel(fins: pd.DataFrame, data_dir: str = DATA_DIR,
                      adj: Optional[pd.DataFrame] = None) -> pd.DataFrame:
     """
@@ -2390,21 +2590,8 @@ def quarterize_panel(fins: pd.DataFrame, data_dir: str = DATA_DIR,
     scripts/jquants_data_fetcher.py の quarterize() と同じ考え方を
     pandas でベクトル化したもの（4,441銘柄 × 10年を回すため）。
     """
-    q_map = {"1Q": 1, "2Q": 2, "3Q": 3, "4Q": 4, "FY": 4}
-    df = fins.copy()
-    df["quarter"] = df["CurPerType"].map(q_map)
-    # 実績値を持つ開示のみ（業績予想の修正だけの開示を除く）
-    has_actual = df[["Sales", "OP", "NP", "EPS"]].notna().any(axis=1)
-    df = df[df["quarter"].notna() & has_actual].copy()
-    df["quarter"] = df["quarter"].astype(int)
-    df["DiscDate"] = pd.to_datetime(df["DiscDate"])
-    # 重複を除く前の開示。進捗の基準（前年同期）を「その日までに出ていた版」で引くため
-    raw_op = df[[c for c in ("Code", "CurFYSt", "quarter", "DiscDate", "DiscTime", "OP")
-                 if c in df.columns]].copy()
-    # 版をすべて残した表。進捗の順位（progress_pct_point_in_time）の母集団を「その日までに
-    # 出ていた各期の最新の版」で持つため。FOP はその版の通期予想
-    raw_ver = df[[c for c in ("Code", "CurFYSt", "quarter", "DiscDate", "DiscTime", "OP", "FOP")
-                  if c in df.columns]].copy()
+    df = actual_disclosures(fins)
+    raw_op, raw_ver = raw_versions(df)
 
     # 同一(銘柄, 会計年度, 四半期)の重複開示は最後の開示を採用（訂正を反映）
     df = (df.sort_values(["Code", "CurFYSt", "quarter", "DiscDate", "DiscTime"])
@@ -3267,6 +3454,13 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     # 株数・BPS の前年同期比を分割で跳ばせないために、株価パネルの調整倍率を渡す
     q = quarterize_panel(fins, data_dir, adj=df[["Code", "Date", "close_raw", "close"]])
     samples = attach_fins(samples, q)
+    pit_info = None
+    if PIT_FINS:
+        # 決算の出し直しの間の行を、その日に分かっていた版で付け直す（2026-10-30 から既定。--no-pit-fins で前の作り）
+        samples, pit_info = repair_reissued(samples, q, fins, data_dir,
+                                            adj=df[["Code", "Date", "close_raw", "close"]])
+        print(f"[merge] 決算の出し直し（その日の版で付け直す）: 出し直しの窓 {pit_info['windows']:,} / 当たる行 "
+              f"{pit_info['rows']:,}件 / 値が変わった行 {pit_info['changed']:,}件")
     # 決算が古すぎる（1年以上前）場合は使わない
     stale = (samples["Date"] - samples["DiscDate"]).dt.days > 365
     fin_cols = [c for c in q.columns if c not in ("Code", "DiscDate", "CurFYSt")]
@@ -3518,6 +3712,15 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
     print(f"[tech] テクニカル指標 {len(TX.COLUMNS)}列 / {time.time() - t0:.0f}秒 / {len(samples):,}行 / "
           f"すべて欠測の行 {int(tx_miss.all(axis=1).sum()):,} / 欠測のいちばん多い列 {tx_miss.mean().max() * 100:.2f}%")
 
+    # Same function and availability rules for training and daily serving.
+    import financial_inputs as FI
+    print("[finance] E121 C: 13 financial inputs / quality columns")
+    finance = FI.calculate(samples[["Code", "Date", "close_raw"]],
+                           df[["Code", "Date", "close", "close_raw"]],
+                           fins, topix, FI.yields(data_dir))
+    for col in FI.COLUMNS:
+        samples[col] = finance[col].to_numpy()
+
     print("\n[rank] 横断面正規化（同一日付内のパーセンタイル順位）")
     samples = add_cross_sectional_ranks(samples, features.RAW_FOR_RANK)
 
@@ -3571,6 +3774,12 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
         print(f"[result] ラベルは全行未確定（予測用）: {len(out):,}件")
     print(f"[result] 期間: {out['Date'].min().date()} 〜 {out['Date'].max().date()}")
     print(f"[result] 銘柄数: {out['Code'].nunique():,}")
+    # どちらの作りで決算を結合したか（ワークフローのログは末尾だけ残すので、ここにも出す）
+    if pit_info is not None:
+        print(f"[result] 決算の出し直し: その日の版で付け直した（PIT_FINS。出し直しの窓 {pit_info['windows']:,} / "
+              f"当たる行 {pit_info['rows']:,}件 / 値が変わった行 {pit_info['changed']:,}件）")
+    else:
+        print("[result] 決算の出し直し: 今の作り（同じ期は最後の版で結合。PIT_FINS はオフ）")
 
     miss = out[feature_cols].isna().mean().sort_values(ascending=False)
     print("\n[欠測率の高い特徴量]")
@@ -3629,6 +3838,7 @@ def build(data_dir: str, out_path: str) -> pd.DataFrame:
         "sweepOverrides": dict(SWEEP_OVERRIDES),
         # 予測用に作ったデータセットかどうか。True のものを学習に使ってはいけない
         "keepUnlabeled": bool(KEEP_UNLABELED),
+        "pitFins": bool(PIT_FINS),
         "nUnlabeled": int(out["label"].isna().sum()),
         "cooldown": BREAKOUT_COOLDOWN,
         # 高値更新の判定の基準（既定 high / True。実験90 が close / False を試す）
@@ -3656,10 +3866,21 @@ def main(argv: List[str] | None = None) -> int:
     ap.add_argument("--out", default=os.path.join(DATA_DIR, "dataset.parquet"))
     ap.add_argument("--keep-unlabeled", action="store_true",
                     help="ラベル未確定の行も残す（日次予測用。学習には使わない）")
+    pit = ap.add_mutually_exclusive_group()
+    pit.add_argument("--pit-fins", action="store_true",
+                     help="決算の出し直しの間の行を、その日に分かっていた版で付け直す（PIT_FINS を立てる。2026-10-30 から既定）")
+    pit.add_argument("--no-pit-fins", action="store_true",
+                     help="決算の出し直しの間の行も、同じ期の最後の版で結合する（PIT_FINS を下ろす。前の作りで比べ直すとき）")
     args = ap.parse_args(argv)
     if args.keep_unlabeled:
         globals()["KEEP_UNLABELED"] = True
         print("[mode] ラベル未確定の行を残す（予測用データセット）")
+    if args.pit_fins:
+        globals()["PIT_FINS"] = True
+        print("[mode] 決算の出し直しの間の行を、その日に分かっていた版で付け直す（PIT_FINS）")
+    if args.no_pit_fins:
+        globals()["PIT_FINS"] = False
+        print("[mode] 決算の出し直しの間の行も、同じ期の最後の版で結合する（PIT_FINS をオフ）")
     build(args.data_dir, args.out)
     return 0
 

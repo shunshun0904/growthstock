@@ -1,0 +1,391 @@
+{
+  "synthetic": true,
+  "generatedAt": "2026-11-04T20:00:00+00:00",
+  "stocks": [
+    {
+      "code": "1111",
+      "jqCode": "11110",
+      "name": "合成・金額あり",
+      "asOf": "2026-11-04",
+      "metrics": {
+        "price": 120
+      },
+      "supplyDemand": {
+        "schemaVersion": 1,
+        "status": "ok",
+        "asOf": "2026-11-04",
+        "currentPrice": 120.0,
+        "balance": {
+          "date": "2026-11-04",
+          "publishedOn": "2026-11-04",
+          "availableOn": "2026-11-04",
+          "availabilityBasis": "published",
+          "shareAdjustment": 1.0
+        },
+        "long": {
+          "reportedShares": 1000.0,
+          "shares": 1000.0,
+          "contractAmount": 110000.0,
+          "averagePrice": 110.0,
+          "averagePriceKind": "contract_amount",
+          "referencePnlRate": 0.09090909090909083
+        },
+        "short": {
+          "reportedShares": 500.0,
+          "shares": 500.0,
+          "contractAmount": 45000.0,
+          "averagePrice": 90.0,
+          "averagePriceKind": "contract_amount",
+          "referencePnlRate": -0.33333333333333326
+        },
+        "ratio": 2.0,
+        "profiles": {
+          "60": {
+            "sessions": 3,
+            "tradedSessions": 3,
+            "from": "2026-11-02",
+            "to": "2026-11-04",
+            "closeFallbackSessions": 0,
+            "long": {
+              "status": "ok",
+              "method": "mean_calibrated",
+              "bins": [
+                {
+                  "low": 80.0,
+                  "high": 82.0,
+                  "price": 80.0,
+                  "shares": 116.204060378001
+                },
+                {
+                  "low": 100.0,
+                  "high": 102.0,
+                  "price": 100.0,
+                  "shares": 267.5918792439983
+                },
+                {
+                  "low": 118.0,
+                  "high": 120.0,
+                  "price": 120.0,
+                  "shares": 616.2040603780008
+                }
+              ],
+              "estimatedAveragePrice": 110.0,
+              "estimatedPnlRate": 0.09090909090909083
+            },
+            "short": {
+              "status": "ok",
+              "method": "mean_calibrated",
+              "bins": [
+                {
+                  "low": 80.0,
+                  "high": 82.0,
+                  "price": 80.0,
+                  "shares": 308.1020301890007
+                },
+                {
+                  "low": 100.0,
+                  "high": 102.0,
+                  "price": 100.0,
+                  "shares": 133.79593962199903
+                },
+                {
+                  "low": 118.0,
+                  "high": 120.0,
+                  "price": 120.0,
+                  "shares": 58.102030189000324
+                }
+              ],
+              "estimatedAveragePrice": 90.0,
+              "estimatedPnlRate": -0.33333333333333326
+            }
+          },
+          "120": {
+            "sessions": 3,
+            "tradedSessions": 3,
+            "from": "2026-11-02",
+            "to": "2026-11-04",
+            "closeFallbackSessions": 0,
+            "long": {
+              "status": "ok",
+              "method": "mean_calibrated",
+              "bins": [
+                {
+                  "low": 80.0,
+                  "high": 82.0,
+                  "price": 80.0,
+                  "shares": 116.204060378001
+                },
+                {
+                  "low": 100.0,
+                  "high": 102.0,
+                  "price": 100.0,
+                  "shares": 267.5918792439983
+                },
+                {
+                  "low": 118.0,
+                  "high": 120.0,
+                  "price": 120.0,
+                  "shares": 616.2040603780008
+                }
+              ],
+              "estimatedAveragePrice": 110.0,
+              "estimatedPnlRate": 0.09090909090909083
+            },
+            "short": {
+              "status": "ok",
+              "method": "mean_calibrated",
+              "bins": [
+                {
+                  "low": 80.0,
+                  "high": 82.0,
+                  "price": 80.0,
+                  "shares": 308.1020301890007
+                },
+                {
+                  "low": 100.0,
+                  "high": 102.0,
+                  "price": 100.0,
+                  "shares": 133.79593962199903
+                },
+                {
+                  "low": 118.0,
+                  "high": 120.0,
+                  "price": 120.0,
+                  "shares": 58.102030189000324
+                }
+              ],
+              "estimatedAveragePrice": 90.0,
+              "estimatedPnlRate": -0.33333333333333326
+            }
+          },
+          "250": {
+            "sessions": 3,
+            "tradedSessions": 3,
+            "from": "2026-11-02",
+            "to": "2026-11-04",
+            "closeFallbackSessions": 0,
+            "long": {
+              "status": "ok",
+              "method": "mean_calibrated",
+              "bins": [
+                {
+                  "low": 80.0,
+                  "high": 82.0,
+                  "price": 80.0,
+                  "shares": 116.204060378001
+                },
+                {
+                  "low": 100.0,
+                  "high": 102.0,
+                  "price": 100.0,
+                  "shares": 267.5918792439983
+                },
+                {
+                  "low": 118.0,
+                  "high": 120.0,
+                  "price": 120.0,
+                  "shares": 616.2040603780008
+                }
+              ],
+              "estimatedAveragePrice": 110.0,
+              "estimatedPnlRate": 0.09090909090909083
+            },
+            "short": {
+              "status": "ok",
+              "method": "mean_calibrated",
+              "bins": [
+                {
+                  "low": 80.0,
+                  "high": 82.0,
+                  "price": 80.0,
+                  "shares": 308.1020301890007
+                },
+                {
+                  "low": 100.0,
+                  "high": 102.0,
+                  "price": 100.0,
+                  "shares": 133.79593962199903
+                },
+                {
+                  "low": 118.0,
+                  "high": 120.0,
+                  "price": 120.0,
+                  "shares": 58.102030189000324
+                }
+              ],
+              "estimatedAveragePrice": 90.0,
+              "estimatedPnlRate": -0.33333333333333326
+            }
+          }
+        }
+      }
+    },
+    {
+      "code": "2222",
+      "jqCode": "22220",
+      "name": "合成・金額なし",
+      "asOf": "2026-11-04",
+      "metrics": {
+        "price": 120
+      },
+      "supplyDemand": {
+        "schemaVersion": 1,
+        "status": "ok",
+        "asOf": "2026-11-04",
+        "currentPrice": 120.0,
+        "balance": {
+          "date": "2026-11-04",
+          "publishedOn": "2026-11-04",
+          "availableOn": "2026-11-04",
+          "availabilityBasis": "published",
+          "shareAdjustment": 1.0
+        },
+        "long": {
+          "reportedShares": 1000.0,
+          "shares": 1000.0,
+          "contractAmount": null,
+          "averagePrice": null,
+          "averagePriceKind": null,
+          "referencePnlRate": null
+        },
+        "short": {
+          "reportedShares": 0.0,
+          "shares": 0.0,
+          "contractAmount": 0.0,
+          "averagePrice": null,
+          "averagePriceKind": null,
+          "referencePnlRate": null
+        },
+        "ratio": null,
+        "profiles": {
+          "60": {
+            "sessions": 3,
+            "tradedSessions": 3,
+            "from": "2026-11-02",
+            "to": "2026-11-04",
+            "closeFallbackSessions": 0,
+            "long": {
+              "status": "ok",
+              "method": "volume_prior",
+              "bins": [
+                {
+                  "low": 80.0,
+                  "high": 82.0,
+                  "price": 80.0,
+                  "shares": 333.3333333333333
+                },
+                {
+                  "low": 100.0,
+                  "high": 102.0,
+                  "price": 99.99999999999999,
+                  "shares": 333.3333333333333
+                },
+                {
+                  "low": 118.0,
+                  "high": 120.0,
+                  "price": 120.0,
+                  "shares": 333.3333333333333
+                }
+              ],
+              "estimatedAveragePrice": 100.0,
+              "estimatedPnlRate": 0.19999999999999996
+            },
+            "short": {
+              "status": "no_positions",
+              "method": null,
+              "bins": [],
+              "estimatedAveragePrice": null,
+              "estimatedPnlRate": null
+            }
+          },
+          "120": {
+            "sessions": 3,
+            "tradedSessions": 3,
+            "from": "2026-11-02",
+            "to": "2026-11-04",
+            "closeFallbackSessions": 0,
+            "long": {
+              "status": "ok",
+              "method": "volume_prior",
+              "bins": [
+                {
+                  "low": 80.0,
+                  "high": 82.0,
+                  "price": 80.0,
+                  "shares": 333.3333333333333
+                },
+                {
+                  "low": 100.0,
+                  "high": 102.0,
+                  "price": 99.99999999999999,
+                  "shares": 333.3333333333333
+                },
+                {
+                  "low": 118.0,
+                  "high": 120.0,
+                  "price": 120.0,
+                  "shares": 333.3333333333333
+                }
+              ],
+              "estimatedAveragePrice": 100.0,
+              "estimatedPnlRate": 0.19999999999999996
+            },
+            "short": {
+              "status": "no_positions",
+              "method": null,
+              "bins": [],
+              "estimatedAveragePrice": null,
+              "estimatedPnlRate": null
+            }
+          },
+          "250": {
+            "sessions": 3,
+            "tradedSessions": 3,
+            "from": "2026-11-02",
+            "to": "2026-11-04",
+            "closeFallbackSessions": 0,
+            "long": {
+              "status": "ok",
+              "method": "volume_prior",
+              "bins": [
+                {
+                  "low": 80.0,
+                  "high": 82.0,
+                  "price": 80.0,
+                  "shares": 333.3333333333333
+                },
+                {
+                  "low": 100.0,
+                  "high": 102.0,
+                  "price": 99.99999999999999,
+                  "shares": 333.3333333333333
+                },
+                {
+                  "low": 118.0,
+                  "high": 120.0,
+                  "price": 120.0,
+                  "shares": 333.3333333333333
+                }
+              ],
+              "estimatedAveragePrice": 100.0,
+              "estimatedPnlRate": 0.19999999999999996
+            },
+            "short": {
+              "status": "no_positions",
+              "method": null,
+              "bins": [],
+              "estimatedAveragePrice": null,
+              "estimatedPnlRate": null
+            }
+          }
+        }
+      }
+    },
+    {
+      "code": "3333",
+      "jqCode": "33330",
+      "name": "合成・需給なし",
+      "metrics": {}
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "dataset_sha256": "811680be295a246b8caef85bd0d59d70088ba3507e06df4f144f95b16bec4479",
+  "prices_sha256": "7beb7c490324c076be0ecae41ea8102262d323237041b5ead427dd61e9fef1f7",
+  "annual_sha256": "6ce4f148af5c4ffc3097c05a7bc7fd10cd7278e2a635b6ea42977c9e1e2b4390",
+  "companies_sha256": "5d52d4130cd037cd8c03532446ed7874d8930515ae4abc7a84be53813da706ce",
+  "fins_sha256": {
+    "fins_2016.parquet": "51a630424a5e627856177d4e65f326b43942f1b41080e16f944178be9fcc3c9e",
+    "fins_2017.parquet": "0aa17e4fffb39b552c42e3fde9008165757fd9357e185f55a148b2b803e1b097",
+    "fins_2018.parquet": "ef8c26414858ff6d32f6ee4c625d2133248dee6307ec61cb0dddeab503bf86c4",
+    "fins_2019.parquet": "5e1ce0980fd5235ad081dbd73057b8dac784de59f456f43ce48b499223e16e7e",
+    "fins_2020.parquet": "678e64b305155d4b86614d865bf6b0ffbbb0448b1b9c97a56a9dc25185ec87a2",
+    "fins_2021.parquet": "6564115e865a52e1d0f6e86a31b637e76c1fcdeb8cdf3e5384ddd51eff013274",
+    "fins_2022.parquet": "d402a6e21378c284d9baabfcf09c28612652b0a9303ea3b0da0f5add209ea7ff",
+    "fins_2023.parquet": "6e024e03e20d9948dae99d7552e85dd14e37b9e018c9cfeb0e7990b90689fb77",
+    "fins_2024.parquet": "161c9744aadec803f20710600e24aaadcecfe76a054fb1194f01147a8d505536",
+    "fins_2025.parquet": "09a3bae857d0fd65330d21549a89123a68b8d7181672ad1dfedb70c366ba0974",
+    "fins_2026.parquet": "5e25c7be16ed362347afc909a6175f48ad5d6929ecfe89c7d0a45dcbaff604c5"
+  },
+  "corrections_sha256": "809f91e6dc0d932580fc213b0089a8be2c8dea05f5a59f20700b02ecd2555e2f",
+  "module_sha256": "584111b000f3af498db081a53e0445fef3e487da2a1d27066ee2a4a1942c27d1",
+  "experiment_sha256": "a94da09677b5c1e318253877490c0c3ddbe81cc7ae38e6f5a7af949e92a83340",
+  "existing_columns_identical": true,
+  "parameter_files_sha256": {
+    "lgbm_params.json": "9158a693e43750cf60b6cb6d4b6cac35ff2a7bb27e76c4a27b5905b5f4796bc6",
+    "multi_params.json": "bb66ab29dd34a719d31ca71f14025fe29d58f4182f91f34050faca8f6ecc1221",
+    "ltr_params.json": "2c2803606c69d97ffb2b257d4e92a5f775c6c53cbaff193da1b8487ffcee54ab",
+    "ltr5_params.json": "3bc6cebf735728987bd276be89582027667422008458b87bad3f55cdd25532ea"
+  },
+  "rows": 22110,
+  "codes": 3748,
+  "historical_revision_lineage_verified": false
+}

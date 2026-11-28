@@ -21,6 +21,11 @@
 #   bash scripts/gh_release_download.sh TAG DIR [PATTERN...]
 #
 # PATTERN は gh の --pattern と同じグロブ（例: 'jsf_*'）。省略すると全アセット。
+#
+# GH_DOWNLOAD_REQUIRED=1 のときは、Release が見つからなければ「初回」とみなさず exit 1 で止める。既定は data-raw と
+# data-jsf だけ 1（どちらも下書き（非公開）の Release にする。下書きは書き込み権限のある鍵にしか見えず、読むだけの鍵では
+# 「無い」と同じに見える。黙って初回として進むと、取り込みが過去を消して作り直しうる。2026-11-27 の Probe Draft Convert で
+# 確かめた。docs/OPERATIONS.md「data-raw を非公開にする」）。0 を渡すと止めない。
 set -uo pipefail
 
 tag="${1:-}"
@@ -33,6 +38,11 @@ shift 2
 patterns=("$@")
 tries="${GH_DOWNLOAD_TRIES:-5}"
 wait_s="${GH_DOWNLOAD_WAIT:-5}"
+if [ "$tag" = "data-raw" ] || [ "$tag" = "data-jsf" ]; then
+  required="${GH_DOWNLOAD_REQUIRED:-1}"
+else
+  required="${GH_DOWNLOAD_REQUIRED:-0}"
+fi
 mkdir -p "$dir"
 
 matches() {
@@ -54,6 +64,10 @@ for ((i = 1; i <= tries; i++)); do
     break
   fi
   if grep -qi "not found" <<<"$out"; then
+    if [ "$required" = "1" ]; then
+      echo "::error title=Release が見つからない::$tag が見つからない（下書きは書き込み権限のある鍵にしか見えない。ワークフローの permissions を contents: write にする）。初回とみなさずに止める" >&2
+      exit 1
+    fi
     echo "[download] Release（$tag）が無い。初回として進む"
     exit 0
   fi

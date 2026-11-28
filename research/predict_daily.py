@@ -30,6 +30,7 @@ out-of-fold 予測から作った較正表とスコア帯統計を meta.json に
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import glob
 import json
 import os
@@ -88,6 +89,8 @@ def load_model(model_dir: str):
             f"モデルがありません（{path}）。"
             "先に research/train_production.py を実行してください")
     meta = json.load(open(meta_path, encoding="utf-8"))
+    import model_artifacts as A
+    A.require(meta, "lgbm", model_dir)
     return lgb.Booster(model_file=path), meta
 
 
@@ -227,7 +230,9 @@ def agreement(per: Dict[str, Dict], algos, pct: float = 90.0) -> Tuple[int, int]
 # 90 以上 = 上位10%）。実験79〜81（docs/MODEL_ADOPTION_RULES.md §35〜37）で、12本の値の中で判断に効いたのは
 # 「12本がそろって高いか」（合意の高さ）だけだった。順位・帯・較正・追跡ファイルは基準モデルのまま。
 # 同じ日の運用者の指示（「12本の平均ではなく、12個全てを載せてほしい」）で、画面は12本の百分位をそのまま表で出す
-# 形に変え、合意は画面に出さなくなった。値は確認・研究用に predictions.json に残す（§38）。
+# 形に変え、合意は画面に出さなくなった。値は確認・研究用に predictions.json に残す（§38）。2026-10-24 に 1.8σ の
+# 4本を外したので、それからの合意は LINEUP の8本（1.2σ と 1.5σ の各4本）の平均。2026-11-02 の予測からはロジスティック
+# 回帰（1.2σ・1.5σ）も外したので6本（1.2σ と 1.5σ の木の各3本）の平均。
 
 def oof_scores_of(algo: str, model_dir: str) -> Optional[pd.DataFrame]:
     """そのモデルの out-of-fold（Code, Date, score）。基準モデルは model_dir/oof.parquet、ほかは models/<名前>/。"""
@@ -286,7 +291,8 @@ def score_others(cand: pd.DataFrame, cols: List[str],
     基準モデル以外でも採点する。
 
     アンサンブルはしない。各モデルのスコアを混ぜて1つにはせず、画面に並べて
-    人間が統合判断する（models.ALGOS。2026-10-09 夜からは木3つ + ロジスティック回帰。MLP は外した）。
+    人間が統合判断する（models.ALGOS。2026-10-09 夜からは木3つ + ロジスティック回帰。MLP は外した。2026-11-02 の予測からは
+    木3つだけ。ロジスティック回帰は運用者の指示 2026-10-29 で外した）。
 
     モデル間で生スコアは比較できない（学習器が違えばスケールも意味も違う）。
     画面に出すのは各モデル自身の過去スコア分布での位置（pctHistorical）。
@@ -295,8 +301,8 @@ def score_others(cand: pd.DataFrame, cols: List[str],
     転んだ日に、日次予測まで落とさないため。
 
     各モデルは**自分が学習した列**（meta の features。並びもそのとき）で採点する。列の組を切り替える週は
-    土曜に 1.5σ・1.8σ、日曜に 1.2σ を学習し直すので、どちらかが失敗するとモデルごとに列が違う週ができる
-    （2026-10-17、241列への切り替えで足した）。学習した列がデータに無いモデルだけ飛ばす。
+    土曜に 1.5σ、日曜に 1.2σ を学習し直すので、どちらかが失敗するとモデルごとに列が違う週ができる
+    （2026-10-17、241列への切り替えで足した。1.8σ は 2026-10-24 に外した）。学習した列がデータに無いモデルだけ飛ばす。
     """
     import models as M
 
@@ -330,9 +336,10 @@ def score_others(cand: pd.DataFrame, cols: List[str],
                 "nOof": meta.get("nOof"),
                 "scoreBands": meta.get("scoreBands", {}),
                 "cv": meta.get("tuning", {}),
-                # ラベル違いのモデル（models.VARIANTS）の目印。画面は本番の合議（agree90）に数えず、並べて見せる
-                "variant": M.label_k(algo) is not None,
+                # ラベル違いのモデル（models.ACTIVE_VARIANTS。1.5σ の木3本）の目印。画面は 1.2σ の一致（agree90）に数えず、並べて見せる
+                "variant": algo in M.ACTIVE_VARIANTS,
                 "labelK": meta.get("volNormK"),
+                "labelSpec": meta.get("labelSpec"),
                 "label": meta.get("label"),
                 "positiveRate": meta.get("positiveRate"),
             })
@@ -340,6 +347,138 @@ def score_others(cand: pd.DataFrame, cols: List[str],
         except Exception as exc:          # noqa: BLE001
             print(f"  [{algo}] 失敗: {type(exc).__name__}: {exc}")
     return scores, info
+
+
+def attach_ltr(rows: List[Dict], cand: pd.DataFrame, model_dir: str) -> Optional[Dict]:
+    """
+    ランキング学習（research/ltr.py）で候補を採点し、各行に ltr（score・その日の中の百分位 dayPct・順位 dayRank・その日の
+    候補数 nDay・上半分の印 upper・過去の分布での位置 pctHistorical）を足す。画面と実運用の追跡が「両方使う形」（今の規則
+    かつ その日の中でランキング学習が上半分）を参考に並べるためのもの（運用者の選択「まず並べて見る」2026-10-24。
+    docs/MODEL_ADOPTION_RULES.md §78-9）。**買いの規則には使わない。**
+
+    rows は cand と同じ順（1行 = cand の1行）。その日の中の順位は、その日の候補すべての中で付ける（実験114b と同じ）。
+    モデルが無い・学習した列がデータに無い・失敗したときは何も足さない（予測は止めない。score_others と同じ考え方）。
+    """
+    import ltr as LTR
+    import models as M
+
+    try:
+        model, meta = LTR.load(model_dir)
+        if model is None:
+            print("[ltr] ランキング学習のモデルが無いので出さない")
+            return None
+        want = list(meta.get("features") or [])
+        miss = [c for c in want if c not in cand.columns]
+        if not want or miss:
+            print(f"[ltr] 学習した列のうち {len(miss)}列がデータに無いので出さない")
+            return None
+        sc = LTR.predict(model, cand[want].to_numpy(dtype=float))
+        fields = LTR.day_fields(cand["Date"], sc, M.hist_scores(LTR.NAME, model_dir))
+        if len(fields) != len(rows):
+            print(f"[ltr] 行の数が合わない（候補 {len(rows)} / 採点 {len(fields)}）ので出さない")
+            return None
+        for x, f in zip(rows, fields):
+            x["ltr"] = f
+        print(f"[ltr] 採点 {len(rows):,}件（学習日 {str(meta.get('trainedAt'))[:10]}）・その日の中で上半分 "
+              f"{sum(1 for f in fields if f['upper']):,}件")
+        return {"algo": LTR.NAME, "name": meta.get("name", LTR.JA), "short": meta.get("short", LTR.SHORT),
+                "note": meta.get("note", LTR.NOTE), "trainedAt": meta.get("trainedAt"), "nOof": meta.get("nOof"),
+                "dayUpper": round(float(meta.get("dayUpper", LTR.DAY_UPPER)) * 100, 1),
+                "oofMetrics": meta.get("oofMetrics", {})}
+    except Exception as exc:          # noqa: BLE001
+        print(f"[ltr] 失敗（出さない）: {type(exc).__name__}: {exc}")
+        return None
+
+
+def attach_ltr5(rows: List[Dict], cand: pd.DataFrame, data_dir: str, model_dir: str) -> Optional[Dict]:
+    """
+    直近5営業日の組のランキング学習（research/ltr5.py。実験117 の W5）で、予測の日（cand の最後の日）の組を採点し、予測の日の
+    候補の行に ltr5（score・組の中の順位 rank（1 = 最上位。同じスコアは銘柄コードの順）・組の行の数 nPool・組の中の百分位 pct）と、
+    3条件・4条件の印 conds（d1・w1・r15・r0・c3・c4。ltr5.conds）を足す。運用者の選択「画面に並べて確かめる」（2026-10-30。
+    docs/MODEL_ADOPTION_RULES.md §82-6）。**買いの規則には使わない。**
+
+    組は予測の日までの直近5営業日の候補（cand は直近 --days 日の候補なので、5営業日ぶんは必ず入っている）。前の日の行には
+    足さない（その日に出した値のまま。freeze_past_days）。モデルが無い・学習した列がデータに無い・日足が足りない・失敗した
+    ときは何も足さない（予測は止めない。attach_ltr と同じ考え方）。rows は cand と同じ順（attach_ltr のあとに呼ぶ。D1 は ltr を見る）。
+    """
+    import live_track as LT
+    import ltr as LTR
+    import ltr5 as L5
+
+    try:
+        model, meta = L5.load(model_dir)
+        if model is None:
+            print("[ltr5] 直近5営業日のランキング学習のモデルが無いので出さない")
+            return None
+        want = list(meta.get("features") or [])
+        base = [c for c in want if c not in L5.MOVE_COLS]
+        miss = [c for c in base if c not in cand.columns]
+        if not want or miss or len(base) + len(L5.MOVE_COLS) != len(want):
+            print(f"[ltr5] 学習した列のうち {len(miss)}列がデータに無い（または値動きの列が足りない）ので出さない")
+            return None
+        day = pd.Timestamp(pd.to_datetime(cand["Date"]).max())
+        bars = LT.load_bars(data_dir, start=day - pd.Timedelta(days=45), extra=["AdjL"])
+        cal = L5.calendar(bars["Date"].unique())
+        if day not in set(cal):
+            print(f"[ltr5] 予測の日 {day.date()} が日足の取引日に無いので出さない")
+            return None
+        pos = int(np.searchsorted(cal.to_numpy(), day.to_datetime64()))
+        first = cal[max(0, pos - (L5.K - 1))]
+        have = pd.to_datetime(cand["Date"]).min()
+        if have > first:
+            print(f"[ltr5] 候補が {have.date()} からしか無く、組（{first.date()} 〜）に足りないので出さない")
+            return None
+        pool = L5.pool_frame(cand, bars, cal, base, decision_days=[day])
+        sc = np.asarray(model.predict(pool[want].to_numpy(dtype=float)), dtype=float)
+        rank = L5.pool_ranks(pool["Date"], pool["Code"], sc)
+        pct = LTR.within_date_pct(pool["Date"], sc)
+        n = int(len(pool))
+        by_code = {str(c): i for i, c in enumerate(pool.loc[pool["r5_days"] == 0, "Code"])}
+        idx0 = pool.index[pool["r5_days"] == 0].to_numpy()
+        iso = day.date().isoformat()
+        todays = [x for x in rows if x.get("date") == iso]
+        got = 0
+        for x in todays:
+            j = by_code.get(str(x.get("jqCode")))
+            if j is None:
+                continue
+            k = int(idx0[j])
+            x["ltr5"] = {"score": round(float(sc[k]), 6), "rank": int(rank[k]), "nPool": n,
+                         "pct": round(float(pct[k]) * 100, 1)}
+            got += 1
+        if got != len(todays):
+            print(f"[ltr5] 予測の日の候補 {len(todays)}件のうち組に見つかったのが {got}件なので出さない")
+            for x in todays:
+                x.pop("ltr5", None)
+            return None
+        # 3条件・4条件の印（3条件 = D1・W1・1.2σ の木3本、4条件 = それに 1.5σ の木3本。ltr5.conds。§87。D1 は日次のランキング
+        # 学習のその日の1位（同じスコアは銘柄コードの順））
+        d_ok = bool(todays) and all(isinstance((x.get("ltr") or {}).get("dayRank"), int) for x in todays)
+        d1_code = None
+        if d_ok:
+            firsts = sorted(str(x["jqCode"]) for x in todays if x["ltr"]["dayRank"] == 1)
+            d1_code = firsts[0] if firsts else None
+        n3 = n4 = 0
+        for x in todays:
+            per = x.get("byModel") or {}
+            c = L5.conds(None if not d_ok else (str(x["jqCode"]) == d1_code), x["ltr5"]["rank"] == 1,
+                         L5.all_at_least(per, L5.R15_TREES), L5.all_at_least(per, L5.R0_TREES))
+            x["conds"] = c
+            n3 += int(c["c3"] is True)
+            n4 += int(c["c4"] is True)
+        top = int(rank[idx0].min()) if len(idx0) else None
+        print(f"[ltr5] 予測の日 {iso} の組 {n}行（その日の候補 {len(todays)}件・前の4営業日の候補 {n - len(todays)}件）を採点"
+              f"（学習日 {str(meta.get('trainedAt'))[:10]}）・その日の候補の最上位は組の {top}位・3条件 {n3}件・4条件 {n4}件")
+        return {"algo": L5.NAME, "name": meta.get("name", L5.JA), "short": meta.get("short", L5.SHORT),
+                "note": meta.get("note", L5.NOTE), "trainedAt": meta.get("trainedAt"), "nOof": meta.get("nOof"),
+                "oofMetrics": meta.get("oofMetrics", {}), "day": iso, "nPool": n, "poolDays": L5.K,
+                "line": L5.LINE, "n3": n3, "n4": n4}
+    except Exception as exc:          # noqa: BLE001
+        print(f"[ltr5] 失敗（出さない）: {type(exc).__name__}: {exc}")
+        for x in rows:
+            x.pop("ltr5", None)
+            x.pop("conds", None)
+        return None
 
 
 def progress_fields(data_dir: str, keys) -> Dict[Tuple[str, str], dict]:
@@ -391,6 +530,8 @@ def main(argv=None) -> int:
                          "1銘柄あたり4リクエストなので、120で約480リクエスト")
     args = ap.parse_args(argv)
 
+    import model_artifacts as A
+    A.verify_all(args.model_dir)
     booster, meta = load_model(args.model_dir)
     cols = meta["features"]
     ds = pd.read_parquet(args.dataset)
@@ -478,6 +619,11 @@ def main(argv=None) -> int:
             "baseLength": r(s.get("base_length"), 0),
             "creditRatio": r(s.get("credit_ratio")),
             "per": r(s.get("per")), "pbr": r(s.get("pbr")),
+            # 予想PER・予想ROE（J-Quants の FwdPER と、% に揃えた FwdROE）。画面の PER・ROE は実績（直近12か月の利益）で、
+            # 一時的な損益で大きく振れる（2026-11-25、実績が予想の数倍になっている候補があった）。証券会社の画面の多くは
+            # 予想を出すので、画面では実績に予想を添える（運用者の選択 2026-11-25「実績と予想を並べる」）。
+            # モデルの入力（per・jq_fwdper・jq_per_gap）は変えない。表示のための値
+            "fwdPer": r(s.get("jq_fwdper")), "fwdRoe": r(s.get("jq_fwdroe")),
             "divYield": r(s.get("div_yield")),
             "epsGrowth": r(s.get("eps_growth_q0")),
             "salesGrowth": r(s.get("sales_growth_q0")),
@@ -498,6 +644,9 @@ def main(argv=None) -> int:
     # --- 他モデルの採点を各候補に載せる --- #
     # アンサンブルはしない。並べるだけ。買うかの判断は人間が統合的に行う
     others, model_info = score_others(cand, cols, args.model_dir)
+    import models as M
+    if not cand.empty and set(others) != set(M.MULTI):
+        raise RuntimeError(f"All five additional fixed-return classifiers are required: {sorted(others)}")
     consensus_meta = None
     if others:
         import models as M
@@ -518,10 +667,12 @@ def main(argv=None) -> int:
             "baseline": True,
             "variant": False,
             "labelK": meta.get("volNormK"),
+                "labelSpec": meta.get("labelSpec"),
             "label": meta.get("label"),
             "positiveRate": meta.get("positiveRate"),
         })
-        # 12本の合意の物差し（過去の out-of-fold の合意の分布）。並びは画面と同じ LINEUP の順。
+        # 合意の物差し（過去の out-of-fold の合意の分布）。並びは画面と同じ LINEUP の順（2026-11-02 から6本。2026-10-24 から
+        # 8本。それまでは12本）。
         # 作れなくても日次予測は止めない（合意を出さないだけ。1モデルの失敗で止めない score_others と同じ考え方）
         try:
             cons_ref, cons_used = consensus_reference(
@@ -541,21 +692,26 @@ def main(argv=None) -> int:
         base_scores = cand["score"].to_numpy(dtype=float)
         for i, x in enumerate(rows):
             per = {M.BASELINE: {"score": x["score"],
-                                "pctHistorical": x["pctHistorical"]}}
+                                "pctHistorical": x["pctHistorical"],
+                                "labelSpec": meta["labelSpec"]}}
             for algo, sc in others.items():
                 v = float(sc[i])
                 per[algo] = {
                     "score": round(v, 6),
+                    "labelSpec": __import__("label_specs").for_model(algo),
                     # モデルごとに別の過去分布で位置を出す。
                     # 共通の分布を使うとスケールの違いが混ざる
                     "pctHistorical": M.pct_historical(v, hist_by_algo[algo]),
                 }
             x["byModel"] = per
             # 何個のモデルが「上位10%」と見ているか。独立した判定の数え上げ。
-            # ラベル違いのモデル（1.5σ・1.8σ）は本番の数（agree90 / nModels）に入れず、別に数える（agreeK90 / nK）
+            # ラベル違いのモデル（1.5σ の木3本。1.8σ は 2026-10-24 に、logit_k15 は 2026-11-02 の予測から外した）は 1.2σ の数
+            # （agree90 / nModels。1.2σ の木3本）に入れず、別に数える（agreeK90 / nK）
             x["agree90"], x["nModels"] = agreement(per, M.ALGOS)
-            x["agreeK90"], x["nK"] = agreement(per, M.VARIANTS)
-            # 12本の合意（cons12）と、その過去の分布での百分位（consPct）。丸める前の百分位で計算する。
+            x["agreeK90"], x["nK"] = agreement(per, M.ACTIVE_VARIANTS)
+            # 合意（cons12。名前は12本だったころのまま。2026-10-24 から8本、2026-11-02 から6本の平均）と、その過去の分布での
+            # 百分位（consPct）。
+            # 丸める前の百分位で計算する。
             # 2026-10-12 に一度画面に出したが、同じ日の運用者の指示（「12本の平均ではなく、12個全てを載せてほしい」）で
             # 画面は12本の百分位をそのまま表で出す形に変え、合意は出さなくなった。確認・研究用に predictions.json には残す
             raw = {M.BASELINE: raw_pct(M.BASELINE, float(base_scores[i]))}
@@ -569,9 +725,15 @@ def main(argv=None) -> int:
               + (f" / 上位10% の線 {np.quantile(cons_ref, 0.90):.1f}・上位2.5% の線 {np.quantile(cons_ref, 0.975):.1f}"
                  if cons_ref is not None else ""))
 
+    # ランキング学習（参考。買いの規則には使わない）。その日の中の順位と上半分の印を足す（attach_ltr。§78-9）
+    ltr_info = attach_ltr(rows, cand, args.model_dir)
+    # 直近5営業日の組のランキング学習（参考。買いの規則には使わない）。予測の日の候補に組の中の順位と3条件・4条件の印を
+    # 足す（attach_ltr5。運用者の選択「画面に並べて確かめる」2026-10-30。§82-6）
+    ltr5_info = attach_ltr5(rows, cand, args.data_dir, args.model_dir)
+
     # ファイルの並び・rankInDay（予測ログの「順位」）はどちらも基準モデルのスコア（上の rank_in_day と同じ）。
     # 帯・較正・追跡ファイルも基準モデル基準なので、ここは基準モデルのまま。画面の一覧は 2026-10-13 から
-    # 1.5σ の3本の百分位の最小の順に並べ直す（src/lib/strategy.js の orderRows。運用者の決定）
+    # 今日の戦略の規則の3本（2026-10-30 から 1.2σ の3本）の百分位の最小の順に並べ直す（src/lib/strategy.js の orderRows。運用者の決定）
     # 次の決算発表の予定（公表済みのものだけ）。予測が実質的に次の決算の予測になっていないかを見るため
     earn = next_earnings([(x["jqCode"], x["date"]) for x in rows], args.data_dir, TC.load(args.data_dir))
     for x in rows:
@@ -613,6 +775,7 @@ def main(argv=None) -> int:
         "candidates": rows,
         "model": {
             "trainedAt": meta["trainedAt"], "label": meta["label"],
+            "labelSpec": meta.get("labelSpec"),
             "volNormK": meta["volNormK"], "riseHorizon": meta["riseHorizon"],
             "highWindow": meta["highWindow"], "preset": meta["preset"],
             "nFeatures": len(cols), "nTrain": meta["nTrain"],
@@ -625,11 +788,17 @@ def main(argv=None) -> int:
         "calibration": meta["calibration"],
         # 画面に並べるモデルの素性。基準モデル(lgbm)も含む
         "models": model_info,
-        # 12本の合意の物差し（consensus_reference）。線は過去の合意の分布の 90% / 97.5% 点（12本の平均の値）。
+        # 合意の物差し（consensus_reference）。線は過去の合意の分布の 90% / 97.5% 点（その日の LINEUP の平均の値）。
         # 画面には出さない（上の cons12 / consPct と同じ。確認・研究用）
         "consensus": consensus_meta,
         # 候補の比較（似た過去の事例）。画面の「候補の比較」タブが読む（research/knn_compare.py）
         "knn": knn,
+        # ランキング学習の素性（attach_ltr。無ければ None）。各候補の ltr と合わせて、画面と実運用の追跡が「両方使う形」を
+        # 参考に並べる（買いの規則には使わない。運用者の選択「まず並べて見る」2026-10-24）
+        "ltr": ltr_info,
+        # 直近5営業日の組のランキング学習の素性（attach_ltr5。無ければ None）。予測の日の候補の ltr5・conds と合わせて、
+        # 予測タブとスプレッドシート v2 が「5日の順位」と3条件・4条件の印を出す（買いの規則には使わない。§82-6）
+        "ltr5": ltr5_info,
         "notes": [
             "スコアは較正されていない生の出力。確率として読まず、"
             "同じ日の候補の中での順位と、スコア帯の過去実績で読むこと。",
@@ -645,10 +814,17 @@ def main(argv=None) -> int:
             "スコアで付けてあり、他のモデルは並べて見るためのもの。",
             "過去の日は、その日に出した値のまま（後の再学習や、後から入ったデータで採点し直さない）。"
             "どのモデルで出した値かは dayInfo の学習日。",
-            "L15 / X15 / C15 / LR15 は到達しきい値 1.5σ、L18 / X18 / C18 / LR18 は 1.8σ のラベルで学習した"
-            "モデル（学習器は記号の元と同じ LightGBM / XGBoost / CatBoost / ロジスティック回帰）。"
-            "1.2σ の4本の一致度（agree90）には数えず、agreeK90 / nK で別に数える。今日の戦略の規則は 1.5σ の木の3本"
-            "（L15 / X15 / C15）がすべて95以上。12本とも毎日の予測に使う。",
+            "LGB / XGB / CAT は固定+10%到達・終盤+5%以上、L15 / X15 / C15 は固定+15%到達・終盤+7.5%以上。"
+            "どちらも翌営業日の寄り基準・20営業日以内・20日目MA5≧MA20。各スコアのlabelSpecで定義を記録する。"
+            "買いの規則は基準側3本（LGB / XGB / CAT）がすべて95以上。過去のσモデルの値は当時の記録として保持する。",
+            "ltr はランキング学習（LambdaRank。同じ日の候補の中で、翌営業日の寄りで買い20営業日目の終値で売った収益の"
+            "順番を学んだもの）。dayPct はその日の候補の中の百分位（候補が1件の日は 50）、upper は 50 以上か。"
+            "「両方使う形」（今の規則を満たし、かつ upper）を参考に並べるだけで、買いの規則には使わない"
+            "（2026-10-24 から。それより前の日には無い）。",
+            "ltr5 は直近5営業日の組のランキング学習（予測の日までの直近5営業日の候補を1つの組にして並べたもの。実験117 の W5）。"
+            "rank は予測の日の組の中の順位（同じスコアは銘柄コードの順）、nPool は組の行の数。conds は3条件（日次の1位・"
+            "5日の1位・基準側+10%の木3本が95以上）と4条件（それに+15%の木3本が95以上）の印。参考に並べるだけで、買いの規則には"
+            "使わない（2026-11-02 から。それより前の日には無い）。",
         ],
     }
     os.makedirs(args.out_dir, exist_ok=True)
@@ -873,6 +1049,24 @@ def update_history(args, rows: List[Dict], days) -> None:
     # 記録が1件でもあれば足さない。追跡列（現在値など）の更新は続ける
     recorded = {e["date"] for e in hist.get("entries", [])}
     added = 0
+    # 運用者が置き換えを指示した日（workflow の force と replace_day。2026-11-15「今夜から新モデルで」: 金曜の夜に前の
+    # モデルで出した 11/13 を、土曜の夜の学習の新しいモデルで出し直して置き換える）だけ、その日の記録を消してから足す
+    replace = os.environ.get("REPLACE_HISTORY_DAY", "").strip()
+    if replace:
+        try:
+            replace = dt.date.fromisoformat(replace).isoformat()
+        except ValueError:
+            print(f"[warn] REPLACE_HISTORY_DAY の形が不正なので置き換えない: {replace!r}")
+            replace = ""
+    if replace and replace != latest:
+        print(f"[warn] REPLACE_HISTORY_DAY={replace} は今回の日 {latest} と違うので置き換えない")
+        replace = ""
+    if replace and latest in recorded:
+        before = len(hist.get("entries", []))
+        hist["entries"] = [e for e in hist.get("entries", []) if e.get("date") != latest]
+        print(f"[history] {latest} の記録 {before - len(hist['entries'])}件を、今回の予測で置き換える（REPLACE_HISTORY_DAY）")
+        existing = {(e["date"], e["jqCode"]) for e in hist["entries"]}
+        recorded = {e["date"] for e in hist["entries"]}
     if latest in recorded:
         print(f"[history] {latest} は記録済み。最初の予測のまま凍結する（追加しない）")
         rows = []
@@ -886,6 +1080,7 @@ def update_history(args, rows: List[Dict], days) -> None:
             "name": x["name"], "rank": x["rankInDay"], "nInDay": x["nInDay"],
             "score": x["score"], "band": x["band"],
             "calibProb": x["calibProb"], "needPct": x["needPct"],
+            "labelSpec": ((x.get("byModel") or {}).get("lgbm") or {}).get("labelSpec"),
             "closeAtPick": x["close"],
         })
         added += 1

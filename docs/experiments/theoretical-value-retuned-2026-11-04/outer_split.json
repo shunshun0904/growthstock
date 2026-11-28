@@ -1,0 +1,51 @@
+{
+  "train_end": "2025-09-03 00:00:00",
+  "test_start": "2025-10-04 00:00:00",
+  "test_end": "2026-10-02 00:00:00",
+  "last_training_outcome": "2025-10-03 00:00:00",
+  "ranking_checks": {
+    "rolling_rows": 110480,
+    "move_checks": {
+      "rows": 300,
+      "same": 300
+    },
+    "same_day_checks": {
+      "rows": 22110,
+      "mismatch": 0
+    }
+  },
+  "tasks": [
+    {
+      "task": "class10",
+      "train_rows": 18150,
+      "test_rows": 3654,
+      "train_max_outcome": "2025-10-03 00:00:00",
+      "test_min_date": "2025-10-06 00:00:00",
+      "test_max_date": "2026-10-02 00:00:00"
+    },
+    {
+      "task": "class15",
+      "train_rows": 18150,
+      "test_rows": 3654,
+      "train_max_outcome": "2025-10-03 00:00:00",
+      "test_min_date": "2025-10-06 00:00:00",
+      "test_max_date": "2026-10-02 00:00:00"
+    },
+    {
+      "task": "ltr",
+      "train_rows": 18150,
+      "test_rows": 3654,
+      "train_max_outcome": "2025-10-03 00:00:00",
+      "test_min_date": "2025-10-06 00:00:00",
+      "test_max_date": "2026-10-02 00:00:00"
+    },
+    {
+      "task": "ltr5",
+      "train_rows": 90476,
+      "test_rows": 18247,
+      "train_max_outcome": "2025-10-03 00:00:00",
+      "test_min_date": "2025-10-06 00:00:00",
+      "test_max_date": "2026-10-02 00:00:00"
+    }
+  ]
+}

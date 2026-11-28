@@ -143,7 +143,8 @@ class TestWorkflowsUseHelper(unittest.TestCase):
     """本番のワークフローは --clobber を直接呼ばず、この再試行つきの手順を通す。"""
 
     WORKFLOWS = ["update-data.yml", "predict.yml", "fetch-edinetdb.yml",
-                 "fetch-jsf.yml", "retrain-weekly.yml"]
+                 "fetch-jsf.yml", "retrain-weekly.yml", "update-minute-bars.yml",
+                 "update-ticks.yml", "update-volume-profile.yml"]
 
     def test_no_bare_clobber(self):
         for w in self.WORKFLOWS:

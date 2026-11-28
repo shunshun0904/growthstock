@@ -1434,11 +1434,13 @@ class 本番のプリセット(unittest.TestCase):
         """2026-10-18 の夕方、249列 -> 360列（テクニカル指標111列）。運用者の決定（2026-10-18「入れる（2段階）」「今すぐ」、§68）。"""
         import features as F
         import technicals as TX
-        self.assertEqual(F.DEFAULT_PRESET, "all_plus_prog_listing_vol_book_shape_dd_recent_tx")
-        self.assertEqual(len(F.columns(F.DEFAULT_PRESET)), 360)
+        self.assertEqual(F.DEFAULT_PRESET, F.LEGACY_PRESET + "_financial")
+        self.assertEqual(len(F.columns(F.DEFAULT_PRESET)), 373)
         self.assertEqual(F.columns(F.DEFAULT_PRESET),
+                         F.columns(F.LEGACY_PRESET) + F.GROUPS["financial_inputs"])
+        self.assertEqual(F.columns(F.LEGACY_PRESET),
                          F.columns("all_plus_prog_listing_vol_book_shape_dd_recent") + TX.COLUMNS)
-        self.assertEqual(F.signature(F.columns(F.DEFAULT_PRESET)), "a0638dfd0880")
+        self.assertEqual(F.signature(F.columns(F.LEGACY_PRESET)), "a0638dfd0880")
 
     def test_249列は_all_plus_prog_listing_vol_book_shape_dd_recent(self):
         """2026-10-18、239列 -> 249列（抜けた土台の形2列 + 下げの深さ3列 + 直近の増減5列）。運用者の決定（2026-10-17、§62〜§64）。
@@ -1585,7 +1587,8 @@ class 探索と学習の列を突き合わせる(unittest.TestCase):
         cols = F.columns(F.DEFAULT_PRESET)
         store = {F.DEFAULT_PRESET: {"_n_features": len(cols),
                                     "_features_sig": F.signature(cols),
-                                    "n_estimators": tuning.SEARCH_N_ESTIMATORS}}
+                                    "n_estimators": tuning.SEARCH_N_ESTIMATORS,
+                                    "_cv": {"label_spec": __import__("label_specs").for_model()}}}
         import train_production as TP
         orig = tuning.load_params
         tuning.load_params = lambda path=None: store
@@ -1624,7 +1627,8 @@ class 探索と学習の列を突き合わせる(unittest.TestCase):
         # （tests/test_tree_count.py）、実際の記録と同じく入れておく
         store = {
             "xgb": {"_cv": {"features_sig": F.signature(cols), "n_features": len(cols),
-                            "n_estimators": TM.N_ESTIMATORS}},
+                            "n_estimators": TM.N_ESTIMATORS,
+                            "label_spec": __import__("label_specs").for_model("xgb")}},
             "cat": {"_cv": {"features_sig": F.signature(F.columns("all")), "n_features": 153}},
             "mlp": {"_cv": {"train_to": "2025-07-23"}},            # 列の記録なし
         }

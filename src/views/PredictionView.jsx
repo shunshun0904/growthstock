@@ -1,10 +1,11 @@
-import React, { useMemo, useState } from 'react';
-import { fmt, fmtInt, fmtSigned, fmtOku, fmtDate, fmtDateTime, DASH } from '../lib/format.js';
+import React, { useEffect, useMemo, useState } from 'react';
+import { fmt, fmtInt, fmtSigned, fmtOku, fmtDate, fmtDateTime, fmtWithForecast, DASH } from '../lib/format.js';
 import { bandColor, bandLabel, pctColor, pctInk, PCT_LEGEND, scoreRange, scoreColor, scoreInk, modelRows, modelGrid, MODEL_SHORT, MODEL_FAMILY,
-  FAMILY_JA, marketTone, candidateToStock, dayOrigin, featureLabel, earningsNote, earningsSummary,
+  FAMILY_JA, activeModels, marketTone, candidateToStock, dayOrigin, featureLabel, earningsNote, earningsSummary,
 } from '../lib/predictions.js';
-import { STRATEGY, RULE_MODELS, RULE_JA, BORDER, strategySignal, exitPlan, nearMisses,
+import { STRATEGY, RULE_MODELS, RULE_JA, RULE_SHORT, RULE_ROW, BORDER, strategySignal, exitPlan, nearMisses,
          MODEL_JA, fundContrib, frozenNote, borderNote, orderRows, ruleMinTier,
+         ltrDayPct, ltrUpper, passesBoth, bothSummary, ltrRanking, ltr5Rank, ltr5Pool, condLevel,
 } from '../lib/strategy.js';
 
 /**
@@ -17,32 +18,56 @@ import { STRATEGY, RULE_MODELS, RULE_JA, BORDER, strategySignal, exitPlan, nearM
  * スコアはモデルごとに並べる。混ぜて1つにはしない（アンサンブルにしない）。
  * 学習器が違えばスコアのスケールも意味も違うので、各モデル自身の過去スコア
  * 分布での位置に揃えて並べ、買うかどうかは人間が統合して決める。
- * 12本（1.2σ・1.5σ・1.8σ のラベルで各4本。どれも毎日の予測に使う）は、ラベル × 学習器の表に数字と色で出す
+ * 6本（1.2σ・1.5σ のラベルで木の各3本。どれも毎日の予測に使う）は、ラベル × 学習器の表に数字と色で出す
  * （運用者の指示 2026-10-12「12本の平均ではなく、12個全てを載せてほしい。棒グラフ形式でなくてよい。
- * 大小が分かればよい」。同じ日に出した「12本の合意の百分位」の欄はこの指示で外した）。
- * 一覧の並び順は、今日の戦略の規則と同じ 1.5σ の3本の百分位の最小が高い順（運用者の決定 2026-10-13
- * 「1.5σ の3本のうち一番低い百分位でいきましょう」。strategy.js の orderRows）。帯・較正・追跡と
+ * 大小が分かればよい」。同じ日に出した「12本の合意の百分位」の欄はこの指示で外した）。1.8σ の4本は 2026-10-24 に外した
+ * （運用者の依頼「1.8σの週次学習はなくしたはずです」→「採点・表示からも外す」。それより前の日の値も出さない。activeModels）。
+ * ロジスティック回帰（1.2σ・1.5σ）も 2026-11-02 の予測から外した（運用者の指示 2026-10-29。同じく前の日の値も出さない）。
+ * 一覧の並び順は、今日の戦略の規則の3本（2026-10-30 から 1.2σ の3本。2026-10-23〜10-29 も同じ。2026-10-29〜10-30 は 1.5σ の3本）の百分位の最小が高い順（運用者の決定 2026-10-13
+ * 「1.5σ の3本のうち一番低い百分位でいきましょう」を、規則の3本に合わせて続けている。strategy.js の orderRows）。帯・較正・追跡と
  * rankInDay（予測ログの「順位」）は基準モデル（1.2σ の LightGBM）のまま。
  * byModel が無い予測ファイル（5モデルを学習する前のもの）でも壊れないよう、
  * 基準モデル1本の表示に落ちる作りにしてある。
  */
 export default function PredictionView({ data, history, featureNames, onSendToOctagon, sentIds }) {
+  const [registry, setRegistry] = useState(null);
+  useEffect(() => {
+    let live = true;
+    fetch(`${import.meta.env.BASE_URL}data/active_models.json`, { cache: 'no-store' }).then((r) => {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    }).then((value) => { if (live) setRegistry(value); }).catch(() => {});
+    return () => { live = false; };
+  }, []);
   const dates = data?.dates || [];
   const [day, setDay] = useState(() => data?.asOf || dates[dates.length - 1]);
   const [openId, setOpenId] = useState(null);
   // モデル別の表に出す値: 百分位（各モデル自身の分布での位置）か、スコアそのもの（運用者の依頼 2026-10-16）。
-  // スコアの色の物差しは予測ファイルの全候補・12本で1つ（scoreRange）
+  // スコアの色の物差しはその表の6本の中の最小〜最大（scoreRange）
   const [metric, setMetric] = useState('pct');
+  // 画面に出すモデル（外した 1.8σ の4本とロジスティック回帰を除く。それより前の日の予測ファイルに値が残っていても出さない）
+  const models = useMemo(() => activeModels(data?.models), [data]);
 
-  // 1.5σ の3本の最小が高い順（orderRows）。各行に order（並び順）と ruleMin（最小）が付く
+  // 規則の3本の最小が高い順（orderRows）。各行に order（並び順）と ruleMin（最小）が付く
   const rows = useMemo(
     () => orderRows((data?.candidates || []).filter((c) => c.date === day)),
     [data, day]
   );
-  // 1.5σ の3本のどれかが欠けて最小が出せない行（1.5σ を予測に入れる前の固定した日）。後ろに基準モデルの順で並ぶ
+  // 規則の3本のどれかが欠けて最小が出せない行（そのモデルの値が無い日）。後ろに基準モデルの順で並ぶ
   const nNoRule = rows.filter((c) => c.ruleMin === null).length;
   const tone = useMemo(() => marketTone(rows), [rows]);
   const signal = useMemo(() => strategySignal(rows), [rows]);
+  // 両方使う形（参考。今の規則 かつ その日の中でランキング学習が上半分）。買う銘柄は signal.picks のまま（§78-9）
+  const both = useMemo(() => bothSummary(rows, signal), [rows, signal]);
+  // ランキング学習の順位表（参考。運用者の依頼 2026-10-29「ランキング学習モデルによるランキングをわかりやくどこかに表示
+  // してください」→「予測タブに順位表」）。行を押すと下の一覧のその候補を開く
+  const ranking = useMemo(() => ltrRanking(rows), [rows]);
+  const openInList = (c) => {
+    setOpenId(c.jqCode);
+    const reduce = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    requestAnimationFrame(() => document.getElementById(`pred-row-${c.jqCode}`)
+      ?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' }));
+  };
   const near = useMemo(() => nearMisses(rows), [rows]);
   const m = data?.model || {};
   // 過去の日は、その日に出した値のまま（research/predict_daily.py の freeze_past_days。dayInfo にその日のモデルの学習日）
@@ -52,9 +77,17 @@ export default function PredictionView({ data, history, featureNames, onSendToOc
 
   return (
     <div className="pred">
-      <StrategyPanel signal={signal} near={near} day={day} models={data?.models}
+      {registry?.kind === 'fixed_return' && <section className="card" data-testid="active-models">
+        <b>使っているモデル：固定+10%・+15%（各3本）</b>
+        <p className="sub">終盤5日平均はそれぞれ+5%・+7.5%以上、20日目にMA5≧MA20。翌営業日の寄りから20営業日以内。
+          株価データ：{registry.models[0]?.dataThrough}まで／学習サンプル：{registry.models[0]?.trainTo}まで。</p>
+        <p className="sub">過去の予測は当時の値を保持しています。σと表示される日の値は旧モデルです。新しい市場データの予測から固定%モデルを使います。旧σモデルの過去成績は、固定%モデルの運用成績ではありません。</p>
+      </section>}
+      <StrategyPanel signal={signal} near={near} day={day} models={models} both={both}
                      onSend={(c) => onSendToOctagon(candidateToStock(c))}
                      sentIds={sentIds} />
+
+      <LtrRankPanel day={day} ranking={ranking} info={data?.ltr} onPick={openInList} />
 
       <section className="card">
         <div className="card-head">
@@ -80,7 +113,7 @@ export default function PredictionView({ data, history, featureNames, onSendToOc
             <span className="lab">候補</span>
             <strong className="num">{rows.length}</strong> 銘柄
           </div>
-          <div title="一覧の行の表に出す値。百分位 = 各モデル自身の過去スコア分布での位置（ラベルをまたいで水準は比べられない）。スコア = モデルが出した確率そのもの（色はその表の12本の中の最小〜最大）。今日の戦略の札と行を開いた詳しい欄は両方を出す">
+          <div title="一覧の行の表に出す値。百分位 = 各モデル自身の過去スコア分布での位置（ラベルをまたいで水準は比べられない）。スコア = モデルが出した確率そのもの（色はその表の6本の中の最小〜最大）。今日の戦略の札と行を開いた詳しい欄は両方を出す">
             <span className="lab">モデル別の表</span>
             <div className="pred-days pred-metric">
               <button className={`btn btn-ghost${metric === 'pct' ? ' on' : ''}`} onClick={() => setMetric('pct')}>百分位</button>
@@ -128,7 +161,7 @@ export default function PredictionView({ data, history, featureNames, onSendToOc
             <span>ℹ</span>
             <div>
               {nNoRule === rows.length
-                ? `この日は${RULE_JA}の百分位が無い（1.5σ のモデルを予測に入れる前の日）ので、`
+                ? `この日は${RULE_JA}の百分位が無いので、`
                   + '基準モデル（1.2σ の LightGBM）のスコア順に並べています。'
                 : `${RULE_JA}の百分位が欠けた ${nNoRule} 件は、最後に基準モデル（1.2σ の LightGBM）のスコア順で並べています。`}
             </div>
@@ -152,7 +185,7 @@ export default function PredictionView({ data, history, featureNames, onSendToOc
 
         <div className="pred-list">
           {rows.map((c) => (
-            <Row key={c.jqCode} c={c} models={data?.models} metric={metric} featureNames={featureNames} open={openId === c.jqCode}
+            <Row key={c.jqCode} c={c} models={models} metric={metric} featureNames={featureNames} open={openId === c.jqCode}
                  onToggle={() => setOpenId(openId === c.jqCode ? null : c.jqCode)}
                  onSend={() => onSendToOctagon(candidateToStock(c))}
                  sent={sentIds?.has(`pred:${c.jqCode}`)} />
@@ -161,7 +194,7 @@ export default function PredictionView({ data, history, featureNames, onSendToOc
       </section>
 
       <BandTable bands={data?.scoreBands} />
-      <ModelLineup models={data?.models} />
+      <ModelLineup models={models} />
       <HistoryPanel history={history} horizon={m.riseHorizon} />
       <ModelCard model={m} notes={data?.notes} generatedAt={data?.generatedAt} />
     </div>
@@ -173,18 +206,18 @@ export default function PredictionView({ data, history, featureNames, onSendToOc
 /**
  * docs/PLAYBOOK.md の手順を、その日のデータでそのまま実行して見せる。
  *
- * 判断の材料（発火数・規則の3モデル（2026-10-12 から 1.5σ の3本）の百分位）は下の一覧にも出ているが、
+ * 判断の材料（発火数・規則の3モデル（2026-10-30 から 1.2σ の3本）の百分位）は下の一覧にも出ているが、
  * 「今日は買うのか、買うなら何を、いくらで手仕舞うのか」を1か所で
  * 言い切る場所が要る。迷いどころを毎日つくらないための画面。
  */
-function StrategyPanel({ signal, near, day, models, onSend, sentIds }) {
+function StrategyPanel({ signal, near, day, models, both, onSend, sentIds }) {
   const { nBreak, verdict, picks, passed, buyable } = signal;
   return (
     <section className="card strat">
       <div className="card-head">
         <h2>今日の戦略</h2>
         <span className="sub">
-          {RULE_JA}（L15・X15・C15）がすべて{STRATEGY.agreePct}以上の銘柄を{STRATEGY.topK}件まで。
+          {RULE_JA}（{RULE_SHORT}）がすべて{STRATEGY.agreePct}以上の銘柄を{STRATEGY.topK}件まで。
           翌営業日の寄りで買い、+{STRATEGY.takeProfit}% の指値か
           {STRATEGY.holdDays}営業日目の終値で降りる（同時保有は{STRATEGY.maxSlots}銘柄まで。
           発火の数では見送らない）
@@ -206,6 +239,18 @@ function StrategyPanel({ signal, near, day, models, onSend, sentIds }) {
             <span className="lab">{RULE_JA}がすべて{STRATEGY.agreePct}以上</span>
             <strong className="num">{passed.length}</strong>
             <span className="sub">件 / {nBreak}件</span>
+          </div>
+          <div title={'今の規則を満たし、かつその日の候補の中でランキング学習の順位が上半分のもの（実験114b で過去の成績を'
+                      + '確かめた形。docs/MODEL_ADOPTION_RULES.md §78）。参考に並べるだけで、買う銘柄は今の規則のまま'}>
+            <span className="lab">両方使う形（参考）</span>
+            {both?.available ? (
+              <>
+                <strong className="num">{both.both.length}</strong>
+                <span className="sub">件 / {passed.length}件（ランキング学習がその日の中で上半分）</span>
+              </>
+            ) : (
+              <span className="sub">この日の予測にはランキング学習の順位がありません</span>
+            )}
           </div>
         </div>
         <p className="sub strat-note">{verdict.note}</p>
@@ -258,24 +303,101 @@ function StrategyPanel({ signal, near, day, models, onSend, sentIds }) {
       {near.length > 0 && <NearMiss near={near} />}
 
       <p className="strat-src sub">
-        実測（画面と同じ百分位、2021-05〜2026-09 の out-of-fold、{RULE_JA}がすべて95以上の354件。
-        +10% の指値・届かなければ20営業日目の終値）: 発火20件以上は192件で +4.9%・勝率78%、
-        8〜19件は140件で +1.5%・勝率59%、7件以下は22件と少なく +5.4%。その時点の百分位で測り直しても
-        7件以下の日（36件 +3.7%）は8件以上の日（523件 +3.1%）より悪くなかったので、2026-10-12 から発火の数では
-        見送らない。この手順のとおり3枠で回すと、その時点の百分位で128取引・1取引 +2.2%（以前の「発火8件以上の日
-        だけ」は118取引・+1.8%）。これまでの目安（1.2σ の3本が95以上）と比べて、どちらが良いかは過去のデータでは
-        見分けられない（docs/MODEL_ADOPTION_RULES.md §46・§47）。
+        実測（画面と同じ百分位、2021-05〜2026-09 の out-of-fold、{RULE_JA}がすべて95以上の328件。
+        +10% の指値・届かなければ20営業日目の終値）: 発火20件以上は199件で +3.72%・勝率72%、
+        8〜19件は109件で +1.90%・勝率64%、7件以下は20件と少なく +3.00%。その時点の百分位で測ると、
+        7件以下の日（23件 +0.61%・−10%割れ 30%）は8件以上の日（406件 +2.99%）より低い（発火の数では見送らない線は
+        2026-10-12 の決定のまま）。この手順のとおり3枠で回すと、その時点の百分位で98取引・1取引 +0.90%
+        （発火8件以上の日だけなら87取引・+1.38%）。2026-10-29〜10-30 の規則（1.5σ の3本が95以上）は同じ物差しで
+        115取引・+1.84%（発火8件以上の日だけなら102取引・+0.86%）。候補全体の平均は 基準ラベルの3本がわずかに上（429件 +2.86% 対
+        561件 +2.70%）で、どちらが上とは言い切れない。それを見た上で、運用者の依頼で 2026-10-30 に 1.2σ の3本に戻した
+        （docs/MODEL_ADOPTION_RULES.md §81・§86）。
       </p>
     </section>
   );
 }
 
+/* ------------------------------------------------------ ランキング学習の順位 */
+
 /**
- * 惜しい候補（規則の3モデル（1.5σ の3本）の最小が 85〜95）。**買わない**ことの根拠を添えて出す。
+ * ランキング学習の順位表（運用者の依頼 2026-10-29「ランキング学習モデルによるランキングをわかりやくどこかに表示して
+ * ください」→「予測タブに順位表」）。対象日の候補を、ランキング学習のその日の中の順位の順に並べ、上半分（両方使う形に
+ * 入れる範囲）の下に区切りを引く。行の銘柄名を押すと、下の一覧でその候補を開く。参考に並べるだけで、買う銘柄は今日の戦略の
+ * 規則のまま（docs/MODEL_ADOPTION_RULES.md §78-9）。順位が無い日（ランキング学習を予測に入れる前の日）は注記だけ。
+ */
+function LtrRankPanel({ day, ranking, info, onPick }) {
+  const { available, items, nUpper } = ranking;
+  return (
+    <section className="card ltr-rank">
+      <div className="card-head">
+        <h2>ランキング学習の順位</h2>
+        <span className="sub">
+          {`${fmtDate(day)} の候補を、ランキング学習（同じ日の候補の中で、20営業日目の終値で売った収益の順番を学んだモデル）の`
+            + '順に並べたもの。「5日の順位」は直近5営業日の候補を1つの組にして並べたときの順位。参考に並べるだけで、買う銘柄は'
+            + '今日の戦略の規則のまま'
+            + (info?.trainedAt ? `（モデルは ${fmtDate(info.trainedAt)} 学習）` : '')}
+        </span>
+      </div>
+      {!available ? (
+        <div className="empty">この日の予測にはランキング学習の順位がありません（ランキング学習を予測に入れる前の日）。</div>
+      ) : (
+        <>
+          <div className="ltr-rank-wrap">
+            <table className="ltr-rank-table">
+              <thead>
+                <tr>
+                  <th scope="col">順位</th>
+                  <th scope="col">銘柄</th>
+                  <th scope="col" className="num" title="その日の候補の中での位置（100 = 最上位、0 = 最下位）">その日の中の百分位</th>
+                  <th scope="col">{RULE_JA}が{STRATEGY.agreePct}以上</th>
+                  <th scope="col" title="今の規則を満たし、かつランキング学習がその日の中で上半分">両方使う形</th>
+                  <th scope="col" className="num"
+                      title="直近5営業日の候補を1つの組にして並べたランキング学習（実験117 の W5）の、組の中の順位 / 組の件数（2026-11-02 の予測から）">
+                    5日の順位
+                  </th>
+                  <th scope="col" title={COND_TITLE}>3条件・4条件</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((x, i) => (
+                  <tr key={x.c.jqCode}
+                      className={`${x.upper ? 'upper' : 'lower'}${i === nUpper - 1 && nUpper < items.length ? ' cut' : ''}`}>
+                    <td className="num ltr-rank-n">{x.rank}<span className="sub"> / {x.nDay}</span></td>
+                    <td>
+                      <button type="button" className="ltr-rank-name" onClick={() => onPick(x.c)}
+                              title="下の一覧でこの候補を開く">
+                        <span className="ltr-rank-nm">{x.c.name || x.c.code}</span>
+                        <span className="sub num">{x.c.code}</span>
+                      </button>
+                    </td>
+                    <td className="num">{fmt(x.dayPct, 1)}</td>
+                    <td>{x.rule ? <span className="badge green">満たす</span> : <span className="sub">—</span>}</td>
+                    <td>{x.both ? <span className="badge violet">両方使う形</span> : <span className="sub">—</span>}</td>
+                    <td className="num ltr-rank-5">
+                      {x.rank5 !== null ? <>{x.rank5}<span className="sub"> / {x.pool5 ?? DASH}</span></> : <span className="sub">—</span>}
+                    </td>
+                    <td>{x.cond ? <CondBadge c={x.c} /> : <span className="sub">—</span>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="sub ltr-rank-note">
+            {`上の ${nUpper} 件がその日の中で上半分（百分位 ${fmt(info?.dayUpper ?? 50, 0)} 以上。両方使う形に入れる範囲）。`
+              + '銘柄名を押すと、下の一覧でその候補を開きます。'}
+          </p>
+        </>
+      )}
+    </section>
+  );
+}
+
+/**
+ * 惜しい候補（規則の3モデル（2026-10-30 から 1.2σ の3本）の最小が 85〜95）。**買わない**ことの根拠を添えて出す。
  *
- * 毎日「あと少しなのに」と迷い直さないための欄。数字は今の規則で測ったもの（research/exp/probe_k15_baseline.py。
- * 画面と同じ百分位、発火8件以上の日）。以前の規則（1.2σ の3本、最小 85〜90）で「1つだけ5pt以上低い形は空き枠と
- * 変わらない」とした実験36 は、1.5σ の3本では成り立たない（幅5以上のほうが少し上）。
+ * 毎日「あと少しなのに」と迷い直さないための欄。数字は今の規則で測ったもの（research/exp/probe_k15_panel.py。
+ * 画面と同じ百分位、発火8件以上の日、360列の OOF）。以前の規則（1.2σ の3本、最小 85〜90、153列のころ）で「1つだけ5pt
+ * 以上低い形は空き枠と変わらない」とした実験36 は、今のモデルでは成り立たない（幅5以上のほうが少し上）。
  */
 function NearMiss({ near }) {
   return (
@@ -294,10 +416,10 @@ function NearMiss({ near }) {
             <span className="sub">
               {c.weak
                 ? `${MODEL_JA[c.laggard] || c.laggard} だけ `
-                  + `${fmt(c.spread, 1)}pt 低い形。最小 85〜95・幅5以上の形は過去 584件で +2.1%・勝率63%`
-                  + `（3本とも95以上は354件で +3.6%）`
-                : `3本がほぼ揃っている（幅 ${fmt(c.spread, 1)}pt）。最小 85〜95・幅5未満の形は過去 369件で `
-                  + '+1.1%・勝率58%（3本とも95以上は354件で +3.6%）'}
+                  + `${fmt(c.spread, 1)}pt 低い形。最小 85〜95・幅5以上の形は過去 593件で +1.75%・勝率61.4%`
+                  + `（3本とも95以上は328件で +3.07%）`
+                : `3本がほぼ揃っている（幅 ${fmt(c.spread, 1)}pt）。最小 85〜95・幅5未満の形は過去 320件で `
+                  + '+1.49%・勝率60.0%（3本とも95以上は328件で +3.07%）'}
               <FundNote c={c} />
             </span>
           </div>
@@ -340,6 +462,8 @@ function PickCard({ c, n, models, onSend, sent }) {
           {c.sector && <span className="sub">{c.sector}</span>}
           <BorderBadge c={c} />
           <EarnBadge c={c} />
+          <LtrBadge c={c} />
+          <CondBadge c={c} />
         </span>
         <button className="btn btn-primary" onClick={onSend} disabled={sent}>
           {sent ? '送信済み' : 'タイムマシーンで見る'}
@@ -361,7 +485,7 @@ function PickCard({ c, n, models, onSend, sent }) {
               <ModelGrid c={c} models={models} />
             </div>
             <div className="strat-metric strat-mg"
-                 title="各モデルが出した確率そのもの（混ぜていない）。色はこの表の12本の中の最小〜最大の線形。ラベルをまたいで水準を比べられる（運用者の依頼 2026-10-16）">
+                 title="各モデルが出した確率そのもの（混ぜていない）。色はこの表の6本の中の最小〜最大の線形。ラベルをまたいで水準を比べられる（運用者の依頼 2026-10-16）">
               <span className="lab">モデル別のスコア<ScoreLegend range={scoreRange([c])} /></span>
               <ModelGrid c={c} models={models} metric="score" />
             </div>
@@ -372,6 +496,27 @@ function PickCard({ c, n, models, onSend, sent }) {
             <span className="num">{fmt(c.byModel?.[a]?.pctHistorical, 0)}</span>
           </div>
         ))}
+        {ltrDayPct(c) !== null && (
+          <div className="strat-metric"
+               title={'ランキング学習（同じ日の候補の中で、20営業日目の終値で売った収益の順番を学んだもの）の、その日の中の順位。'
+                      + '参考に並べるだけで、買いの規則には使いません'}>
+            <span className="lab">ランキング学習（その日の中）</span>
+            <span className="num">{c.ltr?.dayRank ?? DASH}位 / {c.ltr?.nDay ?? DASH}件</span>
+            <span className="sub">{ltrUpper(c) ? '上半分（両方使う形に入る）' : '下半分（両方使う形からは外れる）'}</span>
+          </div>
+        )}
+        {ltr5Rank(c) !== null && (
+          <div className="strat-metric strat-ltr5"
+               title={'直近5営業日の候補を1つの組にして並べたランキング学習（実験117 の W5）の、組の中の順位。'
+                      + '参考に並べるだけで、買いの規則には使いません'}>
+            <span className="lab">直近5営業日の中の順位</span>
+            <span className="num">{ltr5Rank(c)}位 / {ltr5Pool(c) ?? DASH}件</span>
+            <span className="sub">
+              {condLevel(c) === 'c4' ? '4条件を満たす' : condLevel(c) === 'c3' ? '3条件を満たす（4条件ではない）'
+                : '3条件・4条件は満たさない'}
+            </span>
+          </div>
+        )}
         <div className="strat-metric">
           <span className="lab">終値</span>
           <span className="num">{fmtInt(c.close)}</span>
@@ -389,7 +534,7 @@ function PickCard({ c, n, models, onSend, sent }) {
 }
 
 /**
- * 際どい候補の印（1.5σ の3本で見た今の規則の線「3本とも95以上」の下。strategy.js の borderNote）。
+ * 際どい候補の印（規則の3本（2026-10-30 から 1.2σ の3本）で見た今の規則の線「3本とも95以上」の下。strategy.js の borderNote）。
  * その形でそのモデルが一番低い組の過去の平均が 0% 以下（20件以上）なら赤、それ以外は黄（先に決めた線。BORDER_WARN）。
  * 詳しい文言は title と、行を開いたときの本文に出す。選定の規則は変えない。
  */
@@ -399,6 +544,61 @@ function BorderBadge({ c }) {
   return (
     <span className={`badge ${n.warn ? 'red' : 'amber'} pred-warn pred-border`} title={n.text}>
       {n.badge}
+    </span>
+  );
+}
+
+/** 直近5営業日順位を主一覧の全銘柄に表示。条件判定や日次順位とは独立する。 */
+function Ltr5Badge({ c }) {
+  const rank = ltr5Rank(c), pool = ltr5Pool(c);
+  const available = rank !== null && pool !== null && rank >= 1 && rank <= pool;
+  return (
+    <span className={`badge slate pred-warn pred-ltr5${available ? '' : ' unavailable'}`}
+          title={available
+            ? 'この予測日までの直近5営業日の推論対象全体の中の順位です。条件未達の銘柄も含めて計算しています。'
+            : 'この予測日の5営業日順位は未記録です。過去の順位は後から採点し直していません。'}>
+      <span>直近5営業日順位：</span>
+      <span className="num">{available ? `${rank}位 / ${pool}銘柄` : '未記録'}</span>
+    </span>
+  );
+}
+
+/**
+ * ランキング学習の、その日の候補の中の順位の印（予測の ltr。参考に並べるだけで、買いの規則には使わない。§78-9）。
+ * 今の規則を満たし、かつ上半分なら「両方使う形」（紫）。それ以外は上半分 / 下半分を灰で。値の無い日（2026-10-24 より前）は出さない。
+ */
+function LtrBadge({ c }) {
+  const p = ltrDayPct(c);
+  if (p === null) return null;
+  const both = passesBoth(c);
+  const title = `ランキング学習: その日の候補 ${c.ltr?.nDay ?? DASH}件の中で ${c.ltr?.dayRank ?? DASH}位（百分位 ${fmt(p, 1)}。`
+    + '50以上が上半分）。'
+    + (ltr5Rank(c) !== null ? `直近5営業日の組の中で ${ltr5Rank(c)}位 / ${ltr5Pool(c) ?? DASH}件。` : '')
+    + (both ? '今の規則も満たすので「両方使う形」に入ります。' : '')
+    + '参考に並べるだけで、買いの規則には使いません';
+  return (
+    <span className={`badge ${both ? 'violet' : 'slate'} pred-warn pred-ltr`} title={title}>
+      {both ? '両方使う形' : `ランキング${ltrUpper(c) ? '上半分' : '下半分'}`}
+    </span>
+  );
+}
+
+/** 3条件・4条件の説明（印と順位表の見出しの title） */
+const COND_TITLE = `3条件: その日の候補の中で日次のランキング学習が1位・直近5営業日の組の中で1位・基準ラベルの木3本が`
+  + `${STRATEGY.agreePct}以上（この組み合わせの過去の成績は測っていない）。4条件: それに加えて上段より厳しいラベルの木3本も`
+  + `${STRATEGY.agreePct}以上（実験117 は旧σモデルでの参考値）。どちらも参考に並べるだけで、買いの規則には使わない`
+  + '（2026-11-02 の予測から）';
+
+/**
+ * 3条件・4条件の印（予測の conds。research/ltr5.py。§82-6・§87）。4条件は緑、3条件は紫。どちらでもなければ出さない。
+ * 参考に並べるだけで、買いの規則には使わない。2026-11-02 より前の日には値が無い。
+ */
+function CondBadge({ c }) {
+  const lv = condLevel(c);
+  if (!lv) return null;
+  return (
+    <span className={`badge ${lv === 'c4' ? 'green' : 'violet'} pred-warn pred-cond`} title={COND_TITLE}>
+      {lv === 'c4' ? '4条件' : '3条件'}
     </span>
   );
 }
@@ -431,7 +631,7 @@ function Row({ c, models, metric = 'pct', featureNames, open, onToggle, onSend, 
     ? `${RULE_JA}のうち一番低い百分位 ${fmt(c.ruleMin, 1)}（この順に並べています）。${base}`
     : `${RULE_JA}の百分位が無いので、基準モデルのスコア順。${base}`;
   return (
-    <div className={`pred-row${open ? ' open' : ''}`}>
+    <div id={`pred-row-${c.jqCode}`} className={`pred-row${open ? ' open' : ''}`}>
       <button className="pred-main" onClick={onToggle} aria-expanded={open}>
         <span className="pred-rank num" style={{ color: tier ? RANK_INK[tier] : color }} title={rankTitle}>
           {c.order ?? c.rankInDay}
@@ -450,6 +650,9 @@ function Row({ c, models, metric = 'pct', featureNames, open, onToggle, onSend, 
           )}
           <BorderBadge c={c} />
           <EarnBadge c={c} />
+          <LtrBadge c={c} />
+          <Ltr5Badge c={c} />
+          <CondBadge c={c} />
         </span>
         {mr.length > 0 ? (
           <span className="pred-ms">
@@ -505,7 +708,7 @@ function PctLegend() {
 }
 
 /**
- * スコアの色の物差し（その表の12本の中の最小〜最大の線形）。表の見出しに添える。
+ * スコアの色の物差し（その表の6本の中の最小〜最大の線形）。表の見出しに添える。
  * 運用者の依頼（2026-10-16）: 百分位では目的変数をまたいで比べられないので、スコアそのものも同じ形式で出す。
  * 物差しは最初は予測ファイルの全候補で1つにしたが、同日の指示「この表の中での最大最小で色付けしてほしい」で表ごとに変えた。
  */
@@ -513,7 +716,7 @@ function ScoreLegend({ range }) {
   if (!range) return null;
   return (
     <span className="pred-ms-legend pred-ms-grad"
-          title={`スコアの色はこの表の12本（学習器 × ラベル）の中の最小 ${fmt(range.lo, 3)} 〜 最大 ${fmt(range.hi, 3)} の線形（明るいほど高い）。表をまたいでは比べない`}>
+          title={`スコアの色はこの表の6本（学習器 × ラベル）の中の最小 ${fmt(range.lo, 3)} 〜 最大 ${fmt(range.hi, 3)} の線形（明るいほど高い）。表をまたいでは比べない`}>
       <em className="num">{fmt(range.lo, 2)}</em>
       <i style={{ background: `linear-gradient(90deg, ${scoreColor(range.lo, range)}, ${scoreColor(range.hi, range)})` }}
          aria-hidden="true" />
@@ -524,24 +727,25 @@ function ScoreLegend({ range }) {
 
 /**
  * モデル別の百分位の表（運用者の指示 2026-10-12「12個全てを載せてほしい。棒グラフ形式でなくてよい。
- * 大小が分かればよい」）。metric='score' ならマスにスコアそのものを出し、色はこの表の12本の中の最小〜最大の線形
+ * 大小が分かればよい」）。metric='score' ならマスにスコアそのものを出し、色はこの表の6本の中の最小〜最大の線形
  * （scoreColor。運用者の依頼 2026-10-16。ラベルをまたいだ水準の比較ができるように）。
  *
- * 行 = 学習に使ったラベル（1.2σ / 1.5σ / 1.8σ）、列 = 学習器（LGB / XGB / CAT / LR）。マスの数字は
+ * 行 = 学習に使ったラベル（1.2σ / 1.5σ。1.8σ は 2026-10-24 に外した）、列 = 学習器（LGB / XGB / CAT。LR は 2026-11-02 の
+ * 予測から外した）。マスの数字は
  * **そのモデル自身の**過去スコア分布での位置（百分位）、地の色は区分（明るいほど上。pctColor）。
  * モデルをまたいで生スコアを比べられないので、位置に揃えてある。並び順は行をまたいで固定
  * （payload の models 順）。予測ファイルに無いモデルのマスは「—」。
- * large は行を開いた詳しい欄（小数1桁・1.5σ の行の見出しに「規則」）。
- * 12本とも本番で使うモデルなので、1.2σ を「本番」とは呼ばない（運用者の指示 2026-10-17）。
+ * large は行を開いた詳しい欄（小数1桁・規則の行（2026-10-30 から 1.2σ）の見出しに「規則」）。
+ * どれも本番で使うモデルなので、1.2σ を「本番」とは呼ばない（運用者の指示 2026-10-17）。
  */
 function ModelGrid({ c, models, large = false, metric = 'pct' }) {
   const g = modelGrid(c, models);
   if (!g.rows.length) return null;
   const score = metric === 'score';
-  const range = score ? scoreRange([c]) : null;   // 色の物差しはこの表の12本の中の最小〜最大
+  const range = score ? scoreRange([c]) : null;   // 色の物差しはこの表の6本の中の最小〜最大
   return (
     <span className={`pred-mg${large ? ' lg' : ''}`} style={{ '--mg-cols': g.cols.length }}
-          aria-label={score ? 'モデル別のスコア（行はラベル、列は学習器。色は12本・全候補で1つの物差し）'
+          aria-label={score ? 'モデル別のスコア（行はラベル、列は学習器。色はこの表の6本の中の最小〜最大）'
             : 'モデル別の百分位（行はラベル、列は学習器）'}>
       <span className="h" aria-hidden="true" />
       {g.cols.map((k) => <span key={k.learner} className="h">{k.short}</span>)}
@@ -549,9 +753,10 @@ function ModelGrid({ c, models, large = false, metric = 'pct' }) {
         <React.Fragment key={r.label}>
           <span className="r"
                 title={`到達しきい値 ${r.labelJa} のラベルで学習したモデル`
-                  + (r.label === 'base' ? '。スコア帯・較正・追跡の基準はこの行の LightGBM'
-                    : r.label === 'k15' ? '。今日の戦略の規則はこの行の木の3本（L15・X15・C15）がすべて95以上' : '')}>
-            {r.labelJa}{large && r.label === 'k15' ? '（規則）' : ''}
+                  + (r.label === 'base' ? '。スコア帯・較正・追跡の基準はこの行の LightGBM' : '')
+                  + (r.label === RULE_ROW ? `。今日の戦略の規則はこの行の木の3本（${RULE_SHORT}）がすべて${STRATEGY.agreePct}以上`
+                    : '')}>
+            {r.labelJa}{large && r.label === RULE_ROW ? '（規則）' : ''}
           </span>
           {r.cells.map((x, i) => (x && Number.isFinite(score ? x.score : x.pct) ? (
             <span key={g.cols[i].learner} className="c num"
@@ -582,8 +787,11 @@ const NUMS = [
   ['抜けた幅', (c) => fmtSigned(c.breakMargin, 2)],
   ['ベース日数', (c) => fmtInt(c.baseLength, '日')],
   ['信用倍率', (c) => fmt(c.creditRatio, 2, '倍')],
-  ['PER', (c) => fmt(c.per, 1, '倍')],
+  // PER・ROE は実績（直近12か月の利益）。一時的な損益で大きく振れるので、予想（J-Quants の予想PER・予想ROE）を添える
+  // （運用者の選択 2026-11-25「実績と予想を並べる」。証券会社の画面の多くは予想PER）。古い予測ファイルには予想が無く、実績だけ出る
+  ['PER（実績）', (c) => fmtWithForecast(c.per, c.fwdPer, 1, '倍')],
   ['PBR', (c) => fmt(c.pbr, 2, '倍')],
+  ['ROE（実績）', (c) => fmtWithForecast(c.roe, c.fwdRoe, 1, '%')],
   ['配当利回り', (c) => fmt(c.divYield, 2, '%')],
   ['EPS成長', (c) => fmtSigned(c.epsGrowth, 1)],
   ['売上成長', (c) => fmtSigned(c.salesGrowth, 1)],
@@ -596,6 +804,13 @@ function Detail({ c, models, featureNames, onSend, sent }) {
   const maxTop = Math.max(...top.map((t) => Math.abs(t.contrib)), 0.001);
 
   const mr = modelRows(c, models);
+  // 1.5σ の木3本（2026-11-02 の予測から。それまでは LR15 を含む4本）のうち上位10%と見た数。予測ファイルの agreeK90 / nK は
+  // 2026-10-24 より前の日は 1.8σ を含む8本、2026-10-30 までは LR15 を含む4本で数えているので、画面では表に出すモデル
+  // （modelRows。外したモデルを除く）の百分位から数え直す（predict_daily.agreement と同じ 90 以上）
+  const k15 = mr.filter((r) => r.family === 'k15' && Number.isFinite(r.pct));
+  // 1.2σ も同じく表に出すモデル（木3本）の百分位から数え直す。予測ファイルの agree90 / nModels は 2026-10-30 までは
+  // ロジスティック回帰を含む4本の数（表から LR を外したので、そのまま出すと表と合わない）
+  const base = mr.filter((r) => r.family === 'tree' && Number.isFinite(r.pct));
   const bn = borderNote(c);
 
   return (
@@ -621,16 +836,16 @@ function Detail({ c, models, featureNames, onSend, sent }) {
             <ModelGrid c={c} models={models} large />
             <p className="sub" style={{ margin: '10px 0 4px' }}>
               同じ表で<b>スコアそのもの</b>（各モデルが出した確率。混ぜていない）。色は
-              この表の12本の中の最小〜最大の線形で、ラベルをまたいで水準を比べられます。
-              1.5σ・1.8σ は正例が少ないラベルなので、同じ銘柄でもスコアは低く出るのが普通です<ScoreLegend range={scoreRange([c])} />
+              この表の6本の中の最小〜最大の線形で、ラベルをまたいで水準を比べられます。
+              目的変数が違うため、行をまたぐスコアの水準は直接比較できません。各モデル自身の百分位で確認してください<ScoreLegend range={scoreRange([c])} />
             </p>
             <ModelGrid c={c} models={models} large metric="score" />
             <div className="pred-split" style={{ marginTop: 10 }}>
               <span>
                 <span className="lab">上位10%と見たモデル</span>
-                <span className="sub">1.2σ </span><b className="num">{c.agree90}/{c.nModels}</b>
-                {Number.isFinite(c.agreeK90) && c.nK > 0 && (
-                  <span className="sub">（1.5σ・1.8σ {c.agreeK90}/{c.nK}）</span>
+                <span className="sub">{modelGrid(c, models).rows.find((r) => r.label === 'base')?.labelJa} </span><b className="num">{base.filter((r) => r.pct >= 90).length}/{base.length}</b>
+                {k15.length > 0 && (
+                  <span className="sub">（{modelGrid(c, models).rows.find((r) => r.label === 'k15')?.labelJa} {k15.filter((r) => r.pct >= 90).length}/{k15.length}）</span>
                 )}
               </span>
               <span>
@@ -640,18 +855,15 @@ function Detail({ c, models, featureNames, onSend, sent }) {
               </span>
               <span>
                 <span className="lab">帯の基準</span>
-                <b>LightGBM（1.2σ）</b>
+                <b>LightGBM（基準ラベル）</b>
                 <span className="sub num">（{c.rankInDay} / {c.nInDay} 位）</span>
               </span>
             </div>
             <p className="sub" style={{ margin: '8px 0 0' }}>
-              行は学習に使ったラベル（到達しきい値）で、12本とも毎日の予測に使っています。スコア帯の基準は 1.2σ の
-              LightGBM です。1.5σ・1.8σ は、より大きく上がった銘柄だけを正例にして学習したもの。今日の戦略の規則は、2026-10-12 から 1.5σ の木の3本
-              （L15・X15・C15）がすべて95以上です（運用者の決定）。
-              一覧はこの3本の最小が高い順です（2026-10-13 から。それまでは 1.2σ の LightGBM のスコア順）。
-              同じ行・同じ列のモデルは似た見方をするので、そろって高くても独立した票ではありません。
-              1.2σ の3本が95以上の候補に「1.5σ・1.8σ の3本も95以上」を足しても、過去の前向きの
-              検証では成績は安定して上がりませんでした（実験82）。
+              行は学習に使った到達条件です。固定%への切替後は+10%と+15%を各3本使います。
+              スコア帯とSHAPの基準は上段のLightGBMです。今日の戦略は基準ラベルの木3本
+              （{RULE_SHORT}）がすべて{STRATEGY.agreePct}以上の候補を、3本の最小値が高い順に並べます。
+              旧σモデルでの過去成績は固定%モデルの運用成績を示すものではありません。
             </p>
           </div>
         )}
@@ -659,7 +871,7 @@ function Detail({ c, models, featureNames, onSend, sent }) {
           {/* h4 は大文字に変換される（σ が Σ になる）ので、見出しにはラテン・ギリシャ文字を入れない */}
           <h4>基準モデルの見立ての内訳</h4>
           <p className="sub">
-            基準モデル（1.2σ の LightGBM）の出力を特徴量ごとに分解したもの（TreeSHAP）。
+            基準モデル（上段のLightGBM）の出力を特徴量ごとに分解したもの（TreeSHAP）。
             {`一覧の並び順（${RULE_JA}の最小）の内訳ではありません。`}
             対数オッズ空間の寄与なので、確率の差ではなく
             <b>押し上げ／押し下げの相対の大きさ</b>として読みます。
@@ -842,7 +1054,7 @@ function ModelLineup({ models }) {
       </div>
       <p className="sub">
         探索PR-AUC は探索時の内側検証（5分割・50試行・木200本固定）の値です。
-        1.5σ / 1.8σ のモデル（記号の末尾が 15 / 18）はラベルが違うので、この値を 1.2σ のモデルと比べられません。
+        記号の末尾が15のモデルは目的変数が違うため、この値を基準ラベルのモデルと直接比較できません。
         運用は上位だけを買うので、この順位がそのまま運用の優劣にはなりません。
         どのモデルを重く見るかは、上の「スコア帯の実績」と
         「過去に出した銘柄のその後」で確かめてください。

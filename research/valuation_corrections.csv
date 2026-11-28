@@ -1,0 +1,7 @@
+Code,fiscal_year,basis,accounting_standard,source_doc_id,source_url,source_submit_date,source_sha256,normalized_debt,normalized_equity
+79740,2025,consolidated,JP,S100Y9NX,https://www.nintendo.co.jp/ir/pdf/2026/security_q2603.pdf,2026-06-25 15:30,dd17b4ed996fa0c96764b4260a944b3e6c1af85909099a08f0b65c0a97240cfc,7158000000.0,2725446000000.0
+79740,2026,consolidated,JP,S100Y9NX,https://www.nintendo.co.jp/ir/pdf/2026/security_q2603.pdf,2026-06-25 15:30,dd17b4ed996fa0c96764b4260a944b3e6c1af85909099a08f0b65c0a97240cfc,7512000000.0,2955180000000.0
+94320,2025,consolidated,IFRS,S100YCP3,https://group.ntt/jp/ir/library/yuho/2025/pdf/41yuho.pdf,2026-06-16 15:51,526a69a7fead4070b4455544d2d51bf57e3e6fd411cd873500b1ffae1eb47c69,11171213000000.0,11344639000000.0
+94320,2026,consolidated,IFRS,S100YCP3,https://group.ntt/jp/ir/library/yuho/2025/pdf/41yuho.pdf,2026-06-16 15:51,526a69a7fead4070b4455544d2d51bf57e3e6fd411cd873500b1ffae1eb47c69,16919540000000.0,10217533000000.0
+33820,2025,consolidated,JP,S100Y4VB,https://www.7andi.com/ir/file/library/pdf/26_7andi_int04.pdf,2026-05-20 12:05,8efaa5117e30a0fa08a57d5b92704b15e4a60e21141f77e08bb935cac80a2c8d,4098791000000.0,4223212000000.0
+33820,2026,consolidated,JP,S100Y4VB,https://www.7andi.com/ir/file/library/pdf/26_7andi_int04.pdf,2026-05-20 12:05,8efaa5117e30a0fa08a57d5b92704b15e4a60e21141f77e08bb935cac80a2c8d,3793778000000.0,3648195000000.0

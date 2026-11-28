@@ -1,0 +1,41 @@
+{
+  "_source": "週次の探索（Retrain Weekly run 46100964844・14ad536。2025-09-29 までの 18,422件・50試行・5分割・目的は検証分割の日付内 NDCG@5）",
+  "_features_sig": "7091517f6ec2",
+  "_n_features": 373,
+  "_cutoff": "2025-09-29",
+  "_cv": {
+    "objective": "検証分割の日付内 NDCG@5（候補5件以上の日。利得は20営業日目の終値の段階 0〜4）",
+    "scheme": "year_cap_date",
+    "n_splits": 5,
+    "n_trials": 50,
+    "seed": 0,
+    "best_trial": 26,
+    "ndcg": 0.6601,
+    "ndcg_folds": [
+      0.6582,
+      0.6618,
+      0.6548,
+      0.6766,
+      0.6489
+    ],
+    "n_rows": 18422,
+    "n_days": 1768,
+    "train_from": "2018-04-03",
+    "train_to": "2025-09-29",
+    "minutes": 28.1
+  },
+  "params": {
+    "boosting_type": "gbdt",
+    "n_estimators": 200,
+    "subsample_freq": 1,
+    "n_jobs": -1,
+    "verbose": -1,
+    "learning_rate": 0.029230512482084067,
+    "num_leaves": 27,
+    "min_child_samples": 30,
+    "subsample": 0.5566991666277384,
+    "colsample_bytree": 0.7010302714261751,
+    "reg_alpha": 0.006212366551359395,
+    "reg_lambda": 7.460392779706138
+  }
+}

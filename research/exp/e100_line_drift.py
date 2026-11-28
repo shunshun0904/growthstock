@@ -57,7 +57,7 @@ import e79_model_clusters as E79  # noqa: E402
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 DATA_DIR = lab.DATA_DIR
 OUT_DIR = E79.OUT_DIR
-RULE_MODELS = LT.RULE_MODELS            # ("lgbm_k15", "xgb_k15", "cat_k15")
+RULE_MODELS = LT.K15                    # ("lgbm_k15", "xgb_k15", "cat_k15")。実験のときの規則（2026-10-23 からは 1.2σ の3本なので記録どおり固定）
 MAIN = "lgbm_k15"                       # 寄与の分解に使う（画面の「効いた特徴量」と同じ TreeSHAP）
 LINE = LT.AGREE_PCT                     # 95
 LIVE_FROM, LIVE_TO = "2026-10-13", "2026-10-16"   # 今の規則の記録（既定。--live-from / --live-to）

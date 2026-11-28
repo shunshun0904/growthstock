@@ -1,0 +1,33 @@
+{
+  "focused_tests": 10,
+  "focused_command": "OPENBLAS_NUM_THREADS=1 python -m unittest discover -s tests -p 'test_valuation_methods.py' -q",
+  "numeric": {
+    "denominator_rows": 22110,
+    "codes": 3748,
+    "row_order_and_keys_unchanged": true,
+    "no_future_annual_or_sector_snapshots": true,
+    "coverage_recomputed_for_methods": 11,
+    "independent_DCF_polynomial_rows": 80,
+    "independent_DCF_max_yen_error": 1.0913936421275139e-11,
+    "MC_reproduced_real_rows": 10,
+    "verified_input_hashes": 27,
+    "source_versions_independently_audited": false,
+    "probability_priors_calibrated": false,
+    "production_changed": false
+  },
+  "display": {
+    "executed_cells": 8,
+    "notebook_errors": 0,
+    "static_visible_tables": 11,
+    "javascript_enabled": false,
+    "external_requests": 0,
+    "browser_errors": [],
+    "notebook_reexecuted_from_zip_without_original_mart": true
+  },
+  "additional_code_sha256": {
+    "e122_assumptions.py": "eae9db72f529d51cc9d67673f08691b20f388aac496003de8b087d79d6a15cd4",
+    "e122_report.py": "125dd01137a8a1e58c338f40283f95710427c589ec98beebabe30b70a1e40351"
+  },
+  "production_changed": false,
+  "new_method_backtests_done": false
+}

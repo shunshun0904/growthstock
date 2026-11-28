@@ -33,7 +33,8 @@ V2 ではレスポンスの配列キーが一律 ``data`` になり、列名が�
 出力方針
 --------
 取得できなかった指標は「0」ではなく ``null`` として出力し、``sources`` に
-``unavailable`` を記録する。実測値と欠測を混同させないため、値の捏造・推定補完は行わない。
+``unavailable`` を記録する。実測値と欠測を混同させないため、指標の推定補完は行わない。
+別フィールド ``supplyDemand`` の価格帯分布だけは、算出方法を記録した表示用の推計。
 
 使い方
 ------
@@ -55,6 +56,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+
+from supply_demand import build_supply_demand
 
 API_BASE = "https://api.jquants.com/v2"
 USER_AGENT = "GrowthStockAnalyzer-Focus/1.0 (+https://github.com/shunshun0904/growthstock)"
@@ -1054,6 +1057,9 @@ def build_stock(client: JQuantsClient, raw_code: str, note: str = "",
         "quarters": quarters[-9:],
         "history": history,
         "historyBars": chart_bars(quotes),
+        # 表示専用。学習・予測や既存の指標計算には使わない。
+        "supplyDemand": build_supply_demand(quotes, margins, as_of=latest_date,
+                                            trading_days=trading_days),
         "sources": sources,
         "origin": "jquants",
     }

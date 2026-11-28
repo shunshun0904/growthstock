@@ -5,6 +5,14 @@ name: Predict Breakouts
 # 生データの取り込み（Update Data Store。Claude の Routine が平日 18:40 JST に起動）が終わってから走らせる。
 # 固定時刻で待つのではなく workflow_run で繋ぐ。取得が遅れた日に
 # 古いデータで予測してしまうのを防ぐため。
+#
+# 2026-11-15 から、次の営業日が週末の学習（土曜）の後になる日（ふつうは金曜）は、その夜には予測せず、週末の学習の後に
+# Routine が新しいモデルで予測する（関門の第二の規則。research/trading_day_gate.py の weekend_hold。運用者の依頼
+# 「新モデルで、日曜の夜に月曜購入分の予測を実施してほしいです」→ 選択「金曜の夜はやめる」「日曜の朝9時」）。
+# 2026-11-20 から、週末の定時を土曜にまとめ、その予測は土曜 21:00 の Routine が出す（関門は土曜 20:00 JST まで止める。
+# 選択「土曜 00:00」「今週から」「土曜20時まで止める」。docs/MODEL_ADOPTION_RULES.md §98）。
+# 2026-11-21 から、その予測は土曜 15:00 の Routine が出す（関門は土曜 14:00 JST まで止める。運用者の依頼「0時、6時、12時、
+# 最後の予測を15時」→ 選択「土曜14時まで止める（推奨）」「今すぐ予測する」。§102）。
 on:
   workflow_run:
     workflows: ['Update Data Store']
@@ -16,6 +24,11 @@ on:
         required: false
         type: boolean
         default: false
+      replace_day:
+        description: 'force と一緒に使う。この日（YYYY-MM-DD。今回の予測の日と同じとき）の追跡の記録（prediction_history.json）を今回の予測で置き換える'
+        required: false
+        type: string
+        default: ''
   # 保険の予約の起動（平日 23:00 JST の cron）は 2026-10-05 にやめた（GitHub の cron は
   # 実測で +4〜7時間遅れ、保険として当てにならない。docs/OPERATIONS.md）。連鎖が起動
   # しなかった日は、翌朝の Routine（月〜土 07:40 JST）が前日の run を確かめ、無ければ
@@ -98,34 +111,14 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          mkdir -p research/model
-          if bash scripts/gh_release_download.sh data-raw research/model 'model.txt' 'oof.parquet'; then
-            echo "Release のモデルを使う"
-          else
-            echo "Release にモデルが無いので、リポジトリ内の版を使う"
-          fi
-          ls -lh research/model
-
-          # 画面に並べる追加モデル。Release ではアセット名が衝突しないよう
-          # <algo>_model.joblib の形で上がっているので、research/models.py が
-          # 見る research/model/models/<algo>/ の形に並べ直す。
-          # meta.json は git 側（週次学習がコミットする）から来る。
-          # 片方だけ揃っていない場合は models.load が (None, None) を返し、
-          # そのモデルだけ画面から外れる。日次予測は止まらない。
-          if bash scripts/gh_release_download.sh data-raw /tmp/extra '*_model.joblib' '*_oof.parquet'; then
-            shopt -s nullglob
-            for f in /tmp/extra/*_model.joblib; do
-              a=$(basename "$f" _model.joblib)
-              mkdir -p "research/model/models/$a"
-              mv "$f" "research/model/models/$a/model.joblib"
-              [ -f "/tmp/extra/${a}_oof.parquet" ] \
-                && mv "/tmp/extra/${a}_oof.parquet" "research/model/models/$a/oof.parquet"
-            done
-            echo "追加モデル: $(ls -d research/model/models/*/ 2>/dev/null | wc -l)個"
-            python3 research/model_lineup.py || true
-          else
-            echo "Release に追加モデルが無い（基準モデルだけで予測する）"
-          fi
+          python3 research/model_artifacts.py install
+          for a in ltr ltr5; do
+            mkdir -p "research/model/models/$a"
+            bash scripts/gh_release_download.sh data-raw /tmp/rankers "${a}_model.joblib" "${a}_oof.parquet"
+            cp "/tmp/rankers/${a}_model.joblib" "research/model/models/$a/model.joblib"
+            cp "/tmp/rankers/${a}_oof.parquet" "research/model/models/$a/oof.parquet"
+          done
+          python3 research/model_artifacts.py verify
 
       - name: Check freshness
         if: steps.gate.outputs.run != 'false'
@@ -141,6 +134,9 @@ jobs:
 
       - name: Score today's candidates
         if: steps.gate.outputs.run != 'false'
+        env:
+          # force のときだけ渡す（置き換えは運用者が指示した日だけ。predict_daily.update_history）
+          REPLACE_HISTORY_DAY: ${{ inputs.force && inputs.replace_day || '' }}
         run: python3 research/predict_daily.py 2>&1 | tee predict.log
 
       # 学習と予測で特徴量の値が一致するか（research/check_train_serve.py）。
@@ -170,8 +166,8 @@ jobs:
             echo "控えが無い（候補が無かった日）"
           fi
 
-      # 購入条件（1.5σ の3本がすべて95以上）を満たした銘柄ごとのリカレンス・ネットワーク（画面の「リカレンス・ネットワーク」
-      # タブ。research/recurrence_net.py。運用者の依頼 2026-10-19）。取れる全期間（1銘柄 約2,200営業日 × テクニカル指標9列と
+      # 購入条件（今日の戦略の規則。2026-10-30 から 1.2σ の3本がすべて95以上）を満たした銘柄ごとのリカレンス・ネットワーク（画面の
+      # 「リカレンス・ネットワーク」タブ。2026-10-24 からタブは隠している。research/recurrence_net.py。運用者の依頼 2026-10-19）。取れる全期間（1銘柄 約2,200営業日 × テクニカル指標9列と
       # 色付けの値・距離の座標で約250KB。版 6 までは約130KB）で作るので、リポジトリにはコミットせず Release に1つの archive（recurrence.tar.gz）で上げ、デプロイ（deploy-pages.yml）が
       # dist/data/recurrence/ に展開する（運用者の選択「Release に置く」）。過去の日は前の archive（最初の
       # Download raw data で research/_data に来ている）から引き継ぐ。参考の表示で選定には使わないので、作れなくても
@@ -241,7 +237,22 @@ jobs:
             echo "（設定するとこの日から追記されます。過去分は遡りません）"
             exit 0
           fi
-          python3 research/export_sheets.py 2>&1 | tail -10
+          # 予測日が 2026-11-02 より前の行は今のタブ（予測ログ）、11/2 からの行は同じスプレッドシートの v2 のタブ（予測ログ v2。
+          # ランキング学習の列つき）に足す（運用者の依頼 2026-10-30「…予測＆購買記録をv２として…」→「同じシートに v2 のタブ」）。
+          # どちらも、すでにある行の値動きは毎晩更新する。2026-11-11 から v1（予測ログ）は更新しない（運用者の依頼「v1の記録は
+          # 止めて大丈夫です。v2があるので。」）。v1 のタブはその日の中身のまま残る
+          python3 research/export_sheets.py --book v2 2>&1 | tail -10
+
+      - name: Export current valuation comparison
+        if: steps.gate.outputs.run != 'false'
+        run: python3 research/export_valuations.py
+
+      # 画面の「使っているモデル」の欄（学習日・株価データ・学習サンプルの日付）は public/data/active_models.json を読む。
+      # 予測に使った分類6本の meta.json（週次の再学習・作り直しがコミットする）から毎回書き出し、モデルを作り直した週に
+      # 画面だけ前のモデルの日付のまま残らないようにする（2026-11-04 の作り直しのあと 11/3 の日付が残っていた）
+      - name: Export active model registry
+        if: steps.gate.outputs.run != 'false'
+        run: python3 research/export_model_registry.py
 
       - name: Commit predictions
         if: steps.gate.outputs.run != 'false'
@@ -249,7 +260,7 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A public/data/predictions.json public/data/prediction_history.json \
-            public/data/stocks.json
+            public/data/stocks.json public/data/valuations.json public/data/active_models.json
           if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
           git commit -m "chore(data): ブレイク予測を更新 ($(date -u '+%Y-%m-%d %H:%M UTC'))"
           for i in 1 2 3 4; do

@@ -1,0 +1,11 @@
+{
+  "original_rows": 22110,
+  "original_columns_identical": 520,
+  "financial_dates_strict": true,
+  "statistical_ordering_and_normalization": true,
+  "independent_cashflow_identity_real_rows": 200,
+  "identity_max_absolute_yen_error": 1.0913936421275139e-11,
+  "source_hashes_verified": 39,
+  "mature_outcome_separation_tasks": 4,
+  "complete_fits": 72
+}

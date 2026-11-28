@@ -1,4 +1,8 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import ValuationView from './views/ValuationView.jsx';
+import SupplyDemandView from './views/SupplyDemandView.jsx';
+import VolumeProfileView from './views/VolumeProfileView.jsx';
+import SummaryView from './views/SummaryView.jsx';
 import CompareView from './views/CompareView.jsx';
 import TimeMachineView from './views/TimeMachineView.jsx';
 import SimulatorView from './views/SimulatorView.jsx';
@@ -6,6 +10,7 @@ import PredictionView from './views/PredictionView.jsx';
 import KnnCompareView from './views/KnnCompareView.jsx';
 import FilingsView from './views/FilingsView.jsx';
 import SamplesView from './views/SamplesView.jsx';
+import ScoreDistView from './views/ScoreDistView.jsx';
 import NewsView from './views/NewsView.jsx';
 import NetworkView from './views/NetworkView.jsx';
 import AddStockModal from './components/AddStockModal.jsx';
@@ -16,7 +21,7 @@ import {
   manualStockFromForm, mergeStocks, resetSavedState,
 } from './lib/store.js';
 import {
-  loadPredictions, loadHistory, loadFilings, loadFeatureNames, loadNewSamples, loadNewsLinks,
+  loadPredictions, loadHistory, loadFilings, loadFeatureNames, loadNewSamples, loadNewsLinks, loadScoreDist,
 } from './lib/predictions.js';
 
 /*
@@ -25,14 +30,29 @@ import {
  * （FilingsView / SimulatorView / CompareView）とデータの取り込み（Fetch Filings）は残してあるので、hidden を外せば戻る。
  */
 const TABS = [
+  // サマリー（候補ごとの六角形。6本の分類モデルの平均・最低値・偏差、ランキング学習の日次・5日、割安度を 0〜1 で）。
+  // 運用者の依頼 2026-11-21「パット見で、すべての良し悪しを測りたいので、レーダーチャートで…六角形で表示してほしいです…
+  // サマリーという名のタグで一番左に追加してほしいです」。開いたときのタブはブレイク予測のまま。
+  // 同じ日に「サマリーのタグはなしで良いです。消してください。」→「タブを隠す」で hidden に。画面（SummaryView・SummaryRadar）と
+  // 計算（src/lib/summary.js）・テストは残してあり、hidden を外せば戻る
+  { id: 'summary', label: 'サマリー', hidden: true },
   { id: 'prediction', label: 'ブレイク予測' },
   // 候補銘柄のニュース（候補ごとのニュース・適時開示・アナリスト予想・個人投資家の声へのリンク）。運用者の依頼 2026-10-17
   // 「候補銘柄のニュース として新たにタブを追加してほしいです。左から2番目で」
   { id: 'news', label: '候補銘柄のニュース' },
+  { id: 'valuation', label: '理論株価' },
+  // 2026-11-15「推定は本番運用レベルではないので非表示に」で hidden に。画面・推計処理・データは残す。
+  { id: 'supplydemand', label: '価格帯別需給', hidden: true },
+  // 2026-11-21「分足のデータは使わない方針になったので価格帯別出来高の分布タグも消してください」→「隠して集計も止める」
+  // 「公開をやめる」で hidden に。画面（VolumeProfileView）と集計の作り方（research/build_volume_profile.py。ワークフローは手で
+  // 起動するときだけ）は残してあり、hidden を外し、デプロイに集計を置く段を戻して手で作り直せば戻る。分足・ティックの取得と保存は続ける
+  { id: 'volumeprofile', label: '価格帯別出来高', hidden: true },
   // 候補ごとのリカレンス・ネットワーク（点 = その銘柄の1営業日、線 = テクニカル指標9列の状態が似た日どうし。参考で、選定には
   // 使わない）。運用者の依頼 2026-10-19「Obsidian の球状のプロットのようなことを、ノードを1営業日として…その日の各候補銘柄単体で」。
-  // データは Release の recurrence.tar.gz（research/recurrence_net.py）をデプロイで dist/data/recurrence/ に置く
-  { id: 'network', label: 'リカレンス・ネットワーク' },
+  // データは Release の recurrence.tar.gz（research/recurrence_net.py）をデプロイで dist/data/recurrence/ に置く。
+  // 2026-10-24「現状、参考にできるレベルでもないので非表示にしてください。なくて良いです」で hidden に。画面のコード
+  // （NetworkView）と日次予測の網の作成は残してあり、hidden を外せば戻る
+  { id: 'network', label: 'リカレンス・ネットワーク', hidden: true },
   // 候補の比較（似た過去の事例の収益の分布。参考で、選定には使わない）。運用者の指示 2026-10-15
   // 「別タブとして、左から2番目の位置に追加して下さい。3枚で良いです」。2026-10-16「候補の比較タブはいったん、
   // なくしてください」で hidden に。画面のコード（KnnCompareView）と日次予測の knn の計算は残してあり、hidden を外せば戻る
@@ -43,7 +63,13 @@ const TABS = [
   { id: 'simulator', label: 'What-If シミュレーター', hidden: true },
   // 週次の再学習で加わったサンプルのチャート（運用者の依頼 2026-10-13。名前は同日夜「「例」ではなく「サンプル」」）。
   // 一番右（運用者の指示 2026-10-14「一番右側に持ってきてください」）
-  { id: 'samples', label: '再学習で加わったサンプル' },
+  // +10% の LightGBM と直近5営業日の組のランキング学習のスコア・収益の分布と、2つの上位の重なり（運用者の依頼 2026-11-08
+  // 「なんなら、ダッシュボードにほしいくらいです」→ AskUserQuestion「3つとも載せる」）。サンプルのタブを一番右に保つため、その左
+  // 2026-11-15「再学習で加わったサンプル、スコアと収益の分布タグを消してください。」→ AskUserQuestion「隠して自動更新も止める」で
+  // 2つとも hidden に。画面のコード（ScoreDistView / SamplesView）とデータの作り方（research/score_dist.py・new_samples.py。
+  // ワークフローは手で起動するときだけ）は残してあり、hidden を外して手で作り直せば戻る
+  { id: 'scoredist', label: 'スコアと収益の分布', hidden: true },
+  { id: 'samples', label: '再学習で加わったサンプル', hidden: true },
 ];
 const VISIBLE_TABS = TABS.filter((t) => !t.hidden);
 const isVisible = (id) => VISIBLE_TABS.some((t) => t.id === id);
@@ -67,6 +93,7 @@ export default function App() {
   const [featureNames, setFeatureNames] = useState({});
   // 再学習で加わったサンプル。undefined = 読み込み中、null = まだ無い
   const [newSamples, setNewSamples] = useState(undefined);
+  const [scoreDist, setScoreDist] = useState(undefined);
   // 候補銘柄のニュースのリンクを確かめた結果。undefined = 読み込み中、null = まだ無い
   const [newsLinks, setNewsLinks] = useState(undefined);
   const [tab, setTab] = useState('prediction');
@@ -94,7 +121,9 @@ export default function App() {
     if (isVisible('filings')) loadFilings().then((f) => { if (!cancelled) setFilings(f); });
     // 特徴量の日本語名（効いた特徴量の表示）。読めなければ元の列名のまま
     loadFeatureNames().then((n) => { if (!cancelled) setFeatureNames(n); });
-    loadNewSamples().then((d) => { if (!cancelled) setNewSamples(d); });
+    // 再学習で加わったサンプル・スコアと収益の分布。タブを隠している間は読まない
+    if (isVisible('samples')) loadNewSamples().then((d) => { if (!cancelled) setNewSamples(d); });
+    if (isVisible('scoredist')) loadScoreDist().then((d) => { if (!cancelled) setScoreDist(d); });
     loadNewsLinks().then((d) => { if (!cancelled) setNewsLinks(d); });
     return () => { cancelled = true; };
   }, []);
@@ -259,8 +288,8 @@ export default function App() {
 
         {!loading && dataset && <DataNotices dataset={dataset} />}
 
-        {!loading && rows.length === 0 && tab !== 'prediction' && tab !== 'news' && tab !== 'knn' && tab !== 'samples'
-          && tab !== 'network' && (
+        {!loading && rows.length === 0 && tab !== 'summary' && tab !== 'prediction' && tab !== 'news' && tab !== 'knn' && tab !== 'samples' && tab !== 'scoredist'
+          && tab !== 'network' && tab !== 'valuation' && tab !== 'supplydemand' && tab !== 'volumeprofile' && (
           <div className="card empty">
             分析対象の銘柄がありません。
             <div style={{ marginTop: 'var(--s4)' }}>
@@ -278,6 +307,9 @@ export default function App() {
           </div>
         )}
 
+        {tab === 'summary' && <SummaryView pred={pred} predError={predError} />}
+        {tab === 'valuation' && <ValuationView />}
+        {tab === 'volumeprofile' && <VolumeProfileView predictions={pred} predictionError={predError} />}
         {tab === 'prediction' && (
           predError ? (
             <div className="banner warn">
@@ -335,9 +367,12 @@ export default function App() {
         )}
 
         {/* 予測ファイルは候補の並び（今日の戦略の順）にだけ使う。読めなくてもネットワークの目次の順で出す */}
-        {tab === 'network' && <NetworkView data={pred} />}
+        {tab === 'network' && isVisible('network') && <NetworkView data={pred} />}
 
-        {tab === 'samples' && <SamplesView data={newSamples} />}
+        {tab === 'scoredist' && isVisible('scoredist') && <ScoreDistView data={scoreDist} pred={pred} />}
+        {tab === 'samples' && isVisible('samples') && <SamplesView data={newSamples} />}
+        {tab === 'supplydemand' && !loading && <SupplyDemandView stocks={stocks} candidates={pred?.candidates}
+          selectedId={selectedId} onSelect={setSelectedId} />}
 
         {tab === 'filings' && isVisible('filings') && (
           <FilingsView pred={pred} rows={rows} filings={filings} />

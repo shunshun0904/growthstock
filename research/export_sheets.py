@@ -25,7 +25,17 @@
   列の探索は名前なので、右端にあっても正しく書ける。位置が気になるときは
   利用者が手でドラッグして動かしてよい（名前を変えないこと）。
 
+v1 と v2（2026-11-02 の予測から）
+--------------------------------
+運用者の依頼（2026-10-30）「今月までは色々バグがあったので、ランキング学習も加わるということで、予測＆購買記録をv２として
+新規にスプレッドシートを作成して欲しいです。今後は来週以降は、そちらに記録して欲しいです。」→「別スプレッドシートはやっぱ
+やめましょう。シークレットの登録とか面倒なので。」→ AskUserQuestion「同じシートに v2 のタブ」で、同じスプレッドシートの中に
+v2 のタブ（V2_TITLE「予測ログ v2」）を作る。予測日が V2_FROM（2026-11-02）以降の行は v2 のタブ（--book v2）にだけ足し、
+それより前の行は今のタブ（「予測ログ」。--book v1）にだけ足す。どちらも、すでにある行の値動きの列は毎晩更新する（今のタブの
+10月の行も、20営業日が過ぎるまで追う）。v2 のタブはランキング学習の列（RANK_COLS）を足した並びで作る。
+
   GOOGLE_SERVICE_ACCOUNT_JSON='{...}' GSHEET_ID=... python3 research/export_sheets.py
+  GOOGLE_SERVICE_ACCOUNT_JSON='{...}' GSHEET_ID=... python3 research/export_sheets.py --book v2
   python3 research/export_sheets.py --dry-run   # 通信せず、書く内容だけ出す
 """
 from __future__ import annotations
@@ -49,6 +59,13 @@ DATA_DIR = os.path.join(HERE, "_data")
 PUBLIC_DIR = os.path.join(os.path.dirname(HERE), "public", "data")
 
 SHEET_TITLE = "予測ログ"
+
+#: v2 のタブ（同じスプレッドシートの V2_TITLE）に書き始める予測日。これより前の予測日の行は v1（今の「予測ログ」）にだけ、
+#: この日からの行は v2 にだけ足す（運用者の依頼 2026-10-30。上の「v1 と v2」）。holdings_sheet.py の保有の分け方も同じ日
+V2_FROM = "2026-11-02"
+BOOKS = ("v1", "v2")
+#: v2 の予測ログのタブ
+V2_TITLE = "予測ログ v2"
 
 #: このスクリプトが書き込む列（追記時に一度だけ埋める）。
 #: 順番は初回にシートを作るときの並びで、以降は見出し名で探すので動かしてよい。
@@ -78,10 +95,15 @@ OWNED_COLS = [
 #:
 #: 「一致」は上位10%と見ているモデルの数。独立した判定の数え上げで、
 #: スコアを混ぜた値ではない（アンサンブルはしない方針）。
+LABEL_COL = "目的変数定義"
+OWNED_COLS = OWNED_COLS + [LABEL_COL]
 MODEL_COLS = [f"{M.SHORT.get(a, a[:3].upper())}%" for a in M.LINEUP]
 SCORE_COLS = [f"{M.SHORT.get(a, a[:3].upper())}スコア" for a in M.LINEUP]
 AGREE_COL = "一致(上位10%)"
-#: ラベル違いのモデル（L15 / L18。models.VARIANTS）のうち上位10%と見た数。本番の一致（AGREE_COL）には数えない
+#: ラベル違いのモデル（L15 など1.5σ の木3本。models.ACTIVE_VARIANTS）のうち上位10%と見た数。1.2σ の一致（AGREE_COL）には
+#: 数えない。1.8σ の4本（L18 など）は 2026-10-24 に外したので、それからの行は1.5σ の4本だけで数え、L18% などの列は
+#: 書かない（見出しは残り、それより前の行の値もそのまま）。ロジスティック回帰（LR% / LR15% / LRスコア / LR15スコア）も
+#: 2026-11-02 の予測から同じ扱い（運用者の指示 2026-10-29。それからの一致は 1.2σ・1.5σ とも木の3本で数える）
 AGREE_K_COL = "ラベル違い一致(上位10%)"
 AGREE_COLS = [AGREE_COL, AGREE_K_COL]
 
@@ -113,6 +135,39 @@ ENTRY_COLS = ["翌営業日始値"]
 #: 見出しだけ作って中身は一切触らない列。利用者の記入欄。
 USER_COLS = ["建値", "株数", "手仕舞い日", "手仕舞い値", "損益", "メモ"]
 
+#: v2 のタブだけに置く列（ランキング学習。docs/MODEL_ADOPTION_RULES.md §82-6）。追記するときに一度だけ書く（OWNED_COLS と同じ）。
+#:   ランキング順位・ランキング百分位  日次のランキング学習（research/ltr.py）の、その日の候補の中の順位と百分位
+#:   5日の順位・5日の組の数            直近5営業日の組のランキング学習（research/ltr5.py）の、予測の日の組の中の順位と組の行の数
+#:   1.5σの3本95以上 / 1.2σの3本95以上  木の3本の百分位がすべて95以上か（○ / ×。1.2σ は今日の戦略の規則。2026-10-30 から）
+#:   3条件 / 4条件                      日次の1位・5日の1位・1.2σの3本95以上（3条件）、それに 1.5σの3本95以上（4条件）（○ / ×。
+#:                                      §87）
+#: 値が無い（モデルが無い日・決まらない）ときは空のまま
+RANK_COLS = ["ランキング順位", "ランキング百分位", "5日の順位", "5日の組の数",
+             "1.5σの3本95以上", "1.2σの3本95以上", "+15%の3本95以上", "+10%の3本95以上", "3条件", "4条件"]
+
+
+def header_of(book: str = "v1") -> List[str]:
+    """新しく作るタブの見出し（v2 はランキング学習の列を元の列のすぐ右に置く）。"""
+    rank = RANK_COLS if book == "v2" else []
+    return (OWNED_COLS + rank + MODEL_COLS + SCORE_COLS + AGREE_COLS + ENTRY_COLS
+            + TRACK_COLS + USER_COLS + EARN_COLS)
+
+
+def owned_of(book: str = "v1") -> List[str]:
+    """このスクリプトが書く列（見出しに無ければ右端に足す。ensure_columns）。"""
+    rank = RANK_COLS if book == "v2" else []
+    return OWNED_COLS + rank + MODEL_COLS + SCORE_COLS + AGREE_COLS + ENTRY_COLS + TRACK_COLS + EARN_COLS
+
+
+def in_book(pick_date: str, book: str = "v1") -> bool:
+    """その予測日の行をこのタブに足すか（v1 は V2_FROM より前、v2 は V2_FROM から）。"""
+    return (str(pick_date) >= V2_FROM) if book == "v2" else (str(pick_date) < V2_FROM)
+
+
+def _mark(v) -> Optional[str]:
+    """True / False / None → ○ / × / 空（決まらない）。"""
+    return None if v is None else ("○" if v else "×")
+
 KEY_COLS = ("予測日", "コード")
 
 #: 予測ログに違うコードで書いた行の直し（一度だけ効く）。キーは (予測日, 書いたコード, 銘柄名)、
@@ -130,13 +185,17 @@ def rows_from_predictions(pred: Dict) -> List[Dict]:
     モデル別の列は、その予測ファイルが持っているモデルだけ埋める。
     5モデルを学習する前の予測ファイル（byModel が無い）でも落ちない。
     """
-    # 予測ファイルが持っているモデルの順。無ければ models.ALGOS の順
-    algos = [m["algo"] for m in (pred.get("models") or [])] or list(M.LINEUP)
+    # 予測ファイルが持っているモデルの順。無ければ models.LINEUP の順。外した 1.8σ の4本（models.RETIRED_VARIANTS。
+    # 2026-10-24）とロジスティック回帰（models.RETIRED の logit・RETIRED_VARIANTS の logit_k15。2026-11-02 の予測から）は、
+    # それより前に出した予測ファイルにあっても書かない
+    algos = [a for a in ([m["algo"] for m in (pred.get("models") or [])] or list(M.LINEUP))
+             if a not in M.RETIRED_VARIANTS and a not in M.RETIRED]
     short = {m["algo"]: m.get("short") for m in (pred.get("models") or [])}
     out = []
     for c in pred["candidates"]:
         ct = c.get("contrib") or {}
         per = c.get("byModel") or {}
+        fixed = (per.get("lgbm", {}).get("labelSpec") or {}).get("kind") == "fixed_return"
         by_model = {}
         for a in algos:
             if a not in per:
@@ -144,9 +203,15 @@ def rows_from_predictions(pred: Dict) -> List[Dict]:
             tag = short.get(a) or M.SHORT.get(a, a[:3].upper())
             by_model[f"{tag}%"] = per[a].get("pctHistorical")
             by_model[f"{tag}スコア"] = per[a].get("score")
+        lt = c.get("ltr") or {}
+        l5 = c.get("ltr5") or {}
+        cd = c.get("conds") or {}
         out.append({
             "予測日": c["date"], "コード": c["code"], "銘柄名": c.get("name") or "",
             "業種": c.get("sector") or "",
+            LABEL_COL: ("固定+10%/+15%・終盤+5%/+7.5%"
+                        if fixed
+                        else "旧σモデル（1.2σ/1.5σ）"),
             "順位": c["rankInDay"], "候補数": c["nInDay"],
             "スコア": c["score"], "帯": c["band"],
             "較正確率%": c.get("calibProb"),
@@ -169,6 +234,13 @@ def rows_from_predictions(pred: Dict) -> List[Dict]:
             "次の決算日": c.get("nextEarnDate"),
             "次の決算まで営業日": c.get("nextEarnTradingDays"),
             "前回開示からの日数": c.get("daysSinceDisc"),
+            "ランキング順位": lt.get("dayRank"), "ランキング百分位": lt.get("dayPct"),
+            "5日の順位": l5.get("rank"), "5日の組の数": l5.get("nPool"),
+            "1.5σの3本95以上": None if fixed else _mark(cd.get("r15")),
+            "1.2σの3本95以上": None if fixed else _mark(cd.get("r0")),
+            "+15%の3本95以上": _mark(cd.get("r15")) if fixed else None,
+            "+10%の3本95以上": _mark(cd.get("r0")) if fixed else None,
+            "3条件": _mark(cd.get("c3")), "4条件": _mark(cd.get("c4")),
             "_jqCode": c["jqCode"],
         })
     return out
@@ -405,22 +477,21 @@ def open_sheet(sheet_id: str):
     return gspread.authorize(creds).open_by_key(sheet_id)
 
 
-def ensure_worksheet(book, title: str):
-    """無ければ作り、見出し行を置く。既にあれば触らない。"""
+def ensure_worksheet(book, title: str, layout: str = "v1"):
+    """無ければ作り、見出し行を置く（layout の並び。v2 はランキング学習の列を含む）。既にあれば触らない。"""
     try:
         ws = book.worksheet(title)
         return ws, False
     except Exception:
         pass
-    header = (OWNED_COLS + MODEL_COLS + SCORE_COLS + AGREE_COLS + ENTRY_COLS
-              + TRACK_COLS + USER_COLS + EARN_COLS)
+    header = header_of(layout)
     ws = book.add_worksheet(title=title, rows=2000, cols=max(30, len(header) + 5))
     ws.update([header], "A1")
     ws.freeze(rows=1)
     return ws, True
 
 
-def ensure_columns(ws, header: List[str], dry_run: bool = False) -> List[str]:
+def ensure_columns(ws, header: List[str], dry_run: bool = False, book: str = "v1") -> List[str]:
     """
     このスクリプトが書く列のうち、見出しに無いものを**右端に足す**。
 
@@ -433,7 +504,7 @@ def ensure_columns(ws, header: List[str], dry_run: bool = False) -> List[str]:
     既存の中身に触らない。並び順が気になるときは利用者が手で動かしてよい
     （名前を変えなければ、そのまま正しく書き込まれる）。
     """
-    want = OWNED_COLS + MODEL_COLS + SCORE_COLS + AGREE_COLS + ENTRY_COLS + TRACK_COLS + EARN_COLS
+    want = owned_of(book)
     missing = [c for c in want if c not in header]
     if not missing:
         return header
@@ -471,14 +542,15 @@ def a1(col_idx: int, row_idx: int) -> str:
 
 
 def sync(ws, rows: List[Dict], closes, as_of, dry_run: bool = False,
-         cal=None, opens=None) -> Dict[str, int]:
+         cal=None, opens=None, book: str = "v1") -> Dict[str, int]:
     """
     opens: 日足の始値（load_opens の形）。渡さなければ翌営業日始値は書かない。
+    book: v1（今のタブ）/ v2（v2 のタブ）。足すのはそのタブの予測日の行だけ（in_book）。すでにある行の値動きは毎回更新する。
     """
     values = ws.get_all_values()
     if not values:
         raise SystemExit("シートが空です。見出し行が作られていません")
-    header = ensure_columns(ws, values[0], dry_run=dry_run)
+    header = ensure_columns(ws, values[0], dry_run=dry_run, book=book)
     pos = {name: i for i, name in enumerate(header)}
     missing = [c for c in KEY_COLS if c not in pos]
     if missing:
@@ -520,7 +592,7 @@ def sync(ws, rows: List[Dict], closes, as_of, dry_run: bool = False,
                 empty_entry.append(((d, code), r))
 
     # --- 追記する行 --- #
-    new = [x for x in rows if (x["予測日"], x["コード"]) not in seen]
+    new = [x for x in rows if (x["予測日"], x["コード"]) not in seen and in_book(x["予測日"], book)]
     keys = ([(x["_jqCode"], x["予測日"]) for x in new]
             + [(jq_of(d, code), d) for (d, code), _ in empty_entry])
     entry = next_opens(opens, keys, cal) if opens is not None else {}
@@ -544,7 +616,7 @@ def sync(ws, rows: List[Dict], closes, as_of, dry_run: bool = False,
     # 列が増えた直後は、直近5営業日ぶんの既存行にモデル別の値が入っていない。
     # 空のセルにだけ入れる。既に値があるセルは触らない（利用者が手で
     # 上書きしている可能性がある。この台帳は手書きと同居する前提）
-    backfill = [c for c in MODEL_COLS + SCORE_COLS + AGREE_COLS if c in pos]
+    backfill = [c for c in MODEL_COLS + SCORE_COLS + AGREE_COLS + (RANK_COLS if book == "v2" else []) if c in pos]
     for (d, code), r in seen.items():
         x = by_key.get((d, code))
         price = None
@@ -595,24 +667,109 @@ def sync(ws, rows: List[Dict], closes, as_of, dry_run: bool = False,
     return {"appended": len(appended), "updated": len(updates)}
 
 
+#: 書き直し（rewrite_day）で上書きしない列。翌営業日始値・値動きは実際の値（毎晩の sync が空のセルを埋め、値動きは毎晩書き直す）、
+#: 利用者の記入欄は手で書いたもの
+REWRITE_KEEP = ENTRY_COLS + TRACK_COLS + USER_COLS
+
+
+def rewrite_day(ws, rows: List[Dict], day: str, book: str = "v2", dry_run: bool = False) -> Dict:
+    """
+    タブにある予測日 day の行を、rows（今の predictions.json）の値で書き直す。運用者の選択（2026-11-05「固定%の値に書き直す」）:
+    「予測ログ v2」の 2026-11-02 の行は、11/2 夜に旧σモデルの値で足したあと、11/3 に固定 +10%・+15% のモデルで採点し直した値
+    （画面・predictions.json）と食い違い、あとから足した列（+10%/+15% の印）だけが新しい値で埋まって混ざっていた。
+
+    - v2 のタブの予測日だけ（v1 の行は出した値のまま）。その日の行の銘柄の組が rows と同じでなければ止める
+    - 書くのは rows にある列（予測の値・モデル別・ランキング・印・目的変数定義。値が無ければ空）のセルだけ。REWRITE_KEEP の列と、
+      見出しにあって rows に無い列は書かない（セルごとに書くので、ほかのセルの値と型はそのまま）
+    - その日の行の利用者の記入欄と、見出しにあって rows に無い列がどれも空なら、その日の行が今ある位置の中で順位の順に並べ直す。
+      動いた行の翌営業日始値・値動きの列は空にする（その夜の sync が埋め直す）。どれかに値があれば行は動かさない（その場で書き直す）
+    返すもの: rows（書き直した行の数）・moved（位置が変わった行の数）・inPlace（その場で書き直したか）・cells（書いたセルの数）
+    """
+    if book != "v2":
+        raise SystemExit("書き直すのは v2 のタブの行だけ（v1 の行は出した値のまま）")
+    if not in_book(day, book):
+        raise SystemExit(f"{day} は v2 のタブの予測日ではありません（{V2_FROM} から）")
+    values = ws.get_all_values()
+    if not values:
+        raise SystemExit("シートが空です。見出し行が作られていません")
+    header = ensure_columns(ws, values[0], dry_run=dry_run, book=book)
+    pos = {name: i for i, name in enumerate(header)}
+    d_i, c_i = pos[KEY_COLS[0]], pos[KEY_COLS[1]]
+    old = {}
+    for r, line in enumerate(values[1:], start=2):
+        if len(line) > max(d_i, c_i) and str(line[d_i]).strip() == day:
+            code = str(line[c_i]).strip()
+            if code in old:
+                raise SystemExit(f"{day} の行に同じコードが2行あるので書き直さない")
+            old[code] = (r, list(line) + [""] * (len(header) - len(line)))
+    new = sorted((x for x in rows if x["予測日"] == day), key=lambda x: (x["順位"], x["コード"]))
+    if not new:
+        raise SystemExit(f"predictions.json に {day} の候補がありません")
+    if set(old) != {x["コード"] for x in new}:
+        raise SystemExit(f"{day} の行の銘柄がシート（{len(old)}行）と predictions.json（{len(new)}件）で違うので書き直さない")
+    write = [h for h in header if h in new[0] and not h.startswith("_") and h not in REWRITE_KEEP]
+    others = [h for h in header if h not in write and h not in ENTRY_COLS + TRACK_COLS]
+    in_place = any(str(line[pos[h]]).strip() for _, line in old.values() for h in others)
+    slots = sorted(r for r, _ in old.values())
+    target = {x["コード"]: (old[x["コード"]][0] if in_place else slots[i]) for i, x in enumerate(new)}
+    updates = []
+    for x in new:
+        r = target[x["コード"]]
+        for h in write:
+            v = x.get(h)
+            updates.append({"range": a1(pos[h] + 1, r), "values": [["" if v is None else v]]})
+        if r != old[x["コード"]][0]:
+            for h in ENTRY_COLS + TRACK_COLS:
+                if h in pos:
+                    updates.append({"range": a1(pos[h] + 1, r), "values": [[""]]})
+    moved = sum(target[c] != r for c, (r, _) in old.items())
+    if not dry_run:
+        for i in range(0, len(updates), 500):
+            ws.batch_update(updates[i:i + 500], value_input_option="RAW")
+    return {"rows": len(new), "moved": moved, "inPlace": in_place, "cells": len(updates)}
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="予測をスプレッドシートに追記する")
     ap.add_argument("--data-dir", default=DATA_DIR)
     ap.add_argument("--predictions",
                     default=os.path.join(PUBLIC_DIR, "predictions.json"))
+    ap.add_argument("--book", choices=BOOKS, default="v1",
+                    help=f"v1: 今のタブ（{SHEET_TITLE}。予測日が {V2_FROM} より前の行だけ足す）/ "
+                         f"v2: v2 のタブ（{V2_TITLE}。{V2_FROM} からの行だけ足す）。どちらも同じスプレッドシート")
     ap.add_argument("--sheet-id", default=os.environ.get("GSHEET_ID", ""))
-    ap.add_argument("--title", default=SHEET_TITLE)
+    ap.add_argument("--title", default=None, help=f"省くと v1 は「{SHEET_TITLE}」、v2 は「{V2_TITLE}」")
     ap.add_argument("--dry-run", action="store_true",
                     help="通信せず、書き込む内容だけ出す")
     ap.add_argument("--check", action="store_true",
                     help="疎通テストのみ。予測データは書かない")
+    ap.add_argument("--rewrite-day", default=None, metavar="YYYY-MM-DD",
+                    help="v2 のタブにあるこの予測日の行を、今の predictions.json の値で書き直す（rewrite_day。追記・値動きの"
+                         "更新はしない。運用者の選択 2026-11-05「固定%の値に書き直す」）")
     args = ap.parse_args(argv)
+    if args.title is None:
+        args.title = V2_TITLE if args.book == "v2" else SHEET_TITLE
 
     if args.check:
         return check(args.sheet_id, args.title)
 
     pred = json.load(open(args.predictions, encoding="utf-8"))
     rows = rows_from_predictions(pred)
+    if args.rewrite_day:
+        if args.book != "v2":
+            raise SystemExit("--rewrite-day は --book v2 だけ（v1 の行は出した値のまま）")
+        n = sum(x["予測日"] == args.rewrite_day for x in rows)
+        print(f"[rewrite] タブ「{args.title}」の予測日 {args.rewrite_day} の行を predictions.json の値（{n}件）で書き直す")
+        if args.dry_run:
+            print("[dry-run] 通信していません")
+            return 0
+        if not args.sheet_id:
+            raise SystemExit("GSHEET_ID が設定されていません（シートのURLの /d/ と /edit の間）")
+        ws = open_sheet(args.sheet_id).worksheet(args.title)     # 無ければ例外（作らない）
+        res = rewrite_day(ws, rows, args.rewrite_day, book=args.book)
+        how = "その場で（行は動かさない）" if res["inPlace"] else "その日の行の中で順位の順に並べ直して"
+        print(f"[rewrite] {res['rows']}行を書き直した（{how}・位置が変わった行 {res['moved']}・書いたセル {res['cells']}）")
+        return 0
     closes = latest_closes(args.data_dir)
     opens = load_opens(args.data_dir)
     as_of = None
@@ -621,15 +778,16 @@ def main(argv=None) -> int:
         d = pd.read_parquet(paths[-1], columns=["Date"])
         as_of = pd.Timestamp(pd.to_datetime(d["Date"]).max())
     print(f"[load] 候補 {len(rows)}行（{pred['dates'][0]} 〜 {pred['asOf']}） "
-          f"/ 最新終値 {len(closes):,}銘柄（{as_of.date() if as_of is not None else '—'}）")
+          f"/ 最新終値 {len(closes):,}銘柄（{as_of.date() if as_of is not None else '—'}）"
+          f" / タブ「{args.title}」（{args.book}。足せる予測日の行 {sum(in_book(x['予測日'], args.book) for x in rows)}行）")
 
     if args.dry_run:
         # 通信しないので、見出しは初期構成を仮定して整合だけ見る
-        header = (OWNED_COLS + MODEL_COLS + SCORE_COLS + AGREE_COLS + ENTRY_COLS
-                  + TRACK_COLS + USER_COLS)
+        header = header_of(args.book)
         print(f"[dry-run] 列 {len(header)}個: {' / '.join(header)}")
+        known = set(header_of("v2"))
         unknown = sorted({k for x in rows for k in x
-                          if not k.startswith('_') and k not in header})
+                          if not k.startswith('_') and k not in known})
         if unknown:
             raise SystemExit(f"見出しに無い項目を書こうとしています: {unknown}")
         mc = [c for c in MODEL_COLS + SCORE_COLS + AGREE_COLS]
@@ -659,10 +817,10 @@ def main(argv=None) -> int:
     if not args.sheet_id:
         raise SystemExit("GSHEET_ID が設定されていません（シートのURLの /d/ と /edit の間）")
     book = open_sheet(args.sheet_id)
-    ws, created = ensure_worksheet(book, args.title)
+    ws, created = ensure_worksheet(book, args.title, layout=args.book)
     if created:
-        print(f"[sheet] ワークシート「{args.title}」を作成し、見出しを置きました")
-    res = sync(ws, rows, closes, as_of, cal=TC.load(args.data_dir), opens=opens)
+        print(f"[sheet] ワークシート「{args.title}」を作成し、見出しを置きました（{args.book} の並び）")
+    res = sync(ws, rows, closes, as_of, cal=TC.load(args.data_dir), opens=opens, book=args.book)
     print(f"[done] 追記 {res['appended']}行 / 追跡列の更新 {res['updated']}セル")
     print(f"[done] https://docs.google.com/spreadsheets/d/{args.sheet_id}/edit")
     return 0

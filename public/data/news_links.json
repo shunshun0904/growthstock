@@ -1,13 +1,14 @@
 {
- "checkedAt": "2026-10-22T10:02:13Z",
- "asOf": "2026-10-22",
+ "checkedAt": "2026-11-27T09:46:55Z",
+ "asOf": "2026-11-26",
  "rule": {
   "models": [
-   "lgbm_k15",
-   "xgb_k15",
-   "cat_k15"
+   "lgbm",
+   "xgb",
+   "cat"
   ],
-  "agreePct": 95.0
+  "agreePct": 95.0,
+  "ltrTop": 3
  },
  "groups": [
   {
@@ -60,9 +61,9 @@
   }
  ],
  "stocks": {
-  "2489": {
+  "1379": {
    "dates": [
-    "2026-10-19"
+    "2026-11-25"
    ],
    "links": [
     {
@@ -70,7 +71,7 @@
      "group": "news",
      "site": "Yahoo!ファイナンス",
      "label": "ニュース",
-     "href": "https://finance.yahoo.co.jp/quote/2489.T/news",
+     "href": "https://finance.yahoo.co.jp/quote/1379.T/news",
      "note": "複数の配信元のニュースの一覧",
      "state": "ok",
      "reason": ""
@@ -80,7 +81,7 @@
      "group": "news",
      "site": "株探",
      "label": "ニュース",
-     "href": "https://kabutan.jp/stock/news?code=2489",
+     "href": "https://kabutan.jp/stock/news?code=1379",
      "note": "材料ニュース・決算速報・適時開示の一覧。一部の記事は有料（株探プレミアム）",
      "state": "unchecked",
      "reason": "株探は、自動の接続を断る（HTTP 405）"
@@ -90,7 +91,7 @@
      "group": "news",
      "site": "日経",
      "label": "ニュース",
-     "href": "https://www.nikkei.com/nkd/company/news/?scode=2489",
+     "href": "https://www.nikkei.com/nkd/company/news/?scode=1379",
      "note": "日本経済新聞の記事の一覧。有料会員限定の記事がある",
      "state": "unchecked",
      "reason": "日経は、自動化された手段での取得を規約（著作権について）で禁じている"
@@ -100,7 +101,7 @@
      "group": "disclosure",
      "site": "Yahoo!ファイナンス",
      "label": "適時開示",
-     "href": "https://finance.yahoo.co.jp/quote/2489.T/disclosure",
+     "href": "https://finance.yahoo.co.jp/quote/1379.T/disclosure",
      "note": "会社が出した適時開示（決算短信・業績予想の修正など）の一覧",
      "state": "ok",
      "reason": ""
@@ -110,7 +111,7 @@
      "group": "forecast",
      "site": "Yahoo!ファイナンス",
      "label": "業績・予想",
-     "href": "https://finance.yahoo.co.jp/quote/2489.T/performance",
+     "href": "https://finance.yahoo.co.jp/quote/1379.T/performance",
      "note": "業績の推移と会社予想・アナリスト予想",
      "state": "ok",
      "reason": ""
@@ -120,7 +121,7 @@
      "group": "forecast",
      "site": "株予報Pro",
      "label": "コンセンサス",
-     "href": "https://kabuyoho.jp/reportAnalyst?bcode=2489",
+     "href": "https://kabuyoho.jp/reportAnalyst?bcode=1379",
      "note": "アナリスト予想の平均（コンセンサス）と、その変化",
      "state": "unchecked",
      "reason": "株予報Pro は、robots.txt で自動アクセスの間隔を 20時間（Crawl-delay 72000）と求めている"
@@ -130,7 +131,7 @@
      "group": "forecast",
      "site": "みんかぶ",
      "label": "アナリスト予想",
-     "href": "https://minkabu.jp/stock/2489/analyst_consensus",
+     "href": "https://minkabu.jp/stock/1379/analyst_consensus",
      "note": "アナリストの目標株価とレーティングの内訳",
      "state": "unchecked",
      "reason": "みんかぶは、自動の接続を断る（HTTP 405）"
@@ -140,7 +141,7 @@
      "group": "forecast",
      "site": "日経",
      "label": "決算・財務",
-     "href": "https://www.nikkei.com/nkd/company/kessan/?scode=2489",
+     "href": "https://www.nikkei.com/nkd/company/kessan/?scode=1379",
      "note": "決算発表と業績・財務の情報",
      "state": "unchecked",
      "reason": "日経は、自動化された手段での取得を規約（著作権について）で禁じている"
@@ -150,7 +151,7 @@
      "group": "voice",
      "site": "Yahoo!ファイナンス",
      "label": "掲示板",
-     "href": "https://finance.yahoo.co.jp/quote/2489.T/forum",
+     "href": "https://finance.yahoo.co.jp/quote/1379.T/forum",
      "note": "個人投資家の書き込み。真偽の確かめられない書き込みも多い",
      "state": "ok",
      "reason": ""
@@ -160,16 +161,16 @@
      "group": "voice",
      "site": "みんかぶ",
      "label": "個人の売買予想",
-     "href": "https://minkabu.jp/stock/2489/pick",
+     "href": "https://minkabu.jp/stock/1379/pick",
      "note": "個人投資家の買い・売りの予想と予想株価",
      "state": "unchecked",
      "reason": "みんかぶは、自動の接続を断る（HTTP 405）"
     }
    ]
   },
-  "3091": {
+  "150A": {
    "dates": [
-    "2026-10-16"
+    "2026-11-19"
    ],
    "links": [
     {
@@ -177,7 +178,7 @@
      "group": "news",
      "site": "Yahoo!ファイナンス",
      "label": "ニュース",
-     "href": "https://finance.yahoo.co.jp/quote/3091.T/news",
+     "href": "https://finance.yahoo.co.jp/quote/150A.T/news",
      "note": "複数の配信元のニュースの一覧",
      "state": "ok",
      "reason": ""
@@ -187,7 +188,7 @@
      "group": "news",
      "site": "株探",
      "label": "ニュース",
-     "href": "https://kabutan.jp/stock/news?code=3091",
+     "href": "https://kabutan.jp/stock/news?code=150A",
      "note": "材料ニュース・決算速報・適時開示の一覧。一部の記事は有料（株探プレミアム）",
      "state": "unchecked",
      "reason": "株探は、自動の接続を断る（HTTP 405）"
@@ -197,7 +198,7 @@
      "group": "news",
      "site": "日経",
      "label": "ニュース",
-     "href": "https://www.nikkei.com/nkd/company/news/?scode=3091",
+     "href": "https://www.nikkei.com/nkd/company/news/?scode=150A",
      "note": "日本経済新聞の記事の一覧。有料会員限定の記事がある",
      "state": "unchecked",
      "reason": "日経は、自動化された手段での取得を規約（著作権について）で禁じている"
@@ -207,7 +208,7 @@
      "group": "disclosure",
      "site": "Yahoo!ファイナンス",
      "label": "適時開示",
-     "href": "https://finance.yahoo.co.jp/quote/3091.T/disclosure",
+     "href": "https://finance.yahoo.co.jp/quote/150A.T/disclosure",
      "note": "会社が出した適時開示（決算短信・業績予想の修正など）の一覧",
      "state": "ok",
      "reason": ""
@@ -217,7 +218,7 @@
      "group": "forecast",
      "site": "Yahoo!ファイナンス",
      "label": "業績・予想",
-     "href": "https://finance.yahoo.co.jp/quote/3091.T/performance",
+     "href": "https://finance.yahoo.co.jp/quote/150A.T/performance",
      "note": "業績の推移と会社予想・アナリスト予想",
      "state": "ok",
      "reason": ""
@@ -227,7 +228,7 @@
      "group": "forecast",
      "site": "株予報Pro",
      "label": "コンセンサス",
-     "href": "https://kabuyoho.jp/reportAnalyst?bcode=3091",
+     "href": "https://kabuyoho.jp/reportAnalyst?bcode=150A",
      "note": "アナリスト予想の平均（コンセンサス）と、その変化",
      "state": "unchecked",
      "reason": "株予報Pro は、robots.txt で自動アクセスの間隔を 20時間（Crawl-delay 72000）と求めている"
@@ -237,7 +238,7 @@
      "group": "forecast",
      "site": "みんかぶ",
      "label": "アナリスト予想",
-     "href": "https://minkabu.jp/stock/3091/analyst_consensus",
+     "href": "https://minkabu.jp/stock/150A/analyst_consensus",
      "note": "アナリストの目標株価とレーティングの内訳",
      "state": "unchecked",
      "reason": "みんかぶは、自動の接続を断る（HTTP 405）"
@@ -247,7 +248,7 @@
      "group": "forecast",
      "site": "日経",
      "label": "決算・財務",
-     "href": "https://www.nikkei.com/nkd/company/kessan/?scode=3091",
+     "href": "https://www.nikkei.com/nkd/company/kessan/?scode=150A",
      "note": "決算発表と業績・財務の情報",
      "state": "unchecked",
      "reason": "日経は、自動化された手段での取得を規約（著作権について）で禁じている"
@@ -257,7 +258,7 @@
      "group": "voice",
      "site": "Yahoo!ファイナンス",
      "label": "掲示板",
-     "href": "https://finance.yahoo.co.jp/quote/3091.T/forum",
+     "href": "https://finance.yahoo.co.jp/quote/150A.T/forum",
      "note": "個人投資家の書き込み。真偽の確かめられない書き込みも多い",
      "state": "ok",
      "reason": ""
@@ -267,16 +268,16 @@
      "group": "voice",
      "site": "みんかぶ",
      "label": "個人の売買予想",
-     "href": "https://minkabu.jp/stock/3091/pick",
+     "href": "https://minkabu.jp/stock/150A/pick",
      "note": "個人投資家の買い・売りの予想と予想株価",
      "state": "unchecked",
      "reason": "みんかぶは、自動の接続を断る（HTTP 405）"
     }
    ]
   },
-  "3636": {
+  "4307": {
    "dates": [
-    "2026-10-22"
+    "2026-11-25"
    ],
    "links": [
     {
@@ -284,7 +285,7 @@
      "group": "news",
      "site": "Yahoo!ファイナンス",
      "label": "ニュース",
-     "href": "https://finance.yahoo.co.jp/quote/3636.T/news",
+     "href": "https://finance.yahoo.co.jp/quote/4307.T/news",
      "note": "複数の配信元のニュースの一覧",
      "state": "ok",
      "reason": ""
@@ -294,7 +295,7 @@
      "group": "news",
      "site": "株探",
      "label": "ニュース",
-     "href": "https://kabutan.jp/stock/news?code=3636",
+     "href": "https://kabutan.jp/stock/news?code=4307",
      "note": "材料ニュース・決算速報・適時開示の一覧。一部の記事は有料（株探プレミアム）",
      "state": "unchecked",
      "reason": "株探は、自動の接続を断る（HTTP 405）"
@@ -304,7 +305,7 @@
      "group": "news",
      "site": "日経",
      "label": "ニュース",
-     "href": "https://www.nikkei.com/nkd/company/news/?scode=3636",
+     "href": "https://www.nikkei.com/nkd/company/news/?scode=4307",
      "note": "日本経済新聞の記事の一覧。有料会員限定の記事がある",
      "state": "unchecked",
      "reason": "日経は、自動化された手段での取得を規約（著作権について）で禁じている"
@@ -314,7 +315,7 @@
      "group": "disclosure",
      "site": "Yahoo!ファイナンス",
      "label": "適時開示",
-     "href": "https://finance.yahoo.co.jp/quote/3636.T/disclosure",
+     "href": "https://finance.yahoo.co.jp/quote/4307.T/disclosure",
      "note": "会社が出した適時開示（決算短信・業績予想の修正など）の一覧",
      "state": "ok",
      "reason": ""
@@ -324,7 +325,7 @@
      "group": "forecast",
      "site": "Yahoo!ファイナンス",
      "label": "業績・予想",
-     "href": "https://finance.yahoo.co.jp/quote/3636.T/performance",
+     "href": "https://finance.yahoo.co.jp/quote/4307.T/performance",
      "note": "業績の推移と会社予想・アナリスト予想",
      "state": "ok",
      "reason": ""
@@ -334,7 +335,7 @@
      "group": "forecast",
      "site": "株予報Pro",
      "label": "コンセンサス",
-     "href": "https://kabuyoho.jp/reportAnalyst?bcode=3636",
+     "href": "https://kabuyoho.jp/reportAnalyst?bcode=4307",
      "note": "アナリスト予想の平均（コンセンサス）と、その変化",
      "state": "unchecked",
      "reason": "株予報Pro は、robots.txt で自動アクセスの間隔を 20時間（Crawl-delay 72000）と求めている"
@@ -344,7 +345,7 @@
      "group": "forecast",
      "site": "みんかぶ",
      "label": "アナリスト予想",
-     "href": "https://minkabu.jp/stock/3636/analyst_consensus",
+     "href": "https://minkabu.jp/stock/4307/analyst_consensus",
      "note": "アナリストの目標株価とレーティングの内訳",
      "state": "unchecked",
      "reason": "みんかぶは、自動の接続を断る（HTTP 405）"
@@ -354,7 +355,7 @@
      "group": "forecast",
      "site": "日経",
      "label": "決算・財務",
-     "href": "https://www.nikkei.com/nkd/company/kessan/?scode=3636",
+     "href": "https://www.nikkei.com/nkd/company/kessan/?scode=4307",
      "note": "決算発表と業績・財務の情報",
      "state": "unchecked",
      "reason": "日経は、自動化された手段での取得を規約（著作権について）で禁じている"
@@ -364,7 +365,7 @@
      "group": "voice",
      "site": "Yahoo!ファイナンス",
      "label": "掲示板",
-     "href": "https://finance.yahoo.co.jp/quote/3636.T/forum",
+     "href": "https://finance.yahoo.co.jp/quote/4307.T/forum",
      "note": "個人投資家の書き込み。真偽の確かめられない書き込みも多い",
      "state": "ok",
      "reason": ""
@@ -374,16 +375,16 @@
      "group": "voice",
      "site": "みんかぶ",
      "label": "個人の売買予想",
-     "href": "https://minkabu.jp/stock/3636/pick",
+     "href": "https://minkabu.jp/stock/4307/pick",
      "note": "個人投資家の買い・売りの予想と予想株価",
      "state": "unchecked",
      "reason": "みんかぶは、自動の接続を断る（HTTP 405）"
     }
    ]
   },
-  "3676": {
+  "4523": {
    "dates": [
-    "2026-10-22"
+    "2026-11-20"
    ],
    "links": [
     {
@@ -391,7 +392,7 @@
      "group": "news",
      "site": "Yahoo!ファイナンス",
      "label": "ニュース",
-     "href": "https://finance.yahoo.co.jp/quote/3676.T/news",
+     "href": "https://finance.yahoo.co.jp/quote/4523.T/news",
      "note": "複数の配信元のニュースの一覧",
      "state": "ok",
      "reason": ""
@@ -401,7 +402,7 @@
      "group": "news",
      "site": "株探",
      "label": "ニュース",
-     "href": "https://kabutan.jp/stock/news?code=3676",
+     "href": "https://kabutan.jp/stock/news?code=4523",
      "note": "材料ニュース・決算速報・適時開示の一覧。一部の記事は有料（株探プレミアム）",
      "state": "unchecked",
      "reason": "株探は、自動の接続を断る（HTTP 405）"
@@ -411,7 +412,7 @@
      "group": "news",
      "site": "日経",
      "label": "ニュース",
-     "href": "https://www.nikkei.com/nkd/company/news/?scode=3676",
+     "href": "https://www.nikkei.com/nkd/company/news/?scode=4523",
      "note": "日本経済新聞の記事の一覧。有料会員限定の記事がある",
      "state": "unchecked",
      "reason": "日経は、自動化された手段での取得を規約（著作権について）で禁じている"
@@ -421,7 +422,7 @@
      "group": "disclosure",
      "site": "Yahoo!ファイナンス",
      "label": "適時開示",
-     "href": "https://finance.yahoo.co.jp/quote/3676.T/disclosure",
+     "href": "https://finance.yahoo.co.jp/quote/4523.T/disclosure",
      "note": "会社が出した適時開示（決算短信・業績予想の修正など）の一覧",
      "state": "ok",
      "reason": ""
@@ -431,7 +432,7 @@
      "group": "forecast",
      "site": "Yahoo!ファイナンス",
      "label": "業績・予想",
-     "href": "https://finance.yahoo.co.jp/quote/3676.T/performance",
+     "href": "https://finance.yahoo.co.jp/quote/4523.T/performance",
      "note": "業績の推移と会社予想・アナリスト予想",
      "state": "ok",
      "reason": ""
@@ -441,7 +442,7 @@
      "group": "forecast",
      "site": "株予報Pro",
      "label": "コンセンサス",
-     "href": "https://kabuyoho.jp/reportAnalyst?bcode=3676",
+     "href": "https://kabuyoho.jp/reportAnalyst?bcode=4523",
      "note": "アナリスト予想の平均（コンセンサス）と、その変化",
      "state": "unchecked",
      "reason": "株予報Pro は、robots.txt で自動アクセスの間隔を 20時間（Crawl-delay 72000）と求めている"
@@ -451,7 +452,7 @@
      "group": "forecast",
      "site": "みんかぶ",
      "label": "アナリスト予想",
-     "href": "https://minkabu.jp/stock/3676/analyst_consensus",
+     "href": "https://minkabu.jp/stock/4523/analyst_consensus",
      "note": "アナリストの目標株価とレーティングの内訳",
      "state": "unchecked",
      "reason": "みんかぶは、自動の接続を断る（HTTP 405）"
@@ -461,7 +462,7 @@
      "group": "forecast",
      "site": "日経",
      "label": "決算・財務",
-     "href": "https://www.nikkei.com/nkd/company/kessan/?scode=3676",
+     "href": "https://www.nikkei.com/nkd/company/kessan/?scode=4523",
      "note": "決算発表と業績・財務の情報",
      "state": "unchecked",
      "reason": "日経は、自動化された手段での取得を規約（著作権について）で禁じている"
@@ -471,7 +472,7 @@
      "group": "voice",
      "site": "Yahoo!ファイナンス",
      "label": "掲示板",
-     "href": "https://finance.yahoo.co.jp/quote/3676.T/forum",
+     "href": "https://finance.yahoo.co.jp/quote/4523.T/forum",
      "note": "個人投資家の書き込み。真偽の確かめられない書き込みも多い",
      "state": "ok",
      "reason": ""
@@ -481,16 +482,16 @@
      "group": "voice",
      "site": "みんかぶ",
      "label": "個人の売買予想",
-     "href": "https://minkabu.jp/stock/3676/pick",
+     "href": "https://minkabu.jp/stock/4523/pick",
      "note": "個人投資家の買い・売りの予想と予想株価",
      "state": "unchecked",
      "reason": "みんかぶは、自動の接続を断る（HTTP 405）"
     }
    ]
   },
-  "4684": {
+  "4544": {
    "dates": [
-    "2026-10-16"
+    "2026-11-24"
    ],
    "links": [
     {
@@ -498,7 +499,7 @@
      "group": "news",
      "site": "Yahoo!ファイナンス",
      "label": "ニュース",
-     "href": "https://finance.yahoo.co.jp/quote/4684.T/news",
+     "href": "https://finance.yahoo.co.jp/quote/4544.T/news",
      "note": "複数の配信元のニュースの一覧",
      "state": "ok",
      "reason": ""
@@ -508,7 +509,7 @@
      "group": "news",
      "site": "株探",
      "label": "ニュース",
-     "href": "https://kabutan.jp/stock/news?code=4684",
+     "href": "https://kabutan.jp/stock/news?code=4544",
      "note": "材料ニュース・決算速報・適時開示の一覧。一部の記事は有料（株探プレミアム）",
      "state": "unchecked",
      "reason": "株探は、自動の接続を断る（HTTP 405）"
@@ -518,7 +519,7 @@
      "group": "news",
      "site": "日経",
      "label": "ニュース",
-     "href": "https://www.nikkei.com/nkd/company/news/?scode=4684",
+     "href": "https://www.nikkei.com/nkd/company/news/?scode=4544",
      "note": "日本経済新聞の記事の一覧。有料会員限定の記事がある",
      "state": "unchecked",
      "reason": "日経は、自動化された手段での取得を規約（著作権について）で禁じている"
@@ -528,7 +529,7 @@
      "group": "disclosure",
      "site": "Yahoo!ファイナンス",
      "label": "適時開示",
-     "href": "https://finance.yahoo.co.jp/quote/4684.T/disclosure",
+     "href": "https://finance.yahoo.co.jp/quote/4544.T/disclosure",
      "note": "会社が出した適時開示（決算短信・業績予想の修正など）の一覧",
      "state": "ok",
      "reason": ""
@@ -538,7 +539,7 @@
      "group": "forecast",
      "site": "Yahoo!ファイナンス",
      "label": "業績・予想",
-     "href": "https://finance.yahoo.co.jp/quote/4684.T/performance",
+     "href": "https://finance.yahoo.co.jp/quote/4544.T/performance",
      "note": "業績の推移と会社予想・アナリスト予想",
      "state": "ok",
      "reason": ""
@@ -548,7 +549,7 @@
      "group": "forecast",
      "site": "株予報Pro",
      "label": "コンセンサス",
-     "href": "https://kabuyoho.jp/reportAnalyst?bcode=4684",
+     "href": "https://kabuyoho.jp/reportAnalyst?bcode=4544",
      "note": "アナリスト予想の平均（コンセンサス）と、その変化",
      "state": "unchecked",
      "reason": "株予報Pro は、robots.txt で自動アクセスの間隔を 20時間（Crawl-delay 72000）と求めている"
@@ -558,7 +559,7 @@
      "group": "forecast",
      "site": "みんかぶ",
      "label": "アナリスト予想",
-     "href": "https://minkabu.jp/stock/4684/analyst_consensus",
+     "href": "https://minkabu.jp/stock/4544/analyst_consensus",
      "note": "アナリストの目標株価とレーティングの内訳",
      "state": "unchecked",
      "reason": "みんかぶは、自動の接続を断る（HTTP 405）"
@@ -568,7 +569,7 @@
      "group": "forecast",
      "site": "日経",
      "label": "決算・財務",
-     "href": "https://www.nikkei.com/nkd/company/kessan/?scode=4684",
+     "href": "https://www.nikkei.com/nkd/company/kessan/?scode=4544",
      "note": "決算発表と業績・財務の情報",
      "state": "unchecked",
      "reason": "日経は、自動化された手段での取得を規約（著作権について）で禁じている"
@@ -578,7 +579,7 @@
      "group": "voice",
      "site": "Yahoo!ファイナンス",
      "label": "掲示板",
-     "href": "https://finance.yahoo.co.jp/quote/4684.T/forum",
+     "href": "https://finance.yahoo.co.jp/quote/4544.T/forum",
      "note": "個人投資家の書き込み。真偽の確かめられない書き込みも多い",
      "state": "ok",
      "reason": ""
@@ -588,16 +589,16 @@
      "group": "voice",
      "site": "みんかぶ",
      "label": "個人の売買予想",
-     "href": "https://minkabu.jp/stock/4684/pick",
+     "href": "https://minkabu.jp/stock/4544/pick",
      "note": "個人投資家の買い・売りの予想と予想株価",
      "state": "unchecked",
      "reason": "みんかぶは、自動の接続を断る（HTTP 405）"
     }
    ]
   },
-  "4733": {
+  "4578": {
    "dates": [
-    "2026-10-16"
+    "2026-11-25"
    ],
    "links": [
     {
@@ -605,7 +606,7 @@
      "group": "news",
      "site": "Yahoo!ファイナンス",
      "label": "ニュース",
-     "href": "https://finance.yahoo.co.jp/quote/4733.T/news",
+     "href": "https://finance.yahoo.co.jp/quote/4578.T/news",
      "note": "複数の配信元のニュースの一覧",
      "state": "ok",
      "reason": ""
@@ -615,7 +616,7 @@
      "group": "news",
      "site": "株探",
      "label": "ニュース",
-     "href": "https://kabutan.jp/stock/news?code=4733",
+     "href": "https://kabutan.jp/stock/news?code=4578",
      "note": "材料ニュース・決算速報・適時開示の一覧。一部の記事は有料（株探プレミアム）",
      "state": "unchecked",
      "reason": "株探は、自動の接続を断る（HTTP 405）"
@@ -625,7 +626,7 @@
      "group": "news",
      "site": "日経",
      "label": "ニュース",
-     "href": "https://www.nikkei.com/nkd/company/news/?scode=4733",
+     "href": "https://www.nikkei.com/nkd/company/news/?scode=4578",
      "note": "日本経済新聞の記事の一覧。有料会員限定の記事がある",
      "state": "unchecked",
      "reason": "日経は、自動化された手段での取得を規約（著作権について）で禁じている"
@@ -635,7 +636,7 @@
      "group": "disclosure",
      "site": "Yahoo!ファイナンス",
      "label": "適時開示",
-     "href": "https://finance.yahoo.co.jp/quote/4733.T/disclosure",
+     "href": "https://finance.yahoo.co.jp/quote/4578.T/disclosure",
      "note": "会社が出した適時開示（決算短信・業績予想の修正など）の一覧",
      "state": "ok",
      "reason": ""
@@ -645,7 +646,7 @@
      "group": "forecast",
      "site": "Yahoo!ファイナンス",
      "label": "業績・予想",
-     "href": "https://finance.yahoo.co.jp/quote/4733.T/performance",
+     "href": "https://finance.yahoo.co.jp/quote/4578.T/performance",
      "note": "業績の推移と会社予想・アナリスト予想",
      "state": "ok",
      "reason": ""
@@ -655,7 +656,7 @@
      "group": "forecast",
      "site": "株予報Pro",
      "label": "コンセンサス",
-     "href": "https://kabuyoho.jp/reportAnalyst?bcode=4733",
+     "href": "https://kabuyoho.jp/reportAnalyst?bcode=4578",
      "note": "アナリスト予想の平均（コンセンサス）と、その変化",
      "state": "unchecked",
      "reason": "株予報Pro は、robots.txt で自動アクセスの間隔を 20時間（Crawl-delay 72000）と求めている"
@@ -665,7 +666,7 @@
      "group": "forecast",
      "site": "みんかぶ",
      "label": "アナリスト予想",
-     "href": "https://minkabu.jp/stock/4733/analyst_consensus",
+     "href": "https://minkabu.jp/stock/4578/analyst_consensus",
      "note": "アナリストの目標株価とレーティングの内訳",
      "state": "unchecked",
      "reason": "みんかぶは、自動の接続を断る（HTTP 405）"
@@ -675,7 +676,7 @@
      "group": "forecast",
      "site": "日経",
      "label": "決算・財務",
-     "href": "https://www.nikkei.com/nkd/company/kessan/?scode=4733",
+     "href": "https://www.nikkei.com/nkd/company/kessan/?scode=4578",
      "note": "決算発表と業績・財務の情報",
      "state": "unchecked",
      "reason": "日経は、自動化された手段での取得を規約（著作権について）で禁じている"
@@ -685,7 +686,7 @@
      "group": "voice",
      "site": "Yahoo!ファイナンス",
      "label": "掲示板",
-     "href": "https://finance.yahoo.co.jp/quote/4733.T/forum",
+     "href": "https://finance.yahoo.co.jp/quote/4578.T/forum",
      "note": "個人投資家の書き込み。真偽の確かめられない書き込みも多い",
      "state": "ok",
      "reason": ""
@@ -695,16 +696,16 @@
      "group": "voice",
      "site": "みんかぶ",
      "label": "個人の売買予想",
-     "href": "https://minkabu.jp/stock/4733/pick",
+     "href": "https://minkabu.jp/stock/4578/pick",
      "note": "個人投資家の買い・売りの予想と予想株価",
      "state": "unchecked",
      "reason": "みんかぶは、自動の接続を断る（HTTP 405）"
     }
    ]
   },
-  "6743": {
+  "6727": {
    "dates": [
-    "2026-10-21"
+    "2026-11-26"
    ],
    "links": [
     {
@@ -712,7 +713,7 @@
      "group": "news",
      "site": "Yahoo!ファイナンス",
      "label": "ニュース",
-     "href": "https://finance.yahoo.co.jp/quote/6743.T/news",
+     "href": "https://finance.yahoo.co.jp/quote/6727.T/news",
      "note": "複数の配信元のニュースの一覧",
      "state": "ok",
      "reason": ""
@@ -722,7 +723,7 @@
      "group": "news",
      "site": "株探",
      "label": "ニュース",
-     "href": "https://kabutan.jp/stock/news?code=6743",
+     "href": "https://kabutan.jp/stock/news?code=6727",
      "note": "材料ニュース・決算速報・適時開示の一覧。一部の記事は有料（株探プレミアム）",
      "state": "unchecked",
      "reason": "株探は、自動の接続を断る（HTTP 405）"
@@ -732,7 +733,7 @@
      "group": "news",
      "site": "日経",
      "label": "ニュース",
-     "href": "https://www.nikkei.com/nkd/company/news/?scode=6743",
+     "href": "https://www.nikkei.com/nkd/company/news/?scode=6727",
      "note": "日本経済新聞の記事の一覧。有料会員限定の記事がある",
      "state": "unchecked",
      "reason": "日経は、自動化された手段での取得を規約（著作権について）で禁じている"
@@ -742,7 +743,7 @@
      "group": "disclosure",
      "site": "Yahoo!ファイナンス",
      "label": "適時開示",
-     "href": "https://finance.yahoo.co.jp/quote/6743.T/disclosure",
+     "href": "https://finance.yahoo.co.jp/quote/6727.T/disclosure",
      "note": "会社が出した適時開示（決算短信・業績予想の修正など）の一覧",
      "state": "ok",
      "reason": ""
@@ -752,7 +753,7 @@
      "group": "forecast",
      "site": "Yahoo!ファイナンス",
      "label": "業績・予想",
-     "href": "https://finance.yahoo.co.jp/quote/6743.T/performance",
+     "href": "https://finance.yahoo.co.jp/quote/6727.T/performance",
      "note": "業績の推移と会社予想・アナリスト予想",
      "state": "ok",
      "reason": ""
@@ -762,7 +763,7 @@
      "group": "forecast",
      "site": "株予報Pro",
      "label": "コンセンサス",
-     "href": "https://kabuyoho.jp/reportAnalyst?bcode=6743",
+     "href": "https://kabuyoho.jp/reportAnalyst?bcode=6727",
      "note": "アナリスト予想の平均（コンセンサス）と、その変化",
      "state": "unchecked",
      "reason": "株予報Pro は、robots.txt で自動アクセスの間隔を 20時間（Crawl-delay 72000）と求めている"
@@ -772,7 +773,7 @@
      "group": "forecast",
      "site": "みんかぶ",
      "label": "アナリスト予想",
-     "href": "https://minkabu.jp/stock/6743/analyst_consensus",
+     "href": "https://minkabu.jp/stock/6727/analyst_consensus",
      "note": "アナリストの目標株価とレーティングの内訳",
      "state": "unchecked",
      "reason": "みんかぶは、自動の接続を断る（HTTP 405）"
@@ -782,7 +783,7 @@
      "group": "forecast",
      "site": "日経",
      "label": "決算・財務",
-     "href": "https://www.nikkei.com/nkd/company/kessan/?scode=6743",
+     "href": "https://www.nikkei.com/nkd/company/kessan/?scode=6727",
      "note": "決算発表と業績・財務の情報",
      "state": "unchecked",
      "reason": "日経は、自動化された手段での取得を規約（著作権について）で禁じている"
@@ -792,7 +793,7 @@
      "group": "voice",
      "site": "Yahoo!ファイナンス",
      "label": "掲示板",
-     "href": "https://finance.yahoo.co.jp/quote/6743.T/forum",
+     "href": "https://finance.yahoo.co.jp/quote/6727.T/forum",
      "note": "個人投資家の書き込み。真偽の確かめられない書き込みも多い",
      "state": "ok",
      "reason": ""
@@ -802,7 +803,542 @@
      "group": "voice",
      "site": "みんかぶ",
      "label": "個人の売買予想",
-     "href": "https://minkabu.jp/stock/6743/pick",
+     "href": "https://minkabu.jp/stock/6727/pick",
+     "note": "個人投資家の買い・売りの予想と予想株価",
+     "state": "unchecked",
+     "reason": "みんかぶは、自動の接続を断る（HTTP 405）"
+    }
+   ]
+  },
+  "7077": {
+   "dates": [
+    "2026-11-24"
+   ],
+   "links": [
+    {
+     "id": "yahoo_news",
+     "group": "news",
+     "site": "Yahoo!ファイナンス",
+     "label": "ニュース",
+     "href": "https://finance.yahoo.co.jp/quote/7077.T/news",
+     "note": "複数の配信元のニュースの一覧",
+     "state": "ok",
+     "reason": ""
+    },
+    {
+     "id": "kabutan_news",
+     "group": "news",
+     "site": "株探",
+     "label": "ニュース",
+     "href": "https://kabutan.jp/stock/news?code=7077",
+     "note": "材料ニュース・決算速報・適時開示の一覧。一部の記事は有料（株探プレミアム）",
+     "state": "unchecked",
+     "reason": "株探は、自動の接続を断る（HTTP 405）"
+    },
+    {
+     "id": "nikkei_news",
+     "group": "news",
+     "site": "日経",
+     "label": "ニュース",
+     "href": "https://www.nikkei.com/nkd/company/news/?scode=7077",
+     "note": "日本経済新聞の記事の一覧。有料会員限定の記事がある",
+     "state": "unchecked",
+     "reason": "日経は、自動化された手段での取得を規約（著作権について）で禁じている"
+    },
+    {
+     "id": "yahoo_disclosure",
+     "group": "disclosure",
+     "site": "Yahoo!ファイナンス",
+     "label": "適時開示",
+     "href": "https://finance.yahoo.co.jp/quote/7077.T/disclosure",
+     "note": "会社が出した適時開示（決算短信・業績予想の修正など）の一覧",
+     "state": "ok",
+     "reason": ""
+    },
+    {
+     "id": "yahoo_perf",
+     "group": "forecast",
+     "site": "Yahoo!ファイナンス",
+     "label": "業績・予想",
+     "href": "https://finance.yahoo.co.jp/quote/7077.T/performance",
+     "note": "業績の推移と会社予想・アナリスト予想",
+     "state": "ok",
+     "reason": ""
+    },
+    {
+     "id": "kabuyoho_analyst",
+     "group": "forecast",
+     "site": "株予報Pro",
+     "label": "コンセンサス",
+     "href": "https://kabuyoho.jp/reportAnalyst?bcode=7077",
+     "note": "アナリスト予想の平均（コンセンサス）と、その変化",
+     "state": "unchecked",
+     "reason": "株予報Pro は、robots.txt で自動アクセスの間隔を 20時間（Crawl-delay 72000）と求めている"
+    },
+    {
+     "id": "minkabu_analyst",
+     "group": "forecast",
+     "site": "みんかぶ",
+     "label": "アナリスト予想",
+     "href": "https://minkabu.jp/stock/7077/analyst_consensus",
+     "note": "アナリストの目標株価とレーティングの内訳",
+     "state": "unchecked",
+     "reason": "みんかぶは、自動の接続を断る（HTTP 405）"
+    },
+    {
+     "id": "nikkei_kessan",
+     "group": "forecast",
+     "site": "日経",
+     "label": "決算・財務",
+     "href": "https://www.nikkei.com/nkd/company/kessan/?scode=7077",
+     "note": "決算発表と業績・財務の情報",
+     "state": "unchecked",
+     "reason": "日経は、自動化された手段での取得を規約（著作権について）で禁じている"
+    },
+    {
+     "id": "yahoo_forum",
+     "group": "voice",
+     "site": "Yahoo!ファイナンス",
+     "label": "掲示板",
+     "href": "https://finance.yahoo.co.jp/quote/7077.T/forum",
+     "note": "個人投資家の書き込み。真偽の確かめられない書き込みも多い",
+     "state": "ok",
+     "reason": ""
+    },
+    {
+     "id": "minkabu_pick",
+     "group": "voice",
+     "site": "みんかぶ",
+     "label": "個人の売買予想",
+     "href": "https://minkabu.jp/stock/7077/pick",
+     "note": "個人投資家の買い・売りの予想と予想株価",
+     "state": "unchecked",
+     "reason": "みんかぶは、自動の接続を断る（HTTP 405）"
+    }
+   ]
+  },
+  "8060": {
+   "dates": [
+    "2026-11-26"
+   ],
+   "links": [
+    {
+     "id": "yahoo_news",
+     "group": "news",
+     "site": "Yahoo!ファイナンス",
+     "label": "ニュース",
+     "href": "https://finance.yahoo.co.jp/quote/8060.T/news",
+     "note": "複数の配信元のニュースの一覧",
+     "state": "ok",
+     "reason": ""
+    },
+    {
+     "id": "kabutan_news",
+     "group": "news",
+     "site": "株探",
+     "label": "ニュース",
+     "href": "https://kabutan.jp/stock/news?code=8060",
+     "note": "材料ニュース・決算速報・適時開示の一覧。一部の記事は有料（株探プレミアム）",
+     "state": "unchecked",
+     "reason": "株探は、自動の接続を断る（HTTP 405）"
+    },
+    {
+     "id": "nikkei_news",
+     "group": "news",
+     "site": "日経",
+     "label": "ニュース",
+     "href": "https://www.nikkei.com/nkd/company/news/?scode=8060",
+     "note": "日本経済新聞の記事の一覧。有料会員限定の記事がある",
+     "state": "unchecked",
+     "reason": "日経は、自動化された手段での取得を規約（著作権について）で禁じている"
+    },
+    {
+     "id": "yahoo_disclosure",
+     "group": "disclosure",
+     "site": "Yahoo!ファイナンス",
+     "label": "適時開示",
+     "href": "https://finance.yahoo.co.jp/quote/8060.T/disclosure",
+     "note": "会社が出した適時開示（決算短信・業績予想の修正など）の一覧",
+     "state": "ok",
+     "reason": ""
+    },
+    {
+     "id": "yahoo_perf",
+     "group": "forecast",
+     "site": "Yahoo!ファイナンス",
+     "label": "業績・予想",
+     "href": "https://finance.yahoo.co.jp/quote/8060.T/performance",
+     "note": "業績の推移と会社予想・アナリスト予想",
+     "state": "ok",
+     "reason": ""
+    },
+    {
+     "id": "kabuyoho_analyst",
+     "group": "forecast",
+     "site": "株予報Pro",
+     "label": "コンセンサス",
+     "href": "https://kabuyoho.jp/reportAnalyst?bcode=8060",
+     "note": "アナリスト予想の平均（コンセンサス）と、その変化",
+     "state": "unchecked",
+     "reason": "株予報Pro は、robots.txt で自動アクセスの間隔を 20時間（Crawl-delay 72000）と求めている"
+    },
+    {
+     "id": "minkabu_analyst",
+     "group": "forecast",
+     "site": "みんかぶ",
+     "label": "アナリスト予想",
+     "href": "https://minkabu.jp/stock/8060/analyst_consensus",
+     "note": "アナリストの目標株価とレーティングの内訳",
+     "state": "unchecked",
+     "reason": "みんかぶは、自動の接続を断る（HTTP 405）"
+    },
+    {
+     "id": "nikkei_kessan",
+     "group": "forecast",
+     "site": "日経",
+     "label": "決算・財務",
+     "href": "https://www.nikkei.com/nkd/company/kessan/?scode=8060",
+     "note": "決算発表と業績・財務の情報",
+     "state": "unchecked",
+     "reason": "日経は、自動化された手段での取得を規約（著作権について）で禁じている"
+    },
+    {
+     "id": "yahoo_forum",
+     "group": "voice",
+     "site": "Yahoo!ファイナンス",
+     "label": "掲示板",
+     "href": "https://finance.yahoo.co.jp/quote/8060.T/forum",
+     "note": "個人投資家の書き込み。真偽の確かめられない書き込みも多い",
+     "state": "ok",
+     "reason": ""
+    },
+    {
+     "id": "minkabu_pick",
+     "group": "voice",
+     "site": "みんかぶ",
+     "label": "個人の売買予想",
+     "href": "https://minkabu.jp/stock/8060/pick",
+     "note": "個人投資家の買い・売りの予想と予想株価",
+     "state": "unchecked",
+     "reason": "みんかぶは、自動の接続を断る（HTTP 405）"
+    }
+   ]
+  },
+  "8173": {
+   "dates": [
+    "2026-11-20"
+   ],
+   "links": [
+    {
+     "id": "yahoo_news",
+     "group": "news",
+     "site": "Yahoo!ファイナンス",
+     "label": "ニュース",
+     "href": "https://finance.yahoo.co.jp/quote/8173.T/news",
+     "note": "複数の配信元のニュースの一覧",
+     "state": "ok",
+     "reason": ""
+    },
+    {
+     "id": "kabutan_news",
+     "group": "news",
+     "site": "株探",
+     "label": "ニュース",
+     "href": "https://kabutan.jp/stock/news?code=8173",
+     "note": "材料ニュース・決算速報・適時開示の一覧。一部の記事は有料（株探プレミアム）",
+     "state": "unchecked",
+     "reason": "株探は、自動の接続を断る（HTTP 405）"
+    },
+    {
+     "id": "nikkei_news",
+     "group": "news",
+     "site": "日経",
+     "label": "ニュース",
+     "href": "https://www.nikkei.com/nkd/company/news/?scode=8173",
+     "note": "日本経済新聞の記事の一覧。有料会員限定の記事がある",
+     "state": "unchecked",
+     "reason": "日経は、自動化された手段での取得を規約（著作権について）で禁じている"
+    },
+    {
+     "id": "yahoo_disclosure",
+     "group": "disclosure",
+     "site": "Yahoo!ファイナンス",
+     "label": "適時開示",
+     "href": "https://finance.yahoo.co.jp/quote/8173.T/disclosure",
+     "note": "会社が出した適時開示（決算短信・業績予想の修正など）の一覧",
+     "state": "ok",
+     "reason": ""
+    },
+    {
+     "id": "yahoo_perf",
+     "group": "forecast",
+     "site": "Yahoo!ファイナンス",
+     "label": "業績・予想",
+     "href": "https://finance.yahoo.co.jp/quote/8173.T/performance",
+     "note": "業績の推移と会社予想・アナリスト予想",
+     "state": "ok",
+     "reason": ""
+    },
+    {
+     "id": "kabuyoho_analyst",
+     "group": "forecast",
+     "site": "株予報Pro",
+     "label": "コンセンサス",
+     "href": "https://kabuyoho.jp/reportAnalyst?bcode=8173",
+     "note": "アナリスト予想の平均（コンセンサス）と、その変化",
+     "state": "unchecked",
+     "reason": "株予報Pro は、robots.txt で自動アクセスの間隔を 20時間（Crawl-delay 72000）と求めている"
+    },
+    {
+     "id": "minkabu_analyst",
+     "group": "forecast",
+     "site": "みんかぶ",
+     "label": "アナリスト予想",
+     "href": "https://minkabu.jp/stock/8173/analyst_consensus",
+     "note": "アナリストの目標株価とレーティングの内訳",
+     "state": "unchecked",
+     "reason": "みんかぶは、自動の接続を断る（HTTP 405）"
+    },
+    {
+     "id": "nikkei_kessan",
+     "group": "forecast",
+     "site": "日経",
+     "label": "決算・財務",
+     "href": "https://www.nikkei.com/nkd/company/kessan/?scode=8173",
+     "note": "決算発表と業績・財務の情報",
+     "state": "unchecked",
+     "reason": "日経は、自動化された手段での取得を規約（著作権について）で禁じている"
+    },
+    {
+     "id": "yahoo_forum",
+     "group": "voice",
+     "site": "Yahoo!ファイナンス",
+     "label": "掲示板",
+     "href": "https://finance.yahoo.co.jp/quote/8173.T/forum",
+     "note": "個人投資家の書き込み。真偽の確かめられない書き込みも多い",
+     "state": "ok",
+     "reason": ""
+    },
+    {
+     "id": "minkabu_pick",
+     "group": "voice",
+     "site": "みんかぶ",
+     "label": "個人の売買予想",
+     "href": "https://minkabu.jp/stock/8173/pick",
+     "note": "個人投資家の買い・売りの予想と予想株価",
+     "state": "unchecked",
+     "reason": "みんかぶは、自動の接続を断る（HTTP 405）"
+    }
+   ]
+  },
+  "9202": {
+   "dates": [
+    "2026-11-26"
+   ],
+   "links": [
+    {
+     "id": "yahoo_news",
+     "group": "news",
+     "site": "Yahoo!ファイナンス",
+     "label": "ニュース",
+     "href": "https://finance.yahoo.co.jp/quote/9202.T/news",
+     "note": "複数の配信元のニュースの一覧",
+     "state": "ok",
+     "reason": ""
+    },
+    {
+     "id": "kabutan_news",
+     "group": "news",
+     "site": "株探",
+     "label": "ニュース",
+     "href": "https://kabutan.jp/stock/news?code=9202",
+     "note": "材料ニュース・決算速報・適時開示の一覧。一部の記事は有料（株探プレミアム）",
+     "state": "unchecked",
+     "reason": "株探は、自動の接続を断る（HTTP 405）"
+    },
+    {
+     "id": "nikkei_news",
+     "group": "news",
+     "site": "日経",
+     "label": "ニュース",
+     "href": "https://www.nikkei.com/nkd/company/news/?scode=9202",
+     "note": "日本経済新聞の記事の一覧。有料会員限定の記事がある",
+     "state": "unchecked",
+     "reason": "日経は、自動化された手段での取得を規約（著作権について）で禁じている"
+    },
+    {
+     "id": "yahoo_disclosure",
+     "group": "disclosure",
+     "site": "Yahoo!ファイナンス",
+     "label": "適時開示",
+     "href": "https://finance.yahoo.co.jp/quote/9202.T/disclosure",
+     "note": "会社が出した適時開示（決算短信・業績予想の修正など）の一覧",
+     "state": "ok",
+     "reason": ""
+    },
+    {
+     "id": "yahoo_perf",
+     "group": "forecast",
+     "site": "Yahoo!ファイナンス",
+     "label": "業績・予想",
+     "href": "https://finance.yahoo.co.jp/quote/9202.T/performance",
+     "note": "業績の推移と会社予想・アナリスト予想",
+     "state": "ok",
+     "reason": ""
+    },
+    {
+     "id": "kabuyoho_analyst",
+     "group": "forecast",
+     "site": "株予報Pro",
+     "label": "コンセンサス",
+     "href": "https://kabuyoho.jp/reportAnalyst?bcode=9202",
+     "note": "アナリスト予想の平均（コンセンサス）と、その変化",
+     "state": "unchecked",
+     "reason": "株予報Pro は、robots.txt で自動アクセスの間隔を 20時間（Crawl-delay 72000）と求めている"
+    },
+    {
+     "id": "minkabu_analyst",
+     "group": "forecast",
+     "site": "みんかぶ",
+     "label": "アナリスト予想",
+     "href": "https://minkabu.jp/stock/9202/analyst_consensus",
+     "note": "アナリストの目標株価とレーティングの内訳",
+     "state": "unchecked",
+     "reason": "みんかぶは、自動の接続を断る（HTTP 405）"
+    },
+    {
+     "id": "nikkei_kessan",
+     "group": "forecast",
+     "site": "日経",
+     "label": "決算・財務",
+     "href": "https://www.nikkei.com/nkd/company/kessan/?scode=9202",
+     "note": "決算発表と業績・財務の情報",
+     "state": "unchecked",
+     "reason": "日経は、自動化された手段での取得を規約（著作権について）で禁じている"
+    },
+    {
+     "id": "yahoo_forum",
+     "group": "voice",
+     "site": "Yahoo!ファイナンス",
+     "label": "掲示板",
+     "href": "https://finance.yahoo.co.jp/quote/9202.T/forum",
+     "note": "個人投資家の書き込み。真偽の確かめられない書き込みも多い",
+     "state": "ok",
+     "reason": ""
+    },
+    {
+     "id": "minkabu_pick",
+     "group": "voice",
+     "site": "みんかぶ",
+     "label": "個人の売買予想",
+     "href": "https://minkabu.jp/stock/9202/pick",
+     "note": "個人投資家の買い・売りの予想と予想株価",
+     "state": "unchecked",
+     "reason": "みんかぶは、自動の接続を断る（HTTP 405）"
+    }
+   ]
+  },
+  "9204": {
+   "dates": [
+    "2026-11-24"
+   ],
+   "links": [
+    {
+     "id": "yahoo_news",
+     "group": "news",
+     "site": "Yahoo!ファイナンス",
+     "label": "ニュース",
+     "href": "https://finance.yahoo.co.jp/quote/9204.T/news",
+     "note": "複数の配信元のニュースの一覧",
+     "state": "ok",
+     "reason": ""
+    },
+    {
+     "id": "kabutan_news",
+     "group": "news",
+     "site": "株探",
+     "label": "ニュース",
+     "href": "https://kabutan.jp/stock/news?code=9204",
+     "note": "材料ニュース・決算速報・適時開示の一覧。一部の記事は有料（株探プレミアム）",
+     "state": "unchecked",
+     "reason": "株探は、自動の接続を断る（HTTP 405）"
+    },
+    {
+     "id": "nikkei_news",
+     "group": "news",
+     "site": "日経",
+     "label": "ニュース",
+     "href": "https://www.nikkei.com/nkd/company/news/?scode=9204",
+     "note": "日本経済新聞の記事の一覧。有料会員限定の記事がある",
+     "state": "unchecked",
+     "reason": "日経は、自動化された手段での取得を規約（著作権について）で禁じている"
+    },
+    {
+     "id": "yahoo_disclosure",
+     "group": "disclosure",
+     "site": "Yahoo!ファイナンス",
+     "label": "適時開示",
+     "href": "https://finance.yahoo.co.jp/quote/9204.T/disclosure",
+     "note": "会社が出した適時開示（決算短信・業績予想の修正など）の一覧",
+     "state": "ok",
+     "reason": ""
+    },
+    {
+     "id": "yahoo_perf",
+     "group": "forecast",
+     "site": "Yahoo!ファイナンス",
+     "label": "業績・予想",
+     "href": "https://finance.yahoo.co.jp/quote/9204.T/performance",
+     "note": "業績の推移と会社予想・アナリスト予想",
+     "state": "ok",
+     "reason": ""
+    },
+    {
+     "id": "kabuyoho_analyst",
+     "group": "forecast",
+     "site": "株予報Pro",
+     "label": "コンセンサス",
+     "href": "https://kabuyoho.jp/reportAnalyst?bcode=9204",
+     "note": "アナリスト予想の平均（コンセンサス）と、その変化",
+     "state": "unchecked",
+     "reason": "株予報Pro は、robots.txt で自動アクセスの間隔を 20時間（Crawl-delay 72000）と求めている"
+    },
+    {
+     "id": "minkabu_analyst",
+     "group": "forecast",
+     "site": "みんかぶ",
+     "label": "アナリスト予想",
+     "href": "https://minkabu.jp/stock/9204/analyst_consensus",
+     "note": "アナリストの目標株価とレーティングの内訳",
+     "state": "unchecked",
+     "reason": "みんかぶは、自動の接続を断る（HTTP 405）"
+    },
+    {
+     "id": "nikkei_kessan",
+     "group": "forecast",
+     "site": "日経",
+     "label": "決算・財務",
+     "href": "https://www.nikkei.com/nkd/company/kessan/?scode=9204",
+     "note": "決算発表と業績・財務の情報",
+     "state": "unchecked",
+     "reason": "日経は、自動化された手段での取得を規約（著作権について）で禁じている"
+    },
+    {
+     "id": "yahoo_forum",
+     "group": "voice",
+     "site": "Yahoo!ファイナンス",
+     "label": "掲示板",
+     "href": "https://finance.yahoo.co.jp/quote/9204.T/forum",
+     "note": "個人投資家の書き込み。真偽の確かめられない書き込みも多い",
+     "state": "ok",
+     "reason": ""
+    },
+    {
+     "id": "minkabu_pick",
+     "group": "voice",
+     "site": "みんかぶ",
+     "label": "個人の売買予想",
+     "href": "https://minkabu.jp/stock/9204/pick",
      "note": "個人投資家の買い・売りの予想と予想株価",
      "state": "unchecked",
      "reason": "みんかぶは、自動の接続を断る（HTTP 405）"
@@ -811,13 +1347,15 @@
   }
  },
  "summary": {
-  "stocks": 7,
-  "links": 70,
-  "ok": 28,
+  "stocks": 12,
+  "byRule": 0,
+  "byLtrOnly": 12,
+  "links": 120,
+  "ok": 48,
   "ng": 0,
-  "unchecked": 42,
-  "requests": 28,
-  "decoyTried": 112,
+  "unchecked": 72,
+  "requests": 48,
+  "decoyTried": 192,
   "decoyPassed": 0
  }
 }

@@ -13,11 +13,15 @@ on:
     # push で繋がないのは、GITHUB_TOKEN による push が
     # 他のワークフローを起こさないため（GitHub のループ防止）。
     workflows: ['Fetch J-Quants Data', 'Predict Breakouts', 'Refresh Stock Details', 'Fetch Filings',
-                'New Training Samples', 'Backfill KNN', 'Check News Links']
+                'New Training Samples', 'Backfill KNN', 'Check News Links', 'Adopt Financial Inputs',
+                'Score Distribution', 'Refresh Valuations']
+    # Update Volume Profiles は 2026-11-21 に外した（価格帯別出来高のタブを隠し、集計を画面に載せるのをやめた。下の注記）
     types: [completed]
 
 permissions:
-  contents: read
+  # data-raw は下書き（非公開）の Release にする。下書きは書き込み権限のある鍵にしか見えず、読むだけの鍵では
+  # 「無い」と同じに見えるので write（2026-11-27。docs/OPERATIONS.md「data-raw を非公開にする」）
+  contents: write
   pages: write
   id-token: write
 
@@ -52,6 +56,21 @@ jobs:
       - run: npm test
       - run: npm run build
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install pandas==2.2.3 pyarrow==18.1.0
+
+      # 全銘柄の表示専用データ。株価キャッシュを使い、選択時は小さな銘柄別JSONだけを読む。
+      # 本体をGitへ日次コミットせず、Pages成果物へ直接生成する。学習・予測データは変更しない。
+      # API障害でも既存の詳細銘柄の表示とサイト公開を維持する（画面には再試行を表示）。
+      - name: Build per-security price-band demand data
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JQUANTS_API: ${{ secrets.JQUANTS_API }}
+        run: bash scripts/build_supply_demand_assets.sh dist/data/supply-demand
+
       # リカレンス・ネットワーク（日次予測が Release に上げた recurrence.tar.gz。research/recurrence_net.py）を
       # dist/data/recurrence/ に置く。購入条件を満たした銘柄ごとに全期間で作る（1銘柄 約130KB）のでリポジトリには入れていない
       # （運用者の選択「Release に置く」、2026-10-19）。中の名前は recurrence/index.json と recurrence/<日付>_<コード>.json だけのはずなので、
@@ -73,6 +92,11 @@ jobs:
           mkdir -p dist/data
           tar -xzf "$a" -C dist/data
           echo "展開した: $(ls dist/data/recurrence | wc -l) ファイル・$(du -sh dist/data/recurrence | cut -f1)"
+
+      # 価格帯別出来高の集計（volume-profile.json）は 2026-11-21 から画面に載せない。運用者の依頼「分足のデータは使わない
+      # 方針になったので価格帯別出来高の分布タグも消してください」→「隠して集計も止める」「公開をやめる」。それまではここで
+      # Release data-volume-profile から降ろして dist/data/ に置いていた（2026-11-19〜11-20。docs/VOLUME_PROFILE.md）。
+      # タブを戻すときは、git の履歴（2026-11-21 より前の deploy-pages.yml）からこの段を戻す
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

@@ -1,0 +1,145 @@
+{
+  "schemaVersion": 1,
+  "asOf": "2020-01-31",
+  "generatedAt": "2020-01-31T09:00:00Z",
+  "warning": "感応度レンジ。株価の予測区間ではありません。",
+  "stocks": [
+    {
+      "code": "TEST0",
+      "name": "テスト銘柄",
+      "date": "2020-01-31",
+      "price": 119,
+      "beta": 1.0,
+      "riskFree": 0.01,
+      "financialDate": "2020-01-01",
+      "annualDate": "2019-06-01",
+      "yieldDate": "2020-01-30",
+      "methods": [
+        {
+          "id": "ri",
+          "label": "RIM（残余利益）",
+          "kind": "price",
+          "available": true,
+          "min": 100,
+          "max": 150,
+          "mean": 124,
+          "median": 125,
+          "std": 5,
+          "deviation": 0.050420168067226934,
+          "note": "検証用の固定シナリオ",
+          "inputSource": "provider_eps_bps",
+          "inputDate": "2020-01-31",
+          "eps": 5.61,
+          "bps": 139.29
+        },
+        {
+          "id": "ddm",
+          "label": "配当割引法",
+          "kind": "price",
+          "available": true,
+          "min": 150,
+          "max": 250,
+          "mean": 200,
+          "median": 200,
+          "std": 20,
+          "deviation": 0.050420168067226934,
+          "note": "検証用の固定シナリオ"
+        }
+      ],
+      "inferenceDate": "2020-01-31"
+    },
+    {
+      "code": "TEST1",
+      "name": "別テスト銘柄",
+      "date": "2020-01-31",
+      "price": 100,
+      "beta": 1.0,
+      "riskFree": 0.01,
+      "financialDate": "2020-01-01",
+      "annualDate": "2019-06-01",
+      "yieldDate": "2020-01-30",
+      "methods": [
+        {
+          "id": "ri",
+          "label": "RIM（残余利益）",
+          "kind": "price",
+          "available": true,
+          "min": 100,
+          "max": 200,
+          "mean": 150,
+          "median": 150,
+          "std": 5,
+          "deviation": 0.050420168067226934,
+          "note": "検証用の固定シナリオ",
+          "recoveryAssumed": true,
+          "eps": -30.0,
+          "bps": 100.0,
+          "validFraction": 1.0
+        },
+        {
+          "id": "ddm",
+          "label": "配当割引法",
+          "kind": "price",
+          "available": true,
+          "min": 100,
+          "max": 150,
+          "mean": 120,
+          "median": 120,
+          "std": 20,
+          "deviation": 0.050420168067226934,
+          "note": "検証用の固定シナリオ"
+        }
+      ],
+      "inferenceDate": "2020-01-31",
+      "priceFallback": true,
+      "latestStockPriceDate": "2020-02-03"
+    },
+    {
+      "code": "TEST2",
+      "name": "算出不可銘柄",
+      "date": "2020-01-31",
+      "price": 119,
+      "beta": 1.0,
+      "riskFree": 0.01,
+      "financialDate": "2020-01-01",
+      "annualDate": "2019-06-01",
+      "yieldDate": "2020-01-30",
+      "methods": [
+        {
+          "id": "ri",
+          "label": "RIM（残余利益）",
+          "kind": "price",
+          "available": false,
+          "min": 100,
+          "max": 150,
+          "mean": 124,
+          "median": null,
+          "std": 5,
+          "deviation": 0.050420168067226934,
+          "note": "検証用の固定シナリオ",
+          "reason": "自己株式数が欠損"
+        },
+        {
+          "id": "ddm",
+          "label": "配当割引法",
+          "kind": "price",
+          "available": false,
+          "min": 150,
+          "max": 250,
+          "mean": 200,
+          "median": null,
+          "std": 20,
+          "deviation": 0.050420168067226934,
+          "note": "検証用の固定シナリオ",
+          "reason": "自己株式数が欠損"
+        }
+      ],
+      "inferenceDate": "2020-01-31"
+    }
+  ],
+  "inferenceDates": [
+    "2020-01-29",
+    "2020-01-30",
+    "2020-01-31"
+  ]
+}

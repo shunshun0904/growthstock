@@ -144,7 +144,7 @@ class TestLabelParts(unittest.TestCase):
     def test_same_rule_as_build_dataset(self):
         cfg = B.DEFAULT_RISE
         vol = np.array([2.0, 2.0, 2.0, 2.0])
-        need = cfg.vol_norm_k * vol / 100 * np.sqrt(cfg.horizon)
+        need, _ = B.rise_thresholds(vol, cfg)
         end_need = cfg.end_ratio / cfg.threshold * need
         sub = pd.DataFrame({
             "vol_20d": vol,

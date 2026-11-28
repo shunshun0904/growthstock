@@ -94,7 +94,7 @@ class TestRelabel(unittest.TestCase):
 
     def test_end_mult_is_production_ratio(self):
         self.assertAlmostEqual(E.END_MULT, B.END_RATIO / B.RISE_THRESHOLD)
-        self.assertEqual(E.K0, B.VOL_NORM_K)
+        self.assertEqual(E.K0, 1.2)  # Historical experiment remains sigma-based
 
     def test_match_rate_hits_target(self):
         df = frame()

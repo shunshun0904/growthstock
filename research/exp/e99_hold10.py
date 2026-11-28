@@ -66,7 +66,7 @@ import e82_and_rule_variants as E82  # noqa: E402
 import e87_monthly_return_search as E87  # noqa: E402
 
 MODELS = E79.MODELS
-RULE_MODELS = LT.RULE_MODELS            # 1.5σ の3本
+RULE_MODELS = LT.K15                    # 1.5σ の3本（実験のときの規則。2026-10-23 に規則が 1.2σ の3本になったので記録どおり固定）
 LINE = LT.AGREE_PCT                     # 95
 TP = LT.TAKE_PROFIT                     # +10%
 HOLDS = (5, 10, 15, 20)

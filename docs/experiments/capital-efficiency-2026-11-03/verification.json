@@ -1,0 +1,25 @@
+{
+  "broad_test_count": 2098,
+  "broad_tests_skipped": 1,
+  "broad_test_result": "pass",
+  "final_affected_test_count": 27,
+  "final_affected_test_result": "pass",
+  "production_label_contract_tests": 12,
+  "classification_weighting_matches_production": true,
+  "ranking_scores_reproduced_24_fits": true,
+  "same_evaluation_rows_in_every_arm": true,
+  "outcome_dates_strictly_before_test": true,
+  "source_hashes_match_executed_inputs": true,
+  "production_parameter_hashes_unchanged": true,
+  "production_feature_count": 360,
+  "existing_columns_identical": true,
+  "historical_revision_lineage_verified": false,
+  "adoption_validation": false,
+  "runtime_versions": {
+    "numpy": "2.3.5",
+    "pandas": "2.2.3",
+    "scikit-learn": "1.8.0",
+    "lightgbm": "4.7.0"
+  },
+  "test_scope_note": "Broad suite plus focused final checks. Final pool boundary and classifier weighting are covered by the focused suite."
+}

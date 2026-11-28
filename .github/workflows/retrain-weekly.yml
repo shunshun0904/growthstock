@@ -1,6 +1,6 @@
 name: Retrain Weekly
 
-# 運用に出すモデルを作り直す（週次・日曜の朝）。
+# 運用に出すモデルを作り直す（週次・土曜。2026-11-21 から 00:00・06:00・12:00 JST に Routine が起動）。
 #
 # 日次の予測はこのワークフローが保存したモデルを読むだけで、学習はしない。
 # 毎日学習し直すと、その日の予測が「今日のモデル」に依存して
@@ -13,13 +13,25 @@ name: Retrain Weekly
 # 意図的に予測へ繋いでいない。日曜に予測すると金曜引け基準の候補が
 # 金曜夜とは別のモデルで二度出ることになり、どちらを見ればよいのか
 # 分からなくなる。新しいモデルは月曜夜の予測から効く。
+# （2026-11-15 から金曜の夜は予測せず、金曜の分は週末の学習の後に Routine が新しいモデルで一度だけ出す。
+#  2026-11-20 から土曜 21:00、2026-11-21 から土曜 15:00。docs/MODEL_ADOPTION_RULES.md §96・§98・§102。ここから予測へは繋がない）
 on:
   # 予約の起動（cron）は 2026-10-05 にやめた。Claude の Routine が日曜 09:10 JST に
   # workflow_dispatch（tune=yes）で起動する（docs/OPERATIONS.md「起動のしかた」）。
+  # 2026-11-01 から、日曜 09:10 の回は ranking=no（1.2σ の木3本だけ）で、ランキング学習2本（日次・直近5営業日の組）は
+  # 日曜 14:10 JST の別の回（tune=yes・only=ltr,ltr5）で作る（運用者の選択 2026-10-30「日曜 14:10 に分ける」。
+  # docs/MODEL_ADOPTION_RULES.md §85）。同じ回で順番に回すと、基準モデルの探索・学習が落ちたときにランキング学習も
+  # その週は作り直されなかった。土曜 09:10 の回は 1.5σ の木3本（only=lgbm_k15,xgb_k15,cat_k15）
+  # 2026-11-14 に +10% の回を土曜 21:00、ランキング学習の回を土曜 21:10（21:00 の回の後）へ移した（§94）。
+  # 2026-11-20 から、+15% の3本（only=lgbm_k15,xgb_k15,cat_k15）は土曜 00:00、+10% の3本（ranking=no）は土曜 09:00、
+  # ランキング学習2本（only=ltr,ltr5）は土曜 15:00（09:00 の回の後）に Routine が起動する（運用者の依頼。§98）。
+  # 2026-11-21 から、+10% の3本は土曜 06:00、ランキング学習2本は土曜 12:00（06:00 の回の後）。+15% の3本は 00:00 のまま
+  # （運用者の依頼「0時、6時、12時、最後の予測を15時」。§102）。
   #
   # GitHub の cron は実測で +4時間01分〜+7時間19分遅れ（docs/OPERATIONS.md）、
   # 日曜 09:05 JST の予約が実際に動くのは 13〜14時台だった。時刻を指定して起動すれば
-  # 09:10 に始まり、所要 3〜5時間（探索込み。探索なしなら20分ほど）で昼過ぎに終わる。
+  # 09:10 に始まり、所要 3〜5時間（探索込み。探索なしなら20分ほど）で昼過ぎに終わる。2026-11-01 からは 09:10 の回（1.2σ の
+  # 木3本）が 1.5〜2.5時間、14:10 の回（ランキング学習2本）が 1〜1.5時間の見込み。
   #
   # 朝に置いても学習の前提は変わらない。使うのは金曜引けまでのデータで、
   # 土日に増えるものは無い（鮮度チェックは営業日で数えるので、朝でも夜でも
@@ -28,14 +40,20 @@ on:
   workflow_dispatch:
     inputs:
       tune:
-        description: 'ハイパーパラメータを探索し直す（見込み+30分。no にすると保存済みを使う。基準モデル（1.2σ の LightGBM）は探索したときの木の本数が今と違えば学習しない）'
+        description: 'ハイパーパラメータを探索し直す（見込み+30分。no にすると保存済みを使う。基準モデル（+10%の LightGBM）は探索したときの木の本数が今と違えば学習しない）'
         type: choice
         options: ['yes', 'no']
         default: 'yes'
       only:
-        description: '画面に並べる追加モデルのうち、これだけ探索・学習する（例: lgbm_k15,xgb_k15,cat_k15,logit_k15。空なら 1.2σ の4本。1.5σ・1.8σ の8本は指定したときだけ。指定すると基準モデル（1.2σ の LightGBM）は触らない）'
+        description: '画面に並べる追加モデルのうち、これだけ探索・学習する（例: lgbm_k15,xgb_k15,cat_k15。空なら +10%の木3本とランキング学習（ranking=no なら +10%の木3本だけ）。+15%の3本は指定したときだけ。ltr はランキング学習だけ、ltr5 は直近5営業日の組のランキング学習だけ（tune=yes なら木の形も探索し直す）。1.8σ の4本は 2026-10-24 に、ロジスティック回帰（logit・logit_k15）は 2026-11-02 の予測から外した（名指ししても止まる）。指定すると基準モデル（+10%の LightGBM）は触らない）'
         required: false
         default: ''
+      ranking:
+        description: 'ランキング学習（日次 ltr・直近5営業日の組 ltr5）も回すか。日曜 09:10 の回は no（ランキング学習は日曜 14:10 の回が only=ltr,ltr5 で作る。2026-10-30 の運用者の選択「日曜 14:10 に分ける」）。no のときに only へ ltr・ltr5 を書くと止まる'
+        required: false
+        type: choice
+        options: ['yes', 'no']
+        default: 'yes'
 
 permissions:
   contents: write
@@ -69,9 +87,20 @@ jobs:
     # 見込みで、後者はこのジョブに収まらない。全モデル200本のままにしている
     # （2026-09-25、運用者の判断。tuning.SEARCH_N_ESTIMATORS の注記）。
     #
+    # 2026-10-29 から、ランキング学習の木の形の探索（Tune ranking model。50試行 × 5分割）を足した。実験114c の実測で
+    # 1回 14〜20分（上限 45分）。10/24 の全モデルの回（2時間27分）に足して約2時間50分の見込み
+    # 2026-11-01 の回から、直近5営業日の組のランキング学習の探索と学習（Tune / Train 5-day ranking model）を足した
+    # （実験117 の実測で探索 31.6分。2026-10-30 の試しの回で 37.2分。上限 60分）。同じ回からロジスティック回帰（探索 29〜74分）を
+    # 外し、ランキング学習2本は日曜 14:10 の別の回（only=ltr,ltr5。試しの回の実測で ltr5 だけなら 55分）に分けた
+    #
     # 実際の打ち切りはステップ単位で掛けてあるので、ここは最後の砦
     timeout-minutes: 330
     steps:
+      # ジョブの始まりの時刻。ランキング学習の探索（Tune ranking model）は、ジョブの上限までの残りが足りなければ飛ばす
+      - name: Start time
+        id: start
+        run: echo "t=$(date +%s)" >> "$GITHUB_OUTPUT"
+
       # 公開ブランチ（＝既定ブランチ）に対して回す。
       # 成果物をここに積まないと GitHub Pages の画面が更新されない。
       # 調査は claude/breakout-model で進め、まとまったらこちらへマージする。
@@ -131,7 +160,7 @@ jobs:
       - name: Build dataset
         run: python3 research/build_dataset.py 2>&1 | tail -20
 
-      # 毎週探索する。精度を優先する判断（基準モデル（1.2σ の LightGBM）は LGBMClassifier なので
+      # 毎週探索する。精度を優先する判断（基準モデル（+10%の LightGBM）は LGBMClassifier なので
       # pointwise のみ。LTR は本番で使っていないので探索しない）。
       #
       # 引き換えに、特徴量も母集団も変えていないのにパラメータが週ごとに動く。
@@ -147,19 +176,33 @@ jobs:
       # 約2分 → 約10分（テクニカル指標の計算）。
       # 探索の記録には探索したときの木の本数（tuning.SEARCH_N_ESTIMATORS）が残り、
       # 基準モデルの学習（train_production.py）は本数が今と違えば止まる。
-      # 追加モデルだけ作る回（only）は、基準モデル（1.2σ の LightGBM）の探索も学習も飛ばす。
+      # 追加モデルだけ作る回（only）は、基準モデル（+10%の LightGBM）の探索も学習も飛ばす。
       # 週の途中で基準モデルを差し替えると、その週の候補が前日までと比較できなくなる
       - name: Resolve scope
         id: scope
         env:
           ONLY: ${{ inputs.only }}
+          RANKING: ${{ inputs.ranking }}
         run: |
           # 入力をそのままシェルに展開しない（run-experiment.yml と同じ考え方）。名前の形だけ通す
           if [ -n "$ONLY" ] && ! [[ "$ONLY" =~ ^[a-z0-9_]+(,[a-z0-9_]+)*$ ]]; then
             echo "only の形が不正: $ONLY"; exit 1
           fi
           echo "only=$ONLY" >> "$GITHUB_OUTPUT"
+          # ランキング学習（ltr。research/train_ltr.py）と直近5営業日の組のランキング学習（ltr5。research/train_ltr5.py）は
+          # 追加モデルの探索・学習とは別のステップ。only から ltr・ltr5 を除いたものを追加モデルの対象（models）にし、ltr・ltr5 は
+          # only が空かその名前を含むときだけ学習する。ranking=no（日曜 09:10 の回）ならどちらも学習しない（日曜 14:10 の回が作る）
+          if [ "$RANKING" = "no" ] && [[ ",$ONLY," == *",ltr,"* || ",$ONLY," == *",ltr5,"* ]]; then
+            echo "ranking=no なのに only にランキング学習（ltr・ltr5）がある: $ONLY"; exit 1
+          fi
+          MODELS=$(echo ",$ONLY," | sed 's/,ltr,/,/g; s/,ltr5,/,/g; s/,ltr,/,/g; s/^,//; s/,$//')
+          echo "models=$MODELS" >> "$GITHUB_OUTPUT"
+          for m in ltr ltr5; do
+            if [ "$RANKING" != "no" ] && { [ -z "$ONLY" ] || [[ ",$ONLY," == *",$m,"* ]]; }; then v=yes; else v=no; fi
+            echo "$m=$v" >> "$GITHUB_OUTPUT"
+          done
           if [ -n "$ONLY" ]; then echo "対象を限定: $ONLY（基準モデルは触らない）"; else echo "全モデル"; fi
+          if [ "$RANKING" = "no" ]; then echo "ランキング学習（ltr・ltr5）は外す（土曜 12:00 の回で作る）"; fi
 
       - name: Tune
         if: inputs.tune == 'yes' && steps.scope.outputs.only == ''
@@ -175,7 +218,8 @@ jobs:
         if: steps.scope.outputs.only == ''
         run: python3 research/train_production.py 2>&1 | tee retrain.log
 
-      # 画面に並べる追加モデル（xgb / cat。2026-10-09 に運用者の決定で logit / mlp を外した）の探索。
+      # 画面に並べる追加モデル（xgb / cat。2026-10-09 に運用者の決定で logit / mlp を外し、同日夜に logit を戻したが、
+      # 2026-10-29 の運用者の指示で 2026-11-02 の予測から再び外した）の探索。
       # 基準モデルと完全に同じ条件（本番と同じ分割 tuning.PRODUCTION_CV＝年×時価総額帯で
       # 層別・日付単位 / 5分割 / PR-AUC / 50試行 / 木200本固定 / ホールドアウトより手前だけ）。
       #
@@ -189,7 +233,8 @@ jobs:
       # 持ち回すのは、同じ週にやり直したときの保険（下のタイムアウトや
       # コンテナ再起動で落ちた場合、完了済みの試行から再開できる）。
       - name: Tune extra models (opt-in)
-        if: inputs.tune == 'yes'
+        # only が ltr・ltr5 だけの回（ランキング学習だけ）は追加モデルを探索しない
+        if: inputs.tune == 'yes' && (steps.scope.outputs.only == '' || steps.scope.outputs.models != '')
         # 実測: 2026-09-13 の週次実行で127分（試行記録から見積もった86分より
         # 4割長い。CI は手元より遅く、5モデルぶんの初回探索が丸ごと走った）。
         # 150分だと余裕が23分しかなく、データが増えれば足りなくなる。
@@ -202,13 +247,14 @@ jobs:
         timeout-minutes: 270
         continue-on-error: true
         env:
-          ONLY: ${{ steps.scope.outputs.only }}
+          ONLY: ${{ steps.scope.outputs.models }}
         run: |
-          # only があればそのモデルだけ（名前はカンマ区切り → 引数）。空なら 1.2σ の追加モデル（xgb / cat / logit）。
-          # ラベル違いのモデル（models.VARIANTS。1.5σ / 1.8σ × 4学習器の8本）は既定に入れない。土曜に Routine が
-          # only=lgbm_k15,xgb_k15,cat_k15,logit_k15（09:10 JST）と only=lgbm_k18,xgb_k18,cat_k18,logit_k18（14:10 JST）の
-          # 2回に分けて回す（実験78 の実測: 探索 1本 lgbm 13分・cat 12〜17分・logit 21〜26分・xgb 25〜35分。
-          # 1回あたり 1.5〜2時間。8本を日曜に足すと 1.2σ の4本の探索と合わせて 6時間に収まらない。2026-10-11 夜）
+          # only があればそのモデルだけ（名前はカンマ区切り → 引数）。空なら 1.2σ の追加モデル（xgb / cat）。
+          # ラベル違いのモデル（models.ACTIVE_VARIANTS。1.5σ の木3本）は既定に入れない。土曜に Routine が
+          # only=lgbm_k15,xgb_k15,cat_k15（09:10 JST）で回す（実験78 の実測: 探索 1本 lgbm 13分・cat 12〜17分・
+          # xgb 25〜35分。2026-10-11 夜）。1.8σ の4本（14:10 JST の回）は 2026-10-24 に運用者の依頼で、ロジスティック回帰
+          # （logit・logit_k15）は運用者の指示（2026-10-29「次週からロジスティック回帰をなくしてください。…週次の更新自体
+          # いらないです」）で 2026-11-02 の予測から外した（models.RETIRED / RETIRED_VARIANTS。名指ししても探索・学習しない）
           read -r -a ONLY_ARGS <<< "${ONLY//,/ }"
           python3 research/exp/e15_tune_all.py "${ONLY_ARGS[@]}" 2>&1 | tail -25
 
@@ -218,16 +264,78 @@ jobs:
       # ここが丸ごと失敗しても日次予測は動き続ける。
       - name: Train extra models
         # 4モデル × 10窓の out-of-fold ＋ 全期間モデル。実測143秒
+        if: steps.scope.outputs.only == '' || steps.scope.outputs.models != ''
         timeout-minutes: 30
         continue-on-error: true
         env:
-          ONLY: ${{ steps.scope.outputs.only }}
+          ONLY: ${{ steps.scope.outputs.models }}
         run: |
           if [ -n "$ONLY" ]; then
             python3 research/train_multi.py --models "$ONLY" 2>&1 | tee -a retrain.log
           else
             python3 research/train_multi.py 2>&1 | tee -a retrain.log
           fi
+
+      # ランキング学習の木の形の探索（research/tune_ltr.py。実験114 の L と同じ探索: run_tuning.py と同じ打ち切り・
+      # 年×時価総額帯で層別した日付単位の5分割・種0・50試行・木200本固定・目的は検証分割の日付内 NDCG@5）。
+      # 運用者の指示（2026-10-29）「日曜の再学習に毎週の探索を入れてください」。実験114c（docs/MODEL_ADOPTION_RULES.md §78-10）の
+      # 実測で1回 14〜20分。最後まで終わったときだけ research/ltr_params.json を書き換え、下の Train ranking model がその木の形で
+      # 学習する。落ちたり時間切れになったりしたら前の木の形のまま（continue-on-error）。ジョブの上限（330分）までの残りが、
+      # この探索の上限（45分）と学習・上げ・コミットの分（あわせて45分）に足りなければ探索しない
+      - name: Tune ranking model
+        if: inputs.tune == 'yes' && steps.scope.outputs.ltr == 'yes'
+        timeout-minutes: 45
+        continue-on-error: true
+        env:
+          JOB_START: ${{ steps.start.outputs.t }}
+        run: |
+          left=$(( 330 * 60 - ($(date +%s) - JOB_START) ))
+          if [ "$left" -lt $(( 90 * 60 )) ]; then
+            echo "ジョブの上限まで残り $((left / 60))分。探索（上限45分）と学習・上げ・コミットに足りないので探索しない（前の木の形のまま）" | tee -a retrain.log
+            exit 0
+          fi
+          python3 research/tune_ltr.py 2>&1 | tee -a retrain.log
+
+      # ランキング学習（research/train_ltr.py。research/model/models/ltr/ に置く）。買いの規則には使わず、画面と実運用の追跡に
+      # 「両方使う形」（今の規則 かつ その日の中でランキング学習が上半分）を参考に並べるためのもの（運用者の選択「まず並べて見る」
+      # 2026-10-24。docs/MODEL_ADOPTION_RULES.md §78-9）。木の形は research/ltr_params.json（tune=yes の回は上の Tune ranking model が
+      # その週のデータで探索し直したもの）。列の指紋が違えば学習しない（前回のモデルのまま）。失敗しても日次予測は動く（ランキング
+      # 学習を出さないだけ）
+      - name: Train ranking model
+        if: steps.scope.outputs.ltr == 'yes'
+        timeout-minutes: 30
+        continue-on-error: true
+        run: python3 research/train_ltr.py 2>&1 | tee -a retrain.log
+
+      # 直近5営業日の組のランキング学習（research/ltr5.py。実験117 の W5）の木の形の探索（research/tune_ltr5.py。実験117 と同じ:
+      # run_tuning.py と同じ打ち切り・判断日を暦月の塊にした5分割（前後4営業日を訓練から外す）・種0・50試行・木200本固定・目的は
+      # 検証分割の組の中の NDCG@5）。運用者の選択「画面に並べて確かめる」（2026-10-30。docs/MODEL_ADOPTION_RULES.md §82-6）。
+      # 実験117 の実測で 31.6分。最後まで終わったときだけ research/ltr5_params.json を書き換える（落ちたり時間切れになったりしたら
+      # 前の木の形のまま。continue-on-error）。ジョブの上限（330分）までの残りが、この探索の上限（60分）と学習・上げ・コミットの分
+      # （あわせて45分）に足りなければ探索しない
+      - name: Tune 5-day ranking model
+        if: inputs.tune == 'yes' && steps.scope.outputs.ltr5 == 'yes'
+        timeout-minutes: 60
+        continue-on-error: true
+        env:
+          JOB_START: ${{ steps.start.outputs.t }}
+        run: |
+          left=$(( 330 * 60 - ($(date +%s) - JOB_START) ))
+          if [ "$left" -lt $(( 105 * 60 )) ]; then
+            echo "ジョブの上限まで残り $((left / 60))分。探索（上限60分）と学習・上げ・コミットに足りないので探索しない（前の木の形のまま）" | tee -a retrain.log
+            exit 0
+          fi
+          python3 research/tune_ltr5.py 2>&1 | tee -a retrain.log
+
+      # 直近5営業日の組のランキング学習（research/train_ltr5.py。research/model/models/ltr5/ に置く）。買いの規則には使わず、
+      # 予測タブとスプレッドシートに「直近5営業日の中の順位」と3条件・4条件の印を並べるためのもの（§82-6）。木の形は
+      # research/ltr5_params.json。列の指紋が違えば学習しない（前回のモデルのまま）。失敗しても日次予測は動く（5日の順位を出さない
+      # だけ）
+      - name: Train 5-day ranking model
+        if: steps.scope.outputs.ltr5 == 'yes'
+        timeout-minutes: 30
+        continue-on-error: true
+        run: python3 research/train_ltr5.py 2>&1 | tee -a retrain.log
 
       # 1モデルの失敗で他を止めない作りにしたぶん、静かに欠けたまま
       # 運用が続くおそれがある。どれがいつ学習されたのかを毎週要約に出す
@@ -247,23 +355,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 基準モデルを作らない回（only）には model.txt が無い。あるときだけ上げる
-          if [ -f research/model/model.txt ] && [ -f research/model/oof.parquet ]; then
-            bash scripts/gh_release_upload.sh data-raw research/model/model.txt research/model/oof.parquet
-          else
-            echo "基準モデルは作っていないので上げない"
-          fi
-          # 5モデルぶん。ファイル名が algo ごとに衝突するので、
-          # Release のアセット名に algo を入れて上げ直す
-          shopt -s nullglob
-          for d in research/model/models/*/; do
-            a=$(basename "$d")
-            for f in model.joblib oof.parquet; do
-              [ -f "$d$f" ] || continue
-              cp "$d$f" "/tmp/${a}_${f}"
-              bash scripts/gh_release_upload.sh data-raw "/tmp/${a}_${f}"
-            done
-          done
+          python3 research/model_artifacts.py publish
           # Optuna の試行 DB も上げる。来週これを降ろして試行を引き継ぐ
           if [ -f research/_data/optuna_multi.db ]; then
             bash scripts/gh_release_upload.sh data-raw research/_data/optuna_multi.db
@@ -278,6 +370,14 @@ jobs:
           { echo '### パラメータの変化（先週 -> 今週）'
             echo '```diff'
             git diff -- research/lgbm_params.json | tail -n +5 | head -60 || true
+            echo '```'
+            echo '### ランキング学習の木の形の変化（先週 -> 今週）'
+            echo '```diff'
+            git diff -- research/ltr_params.json | tail -n +5 | grep -E '^[-+] ' | head -30 || true
+            echo '```'
+            echo '### 直近5営業日の組のランキング学習の木の形の変化（先週 -> 今週）'
+            echo '```diff'
+            git diff -- research/ltr5_params.json | tail -n +5 | grep -E '^[-+] ' | head -30 || true
             echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           # 以前コミットしていたバイナリを追跡から外す（1回だけ効く）
           git rm --cached -q --ignore-unmatch research/model/model.txt \
@@ -285,7 +385,8 @@ jobs:
             'research/model/models/*/model.joblib' \
             'research/model/models/*/oof.parquet' 
           git add -A research/model/meta.json research/lgbm_params.json \
-            research/multi_params.json research/model/models/*/meta.json
+            research/multi_params.json research/ltr_params.json research/ltr5_params.json \
+            research/model/models/*/meta.json
           if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
           git commit -m "chore(model): 週次の再学習 ($(date -u '+%Y-%m-%d'))"
           for i in 1 2 3 4; do

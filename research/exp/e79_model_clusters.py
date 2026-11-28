@@ -68,13 +68,16 @@ from train_production import OOF_MIN_TRAIN_MONTHS, OOF_STEP_MONTHS, OOF_TEST_MON
 DATA_DIR = lab.DATA_DIR
 OUT_DIR = os.path.join(DATA_DIR, "oof")
 OUTCOME = lab.OUTCOME                                   # ret_o1_20
-#: 画面の並び（本番の4 → 1.5σ の4 → 1.8σ の4）
-MODELS = tuple(M.ALGOS) + tuple(M.VARIANTS)
+#: 実験79〜88 の4学習器（当時の 1.2σ の4本）。2026-11-02 の予測からロジスティック回帰を毎日の採点から外したが
+#: （models.RETIRED）、実験は記録どおり logit を含む4本のまま（models.ALGOS に頼らない）
+ALGOS4 = ("lgbm", "xgb", "cat", "logit")
+#: 当時の画面の並び（1.2σ の4 → 1.5σ の4 → 1.8σ の4）
+MODELS = ALGOS4 + tuple(M.VARIANTS)
 #: ラベルの列をどの out-of-fold から取るか（ラベル違いの OOF の label はそのモデルのラベル）
 LABEL_FROM = {M.BASELINE: "label_k12", "lgbm_k15": "label_k15", "lgbm_k18": "label_k18"}
 TREES = tuple(a for a in MODELS if M.base_algo(a) in ("lgbm", "xgb", "cat"))
 LOGITS = tuple(a for a in MODELS if M.base_algo(a) == "logit")
-BASE4 = tuple(M.ALGOS)
+BASE4 = ALGOS4
 K15 = tuple(M.variants_of(1.5))
 K18 = tuple(M.variants_of(1.8))
 

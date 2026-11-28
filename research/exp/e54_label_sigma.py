@@ -58,7 +58,7 @@ import e53_objective_tuning as E53  # noqa: E402
 OOF_DIR = os.path.join(lab.DATA_DIR, "oof")
 OUTCOME = lab.OUTCOME
 HORIZON = B.RISE_HORIZON
-K0 = float(B.VOL_NORM_K)
+K0 = 1.2  # Historical experiment reference; independent of current production label
 #: 終盤の必要水準はしきい値の何倍か（本番: 0.10 / 0.20）
 END_MULT = float(B.END_RATIO / B.RISE_THRESHOLD)
 #: 腕 → (σ の列, k を正例率でそろえるか)。σ の列が None なら固定%

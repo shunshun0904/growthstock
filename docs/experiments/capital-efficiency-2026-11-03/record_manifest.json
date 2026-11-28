@@ -1,0 +1,27 @@
+{
+  "baseline_commit": "76abee39d8ad535290918739e1a6f30cab320a4a",
+  "snapshot_date": "2026-11-03",
+  "production_unchanged": true,
+  "raw_rows_and_predictions_included": false,
+  "notebook_reexecutes_from_aggregates_only": true,
+  "files": {
+    "README.md": "3d295bd1de51171fcf363021a7f5c881a0ec0dc8840c3e9a6034e33a11c0c086",
+    "archive_display_verification.json": "faa5736f2238172cf7441c8c047d17b07e118298a15d83c5be4c42ff67bd94c9",
+    "comparison_summary.csv": "130795efdf6877ff6699d48ed45ab11357618b467bf9cd1d8759635af2e863db",
+    "completed.json": "ff6b0a1f57d0b198dd471cb1d45df0877c89ece89ba0fea61b353ef1566eac77",
+    "coverage.csv": "2ba0be16d2f856c20f226f9baf15fefddb7cf0cbfa3aaa1ccae782809ed5dd23",
+    "coverage_by_year.csv": "6e8e6a8e006a105d8addf9b2cdab124d6957050d105dd366bc00596df4d24bb5",
+    "data_checks.json": "d32be5dfedb412d3c726fad45fbbe91c280588953f6865bac9e687b38842f861",
+    "experiment_plan.json": "60a59d473c49f8cae88be42ef75fb5aed842ecbf31fbd56bfeda946e14bdc124",
+    "feature_summary.csv": "4d2c3ba36fc974c3c7c82bfa034a092f2b02ba59e6bfe89c2a0daf3b93315e40",
+    "inputs.json": "a824b714646a5d6d70114c1bf3b107473b16e46c4d9c457dfa7e8ad462b8ba35",
+    "numeric_verification.json": "b27fb0e6413088596681838014e8a278d1c7e2c4f21533af3125b9e66cf375c6",
+    "quarter_results.csv": "aebba76bf75d194d4e08bb1665c95e7b221677cb39d6afc89c9d0219465644e8",
+    "report.html": "7141827eb8081adb55a037dd951382c217c9253894a2c8cbcfdedabe9b8cfab1",
+    "report.ipynb": "a3f2956165f93574d6412f3c70caebece0fbd48828ebb39fc6656ef799ef81dd",
+    "results.csv": "f5c47b87308b04cb9440f09c35a15fd0b6428dff7bdd981fca964682002b3ed8",
+    "seed_results.csv": "789a40e432cebae8a39cda79402430b657d424420988df4303dab9a67e72cbaa",
+    "split_checks.json": "335fb91deef61ebd739982fa4d32ea83158ec0fc56ef806685fd58a4f4b15550",
+    "verification.json": "16128eb546afb5312a2b680153082204327ece73d7f95981bd2c9234cbbb6d34"
+  }
+}

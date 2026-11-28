@@ -55,8 +55,12 @@ import tuning_multi as TM  # noqa: E402
 #: 同日夜の訂正: 「ロジスティックはシグマ光機の件もあり大事な気がしてきた」→ ロジスティック回帰は
 #: 予測と画面に戻す（MLP は外したまま）。同夜の追加指示で実験（モデル改善）にも含める（§7 の票は木3つのまま）。
 #: 外したモデルは RETIRED に残す（過去の予測ファイル・実験の記録を読むため。学習も採点もしない）
-ALGOS = ("lgbm", "xgb", "cat", "logit")
-RETIRED = ("mlp",)
+#: 運用者の指示（2026-10-29）「次週からロジスティック回帰をなくしてください。…ダッシュボードから非表示にするだけでなく、
+#: ロジスティックに関して週次の更新自体いらないです」→ AskUserQuestion「月曜の予測から」で、ロジスティック回帰（logit。
+#: 1.5σ の logit_k15 も）を週次の学習・毎日の採点・画面・スプレッドシートから外した（2026-11-02 の予測から）。
+#: 学習器の比べ方の実験（tuning_multi.ALGOS）には残す
+ALGOS = ("lgbm", "xgb", "cat")
+RETIRED = ("mlp", "logit")
 
 #: 基準モデル。日次予測の順位・スコア帯・較正・SHAP・追跡ファイルは
 #: すべてこのモデルのもの。research/model/{model.txt, meta.json, oof.parquet}
@@ -89,11 +93,19 @@ base_algo = TM.base_algo
 label_k = TM.label_k
 variants_of = TM.variants_of
 
-#: 画面・スプレッドシートに並べる順（本番の4モデル → 1.5σ の4本 → 1.8σ の4本）
-LINEUP = ALGOS + tuple(VARIANTS)
+#: 外したラベル違いのモデル。運用者の依頼（2026-10-24）「1.8σの週次学習はなくしたはずです」→ AskUserQuestion
+#: 「採点・表示からも外す」で、1.8σ の4本は週次の学習・毎日の採点・画面・スプレッドシートから外した。
+#: 2026-11-02 の予測からはロジスティック回帰の 1.5σ（logit_k15）も外した（上の RETIRED の logit と同じ指示）。
+#: RETIRED（mlp・logit）と同じく VARIANTS には残す（過去の予測ファイルと実験78〜88 などの記録を読むため。学習も採点もしない）
+RETIRED_VARIANTS = ("lgbm_k18", "xgb_k18", "cat_k18", "logit_k18", "logit_k15")
+#: 今使っているラベル違いのモデル（1.5σ の木3本）
+ACTIVE_VARIANTS = tuple(a for a in VARIANTS if a not in RETIRED_VARIANTS)
+
+#: 画面・スプレッドシートに並べる順（1.2σ の3本 → 1.5σ の3本。2026-11-02 の予測から。それまでは各4本）
+LINEUP = ALGOS + ACTIVE_VARIANTS
 #: train_multi.py が作れるもの全部（基準モデル以外 + ラベル違い）。既定の対象は EXTRA（日曜の週次）で、
 #: ラベル違いは土曜の Retrain Weekly が --models で名指しして作る（2026-10-11 夜。8本を日曜に足すと長すぎる）
-MULTI = EXTRA + tuple(VARIANTS)
+MULTI = EXTRA + ACTIVE_VARIANTS
 
 #: 画面に出す日本語名。棒グラフのラベルに使う
 JA = {
@@ -102,7 +114,7 @@ JA = {
     "cat": "CatBoost",
     "logit": "ロジスティック回帰",
     "mlp": "ニューラルネット",
-    "lgbm_k15": "LightGBM（1.5σ）", "xgb_k15": "XGBoost（1.5σ）", "cat_k15": "CatBoost（1.5σ）",
+    "lgbm_k15": "LightGBM（+15%）", "xgb_k15": "XGBoost（+15%）", "cat_k15": "CatBoost（+15%）",
     "logit_k15": "ロジスティック回帰（1.5σ）",
     "lgbm_k18": "LightGBM（1.8σ）", "xgb_k18": "XGBoost（1.8σ）", "cat_k18": "CatBoost（1.8σ）",
     "logit_k18": "ロジスティック回帰（1.8σ）",
@@ -122,16 +134,17 @@ SHORT = {
 }
 
 #: それぞれ何を見ているか。画面の説明に使う（学習のときに meta.json の note に写り、日次予測が predictions.json に出す）。
-#: 12本とも本番で使うモデルなので、1.2σ のモデルを「本番」と呼ばない（運用者の指示 2026-10-17）
+#: どのモデルも毎日の予測で使うので、1.2σ のモデルを「本番」と呼ばない（運用者の指示 2026-10-17。当時は12本、2026-10-24 から8本、
+#: 2026-11-02 から6本。外したモデルの説明は過去の予測ファイルを読むために残す）
 NOTE = {
     "lgbm": "勾配ブースティング（葉単位で成長）。スコア帯・較正・追跡の基準モデル",
     "xgb": "勾配ブースティング（深さ単位で成長）。木の形が違う",
     "cat": "勾配ブースティング（欠損と正則化の扱いが違う）",
     "logit": "線形モデル。特徴量の足し算で判断するので、木とは外す銘柄が違う",
     "mlp": "ニューラルネット。滑らかな交互作用を見る。木とも線形とも違う",
-    "lgbm_k15": "LightGBM を、到達しきい値 1.5σ（必要な上昇率が 1.2σ の 1.25倍）のラベルで学習（学習器・列は 1.2σ と同じ）。今日の戦略の規則の3本の1つ",
-    "xgb_k15": "XGBoost を、到達しきい値 1.5σ のラベルで学習（学習器・列は 1.2σ と同じ）。今日の戦略の規則の3本の1つ",
-    "cat_k15": "CatBoost を、到達しきい値 1.5σ のラベルで学習（学習器・列は 1.2σ と同じ）。今日の戦略の規則の3本の1つ",
+    "lgbm_k15": "固定+15%到達・終盤+7.5%以上・20日目MA5≧MA20。翌営業日の寄り基準",
+    "xgb_k15": "固定+15%到達・終盤+7.5%以上・20日目MA5≧MA20。翌営業日の寄り基準",
+    "cat_k15": "固定+15%到達・終盤+7.5%以上・20日目MA5≧MA20。翌営業日の寄り基準",
     "logit_k15": "ロジスティック回帰を、到達しきい値 1.5σ のラベルで学習（線形なので並びは 1.2σ とほぼ同じ）。規則には使わない",
     "lgbm_k18": "LightGBM を、到達しきい値 1.8σ（必要な上昇率が 1.2σ の 1.5倍）のラベルで学習（学習器・列は 1.2σ と同じ）。規則には使わない",
     "xgb_k18": "XGBoost を、到達しきい値 1.8σ のラベルで学習（学習器・列は 1.2σ と同じ）。規則には使わない",
@@ -174,10 +187,13 @@ def save(algo: str, model, meta: Dict, oof: pd.DataFrame,
     os.makedirs(d, exist_ok=True)
     joblib.dump(model, os.path.join(d, "model.joblib"), compress=3)
     import json
+    oof.to_parquet(os.path.join(d, "oof.parquet"), index=False, compression="zstd")
+    if "labelSpec" in meta:
+        import model_artifacts as A
+        meta["artifactHashes"] = {n: A.sha256(os.path.join(d, n))
+                                  for n in ("model.joblib", "oof.parquet")}
     with open(os.path.join(d, "meta.json"), "w", encoding="utf-8") as fh:
         json.dump(meta, fh, ensure_ascii=False, indent=2)
-    oof.to_parquet(os.path.join(d, "oof.parquet"), index=False,
-                   compression="zstd")
     return d
 
 
@@ -203,7 +219,8 @@ def load(algo: str, root: str = MODEL_DIR):
 
 
 def available(root: str = MODEL_DIR) -> List[str]:
-    """保存済みのモデル名を LINEUP の順（本番の4モデル → ラベル違い）で返す。"""
+    """保存済みのモデル名を LINEUP の順（1.2σ の3本 → 1.5σ の3本）で返す。外したモデル（RETIRED・RETIRED_VARIANTS）は
+    Release から落ちてきて置き場にあっても返さない（採点しない）。"""
     return [a for a in LINEUP
             if os.path.exists(os.path.join(sub_dir(a, root), "model.joblib"))]
 

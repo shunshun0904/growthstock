@@ -1,0 +1,30 @@
+{
+  "files": {
+    "/workspace/artifacts/growthstock-theoretical-value/dataset.parquet": "72dd254c66a3b1e792ed15f17dd5a3c28dc2e7af242e55a0b41e715fc0498daa",
+    "/workspace/scratch/production-fixed-return/panel_bounded.parquet": "7beb7c490324c076be0ecae41ea8102262d323237041b5ead427dd61e9fef1f7",
+    "/workspace/growthstock/research/exp/e121_theoretical_value_retune.py": "40a36b250ca33eded65187fcf60b3597b5718369e45460cb42bf8e3ff3bcc713",
+    "/workspace/growthstock/research/exp/e120_theoretical_value.py": "53bfa23f39672d8dd0a5be4e329ae7e53b0f889a7f07436c7c5dd801be39a0f1",
+    "/workspace/growthstock/research/exp/e119_capital_efficiency.py": "a94da09677b5c1e318253877490c0c3ddbe81cc7ae38e6f5a7af949e92a83340",
+    "/workspace/growthstock/research/theoretical_value.py": "8d08963a3817962e04e4d839117b86d3f6e4707197ce9d10ec5112dbb56a36c5",
+    "/workspace/growthstock/research/features.py": "cf44e9760b10712a1e59d62b74e45d2e6779a36cf7dc2c233926e30cf016f144",
+    "/workspace/growthstock/research/label_specs.py": "586620269ed3e6d1b642f016551f64bcc83fabf50b9e560793656bec926fad14",
+    "/workspace/growthstock/research/ltr.py": "3ec668f80254e5cdaff5b7ade5dce6ae9adbdccab43ed5453f47d03fef2c6f73",
+    "/workspace/growthstock/research/ltr5.py": "43ffb51d3d1fe3216f626bbed8155bc141bba62608e25988a817bcce2ee65996",
+    "/workspace/growthstock/research/live_track.py": "1753f5c23a484537b1d50a8d5111825c05f62060b900a6ce9b7af52759f3dc4a",
+    "/workspace/growthstock/research/train_model.py": "5b76588f3c5561da3fab13aa6b93c55eb98464380237d4b9c1fdda75473e4154",
+    "/workspace/growthstock/research/tuning.py": "9c5e7285f40a23c054672787d71679217cc439f0d3ce8a93d2c5e35ce6f31371",
+    "/workspace/growthstock/research/lgbm_params.json": "9158a693e43750cf60b6cb6d4b6cac35ff2a7bb27e76c4a27b5905b5f4796bc6",
+    "/workspace/growthstock/research/multi_params.json": "bb66ab29dd34a719d31ca71f14025fe29d58f4182f91f34050faca8f6ecc1221",
+    "/workspace/growthstock/research/ltr_params.json": "2c2803606c69d97ffb2b257d4e92a5f775c6c53cbaff193da1b8487ffcee54ab",
+    "/workspace/growthstock/research/ltr5_params.json": "3bc6cebf735728987bd276be89582027667422008458b87bad3f55cdd25532ea"
+  },
+  "runtime": {
+    "python": "3.12.14",
+    "numpy": "2.3.5",
+    "pandas": "2.2.3",
+    "sklearn": "1.8.0",
+    "lightgbm": "4.7.0",
+    "optuna": "4.9.0"
+  },
+  "experiment_sha256": "40a36b250ca33eded65187fcf60b3597b5718369e45460cb42bf8e3ff3bcc713"
+}

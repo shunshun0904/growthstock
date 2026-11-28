@@ -41,7 +41,7 @@ def frame(n=400, seed=0):
                        "Date": pd.to_datetime(rng.choice(pd.bdate_range("2023-01-04", "2025-12-30"), n)),
                        "vol_20d": vol, "future_rise": rise, "end_level": end, "uptrend_end": up,
                        "ret_o1_20": end, "ret_o1_40": end * 1.2})
-    need, end_need = B.rise_thresholds(df["vol_20d"], B.DEFAULT_RISE)
+    need, end_need = B.rise_thresholds(df["vol_20d"], __import__("dataclasses").replace(B.DEFAULT_RISE, vol_norm_k=1.2))
     df["label"] = ((df["future_rise"] >= need.to_numpy()) & (df["end_level"] >= end_need.to_numpy())
                    & (df["uptrend_end"] == 1.0)).astype(float)
     del sig

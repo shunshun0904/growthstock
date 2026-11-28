@@ -42,7 +42,7 @@ MACRO: List[tuple] = [
     ("決算（変化）", ["fund_growth", "fund_trend", "fund_streak", "turnaround",
                       "progress", "guidance", "progress_seasonal", "progress_seasonal_pct"],
      "前期との差分・加速・連続性。「良くなっているか」を測る。今回の主役"),
-    ("バリュエーション・配当", ["valuation", "dividend", "cashflow", "efficiency"],
+    ("バリュエーション・配当", ["valuation", "dividend", "cashflow", "efficiency", "financial_inputs"],
      "株価と決算の比。割高・割安と、利益の質"),
     ("株価・ブレイク", ["price", "breakout", "breakout_shape", "drawdown", "recent_change"],
      "高値からの位置と、その日の抜け方・抜けた土台の形・下げの深さ・直近の増減"),
@@ -510,6 +510,23 @@ NAME_JA = {
 NAME_JA.update({c: TX.JA[c] for c in TX.COLUMNS})
 COL_JA.update({c: f"テクニカル指標（{TX.GROUP_JA[TX.GROUP_OF[c]]}）: {TX.JA[c]}。日足の t の引けまでの値だけから数える"
                   f"（research/technicals.py。実験105）" for c in TX.COLUMNS})
+
+# 直近5営業日の組のランキング学習（research/ltr5.py。実験117 の W5。2026-10-30 から週次で学習。docs/MODEL_ADOPTION_RULES.md
+# §82-6）だけが使う値動き4列。候補の日（高値更新の日）から判断日までの動き。定義は ltr5.pool_frame
+NAME_JA.update({"r5_days": "候補の日からの営業日数", "r5_ret": "候補の日からの騰落", "r5_high": "候補の日からの最高値の伸び",
+                "r5_low": "候補の日からの最安値の下げ"})
+COL_JA.update({
+    "r5_days": "候補の日から判断日までの営業日数（0 = 判断日に入った候補。0〜4）。直近5営業日の組のランキング学習だけが使う",
+    "r5_ret": "候補の日の終値から判断日の終値までの騰落（比。調整後終値）。直近5営業日の組のランキング学習だけが使う",
+    "r5_high": "候補の日の翌営業日〜判断日の高値の最大 ÷ 候補の日の終値 − 1（判断日に入った候補は欠測）。直近5営業日の組の"
+               "ランキング学習だけが使う",
+    "r5_low": "候補の日の翌営業日〜判断日の安値の最小 ÷ 候補の日の終値 − 1（判断日に入った候補は欠測）。直近5営業日の組の"
+              "ランキング学習だけが使う",
+})
+
+
+NAME_JA.update({'tv_beta': '対TOPIXベータ（縮小推定）', 'tv_beta_n': 'ベータ推定の有効観測数', 'tv_rf': '国債10年実効利回り', 'tv_rf_age': '金利基準日からの日数', 'tv_fin_age': '財務開示からの日数（評価用）', 'tv_earnings_yield': 'TTM利益利回り（評価用）', 'tv_book_yield': '純資産株価比率（評価用）', 'tv_div_yield': '実績配当利回り（評価用）', 'tv_payout': '実績配当性向（評価用）', 'tv_ri_valid_fraction': '残余利益評価の有効シナリオ割合', 'tv_ddm_valid_fraction': '配当割引評価の有効シナリオ割合', 'missing_tv_ri': '残余利益評価の欠損フラグ', 'missing_tv_ddm': '配当割引評価の欠損フラグ'})
+COL_JA.update({k: v + "。E121 Cと同じ計算。財務と金利は候補日より前に利用可能な値を使う。" for k, v in NAME_JA.items() if k.startswith("tv_") or k.startswith("missing_tv_")})
 
 
 def name_ja(col: str) -> str:

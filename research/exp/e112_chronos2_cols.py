@@ -5,7 +5,7 @@ out-of-fold・32窓の分離力（PR-AUC）が上がるか（§7。腕は「列�
 
 運用者の依頼（2026-10-23）「こちらの論文（TSFM）を使った金融時系列リターン予測の論文ですが、私が運用している本運用モデルに
 導入できないか考えたいです」（Noguer i Alonso・Pereira Franklin「Pretrained Time-Series Foundation Models for Financial Return
-Forecasting」arXiv 2606.27100）→ 調べた答え（docs/MODEL_ADOPTION_RULES.md §75）: 置き換え・混ぜるは勧めない（論文自身が売買の
+Forecasting」arXiv 2606.27100）→ 調べた答え（docs/MODEL_ADOPTION_RULES.md §106。作業ブランチでは §75 だった）: 置き換え・混ぜるは勧めない（論文自身が売買の
 優位の証拠ではないと書き、比べた相手は1銘柄ごとに一から学ぶ深層学習で、木のモデルは入っていない。実験109 でも Chronos-2 は
 基準モデルを下回った）。まだ試していない入れ方で筋が通るのは「TSFM の予測を列として足す」だけ（実験109 の株価だけの腕 Z0 は
 基準モデルを下回ったが、当てる力はあった: lift 1.33・95%区間の下端 1.28）→ 運用者の選択（AskUserQuestion）「列として足す

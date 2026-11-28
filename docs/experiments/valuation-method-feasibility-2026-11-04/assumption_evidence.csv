@@ -1,0 +1,11 @@
+check,rows,median,p05,p95,within_assumed_range_pct,note
+historical_sales_growth,5771,0.05501409798263279,-0.10593176705977753,0.2802235167311826,57.338416219026165,One realised YoY change per sample; not a forecast-error distribution; repeated companies/years included
+historical_margin_relative_change,5602,0.03378091064375632,-0.4699651984001971,1.1649607435516574,56.12281328097109,Compared with assumed +/-20% margin prior; actual YoY changes are not prediction errors
+historical_effective_tax_rate,5540,0.3035812756036653,0.1784461120887947,0.46477940740439877,62.77978339350181,Company effective rate differs from marginal tax rate required by DCF
+historical_interest_over_ending_debt,5780,0.009208865071014982,0.00235640648011782,0.042714134818513654,34.39446366782007,"Ending debt subtotal, not average debt; historical coupon cost differs from future marginal funding cost"
+disclosed_capex_over_cash_capex,904,1.0233957862619314,0.7143176484719144,1.7201849953663348,73.67256637168141,Limited overlapping rows cannot establish that the two investment definitions are interchangeable
+annual_NWC_ratio_change_pp,5749,0.23941598889291732,-5.374084528959409,6.102518285024297,,Forecast freezes current working-capital/sales ratio; only AR+inventory-AP are included
+terminal_PV_ratio_cash,939,0.845453622408875,0.7197628903999077,1.1625403550644051,25.66560170394036,Ratio>80% indicates strong terminal-assumption dependence
+reverse_growth_ERP3_to7_width_pp_cash,840,17.146311078778858,8.648788445169977,30.274527446801386,,Other assumptions held fixed; difference in annual growth percentage points
+terminal_PV_ratio_flex,5152,0.8485147182647763,0.7377113531773296,1.1101709168026825,24.49534161490683,Ratio>80% indicates strong terminal-assumption dependence
+reverse_growth_ERP3_to7_width_pp_flex,4586,16.902285240393773,9.477177169059392,31.584588075644245,,Other assumptions held fixed; difference in annual growth percentage points

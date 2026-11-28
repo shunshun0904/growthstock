@@ -53,6 +53,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import build_dataset as B  # noqa: E402
 import features as F  # noqa: E402
 import lab  # noqa: E402
+import label_specs as LS
 import models as M  # noqa: E402
 import tuning_multi as TM  # noqa: E402
 from train_model import EMBARGO_DAYS, HOLDOUT_MONTHS, holdout_bounds  # noqa: E402
@@ -62,7 +63,7 @@ N_TRIALS = 50
 
 def why_retune(prev: dict, train_to: str, sig: str,
                trees: Optional[int] = None, scheme: Optional[str] = None,
-               objective: Optional[str] = None) -> Optional[str]:
+               objective: Optional[str] = None, label_spec=None) -> Optional[str]:
     """
     保存済みの探索（prev = multi_params.json の _cv）を使えるか。
     使えるなら None、探索し直すなら理由を返す。
@@ -77,6 +78,8 @@ def why_retune(prev: dict, train_to: str, sig: str,
     scheme は探索の分割方式（tuning.PRODUCTION_CV）。違う分割で選んだ探索も使わない
     （本番の分割を変えたときに、前の分割で選んだパラメータを使い続けないため。§32）。
     """
+    if label_spec is not None and prev.get("label_spec") != label_spec:
+        return "目的変数の定義が違います"
     if not prev:
         return "探索済みパラメータが無い"
     if prev.get("features_sig") != sig:
@@ -97,12 +100,15 @@ def why_retune(prev: dict, train_to: str, sig: str,
 def main() -> int:
     args = [a for a in sys.argv[1:] if not a.startswith("-")]
     force = "--force" in sys.argv
-    # RETIRED（2026-10-09 に外した mlp）は探索しない。ラベル違いのモデル（TM.VARIANTS。8本）は既定に入れず、
-    # 名指ししたときだけ探索する（土曜の Retrain Weekly が only= で回す。2026-10-11 夜）
+    # RETIRED（2026-10-09 に外した mlp・2026-11-02 の予測から外したロジスティック回帰）は名指ししても探索しない。ラベル違いの
+    # モデル（M.ACTIVE_VARIANTS。1.5σ の木3本）は既定に入れず、名指ししたときだけ探索する（土曜の Retrain Weekly が only= で
+    # 回す。2026-10-11 夜）。外したラベル違い（M.RETIRED_VARIANTS。1.8σ の4本と logit_k15）も名指ししても探索しない
+    # （学習側の train_multi.py も止まる）
     algos = args or [a for a in TM.ALGOS if a not in M.RETIRED]
-    unknown = [a for a in algos if a not in TM.ALGOS and a not in TM.VARIANTS]
+    known = [a for a in TM.ALGOS if a not in M.RETIRED] + list(M.ACTIVE_VARIANTS)
+    unknown = [a for a in algos if a not in known]
     if unknown:
-        raise SystemExit(f"知らないモデル: {unknown}（{', '.join(list(TM.ALGOS) + list(TM.VARIANTS))} のいずれか）")
+        raise SystemExit(f"知らないモデル: {unknown}（{', '.join(known)} のいずれか）")
     df = lab.frame()
     preset = F.DEFAULT_PRESET
     cols = F.columns(preset)
@@ -138,25 +144,20 @@ def main() -> int:
         # （通常の週次実行では5営業日ぶん進むので、必ず探索が走る）
         why = why_retune(prev, train_to, sig,
                          TM.N_ESTIMATORS if TM.is_tree(algo) else None,
-                         scheme=TM.tuning.PRODUCTION_CV, objective=TM.tuning.PRODUCTION_OBJECTIVE)
+                         scheme=TM.tuning.PRODUCTION_CV, objective=TM.tuning.PRODUCTION_OBJECTIVE, label_spec=LS.for_model(algo))
         if why is None and not force:
             print(f"  [{algo}] 探索済みを読む "
                   f"(PR-AUC {prev['mean_pr_auc']:.4f} / 訓練最終日 {train_to})")
             continue
         print(f"  [{algo}] 探索する: {why or '--force'}")
         t0 = time.time()
-        k = TM.label_k(algo)
-        sub_a = sub
-        if k is not None:
-            # ラベル違いのモデルは k のラベルで探索する（列・分割・目的関数は本番と同じ）
-            sub_a = sub.copy()
-            sub_a["label"] = B.rise_label_for_k(sub_a, k)
-            sub_a = sub_a[sub_a["label"].notna()]
-            print(f"  [{algo}] ラベル {k:.1f}σ: 正例率 {sub_a['label'].mean()*100:.2f}%（{len(sub_a):,}件）")
-        store[algo] = TM.tune(algo, sub_a, cols, n_trials=N_TRIALS)
+        sub_a = sub.copy()
+        sub_a["label"] = LS.labels(sub_a, algo)
+        sub_a = sub_a[sub_a["label"].notna()]
+        print(f"  [{algo}] {LS.name(algo)} / {len(sub_a):,}件")
+        store[algo] = TM.tune(algo, sub_a, cols, n_trials=N_TRIALS,
+                              label_spec=LS.for_model(algo))
         store[algo]["_cv"]["preset"] = preset
-        if k is not None:
-            store[algo]["_cv"]["label_k"] = float(k)
         # 途中で落ちても結果を失わないよう、1つ終わるたびに保存する
         TM.save(store)
         print(f"  [{algo}] {time.time()-t0:.0f}秒")

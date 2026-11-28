@@ -81,6 +81,11 @@ TARGETS = [
      "投資部門別（週次）。PubDate がその日の行を数える"),
     ("shortsale", "/markets/short-sale-report", "try:disc_date,calc_date,date",
      "空売り残高報告。日付の引数名が未確認なので順に試す"),
+    # --- 2026-11-18 追加: 分足（アドオン「株価 分足・ティック」。research/minute_bars.py）---
+    # 公表時刻は公式の記載を見つけられなかった（日次の更新とだけある）。date= だけでは
+    # 全銘柄で数十ページになるので、JPX（86970。仕様のサンプルと同じ銘柄）の1銘柄で見る
+    ("minute", "/equities/bars/minute", "code:86970",
+     "分足（アドオン）。1銘柄の行数で当日ぶんが出たかを見る"),
 ]
 
 
@@ -97,6 +102,8 @@ def _params(kind: str, day: dt.date) -> dict:
         return {"from": day.isoformat(), "to": day.isoformat()}
     if kind == "date:prev_friday":
         return {"date": _prev_friday(day).isoformat()}
+    if kind.startswith("code:"):
+        return {"code": kind.split(":", 1)[1], "date": day.isoformat()}
     return {"date": day.isoformat()}
 
 

@@ -41,7 +41,16 @@
 
 公開ログには件数と最新日だけを出す（銘柄名・株価・損益の値は出さない）。
 
-  GOOGLE_SERVICE_ACCOUNT_JSON='{...}' GSHEET_ID=... python3 research/holdings_sheet.py
+v1 と v2 のタブ（運用者の依頼 2026-10-30「…予測＆購買記録をv２として新規に…今後は来週以降は、そちらに記録して欲しいです。」
+→「別スプレッドシートはやっぱやめましょう。シークレットの登録とか面倒なので。」→「同じシートに v2 のタブ」）
+  --book v1  今のタブ（取引の記録・保有の推移・予測ログ）。予測日が export_sheets.V2_FROM（2026-11-02）より前の買いと、
+             その売り・指値・取消（10月に買った銘柄は売るまでここで追う）
+  --book v2  v2 のタブ（取引の記録 v2・保有の推移 v2・予測ログ v2）。予測日が V2_FROM 以降の買い（予測日が無ければ、買った日が
+             V2_FROM より後）と、その売り・指値・取消。予測ログ v2 がまだ無ければ（最初の予測を書く前）何もしない
+  売り・指値の台帳は、受け皿の全件で保有を作ったときに付く買いの台帳（event_books）。--book all（既定）は分けない（前と同じ）
+
+  GOOGLE_SERVICE_ACCOUNT_JSON='{...}' GSHEET_ID=... python3 research/holdings_sheet.py --book v1
+  GOOGLE_SERVICE_ACCOUNT_JSON='{...}' GSHEET_ID=... python3 research/holdings_sheet.py --book v2
   python3 research/holdings_sheet.py --dry-run   # シートを読んで計算だけする（書かない）
 """
 from __future__ import annotations
@@ -65,6 +74,10 @@ import trades_inbox as TI  # noqa: E402
 
 TAB = "保有の推移"
 LOG_TAB = "取引の記録"
+#: 台帳ごとのタブ（保有の推移, 取引の記録, 予測ログ）。v2 は同じスプレッドシートの別のタブ（2026-11-02 の予測から）
+BOOKS = ("all", "v1", "v2")
+BOOK_TABS = {"all": (TAB, LOG_TAB, ES.SHEET_TITLE), "v1": (TAB, LOG_TAB, ES.SHEET_TITLE),
+             "v2": (f"{TAB} v2", f"{LOG_TAB} v2", ES.V2_TITLE)}
 #: 「指値%」は指値の変更の行だけ（買値からの %）。2026-10-14 に右端に足した（前からあるタブにも右端に足される）
 LOG_HEADER = ["id", "受付", "種類", "予測日", "コード", "銘柄名", "日付", "価格", "株数",
               "取消の対象", "メモ", "指値%"]
@@ -118,6 +131,8 @@ class Position:
     target_from: Optional[pd.Timestamp] = None  # 変えた指値が効く最初の日
     peak: Optional[float] = None               # 20日目まで（売った日まで）の日中の高値の最大
     peak_day: Optional[pd.Timestamp] = None
+    #: この保有を作った取引の記録の id（買い・売り・指値。台帳を分けるのに使う。event_books）
+    ids: List[str] = field(default_factory=list)
 
     @property
     def jq_code(self) -> str:
@@ -282,7 +297,8 @@ def positions_from_log(rows: List[Dict], pred_values: List[List[str]]
             pick_date=_ymd(pick) or None, code=code,
             name=name or str(rec.get("銘柄名", "")).strip(), row=row,
             buy_date=day, entry_price=_num(rec.get("価格")),
-            shares=shares if shares and shares > 0 else DEFAULT_SHARES))
+            shares=shares if shares and shares > 0 else DEFAULT_SHARES,
+            ids=[str(rec.get("id", "")).strip()]))
 
     def start_of(p: Position) -> pd.Timestamp:
         return p.buy_date if p.buy_date is not None else pd.Timestamp(p.pick_date)
@@ -302,6 +318,7 @@ def positions_from_log(rows: List[Dict], pred_values: List[List[str]]
         p = max(cands, key=start_of)
         p.sell_date = day
         p.sell_price = _num(rec.get("価格"))
+        p.ids.append(str(rec.get("id", "")).strip())
 
     for rec in rows:
         if _kind(rec) != "target" or cancelled(rec):
@@ -318,10 +335,53 @@ def positions_from_log(rows: List[Dict], pred_values: List[List[str]]
         if not cands:
             issues.append("指値に合う買いが無い")
             continue
-        max(cands, key=start_of).targets.append((day, pct))
+        hit = max(cands, key=start_of)
+        hit.targets.append((day, pct))
+        hit.ids.append(str(rec.get("id", "")).strip())
     active = {p.row for p in positions if p.row is not None}
     positions.sort(key=lambda p: (p.pick_date or _ymd(p.buy_date), p.code))
     return positions, issues, cleared - active
+
+
+def position_book(p: Position, cutover: str) -> str:
+    """保有の台帳（v1 / v2）。予測日が cutover 以降なら v2。予測日が無ければ、買った日が cutover より後なら v2。"""
+    cut = pd.Timestamp(cutover)
+    if p.pick_date:
+        return "v2" if pd.Timestamp(p.pick_date) >= cut else "v1"
+    if p.buy_date is not None:
+        return "v2" if p.buy_date > cut else "v1"
+    return "v1"
+
+
+def event_books(events: List[Dict], cutover: str) -> Dict[str, str]:
+    """
+    受け皿の取引ごとの台帳（id → v1 / v2）。売り・指値は、受け皿の全件で保有を作ったとき（positions_from_log と同じ付け方）に
+    付いた買いの台帳に入れる（10月に買った銘柄の11月の売りは v1）。付かなかったもの（合わない行）は自分の予測日（無ければ日付）、
+    取消は取消の対象の台帳（対象が見つからなければ自分の日付）で決める（cutover 以降は v2）。
+    """
+    recs = [event_record(e, {}) for e in events if e.get("id")]
+    positions, _, _ = positions_from_log(recs, [])
+    out: Dict[str, str] = {}
+    for p in positions:
+        b = position_book(p, cutover)
+        for i in p.ids:
+            out[i] = b
+    cut = pd.Timestamp(cutover)
+
+    def own(rec) -> str:
+        d = _date(rec.get("予測日")) or _date(rec.get("日付"))
+        return "v2" if d is not None and d >= cut else "v1"
+
+    for rec in recs:
+        rid = str(rec["id"])
+        if rid not in out and _kind(rec) != "cancel":
+            out[rid] = own(rec)                    # 取り消した買い・合わない売りなど
+    for rec in recs:
+        if _kind(rec) == "cancel":
+            ref = str(rec.get("取消の対象", "")).strip().lower()
+            hit = [b for i, b in out.items() if ref and i.lower().startswith(ref)]
+            out[str(rec["id"])] = hit[0] if hit else own(rec)
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -821,10 +881,10 @@ def user_cell_updates(header: List[str], positions: List[Position],
 # --------------------------------------------------------------------------- #
 
 def sync_log_tab(book, events: List[Dict], names: Dict[str, str],
-                 dry_run: bool = False) -> Tuple[List[Dict], int]:
-    """受け皿の取引のうち、取引の記録タブに無いものを足す。返り値は (タブの全行, 足した数)。"""
+                 dry_run: bool = False, title: str = LOG_TAB) -> Tuple[List[Dict], int]:
+    """受け皿の取引のうち、取引の記録タブ（title）に無いものを足す。返り値は (タブの全行, 足した数)。"""
     try:
-        ws = book.worksheet(LOG_TAB)
+        ws = book.worksheet(title)
         values = ws.get_all_values()
     except Exception:
         ws, values = None, []
@@ -835,7 +895,7 @@ def sync_log_tab(book, events: List[Dict], names: Dict[str, str],
     recs = [event_record(e, names) for e in new]
     if new and not dry_run:
         if ws is None:
-            ws = book.add_worksheet(title=LOG_TAB, rows=500, cols=len(LOG_HEADER) + 2)
+            ws = book.add_worksheet(title=title, rows=500, cols=len(LOG_HEADER) + 2)
         if ws.col_count < len(header):        # 見出しを右端に足すとき（2026-10-14 の「指値%」）
             ws.resize(cols=len(header))
         if not values or header != [str(h).strip() for h in values[0]]:
@@ -848,12 +908,12 @@ def sync_log_tab(book, events: List[Dict], names: Dict[str, str],
     return rows, len(new)
 
 
-def write_tab(book, lay: Layout) -> int:
-    """保有の推移タブを作り直す（値・書式・グラフ）。グラフの系列数を返す。"""
+def write_tab(book, lay: Layout, title: str = TAB) -> int:
+    """保有の推移タブ（title）を作り直す（値・書式・グラフ）。グラフの系列数を返す。"""
     try:
-        ws = book.worksheet(TAB)
+        ws = book.worksheet(title)
     except Exception:
-        ws = book.add_worksheet(title=TAB, rows=max(200, len(lay.values) + 50),
+        ws = book.add_worksheet(title=title, rows=max(200, len(lay.values) + 50),
                                 cols=max(26, lay.width + 12))
     sid = ws.id
     need_rows = len(lay.values) + 50
@@ -914,8 +974,11 @@ def report(n_events: int, n_failed: int, n_added: int, positions: List[Position]
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description="保有の損益の推移を別タブに書き、予測ログを塗る")
+    ap.add_argument("--book", choices=BOOKS, default="all",
+                    help=f"v1: 今のタブ（予測日が {ES.V2_FROM} より前の買い）/ v2: v2 のタブ（{ES.V2_FROM} からの買い）/ "
+                         "all: 分けない（今のタブ）")
     ap.add_argument("--sheet-id", default=os.environ.get("GSHEET_ID", ""))
-    ap.add_argument("--log-title", default=ES.SHEET_TITLE)
+    ap.add_argument("--log-title", default=None, help="予測ログのタブ（省くと台帳のもの）")
     ap.add_argument("--data-dir", default=ES.DATA_DIR)
     ap.add_argument("--inbox", default=TI.INBOX)
     ap.add_argument("--dry-run", action="store_true", help="シートを読んで計算だけする（書かない）")
@@ -923,10 +986,25 @@ def main(argv=None) -> int:
     if not args.sheet_id:
         raise SystemExit("GSHEET_ID が設定されていません（シートのURLの /d/ と /edit の間）")
 
+    tab, log_tab, pred_title = BOOK_TABS[args.book]
+    if args.log_title is None:
+        args.log_title = pred_title
     key = TI.private_key_from_env()
     events, failed = TI.read_inbox(args.inbox, key) if key is not None else ([], 0)
+    n_all = len(events)
+    if args.book != "all":
+        books = event_books(events, ES.V2_FROM)
+        events = [e for e in events if books.get(str(e.get("id", ""))) == args.book]
+        print(f"[holdings] 台帳 {args.book}（{ES.V2_FROM} で分ける）: 受け皿 {n_all}件のうち {len(events)}件 → "
+              f"タブ「{log_tab}」「{tab}」")
     book = ES.open_sheet(args.sheet_id)
-    pred_ws = book.worksheet(args.log_title)
+    try:
+        pred_ws = book.worksheet(args.log_title)
+    except Exception:
+        if args.book == "v2":
+            print(f"[holdings] 「{args.log_title}」がまだ無い（最初の予測を書く前）ので何もしない")
+            return 0
+        raise
     pred_values = pred_ws.get_all_values()
     header = [str(h).strip() for h in pred_values[0]] if pred_values else []
     names: Dict[str, str] = {}
@@ -935,8 +1013,10 @@ def main(argv=None) -> int:
         for line in pred_values[1:]:
             if ci < len(line) and ni < len(line):
                 names.setdefault(_code(line[ci]), str(line[ni]).strip())
-    rows, added = sync_log_tab(book, events, names, dry_run=args.dry_run)
+    rows, added = sync_log_tab(book, events, names, dry_run=args.dry_run, title=log_tab)
     positions, issues, cleared = positions_from_log(rows, pred_values)
+    if args.book != "all":
+        positions = [p for p in positions if position_book(p, ES.V2_FROM) == args.book]
     starts = [d for p in positions
               for d in (p.buy_date, _date(p.pick_date)) if d is not None]
     bars = load_bars(args.data_dir, [p.jq_code for p in positions],
@@ -956,14 +1036,14 @@ def main(argv=None) -> int:
              else f"{pd.Timestamp.now(tz='Asia/Tokyo'):%Y-%m-%d}")
     lay = build_layout(as_of, summary_rows(positions, paths), daily, len(positions),
                        chart_series(positions, paths, days))
-    for line in report(len(events), failed, added, positions, issues, len(daily), as_of):
+    for line in report(n_all, failed, added, positions, issues, len(daily), as_of):
         print(line)
     if args.dry_run:
         print("[holdings] --dry-run なので書かない")
         return 0
-    n = write_tab(book, lay)
+    n = write_tab(book, lay, title=tab)
     marked = mark_log(book, pred_ws, header, positions, paths, sorted(cleared))
-    print(f"[holdings] タブ「{TAB}」を作り直した（{len(lay.values)}行・グラフ {n}系列）・"
+    print(f"[holdings] タブ「{tab}」を作り直した（{len(lay.values)}行・グラフ {n}系列）・"
           f"予測ログの {marked}行を塗った（取り消しで外した {len(cleared)}行を含む）")
     return 0
 

@@ -37,7 +37,7 @@ class TestArms(unittest.TestCase):
         s = E.column_sets()
         self.assertEqual(s["base"], F.columns(F.DEFAULT_PRESET))
         # 2026-10-18 の夕方から本番は360列（実験76 の時点は 239 / 249 / 259）
-        self.assertEqual((len(s["base"]), len(s["ind"]), len(s["both"])), (360, 370, 380))
+        self.assertEqual((len(s["base"]), len(s["ind"]), len(s["both"])), (373, 383, 393))
         self.assertEqual(s["ind"], s["base"] + RF.columns("ind"))
         self.assertEqual(s["both"], s["base"] + RF.columns("all"))
         self.assertEqual(s["perm_ind"], s["ind"])

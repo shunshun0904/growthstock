@@ -51,7 +51,7 @@ class TestLineup(unittest.TestCase):
         self.assertEqual((E.RULE_LINE, E.TP, E.MIN_BREAK), (95.0, 10.0, 1))      # 画面の規則と同じ
         self.assertEqual((E.MIN_TRAIN_WINDOWS, E.MIN_GROUP), (2, 5))
         self.assertEqual((E.k_tag(1.5), E.k_tag(1.2)), ("k15", "k12"))
-        self.assertEqual(len(F.columns(F.DEFAULT_PRESET)), 360)    # 2026-10-18 の夕方から（実験90 の時点は239列）
+        self.assertEqual(len(F.columns(F.DEFAULT_PRESET)), 373)    # 2026-10-18 の夕方から（実験90 の時点は239列）
 
     def test_production_default_is_untouched(self):
         self.assertEqual((B.BREAKOUT_REF, B.BREAKOUT_ON_HIGH), E.POP_DEF["high"])
@@ -106,7 +106,7 @@ def label_frame(n=400, seed=0):
     """ラベルの材料（vol_20d・future_rise・end_level・uptrend_end）を持つ合成の表。"""
     rng = np.random.default_rng(seed)
     vol = rng.uniform(1.5, 4.0, n)
-    need12, end12 = B.rise_thresholds(pd.Series(vol), B.DEFAULT_RISE)
+    need12, end12 = B.rise_thresholds(pd.Series(vol), __import__("dataclasses").replace(B.DEFAULT_RISE, vol_norm_k=1.2))
     rise = need12.to_numpy() * rng.uniform(0.5, 1.8, n)
     end = end12.to_numpy() * rng.uniform(0.5, 2.5, n)
     up = rng.integers(0, 2, n).astype(float)

@@ -1,0 +1,9 @@
+{
+  "studies": 12,
+  "candidates_per_study": 30,
+  "cv_fits": 1080,
+  "final_fits": 36,
+  "production_changed": false,
+  "test_previously_observed": true,
+  "selection_sha256": "525cd1e3c3b8ee9b08b1843e6c81f4cd33b09d7f0772870b5cc9b325797226dd"
+}

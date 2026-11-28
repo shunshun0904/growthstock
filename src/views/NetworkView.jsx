@@ -16,7 +16,7 @@ import {
  * 良い。特徴量はいったん、重要度の高いテクニカル系のみ」→ 運用者の選択: ε-リカレンス・ネットワーク / 実験105 の gain 上位9列 /
  * 取れる全期間 / 画面の新しいタブ / データは Release に置く（research/recurrence_net.py）。
  * 対象は同日の指定「候補といったのは、予測サンプルではなく、その中でも購入条件を満たした銘柄です」のとおり、その日の高値更新の
- * 銘柄のうち購入条件（1.5σ の3本がすべて95以上。今日の戦略の strategySignal の passed）を満たした銘柄だけ。
+ * 銘柄のうち購入条件（規則の3本がすべて95以上。2026-10-30 から 1.2σ の3本。今日の戦略の strategySignal の passed）を満たした銘柄だけ。
  *
  * 点 = その銘柄の1営業日、線 = テクニカル指標9列の状態が似た日どうし（各日に、20営業日より離れた日のうち状態の近い k 日。
  * どちらかが選べば結ぶ）。同日の夜の運用者の選択「k近傍だけにする」と指定「kは1〜10までで良いです」（それまでは辺の密度で ε を
@@ -33,7 +33,7 @@ import {
  * 最高値までの上昇率と時期の色は青白赤（同日の指定「青白ではなく、青白赤で」→ 選択「高い・新しい方を赤」。src/lib/recurrence.js の BWR）。
  * 結果・20営業日目・目的変数も同じ向き（2026-10-20 の指定「揃えたいです」。+10% 到達・正例 = 赤、下げ = 青）。
  * 図の力は Obsidian のグラフ表示と同じ4つのつまみ（中心の力・反発の力・リンクの力・リンクの長さ）で変えられる。
- * **参考の表示で、選定には使わない。** 買う銘柄は今日の戦略（1.5σ の3本の最小の順）のまま。
+ * **参考の表示で、選定には使わない。** 買う銘柄は今日の戦略（規則の3本の最小の順）のまま。
  */
 
 const pct = (v) => (Number.isFinite(v) ? `${fmt(v * 100, 0)}%` : '—');
@@ -43,18 +43,23 @@ const pct = (v) => (Number.isFinite(v) ? `${fmt(v * 100, 0)}%` : '—');
 const TRAIL_DAYS = 20;
 const reducedMotion = () => typeof window !== 'undefined' && Boolean(window.matchMedia?.('(prefers-reduced-motion: reduce)').matches);
 // 点の大きさ（運用者の依頼 2026-10-20「プロットのサイズをもう少し大きくできないですか？画面上で調整できるようにしても良いです」
-// →「図自体ではなく、点のサイズですかね」）。倍率は前の大きさ（標準）に掛ける。既定は「大」。選んだ大きさはこのブラウザに覚える
-const POINT_SIZES = [
-  { key: 's', label: '小', scale: 0.75 }, { key: 'm', label: '標準', scale: 1 },
-  { key: 'l', label: '大', scale: 1.5 }, { key: 'xl', label: '特大', scale: 2 },
-];
-const POINT_SIZE_KEY = 'net.pointSize';
-const readPointSize = () => {
+// →「図自体ではなく、点のサイズですかね」）。倍率は前の大きさ（標準 1）に掛ける。2026-10-23 の依頼「サイズはバーで滑らかに変更
+// できるほうが嬉しいです」で、ボタン（小・標準・大・特大）をやめてバーにした。既定は前の「大」と同じ 1.5 倍。今日・選んだ日・
+// その似た日の点には掛けない（同日の指定「選択された点のサイズはそのままで良いです」「選択された類似の点もそのままで良いです。
+// 全く関係ない他のノードを調整したいので」。src/components/RecurrenceGraph.jsx）。選んだ大きさはこのブラウザに覚える（前の
+// ボタンで覚えた net.pointSize も読む）
+const POINT_SCALE = { min: 0.5, max: 3, step: 0.05, def: 1.5 };
+const POINT_SCALE_KEY = 'net.pointScale';
+const OLD_POINT_SIZES = { s: 0.75, m: 1, l: 1.5, xl: 2 };       // 前のボタン（net.pointSize）の倍率
+const clampScale = (v) => Math.min(POINT_SCALE.max, Math.max(POINT_SCALE.min, v));
+const readPointScale = () => {
   try {
-    const v = window.localStorage.getItem(POINT_SIZE_KEY);
-    return POINT_SIZES.some((s) => s.key === v) ? v : 'l';
+    const raw = window.localStorage.getItem(POINT_SCALE_KEY);
+    const v = raw === null ? NaN : Number(raw);
+    if (Number.isFinite(v)) return clampScale(v);
+    return OLD_POINT_SIZES[window.localStorage.getItem('net.pointSize')] ?? POINT_SCALE.def;
   } catch {
-    return 'l';
+    return POINT_SCALE.def;
   }
 };
 
@@ -89,7 +94,7 @@ function rawText(v) {
 }
 
 /**
- * 一覧に出す銘柄: その日の高値更新の銘柄（予測ファイルの候補）のうち、購入条件（1.5σ の3本がすべて95以上）を満たした銘柄だけ。
+ * 一覧に出す銘柄: その日の高値更新の銘柄（予測ファイルの候補）のうち、購入条件（規則の3本がすべて95以上）を満たした銘柄だけ。
  * 今日の戦略（strategySignal）の passed と同じ銘柄・同じ並び（3本の最小の順）で、上位の枠に入った銘柄（picks）は pick = true
  * （「買う候補」の印。候補銘柄のニュースのタブと同じ）。目次の項目と作れなかった理由を付ける。
  * 戻り値: { rows, nBreak }。nBreak はその日の高値更新の件数（予測ファイルにその日が無ければ目次の値、それも無ければ null）。
@@ -125,11 +130,10 @@ export default function NetworkView({ data }) {
   const [flow] = useState(() => !reducedMotion());       // 軌跡の明るみを流す（動きを減らす設定では向きの矢印）
   const [trail, setTrail] = useState(false);            // 直近の軌跡は最初は出さない（運用者の指定 2026-10-20）
   const [lightToday, setLightToday] = useState(true);   // 今日に似た日を光らせる（運用者の依頼 2026-10-19）
-  const [pointSize, setPointSize] = useState(readPointSize);
+  const [pointScale, setPointScale] = useState(readPointScale);
   useEffect(() => {
-    try { window.localStorage.setItem(POINT_SIZE_KEY, pointSize); } catch { /* 覚えられなくても表示は変わらない */ }
-  }, [pointSize]);
-  const pointScale = (POINT_SIZES.find((s) => s.key === pointSize) || POINT_SIZES[2]).scale;
+    try { window.localStorage.setItem(POINT_SCALE_KEY, String(pointScale)); } catch { /* 覚えられなくても表示は変わらない */ }
+  }, [pointScale]);
   const [selected, setSelected] = useState(null);
   const [zoomCmd, setZoomCmd] = useState(null);
   const [forces, setForces] = useState(DEFAULT_FORCES);
@@ -321,14 +325,11 @@ export default function NetworkView({ data }) {
           </div>
           <div>
             <span className="lab">点の大きさ</span>
-            <div className="net-seg" role="group" aria-label="点の大きさ">
-              {POINT_SIZES.map((s) => (
-                <button key={s.key} className={`btn btn-ghost${s.key === pointSize ? ' on' : ''}`} aria-pressed={s.key === pointSize}
-                        onClick={() => setPointSize(s.key)} title={`前の大きさの ${s.scale} 倍`}>
-                  {s.label}
-                </button>
-              ))}
-            </div>
+            <label className="net-size" title="今日・選んだ日・似た日の点は変わらない（ほかの点だけ）">
+              <input type="range" min={POINT_SCALE.min} max={POINT_SCALE.max} step={POINT_SCALE.step} value={pointScale}
+                     aria-label="点の大きさ" onChange={(e) => setPointScale(clampScale(Number(e.target.value)))} />
+              <b className="num">{`×${pointScale.toFixed(2)}`}</b>
+            </label>
           </div>
         </div>
 

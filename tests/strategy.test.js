@@ -5,9 +5,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  BOOST, RULE_MODELS, RULE_JA, STRATEGY, boostPcts, pctsOf, minPct, passesAgree, dayVerdict, strategySignal, exitPlan,
+  BOOST, RULE_MODELS, RULE_JA, RULE_SHORT, RULE_SIGMA, RULE_ROW, STRATEGY, boostPcts, pctsOf, minPct, passesAgree, dayVerdict,
+  strategySignal, exitPlan,
   freeSlots, pctSpread, laggard, nearMisses, fundContrib, frozenNote,
   BORDER, BORDER_STATS, BORDER_WARN, borderShape, borderNote, borderWarn, orderRows, ruleMinTier,
+  ltrDayPct, ltrUpper, passesBoth, bothSummary, ltrRanking, ltr5Rank, ltr5Pool, condLevel,
+  NEWS_LTR_TOP, ltrTop, newsRows,
 } from '../src/lib/strategy.js';
 
 const cand = (code, pcts, score = 0.5) => ({
@@ -16,7 +19,7 @@ const cand = (code, pcts, score = 0.5) => ({
     Object.entries(pcts).map(([a, p]) => [a, { score, pctHistorical: p }])),
 });
 
-/** 今の規則のモデル（1.5σ の3本: lgbm_k15 / xgb_k15 / cat_k15）の百分位で候補を作る。 */
+/** 今の規則のモデル（2026-10-30 から 1.2σ の3本: lgbm / xgb / cat）の百分位で候補を作る。 */
 const rule = (code, [a, b, c], score = 0.5) => {
   const pcts = {};
   [a, b, c].forEach((v, i) => { if (v !== undefined) pcts[RULE_MODELS[i]] = v; });
@@ -28,23 +31,30 @@ const day = (n, pcts = [95, 95, 95]) =>
 
 /* ------------------------------------------------ 規則の3モデルの百分位 */
 
-test('規則のモデル: 2026-10-12 から 1.5σ の3本・線 95', () => {
-  assert.deepEqual(RULE_MODELS, ['lgbm_k15', 'xgb_k15', 'cat_k15']);
+test('規則のモデル: 2026-10-30 から 1.2σ の3本・線 95（運用者の依頼「買いの判断に使うものは1.2σ の3本（すべて95以上）に戻してほしいです」）', () => {
+  assert.deepEqual(RULE_MODELS, ['lgbm', 'xgb', 'cat']);
+  assert.deepEqual(RULE_MODELS, BOOST);
   assert.equal(STRATEGY.agreePct, 95);
-  assert.equal(RULE_JA, '1.5σ の3本');
+  assert.equal(RULE_JA, '基準ラベルの3本');
+  assert.equal(RULE_SHORT, 'LGB・XGB・CAT');
+  assert.equal(RULE_SIGMA, '基準ラベル');
+  assert.equal(RULE_ROW, 'base');
 });
 
-test('minPct: 規則の3モデルの最小を返す（1.2σ の値は見ない）', () => {
+const K15 = ['lgbm_k15', 'xgb_k15', 'cat_k15'];
+
+test('minPct: 規則の3モデルの最小を返す（1.5σ の値は見ない）', () => {
   const c = rule('A', [95, 91, 99]);
-  c.byModel.lgbm = { score: 0.1, pctHistorical: 10 };       // 1.2σ の値が低くても規則には効かない
+  c.byModel.lgbm_k15 = { score: 0.1, pctHistorical: 10 };   // 1.5σ の値が低くても規則には効かない
   assert.equal(minPct(c), 91);
-  assert.equal(minPct(c, BOOST), null);                     // 1.2σ の3本はそろっていない
+  assert.equal(minPct(c, K15), null);                        // 1.5σ の3本はそろっていない
 });
 
-test('minPct: 線形・MLP・1.2σ は混ぜない', () => {
+test('minPct: 線形・MLP・1.5σ は混ぜない', () => {
   const c = rule('A', [95, 91, 99]);
-  c.byModel.logit_k15 = { score: 0.1, pctHistorical: 10 };
+  c.byModel.logit = { score: 0.1, pctHistorical: 10 };
   c.byModel.mlp = { score: 0.1, pctHistorical: 5 };
+  c.byModel.cat_k15 = { score: 0.1, pctHistorical: 3 };
   assert.equal(minPct(c), 91);
   assert.deepEqual(Object.keys(pctsOf(c)), RULE_MODELS);
   assert.deepEqual(Object.keys(boostPcts(c)), BOOST);
@@ -55,8 +65,8 @@ test('minPct: 1つでも欠けていれば null（欠測を「満たした」に
   assert.equal(minPct(c), null);
   assert.equal(passesAgree(c), false);
   assert.equal(minPct({}), null);
-  // 1.5σ のモデルがまだ無い予測ファイル（1.2σ だけ）では誰も通らない
-  assert.equal(passesAgree(cand('B', { lgbm: 99, xgb: 99, cat: 99 })), false);
+  // 1.5σ の3本だけがそろった候補（1.2σ の値が無い）は通らない
+  assert.equal(passesAgree(cand('B', { lgbm_k15: 99, xgb_k15: 99, cat_k15: 99 })), false);
 });
 
 test('passesAgree: 3つすべてが 95 以上のときだけ true', () => {
@@ -86,7 +96,7 @@ test('dayVerdict: 発火数で帯に分かれる。2026-10-12 から発火の数
 
 test('strategySignal: 発火が多い日は上位2件を買う', () => {
   const rows = day(25);
-  rows[3].byModel.lgbm_k15.pctHistorical = 99;   // 最小は 95 のまま
+  rows[3].byModel.lgbm.pctHistorical = 99;       // 最小は 95 のまま
   const s = strategySignal(rows);
   assert.equal(s.nBreak, 25);
   assert.equal(s.verdict.kind, 'strong');
@@ -111,13 +121,13 @@ test('strategySignal: 3モデルの最小順位で並ぶ（lgbm 単体の順で�
 
 /* ------------------------------------------------ 一覧の並び順（運用者の決定 2026-10-13） */
 
-test('orderRows: 1.5σ の3本の最小が高い順（1.2σ の LightGBM のスコア順ではない）', () => {
+test('orderRows: 規則の3本（1.2σ）の最小が高い順（基準モデルの LightGBM のスコア順ではない）', () => {
   const rows = [
-    { ...rule('BASE1', [83.6, 97.1, 97.4], 0.9), rankInDay: 1 },   // 1.2σ の LightGBM では1位・最小 83.6
+    { ...rule('BASE1', [83.6, 97.1, 97.4], 0.9), rankInDay: 1 },   // 基準モデル（1.2σ の LightGBM）では1位・最小 83.6
     { ...rule('PASS', [99.2, 95.2, 98.4], 0.4), rankInDay: 4 },    // 最小 95.2（規則を満たす）
     { ...rule('NEAR', [94.4, 93.5, 95.3], 0.8), rankInDay: 2 },    // 最小 93.5
   ];
-  rows[0].byModel.lgbm = { score: 0.9, pctHistorical: 99.9 };      // 1.2σ の値は並び順に使わない
+  rows[0].byModel.lgbm_k15 = { score: 0.9, pctHistorical: 99.9 };  // 1.5σ の値は並び順に使わない
   const out = orderRows(rows);
   assert.deepEqual(out.map((c) => c.code), ['PASS', 'NEAR', 'BASE1']);
   assert.deepEqual(out.map((c) => c.order), [1, 2, 3]);
@@ -139,11 +149,11 @@ test('orderRows: 最小が同じなら基準モデルのスコアが高い順（
   assert.deepEqual(s.passed.map((c) => c.code), out.filter((c) => c.ruleMin >= 95).map((c) => c.code));
 });
 
-test('orderRows: 1.5σ の百分位が欠けた行は後ろに、基準モデルのスコア順で並ぶ', () => {
+test('orderRows: 規則の3本の百分位が欠けた行は後ろに、基準モデルのスコア順で並ぶ', () => {
   const rows = [
     { ...rule('MISS_HI', [99, 99, undefined], 0.9), rankInDay: 1 },
     { ...rule('LOW', [10, 20, 30], 0.2), rankInDay: 5 },
-    { ...cand('OLD', { lgbm: 99 }, 0.5), rankInDay: 3 },              // 1.5σ を予測に入れる前の行
+    { ...cand('OLD', { lgbm: 99, lgbm_k15: 99, xgb_k15: 99, cat_k15: 99 }, 0.5), rankInDay: 3 },   // 規則の3本のうち1本だけ
     { ...rule('HIGH', [90, 91, 92], 0.3), rankInDay: 4 },
   ];
   const out = orderRows(rows);
@@ -151,8 +161,8 @@ test('orderRows: 1.5σ の百分位が欠けた行は後ろに、基準モデル
   assert.deepEqual(out.map((c) => c.ruleMin), [90, 10, null, null]);
 });
 
-test('orderRows: 1.5σ の値がまったく無い日（固定した過去の日）は基準モデルの順のまま', () => {
-  const rows = [3, 1, 2].map((r) => ({ ...cand(`R${r}`, { lgbm: 90 - r }, 0.6 - r * 0.1), rankInDay: r }));
+test('orderRows: 規則の3本がそろわない日（固定した過去の日など）は基準モデルの順のまま', () => {
+  const rows = [3, 1, 2].map((r) => ({ ...cand(`R${r}`, { lgbm_k15: 90 - r }, 0.6 - r * 0.1), rankInDay: r }));
   const out = orderRows(rows);
   assert.deepEqual(out.map((c) => c.code), ['R1', 'R2', 'R3']);
   assert.ok(out.every((c) => c.ruleMin === null));
@@ -185,8 +195,9 @@ test('strategySignal: 規則の3本の百分位が欠けた候補が1件でも�
   assert.equal(s.missing, 1);
   assert.equal(s.buyable, false);
   assert.equal(s.picks.length, 0);
-  // 1.2σ の値だけの日（1.5σ のモデルを予測に入れる前に出し、その日の値のまま固定した日）も判定できない
-  const old = strategySignal([cand('C', { lgbm: 99, xgb: 99, cat: 99 }), cand('D', { lgbm: 98, xgb: 97, cat: 99 })]);
+  // 規則の3本の値が無い日（1.5σ の値だけ）も判定できない
+  const old = strategySignal([cand('C', { lgbm_k15: 99, xgb_k15: 99, cat_k15: 99 }),
+    cand('D', { lgbm_k15: 98, xgb_k15: 97, cat_k15: 99 })]);
   assert.equal(old.missing, 2);
   assert.equal(old.picks.length, 0);
   assert.equal(strategySignal(day(10)).missing, 0);
@@ -259,13 +270,13 @@ test('freeSlots: 保有数が分からなければ null（枠の話をしない�
 });
 
 test('pctSpread / laggard: 3モデルの幅と最下位モデル', () => {
-  // クニミネ工業 2026-09-18 の 1.2σ の実際の値を、規則のモデル（1.5σ）にも当てる
+  // クニミネ工業 2026-09-18 の 1.2σ の実際の値（規則のモデル）
   const k = rule('5388', [86.5, 91.7, 91.5]);
   assert.equal(minPct(k), 86.5);
   assert.equal(Math.round(pctSpread(k) * 10) / 10, 5.2);
-  assert.equal(laggard(k), 'lgbm_k15');
-  const k12 = cand('5388', { lgbm: 86.5, xgb: 91.7, cat: 91.5 });
-  assert.equal(laggard(k12, BOOST), 'lgbm');                 // 1.2σ の3本で見るとき
+  assert.equal(laggard(k), 'lgbm');
+  const k15 = cand('5388', { lgbm_k15: 86.5, xgb_k15: 91.7, cat_k15: 91.5 });
+  assert.equal(laggard(k15, K15), 'lgbm_k15');                // 1.5σ の3本で見るとき
   // 欠けていれば null（欠けたまま判定しない）
   const bad = rule('9999', [90, 90]);
   assert.equal(pctSpread(bad), null);
@@ -284,7 +295,7 @@ test('nearMisses: 最小85〜95 だけを拾い、幅5以上の形に印を付�
   assert.deepEqual(n.map((x) => x.code), ['E', 'C', 'B']);  // 最小の降順
   assert.equal(n.find((x) => x.code === 'B').weak, true);
   assert.equal(n.find((x) => x.code === 'C').weak, false);
-  assert.equal(n.find((x) => x.code === 'B').laggard, 'lgbm_k15');
+  assert.equal(n.find((x) => x.code === 'B').laggard, 'lgbm');
 });
 
 test('nearMisses: 境界（85ちょうどは入る / 95ちょうどは入らない）', () => {
@@ -295,11 +306,11 @@ test('nearMisses: 境界（85ちょうどは入る / 95ちょうどは入らな�
 });
 
 test('dayVerdict: 文言は今の規則で測った数字（7件以下は件数が少なく当たり外れが大きいと添える）', () => {
-  assert.ok(dayVerdict(25).note.includes('192件 +4.9%'));
-  assert.ok(dayVerdict(10).note.includes('140件 +1.5%'));
+  assert.ok(dayVerdict(25).note.includes('旧1.2σモデルの参考値：95以上で199件 +3.72%・勝率72%'));
+  assert.ok(dayVerdict(10).note.includes('109件 +1.90%・勝率64%'));
   const quiet = dayVerdict(5).note;
-  assert.ok(quiet.includes('枠が空いていれば買う') && quiet.includes('22件 +5.4%'));
-  assert.ok(quiet.includes('36件 +3.7%') && quiet.includes('−10%割れ 11%'));
+  assert.ok(quiet.includes('枠が空いていれば買う') && quiet.includes('20件 +3.00%'));
+  assert.ok(quiet.includes('23件 +0.61%') && quiet.includes('−10%割れ 30%'));
   assert.equal(dayVerdict(5).label, '発火が少ない日');
   for (const n of [25, 10, 5, 0]) assert.ok(!/NaN|undefined|null/.test(dayVerdict(n).note));
 });
@@ -329,13 +340,13 @@ test('frozenNote: 直近20日の日次ボラが frozenVol 未満のときだけ�
 });
 
 
-/* ------------------------------------------------ 際どい候補（1.5σ の3本で見た線 95 の下） */
+/* ------------------------------------------------ 際どい候補（規則の3本 = 1.2σ の3本で見た線 95 の下） */
 
-test('borderShape: 運用者の例（xgb 96・cat 98・lgbm 85）を 1.5σ の3本で見ると「2本95以上・残り 85〜90」', () => {
+test('borderShape: 運用者の例（xgb 96・cat 98・lgbm 85）を 1.2σ の3本で見ると「2本95以上・残り 85〜90」', () => {
   assert.deepEqual(BORDER, { line: 95, lo: 85 });
   assert.equal(borderShape(rule('A', [85, 96, 98])), 'two95_mid');
-  // 1.2σ の値は見ない（1.2σ だけの予測ファイルでは判定しない）
-  assert.equal(borderShape(cand('B', { lgbm: 85, xgb: 96, cat: 98 })), null);
+  // 1.5σ の値は見ない（1.5σ の値だけでは判定しない）
+  assert.equal(borderShape(cand('B', { lgbm_k15: 85, xgb_k15: 96, cat_k15: 98 })), null);
 });
 
 test('borderShape: 形の全部と境目', () => {
@@ -368,20 +379,18 @@ test('borderWarn: 先に決めた線（20件以上で平均 0% 以下）', () =>
 /** 文言の組み立てを確かめるための作りものの数字（実測は BORDER_STATS） */
 const ST = {
   line: { n: 500, ret: 4.0 },
-  two95: { all: { n: 130, ret: 1.0 }, lgbm_k15: { n: 40, ret: -0.4 }, xgb_k15: { n: 60, ret: 2.0 },
-           cat_k15: { n: 30, ret: 1.5 } },
-  min: { all: { n: 110, ret: 1.0 }, lgbm_k15: { n: 100, ret: 1.04 }, xgb_k15: { n: 10, ret: -2.0 },
-         cat_k15: { n: 0, ret: null } },
+  two95: { all: { n: 130, ret: 1.0 }, lgbm: { n: 40, ret: -0.4 }, xgb: { n: 60, ret: 2.0 }, cat: { n: 30, ret: 1.5 } },
+  min: { all: { n: 110, ret: 1.0 }, lgbm: { n: 100, ret: 1.04 }, xgb: { n: 10, ret: -2.0 }, cat: { n: 0, ret: null } },
 };
 
 test('borderNote: その組の平均が 0% 以下（20件以上）なら赤。ほかのモデルと線の上の数字を添える', () => {
   const n = borderNote(rule('A', [85, 96, 98]), BORDER, ST);
   assert.equal(n.shape, 'two95_mid');
-  assert.equal(n.laggard, 'lgbm_k15');
+  assert.equal(n.laggard, 'lgbm');
   assert.equal(n.laggardPct, 85);
   assert.equal(n.warn, true);
   assert.equal(n.few, false);
-  assert.equal(n.badge, '1.5σで際どい・LightGBM が最下位');
+  assert.equal(n.badge, '基準ラベルで際どい・LightGBM が最下位');
   assert.ok(n.text.startsWith('LightGBM が一番低い（85.0）。'));
   assert.ok(n.text.includes('2本が95以上の形で LightGBM が一番低いときは、過去 −0.4%（40件）。空き枠（0%）と同じか悪い'));
   assert.ok(n.text.includes('ほかが一番低いときは XGBoost +2.0%（60件）・CatBoost +1.5%（30件）'));
@@ -392,9 +401,9 @@ test('borderNote: その組の平均が 0% 以下（20件以上）なら赤。�
 test('borderNote: 平均がプラスの組は黄', () => {
   const n = borderNote(rule('B', [97, 96, 91]), BORDER, ST);
   assert.equal(n.shape, 'two95_hi');
-  assert.equal(n.laggard, 'cat_k15');
+  assert.equal(n.laggard, 'cat');
   assert.equal(n.warn, false);
-  assert.equal(n.badge, '1.5σで際どい・最下位 CatBoost');
+  assert.equal(n.badge, '基準ラベルで際どい・最下位 CatBoost');
   assert.ok(n.text.startsWith('CatBoost が一番低い（91.0）。'));
   assert.ok(!n.text.includes('空き枠'));
 });
@@ -402,13 +411,13 @@ test('borderNote: 平均がプラスの組は黄', () => {
 test('borderNote: 件数の少ない組は赤にしない（平均がマイナスでも）。0件の組は「0件」', () => {
   const x = borderNote(rule('C', [92, 86, 97]), BORDER, ST);
   assert.equal(x.shape, 'min85');
-  assert.equal(x.laggard, 'xgb_k15');
+  assert.equal(x.laggard, 'xgb');
   assert.equal(x.warn, false);
   assert.equal(x.few, true);
   assert.ok(x.text.includes('95以上が1本以下・最小 85〜95 の形で XGBoost が一番低いときは、過去 −2.0%（10件）。件数が少なく目安にしにくい'));
   assert.ok(x.text.includes('LightGBM +1.0%（100件）・CatBoost 0件'));
   const c = borderNote(rule('D', [92, 93, 88]), BORDER, ST);
-  assert.equal(c.laggard, 'cat_k15');
+  assert.equal(c.laggard, 'cat');
   assert.equal(c.few, true);
   assert.ok(c.text.includes('CatBoost が一番低いときは、過去 0件'));
   assert.ok(!/NaN|undefined|null/.test(x.text + c.text));
@@ -416,23 +425,158 @@ test('borderNote: 件数の少ない組は赤にしない（平均がマイナ�
   assert.equal(borderNote(rule('F', [50, 60, 70]), BORDER, ST), null);
 });
 
-test('BORDER_STATS: probe_k15_border の数字（件数の合計が形の件数と合う・今は赤の組が無い）', () => {
+test('BORDER_STATS: probe_k15_panel の 1.2σ の3本の数字（■4c・■4d。件数の合計が形の件数と合う・今は赤の組が無い）', () => {
   const t = BORDER_STATS;
   for (const fam of ['two95', 'min']) {
     assert.equal(RULE_MODELS.reduce((a, m) => a + t[fam][m].n, 0), t[fam].all.n);
   }
-  assert.equal(t.two95.all.n, 354 + 86 + 49);       // 2本95以上の3つの形
-  assert.equal(t.min.all.n, 275 + 581);              // 最小 90〜95 と 85〜90
-  assert.equal(t.line.n, 559);
+  assert.equal(t.two95.all.n, 293 + 93 + 64);       // 2本95以上の3つの形（probe_k15_panel の ■4c）
+  assert.equal(t.min.all.n, 228 + 463);              // 最小 90〜95 と 85〜90
+  assert.equal(t.line.n, 429);
   const reds = ['two95', 'min'].flatMap((f) => RULE_MODELS.filter((m) => borderWarn(t[f][m])));
   assert.deepEqual(reds, []);
   // 実際の数字で作った文言（運用者の例の形）
   const n = borderNote(rule('A', [85, 96, 98]));
   assert.equal(n.warn, false);
-  assert.equal(n.badge, '1.5σで際どい・最下位 LightGBM');
-  assert.ok(n.text.includes('2本が95以上の形で LightGBM が一番低いときは、過去 +1.6%（141件）'));
-  assert.ok(n.text.includes('ほかが一番低いときは XGBoost +2.7%（228件）・CatBoost +2.8%（120件）'));
-  assert.ok(n.text.includes('3本とも95以上は +3.1%（559件）'));
+  assert.equal(n.badge, '基準ラベルで際どい・最下位 LightGBM');
+  assert.ok(n.text.includes('2本が95以上の形で LightGBM が一番低いときは、過去 +2.3%（200件）'));
+  assert.ok(n.text.includes('ほかが一番低いときは XGBoost +1.7%（106件）・CatBoost +1.6%（144件）'));
+  assert.ok(n.text.includes('3本とも95以上は +2.9%（429件）'));
+  assert.ok(n.text.includes('（旧1.2σモデルの参考値・前向きの百分位。'));
   assert.ok(!/NaN|undefined|null|測っていない/.test(n.text));
 });
 
+/* ------------------------------------------------ ランキング学習（参考。両方使う形） */
+
+const withLtr = (c, dayPct, upper) => ({ ...c, ltr: { score: 0.1, dayPct, dayRank: 1, nDay: 4, upper } });
+
+test('ltrDayPct / ltrUpper: 予測の ltr を読む。無い・壊れた値は null', () => {
+  const c = withLtr(rule('A', [96, 97, 98]), 66.7, true);
+  assert.equal(ltrDayPct(c), 66.7);
+  assert.equal(ltrUpper(c), true);
+  assert.equal(ltrDayPct(rule('B', [96, 97, 98])), null);
+  assert.equal(ltrUpper(rule('B', [96, 97, 98])), null);
+  assert.equal(ltrUpper({ ltr: { upper: 'yes' } }), null);
+  assert.equal(ltrDayPct({ ltr: { dayPct: null } }), null);
+});
+
+test('passesBoth: 今の規則を満たし、かつランキング学習が上半分のときだけ（予測の upper で決める）', () => {
+  assert.equal(passesBoth(withLtr(rule('A', [96, 97, 98]), 66.7, true)), true);
+  assert.equal(passesBoth(withLtr(rule('B', [96, 97, 98]), 33.3, false)), false);
+  assert.equal(passesBoth(withLtr(rule('C', [94, 97, 98]), 100, true)), false);
+  assert.equal(passesBoth(rule('D', [96, 97, 98])), false);
+});
+
+test('bothSummary: 規則を満たした候補のうち上半分を、passed の並びのまま。ランキング学習の無い日は数えない', () => {
+  const rows = [
+    withLtr(rule('A', [99, 99, 99], 0.9), 100, true),
+    withLtr(rule('B', [97, 98, 99], 0.8), 33.3, false),
+    withLtr(rule('C', [96, 96, 96], 0.7), 66.7, true),
+    withLtr(rule('D', [50, 60, 70], 0.6), 0, false),
+  ];
+  const sig = strategySignal(rows);
+  const b = bothSummary(rows, sig);
+  assert.equal(b.available, true);
+  assert.equal(b.nPassed, 3);
+  assert.deepEqual(b.both.map((c) => c.code), ['A', 'C']);
+  // 買う銘柄（今の規則の上位2件）は変えない
+  assert.deepEqual(sig.picks.map((c) => c.code), ['A', 'B']);
+  const old = rows.map(({ ltr, ...c }) => c);
+  const ob = bothSummary(old, strategySignal(old));
+  assert.equal(ob.available, false);
+  assert.deepEqual(ob.both, []);
+  assert.equal(bothSummary([], strategySignal([])).available, false);
+});
+
+test('ltrRanking: ランキング学習の順位の順に並べ、上半分・今の規則・両方使う形の印を付ける。順位が欠けた日は出さない', () => {
+  const r = (code, pcts, rank, dayPct, upper) => ({ ...rule(code, pcts), ltr: { score: 0.1, dayPct, dayRank: rank, nDay: 4, upper } });
+  const rows = [
+    r('A', [99, 99, 99], 3, 33.3, false),
+    r('B', [50, 60, 70], 1, 100, true),
+    r('C', [96, 97, 98], 2, 66.7, true),
+    r('D', [96, 97, 98], 4, 0, false),
+  ];
+  const k = ltrRanking(rows);
+  assert.equal(k.available, true);
+  assert.deepEqual(k.items.map((x) => x.c.code), ['B', 'C', 'A', 'D']);
+  assert.deepEqual(k.items.map((x) => x.rank), [1, 2, 3, 4]);
+  assert.equal(k.nUpper, 2);
+  assert.deepEqual(k.items.map((x) => x.upper), [true, true, false, false]);
+  assert.deepEqual(k.items.map((x) => x.rule), [false, true, true, true]);
+  assert.deepEqual(k.items.map((x) => x.both), [false, true, false, false]);   // passesBoth と同じ
+  assert.deepEqual(k.items.map((x) => x.both), k.items.map((x) => passesBoth(x.c)));
+  assert.deepEqual(k.items.map((x) => x.dayPct), [100, 66.7, 33.3, 0]);
+  assert.equal(k.items[0].nDay, 4);
+  assert.equal(rows[0].rank, undefined);                                       // 元の行は変えない
+  // 同じ順位は銘柄コードの順
+  const tie = [r('Z', [1, 1, 1], 1, 75, true), r('Y', [1, 1, 1], 1, 75, true)];
+  assert.deepEqual(ltrRanking(tie).items.map((x) => x.c.code), ['Y', 'Z']);
+  // 1件でも順位が無ければ出さない（bothSummary と同じ扱い）。候補ゼロも
+  assert.equal(ltrRanking([rows[0], rule('E', [96, 97, 98])]).available, false);
+  assert.equal(ltrRanking([{ ...rows[0], ltr: { ...rows[0].ltr, dayRank: 1.5 } }]).available, false);
+  assert.deepEqual(ltrRanking([]), { available: false, items: [], nUpper: 0 });
+  assert.equal(ltrRanking(null).available, false);
+});
+
+test('ltr5Rank / ltr5Pool / condLevel: 直近5営業日の組の中の順位と3条件・4条件の印（予測の ltr5・conds。2026-11-02 から）', () => {
+  const c = { ltr5: { score: 0.3, rank: 2, nPool: 41, pct: 97.5 }, conds: { d1: true, w1: false, r15: true, r0: true, c3: false, c4: false } };
+  assert.equal(ltr5Rank(c), 2);
+  assert.equal(ltr5Pool(c), 41);
+  assert.equal(condLevel(c), null);                                       // 3条件・4条件とも満たさない
+  assert.equal(condLevel({ conds: { c3: true, c4: false } }), 'c3');
+  assert.equal(condLevel({ conds: { c3: true, c4: true } }), 'c4');
+  assert.equal(condLevel({ conds: { c3: null, c4: null } }), null);       // 決まらない（日次の順位が無いなど）
+  // 値が無い日（2026-11-02 より前）・形が違う値は null
+  assert.equal(ltr5Rank({}), null);
+  assert.equal(ltr5Pool({ ltr5: { nPool: '41' } }), null);
+  assert.equal(ltr5Rank({ ltr5: { rank: 1.5 } }), null);
+  assert.equal(condLevel(undefined), null);
+});
+
+test('ltrRanking: 順位表の行に、直近5営業日の組の中の順位と3条件・4条件の印も付ける（無ければ null）', () => {
+  const r = (code, rank, extra = {}) => ({ ...rule(code, [96, 97, 98]), ltr: { score: 0.1, dayPct: 50, dayRank: rank, nDay: 2, upper: rank === 1 },
+                                           ...extra });
+  const k = ltrRanking([
+    r('B', 2),
+    r('A', 1, { ltr5: { rank: 1, nPool: 30 }, conds: { c3: true, c4: true } }),
+  ]);
+  assert.deepEqual(k.items.map((x) => [x.c.code, x.rank5, x.pool5, x.cond]), [['A', 1, 30, 'c4'], ['B', null, null, null]]);
+});
+
+test('NEWS_LTR_TOP / ltrTop: 候補銘柄のニュースに足すのはランキング学習（日次）のその日の3位以内（運用者の選択 2026-11-21）', () => {
+  assert.equal(NEWS_LTR_TOP, 3);
+  const r = (rank) => ({ ...rule('A', [10, 10, 10]), ltr: { dayRank: rank } });
+  assert.deepEqual([1, 2, 3, 4].map((k) => ltrTop(r(k))), [true, true, true, false]);
+  // 順位が無い・整数でない・0 以下は足さない
+  for (const bad of [undefined, null, 0, -1, 1.5, '1', true, NaN]) assert.equal(ltrTop(r(bad)), false, String(bad));
+  assert.equal(ltrTop(rule('B', [99, 99, 99])), false);
+  assert.equal(ltrTop(null), false);
+  assert.equal(ltrTop(r(4), 5), true);
+});
+
+test('newsRows: 規則を満たす候補（passed の並び）の後ろに、規則を満たさない3位以内を順位の順で足す。買う銘柄は変えない', () => {
+  const r = (code, pcts, rank) => ({ ...rule(code, pcts), ltr: rank === undefined ? undefined : { dayRank: rank, upper: rank <= 2 } });
+  const rows = [
+    r('A', [99, 99, 99], 5),      // 規則を満たす（順位は5位）
+    r('B', [50, 60, 70], 2),      // 規則を満たさない・2位 → 足す
+    r('C', [96, 97, 98], 3),      // 規則を満たす・3位（二重に出さない）
+    r('D', [40, 40, 40], 1),      // 規則を満たさない・1位 → 足す
+    r('E', [40, 40, 40], 4),      // 規則を満たさない・4位 → 出さない
+    r('F', [40, 40, 40]),         // 順位が無い → 出さない
+  ];
+  const signal = strategySignal(rows);
+  const shown = newsRows(rows, signal);
+  assert.deepEqual(shown.map((c) => c.code), ['A', 'C', 'D', 'B']);
+  assert.deepEqual(signal.picks.map((c) => c.code), ['A', 'C']);                 // 買う銘柄は規則のまま
+  assert.deepEqual(shown.slice(0, 2), signal.passed);                           // 規則を満たす候補は passed のまま（minPct つき）
+  assert.equal(shown[2].minPct, undefined);                                      // 足した候補に最小の百分位は付けない
+  // 規則を満たす候補が無い日は3位以内だけ。同じ順位は銘柄コードの順
+  const none = [r('Z', [1, 1, 1], 1), r('Y', [1, 1, 1], 1), r('X', [1, 1, 1], 3), r('W', [1, 1, 1], 4)];
+  assert.deepEqual(newsRows(none, strategySignal(none)).map((c) => c.code), ['Y', 'Z', 'X']);
+  // ランキング学習の無い日は今までどおり規則を満たす候補だけ
+  const old = [rule('P', [99, 99, 99]), rule('Q', [10, 10, 10])];
+  assert.deepEqual(newsRows(old, strategySignal(old)).map((c) => c.code), ['P']);
+  assert.deepEqual(newsRows([], strategySignal([])), []);
+  assert.deepEqual(newsRows(null, null), []);
+  assert.equal(rows[1].minPct, undefined);                                       // 元の行は変えない
+});

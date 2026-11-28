@@ -1,23 +1,31 @@
 /**
  * 運用の戦略（docs/PLAYBOOK.md）を画面で再現する。
  *
- * 手順（2026-10-12 に選定の線を運用者の決定で変えた。下の 1 の数字は以前の規則で測ったもの）:
+ * 手順（2026-10-12 に選定の線を運用者の決定で 1.5σ の3本に変え、2026-10-23 に運用者の依頼で 1.2σ の3本に、2026-10-29 に
+ * 運用者の依頼で 1.5σ の3本に、2026-10-30 に運用者の依頼で 1.2σ の3本に戻した。下の 1 の最初の数字は 2026-10-12 より前の
+ * 規則で測ったもの）:
  *
  *   1. その日の発火数（78週高値を更新した銘柄数）を見る
  *        20件以上 … 本命。8〜19件 … 枠が空いていれば取る。7件以下 … 発火が少ない日（枠が空いていれば取る）
  *      2026-10-12 までは 7件以下の日は見送っていた。運用者の決定（「Aでお願いします」）で、発火の数では見送らない
  *      以前の規則（1.2σ の3モデル 90以上、out-of-fold 2021-11〜2026-08）では、20件以上 +3.27%・勝率63%、
  *      8〜19件 +1.0〜2.2%、7件以下は142件で −0.11%・−10%割れ 14.1%（7件以下と8件以上の差は z≈2.6）。
- *      今の規則（1.5σ の3本 95以上、画面と同じ百分位）では 20件以上 192件 +4.9%、8〜19件 140件 +1.5%、
- *      7件以下は22件と少なく +5.4%（+10% の指値・20営業日目の終値。research/exp/probe_k15_baseline.py）。
- *      前向きの百分位で測り直すと（実験88）、7件以下の日 36件 +3.71%・8件以上 523件 +3.05% で、見送りの線を支える
- *      数字は無かった（だから見送りをやめた。7件以下の日は −10%割れが 11.1% と多く、当たり外れが大きい）。
+ *      1.5σ の3本 95以上（2026-10-12〜10-23 の規則）で前向きの百分位で測り直すと（実験88）、7件以下の日 36件 +3.71%・
+ *      8件以上 523件 +3.05% で、見送りの線を支える数字は無かった（だから見送りをやめた）。
+ *      今の規則（1.2σ の3本 95以上、画面と同じ百分位、360列の OOF）では 20件以上 199件 +3.72%、8〜19件 109件 +1.90%、
+ *      7件以下は20件と少なく +3.00%（+10% の指値・20営業日目の終値。research/exp/probe_k15_panel.py、run 40876903076）。
+ *      前向きの百分位では 7件以下 23件 +0.61%（−10%割れ 30.4%）・8件以上 406件 +2.99%（4.4%）で、7件以下が低い（見送りの線は
+ *      変えていない）。1.5σ の3本 95以上（2026-10-29〜10-30 の規則）は、同じ OOF の前向きで 7件以下 32件 +2.16%（12.5%）・
+ *      8件以上 529件 +2.74%（5.9%）。
  *      **20件未満を全部見送るのは誤り。** 空き枠の収益は 0% なので、
  *      プラスの帯を捨てて枠を遊ばせると損になる（実験35）
- *   2. 1.5σ のラベルで学んだ木の3モデル（RULE_MODELS: LightGBM / XGBoost / CatBoost の 1.5σ 版）**すべて**が
- *      過去分布の95以上（運用者の決定 2026-10-12「1.5σの3モデルで95以上を選定のベースラインにしようかな」
- *      「今日の戦略パネルも変えてください」）。それまでは 1.2σ の3モデルすべてが90以上。
- *      1.2σ の3本 95以上と比べて、どちらが良いかは過去のデータでは見分けられない（実験82・87）
+ *   2. 1.2σ のラベルで学んだ木の3モデル（RULE_MODELS: LightGBM / XGBoost / CatBoost）**すべて**が過去分布の95以上
+ *      （運用者の依頼 2026-10-30「買いの判断に使うものは1.2σ の3本（すべて95以上）に戻してほしいです。こちらのほうが、売却ロジックの
+ *      目安（+10%）に近いと思うので。」→「すぐ戻す（今夜から）」。2026-10-23〜10-29 も同じ。2026-10-12〜10-23 と 2026-10-29〜10-30 は
+ *      1.5σ の3本すべてが95以上、2026-10-12 より前は 1.2σ の3本すべてが90以上）。今の OOF（360列）・前向きでは、今の手順（3枠・
+ *      発火の数を問わない）で 1.2σ 98取引 +0.90%・1.5σ 115取引 +1.84%、候補全体の平均は 429件 +2.86%・561件 +2.70%（窓ごとの差
+ *      1.5σ − 1.2σ は +0.85 ± 0.79pt）で、どちらが上とも言い切れない。それを知らせた上での運用者の判断（probe_k15_panel、
+ *      docs/MODEL_ADOPTION_RULES.md §81・§86）
  *   3. 通った銘柄を「3モデルの最小順位」で並べて上位1〜2件（同点は 1.2σ の LightGBM のスコア順）
  *        lgbm 単体の順位で並べると2番手が +0.87% まで落ちる（最小順位なら +2.99%。以前の規則で測ったもの）
  *   4. 翌営業日の寄りで買う
@@ -34,22 +42,32 @@
  * views/PredictionView.jsx。
  */
 
-/** 1.2σ のラベルのブースティング3モデル。2026-10-12 までの規則（実運用の追跡の参考・実験の再現）に使う。 */
+/** 1.2σ のラベルのブースティング3モデル。今の規則（2026-10-30 から。2026-10-23〜10-29 も同じ）・2026-10-12 までの規則・実験の再現に使う。 */
 export const BOOST = ['lgbm', 'xgb', 'cat'];
 
 /**
- * 今日の戦略の規則に使う3モデル（2026-10-12 から）。1.5σ のラベルで学んだ木の3本。
- * research/live_track.py の RULE_MODELS と同じ（tests/test_live_track.py が突き合わせる）。
+ * 今日の戦略の規則に使う3モデル（2026-10-30 から）。1.2σ のラベルで学んだ木の3本（運用者の依頼「買いの判断に使うものは1.2σ の
+ * 3本（すべて95以上）に戻してほしいです」。2026-10-23〜10-29 も同じ。2026-10-12〜10-23 と 2026-10-29〜10-30 は 1.5σ の3本
+ * lgbm_k15 / xgb_k15 / cat_k15）。research/live_track.py の RULE_MODELS と同じ（tests/test_live_track.py が突き合わせる）。
  */
-export const RULE_MODELS = ['lgbm_k15', 'xgb_k15', 'cat_k15'];
+export const RULE_MODELS = ['lgbm', 'xgb', 'cat'];
 
 /** 規則の3モデルの呼び名（画面の文言） */
-export const RULE_JA = '1.5σ の3本';
+export const RULE_JA = '基準ラベルの3本';
+
+/** 規則の3モデルの短い記号（予測ファイルのモデルの short。research/models.py と同じ） */
+export const RULE_SHORT = 'LGB・XGB・CAT';
+
+/** 規則のラベル（際どい印の頭に付ける） */
+export const RULE_SIGMA = '基準ラベル';
+
+/** モデル別の表で規則の3本が並ぶ行（predictions.js の modelGrid の label。1.5σ の行は 'k15'） */
+export const RULE_ROW = 'base';
 
 /** 画面に出す短い呼び名。正本は research/models.py。 */
 export const MODEL_JA = {
   lgbm: 'LightGBM', xgb: 'XGBoost', cat: 'CatBoost',
-  lgbm_k15: 'LightGBM（1.5σ）', xgb_k15: 'XGBoost（1.5σ）', cat_k15: 'CatBoost（1.5σ）',
+  lgbm_k15: 'LightGBM（厳しい到達条件）', xgb_k15: 'XGBoost（厳しい到達条件）', cat_k15: 'CatBoost（厳しい到達条件）',
 };
 
 /**
@@ -69,7 +87,8 @@ export function fundContrib(candidate) {
 }
 
 export const STRATEGY = {
-  agreePct: 95,      // 規則の3モデル（RULE_MODELS）すべてがこの百分位以上。2026-10-12 に 1.2σ の3本 90 → 1.5σ の3本 95
+  agreePct: 95,      // 規則の3モデル（RULE_MODELS）すべてがこの百分位以上。2026-10-12 に 1.2σ の3本 90 → 1.5σ の3本 95、
+                     // 2026-10-23 に 1.2σ の3本 95、2026-10-29 に 1.5σ の3本 95、2026-10-30 に 1.2σ の3本 95
   strongBreaks: 20,  // この件数以上の発火なら本命
   skipBreaks: 1,     // これ未満の発火なら見送る。2026-10-12 に 8 → 1（発火の数では見送らない。運用者の決定「Aでお願いします」・実験88）
   quietBreaks: 8,    // これ未満は「発火が少ない日」（買うが、件数が少なく当たり外れが大きいと添える。以前の見送りの線）
@@ -138,10 +157,11 @@ export function minPct(candidate, models = RULE_MODELS) {
 
 /**
  * 予測タブの一覧の並び順（運用者の決定 2026-10-13「1.5σ の3本のうち一番低い百分位でいきましょう」。それまでは
- * 基準モデル（1.2σ の LightGBM）のスコア順＝rankInDay）。
+ * 基準モデル（1.2σ の LightGBM）のスコア順＝rankInDay。2026-10-23〜10-29 は規則が 1.2σ の3本だったので、その3本の最小。
+ * 2026-10-29 に規則と一緒に 1.5σ の3本に、2026-10-30 に規則と一緒に 1.2σ の3本に戻した）。
  *
  * 規則の3モデル（RULE_MODELS）の百分位の最小が高い順。同点は基準モデルのスコアが高い順（strategySignal と同じ）。
- * 3本のどれかが欠けた候補（1.5σ のモデルを予測に入れる前の、固定した過去の日など）は最小が出せないので後ろに
+ * 3本のどれかが欠けた候補（そのモデルの値が無い日。1.5σ の3本が規則だったころは、1.5σ を予測に入れる前の固定した過去の日）は最小が出せないので後ろに
  * 置き、基準モデルのスコア順に並べる。戻り値は各行に order（1始まりの並び順）と ruleMin（最小。出せなければ
  * null）を足した新しい配列（元の行は変えない）。rankInDay（基準モデルの順位）は帯・較正・予測ログ・追跡の
  * 物差しなので、そのまま残す。
@@ -192,33 +212,34 @@ export function laggard(candidate, models = RULE_MODELS) {
 }
 
 /**
- * 1.5σ の3本（RULE_MODELS）で見た「際どい」範囲（運用者の依頼 2026-10-12「1.5σで際どいにしてほしいです」。
- * それまでは 1.2σ の3本と実験70 の数字）。今の規則の線「3本とも95以上」の下で、次のどちらか:
+ * 規則の3本（RULE_MODELS。2026-10-30 から 1.2σ の3本）で見た「際どい」範囲（運用者の依頼 2026-10-12「1.5σで際どいに
+ * してほしいです」で 1.5σ の3本にし、2026-10-23〜10-29 は規則に合わせて 1.2σ の3本、2026-10-29〜10-30 は 1.5σ の3本、
+ * 2026-10-30 に規則と一緒に 1.2σ の3本に戻した）。今の規則の線「3本とも95以上」の下で、
+ * 次のどちらか:
  *   - 2本が 95以上で、残り1本が 95未満
  *   - 95以上は1本以下で、3本の最小が 85〜95
- * 例: xgb_k15 96・cat_k15 98・lgbm_k15 85。
+ * 例: xgb 96・cat 98・lgbm 85。
  */
 export const BORDER = { line: 95, lo: 85 };
 
 /**
- * 際どい候補の過去の成績（research/exp/probe_k15_border.py、run 38217095967。前向きの百分位・テスト窓 3〜11
- * （2022-05〜2026-09）・発火の数を問わない。docs/MODEL_ADOPTION_RULES.md §48）。物差しは +10% の指値
- * （届かなければ20営業日目の終値）の平均（%）。形は「2本95以上（two95）」と「95以上は1本以下・最小 85〜95（min）」で、
- * それぞれ一番低いモデルで分けた:
- *   3本とも95以上（線の上）       559件 +3.09%
- *   2本95以上                     489件 +2.39%（一番低いのが LightGBM 141件 +1.64% / XGBoost 228件 +2.65% / CatBoost 120件 +2.79%）
- *   95以上は1本以下・最小 85〜95  856件 +1.15%（LightGBM 268件 +0.47% / XGBoost 362件 +1.14% / CatBoost 226件 +1.95%）
- * どちらの形も LightGBM が一番低い組がいちばん低いが、ほかの2本との差は SE の範囲（−1.06 ± 0.88pt / −0.98 ± 0.63pt）。
+ * 際どい候補の過去の成績（research/exp/probe_k15_panel.py の ■4c・■4d、2026-10-30・run 41093274768・360列の OOF（最後の
+ * 再学習は 10/24）。前向きの百分位・テスト窓 3〜11（2022-05〜2026-09）・発火の数を問わない。probe_k15_border と同じ形。
+ * docs/MODEL_ADOPTION_RULES.md §86）。物差しは +10% の指値（届かなければ20営業日目の終値）の平均（%）。形は「2本95以上（two95）」と
+ * 「95以上は1本以下・最小 85〜95（min）」で、それぞれ一番低いモデルで分けた（1.2σ の3本）:
+ *   3本とも95以上（線の上）       429件 +2.86%
+ *   2本95以上                     450件 +1.94%（一番低いのが LightGBM 200件 +2.33% / XGBoost 106件 +1.69% / CatBoost 144件 +1.60%）
+ *   95以上は1本以下・最小 85〜95  691件 +1.64%（LightGBM 291件 +1.45% / XGBoost 227件 +1.28% / CatBoost 173件 +2.44%）
+ * どの組もほかの2本との差は SE の範囲（いちばん離れたのが「1本以下で CatBoost が一番低い」+1.07 ± 0.68pt）。
  * 先に決めた赤の線（BORDER_WARN: 20件以上で平均 0% 以下）に当たる組は無いので、今の数字では赤は出ない（全部黄）。
- * 以前の 1.2σ の3本の印（実験70「2つ95以上で LightGBM が一番低い 145件は約 0.0%」→ 赤）は、同じ前向きの物差しで測ると
- * 225件 +1.47% で、0% 付近ではなかった（実験70 は届かなければ持ち切り・窓2以降の百分位で、物差しが違う）。
+ * 同じ OOF の 1.5σ の3本（2026-10-29〜10-30 の規則。run 40876903076 の ■4）は 2本95以上 502件 +1.92%・1本以下 894件 +1.41%（§81）。
+ * 10/24 の再学習の前の 1.2σ の3本の数字（probe_t3_panel）は §75、2026-10-12〜10-23 の 1.5σ の3本の数字（probe_k15_border、
+ * 249列のころの OOF）は §48。
  */
 export const BORDER_STATS = {
-  line: { n: 559, ret: 3.09 },                     // 3本とも95以上（線の上）
-  two95: { all: { n: 489, ret: 2.39 }, lgbm_k15: { n: 141, ret: 1.64 }, xgb_k15: { n: 228, ret: 2.65 },
-           cat_k15: { n: 120, ret: 2.79 } },
-  min: { all: { n: 856, ret: 1.15 }, lgbm_k15: { n: 268, ret: 0.47 }, xgb_k15: { n: 362, ret: 1.14 },
-         cat_k15: { n: 226, ret: 1.95 } },
+  line: { n: 429, ret: 2.86 },                     // 3本とも95以上（線の上）
+  two95: { all: { n: 450, ret: 1.94 }, lgbm: { n: 200, ret: 2.33 }, xgb: { n: 106, ret: 1.69 }, cat: { n: 144, ret: 1.60 } },
+  min: { all: { n: 691, ret: 1.64 }, lgbm: { n: 291, ret: 1.45 }, xgb: { n: 227, ret: 1.28 }, cat: { n: 173, ret: 2.44 } },
 };
 
 /** 赤の注意を出す線（先に決めたもの）: 件数が minN 件以上で、平均が ret（%）以下。件数が少ない組は赤にしない。 */
@@ -255,7 +276,7 @@ const past = (x) => {
   return Number.isFinite(x?.ret) && x?.n ? `${fmtRet(x.ret)}（${x.n}件）` : '（測っていない）';
 };
 
-/** 短い呼び名（「LightGBM（1.5σ）」→「LightGBM」。印の頭と注意の見出しに 1.5σ と書くので）。 */
+/** 短い呼び名（「LightGBM（厳しい到達条件）」→「LightGBM」。印の頭と注意の見出しに規則のラベル（RULE_SIGMA）を書くので）。 */
 const shortJa = (a) => MODEL_JA[String(a).replace(/_k1[58]$/, '')] || a;
 
 /** 先に決めた線（BORDER_WARN）に当たるか: 件数 minN 以上で平均が ret 以下。 */
@@ -288,20 +309,23 @@ export function borderNote(candidate, b = BORDER, st = BORDER_STATS, w = BORDER_
     + (warn ? '。空き枠（0%）と同じか悪い' : '')
     + (few ? '。件数が少なく目安にしにくい' : '')
     + `。ほかが一番低いときは ${others}、3本とも${b.line}以上は ${past(st?.line)}`
-    + '（1.5σ の3本・前向きの百分位。+10% の指値で売り、届かなければ20営業日目の終値で売ったときの平均）';
+    + `（旧1.2σモデルの参考値・前向きの百分位。+10% の指値で売り、届かなければ20営業日目の終値で売ったときの平均）`;
   return {
     shape, laggard: lag, laggardPct: p[lag], warn, few,
-    badge: warn ? `1.5σで際どい・${name} が最下位` : `1.5σで際どい・最下位 ${name}`,
+    badge: warn ? `${RULE_SIGMA}で際どい・${name} が最下位` : `${RULE_SIGMA}で際どい・最下位 ${name}`,
     text,
   };
 }
 
 /**
- * 基準に届かなかったが惜しい候補（規則の3モデルの最小が nearLo〜agreePct。今は 1.5σ の3本で 85〜95）。
+ * 基準に届かなかったが惜しい候補（規則の3モデルの最小が nearLo〜agreePct。今は 1.2σ の3本で 85〜95）。
  *
- * 画面に出すのは「なぜ買わないか」を毎日考え直さないため。今の規則（1.5σ の3本、画面と同じ百分位、発火8件以上の日、
- * +10% の指値・20営業日目の終値。research/exp/probe_k15_baseline.py）では、最小 85〜95 で幅5未満 369件 +1.05%・
- * 勝率58%、幅5以上 584件 +2.08%・勝率63%（線の上の354件は +3.58%）。幅5以上（weak）でも弱くはない。
+ * 画面に出すのは「なぜ買わないか」を毎日考え直さないため。今の規則（1.2σ の3本、画面と同じ百分位、発火8件以上の日、
+ * +10% の指値・20営業日目の終値。research/exp/probe_k15_panel.py、run 40876903076、360列の OOF）では、最小 85〜95 で
+ * 幅5未満 320件 +1.49%・勝率60.0%、幅5以上 593件 +1.75%・勝率61.4%（線の上の328件は +3.07%）。幅5以上（weak）でも弱くはない。
+ * （同じ OOF の 1.5σ の3本（2026-10-29〜10-30 の規則）は 幅5未満 387件 +1.41%・幅5以上 633件 +1.72%。249列のころの 1.5σ の
+ * 3本（probe_k15_baseline）は 幅5未満 369件 +1.05%・幅5以上 584件 +2.08%。10/24 の再学習の前の 1.2σ の3本（probe_t3_panel）は
+ * 幅5未満 335件 +1.49%・幅5以上 576件 +2.28%。）
  * 以下は以前の規則（1.2σ の3モデル、最小 85〜90）の実測（実験36、発火8件以上の日・枠の制約なし）:
  *
  *   最小 85〜90 で 3モデルの幅 < 5   118件 +2.70% 勝率58% −10%割れ 5.1%
@@ -312,8 +336,8 @@ export function borderNote(candidate, b = BORDER, st = BORDER_STATS, w = BORDER_
  * とくに最下位が LightGBM のときが弱い（104件 +0.39%）。
  * ※ 上は 153列のころの実験36。いまの239列のモデル（実験70、2026-10-10）では、85〜90 の帯で最下位が
  *   LightGBM の形は弱くない（LightGBM が最下位 202件 +1.3%、XGBoost / CatBoost が最下位 445件 +0.7%。
- *   形ごとの表の値から合成）。1.5σ の3本（probe_k15_border、前向き）では、最小 85〜95 の形で一番低いのが
- *   LightGBM の組が +0.47%（268件）といちばん低いが、ほかとの差は SE の範囲（borderNote の BORDER_STATS）。
+ *   形ごとの表の値から合成）。今の 1.2σ の3本（probe_k15_panel の ■4d、前向き）では、最小 85〜95 の形で一番低いのが
+ *   XGBoost の組が +1.28%（227件）といちばん低いが、ほかとの差は SE の範囲（borderNote の BORDER_STATS）。
  */
 export function nearMisses(rows, s = STRATEGY) {
   const list = Array.isArray(rows) ? rows : [];
@@ -338,6 +362,127 @@ export function passesAgree(candidate, pct = STRATEGY.agreePct) {
 }
 
 /**
+ * ランキング学習（予測の ltr。research/ltr.py）の、その日の候補の中の百分位（0〜100。候補が1件の日は 50）。無ければ null。
+ * 2026-10-24 から予測に入る（それより前の日には無い）。参考に並べるだけで、買いの規則には使わない
+ * （運用者の選択「まず並べて見る」。docs/MODEL_ADOPTION_RULES.md §78-9）。
+ */
+export function ltrDayPct(candidate) {
+  const v = candidate?.ltr?.dayPct;
+  return Number.isFinite(v) ? v : null;
+}
+
+/** その日の中でランキング学習が上半分か（予測の ltr.upper。丸める前の百分位で決めてある）。無ければ null。 */
+export function ltrUpper(candidate) {
+  const u = candidate?.ltr?.upper;
+  return typeof u === 'boolean' ? u : null;
+}
+
+/**
+ * 直近5営業日の組のランキング学習（予測の ltr5。research/ltr5.py。実験117 の W5）の、予測の日の組（その日までの直近5営業日の
+ * 候補）の中の順位（1 = 最上位。同じスコアは銘柄コードの順）。無ければ null。2026-11-02 の予測から入る（それより前の日には
+ * 無い）。参考に並べるだけで、買いの規則には使わない（運用者の選択「画面に並べて確かめる」。docs/MODEL_ADOPTION_RULES.md §82-6）。
+ */
+export function ltr5Rank(candidate) {
+  const v = candidate?.ltr5?.rank;
+  return Number.isInteger(v) ? v : null;
+}
+
+/** 直近5営業日の組の行の数（予測の ltr5.nPool）。無ければ null。 */
+export function ltr5Pool(candidate) {
+  const v = candidate?.ltr5?.nPool;
+  return Number.isInteger(v) ? v : null;
+}
+
+/**
+ * 3条件・4条件の印（予測の conds。research/ltr5.py の conds）。2026-11-02 の予測から（運用者の選択 2026-10-31「すぐ 1.2σ に
+ * 替える」。docs/MODEL_ADOPTION_RULES.md §87）:
+ *   'c4'  4条件: その日の候補の中で日次のランキング学習が1位・直近5営業日の組の中で1位・1.2σ の木3本がすべて95以上・
+ *         1.5σ の木3本もすべて95以上（実験117 の参考の表と同じ組み合わせ）
+ *   'c3'  3条件（4条件ではない）: 上の3つ（1.5σ は問わない。実験117 では測っていない組み合わせ）
+ *   null  どちらでもない・値が無い
+ */
+export function condLevel(candidate) {
+  const c = candidate?.conds;
+  if (!c) return null;
+  if (c.c4 === true) return 'c4';
+  if (c.c3 === true) return 'c3';
+  return null;
+}
+
+/**
+ * 両方使う形（参考）: 今の規則（RULE_MODELS がすべて agreePct 以上）を満たし、かつその日の中でランキング学習が上半分。
+ * 実験114b の R0D（§78-8）。買う銘柄は strategySignal のまま変えない。research/live_track.py の ■7 と同じ判定。
+ */
+export function passesBoth(candidate, s = STRATEGY) {
+  return passesAgree(candidate, s.agreePct) && ltrUpper(candidate) === true;
+}
+
+/**
+ * その日の「両方使う形」の要約。rows はその日の候補、signal はその日の strategySignal。
+ *   available  その日の候補にランキング学習の値があるか（無い日は数えない）
+ *   both       今の規則を満たした候補（signal.passed）のうち、ランキング学習が上半分のもの（並びは passed のまま）
+ */
+export function bothSummary(rows, signal) {
+  const list = Array.isArray(rows) ? rows : [];
+  const passed = signal?.passed ?? [];
+  const available = list.length > 0 && list.every((c) => ltrUpper(c) !== null);
+  return { available, both: available ? passed.filter((c) => ltrUpper(c) === true) : [], nPassed: passed.length };
+}
+
+/**
+ * ランキング学習の順位表（予測タブ。運用者の依頼 2026-10-29「ランキング学習モデルによるランキングをわかりやくどこかに
+ * 表示してください」→「予測タブに順位表」）。その日の候補を、ランキング学習のその日の中の順位（ltr.dayRank。1 = 最上位）の
+ * 順に並べる。同じ順位は銘柄コードの順。参考に並べるだけで、買う銘柄は今日の戦略の規則のまま。
+ *   available  その日の候補すべてに順位がある（1件でも欠ければ出さない。bothSummary と同じ扱い）
+ *   items      { c, rank, nDay, dayPct, upper（上半分）, rule（今の規則を満たす）, both（両方使う形）,
+ *                rank5・pool5（直近5営業日の組の中の順位と組の行の数。無ければ null）, cond（condLevel） } の並び
+ *   nUpper     上半分の件数（表に区切りの線を引く位置）
+ */
+export function ltrRanking(rows, s = STRATEGY) {
+  const list = Array.isArray(rows) ? rows : [];
+  const has = (c) => Number.isInteger(c?.ltr?.dayRank) && ltrUpper(c) !== null;
+  if (!list.length || !list.every(has)) return { available: false, items: [], nUpper: 0 };
+  const items = list.map((c) => {
+    const rule = passesAgree(c, s.agreePct);
+    const upper = ltrUpper(c) === true;
+    return { c, rank: c.ltr.dayRank, nDay: Number.isInteger(c.ltr.nDay) ? c.ltr.nDay : list.length,
+             dayPct: ltrDayPct(c), upper, rule, both: rule && upper,
+             rank5: ltr5Rank(c), pool5: ltr5Pool(c), cond: condLevel(c) };
+  });
+  items.sort((a, b) => (a.rank - b.rank) || String(a.c.code ?? '').localeCompare(String(b.c.code ?? '')));
+  return { available: true, items, nUpper: items.filter((x) => x.upper).length };
+}
+
+/**
+ * 候補銘柄のニュースに、規則を通らなくても並べるランキング学習（日次）のその日の中の順位の上限（予測の ltr.dayRank）。
+ * 運用者の依頼（2026-11-21）「候補銘柄のニュースの探索条件を緩くしてほしいです。分類モデルのスコアは条件を満たしてなくても
+ * ランキング学習モデルが良ければ買うことはあり得るので」→ 選択「日次ランキングの3位以内」。research/news_links.py の LTR_TOP と
+ * 同じ値（tests/test_news_links.py で確かめる）。買う銘柄（strategySignal の picks）は変えない。
+ */
+export const NEWS_LTR_TOP = 3;
+
+/** その日の候補の中でランキング学習（日次）の順位が top 位以内か（1 = 最上位）。順位が無い・整数でなければ false。 */
+export function ltrTop(candidate, top = NEWS_LTR_TOP) {
+  const r = candidate?.ltr?.dayRank;
+  return Number.isInteger(r) && r >= 1 && r <= top;
+}
+
+/**
+ * 候補銘柄のニュースに並べる候補（rows はその日の候補、signal はその日の strategySignal）。今の規則を満たす候補
+ * （signal.passed。並びもそのまま）の後ろに、規則は満たさないがランキング学習（日次）がその日の top 位以内の候補を、
+ * 順位の順（同じ順位は銘柄コードの順）に足す。research/news_links.py の news_codes と同じ選び方。
+ */
+export function newsRows(rows, signal, top = NEWS_LTR_TOP) {
+  const passed = signal?.passed ?? [];
+  const key = (c) => c?.jqCode ?? c?.code;
+  const seen = new Set(passed.map(key));
+  const extra = (Array.isArray(rows) ? rows : [])
+    .filter((c) => !seen.has(key(c)) && ltrTop(c, top))
+    .sort((a, b) => (a.ltr.dayRank - b.ltr.dayRank) || String(a.code ?? '').localeCompare(String(b.code ?? '')));
+  return [...passed, ...extra];
+}
+
+/**
  * その日の発火数の帯。発火数だけで決める（2026-10-12 からは発火の数では見送らない。skipBreaks = 1）。
  *   strong  20件以上（本命）/ ok  8〜19件 / quiet  1〜7件（発火が少ない日。買うが件数が少ないと添える）/ none  0件
  * 地合いの条件は足さない（発火15件以上の日は100%が TOPIX 200日線より上で、
@@ -350,18 +495,18 @@ export function dayVerdict(nBreak, s = STRATEGY) {
   }
   if (nBreak >= s.strongBreaks) {
     return { kind: 'strong', tone: 'green', label: '本命の日',
-             note: `発火 ${nBreak} 件。20件以上の帯（${RULE_JA}が95以上で192件 +4.9%・勝率78%）` };
+             note: `発火 ${nBreak} 件。20件以上の帯（旧1.2σモデルの参考値：95以上で199件 +3.72%・勝率72%）` };
   }
   if (nBreak >= s.quietBreaks) {
     return { kind: 'ok', tone: 'amber', label: '枠が空いていれば',
-             note: `発火 ${nBreak} 件。8〜19件の帯（140件 +1.5%・勝率59%）。`
+             note: `発火 ${nBreak} 件。8〜19件の帯（109件 +1.90%・勝率64%）。`
                    + '枠が遊ぶより買うほうが良い' };
   }
   if (nBreak >= s.skipBreaks) {
     return { kind: 'quiet', tone: 'amber', label: '発火が少ない日',
              note: `発火 ${nBreak} 件。枠が空いていれば買う（2026-10-12 までは見送っていた）。`
-                   + `7件以下の帯は件数が少ない（22件 +5.4%・勝率82%。その時点の百分位で測ると36件 +3.7%・`
-                   + '−10%割れ 11%と当たり外れが大きい。実験88）' };
+                   + `7件以下の帯は件数が少ない（20件 +3.00%・勝率70%。その時点の百分位で測ると23件 +0.61%・`
+                   + '−10%割れ 30%と当たり外れが大きい）' };
   }
   return { kind: 'skip', tone: 'red', label: '見送り',
            note: `発火 ${nBreak} 件。${s.skipBreaks - 1}件以下の日は枠が空いていても買わない` };
@@ -379,7 +524,8 @@ export function strategySignal(rows, s = STRATEGY) {
   const verdict = dayVerdict(nBreak, s);
   // 規則の3モデルの百分位が1つでも欠けた候補の数。1件でもあればその日は判定できない（買わない）。
   // research/live_track.py の decide（「判定できない」）と同じ。過去の日は、その日に出した値のまま固定するので
-  // （research/predict_daily.py の freeze_past_days）、1.5σ のモデルを予測に入れる前の日は欠ける
+  // （research/predict_daily.py の freeze_past_days）、規則のモデルを予測に入れる前の日は欠ける（1.2σ の3本は運用の始めからある。
+  // 1.5σ の3本が規則だったころは、2026-10-13 より前の日が欠けた）
   const missing = list.filter((c) => minPct(c) === null).length;
   const passed = list
     .filter((c) => passesAgree(c, s.agreePct))

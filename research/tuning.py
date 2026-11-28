@@ -594,7 +594,7 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
          embargo_days: int = 60, scheme: str = "year",
          model: str = "classifier", n_estimators: Optional[int] = None,
          lr_bounds: Optional[Tuple[float, float]] = None,
-         objective: str = PRODUCTION_OBJECTIVE) -> Dict:
+         objective: str = PRODUCTION_OBJECTIVE, label_spec=None) -> Dict:
     """
     Optuna で探索する。df は「テスト窓より前」のデータだけを渡すこと。
 
@@ -690,6 +690,7 @@ def tune(df: pd.DataFrame, cols: List[str], *, n_trials: int = 30,
     at = study.best_trial.user_attrs
     global LAST_CV
     LAST_CV = {"scheme": scheme, "model": model,
+               **({"label_spec": label_spec} if label_spec is not None else {}),
                "n_estimators": n_trees,
                "lr_range": [lr_lo, lr_hi],
                "n_splits": len(folds), "objective": objective,
