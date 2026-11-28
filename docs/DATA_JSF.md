@@ -111,6 +111,8 @@
 2026-11-27 に、公開の Release のままで誰でも落とせることが分かり、運用者の選択「3つとも一緒に非公開」で、data-raw と一緒に
 2026-11-28 21:00 JST に下書き（非公開）にする（`docs/OPERATIONS.md`「data-raw を非公開にする」）。取り出しは、Release が
 見つからなければ「初回」とみなさずに止まる（`scripts/gh_release_download.sh` の `GH_DOWNLOAD_REQUIRED`。data-jsf は既定で 1）。
+2026-11-28 21:01 JST に下書きにした（Make Releases Private の run 46142598015。PASS 45 / FAIL 0。アセット 6件は変わらない）。
+上げる手順は、data-jsf が下書きでなければ上げずに止まる（`scripts/gh_release_upload.sh` の `GH_UPLOAD_REQUIRE_DRAFT`）。
 
 ## 特徴量（案。過去3年がそろってから作り、§7 の手順で比べる）
 

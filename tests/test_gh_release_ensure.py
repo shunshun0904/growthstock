@@ -8,6 +8,8 @@ scripts/gh_release_ensure.sh（Release が無ければ作る）のテスト。�
 - 試し直しても作れなければ exit 1
 - タグが無ければ exit 2
 - GH_ENSURE_DRAFT=1: 下書きで作る。既にあるものが下書きでなければ（公開されていれば）exit 3 で止める
+- 作るのは gh が「見つからない」と答えたときだけ。一時的なエラーで見えないだけなら作らずに見直す
+  （下書きには git のタグが無いので、作ると同じ名前の下書きが2つになりうる。docs/OPERATIONS.md「data-raw を非公開にする」）
 
   python3 -m unittest tests/test_gh_release_ensure.py
 """
@@ -20,12 +22,15 @@ import unittest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SCRIPT = os.path.join(ROOT, "scripts", "gh_release_ensure.sh")
 
-# 偽の gh。Release を $STUB_STATE/<tag>/ のディレクトリで表す。create は $STUB_CREATE_FAILS 回だけ失敗する
+# 偽の gh。Release を $STUB_STATE/<tag>/ のディレクトリで表す。create は $STUB_CREATE_FAILS 回だけ失敗する。
+# view は $STUB_VIEW_FAILS 回だけ一時的なエラー（HTTP 502。「見つからない」ではない）を返す
 FAKE_GH = r"""#!/usr/bin/env bash
 set -u
 state="$STUB_STATE"
 cmd="$1 $2"; tag="$3"; shift 3
 if [ "$cmd" = "release view" ]; then
+  v=$(( $(cat "$state/views" 2>/dev/null || echo 0) + 1 )); echo "$v" > "$state/views"
+  if [ "$v" -le "${STUB_VIEW_FAILS:-0}" ]; then echo "HTTP 502: Bad Gateway" >&2; exit 1; fi
   if [ -d "$state/$tag" ]; then
     if [ -f "$state/$tag/draft" ]; then echo true; else echo false; fi
     exit 0
@@ -113,6 +118,26 @@ class TestEnsure(unittest.TestCase):
         self.assertEqual(self.creates(), 0)
         # 下書きを求めないなら、公開でもそのまま
         self.assertEqual(self.run_script("data-minute").returncode, 0)
+
+    def test_transient_view_error_does_not_create(self):
+        """あるのに一時的なエラーで見えないとき、作らない（下書きが2つにならない）。見直して見つかれば終わる。"""
+        os.makedirs(os.path.join(self.state, "data-raw"))
+        open(os.path.join(self.state, "data-raw", "draft"), "w").close()
+        r = self.run_script("data-raw", GH_ENSURE_DRAFT="1", STUB_VIEW_FAILS="2")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.creates(), 0)
+        self.assertIn("確かめられなかった", r.stdout)
+
+    def test_transient_view_error_then_not_found_creates_once(self):
+        r = self.run_script("data-jsf", "題", "説明", GH_ENSURE_DRAFT="1", STUB_VIEW_FAILS="1")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.creates(), 1)
+        self.assertTrue(os.path.exists(os.path.join(self.state, "data-jsf", "draft")))
+
+    def test_view_errors_only_gives_up_without_creating(self):
+        r = self.run_script("data-raw", GH_ENSURE_DRAFT="1", STUB_VIEW_FAILS="99", GH_ENSURE_TRIES="3")
+        self.assertEqual(r.returncode, 1)
+        self.assertEqual(self.creates(), 0)
 
     def test_usage(self):
         self.assertEqual(self.run_script().returncode, 2)

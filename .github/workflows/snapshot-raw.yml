@@ -56,10 +56,9 @@ jobs:
           ls -lh snap
           n=$(ls snap | wc -l)
           [ "$n" -gt 0 ] || { echo "写すファイルが無い"; exit 1; }
-          gh release view "$TAG" >/dev/null 2>&1 || \
-            gh release create "$TAG" --draft --title "生データの写し: $TAG" \
-              --notes "取り直す前の data-raw の写し（種別: $KINDS_IN）。比べる実験のためだけに置く。" \
-              --latest=false
+          # 下書き（非公開）で作り、公開になっていたら止める（exit 3）。「見つからない」ときだけ作る（2026-11-28。docs/OPERATIONS.md「data-raw を非公開にする」）
+          GH_ENSURE_DRAFT=1 bash scripts/gh_release_ensure.sh "$TAG" "生データの写し: $TAG" \
+            "取り直す前の data-raw の写し（種別: $KINDS_IN）。比べる実験のためだけに置く。"
           gh release upload "$TAG" snap/* --clobber
           {
             echo "## 写した生データ（$TAG）"

@@ -88,11 +88,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || \
-            gh release create "$RELEASE_TAG" --draft \
-              --title "J-Quants 生データ" \
-              --notes "J-Quants API V2 から取得した日次株価・財務・信用残・TOPIX・銘柄マスタ。年別 parquet と manifest.json。" \
-              --latest=false
+          # 下書き（非公開）で作り、公開になっていたら止める（exit 3）。「見つからない」ときだけ作る（2026-11-28。docs/OPERATIONS.md「data-raw を非公開にする」）
+          GH_ENSURE_DRAFT=1 bash scripts/gh_release_ensure.sh "$RELEASE_TAG" "J-Quants 生データ" \
+            "J-Quants API V2 から取得した日次株価・財務・信用残・TOPIX・銘柄マスタ。年別 parquet と manifest.json。"
 
       - name: Upload to release
         env:

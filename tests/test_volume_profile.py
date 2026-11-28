@@ -342,7 +342,9 @@ class WorkflowTest(unittest.TestCase):
         self.assertIn("OUT_FILE: volume-profile.json", text)
         self.assertIn('gh release delete-asset "$OUT_TAG" "$OLD_FILE"', text)  # 暗号化していたころのアセットを片づける
         self.assertNotIn("public/", text.split("--output", 1)[1].split("\n", 1)[0])
-        self.assertNotIn("GH_ENSURE_DRAFT", text)  # デプロイの読み取り専用の鍵で読める公開の Release
+        # 2026-11-28 に Release ごと下書き（非公開）にした（運用者の選択 2026-11-27「3つとも一緒に非公開」。
+        # docs/OPERATIONS.md「data-raw を非公開にする」）。下書きで作り、公開になっていたら上げずに止める
+        self.assertIn('GH_ENSURE_DRAFT=1 bash scripts/gh_release_ensure.sh "$OUT_TAG"', text)
 
     def test_deploy_no_longer_places_the_profile(self):
         # 2026-11-21 から集計を画面に載せない（公開をやめた）。集計の完了でデプロイも起動しない

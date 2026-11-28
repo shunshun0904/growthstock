@@ -4,8 +4,8 @@ name: Update Volume Profiles
 #
 # 直近5営業日の予測対象すべてについて、予測の基準日までの 1・5・20営業日の価格帯別出来高を、
 # 蓄積した分足・ティック（下書きの Release data-minute・data-tick-YYYY）と日足（Release data-raw。照合用）から作る。
-# 結果は Release data-volume-profile に volume-profile.json として上げ、Deploy to GitHub Pages がそれを dist/data/ に
-# 置く。画面はキーの入力なしで開く。
+# 結果は Release data-volume-profile に volume-profile.json として上げる（2026-11-21 からデプロイは画面に載せない。
+# 2026-11-28 から Release は下書き（非公開）。docs/OPERATIONS.md「data-raw を非公開にする」）。
 #
 # 2026-11-19〜11-20 は**集計を誰でも見られる形で公開していた**（公開の Release とサイト。2026-11-21 にやめた。下の on:）。
 # 運用者の選択（2026-11-19「暗号化をやめて公開する」）。それまでは
@@ -17,8 +17,10 @@ name: Update Volume Profiles
 # 作り直していた（workflow_run）。2026-11-21 に運用者の依頼「分足のデータは使わない方針になったので価格帯別出来高の分布タグも
 # 消してください。データ取得と保存は契約が切れるまで引き続きお願いします（分足のデータの保存はそのままにしておいてください）」
 # → 選択「隠して集計も止める」「公開をやめる」で、タブを隠し、自動の起動を外し、デプロイに載せる段（deploy-pages.yml）を外し、
-# Release data-volume-profile の集計ファイルを消した。分足・ティックの取得と保存（Update Minute Bars・Update Ticks）は続ける。
-# **手で起動すると、集計がまた公開の Release に上がる**（公開をやめているので、起動する前に運用者に確かめる）。
+# Release data-volume-profile の集計ファイルを消すことにした（実際には消えておらず、2026-11-28 に Release ごと下書き（非公開）に
+# した）。分足・ティックの取得と保存（Update Minute Bars・Update Ticks）は続ける。
+# 手で起動すると、集計は下書き（非公開）の Release に上がる（公開になっていたら上げずに止まる。GH_ENSURE_DRAFT）。
+# 集計を作り直すかは、起動する前に運用者に確かめる。
 # docs/VOLUME_PROFILE.md「止めたこと（2026-11-21）」。
 on:
   workflow_dispatch:
@@ -88,7 +90,8 @@ jobs:
           TITLE: 価格帯別出来高
           NOTES: 「価格帯別出来高」タブの集計（volume-profile.json。直近5営業日の予測対象すべての 1・5・20営業日）。growthstock の Update Volume Profiles が書き、Deploy to GitHub Pages が画面に載せる（docs/VOLUME_PROFILE.md）。
         run: |
-          bash scripts/gh_release_ensure.sh "$OUT_TAG" "$TITLE" "$NOTES"
+          # 分足から作った集計も J-Quants のデータ。下書き（非公開）で作り、公開になっていたら止める（exit 3）。「見つからない」ときだけ作る（2026-11-28。docs/OPERATIONS.md「data-raw を非公開にする」）
+          GH_ENSURE_DRAFT=1 bash scripts/gh_release_ensure.sh "$OUT_TAG" "$TITLE" "$NOTES"
           bash scripts/gh_release_upload.sh "$OUT_TAG" "$RUNNER_TEMP/vp/out/$OUT_FILE"
           echo "上げた: $OUT_TAG / $OUT_FILE"
           # 暗号化していたころの題名・説明とアセットを片づける（無ければ何もしない）

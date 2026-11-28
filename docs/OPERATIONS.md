@@ -107,6 +107,24 @@ pre-dedupe-20260924（9/24 の取り直し前の J-Quants の写し）・data-vo
 作る手順（Update Data Store・Fetch JSF）も無いときは下書きで作るようにした。④は1回だけのワークフロー **Make Releases Private**
 （`.github/workflows/make-releases-private.yml`。confirm が yes でなければ何もしない。ほかの run が動いていれば止める）で行う。
 
+結果（2026-11-28 21:01 JST。④ = Make Releases Private の run 46142598015）: **PASS 45 / FAIL 0**。4つとも下書きに戻り、git のタグが
+消え、アセットの数は変わらない（data-raw 214・data-jsf 6・pre-dedupe-20260924 62・data-volume-profile 1）。鍵なし（Actions の実行
+環境から鍵を付けずに）で Release の API・アセットの API・前のダウンロードの URL・前のページがどれも 404、鍵なしの一覧にも出ない。
+鍵あり（`contents: write`）ではタグ名から見つかり、取り出しの台本で前と同じ中身（SHA-256 が一致）が取れた。起動の前に、動いている
+run と待っている run が無いことを確かめた。なお、このリポジトリで作業する Claude のセッションの通信は、中継で GitHub の鍵が付く
+（鍵なしのつもりの問い合わせでも下書きが見える）ので、鍵なしの確かめは Actions の実行環境で行った結果を使う。
+
+③は④の直後に入れた（同日）: data-raw・data-jsf・生データの写し・集計（data-volume-profile）を作る手順は、gh で直に作らず
+`GH_ENSURE_DRAFT=1 bash scripts/gh_release_ensure.sh` を通す（無ければ下書きで作り、公開になっていたら止める）。ensure の台本は
+gh が「見つからない」と答えたときだけ作る（下書きには git のタグが無いので、一時的なエラーで作ると同じ名前の下書きが2つになり
+うる）。上げる台本（`scripts/gh_release_upload.sh`）は、data-raw・data-jsf が下書きでなければ（確かめられなければ）上げずに止まる
+（`GH_UPLOAD_REQUIRE_DRAFT`。既定で有効）。
+
+⑤（読み出しの確かめ。2026-11-28 21:06 JST に1回ずつ起動）: Check Data Store（run 46142985217）・Update Holdings Sheet（run
+46142986778）・Deploy to GitHub Pages（run 46142988798）がどれも成功。下書きの data-raw から読めた（検査は47の組み合わせで
+足りない行 0、保有の推移は日付ごとの表 14日、デプロイはリカレンス・ネットワークの集計を取り出して載せた）。この前の土曜 15:00
+の予測・保有の推移は下書きにする前の run。日曜 10:10 の EDINET・10:20 の日証金（どちらも上げる手順を通る）の定時の結果も見る。
+
 残ること（別に決める）: これまでに公開されていた分は、落とした人の手元からは消せない。git の `public/data/*.json`（予測の候補の
 株価・PER など）と、それを出す公開の画面（GitHub Pages）にも J-Quants の値が出ていて、git の履歴にも残る。EDINET DB のデータ
 （`edinet_fin` など）の利用条件は確かめていない。

@@ -22,6 +22,10 @@
 #
 # GH_UPLOAD_TRIES（既定 5）回でそろわなければ exit 1。GH_UPLOAD_WAIT は最初の待ち（秒）。
 # GH_TOKEN は呼び出し側の env で渡す（gh がそのまま使う）。
+#
+# 上げる前に、Release が下書き（非公開）かを確かめ、下書きでなければ（確かめられなければ）上げずに exit 3 で止める。
+# 既定で確かめるのは data-raw と data-jsf（2026-11-28 に下書きにした。J-Quants・日証金のデータは第三者に配信できない。
+# docs/OPERATIONS.md「data-raw を非公開にする」）。GH_UPLOAD_REQUIRE_DRAFT=0 で外せ、1 ならほかのタグでも確かめる。
 set -uo pipefail
 
 tag="${1:-}"
@@ -43,6 +47,30 @@ done
 
 tries="${GH_UPLOAD_TRIES:-5}"
 wait_s="${GH_UPLOAD_WAIT:-5}"
+
+if [ "$tag" = "data-raw" ] || [ "$tag" = "data-jsf" ]; then
+  need_draft="${GH_UPLOAD_REQUIRE_DRAFT:-1}"
+else
+  need_draft="${GH_UPLOAD_REQUIRE_DRAFT:-0}"
+fi
+if [ "$need_draft" = "1" ]; then
+  is_draft=""
+  for ((i = 1; i <= tries; i++)); do
+    if is_draft=$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null); then
+      break
+    fi
+    is_draft=""
+    if [ "$i" -lt "$tries" ]; then
+      s=$((wait_s * (1 << (i - 1))))
+      echo "[upload] $tag が下書きか確かめられなかった（${i}/${tries}回目）。${s}秒待つ"
+      sleep "$s"
+    fi
+  done
+  if [ "$is_draft" != "true" ]; then
+    echo "::error title=Release が下書きでない::$tag が下書き（非公開）でない（${is_draft:-確かめられなかった}）。誰でもダウンロードできる場所に上げないよう、上げずに止める（docs/OPERATIONS.md「data-raw を非公開にする」）" >&2
+    exit 3
+  fi
+fi
 
 # 渡したファイルのうち、Release に無いもの（state が uploaded でないものも含む）を1行ずつ出す。
 # 一覧が引けなければ 1 を返す

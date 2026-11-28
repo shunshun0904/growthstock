@@ -32,6 +32,8 @@ if [ "$cmd" = "release view" ]; then
   if [ "${STUB_VIEW_FAIL:-0}" = "1" ]; then echo "HTTP 502" >&2; exit 1; fi
   jq=""
   while [ $# -gt 0 ]; do case "$1" in --jq) jq="$2"; shift 2;; *) shift;; esac; done
+  # data-jsf は下書き（非公開）。上げる台本は上げる前に下書きかを確かめる（2026-11-28。docs/OPERATIONS.md「data-raw を非公開にする」）
+  if [ "$jq" = ".isDraft" ]; then echo true; exit 0; fi
   for f in "$state/rel/"*; do
     [ -f "$f" ] || continue
     if [[ "$jq" == *'\t'* ]]; then printf '%s\t%s\n' "$(basename "$f")" "$(stat -c %s "$f")"

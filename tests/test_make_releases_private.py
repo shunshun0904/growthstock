@@ -63,16 +63,25 @@ class TestMakeReleasesPrivate(unittest.TestCase):
 
 
 class TestCreateAsDraft(unittest.TestCase):
-    """data-raw・data-jsf（と生データの写し）を作る手順は、無いときに下書きで作る。"""
+    """data-raw・data-jsf・生データの写し・集計を作る手順は、gh で直に作らず、scripts/gh_release_ensure.sh を
+    GH_ENSURE_DRAFT=1 で通す（無いときは下書きで作り、公開になっていたら止める。「見つからない」ときだけ作る）。"""
 
-    def test_create_lines_are_draft(self):
-        for name in ("update-data.yml", "fetch-jsf.yml", "snapshot-raw.yml", "migrate-to-release.yml"):
+    def test_create_goes_through_ensure_with_draft(self):
+        for name in ("update-data.yml", "fetch-jsf.yml", "snapshot-raw.yml", "migrate-to-release.yml",
+                     "update-volume-profile.yml"):
             text, _ = load(name)
-            lines = [ln for ln in text.splitlines() if re.search(r"\bgh release create\b", ln)
-                     and not ln.lstrip().startswith("#")]
-            self.assertTrue(lines, name)
-            for ln in lines:
-                self.assertIn("--draft", ln, f"{name}: {ln.strip()}")
+            code = [ln for ln in text.splitlines() if not ln.lstrip().startswith("#")]
+            self.assertEqual([ln.strip() for ln in code if re.search(r"\bgh release create\b", ln)], [], name)
+            ensure = [ln for ln in code if "scripts/gh_release_ensure.sh" in ln]
+            self.assertTrue(ensure, name)
+            for ln in ensure:
+                self.assertIn("GH_ENSURE_DRAFT=1 bash scripts/gh_release_ensure.sh", ln, f"{name}: {ln.strip()}")
+
+    def test_upload_requires_draft_for_private_tags(self):
+        with open(os.path.join(ROOT, "scripts", "gh_release_upload.sh"), encoding="utf-8") as fh:
+            text = fh.read()
+        self.assertIn('if [ "$tag" = "data-raw" ] || [ "$tag" = "data-jsf" ]; then', text)
+        self.assertIn('need_draft="${GH_UPLOAD_REQUIRE_DRAFT:-1}"', text)
 
     def test_download_required_for_private_tags(self):
         with open(os.path.join(ROOT, "scripts", "gh_release_download.sh"), encoding="utf-8") as fh:

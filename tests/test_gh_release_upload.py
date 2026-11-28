@@ -12,6 +12,8 @@ scripts/gh_release_upload.sh（Release へのアップロードを一時的な�
 - 失敗が続けば決めた回数で諦めて exit 1、何が無いかを言う
 - gh が成功を返したのに一覧に無いファイルがあれば、上げ直す
 - 引数の誤り（ファイルが無い）は exit 2
+- data-raw・data-jsf は、下書き（非公開）でなければ（確かめられなければ）上げずに exit 3
+  （docs/OPERATIONS.md「data-raw を非公開にする」。GH_UPLOAD_REQUIRE_DRAFT で変えられる）
 
   python3 tests/test_gh_release_upload.py
 """
@@ -28,7 +30,8 @@ SCRIPT = os.path.join(ROOT, "scripts", "gh_release_upload.sh")
 #   upload: 呼ばれた回数を数え、$STUB_FAIL_CALLS に入っている回では、1つ目のファイルを上げた後に
 #           2つ目の古い版を消して exit 1（--clobber が消した後に 502 が返った状況）
 #           $STUB_DROP_CALLS に入っている回では、全部上げて成功を返すが、最後のファイルを消しておく
-#   view:   アセット名を1行ずつ（--jq の結果と同じ形）
+#   view:   アセット名を1行ずつ（--jq の結果と同じ形）。--json isDraft なら下書きか（$STUB_STATE/public_<tag> が
+#           あれば false、無ければ true）。$STUB_DRAFT_VIEW_FAILS 回だけ一時的なエラーを返す
 FAKE_GH = r"""#!/usr/bin/env bash
 set -u
 state="$STUB_STATE"
@@ -51,6 +54,12 @@ if [ "$cmd" = "release upload" ]; then
   exit 0
 fi
 if [ "$cmd" = "release view" ]; then
+  if [[ " $* " == *"isDraft"* ]]; then
+    v=$(( $(cat "$state/draft_views" 2>/dev/null || echo 0) + 1 )); echo "$v" > "$state/draft_views"
+    if [ "$v" -le "${STUB_DRAFT_VIEW_FAILS:-0}" ]; then echo "HTTP 502: Bad Gateway" >&2; exit 1; fi
+    if [ -f "$state/public_$tag" ]; then echo false; else echo true; fi
+    exit 0
+  fi
   ls -1 "$state/$tag"
   exit 0
 fi
@@ -137,6 +146,45 @@ class TestUpload(unittest.TestCase):
         self.assertEqual(self.run_script().returncode, 2)
         self.assertEqual(self.run_script("data-raw").returncode, 2)
         self.assertEqual(self.run_script("data-raw", "nope.parquet").returncode, 2)
+
+    def mark_public(self, tag):
+        open(os.path.join(self.state, f"public_{tag}"), "w").close()
+
+    def uploaded(self):
+        return os.path.exists(os.path.join(self.state, "calls"))
+
+    def test_public_release_is_refused(self):
+        """data-raw・data-jsf が公開（下書きでない）なら上げない。中身はそのまま。"""
+        for tag in ("data-raw", "data-jsf"):
+            self.mark_public(tag)
+            r = self.run_script(tag, *self.names)
+            self.assertEqual(r.returncode, 3, tag + r.stdout + r.stderr)
+            self.assertIn("下書き（非公開）でない", r.stderr)
+        self.assertFalse(self.uploaded())
+        self.assertEqual(self.release(), {n: "old" for n in self.names})
+
+    def test_draft_check_retries_transient_errors(self):
+        r = self.run_script("data-raw", *self.names, STUB_DRAFT_VIEW_FAILS="2")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("確かめられなかった", r.stdout)
+        self.assertEqual(self.release(), {n: "new" for n in self.names})
+
+    def test_draft_check_gives_up_without_uploading(self):
+        r = self.run_script("data-raw", *self.names, STUB_DRAFT_VIEW_FAILS="99", GH_UPLOAD_TRIES="2")
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
+        self.assertIn("確かめられなかった", r.stderr)
+        self.assertFalse(self.uploaded())
+
+    def test_require_draft_can_be_set(self):
+        self.mark_public("data-raw")
+        r = self.run_script("data-raw", *self.names, GH_UPLOAD_REQUIRE_DRAFT="0")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.release(), {n: "new" for n in self.names})
+        # ほかのタグは既定で確かめない。1 を渡せば確かめる
+        self.mark_public("data-other")
+        self.assertEqual(self.run_script("data-other", self.names[0]).returncode, 0)
+        r = self.run_script("data-other", self.names[0], GH_UPLOAD_REQUIRE_DRAFT="1")
+        self.assertEqual(r.returncode, 3, r.stdout + r.stderr)
 
 
 class TestWorkflowsUseHelper(unittest.TestCase):
